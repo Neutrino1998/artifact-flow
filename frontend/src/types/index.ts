@@ -43,6 +43,25 @@ export type ResolveDepartmentRequest = S['ResolveDepartmentRequest'];
 export type ResolveDepartmentResponse = S['ResolveDepartmentResponse'];
 
 // ============================================================
+// Tool Registry Types (Admin) — B-4 工具 unit 管理
+// ============================================================
+
+export type ToolParamSpec = S['ToolParamSpec'];
+export type ToolMemberSpec = S['ToolMemberSpec'];
+export type CreateToolUnitRequest = S['CreateToolUnitRequest'];
+export type UpdateToolUnitRequest = S['UpdateToolUnitRequest'];
+export type MountUnitRequest = S['MountUnitRequest'];
+export type SetCredentialRequest = S['SetCredentialRequest'];
+export type ToolMemberResponse = S['ToolMemberResponse'];
+export type MountedAgentResponse = S['MountedAgentResponse'];
+export type MountResponse = S['MountResponse'];
+export type CredentialStatusResponse = S['CredentialStatusResponse'];
+export type ToolUnitResponse = S['ToolUnitResponse'];
+export type ToolUnitListResponse = S['ToolUnitListResponse'];
+export type AgentSummaryResponse = S['AgentSummaryResponse'];
+export type AgentListResponse = S['AgentListResponse'];
+
+// ============================================================
 // Chat Types
 // ============================================================
 

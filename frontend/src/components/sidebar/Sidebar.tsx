@@ -64,6 +64,8 @@ export default function Sidebar() {
   const setConversationBrowserVisible = useUIStore((s) => s.setConversationBrowserVisible);
   const userManagementVisible = useUIStore((s) => s.userManagementVisible);
   const setUserManagementVisible = useUIStore((s) => s.setUserManagementVisible);
+  const toolUnitManagementVisible = useUIStore((s) => s.toolUnitManagementVisible);
+  const setToolUnitManagementVisible = useUIStore((s) => s.setToolUnitManagementVisible);
 
   const observabilityVisible = useUIStore((s) => s.observabilityVisible);
   const setObservabilityVisible = useUIStore((s) => s.setObservabilityVisible);
@@ -77,6 +79,7 @@ export default function Sidebar() {
     setArtifactPanelVisible(false);
     setConversationBrowserVisible(false);
     setUserManagementVisible(false);
+    setToolUnitManagementVisible(false);
     setObservabilityVisible(false);
   };
 
@@ -104,12 +107,18 @@ export default function Sidebar() {
     setUserManagementVisible(false);
   };
 
+  const handleExitToolUnitMgmt = () => {
+    setToolUnitManagementVisible(false);
+  };
+
   const inObservability = observabilityVisible && isAdmin;
   // While user-management owns the right panel (master-detail on desktop,
   // force-hidden on mobile), the artifact toggle would just flip a hidden
   // store flag that ThreeColumnLayout's forceArtifactVisible overrides —
   // the button looks broken and leaks state across exit. Hide it here.
   const inUserMgmt = userManagementVisible && isAdmin;
+  // Tool-unit management is the same master-detail shape as user-mgmt.
+  const inToolUnitMgmt = toolUnitManagementVisible && isAdmin;
 
   // ── Collapsed: 48px icon bar ──
   if (sidebarCollapsed) {
@@ -147,8 +156,8 @@ export default function Sidebar() {
           </>
         ) : (
           <>
-            {/* Artifacts — hidden while user-management owns the right panel */}
-            {!inUserMgmt && (
+            {/* Artifacts — hidden while admin management owns the right panel */}
+            {!inUserMgmt && !inToolUnitMgmt && (
               <IconButton onClick={toggleArtifactPanel} label="文件面板">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <rect x="2" y="2" width="12" height="12" rx="1.5" />
@@ -180,6 +189,15 @@ export default function Sidebar() {
                 </svg>
               </IconButton>
             )}
+
+            {/* Exit tool-unit management */}
+            {inToolUnitMgmt && (
+              <IconButton onClick={handleExitToolUnitMgmt} label="退出工具管理">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                  <path d="M4 4l8 8M12 4l-8 8" />
+                </svg>
+              </IconButton>
+            )}
           </>
         )}
 
@@ -202,9 +220,9 @@ export default function Sidebar() {
       <div className="flex items-center justify-between px-4 py-3 border-b border-border dark:border-border-dark">
         <div className="min-w-0">
           <h1 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark">
-            {inObservability ? '运行监控' : inUserMgmt ? '用户管理' : APP_NAME}
+            {inObservability ? '运行监控' : inUserMgmt ? '用户管理' : inToolUnitMgmt ? '工具管理' : APP_NAME}
           </h1>
-          {!inObservability && !inUserMgmt && (
+          {!inObservability && !inUserMgmt && !inToolUnitMgmt && (
             <p className="text-xs text-text-secondary dark:text-text-secondary-dark">
               {APP_TAGLINE}
             </p>
@@ -251,8 +269,8 @@ export default function Sidebar() {
           </>
         ) : (
           <>
-            {/* Artifacts — hidden while user-management owns the right panel */}
-            {!inUserMgmt && (
+            {/* Artifacts — hidden while admin management owns the right panel */}
+            {!inUserMgmt && !inToolUnitMgmt && (
               <button
                 onClick={toggleArtifactPanel}
                 className={navRowClass}
@@ -294,6 +312,17 @@ export default function Sidebar() {
                 退出用户管理
               </button>
             )}
+            {inToolUnitMgmt && (
+              <button
+                onClick={handleExitToolUnitMgmt}
+                className={navRowDangerClass}
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                  <path d="M9 3H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h5M7 8h6m0 0l-2-2m2 2l-2 2" />
+                </svg>
+                退出工具管理
+              </button>
+            )}
           </>
         )}
       </div>
@@ -306,7 +335,7 @@ export default function Sidebar() {
 
       {/* Notifications + user menu at bottom */}
       <div className="px-3 pb-3 pt-2 space-y-2">
-        {!inObservability && !inUserMgmt && <StorageBar />}
+        {!inObservability && !inUserMgmt && !inToolUnitMgmt && <StorageBar />}
         <NotificationCenter />
         <UserMenu />
       </div>

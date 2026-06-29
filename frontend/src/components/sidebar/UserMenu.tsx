@@ -15,6 +15,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const setUserManagementVisible = useUIStore((s) => s.setUserManagementVisible);
+  const setToolUnitManagementVisible = useUIStore((s) => s.setToolUnitManagementVisible);
   const setObservabilityVisible = useUIStore((s) => s.setObservabilityVisible);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -64,6 +65,11 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
   const handleManageUsers = () => {
     setPopoverOpen(false);
     setUserManagementVisible(true);
+  };
+
+  const handleManageTools = () => {
+    setPopoverOpen(false);
+    setToolUnitManagementVisible(true);
   };
 
   const handleObservability = () => {
@@ -195,6 +201,19 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
                   <path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" />
                 </svg>
                 管理用户
+              </button>
+            )}
+
+            {/* Admin: manage tool units */}
+            {isAdmin && (
+              <button
+                onClick={handleManageTools}
+                className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-[#141414] rounded-lg transition-colors"
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M6.5 2.5a3 3 0 0 0 3.8 3.8l3 3a1.5 1.5 0 0 1-2 2l-3-3a3 3 0 0 1-3.8-3.8l1.5 1.5 1-1-1.5-1.5z" />
+                </svg>
+                工具管理
               </button>
             )}
 

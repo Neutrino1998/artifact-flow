@@ -13,6 +13,7 @@ import ErrorFlowBlock from './ErrorFlowBlock';
 import UserMessage from './UserMessage';
 import ConversationBrowser from './ConversationBrowser';
 import UserManagementPanel from './UserManagementPanel';
+import ToolUnitManagementPanel from './ToolUnitManagementPanel';
 import ObservabilityPanel from './ObservabilityPanel';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -34,6 +35,7 @@ export default function ChatPanel() {
 
   const conversationBrowserVisible = useUIStore((s) => s.conversationBrowserVisible);
   const userManagementVisible = useUIStore((s) => s.userManagementVisible);
+  const toolUnitManagementVisible = useUIStore((s) => s.toolUnitManagementVisible);
   const observabilityVisible = useUIStore((s) => s.observabilityVisible);
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
 
@@ -67,6 +69,10 @@ export default function ChatPanel() {
 
   if (userManagementVisible && isAdmin) {
     return <UserManagementPanel />;
+  }
+
+  if (toolUnitManagementVisible && isAdmin) {
+    return <ToolUnitManagementPanel />;
   }
 
   if (conversationBrowserVisible) {

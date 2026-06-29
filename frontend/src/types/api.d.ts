@@ -765,6 +765,96 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/tools/units": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Units */
+        get: operations["list_units_api_v1_admin_tools_units_get"];
+        put?: never;
+        /** Create Unit */
+        post: operations["create_unit_api_v1_admin_tools_units_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/tools/units/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Unit */
+        get: operations["get_unit_api_v1_admin_tools_units__name__get"];
+        /** Update Unit */
+        put: operations["update_unit_api_v1_admin_tools_units__name__put"];
+        post?: never;
+        /** Delete Unit */
+        delete: operations["delete_unit_api_v1_admin_tools_units__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/tools/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Agents */
+        get: operations["list_agents_api_v1_admin_tools_agents_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/tools/units/{name}/agents/{agent_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Mount Unit */
+        put: operations["mount_unit_api_v1_admin_tools_units__name__agents__agent_name__put"];
+        post?: never;
+        /** Unmount Unit */
+        delete: operations["unmount_unit_api_v1_admin_tools_units__name__agents__agent_name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/tools/units/{name}/credentials/{placeholder}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set Credential */
+        put: operations["set_credential_api_v1_admin_tools_units__name__credentials__placeholder__put"];
+        post?: never;
+        /** Delete Credential */
+        delete: operations["delete_credential_api_v1_admin_tools_units__name__credentials__placeholder__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/departments": {
         parameters: {
             query?: never;
@@ -1108,6 +1198,20 @@ export interface components {
             messages: {
                 [key: string]: unknown;
             }[];
+        };
+        /** AgentListResponse */
+        AgentListResponse: {
+            /** Agents */
+            agents: components["schemas"]["AgentSummaryResponse"][];
+        };
+        /** AgentSummaryResponse */
+        AgentSummaryResponse: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Internal */
+            internal: boolean;
         };
         /**
          * ArtifactListResponse
@@ -1647,6 +1751,41 @@ export interface components {
             parent_id?: string | null;
         };
         /**
+         * CreateToolUnitRequest
+         * @description POST /api/v1/admin/tools/units —— 新建 dynamic unit。
+         */
+        CreateToolUnitRequest: {
+            /**
+             * Name
+             * @description unit 名,全局唯一,禁含 '__'
+             */
+            name: string;
+            /**
+             * Kind
+             * @default tool
+             * @enum {string}
+             */
+            kind: "tool" | "toolset";
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Visibility
+             * @default public
+             * @enum {string}
+             */
+            visibility: "public" | "department";
+            /**
+             * Defer
+             * @default false
+             */
+            defer: boolean;
+            /** Members */
+            members: components["schemas"]["ToolMemberSpec"][];
+        };
+        /**
          * CreateUserRequest
          * @description POST /api/v1/admin/users request body
          */
@@ -1677,6 +1816,15 @@ export interface components {
              * @description Department id; null = unassigned
              */
             department_id?: string | null;
+        };
+        /** CredentialStatusResponse */
+        CredentialStatusResponse: {
+            /** Placeholder */
+            placeholder: string;
+            /** Configured */
+            configured: boolean;
+            /** Source */
+            source: string | null;
         };
         /**
          * DepartmentListResponse
@@ -1867,6 +2015,41 @@ export interface components {
             uploaded_files: components["schemas"]["UploadedFileRef"][] | null;
         };
         /**
+         * MountResponse
+         * @description PUT .../agents/{agent} 的返回(挂载/改成员态后的绑定快照)。
+         */
+        MountResponse: {
+            /** Agent Name */
+            agent_name: string;
+            /** Unit Name */
+            unit_name: string;
+            /** Member State */
+            member_state: string;
+            /** Source */
+            source: string;
+        };
+        /**
+         * MountUnitRequest
+         * @description PUT /api/v1/admin/tools/units/{name}/agents/{agent_name}
+         */
+        MountUnitRequest: {
+            /**
+             * Member State
+             * @default enabled
+             * @enum {string}
+             */
+            member_state: "enabled" | "disabled";
+        };
+        /** MountedAgentResponse */
+        MountedAgentResponse: {
+            /** Agent Name */
+            agent_name: string;
+            /** Member State */
+            member_state: string;
+            /** Source */
+            source: string;
+        };
+        /**
          * MoveDepartmentRequest
          * @description POST /api/v1/departments/{id}/move request body — 搬家
          */
@@ -1933,6 +2116,17 @@ export interface components {
             stream_url: string;
         };
         /**
+         * SetCredentialRequest
+         * @description PUT /api/v1/admin/tools/units/{name}/credentials/{placeholder} —— 写-only。
+         */
+        SetCredentialRequest: {
+            /**
+             * Value
+             * @description 明文,加密落库后永不回读
+             */
+            value: string;
+        };
+        /**
          * StorageUsageResponse
          * @description GET /api/v1/chat/storage response — per-user attachment storage usage.
          */
@@ -1947,6 +2141,121 @@ export interface components {
              * @description Per-user blob quota (ARTIFACT_USER_QUOTA_BYTES). An upload is rejected with 413 when used_bytes + incoming would exceed it. 0 = unlimited (quota disabled); the frontend should render the bar as unbounded.
              */
             quota_bytes: number;
+        };
+        /** ToolMemberResponse */
+        ToolMemberResponse: {
+            /** Member Name */
+            member_name: string;
+            /** Full Name */
+            full_name: string;
+            /** Permission */
+            permission: string;
+            /** Show Example */
+            show_example: boolean;
+            /** Definition */
+            definition: {
+                [key: string]: unknown;
+            };
+        };
+        /** ToolMemberSpec */
+        ToolMemberSpec: {
+            /**
+             * Member Name
+             * @description 作者裸名;singleton 会被规整为 unit 名
+             */
+            member_name: string;
+            /**
+             * Permission
+             * @default confirm
+             * @enum {string}
+             */
+            permission: "auto" | "confirm";
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Endpoint
+             * @default
+             */
+            endpoint: string;
+            /**
+             * Method
+             * @default GET
+             */
+            method: string;
+            /** Headers */
+            headers: {
+                [key: string]: string;
+            };
+            /** Parameters */
+            parameters: components["schemas"]["ToolParamSpec"][];
+            /** Response Extract */
+            response_extract: string | null;
+            /**
+             * Timeout
+             * @default 60
+             */
+            timeout: number;
+            /**
+             * Show Example
+             * @default true
+             */
+            show_example: boolean;
+        };
+        /** ToolParamSpec */
+        ToolParamSpec: {
+            /** Name */
+            name: string;
+            /**
+             * Type
+             * @default string
+             * @enum {string}
+             */
+            type: "string" | "integer" | "number" | "boolean";
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Required
+             * @default true
+             */
+            required: boolean;
+            /** Default */
+            default: unknown | null;
+            /** Enum */
+            enum: unknown[] | null;
+        };
+        /** ToolUnitListResponse */
+        ToolUnitListResponse: {
+            /** Units */
+            units: components["schemas"]["ToolUnitResponse"][];
+        };
+        /** ToolUnitResponse */
+        ToolUnitResponse: {
+            /** Name */
+            name: string;
+            /** Kind */
+            kind: string;
+            /** Description */
+            description: string;
+            /** Visibility */
+            visibility: string;
+            /** Defer */
+            defer: boolean;
+            /** Provider */
+            provider: string;
+            /** Source */
+            source: string;
+            /** Members */
+            members: components["schemas"]["ToolMemberResponse"][];
+            /** Mounted Agents */
+            mounted_agents: components["schemas"]["MountedAgentResponse"][];
+            /** Credentials */
+            credentials: components["schemas"]["CredentialStatusResponse"][];
         };
         /**
          * UpdateDepartmentRequest
@@ -1969,6 +2278,41 @@ export interface components {
              * @description Display name; pass empty string to clear
              */
             display_name?: string | null;
+        };
+        /**
+         * UpdateToolUnitRequest
+         * @description PUT /api/v1/admin/tools/units/{name} —— 整体替换 dynamic unit(name 取自路径)。
+         */
+        UpdateToolUnitRequest: {
+            /**
+             * Name
+             * @description unit 名,全局唯一,禁含 '__'
+             */
+            name: string;
+            /**
+             * Kind
+             * @default tool
+             * @enum {string}
+             */
+            kind: "tool" | "toolset";
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Visibility
+             * @default public
+             * @enum {string}
+             */
+            visibility: "public" | "department";
+            /**
+             * Defer
+             * @default false
+             */
+            defer: boolean;
+            /** Members */
+            members: components["schemas"]["ToolMemberSpec"][];
         };
         /**
          * UpdateUserRequest
@@ -3299,6 +3643,304 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_units_api_v1_admin_tools_units_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolUnitListResponse"];
+                };
+            };
+        };
+    };
+    create_unit_api_v1_admin_tools_units_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateToolUnitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolUnitResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_unit_api_v1_admin_tools_units__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolUnitResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_unit_api_v1_admin_tools_units__name__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateToolUnitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolUnitResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_unit_api_v1_admin_tools_units__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_agents_api_v1_admin_tools_agents_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentListResponse"];
+                };
+            };
+        };
+    };
+    mount_unit_api_v1_admin_tools_units__name__agents__agent_name__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                agent_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MountUnitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MountResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unmount_unit_api_v1_admin_tools_units__name__agents__agent_name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                agent_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_credential_api_v1_admin_tools_units__name__credentials__placeholder__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                placeholder: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetCredentialRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_credential_api_v1_admin_tools_units__name__credentials__placeholder__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                placeholder: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

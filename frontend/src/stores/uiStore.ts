@@ -14,6 +14,11 @@ export type UserMgmtRightView =
   | { type: 'bulk-import' }
   | { type: 'bulk-action' };
 
+export type ToolUnitRightView =
+  | { type: 'empty' }
+  | { type: 'create-unit' }
+  | { type: 'edit-unit'; unitName: string };
+
 interface UIState {
   sidebarCollapsed: boolean;
   artifactPanelVisible: boolean;
@@ -33,6 +38,11 @@ interface UIState {
   // 列表刷新版本号 — 右面板表单（创建/编辑/删除）成功后 bump，
   // UserManagementPanel 订阅版本号触发 refetch，避免 prop 钻透
   userMgmtListVersion: number;
+  // 工具 unit 管理（B-4）— 与 user-mgmt 同构的 master-detail：中间面板列表 +
+  // 右面板详情/创建。listVersion 由挂载/凭证/CRUD 成功后 bump 触发列表刷新。
+  toolUnitManagementVisible: boolean;
+  toolUnitRightView: ToolUnitRightView;
+  toolUnitListVersion: number;
   // PR5a: 中间面板的选择模式 + 选中集；与 RightView 协调（进入选择模式
   // 自动切到 'bulk-action'，退出回 'empty'）
   selectionMode: boolean;
@@ -51,6 +61,9 @@ interface UIState {
   setUserManagementVisible: (visible: boolean) => void;
   setUserManagementRightView: (view: UserMgmtRightView) => void;
   bumpUserMgmtListVersion: () => void;
+  setToolUnitManagementVisible: (visible: boolean) => void;
+  setToolUnitRightView: (view: ToolUnitRightView) => void;
+  bumpToolUnitListVersion: () => void;
   enterSelectionMode: () => void;
   exitSelectionMode: () => void;
   toggleUserSelection: (userId: string) => void;
@@ -72,6 +85,9 @@ export const useUIStore = create<UIState>((set) => ({
   userManagementVisible: false,
   userManagementRightView: { type: 'empty' },
   userMgmtListVersion: 0,
+  toolUnitManagementVisible: false,
+  toolUnitRightView: { type: 'empty' },
+  toolUnitListVersion: 0,
   selectionMode: false,
   userManagementSelection: [],
   observabilityVisible: false,
@@ -102,6 +118,8 @@ export const useUIStore = create<UIState>((set) => ({
       selectionMode: false,
       userManagementSelection: [],
       observabilityVisible: false,
+      toolUnitManagementVisible: false,
+      toolUnitRightView: { type: 'empty' },
     }),
   }),
   setUserManagementVisible: (visible) => set((s) => ({
@@ -110,7 +128,12 @@ export const useUIStore = create<UIState>((set) => ({
     // UserManagementDetailPanel; closing releases it back to ArtifactPanel.
     // Either edge is a user-driven right-panel intent change.
     rightPanelIntentEpoch: s.rightPanelIntentEpoch + 1,
-    ...(visible && { conversationBrowserVisible: false, observabilityVisible: false }),
+    ...(visible && {
+      conversationBrowserVisible: false,
+      observabilityVisible: false,
+      toolUnitManagementVisible: false,
+      toolUnitRightView: { type: 'empty' },
+    }),
     ...(!visible && {
       userManagementRightView: { type: 'empty' },
       selectionMode: false,
@@ -120,6 +143,24 @@ export const useUIStore = create<UIState>((set) => ({
   setUserManagementRightView: (view) => set({ userManagementRightView: view }),
   bumpUserMgmtListVersion: () =>
     set((s) => ({ userMgmtListVersion: s.userMgmtListVersion + 1 })),
+  // 工具 unit 管理 — 镜像 setUserManagementVisible：开则关闭同级右面板接管者，
+  // 关则复位右视图。开/关两边都 bump rightPanelIntentEpoch（同 user-mgmt 注释）。
+  setToolUnitManagementVisible: (visible) => set((s) => ({
+    toolUnitManagementVisible: visible,
+    rightPanelIntentEpoch: s.rightPanelIntentEpoch + 1,
+    ...(visible && {
+      conversationBrowserVisible: false,
+      observabilityVisible: false,
+      userManagementVisible: false,
+      userManagementRightView: { type: 'empty' },
+      selectionMode: false,
+      userManagementSelection: [],
+    }),
+    ...(!visible && { toolUnitRightView: { type: 'empty' } }),
+  })),
+  setToolUnitRightView: (view) => set({ toolUnitRightView: view }),
+  bumpToolUnitListVersion: () =>
+    set((s) => ({ toolUnitListVersion: s.toolUnitListVersion + 1 })),
   enterSelectionMode: () => set({
     selectionMode: true,
     userManagementSelection: [],
@@ -153,6 +194,8 @@ export const useUIStore = create<UIState>((set) => ({
       selectionMode: false,
       userManagementSelection: [],
       artifactPanelVisible: false,
+      toolUnitManagementVisible: false,
+      toolUnitRightView: { type: 'empty' },
     }),
     ...(!visible && { observabilitySelectedConvId: null, observabilityBrowseVisible: false }),
   })),
