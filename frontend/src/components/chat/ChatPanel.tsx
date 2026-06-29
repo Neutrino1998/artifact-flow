@@ -33,10 +33,7 @@ export default function ChatPanel() {
   const pendingUserFiles = useStreamStore((s) => s.pendingUserFiles);
   const sendError = useStreamStore((s) => s.sendError);
 
-  const conversationBrowserVisible = useUIStore((s) => s.conversationBrowserVisible);
-  const userManagementVisible = useUIStore((s) => s.userManagementVisible);
-  const toolUnitManagementVisible = useUIStore((s) => s.toolUnitManagementVisible);
-  const observabilityVisible = useUIStore((s) => s.observabilityVisible);
+  const activeMode = useUIStore((s) => s.activeMode);
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
 
   const addFiles = useStagedFilesStore((s) => s.addFiles);
@@ -63,19 +60,19 @@ export default function ChatPanel() {
     setIsDragOver(false);
   }, []);
 
-  if (observabilityVisible && isAdmin) {
+  if (activeMode === 'observability' && isAdmin) {
     return <ObservabilityPanel />;
   }
 
-  if (userManagementVisible && isAdmin) {
+  if (activeMode === 'userManagement' && isAdmin) {
     return <UserManagementPanel />;
   }
 
-  if (toolUnitManagementVisible && isAdmin) {
+  if (activeMode === 'toolUnit' && isAdmin) {
     return <ToolUnitManagementPanel />;
   }
 
-  if (conversationBrowserVisible) {
+  if (activeMode === 'conversationBrowser') {
     return <ConversationBrowser />;
   }
 

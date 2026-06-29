@@ -59,7 +59,7 @@ export default function UserManagementPanel() {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const currentUserId = useAuthStore((s) => s.user?.id);
-  const setUserManagementVisible = useUIStore((s) => s.setUserManagementVisible);
+  const setActiveMode = useUIStore((s) => s.setActiveMode);
   const setRightView = useUIStore((s) => s.setUserManagementRightView);
   const rightView = useUIStore((s) => s.userManagementRightView);
   const listVersion = useUIStore((s) => s.userMgmtListVersion);
@@ -161,8 +161,8 @@ export default function UserManagementPanel() {
   }, [fetchUsers]);
 
   const handleClose = useCallback(() => {
-    setUserManagementVisible(false);
-  }, [setUserManagementVisible]);
+    setActiveMode('none');
+  }, [setActiveMode]);
 
   // Esc 退出选择模式（与中间面板的其他 Esc 行为不打架 — 只在选择模式生效）
   useEffect(() => {

@@ -5,6 +5,7 @@ import * as api from '@/lib/api';
 import type { ToolUnitResponse } from '@/types';
 import { useUIStore } from '@/stores/uiStore';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
+import { SourceBadge } from '@/components/forms/ToolUnitBadges';
 import PanelSearchBar from './PanelSearchBar';
 
 export default function ToolUnitManagementPanel() {
@@ -13,7 +14,7 @@ export default function ToolUnitManagementPanel() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
 
-  const setVisible = useUIStore((s) => s.setToolUnitManagementVisible);
+  const setActiveMode = useUIStore((s) => s.setActiveMode);
   const setRightView = useUIStore((s) => s.setToolUnitRightView);
   const rightView = useUIStore((s) => s.toolUnitRightView);
   const listVersion = useUIStore((s) => s.toolUnitListVersion);
@@ -59,7 +60,7 @@ export default function ToolUnitManagementPanel() {
         onChange={setQuery}
         placeholder="搜索 unit 名 / 描述 / 工具全名..."
         countLabel={`${units.length} unit`}
-        onClose={() => setVisible(false)}
+        onClose={() => setActiveMode('none')}
       />
 
       <div className="flex-1 overflow-y-auto px-4">
@@ -119,7 +120,6 @@ function UnitRow({
   isSelected: boolean;
   onOpen: () => void;
 }) {
-  const seeded = unit.source === 'seeded';
   const configuredCreds = unit.credentials.filter((c) => c.configured).length;
 
   return (
@@ -145,15 +145,7 @@ function UnitRow({
           <span className="font-medium font-mono text-text-primary dark:text-text-primary-dark truncate">
             {unit.name}
           </span>
-          <span
-            className={`flex-shrink-0 inline-block px-1.5 py-0.5 text-xs rounded ${
-              seeded
-                ? 'bg-bg dark:bg-bg-dark text-text-secondary dark:text-text-secondary-dark'
-                : 'bg-accent/10 text-accent'
-            }`}
-          >
-            {seeded ? '种子' : '动态'}
-          </span>
+          <SourceBadge source={unit.source} />
           {unit.defer && (
             <span className="flex-shrink-0 inline-block px-1.5 py-0.5 text-xs rounded bg-bg dark:bg-bg-dark text-text-tertiary dark:text-text-tertiary-dark">
               defer

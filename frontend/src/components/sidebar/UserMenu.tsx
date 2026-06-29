@@ -14,9 +14,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
-  const setUserManagementVisible = useUIStore((s) => s.setUserManagementVisible);
-  const setToolUnitManagementVisible = useUIStore((s) => s.setToolUnitManagementVisible);
-  const setObservabilityVisible = useUIStore((s) => s.setObservabilityVisible);
+  const setActiveMode = useUIStore((s) => s.setActiveMode);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
@@ -64,17 +62,17 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
 
   const handleManageUsers = () => {
     setPopoverOpen(false);
-    setUserManagementVisible(true);
+    setActiveMode('userManagement');
   };
 
   const handleManageTools = () => {
     setPopoverOpen(false);
-    setToolUnitManagementVisible(true);
+    setActiveMode('toolUnit');
   };
 
   const handleObservability = () => {
     setPopoverOpen(false);
-    setObservabilityVisible(true);
+    setActiveMode('observability');
   };
 
   const handleChangePassword = () => {

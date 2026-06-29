@@ -117,6 +117,9 @@ export function unitResponseToDraft(u: ToolUnitResponse): UnitDraft {
   };
 }
 
+// 仅在本编辑器自己的提交期 coerce/校验。后端存 default 时不按 type 强转(原样存),故"绕过本
+// UI 用 REST 直建的、type 与 default 不符的脏 unit"在这里重存会抛错——但 dynamic unit 的唯一
+// 创建者就是本 UI(建时即 coerce),该脏态按构造不可达,不额外兜底(reviewer #4)。
 function coerceScalar(type: ParamType, raw: string): unknown {
   const t = raw.trim();
   if (t === '') return null;
@@ -126,7 +129,9 @@ function coerceScalar(type: ParamType, raw: string): unknown {
   }
   if (type === 'number') {
     const n = Number(t);
-    if (Number.isNaN(n)) throw new Error(`数值参数的值「${t}」不是合法数字`);
+    // 拒非有限(NaN/Infinity):否则 Infinity 过了"合法数字"校验,却被 JSON.stringify 静默
+    // 吞成 null → 默认值无声丢失。loud-fail 优于静默(reviewer #5)。
+    if (!Number.isFinite(n)) throw new Error(`数值参数的值「${t}」不是合法有限数字`);
     return n;
   }
   if (type === 'boolean') {
@@ -138,7 +143,8 @@ function coerceScalar(type: ParamType, raw: string): unknown {
 }
 
 function parseEnum(type: ParamType, raw: string): unknown[] | null {
-  const parts = raw.split(/[\n,]/).map((s) => s.trim()).filter((s) => s.length > 0);
+  // 只按换行分隔(与 unitResponseToDraft 的 \n join 对齐)→ 往返无损,枚举值本身可含逗号(reviewer #3)
+  const parts = raw.split('\n').map((s) => s.trim()).filter((s) => s.length > 0);
   if (parts.length === 0) return null;
   return parts.map((p) => coerceScalar(type, p));
 }
@@ -223,7 +229,7 @@ interface ToolUnitEditorProps {
   disabled?: boolean;
 }
 
-const SELECT_CHEVRON = (
+export const SELECT_CHEVRON = (
   <svg
     className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-tertiary dark:text-text-tertiary-dark"
     width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
@@ -715,13 +721,13 @@ function ParamEditor({
                   placeholder="默认值（可选）"
                   className={`${INPUT_ON_PANEL} font-mono`}
                 />
-                <input
-                  type="text"
+                <textarea
                   value={p.enum}
                   onChange={(e) => update(idx, { enum: e.target.value })}
                   disabled={readOnly}
-                  placeholder="枚举值,逗号/换行分隔（可选）"
-                  className={`${INPUT_ON_PANEL} font-mono`}
+                  rows={2}
+                  placeholder="枚举值,每行一个（可选）"
+                  className={`${INPUT_ON_PANEL} font-mono resize-y`}
                 />
               </div>
               <label className="flex items-center gap-2 select-none cursor-pointer">

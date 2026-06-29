@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import * as api from '@/lib/api';
-import { ApiError } from '@/lib/api';
 import { useUIStore } from '@/stores/uiStore';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
 import PanelShell from '@/components/layout/PanelShell';
@@ -38,7 +37,7 @@ export default function CreateToolUnitForm() {
       // 落到刚建好的 unit 详情:可立即挂载 agent / 配凭证
       setRightView({ type: 'edit-unit', unitName: created.name });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : '创建失败');
+      setError(err instanceof Error ? err.message : '创建失败');
     } finally {
       setSubmitting(false);
     }

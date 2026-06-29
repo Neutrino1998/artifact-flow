@@ -1,82 +1,83 @@
 import { describe, test, expect, beforeEach } from 'vitest';
-import { useUIStore } from './uiStore';
+import { useUIStore, INITIAL_UI_STATE } from './uiStore';
 
+// 整体复位到导出的初始数据态 —— 新增字段无需改这里,不会有"漏复位 → 泄漏到下个用例"。
 function reset() {
-  useUIStore.setState({
-    sidebarCollapsed: false,
-    artifactPanelVisible: false,
-    rightPanelIntentEpoch: 0,
-    conversationBrowserVisible: false,
-    userManagementVisible: false,
-    userManagementRightView: { type: 'empty' },
-    observabilityVisible: false,
-    observabilitySelectedConvId: null,
-    observabilityBrowseVisible: false,
-    observabilityRefreshTick: 0,
-  });
+  useUIStore.setState(INITIAL_UI_STATE);
 }
 
-describe('uiStore panel mutual exclusion', () => {
+describe('uiStore activeMode mutual exclusion', () => {
   beforeEach(() => reset());
 
-  test('opening conversationBrowser closes userManagement and observability', () => {
-    useUIStore.setState({ userManagementVisible: true, observabilityVisible: true });
-    useUIStore.getState().setConversationBrowserVisible(true);
-
-    const s = useUIStore.getState();
-    expect(s.conversationBrowserVisible).toBe(true);
-    expect(s.userManagementVisible).toBe(false);
-    expect(s.observabilityVisible).toBe(false);
+  // 「同一时刻最多一个接管面板」现在按构造成立:activeMode 是单一枚举,
+  // 不可能同时取两个值。下面验证切换即排他(旧 mode 自动消失)。
+  test('setActiveMode replaces the previous mode (exclusion by construction)', () => {
+    const set = useUIStore.getState().setActiveMode;
+    set('userManagement');
+    expect(useUIStore.getState().activeMode).toBe('userManagement');
+    set('toolUnit');
+    expect(useUIStore.getState().activeMode).toBe('toolUnit'); // userManagement gone, no leftover flag
+    set('observability');
+    expect(useUIStore.getState().activeMode).toBe('observability');
+    set('conversationBrowser');
+    expect(useUIStore.getState().activeMode).toBe('conversationBrowser');
   });
 
-  test('opening userManagement closes conversationBrowser and observability', () => {
-    useUIStore.setState({ conversationBrowserVisible: true, observabilityVisible: true });
-    useUIStore.getState().setUserManagementVisible(true);
-
-    const s = useUIStore.getState();
-    expect(s.userManagementVisible).toBe(true);
-    expect(s.conversationBrowserVisible).toBe(false);
-    expect(s.observabilityVisible).toBe(false);
+  test('setActiveMode("none") returns to plain chat (closes any panel)', () => {
+    useUIStore.getState().setActiveMode('toolUnit');
+    useUIStore.getState().setActiveMode('none');
+    expect(useUIStore.getState().activeMode).toBe('none');
   });
 
-  test('opening observability closes conversationBrowser, userManagement, and artifactPanel', () => {
+  test('entering observability hides the default artifact panel', () => {
+    useUIStore.setState({ artifactPanelVisible: true });
+    useUIStore.getState().setActiveMode('observability');
+    expect(useUIStore.getState().artifactPanelVisible).toBe(false);
+  });
+
+  test('switching mode resets all per-mode transient sub-state', () => {
+    // userManagement 里攒了选择 + rightView,观测里选了一条会话 —— 切到 toolUnit 应全清。
     useUIStore.setState({
-      conversationBrowserVisible: true,
-      userManagementVisible: true,
-      artifactPanelVisible: true,
-    });
-    useUIStore.getState().setObservabilityVisible(true);
-
-    const s = useUIStore.getState();
-    expect(s.observabilityVisible).toBe(true);
-    expect(s.conversationBrowserVisible).toBe(false);
-    expect(s.userManagementVisible).toBe(false);
-    expect(s.artifactPanelVisible).toBe(false);
-  });
-
-  test('closing observability also clears observabilitySelectedConvId and BrowseVisible', () => {
-    useUIStore.setState({
-      observabilityVisible: true,
+      activeMode: 'userManagement',
+      userManagementRightView: { type: 'edit-user', userId: 'u-1' },
+      selectionMode: true,
+      userManagementSelection: ['u-1', 'u-2'],
       observabilitySelectedConvId: 'conv-1',
       observabilityBrowseVisible: true,
     });
-    useUIStore.getState().setObservabilityVisible(false);
+    useUIStore.getState().setActiveMode('toolUnit');
 
     const s = useUIStore.getState();
-    expect(s.observabilityVisible).toBe(false);
+    expect(s.activeMode).toBe('toolUnit');
+    expect(s.userManagementRightView).toEqual({ type: 'empty' });
+    expect(s.selectionMode).toBe(false);
+    expect(s.userManagementSelection).toEqual([]);
+    expect(s.toolUnitRightView).toEqual({ type: 'empty' });
     expect(s.observabilitySelectedConvId).toBeNull();
     expect(s.observabilityBrowseVisible).toBe(false);
   });
 
-  test('setting setConversationBrowserVisible(false) does NOT touch other panels', () => {
-    useUIStore.setState({ userManagementVisible: true, observabilityVisible: true });
-    useUIStore.getState().setConversationBrowserVisible(false);
+  test('leaving a mode (→ none) clears its sub-state too', () => {
+    useUIStore.setState({
+      activeMode: 'observability',
+      observabilitySelectedConvId: 'conv-1',
+      observabilityBrowseVisible: true,
+    });
+    useUIStore.getState().setActiveMode('none');
 
     const s = useUIStore.getState();
-    expect(s.conversationBrowserVisible).toBe(false);
-    // Other panels untouched (mutual-exclusion only fires on open)
-    expect(s.userManagementVisible).toBe(true);
-    expect(s.observabilityVisible).toBe(true);
+    expect(s.observabilitySelectedConvId).toBeNull();
+    expect(s.observabilityBrowseVisible).toBe(false);
+  });
+
+  test('re-entering the current mode is a no-op (does not wipe sub-state)', () => {
+    useUIStore.setState({
+      activeMode: 'userManagement',
+      userManagementRightView: { type: 'edit-user', userId: 'u-1' },
+    });
+    useUIStore.getState().setActiveMode('userManagement');
+    // 重复进同一 mode 不应清掉刚选中的用户(避免重点菜单项把详情重置)
+    expect(useUIStore.getState().userManagementRightView).toEqual({ type: 'edit-user', userId: 'u-1' });
   });
 });
 
@@ -91,44 +92,54 @@ describe('uiStore rightPanelIntentEpoch', () => {
   });
 
   test('setArtifactPanelVisible bumps epoch even when value is unchanged', () => {
-    // Conservative: any caller of the setter is signaling user intent;
-    // we don't try to detect no-op writes.
     const before = useUIStore.getState().rightPanelIntentEpoch;
     useUIStore.getState().setArtifactPanelVisible(false);
     expect(useUIStore.getState().rightPanelIntentEpoch).toBe(before + 1);
   });
 
-  test('opening user management bumps epoch (right panel re-targets to detail)', () => {
+  test('entering user management bumps epoch (right panel re-targets to detail)', () => {
     const before = useUIStore.getState().rightPanelIntentEpoch;
-    useUIStore.getState().setUserManagementVisible(true);
+    useUIStore.getState().setActiveMode('userManagement');
     expect(useUIStore.getState().rightPanelIntentEpoch).toBe(before + 1);
   });
 
-  test('closing user management bumps epoch (right panel releases back)', () => {
-    useUIStore.setState({ userManagementVisible: true });
+  test('leaving user management (→ none) bumps epoch (right panel releases back)', () => {
+    useUIStore.getState().setActiveMode('userManagement');
     const before = useUIStore.getState().rightPanelIntentEpoch;
-    useUIStore.getState().setUserManagementVisible(false);
+    useUIStore.getState().setActiveMode('none');
     expect(useUIStore.getState().rightPanelIntentEpoch).toBe(before + 1);
   });
 
-  test('opening observability bumps epoch (full-screen takeover)', () => {
+  test('entering tool-unit bumps epoch (master-detail re-target)', () => {
     const before = useUIStore.getState().rightPanelIntentEpoch;
-    useUIStore.getState().setObservabilityVisible(true);
+    useUIStore.getState().setActiveMode('toolUnit');
     expect(useUIStore.getState().rightPanelIntentEpoch).toBe(before + 1);
   });
 
-  test('closing observability bumps epoch (right panel released back)', () => {
-    useUIStore.setState({ observabilityVisible: true });
+  test('entering observability bumps epoch (full-screen takeover)', () => {
     const before = useUIStore.getState().rightPanelIntentEpoch;
-    useUIStore.getState().setObservabilityVisible(false);
+    useUIStore.getState().setActiveMode('observability');
     expect(useUIStore.getState().rightPanelIntentEpoch).toBe(before + 1);
   });
 
-  test('conversationBrowser open does NOT bump (middle-panel takeover, not right)', () => {
+  test('conversationBrowser does NOT bump (middle-panel takeover, not right)', () => {
     const before = useUIStore.getState().rightPanelIntentEpoch;
-    useUIStore.getState().setConversationBrowserVisible(true);
-    useUIStore.getState().setConversationBrowserVisible(false);
+    useUIStore.getState().setActiveMode('conversationBrowser');
+    useUIStore.getState().setActiveMode('none');
     expect(useUIStore.getState().rightPanelIntentEpoch).toBe(before);
+  });
+});
+
+describe('uiStore list versions', () => {
+  beforeEach(() => reset());
+
+  test('bumpUserMgmtListVersion / bumpToolUnitListVersion increment independently', () => {
+    useUIStore.getState().bumpUserMgmtListVersion();
+    useUIStore.getState().bumpToolUnitListVersion();
+    useUIStore.getState().bumpToolUnitListVersion();
+    const s = useUIStore.getState();
+    expect(s.userMgmtListVersion).toBe(1);
+    expect(s.toolUnitListVersion).toBe(2);
   });
 });
 
@@ -152,57 +163,16 @@ describe('uiStore observability sub-state', () => {
   });
 });
 
-describe('uiStore userManagementRightView', () => {
+describe('uiStore rightView payloads', () => {
   beforeEach(() => reset());
 
   test('setUserManagementRightView updates view payload', () => {
     useUIStore.getState().setUserManagementRightView({ type: 'edit-user', userId: 'u-1' });
-
-    const view = useUIStore.getState().userManagementRightView;
-    expect(view).toEqual({ type: 'edit-user', userId: 'u-1' });
+    expect(useUIStore.getState().userManagementRightView).toEqual({ type: 'edit-user', userId: 'u-1' });
   });
 
-  test('closing user management resets RightView to empty', () => {
-    useUIStore.setState({
-      userManagementVisible: true,
-      userManagementRightView: { type: 'edit-user', userId: 'u-1' },
-    });
-    useUIStore.getState().setUserManagementVisible(false);
-
-    const s = useUIStore.getState();
-    expect(s.userManagementVisible).toBe(false);
-    expect(s.userManagementRightView).toEqual({ type: 'empty' });
-  });
-
-  test('opening user management does NOT touch RightView (caller controls)', () => {
-    // simulate stale state from a prior session (shouldn't happen in practice, but verifies opener doesn't overwrite)
-    useUIStore.setState({ userManagementRightView: { type: 'create-user' } });
-    useUIStore.getState().setUserManagementVisible(true);
-
-    expect(useUIStore.getState().userManagementRightView).toEqual({ type: 'create-user' });
-  });
-
-  test('opening conversationBrowser also resets RightView (sibling-panel path)', () => {
-    useUIStore.setState({
-      userManagementVisible: true,
-      userManagementRightView: { type: 'edit-user', userId: 'u-1' },
-    });
-    useUIStore.getState().setConversationBrowserVisible(true);
-
-    const s = useUIStore.getState();
-    expect(s.userManagementVisible).toBe(false);
-    expect(s.userManagementRightView).toEqual({ type: 'empty' });
-  });
-
-  test('opening observability also resets RightView (sibling-panel path)', () => {
-    useUIStore.setState({
-      userManagementVisible: true,
-      userManagementRightView: { type: 'edit-user', userId: 'u-1' },
-    });
-    useUIStore.getState().setObservabilityVisible(true);
-
-    const s = useUIStore.getState();
-    expect(s.userManagementVisible).toBe(false);
-    expect(s.userManagementRightView).toEqual({ type: 'empty' });
+  test('setToolUnitRightView updates view payload', () => {
+    useUIStore.getState().setToolUnitRightView({ type: 'edit-unit', unitName: 'weather_api' });
+    expect(useUIStore.getState().toolUnitRightView).toEqual({ type: 'edit-unit', unitName: 'weather_api' });
   });
 });

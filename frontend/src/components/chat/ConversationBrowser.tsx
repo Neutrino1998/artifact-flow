@@ -41,7 +41,7 @@ export default function ConversationBrowser() {
 
   const currentId = useConversationStore((s) => s.current?.id);
   const removeConversation = useConversationStore((s) => s.removeConversation);
-  const setConversationBrowserVisible = useUIStore((s) => s.setConversationBrowserVisible);
+  const setActiveMode = useUIStore((s) => s.setActiveMode);
   const { switchConversation } = useChat();
   const claim = useLatestOnly();
 
@@ -95,9 +95,9 @@ export default function ConversationBrowser() {
   }, [fetchConversations, query]);
 
   const handleSelect = useCallback(async (id: string) => {
-    setConversationBrowserVisible(false);
+    setActiveMode('none');
     await switchConversation(id);
-  }, [switchConversation, setConversationBrowserVisible]);
+  }, [switchConversation, setActiveMode]);
 
   const handleDelete = useCallback(async (id: string) => {
     try {
@@ -115,8 +115,8 @@ export default function ConversationBrowser() {
   }, [removeConversation, total, page, pageSize, query, fetchConversations]);
 
   const handleClose = useCallback(() => {
-    setConversationBrowserVisible(false);
-  }, [setConversationBrowserVisible]);
+    setActiveMode('none');
+  }, [setActiveMode]);
 
   const exitSelectionMode = useCallback(() => {
     setSelectionMode(false);

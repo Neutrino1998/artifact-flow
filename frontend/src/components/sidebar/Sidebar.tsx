@@ -61,14 +61,8 @@ export default function Sidebar() {
   const toggleArtifactPanel = useUIStore((s) => s.toggleArtifactPanel);
   const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
 
-  const setConversationBrowserVisible = useUIStore((s) => s.setConversationBrowserVisible);
-  const userManagementVisible = useUIStore((s) => s.userManagementVisible);
-  const setUserManagementVisible = useUIStore((s) => s.setUserManagementVisible);
-  const toolUnitManagementVisible = useUIStore((s) => s.toolUnitManagementVisible);
-  const setToolUnitManagementVisible = useUIStore((s) => s.setToolUnitManagementVisible);
-
-  const observabilityVisible = useUIStore((s) => s.observabilityVisible);
-  const setObservabilityVisible = useUIStore((s) => s.setObservabilityVisible);
+  const activeMode = useUIStore((s) => s.activeMode);
+  const setActiveMode = useUIStore((s) => s.setActiveMode);
   const setObservabilityBrowseVisible = useUIStore((s) => s.setObservabilityBrowseVisible);
   const triggerObservabilityRefresh = useUIStore((s) => s.triggerObservabilityRefresh);
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
@@ -77,10 +71,7 @@ export default function Sidebar() {
   const handleNewChat = () => {
     startNewChat();
     setArtifactPanelVisible(false);
-    setConversationBrowserVisible(false);
-    setUserManagementVisible(false);
-    setToolUnitManagementVisible(false);
-    setObservabilityVisible(false);
+    setActiveMode('none'); // 单一动作关掉任何接管面板(取代旧的 4 次 set*Visible(false))
   };
 
   const [refreshSpinning, setRefreshSpinning] = useState(false);
@@ -92,33 +83,25 @@ export default function Sidebar() {
   }, [triggerObservabilityRefresh]);
 
   const handleSearchChat = () => {
-    setConversationBrowserVisible(true);
+    setActiveMode('conversationBrowser');
   };
 
   const handleSearchAdmin = () => {
     setObservabilityBrowseVisible(true);
   };
 
-  const handleExitObservability = () => {
-    setObservabilityVisible(false);
+  const handleExit = () => {
+    setActiveMode('none');
   };
 
-  const handleExitUserMgmt = () => {
-    setUserManagementVisible(false);
-  };
-
-  const handleExitToolUnitMgmt = () => {
-    setToolUnitManagementVisible(false);
-  };
-
-  const inObservability = observabilityVisible && isAdmin;
-  // While user-management owns the right panel (master-detail on desktop,
+  const inObservability = activeMode === 'observability' && isAdmin;
+  // While a master-detail mode owns the right panel (force-shown on desktop,
   // force-hidden on mobile), the artifact toggle would just flip a hidden
   // store flag that ThreeColumnLayout's forceArtifactVisible overrides —
   // the button looks broken and leaks state across exit. Hide it here.
-  const inUserMgmt = userManagementVisible && isAdmin;
+  const inUserMgmt = activeMode === 'userManagement' && isAdmin;
   // Tool-unit management is the same master-detail shape as user-mgmt.
-  const inToolUnitMgmt = toolUnitManagementVisible && isAdmin;
+  const inToolUnitMgmt = activeMode === 'toolUnit' && isAdmin;
 
   // ── Collapsed: 48px icon bar ──
   if (sidebarCollapsed) {
@@ -148,7 +131,7 @@ export default function Sidebar() {
             </IconButton>
 
             {/* Exit observability */}
-            <IconButton onClick={handleExitObservability} label="退出监控">
+            <IconButton onClick={handleExit} label="退出监控">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                 <path d="M4 4l8 8M12 4l-8 8" />
               </svg>
@@ -183,7 +166,7 @@ export default function Sidebar() {
 
             {/* Exit user management */}
             {inUserMgmt && (
-              <IconButton onClick={handleExitUserMgmt} label="退出用户管理">
+              <IconButton onClick={handleExit} label="退出用户管理">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                   <path d="M4 4l8 8M12 4l-8 8" />
                 </svg>
@@ -192,7 +175,7 @@ export default function Sidebar() {
 
             {/* Exit tool-unit management */}
             {inToolUnitMgmt && (
-              <IconButton onClick={handleExitToolUnitMgmt} label="退出工具管理">
+              <IconButton onClick={handleExit} label="退出工具管理">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                   <path d="M4 4l8 8M12 4l-8 8" />
                 </svg>
@@ -258,7 +241,7 @@ export default function Sidebar() {
               刷新对话
             </button>
             <button
-              onClick={handleExitObservability}
+              onClick={handleExit}
               className={navRowDangerClass}
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -303,7 +286,7 @@ export default function Sidebar() {
             </button>
             {inUserMgmt && (
               <button
-                onClick={handleExitUserMgmt}
+                onClick={handleExit}
                 className={navRowDangerClass}
               >
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -314,7 +297,7 @@ export default function Sidebar() {
             )}
             {inToolUnitMgmt && (
               <button
-                onClick={handleExitToolUnitMgmt}
+                onClick={handleExit}
                 className={navRowDangerClass}
               >
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">

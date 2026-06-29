@@ -16,12 +16,11 @@ import PermissionModal from '@/components/layout/PermissionModal';
 
 export default function Home() {
   const permissionRequest = useStreamStore((s) => s.permissionRequest);
-  const userManagementVisible = useUIStore((s) => s.userManagementVisible);
-  const toolUnitManagementVisible = useUIStore((s) => s.toolUnitManagementVisible);
+  const activeMode = useUIStore((s) => s.activeMode);
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
   const isMd = useMediaQuery(BREAKPOINTS.md);
-  const userMgmtMode = userManagementVisible && isAdmin;
-  const toolUnitMode = toolUnitManagementVisible && isAdmin;
+  const userMgmtMode = activeMode === 'userManagement' && isAdmin;
+  const toolUnitMode = activeMode === 'toolUnit' && isAdmin;
 
   // Right-panel visibility override (see ThreeColumnLayout's prop doc):
   //   desktop master-detail (user-mgmt / tool-unit) → true  (force-show)

@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import * as api from '@/lib/api';
-import { ApiError } from '@/lib/api';
 import { useUIStore } from '@/stores/uiStore';
 import {
   BUTTON_DANGER_OUTLINE,
@@ -15,8 +14,10 @@ import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
 import ToolUnitEditor, {
   draftToRequest,
   unitResponseToDraft,
+  SELECT_CHEVRON,
   type UnitDraft,
 } from '@/components/forms/ToolUnitEditor';
+import { SourceBadge, StateBadge } from '@/components/forms/ToolUnitBadges';
 import type {
   AgentSummaryResponse,
   CredentialStatusResponse,
@@ -108,7 +109,7 @@ export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps
       setDraft(d);
       bumpListVersion();
     } catch (err) {
-      setSaveError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : '保存失败');
+      setSaveError(err instanceof Error ? err.message : '保存失败');
     } finally {
       setSaving(false);
     }
@@ -203,6 +204,7 @@ export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps
           onChange={setDraft}
           readOnly={!isDynamic}
           lockIdentity
+          disabled={saving}
         />
 
         {saveError && <div className="text-status-error text-sm">{saveError}</div>}
@@ -223,7 +225,7 @@ export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps
         <CredentialSection
           unitName={unit.name}
           credentials={unit.credentials}
-          isDynamic={!!isDynamic}
+          isDynamic={isDynamic}
           onChanged={refreshLiveState}
         />
       </div>
@@ -275,7 +277,7 @@ function MountSection({
       await fn();
       await onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : '操作失败');
+      setError(err instanceof Error ? err.message : '操作失败');
     } finally {
       setBusy(null);
     }
@@ -364,12 +366,7 @@ function MountSection({
               </option>
             ))}
           </select>
-          <svg
-            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-tertiary dark:text-text-tertiary-dark"
-            width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
-          >
-            <path d="M3 4.5l3 3 3-3" />
-          </svg>
+          {SELECT_CHEVRON}
         </div>
         <div className="relative w-28 flex-shrink-0">
           <select
@@ -381,12 +378,7 @@ function MountSection({
             <option value="enabled">启用</option>
             <option value="disabled">停用</option>
           </select>
-          <svg
-            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-tertiary dark:text-text-tertiary-dark"
-            width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
-          >
-            <path d="M3 4.5l3 3 3-3" />
-          </svg>
+          {SELECT_CHEVRON}
         </div>
         <button
           onClick={handleAdd}
@@ -471,7 +463,7 @@ function CredentialRow({
       if (clear) setValue('');
       await onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : '操作失败');
+      setError(err instanceof Error ? err.message : '操作失败');
     } finally {
       setBusy(false);
     }
@@ -529,33 +521,5 @@ function CredentialRow({
 
       {error && <div className="text-status-error text-xs">{error}</div>}
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 小徽章
-// ---------------------------------------------------------------------------
-
-function SourceBadge({ source }: { source: string }) {
-  const seeded = source === 'seeded';
-  return (
-    <span
-      className={`flex-shrink-0 inline-block px-1.5 py-0.5 text-xs rounded ${
-        seeded
-          ? 'bg-bg dark:bg-bg-dark text-text-secondary dark:text-text-secondary-dark'
-          : 'bg-accent/10 text-accent'
-      }`}
-    >
-      {seeded ? '种子' : '动态'}
-    </span>
-  );
-}
-
-function StateBadge({ state }: { state: string }) {
-  const enabled = state === 'enabled';
-  return (
-    <span className={`flex-shrink-0 text-xs ${enabled ? 'text-green-600 dark:text-green-400' : 'text-text-tertiary dark:text-text-tertiary-dark'}`}>
-      {enabled ? '启用' : '停用'}
-    </span>
   );
 }

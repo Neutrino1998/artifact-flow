@@ -14,8 +14,7 @@ export default function ConversationList() {
   const currentId = useConversationStore((s) => s.current?.id);
   const setConversations = useConversationStore((s) => s.setConversations);
   const setListLoading = useConversationStore((s) => s.setListLoading);
-  const setConversationBrowserVisible = useUIStore((s) => s.setConversationBrowserVisible);
-  const setUserManagementVisible = useUIStore((s) => s.setUserManagementVisible);
+  const setActiveMode = useUIStore((s) => s.setActiveMode);
   const { switchConversation } = useChat();
 
   const loadConversations = useCallback(async () => {
@@ -32,11 +31,12 @@ export default function ConversationList() {
 
   const selectConversation = useCallback(
     async (id: string) => {
-      setConversationBrowserVisible(false);
-      setUserManagementVisible(false);
+      // 回普通聊天:一句关掉任何接管面板(含工具管理 —— 旧的逐个 set*Visible(false)
+      // 漏了新面板正是 reviewer #1)。activeMode 单一真相源后,新增面板零改动自动覆盖。
+      setActiveMode('none');
       await switchConversation(id);
     },
-    [switchConversation, setConversationBrowserVisible, setUserManagementVisible]
+    [switchConversation, setActiveMode]
   );
 
   useEffect(() => {
@@ -88,7 +88,7 @@ export default function ConversationList() {
       {hasMore && !listLoading && (
         <div className="mx-2 mb-1">
           <button
-            onClick={() => setConversationBrowserVisible(true)}
+            onClick={() => setActiveMode('conversationBrowser')}
             className="w-full px-3 py-2 text-xs text-text-secondary dark:text-text-secondary-dark rounded-lg hover:bg-chat/60 dark:hover:bg-panel-accent-dark/60 transition-colors"
           >
             显示所有对话
