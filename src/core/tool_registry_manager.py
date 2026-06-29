@@ -21,7 +21,7 @@ from repositories.tool_credential_repo import ToolCredentialRepository
 from repositories.tool_registry_repo import ToolRegistryRepository
 from tools.base import is_builtin_name
 from tools.custom.credentials import get_cipher
-from tools.custom.secrets import extract_placeholders
+from tools.custom.secrets import assert_secret_refs_allowed, extract_placeholders, SecretResolutionError
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -51,6 +51,11 @@ class NameCollisionError(ToolRegistryError):
 
 class InvalidUnitError(ToolRegistryError):
     status_code = 400
+
+
+class ImmutableFieldError(ToolRegistryError):
+    """改了 create 后不可变的字段(如 kind —— 它决定 full_name 形状)。"""
+    status_code = 409
 
 
 class AgentNotFoundError(ToolRegistryError):
@@ -91,11 +96,7 @@ class ToolRegistryManager:
                         cred_map: Dict[str, str]) -> dict:
         members = sorted(u.members, key=lambda m: m.full_name)
         # 定义引用的 {{NAME}} ∪ 已配置的占位符 → 掩码列表(永不含密文/明文)
-        referenced: set = set()
-        for m in members:
-            d = m.definition or {}
-            referenced |= extract_placeholders(d.get("endpoint", ""))
-            referenced |= extract_placeholders(d.get("headers", {}) or {})
+        referenced = self._referenced_placeholders(members)
         creds = [
             {"placeholder": ph, "configured": ph in cred_map, "source": cred_map.get(ph)}
             for ph in sorted(referenced | set(cred_map))
@@ -154,14 +155,24 @@ class ToolRegistryManager:
     async def update_unit(self, name: str, spec: dict) -> dict:
         u = await self._require_unit(name)
         self._require_dynamic(u, "edit")
+        # kind 不可变:它决定 full_name 形状(singleton==unit 名 vs set=<unit>__<member>)。
+        # 改 kind → replace_members 会静默重命名可调工具名,挂在旧 full_name 上的 always_allow
+        # / 未来 per-tool 规则全悬空(reviewer #14)。要变 = 删了重建。
+        if spec.get("kind") != u.kind:
+            raise ImmutableFieldError(
+                f"cannot change kind of unit '{name}' ('{u.kind}' → '{spec.get('kind')}') — "
+                f"kind is immutable (it determines the callable tool name); delete and recreate"
+            )
         members = self._build_members(name, spec)
         await self._validate_names(name, members, exclude_unit=name)
 
-        u.kind = spec["kind"]
         u.description = spec.get("description", "") or ""
         u.visibility = self._check_visibility(spec.get("visibility", "public"))
         u.defer = bool(spec.get("defer", False))
         await self._registry.replace_members(name, members)
+        # 新定义不再引用的 dynamic 凭证 → prune(与 reconciler 对 seeded 的 prune 对称,
+        # 否则失引用密文残留、GET 仍显示 configured,误导 + secret 卫生 cruft,reviewer #9)
+        await self._creds.prune_unreferenced(name, self._referenced_placeholders(members))
         await self._commit("update unit")
         return await self.get_unit(name)
 
@@ -227,14 +238,28 @@ class ToolRegistryManager:
         self._require_dynamic(u, "configure credentials for")
         if not value:
             raise InvalidUnitError("credential value must be non-empty")
+        # 占位符必须被某成员的 endpoint/headers 引用 —— 否则是配不上的孤儿密文(GET 会显示
+        # configured 却无对应 {{NAME}},误导 + secret cruft,reviewer #9)。
+        if placeholder not in self._referenced_placeholders(u.members):
+            raise InvalidUnitError(
+                f"placeholder '{placeholder}' is not referenced by any endpoint/header in "
+                f"unit '{unit_name}'; add the {{{{{placeholder}}}}} reference first"
+            )
         # 主密钥由 validate_config 强制存在 → get_cipher 不因缺 key 抛(缺 = 启动期已拦)。
         cipher = get_cipher()
         await self._creds.upsert(unit_name, placeholder, cipher.encrypt(value), "dynamic")
         await self._commit("set credential")
 
     async def delete_credential(self, unit_name: str, placeholder: str) -> None:
-        await self._require_unit(unit_name)
-        await self._creds.delete_placeholder(unit_name, placeholder)
+        u = await self._require_unit(unit_name)
+        # seeded 凭证归 reconciler 拥有,UI 删了下次 reconcile 又种回 → 禁(对称 set,reviewer #2)
+        self._require_dynamic(u, "delete credentials for")
+        deleted = await self._creds.delete_placeholder(unit_name, placeholder)
+        if not deleted:
+            # 删不存在的占位符 = no-op,返 404(对称 unmount,不给假"已删")
+            raise UnitNotFoundError(
+                f"unit '{unit_name}' has no credential for placeholder '{placeholder}'"
+            )
         await self._commit("delete credential")
 
     # ======================================================================
@@ -314,6 +339,13 @@ class ToolRegistryManager:
                 )
             if not p.get("name"):
                 raise InvalidUnitError("parameter missing 'name'")
+            # {{...}} 只在 endpoint/headers 受支持(运行期替换);参数 default 不是 secret
+            # 注入点 —— 出现占位符 = 配错(会原样外发,且不被 substitute),build 期拒(sweep)
+            if extract_placeholders(p.get("default")):
+                raise InvalidUnitError(
+                    f"parameter '{p['name']}' default must not contain a {{{{...}}}} placeholder "
+                    f"(secret placeholders are only supported in endpoint/headers)"
+                )
             params.append({
                 "name": p["name"],
                 "type": ptype,
@@ -322,15 +354,34 @@ class ToolRegistryManager:
                 "default": p.get("default"),
                 "enum": p.get("enum"),
             })
+        endpoint = rm.get("endpoint", "") or ""
+        headers = rm.get("headers", {}) or {}
+        # SSRF-02 前缀闸:与 seeds/loader 同口径,{{VAR}} 必须白名单前缀(reviewer #15)。
+        # 否则 dynamic 路径能把凭证存到 {{JWT_SECRET}} 这类误导名下,且将来若为 dynamic
+        # 重引入 env 解析即成外泄面。失败转 400(不漏 500)。
+        try:
+            assert_secret_refs_allowed(endpoint)
+            assert_secret_refs_allowed(headers)
+        except SecretResolutionError as e:
+            raise InvalidUnitError(str(e)) from e
         return {
             "description": rm.get("description", "") or "",
-            "endpoint": rm.get("endpoint", "") or "",
+            "endpoint": endpoint,
             "method": (rm.get("method", "GET") or "GET").upper(),
-            "headers": rm.get("headers", {}) or {},
+            "headers": headers,
             "parameters": params,
             "response_extract": rm.get("response_extract"),
             "timeout": int(rm.get("timeout", 60) or 60),
         }
+
+    def _referenced_placeholders(self, members) -> set:
+        """成员 endpoint/headers 引用的 {{NAME}} 占位符全集(凭证掩码 / 引用校验 / prune 共用)。"""
+        refs: set = set()
+        for m in members:
+            d = m.definition or {}
+            refs |= extract_placeholders(d.get("endpoint", ""))
+            refs |= extract_placeholders(d.get("headers", {}) or {})
+        return refs
 
     async def _validate_names(self, name: str, members: List[ToolMember],
                               exclude_unit: Optional[str]) -> None:

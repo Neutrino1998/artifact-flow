@@ -143,6 +143,33 @@ class TestUnitCrud:
         assert (await admin_client.delete("/api/v1/admin/tools/units/weather")).status_code == 204
         assert (await admin_client.get("/api/v1/admin/tools/units/weather")).status_code == 404
 
+    async def test_update_cannot_change_kind(self, admin_client: AsyncClient):
+        # kind 不可变(决定 full_name 形状)→ 改 = 409
+        await admin_client.post("/api/v1/admin/tools/units", json=_singleton_body())  # tool
+        resp = await admin_client.put(
+            "/api/v1/admin/tools/units/weather", json=_singleton_body(kind="toolset")
+        )
+        assert resp.status_code == 409
+        assert "kind" in resp.json()["detail"]
+
+    async def test_create_rejects_non_whitelist_secret_ref(self, admin_client: AsyncClient):
+        # {{JWT_SECRET}} 非 TOOL_SECRET_ 前缀 → 400(与 seeds/loader 同口径,reviewer #15)
+        body = _singleton_body()
+        body["members"][0]["headers"] = {"Authorization": "Bearer {{JWT_SECRET}}"}
+        resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
+        assert resp.status_code == 400
+        assert "TOOL_SECRET_" in resp.json()["detail"]
+
+    async def test_create_rejects_placeholder_in_param_default(self, admin_client: AsyncClient):
+        # 参数 default 不是 secret 注入点 → 含 {{...}} 即 400(sweep minor)
+        body = _singleton_body()
+        body["members"][0]["parameters"] = [
+            {"name": "q", "type": "string", "default": "{{TOOL_SECRET_K}}"}
+        ]
+        resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
+        assert resp.status_code == 400
+        assert "default" in resp.json()["detail"]
+
 
 class TestSeededReadOnly:
     async def test_update_seeded_409(self, admin_client: AsyncClient, db_session):
@@ -254,3 +281,64 @@ class TestCredentials:
             json={"value": "x"},
         )
         assert resp.status_code == 409
+
+    async def test_set_credential_unreferenced_placeholder_400(self, admin_client: AsyncClient, key):
+        # unit 定义未引用 {{TOOL_SECRET_X}} → 配它是配不上的孤儿 → 400(reviewer #9)
+        await admin_client.post("/api/v1/admin/tools/units", json=_singleton_body())  # 无 headers
+        resp = await admin_client.put(
+            "/api/v1/admin/tools/units/weather/credentials/TOOL_SECRET_X",
+            json={"value": "v"},
+        )
+        assert resp.status_code == 400
+        assert "not referenced" in resp.json()["detail"]
+
+    async def test_delete_credential_on_seeded_409(self, admin_client: AsyncClient, db_session, key):
+        # seeded 凭证归 reconciler,UI 不能删(对称 set,reviewer #2)
+        await _seed_seeded_unit(db_session)
+        resp = await admin_client.delete(
+            "/api/v1/admin/tools/units/legacy/credentials/TOOL_SECRET_K"
+        )
+        assert resp.status_code == 409
+
+    async def test_delete_nonexistent_credential_404(self, admin_client: AsyncClient, key):
+        # 引用了占位符但从未配过 → 删 = no-op → 404(不给假"已删",对称 unmount)
+        body = _singleton_body()
+        body["members"][0]["headers"] = {"Authorization": "Bearer {{TOOL_SECRET_K}}"}
+        await admin_client.post("/api/v1/admin/tools/units", json=body)
+        resp = await admin_client.delete(
+            "/api/v1/admin/tools/units/weather/credentials/TOOL_SECRET_K"
+        )
+        assert resp.status_code == 404
+
+    async def test_delete_existing_credential_204(self, admin_client: AsyncClient, key):
+        body = _singleton_body()
+        body["members"][0]["headers"] = {"Authorization": "Bearer {{TOOL_SECRET_K}}"}
+        await admin_client.post("/api/v1/admin/tools/units", json=body)
+        await admin_client.put(
+            "/api/v1/admin/tools/units/weather/credentials/TOOL_SECRET_K", json={"value": "v"}
+        )
+        resp = await admin_client.delete(
+            "/api/v1/admin/tools/units/weather/credentials/TOOL_SECRET_K"
+        )
+        assert resp.status_code == 204
+
+    async def test_placeholder_too_long_422(self, admin_client: AsyncClient, key):
+        # 路径参数 >128 → 边界 422(不漏到 asyncpg 截断 500,reviewer #10)
+        await admin_client.post("/api/v1/admin/tools/units", json=_singleton_body())
+        resp = await admin_client.put(
+            f"/api/v1/admin/tools/units/weather/credentials/{'X' * 200}", json={"value": "v"}
+        )
+        assert resp.status_code == 422
+
+    async def test_update_prunes_dereferenced_dynamic_credential(self, admin_client: AsyncClient, key):
+        # 配了引用的凭证 → 改定义去掉该引用 → update 后凭证被 prune(对称 reconciler,reviewer #9)
+        body = _singleton_body()
+        body["members"][0]["headers"] = {"Authorization": "Bearer {{TOOL_SECRET_K}}"}
+        await admin_client.post("/api/v1/admin/tools/units", json=body)
+        await admin_client.put(
+            "/api/v1/admin/tools/units/weather/credentials/TOOL_SECRET_K", json={"value": "v"}
+        )
+        # 改定义去掉 header(不再引用 TOOL_SECRET_K)
+        await admin_client.put("/api/v1/admin/tools/units/weather", json=_singleton_body())
+        unit = (await admin_client.get("/api/v1/admin/tools/units/weather")).json()
+        assert all(c["placeholder"] != "TOOL_SECRET_K" for c in unit["credentials"])

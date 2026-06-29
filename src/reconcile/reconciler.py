@@ -276,7 +276,11 @@ async def _reconcile_credentials(
                     if cipher.decrypt(row.encrypted_value) == env_val:
                         continue  # 未变,skip
                 except Exception:
-                    pass  # 密文坏 / 主密钥换过 → 重新加密覆盖
+                    # 密文坏 / 主密钥换过 → 重新加密覆盖。非显然、ops 相关(错配主密钥会把
+                    # 所有 seeded 行在坏 key 下重写)→ 先 WARN 再覆盖(reviewer #5),不静默。
+                    logger.warning("reconcile: re-encrypting seeded credential %s/%s — prior "
+                                   "ciphertext failed to decrypt (master key rotation or "
+                                   "corruption)", unit, name)
                 row.encrypted_value = cipher.encrypt(env_val)
                 row.source = "seeded"
             else:

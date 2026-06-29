@@ -81,6 +81,14 @@ class MountedAgentResponse(BaseModel):
     source: str
 
 
+class MountResponse(BaseModel):
+    """PUT .../agents/{agent} 的返回(挂载/改成员态后的绑定快照)。"""
+    agent_name: str
+    unit_name: str
+    member_state: str
+    source: str
+
+
 class CredentialStatusResponse(BaseModel):
     placeholder: str
     configured: bool

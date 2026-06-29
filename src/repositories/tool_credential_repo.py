@@ -50,13 +50,23 @@ class ToolCredentialRepository(BaseRepository[ToolCredential]):
             row.encrypted_value = encrypted_value
             row.source = source
 
-    async def delete_placeholder(self, unit_name: str, placeholder_name: str) -> None:
-        await self._session.execute(
+    async def delete_placeholder(self, unit_name: str, placeholder_name: str) -> bool:
+        """删一行;返回是否真删到(供上层把 no-op 区分成 404)。"""
+        result = await self._session.execute(
             delete(ToolCredential).where(
                 ToolCredential.unit_name == unit_name,
                 ToolCredential.placeholder_name == placeholder_name,
             )
         )
+        return result.rowcount > 0
+
+    async def prune_unreferenced(self, unit_name: str, referenced: set) -> None:
+        """删该 unit 内占位符 ∉ referenced 的凭证行(update_unit 后,定义不再引用的 dynamic
+        凭证对称清理)。referenced 空 → 删该 unit 全部凭证。"""
+        stmt = delete(ToolCredential).where(ToolCredential.unit_name == unit_name)
+        if referenced:
+            stmt = stmt.where(ToolCredential.placeholder_name.notin_(referenced))
+        await self._session.execute(stmt)
 
     async def delete_for_unit(self, unit_name: str) -> None:
         await self._session.execute(

@@ -1877,6 +1877,463 @@
         ]
       }
     },
+    "/api/v1/admin/tools/units": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Units",
+        "operationId": "list_units_api_v1_admin_tools_units_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolUnitListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create Unit",
+        "operationId": "create_unit_api_v1_admin_tools_units_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateToolUnitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolUnitResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/tools/units/{name}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Unit",
+        "operationId": "get_unit_api_v1_admin_tools_units__name__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolUnitResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update Unit",
+        "operationId": "update_unit_api_v1_admin_tools_units__name__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateToolUnitRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolUnitResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete Unit",
+        "operationId": "delete_unit_api_v1_admin_tools_units__name__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/tools/agents": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Agents",
+        "operationId": "list_agents_api_v1_admin_tools_agents_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/tools/units/{name}/agents/{agent_name}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Mount Unit",
+        "operationId": "mount_unit_api_v1_admin_tools_units__name__agents__agent_name__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "agent_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MountUnitRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MountResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Unmount Unit",
+        "operationId": "unmount_unit_api_v1_admin_tools_units__name__agents__agent_name__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "agent_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/tools/units/{name}/credentials/{placeholder}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Set Credential",
+        "operationId": "set_credential_api_v1_admin_tools_units__name__credentials__placeholder__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "placeholder",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Placeholder"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCredentialRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete Credential",
+        "operationId": "delete_credential_api_v1_admin_tools_units__name__credentials__placeholder__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "placeholder",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Placeholder"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/departments": {
       "get": {
         "tags": [
@@ -2687,6 +3144,45 @@
         ],
         "title": "AdminPromptReconstructResponse",
         "description": "GET .../messages/{message_id}/reconstruct response \u2014 \u91cd\u5efa\u67d0\u53d1 LLM \u8c03\u7528\u7684\u5b8c\u6574 prompt\u3002\n\nhas_reminder=False \u8868\u793a\u8be5 agent_start \u65e9\u4e8e reminder \u6301\u4e45\u5316\uff08\u53ea\u91cd\u5efa\u4e86 system_prompt +\n\u5386\u53f2\uff0c\u65e0\u52a8\u6001 reminder\uff09\u3002messages \u7684 content \u53ef\u80fd\u662f str \u6216\u5757\u5217\u8868\uff08\u8bc6\u56fe\u5757\u964d\u7ea7\u4e3a\u5360\u4f4d\u6587\u672c\uff09\u3002"
+      },
+      "AgentListResponse": {
+        "properties": {
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/AgentSummaryResponse"
+            },
+            "type": "array",
+            "title": "Agents"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agents"
+        ],
+        "title": "AgentListResponse"
+      },
+      "AgentSummaryResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "internal": {
+            "type": "boolean",
+            "title": "Internal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "internal"
+        ],
+        "title": "AgentSummaryResponse"
       },
       "ArtifactListResponse": {
         "properties": {
@@ -3523,6 +4019,59 @@
         "title": "CreateDepartmentRequest",
         "description": "POST /api/v1/departments request body"
       },
+      "CreateToolUnitRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Name",
+            "description": "unit \u540d,\u5168\u5c40\u552f\u4e00,\u7981\u542b '__'"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "tool",
+              "toolset"
+            ],
+            "title": "Kind",
+            "default": "tool"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "department"
+            ],
+            "title": "Visibility",
+            "default": "public"
+          },
+          "defer": {
+            "type": "boolean",
+            "title": "Defer",
+            "default": false
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/ToolMemberSpec"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Members"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "members"
+        ],
+        "title": "CreateToolUnitRequest",
+        "description": "POST /api/v1/admin/tools/units \u2014\u2014 \u65b0\u5efa dynamic unit\u3002"
+      },
       "CreateUserRequest": {
         "properties": {
           "username": {
@@ -3577,6 +4126,36 @@
         ],
         "title": "CreateUserRequest",
         "description": "POST /api/v1/admin/users request body"
+      },
+      "CredentialStatusResponse": {
+        "properties": {
+          "placeholder": {
+            "type": "string",
+            "title": "Placeholder"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "placeholder",
+          "configured",
+          "source"
+        ],
+        "title": "CredentialStatusResponse"
       },
       "DepartmentListResponse": {
         "properties": {
@@ -3912,6 +4491,74 @@
         "title": "MessageResponse",
         "description": "Message in conversation detail response"
       },
+      "MountResponse": {
+        "properties": {
+          "agent_name": {
+            "type": "string",
+            "title": "Agent Name"
+          },
+          "unit_name": {
+            "type": "string",
+            "title": "Unit Name"
+          },
+          "member_state": {
+            "type": "string",
+            "title": "Member State"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_name",
+          "unit_name",
+          "member_state",
+          "source"
+        ],
+        "title": "MountResponse",
+        "description": "PUT .../agents/{agent} \u7684\u8fd4\u56de(\u6302\u8f7d/\u6539\u6210\u5458\u6001\u540e\u7684\u7ed1\u5b9a\u5feb\u7167)\u3002"
+      },
+      "MountUnitRequest": {
+        "properties": {
+          "member_state": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled"
+            ],
+            "title": "Member State",
+            "default": "enabled"
+          }
+        },
+        "type": "object",
+        "title": "MountUnitRequest",
+        "description": "PUT /api/v1/admin/tools/units/{name}/agents/{agent_name}"
+      },
+      "MountedAgentResponse": {
+        "properties": {
+          "agent_name": {
+            "type": "string",
+            "title": "Agent Name"
+          },
+          "member_state": {
+            "type": "string",
+            "title": "Member State"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_name",
+          "member_state",
+          "source"
+        ],
+        "title": "MountedAgentResponse"
+      },
       "MoveDepartmentRequest": {
         "properties": {
           "new_parent_id": {
@@ -4013,6 +4660,23 @@
         "title": "ResumeResponse",
         "description": "POST /api/v1/chat/{conv_id}/resume response"
       },
+      "SetCredentialRequest": {
+        "properties": {
+          "value": {
+            "type": "string",
+            "maxLength": 8192,
+            "minLength": 1,
+            "title": "Value",
+            "description": "\u660e\u6587,\u52a0\u5bc6\u843d\u5e93\u540e\u6c38\u4e0d\u56de\u8bfb"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "title": "SetCredentialRequest",
+        "description": "PUT /api/v1/admin/tools/units/{name}/credentials/{placeholder} \u2014\u2014 \u5199-only\u3002"
+      },
       "StorageUsageResponse": {
         "properties": {
           "used_bytes": {
@@ -4033,6 +4697,269 @@
         ],
         "title": "StorageUsageResponse",
         "description": "GET /api/v1/chat/storage response \u2014 per-user attachment storage usage."
+      },
+      "ToolMemberResponse": {
+        "properties": {
+          "member_name": {
+            "type": "string",
+            "title": "Member Name"
+          },
+          "full_name": {
+            "type": "string",
+            "title": "Full Name"
+          },
+          "permission": {
+            "type": "string",
+            "title": "Permission"
+          },
+          "show_example": {
+            "type": "boolean",
+            "title": "Show Example"
+          },
+          "definition": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Definition"
+          }
+        },
+        "type": "object",
+        "required": [
+          "member_name",
+          "full_name",
+          "permission",
+          "show_example",
+          "definition"
+        ],
+        "title": "ToolMemberResponse"
+      },
+      "ToolMemberSpec": {
+        "properties": {
+          "member_name": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Member Name",
+            "description": "\u4f5c\u8005\u88f8\u540d;singleton \u4f1a\u88ab\u89c4\u6574\u4e3a unit \u540d"
+          },
+          "permission": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "confirm"
+            ],
+            "title": "Permission",
+            "default": "confirm"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "endpoint": {
+            "type": "string",
+            "title": "Endpoint",
+            "default": ""
+          },
+          "method": {
+            "type": "string",
+            "title": "Method",
+            "default": "GET"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Headers"
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/ToolParamSpec"
+            },
+            "type": "array",
+            "title": "Parameters"
+          },
+          "response_extract": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Extract"
+          },
+          "timeout": {
+            "type": "integer",
+            "maximum": 600.0,
+            "minimum": 1.0,
+            "title": "Timeout",
+            "default": 60
+          },
+          "show_example": {
+            "type": "boolean",
+            "title": "Show Example",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "member_name",
+          "permission",
+          "description",
+          "endpoint",
+          "method",
+          "headers",
+          "parameters",
+          "response_extract",
+          "timeout",
+          "show_example"
+        ],
+        "title": "ToolMemberSpec"
+      },
+      "ToolParamSpec": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Name"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "string",
+              "integer",
+              "number",
+              "boolean"
+            ],
+            "title": "Type",
+            "default": "string"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "default": true
+          },
+          "default": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default"
+          },
+          "enum": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enum"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "type",
+          "description",
+          "required",
+          "default",
+          "enum"
+        ],
+        "title": "ToolParamSpec"
+      },
+      "ToolUnitListResponse": {
+        "properties": {
+          "units": {
+            "items": {
+              "$ref": "#/components/schemas/ToolUnitResponse"
+            },
+            "type": "array",
+            "title": "Units"
+          }
+        },
+        "type": "object",
+        "required": [
+          "units"
+        ],
+        "title": "ToolUnitListResponse"
+      },
+      "ToolUnitResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "visibility": {
+            "type": "string",
+            "title": "Visibility"
+          },
+          "defer": {
+            "type": "boolean",
+            "title": "Defer"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/ToolMemberResponse"
+            },
+            "type": "array",
+            "title": "Members"
+          },
+          "mounted_agents": {
+            "items": {
+              "$ref": "#/components/schemas/MountedAgentResponse"
+            },
+            "type": "array",
+            "title": "Mounted Agents"
+          },
+          "credentials": {
+            "items": {
+              "$ref": "#/components/schemas/CredentialStatusResponse"
+            },
+            "type": "array",
+            "title": "Credentials"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "description",
+          "visibility",
+          "defer",
+          "provider",
+          "source",
+          "members",
+          "mounted_agents",
+          "credentials"
+        ],
+        "title": "ToolUnitResponse"
       },
       "UpdateDepartmentRequest": {
         "properties": {
@@ -4070,6 +4997,59 @@
         "type": "object",
         "title": "UpdateMyProfileRequest",
         "description": "PATCH /api/v1/auth/me request body \u2014 \u81ea\u52a9\u4fee\u6539\u81ea\u5df1\u7684\u975e\u654f\u611f\u8d44\u6599\u5b57\u6bb5"
+      },
+      "UpdateToolUnitRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Name",
+            "description": "unit \u540d,\u5168\u5c40\u552f\u4e00,\u7981\u542b '__'"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "tool",
+              "toolset"
+            ],
+            "title": "Kind",
+            "default": "tool"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "department"
+            ],
+            "title": "Visibility",
+            "default": "public"
+          },
+          "defer": {
+            "type": "boolean",
+            "title": "Defer",
+            "default": false
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/ToolMemberSpec"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Members"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "members"
+        ],
+        "title": "UpdateToolUnitRequest",
+        "description": "PUT /api/v1/admin/tools/units/{name} \u2014\u2014 \u6574\u4f53\u66ff\u6362 dynamic unit(name \u53d6\u81ea\u8def\u5f84)\u3002"
       },
       "UpdateUserRequest": {
         "properties": {

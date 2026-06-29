@@ -161,14 +161,17 @@ def _build_http_member(frontmatter: dict, body: str, *, unit_name: str,
 
     full_name = member_name if is_singleton else f"{unit_name}__{member_name}"
 
+    # method/timeout 归一化与 dynamic CRUD(tool_registry_manager._build_definition)同口径:
+    # 同一工具经 MD vs API 落库的 definition 必须一致,否则 seed_hash / GET 展示漂移
+    # (reviewer #7;运行期虽被 HttpTool.__init__ 的 .upper() 兜住,存储形态仍应统一)。
     definition = {
         "description": description,
         "endpoint": frontmatter.get("endpoint", ""),
-        "method": frontmatter.get("method", "GET"),
+        "method": (frontmatter.get("method", "GET") or "GET").upper(),
         "headers": frontmatter.get("headers", {}) or {},
         "parameters": params,
         "response_extract": frontmatter.get("response_extract"),
-        "timeout": frontmatter.get("timeout", 60),
+        "timeout": int(frontmatter.get("timeout", 60) or 60),
     }
     return MemberSeed(
         member_name=member_name,
