@@ -179,8 +179,7 @@ class ToolRegistryManager:
     async def delete_unit(self, name: str) -> None:
         u = await self._require_unit(name)
         self._require_dynamic(u, "delete")
-        # 显式删凭证 + 子行(dialect-safe);DB FK CASCADE 是双保险
-        await self._creds.delete_for_unit(name)
+        # repo.delete_unit 自洽删全部子行(含 ToolCredential);DB FK CASCADE 是双保险
         await self._registry.delete_unit(name)
         await self._commit("delete unit")
 

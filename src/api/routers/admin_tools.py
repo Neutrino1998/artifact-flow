@@ -28,13 +28,13 @@ from api.schemas.tools import (
     ToolUnitResponse,
     UpdateToolUnitRequest,
 )
+from api.services.auth import TokenPayload
+from core.tool_registry_manager import ToolRegistryError, ToolRegistryManager
 
 # 凭证占位符路径参数上限 = ToolCredential.placeholder_name 列宽。在边界挡超长值,
 # 否则 >128 字符落到 asyncpg 触发 StringDataRightTruncation(DataError)→ 漏出 500;
 # 在此校验直接 422(reviewer #10)。
 _PLACEHOLDER_MAX = 128
-from api.services.auth import TokenPayload
-from core.tool_registry_manager import ToolRegistryError, ToolRegistryManager
 
 router = APIRouter()
 

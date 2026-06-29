@@ -284,6 +284,10 @@ async def _reconcile_credentials(
                 row.encrypted_value = cipher.encrypt(env_val)
                 row.source = "seeded"
             else:
+                # blind add 安全 by-construction(reviewer #6):existing 已含本 unit 的全部
+                # seeded 行,故 row is None ⇒ 该 (unit, placeholder) 无 seeded 行。也不可能撞
+                # dynamic 行——unit 是 seeded XOR dynamic 且不可翻转(reconcile 撞 dynamic 即
+                # loud-fail),seeded unit 永不持 dynamic 凭证。故 PK 不可能冲突。
                 session.add(ToolCredential(
                     unit_name=unit,
                     placeholder_name=name,

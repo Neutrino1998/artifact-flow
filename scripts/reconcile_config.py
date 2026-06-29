@@ -28,12 +28,18 @@ load_dotenv()
 
 
 async def main(dry_run: bool) -> int:
-    from config import config
+    from config import config, validate_config
     from db.database import DatabaseManager
     from reconcile.reconciler import reconcile_config_to_db
     from utils.logger import get_logger
 
     logger = get_logger("ArtifactFlow")
+
+    # 部署门禁(reviewer N4):release(非 dry-run)先全量校验 config —— 缺/格式错主密钥
+    # (及其它必填项)在 release 闸即 loud-fail,而非"无凭证工具时 release 成功、backend
+    # 启动才在 validate_config 崩 → crash-loop"。dry-run(纯解析报告)跳过,免逼着配齐 env。
+    if not dry_run:
+        validate_config()
 
     db_urls = [u.strip() for u in config.DATABASE_URLS.split(",") if u.strip()] if config.DATABASE_URLS else []
     db = DatabaseManager(
