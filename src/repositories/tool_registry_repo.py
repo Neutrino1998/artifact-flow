@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Agent, AgentUnit, ToolCredential, ToolMember, ToolUnit
+from db.models import Agent, AgentUnit, ToolMember, ToolUnit
 from repositories.base import BaseRepository
 
 
@@ -77,11 +77,8 @@ class ToolRegistryRepository(BaseRepository[ToolUnit]):
             self._session.add(m)
 
     async def delete_unit(self, name: str) -> None:
-        """显式删全部子行(dialect-safe,不赖 per-connection FK pragma);DB FK 是双保险。
-        含 ToolCredential —— 让本方法自洽,不依赖调用方记得另调 creds.delete_for_unit
-        (否则直接调用者会在 FK 关闭的 SQLite 上孤儿化凭证,reviewer #7)。"""
+        """显式删子行(dialect-safe,不赖 per-connection FK pragma);DB FK 是双保险。"""
         await self._session.execute(delete(AgentUnit).where(AgentUnit.unit_name == name))
-        await self._session.execute(delete(ToolCredential).where(ToolCredential.unit_name == name))
         await self._session.execute(delete(ToolMember).where(ToolMember.unit_name == name))
         await self._session.execute(delete(ToolUnit).where(ToolUnit.name == name))
 
