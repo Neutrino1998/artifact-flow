@@ -42,13 +42,18 @@ def sanitize_error_event(event: dict) -> dict:
 @asynccontextmanager
 async def create_controller(conversation_id: str, message_id: str) -> AsyncGenerator:
     """
-    Build a fresh ExecutionController with its own DB session.
+    Build a fresh ExecutionController wired to the db_manager factory.
 
-    Why not use Depends(get_controller)?
-    send_message() launches a background task whose lifetime exceeds the HTTP request.
-    Depends(get_db_session) closes the session when the request ends, but the background
-    task still needs a live session. This context manager provides an independent session
-    scoped to the background task's lifetime.
+    Why not Depends(get_controller)? send_message() launches a background task whose
+    lifetime exceeds the HTTP request, so it can't ride the request-scoped session.
+
+    B-5: rather than pre-open ONE turn-long session for the whole background task (held
+    idle-in-transaction while awaiting LLM / authorization, and the turn's only DB read
+    with no fresh-session retry), the controller holds the db_manager and opens a SHORT
+    retrying session per DB touch — artifact (ArtifactService.db_manager) / conversation
+    + event (controller._with_db_retry) / credential (resolver.with_retry). Only the
+    one-shot registry snapshot is read here (also on a short session); everything else is
+    lazy inside stream_execute.
 
     Usage:
         async with create_controller(conv_id, msg_id) as ctrl:
@@ -58,15 +63,11 @@ async def create_controller(conversation_id: str, message_id: str) -> AsyncGener
     from core.controller import ExecutionController
     from core.effective_toolset import resolve_all
     from core.engine import EngineHooks
-    from core.conversation_manager import ConversationManager as CM
     from reconcile.snapshot import load_registry_snapshot
     from tools.builtin.artifact_service import ArtifactService
     from tools.builtin.artifact_ops import create_artifact_tools
     from tools.builtin.sandbox_session import SandboxSession
     from tools.builtin.sandbox_ops import create_sandbox_tools
-    from repositories.artifact_repo import ArtifactRepository
-    from repositories.conversation_repo import ConversationRepository as CR
-    from repositories.message_event_repo import MessageEventRepository
 
     db_manager = get_db_manager()
     runner = get_execution_runner()
@@ -79,65 +80,66 @@ async def create_controller(conversation_id: str, message_id: str) -> AsyncGener
     sandbox_session = SandboxSession(conversation_id, message_id)
     runner.register_cleanup(message_id, sandbox_session.close)
 
-    async with db_manager.session() as session:
-        artifact_repo = ArtifactRepository(session)
-        artifact_service = ArtifactService(artifact_repo)
+    # ArtifactService 持 db_manager(不绑一条 turn-long session):turn 期每次 DB 读/写各开
+    # 短 retrying session 读完即关(B-5),WorkingSet 留实例做 turn-live 缓存。
+    artifact_service = ArtifactService(db_manager=db_manager)
 
-        # per-turn 注册表快照:agent 元数据 + external 工具(HttpTool)从 DB 重建。
-        # 进程级 reconcile(entrypoint / 手动脚本)把 config 物化进库,这里每 turn 读一
-        # 次快照 —— 避跨 worker 缓存失效,与引擎每 turn 重建 MessageEvent 历史同源(原则 5)。
-        snapshot = await load_registry_snapshot(session)
-        if "lead_agent" not in snapshot.agents:
-            # DB 注册表为空/缺 lead_agent = reconcile 没跑(或跑挂)。引擎此时无可执行
-            # agent,与其在 turn 中途撞 KeyError,不如在装配处 loud-fail 给出可操作指引。
-            raise RuntimeError(
-                "Tool/agent registry is empty or missing 'lead_agent' — run "
-                "`python scripts/reconcile_config.py` to materialize config into the DB "
-                "(prod: entrypoint does this under the migration lock)."
-            )
-
-        # 合并工具来源:全局 builtin(进程级) + DB external(快照重建) + 请求级
-        # artifact / 沙盒工具。external 工具自此唯一来源是 DB —— 不再进程级加载
-        # config/tools/*.md(见 dependencies._load_tools)。
-        artifact_tools = create_artifact_tools(artifact_service)
-        sandbox_tools = create_sandbox_tools(sandbox_session, artifact_service)
-        all_tools = {
-            **get_tools(),
-            **snapshot.external_tools,
-            **{t.name: t for t in artifact_tools},
-            **{t.name: t for t in sandbox_tools},
-        }
-        agents = snapshot.agents
-        # 决策 11 单一解析点:把每 agent 的宇宙(builtin ∪ units)解析成扁平
-        # {full_name: 等级};等级从工具对象取(绑定不存等级)。引擎/上下文构建
-        # 全程读这个,不再直读 agent 配置的 tools。
-        effective_toolsets = resolve_all(snapshot, all_tools)
-
-        conv_repo = CR(session)
-        conv_manager = CM(conv_repo)
-        event_repo = MessageEventRepository(session)
-
-        hooks = EngineHooks(
-            check_cancelled=store.is_cancelled,
-            wait_for_interrupt=store.wait_for_interrupt,
-            drain_messages=store.drain_messages,
+    # per-turn 注册表快照:agent 元数据 + external 工具(HttpTool)从 DB 重建。
+    # 进程级 reconcile(entrypoint / 手动脚本)把 config 物化进库,这里每 turn 读一
+    # 次快照 —— 避跨 worker 缓存失效,与引擎每 turn 重建 MessageEvent 历史同源(原则 5)。
+    # 短 session 读完即关;凭证 resolver 拿 db_manager(execute 期再各开短 session lazy
+    # 解密),不被快照 session 骑成 turn-long 连接。
+    snapshot = await db_manager.with_retry(
+        lambda session: load_registry_snapshot(session, db_manager=db_manager)
+    )
+    if "lead_agent" not in snapshot.agents:
+        # DB 注册表为空/缺 lead_agent = reconcile 没跑(或跑挂)。引擎此时无可执行
+        # agent,与其在 turn 中途撞 KeyError,不如在装配处 loud-fail 给出可操作指引。
+        raise RuntimeError(
+            "Tool/agent registry is empty or missing 'lead_agent' — run "
+            "`python scripts/reconcile_config.py` to materialize config into the DB "
+            "(prod: entrypoint does this under the migration lock)."
         )
 
-        async def _on_engine_exit(conv_id: str, msg_id: str) -> None:
-            await store.clear_engine_interactive(conv_id, msg_id)
+    # 合并工具来源:全局 builtin(进程级) + DB external(快照重建) + 请求级
+    # artifact / 沙盒工具。external 工具自此唯一来源是 DB —— 不再进程级加载
+    # config/tools/*.md(见 dependencies._load_tools)。
+    artifact_tools = create_artifact_tools(artifact_service)
+    sandbox_tools = create_sandbox_tools(sandbox_session, artifact_service)
+    all_tools = {
+        **get_tools(),
+        **snapshot.external_tools,
+        **{t.name: t for t in artifact_tools},
+        **{t.name: t for t in sandbox_tools},
+    }
+    agents = snapshot.agents
+    # 决策 11 单一解析点:把每 agent 的宇宙(builtin ∪ units)解析成扁平
+    # {full_name: 等级};等级从工具对象取(绑定不存等级)。引擎/上下文构建
+    # 全程读这个,不再直读 agent 配置的 tools。
+    effective_toolsets = resolve_all(snapshot, all_tools)
 
-        yield ExecutionController(
-            agents=agents,
-            tools=all_tools,
-            effective_toolsets=effective_toolsets,
-            hooks=hooks,
-            artifact_service=artifact_service,
-            conversation_manager=conv_manager,
-            message_event_repo=event_repo,
-            on_engine_exit=_on_engine_exit,
-            db_manager=db_manager,
-            sandbox_session=sandbox_session,
-        )
+    hooks = EngineHooks(
+        check_cancelled=store.is_cancelled,
+        wait_for_interrupt=store.wait_for_interrupt,
+        drain_messages=store.drain_messages,
+    )
+
+    async def _on_engine_exit(conv_id: str, msg_id: str) -> None:
+        await store.clear_engine_interactive(conv_id, msg_id)
+
+    # conversation_manager / message_event_repo 不在此绑 session(B-5):controller 经
+    # _with_db_retry 每调一次开短 session(默认 ConversationManager() 仅作 no-db_manager
+    # 回落,prod 永走 retry 路径);db_manager 在场,事件持久化 / 对话读写均不缺。
+    yield ExecutionController(
+        agents=agents,
+        tools=all_tools,
+        effective_toolsets=effective_toolsets,
+        hooks=hooks,
+        artifact_service=artifact_service,
+        on_engine_exit=_on_engine_exit,
+        db_manager=db_manager,
+        sandbox_session=sandbox_session,
+    )
 
 
 async def run_and_push(

@@ -1,4 +1,4 @@
-"""HttpTool 运行期凭证注入(B-4):snapshot 已解密的纯 dict 路径 + env 回落 + 缺凭证。"""
+"""HttpTool 运行期凭证注入(B-4;B-5 lazy):resolver 按 unit 解密路径 + env 回落 + 缺凭证。"""
 
 import os
 from unittest.mock import patch
@@ -45,7 +45,18 @@ def _fake_client(monkeypatch):
     monkeypatch.setattr("tools.custom.http_tool.httpx.AsyncClient", _CapturingClient)
 
 
-def _tool(resolved_credentials):
+class _FakeResolver:
+    """模拟 CredentialResolver:resolve(unit) → 预置的 {placeholder: 明文}。
+    execute 期 await 它(B-5 lazy),不碰真 DB。"""
+
+    def __init__(self, values):
+        self._values = values
+
+    async def resolve(self, unit_name):
+        return self._values
+
+
+def _tool(values):
     return HttpTool(
         HttpToolConfig(
             name="ragflow__query",
@@ -56,12 +67,13 @@ def _tool(resolved_credentials):
             headers={"Authorization": "Bearer {{TOOL_SECRET_KEY}}"},
             parameters=[],
         ),
-        resolved_credentials=resolved_credentials,
+        unit_name="ragflow",
+        credential_resolver=_FakeResolver(values),
     )
 
 
 async def test_resolved_credentials_substituted_into_request(_fake_client):
-    # snapshot 已把本 unit 凭证解密成纯 dict;execute 纯替换(无 DB / await)
+    # resolver 按 unit 解密出本 unit 凭证;execute 替换 {{NAME}} 进出站请求
     result = await _tool(
         {"TOOL_SECRET_HOST": "host.local", "TOOL_SECRET_KEY": "live-key"}
     ).execute()
@@ -71,7 +83,7 @@ async def test_resolved_credentials_substituted_into_request(_fake_client):
 
 
 async def test_missing_credential_is_generic_error(_fake_client):
-    # 占位符无对应凭证(未配 / snapshot 解密失败被跳过)→ SecretResolutionError → generic
+    # 占位符无对应凭证(未配)→ substitute_templates SecretResolutionError → generic
     # 错误,绝不外发占位符原文
     result = await _tool({"TOOL_SECRET_HOST": "host.local"}).execute()   # 缺 KEY
     assert result.success is False

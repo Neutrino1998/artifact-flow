@@ -12,9 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Agent, AgentUnit, ToolMember, ToolUnit
-from repositories.tool_credential_repo import ToolCredentialRepository
 from tools.base import BaseTool, ToolParameter, is_builtin_name
-from tools.custom.credentials import resolve_all_credentials
+from tools.custom.credentials import CredentialResolver
 from tools.custom.http_tool import HttpTool, HttpToolConfig
 from utils.logger import get_logger
 
@@ -61,12 +60,13 @@ def build_http_tool(
     permission: str,
     definition: dict,
     *,
-    resolved_credentials: Optional[Dict[str, str]] = None,
+    unit_name: Optional[str] = None,
+    credential_resolver: Optional[CredentialResolver] = None,
 ) -> HttpTool:
     """从 tool_member 行重建 HttpTool。full_name 作工具名、permission 作等级。
 
-    resolved_credentials = snapshot 读边界已解密的本 unit 凭证 {placeholder: 明文}(纯
-    dict,无 DB 句柄);execute 期纯替换 {{NAME}}。缺省(测试直接调)→ HttpTool 回落 env。
+    unit_name + credential_resolver 灌入运行期凭证通路(B-4;B-5 lazy):execute 期按 unit
+    从 tool_credentials 开短 session 解密填 {{NAME}}。两者缺省(测试直接调)→ 回落 env。
     """
     params = [
         ToolParameter(
@@ -90,10 +90,12 @@ def build_http_tool(
         response_extract=definition.get("response_extract"),
         timeout=definition.get("timeout", 60),
     )
-    return HttpTool(config, resolved_credentials=resolved_credentials)
+    return HttpTool(config, unit_name=unit_name, credential_resolver=credential_resolver)
 
 
-async def load_registry_snapshot(session: AsyncSession) -> RegistrySnapshot:
+async def load_registry_snapshot(
+    session: AsyncSession, *, db_manager=None
+) -> RegistrySnapshot:
     """一次性读全部注册表行,重建 external 工具 + unit 元数据 + agent 元数据。
 
     显式 order_by 定序的是 **external/unit 轴**(member/agent_unit 行序)—— 这一轴喂
@@ -107,10 +109,10 @@ async def load_registry_snapshot(session: AsyncSession) -> RegistrySnapshot:
     不 raise —— 本函数每 turn 每用户都跑,一行坏数据 raise 会拖垮全机群;主防线是写入期
     loud-fail(reconcile / B-4 CRUD),这里只作兜底,不该有全局爆炸半径。
     """
-    # 凭证在此读边界一次性解密(每 unit 一份 {placeholder: 明文} dict),纯 dict 灌进
-    # HttpTool —— 引擎循环不再持 DB 句柄、execute 无 await(执行生命周期 #4)。解密值不进
-    # catalog/事件;单行解密失败在 resolve_all_credentials 内 skip+WARNING(爆炸半径有界)。
-    credentials_by_unit = await resolve_all_credentials(ToolCredentialRepository(session))
+    # 凭证 resolver 持 db_manager(非本快照 session):execute 期按 unit 开短 session lazy
+    # 解密(B-5)—— 本 session 只读注册表行、读完即关,不被凭证解析骑成 turn-long 连接。
+    # db_manager 缺省(测试 / 进程级重建脚本不带)→ resolver=None,HttpTool 回落 env。
+    credential_resolver = CredentialResolver(db_manager) if db_manager is not None else None
 
     units_rows = (await session.execute(
         select(ToolUnit).order_by(ToolUnit.name)
@@ -168,7 +170,8 @@ async def load_registry_snapshot(session: AsyncSession) -> RegistrySnapshot:
         if unit is not None and unit.provider == "http":
             external_tools[m.full_name] = build_http_tool(
                 m.full_name, m.permission, m.definition or {},
-                resolved_credentials=credentials_by_unit.get(m.unit_name, {}),
+                unit_name=m.unit_name,
+                credential_resolver=credential_resolver,
             )
 
     agents: Dict[str, AgentSnapshot] = {

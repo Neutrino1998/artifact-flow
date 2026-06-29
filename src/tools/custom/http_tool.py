@@ -43,11 +43,11 @@ class HttpTool(BaseTool):
     执行流程：
     1. 注册时：MD frontmatter → HttpToolConfig → HttpTool 实例
     2. 调用时：LLM tool_call → 拼 HTTP 请求 → 发出 → 提取结果 → 返回
-    3. 密钥处理：{{VAR}} 由 snapshot 读边界解密后以纯 dict 注入(resolved_credentials),
-       execute 期纯替换、不读 DB / 不 await(回落路径才读 env);不暴露给 LLM
+    3. 密钥处理：{{VAR}} 由 credential_resolver 在 execute 期按 unit 从 tool_credentials
+       短 session 解密注入(只解被调工具、不驻留整轮);无 resolver 时回落 env;不暴露给 LLM
     """
 
-    def __init__(self, config: HttpToolConfig, *, resolved_credentials=None):
+    def __init__(self, config: HttpToolConfig, *, unit_name=None, credential_resolver=None):
         super().__init__(
             name=config.name,
             description=config.description,
@@ -59,11 +59,12 @@ class HttpTool(BaseTool):
         self._response_extract = config.response_extract
         self._timeout = config.timeout
         self._param_defs = config.parameters
-        # 运行期凭证(B-4):snapshot 读边界已解密的 {placeholder: 明文} map(纯 dict,
-        # 无 DB 句柄,故引擎循环无 DB await —— 执行生命周期 #4)。dict(含空 {})→ 走
-        # tool_credentials 替换路径;None = 无注入(legacy loader / 测试直接构造)→ 回落
-        # env 解析(白名单前缀)。凭证 = unit 级,snapshot 已按 unit 灌好本工具那份。
-        self._resolved_credentials = resolved_credentials
+        # 运行期凭证(B-4;B-5 退回 lazy):snapshot 重建时灌入 unit 名 + resolver。两者齐备
+        # → execute 期按 unit 从 tool_credentials(加密落库)开短 session 解密填 {{NAME}}
+        # (只解被调工具、用完即弃);否则回落 env(legacy loader / 直接构造的工具,无 unit
+        # 上下文)。凭证 = unit 级,故按 unit 名(非 full_name)查。
+        self._unit_name = unit_name
+        self._credential_resolver = credential_resolver
 
     def get_parameters(self) -> List[ToolParameter]:
         return self._param_defs
@@ -81,13 +82,15 @@ class HttpTool(BaseTool):
         if not self._endpoint:
             return ToolResult(success=False, error="Tool endpoint not configured")
 
-        # 注入 secrets(占位符缺失 / 非白名单前缀 → 拒绝,不外发占位符原文)。
-        # DB 路径(B-4):resolved_credentials 是 snapshot 已解密的 {{NAME}}→明文 map,纯替换;
-        # 回落路径:None(legacy loader / 测试直接构造)→ env 解析(白名单前缀)。两路均无 DB / await。
+        # 注入 secrets(缺失 / 非白名单前缀 / 解密失败 → 拒绝,不外发占位符原文)。
+        # DB 路径(B-4;B-5 lazy):resolver + unit 名齐备 → execute 期开短 session 按 unit
+        # 解密凭证表填 {{NAME}}(只解被调工具、不驻留整轮);回落路径:无注入(legacy loader /
+        # 测试直接构造)→ env 解析(白名单前缀)。
         try:
-            if self._resolved_credentials is not None:
-                headers = substitute_templates(self._headers, self._resolved_credentials)
-                endpoint = substitute_templates(self._endpoint, self._resolved_credentials)
+            if self._credential_resolver is not None and self._unit_name is not None:
+                values = await self._credential_resolver.resolve(self._unit_name)
+                headers = substitute_templates(self._headers, values)
+                endpoint = substitute_templates(self._endpoint, values)
             else:
                 headers = resolve_secrets(self._headers)
                 endpoint = resolve_secrets(self._endpoint)

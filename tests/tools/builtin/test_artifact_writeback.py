@@ -890,3 +890,41 @@ class TestUploadQuota:
         monkeypatch.setattr(config, "ARTIFACT_USER_QUOTA_BYTES", 0)
         ok, msg, _ = await _persist_blob(artifact_service, session_id, "big.bin", 10_000_000)
         assert ok, msg
+
+
+class TestShortSessionPath:
+    """B-5:引擎路径的 ArtifactService 持 db_manager(repository=None)—— DB 读/写各开短
+    retrying session(不绑 turn-long session),WorkingSet 留实例做 turn-live 缓存。
+
+    bound-repo 路径(上面所有用例)覆盖不到这条:它构造 ArtifactService(repo)。这里专测
+    db_manager 路径,锁死 create/list/flush 都不依赖 bound repo。
+    """
+
+    async def test_create_flush_then_list_from_db(self, db_manager, session_id: str):
+        svc = ArtifactService(db_manager=db_manager)
+        svc.set_session(session_id)
+        ok, _ = await svc.create_artifact(
+            session_id, "doc.md", "text/markdown", "Doc", "hello"
+        )
+        assert ok is True
+        await svc.flush_all(session_id, db_manager=db_manager)
+
+        # 新实例 = 空 WorkingSet → list 只能来自 DB,证明短 session 读通且 flush 已落库。
+        fresh = ArtifactService(db_manager=db_manager)
+        arts = await fresh.list_artifacts(session_id)
+        assert any(a["id"] == "doc.md" for a in arts)
+
+    async def test_create_duplicate_hits_db_existence_check(self, db_manager, session_id: str):
+        # 回归:WorkingSet miss 时 create 走 DB 存在性检查。该检查曾误用 _ensure_repository,
+        # 在 repository=None 的引擎路径会 RuntimeError —— 此用例锁死它走短 session。
+        svc = ArtifactService(db_manager=db_manager)
+        svc.set_session(session_id)
+        ok, _ = await svc.create_artifact(session_id, "dup.md", "text/markdown", "D", "x")
+        assert ok is True
+        await svc.flush_all(session_id, db_manager=db_manager)
+
+        fresh = ArtifactService(db_manager=db_manager)  # 空 WorkingSet → 必查 DB
+        fresh.set_session(session_id)
+        ok2, msg2 = await fresh.create_artifact(session_id, "dup.md", "text/markdown", "D", "y")
+        assert ok2 is False
+        assert "already exists" in msg2

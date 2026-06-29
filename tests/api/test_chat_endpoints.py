@@ -383,7 +383,7 @@ def _patch_snapshot(fake_agents):
         for n, c in fake_agents.items()
     }
 
-    async def _load(session):
+    async def _load(session, *, db_manager=None):
         return RegistrySnapshot(external_tools={}, units={}, agents=agents)
 
     return patch("reconcile.snapshot.load_registry_snapshot", _load)

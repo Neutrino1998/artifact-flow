@@ -129,14 +129,22 @@ class ExecutionController:
             )
 
         # ========== 准备工作 ==========
+        # setup 期对话读写也走 _with_db_retry(B-5):每调一次开短 retrying session,不再
+        # 骑 controller_factory 预开的 turn-long session(那条已退役)。
         if not conversation_id:
-            conversation_id = await self.conversation_manager.start_conversation_async()
+            conversation_id = await self._with_db_retry(
+                lambda cm, er, am: cm.start_conversation_async()
+            )
         else:
-            await self.conversation_manager.ensure_conversation_exists(conversation_id)
+            await self._with_db_retry(
+                lambda cm, er, am: cm.ensure_conversation_exists(conversation_id)
+            )
 
         # Auto-detect parent
         if parent_message_id is _UNSET:
-            parent_message_id = await self.conversation_manager.get_active_branch(conversation_id)
+            parent_message_id = await self._with_db_retry(
+                lambda cm, er, am: cm.get_active_branch(conversation_id)
+            )
             if parent_message_id:
                 logger.debug(f"Auto-set parent_message_id to active_branch: {parent_message_id}")
 
@@ -178,7 +186,9 @@ class ExecutionController:
         # 从父消息 metadata 中恢复 always_allowed_tools
         parent_always_allowed = []
         if resolved_parent:
-            parent_meta = await self.conversation_manager.get_message_metadata_async(resolved_parent)
+            parent_meta = await self._with_db_retry(
+                lambda cm, er, am: cm.get_message_metadata_async(resolved_parent)
+            )
             parent_always_allowed = parent_meta.get("always_allowed_tools", [])
 
         # 创建初始状态
@@ -195,11 +205,13 @@ class ExecutionController:
         logger.info(f"Processing new message (streaming) in conversation {conversation_id}")
 
         # 添加消息到 conversation (after all pre-engine setup to avoid orphaned rows on failure)
-        await self.conversation_manager.add_message_async(
-            conv_id=conversation_id,
-            message_id=message_id,
-            user_input=user_input,
-            parent_id=resolved_parent,
+        await self._with_db_retry(
+            lambda cm, er, am: cm.add_message_async(
+                conv_id=conversation_id,
+                message_id=message_id,
+                user_input=user_input,
+                parent_id=resolved_parent,
+            )
         )
 
         # ========== 执行引擎 ==========
@@ -667,7 +679,10 @@ class ExecutionController:
         Raises:
             IntegrityError — conv 已被删除（caller 应早返回，跳过后续阶段）
         """
-        if not self.message_event_repo:
+        # 能否持久化 = 有 db_manager(走 _with_db_retry 的 fresh er)或有 bound event_repo。
+        # B-5:turn 路径下 factory 不再绑 message_event_repo,持久化经 db_manager 短 session;
+        # 两者皆无(裸 controller / 部分测试)才是真的「无处可写」→ 跳过。
+        if not self._db_manager and not self.message_event_repo:
             return True
 
         all_events = final_state.get("events", [])

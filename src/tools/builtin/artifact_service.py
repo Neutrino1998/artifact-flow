@@ -79,19 +79,25 @@ class ArtifactService:
     """Artifact 用例编排:dedup / 版本计算 / 调纯算法 / 上传 stage / tool-result
     持久化 / flush(WorkingSet→Repo)/ 发事件。无 artifact 领域状态(那在 WorkingSet)。
 
-    用法:
-        repo = ArtifactRepository(session)
-        service = ArtifactService(repo)          # 自带一个独占 WorkingSet
-        service.set_session(session_id)
-        await service.create_artifact(...)
+    用法(两种,B-5):
+        # 引擎/turn 路径 —— 持 db_manager,DB 读/写各开短 retrying session 读完即关
+        # (不骑 turn-long session),WorkingSet 留在本实例做 turn-live 缓存:
+        service = ArtifactService(db_manager=db_manager)
+        # REST/请求路径 —— 绑请求级 session 的 repo(请求生命周期内有效):
+        service = ArtifactService(ArtifactRepository(session))
     """
 
     def __init__(
         self,
         repository: Optional[ArtifactRepository] = None,
         working_set: Optional[ArtifactWorkingSet] = None,
+        db_manager=None,
     ):
+        # repository = 请求级 bound session(REST/测试);db_manager = 短 session 工厂
+        # (引擎/turn 路径)。turn-path DB 触碰一律经 _run_with_repo:有 db_manager → fresh
+        # retrying session 读完即关(B-5);否则回落 bound repo(REST 请求级 / 测试)。
         self.repository = repository
+        self._db_manager = db_manager
         self._ws = working_set or ArtifactWorkingSet()
         # turn 级事件回调(引擎 bind);REST 侧恒 None → 不发事件。详见模块 docstring。
         self._emit = None
@@ -189,10 +195,22 @@ class ArtifactService:
             raise RuntimeError("ArtifactService: repository not configured")
         return self.repository
 
+    async def _run_with_repo(self, fn):
+        """单次 DB 触碰的会话边界(B-5)。有 db_manager → fresh retrying session,fn 在其
+        内拿一个临时 ArtifactRepository、读完即关;否则回落 bound repo(REST 请求级 / 测试)。
+
+        闸:fn **必须在回调内完成读 + 序列化**(返回纯 dict / 标量 / bool),不得把 ORM 行
+        漏到回调外 —— session 已关,detached 实例触 lazy 属性会 MissingGreenlet。
+        """
+        if self._db_manager is not None:
+            async def _attempt(session):
+                return await fn(ArtifactRepository(session))
+            return await self._db_manager.with_retry(_attempt)
+        return await fn(self._ensure_repository())
+
     async def ensure_session_exists(self, session_id: str) -> None:
         """确保 ArtifactSession 存在(数据库层)。"""
-        repo = self._ensure_repository()
-        await repo.ensure_session_exists(session_id)
+        await self._run_with_repo(lambda repo: repo.ensure_session_exists(session_id))
 
     # ========================================
     # 创建
@@ -219,13 +237,14 @@ class ArtifactService:
         try:
             await self.ensure_session_exists(session_id)
 
-            # 检查缓存和 DB 中是否已存在
+            # 检查缓存和 DB 中是否已存在(DB 查经短 session,B-5;只判存在性,不读行属性)
             if self._ws.peek(session_id, artifact_id) is not None:
                 return False, f"Artifact '{artifact_id}' already exists in session"
 
-            repo = self._ensure_repository()
-            existing = await repo.get_artifact(session_id, artifact_id)
-            if existing:
+            existing = await self._run_with_repo(
+                lambda repo: repo.get_artifact(session_id, artifact_id)
+            )
+            if existing is not None:
                 return False, f"Artifact '{artifact_id}' already exists in session"
 
             memory = ArtifactMemory(
@@ -280,14 +299,16 @@ class ArtifactService:
             ), None
 
         # Dedup:同时对 WorkingSet(本轮已 stage / 缓存)与 DB(往轮已落库)去重,
-        # 追加后缀直到唯一。
-        repo = self._ensure_repository()
+        # 追加后缀直到唯一。DB 查经短 session(B-5)——这里只判存在性(is not None),
+        # 不读返回行的属性,故 ORM 行漏出回调亦无 lazy IO 之虞。
         artifact_id = id_base
         suffix = 0
         original_id = id_base
         while (
             self._ws.peek(session_id, artifact_id) is not None
-            or await repo.get_artifact(session_id, artifact_id) is not None
+            or (await self._run_with_repo(
+                lambda repo, aid=artifact_id: repo.get_artifact(session_id, aid)
+            )) is not None
         ):
             suffix += 1
             name_part, _, ext_part = original_id.rpartition('.')
@@ -322,8 +343,10 @@ class ArtifactService:
         # 工具结果）或 loud-abort 本轮（上传 staging）。
         if blob is not None and config.ARTIFACT_USER_QUOTA_BYTES > 0:
             # 一趟查询：子查询内联把 session_id 解析成属主再聚合(属主跨全部会话已落字节)。
-            # 无主会话 → 返回 0,仍由下方数值判定兜单个超大 blob。
-            committed = await repo.get_user_blob_bytes_for_session(session_id)
+            # 无主会话 → 返回 0,仍由下方数值判定兜单个超大 blob。短 session 读(B-5),返回标量。
+            committed = await self._run_with_repo(
+                lambda repo: repo.get_user_blob_bytes_for_session(session_id)
+            )
             # staged = 本轮已 stage 但**未 flush** 的 blob。扫 dirty 标记(非整个 cache):
             # flush 的 clear_one 已把已落盘条目移出 dirty,故已 committed 的 blob 不会
             # 在此被重复计数 —— 即便将来同一 service 在 flush 后继续 stage 也安全。
@@ -463,22 +486,27 @@ class ArtifactService:
         if cached is not None:
             return cached
 
-        repo = self._ensure_repository()
-        db_artifact = await repo.get_artifact(session_id, artifact_id)
-        if not db_artifact:
-            return None
+        # cache-miss → 短 session 读 DB(B-5)。在回调内就地建 ArtifactMemory(纯 dataclass)
+        # 再返回,ORM 行不出 session;回填 WorkingSet 后即 turn-live 缓存(故只 miss 时读 DB)。
+        async def _load(repo) -> Optional[ArtifactMemory]:
+            db_artifact = await repo.get_artifact(session_id, artifact_id)
+            if not db_artifact:
+                return None
+            return ArtifactMemory(
+                artifact_id=db_artifact.id,
+                content_type=db_artifact.content_type,
+                title=db_artifact.title,
+                content=db_artifact.content,
+                current_version=db_artifact.current_version,
+                metadata=db_artifact.metadata_,
+                created_at=db_artifact.created_at,
+                source=db_artifact.source,
+                has_blob=db_artifact.has_blob,  # blob lazy 未载,判别取列值
+            )
 
-        memory = ArtifactMemory(
-            artifact_id=db_artifact.id,
-            content_type=db_artifact.content_type,
-            title=db_artifact.title,
-            content=db_artifact.content,
-            current_version=db_artifact.current_version,
-            metadata=db_artifact.metadata_,
-            created_at=db_artifact.created_at,
-            source=db_artifact.source,
-            has_blob=db_artifact.has_blob,  # blob lazy 未载,判别取列值
-        )
+        memory = await self._run_with_repo(_load)
+        if memory is None:
+            return None
         self._ws.put(session_id, memory)
         return memory
 
@@ -526,9 +554,10 @@ class ArtifactService:
                 "updated_at": memory.updated_at.isoformat(),
             }
 
-        # 不是当前版本 → 走 DB 取历史版本快照
-        repo = self._ensure_repository()
-        content = await repo.get_version_content(session_id, artifact_id, version)
+        # 不是当前版本 → 走 DB 取历史版本快照(短 session,B-5;返回纯文本)
+        content = await self._run_with_repo(
+            lambda repo: repo.get_version_content(session_id, artifact_id, version)
+        )
         if content is None:
             return None
         return {
@@ -567,11 +596,18 @@ class ArtifactService:
         if staged is not None:
             data, size = staged, len(staged)
         else:
-            repo = self._ensure_repository()
-            row = await repo.get_blob(session_id, artifact_id)
-            if row is None:
+            # 短 session 读字节(B-5):工具路径(sandbox/artifact 投递)也走此法,不再骑
+            # turn-long session。在回调内取列(data/size_bytes),不漏 ORM 行到 session 外。
+            async def _load_blob(repo):
+                row = await repo.get_blob(session_id, artifact_id)
+                if row is None:
+                    return None
+                return row.data, row.size_bytes
+
+            loaded = await self._run_with_repo(_load_blob)
+            if loaded is None:
                 return None
-            data, size = row.data, row.size_bytes
+            data, size = loaded
         return {
             "data": data,
             "size_bytes": size,
@@ -819,50 +855,55 @@ class ArtifactService:
 
         合并 DB 结果与 WorkingSet 里的 dirty/new artifact,使引擎 context 装配看到
         同轮改动。REST 侧 WorkingSet 恒空,故等价纯 DB 列表。
-        """
-        repo = self._ensure_repository()
-        db_artifacts = await repo.list_artifacts(
-            session_id=session_id,
-            content_type=content_type,
-        )
 
-        seen_ids: set = set()
-        result = []
-        for art in db_artifacts:
-            memory = self._ws.peek(session_id, art.id)
-            if memory and self._ws.is_dirty(session_id, art.id):
+        DB 读 + 序列化全在短 session 回调内完成(B-5):`art.*` 在 session 内即 序列化成
+        纯 dict,ORM 行不出回调;WorkingSet 合并是内存操作,放回调内一并完成无妨。
+        """
+        async def _build(repo) -> List[Dict[str, Any]]:
+            db_artifacts = await repo.list_artifacts(
+                session_id=session_id,
+                content_type=content_type,
+            )
+
+            seen_ids: set = set()
+            result: List[Dict[str, Any]] = []
+            for art in db_artifacts:
+                memory = self._ws.peek(session_id, art.id)
+                if memory and self._ws.is_dirty(session_id, art.id):
+                    if content_type and memory.content_type != content_type:
+                        continue
+                    info = self._serialize_memory(memory, include_content)
+                else:
+                    info = {
+                        "id": art.id,
+                        "content_type": art.content_type,
+                        "title": art.title,
+                        "version": art.current_version,
+                        "source": art.source,
+                        "original_filename": (art.metadata_ or {}).get("original_filename"),
+                        "has_blob": art.has_blob,
+                        "created_at": art.created_at.isoformat(),
+                        "updated_at": art.updated_at.isoformat(),
+                    }
+                    if include_content:
+                        info["content"] = art.content
+                result.append(info)
+                seen_ids.add(art.id)
+
+            # 追加 WorkingSet 里尚未落 DB 的 new artifact
+            for sid, aid in self._ws.new_keys(session_id):
+                if aid in seen_ids:
+                    continue
+                memory = self._ws.peek(sid, aid)
+                if not memory:
+                    continue
                 if content_type and memory.content_type != content_type:
                     continue
-                info = self._serialize_memory(memory, include_content)
-            else:
-                info = {
-                    "id": art.id,
-                    "content_type": art.content_type,
-                    "title": art.title,
-                    "version": art.current_version,
-                    "source": art.source,
-                    "original_filename": (art.metadata_ or {}).get("original_filename"),
-                    "has_blob": art.has_blob,
-                    "created_at": art.created_at.isoformat(),
-                    "updated_at": art.updated_at.isoformat(),
-                }
-                if include_content:
-                    info["content"] = art.content
-            result.append(info)
-            seen_ids.add(art.id)
+                result.append(self._serialize_memory(memory, include_content))
 
-        # 追加 WorkingSet 里尚未落 DB 的 new artifact
-        for sid, aid in self._ws.new_keys(session_id):
-            if aid in seen_ids:
-                continue
-            memory = self._ws.peek(sid, aid)
-            if not memory:
-                continue
-            if content_type and memory.content_type != content_type:
-                continue
-            result.append(self._serialize_memory(memory, include_content))
+            return result
 
-        return result
+        return await self._run_with_repo(_build)
 
     @staticmethod
     def _serialize_memory(memory: ArtifactMemory, include_content: bool) -> Dict[str, Any]:

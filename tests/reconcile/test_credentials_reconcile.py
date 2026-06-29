@@ -173,14 +173,21 @@ async def test_unit_prune_cascades_credentials(db_session, cfg, key, monkeypatch
     assert await _creds(db_session, "ragflow") == {}
 
 
-async def test_snapshot_tool_decrypts_credential_at_execute(db_session, cfg, key, monkeypatch):
-    """端到端:reconcile 种密文 → snapshot 重建 HttpTool → execute 解密替换进出站请求。"""
+async def test_snapshot_tool_decrypts_credential_at_execute(db_session, db_manager, cfg, key, monkeypatch):
+    """端到端(B-5 lazy):reconcile 种密文 → snapshot 建 HttpTool + resolver(持 db_manager)
+    → execute 期开短 session 解密替换。execute 前把 env 改成假值 —— 断言仍取到 DB 里的真值,
+    即证明走的是 lazy DB 解密(短 session)而非 env 回落。"""
     monkeypatch.setenv("TOOL_SECRET_RAGFLOW_HOST", "rag.local")
     monkeypatch.setenv("TOOL_SECRET_RAGFLOW_KEY", "k-secret")
     _write(cfg[0] / "ragflow.md", _tool_with_secret_md())
     await _run(db_session, cfg)
+    await db_session.commit()  # 密文行落定:resolver 的 fresh with_retry session 才看得到
 
-    snapshot = await load_registry_snapshot(db_session)
+    # env 改成假值:execute 若误走 env 回落会得到 WRONG.*,故下面断言成立 = 确实走了 DB 解密
+    monkeypatch.setenv("TOOL_SECRET_RAGFLOW_HOST", "WRONG.env")
+    monkeypatch.setenv("TOOL_SECRET_RAGFLOW_KEY", "WRONG-key")
+
+    snapshot = await load_registry_snapshot(db_session, db_manager=db_manager)
     tool = snapshot.external_tools["ragflow"]
 
     captured = {}
