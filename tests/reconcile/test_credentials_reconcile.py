@@ -141,6 +141,26 @@ async def test_missing_env_seeds_no_row(db_session, cfg, key, monkeypatch):
     assert set(rows) == {"TOOL_SECRET_RAGFLOW_HOST"}
 
 
+async def test_env_gone_keeps_existing_credential(db_session, cfg, key, monkeypatch):
+    # env 先有值 → 种密文;随后 env 缺失但定义**仍引用**该占位符 → 保留旧密文(不删)。
+    # reviewer #3:env-absent 是模糊信号(副本 .env 漏挂 / 注入先后),不在其上销毁共享状态。
+    # 撤销只走"删 config 里的 {{...}} 引用"(见 test_removed_placeholder_pruned)。
+    monkeypatch.setenv("TOOL_SECRET_RAGFLOW_HOST", "rag.local")
+    monkeypatch.setenv("TOOL_SECRET_RAGFLOW_KEY", "k-123")
+    _write(cfg[0] / "ragflow.md", _tool_with_secret_md())
+    await _run(db_session, cfg)
+    assert "TOOL_SECRET_RAGFLOW_KEY" in await _creds(db_session, "ragflow")
+
+    # KEY 从 env 消失,但定义没变(仍引用 {{TOOL_SECRET_RAGFLOW_KEY}})
+    monkeypatch.delenv("TOOL_SECRET_RAGFLOW_KEY", raising=False)
+    await _run(db_session, cfg)
+
+    rows = await _creds(db_session, "ragflow")
+    assert set(rows) == {"TOOL_SECRET_RAGFLOW_HOST", "TOOL_SECRET_RAGFLOW_KEY"}  # KEY 仍在
+    assert CredentialCipher(key).decrypt(
+        rows["TOOL_SECRET_RAGFLOW_KEY"].encrypted_value) == "k-123"
+
+
 async def test_unit_prune_cascades_credentials(db_session, cfg, key, monkeypatch):
     monkeypatch.setenv("TOOL_SECRET_RAGFLOW_HOST", "rag.local")
     monkeypatch.setenv("TOOL_SECRET_RAGFLOW_KEY", "k-123")

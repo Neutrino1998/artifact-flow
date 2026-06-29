@@ -251,19 +251,18 @@ async def _reconcile_credentials(
 
             if env_val is None:
                 if row is not None:
-                    await session.execute(
-                        delete(ToolCredential).where(
-                            and_(
-                                ToolCredential.unit_name == unit,
-                                ToolCredential.placeholder_name == name,
-                            )
-                        )
-                    )
-                    logger.warning("reconcile: env value for %s gone — pruned seeded "
-                                   "credential on unit %r (tool will fail at call)", name, unit)
+                    # env 当前缺该值,但定义**仍引用**此占位符 → 保留旧密文,不删。
+                    # env-absent 是模糊信号(副本 .env 漏挂 / secret 注入有先后 / 多副本
+                    # env skew),删 = 在模糊信号上销毁机群共享的持久状态(reviewer #3)。
+                    # 撤销凭证走显式路径:删 config 定义里的 {{...}} 引用(上面 not-in-wanted
+                    # 的 prune 分支),而非从 env 删变量。
+                    logger.warning("reconcile: env value for %s currently absent — keeping the "
+                                   "existing encrypted credential on unit %r (transient env "
+                                   "absence won't delete it; remove the {{...}} reference in "
+                                   "config to revoke)", name, unit)
                 else:
                     logger.warning("reconcile: unit %r references secret %s but it is not "
-                                   "in the environment — credential not seeded, tool will "
+                                   "in the environment and no credential exists — tool will "
                                    "fail at call", unit, name)
                 continue
 
