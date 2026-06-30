@@ -113,7 +113,6 @@ class ToolUnitListResponse(BaseModel):
 class AgentSummaryResponse(BaseModel):
     name: str
     description: str
-    internal: bool
 
 
 class AgentListResponse(BaseModel):

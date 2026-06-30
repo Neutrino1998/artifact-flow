@@ -63,6 +63,12 @@ class AgentNotFoundError(ToolRegistryError):
     status_code = 400
 
 
+class InternalAgentError(ToolRegistryError):
+    # 内部 agent(compact_agent 等,internal=True)不跑工具循环 —— 给它挂工具是
+    # 无意义的死绑定。与 dependencies.py 把 internal 排除出 call_subagent 目标同源。
+    status_code = 400
+
+
 class ToolRegistryManager:
     def __init__(self, session: AsyncSession):
         self._session = session
@@ -89,9 +95,11 @@ class ToolRegistryManager:
         return self._serialize_unit(u, mounts, cred_map)
 
     async def list_agents(self) -> List[dict]:
+        # 只列可挂载目标 —— 内部 agent(compact_agent 等)不跑工具循环,挂载端点
+        # 也会拒绝它们(mount 的 InternalAgentError),故根本不暴露给挂载 UI。
         agents = await self._registry.list_agents()
-        return [{"name": a.name, "description": a.description, "internal": a.internal}
-                for a in agents]
+        return [{"name": a.name, "description": a.description}
+                for a in agents if not a.internal]
 
     def _serialize_unit(self, u: ToolUnit, mounts: List[AgentUnit],
                         cred_map: Dict[str, str]) -> dict:
@@ -190,8 +198,13 @@ class ToolRegistryManager:
 
     async def mount(self, unit_name: str, agent_name: str, member_state: str) -> dict:
         await self._require_unit(unit_name)
-        if not await self._registry.agent_exists(agent_name):
+        agent = await self._registry.get_agent(agent_name)
+        if agent is None:
             raise AgentNotFoundError(f"agent '{agent_name}' does not exist")
+        if agent.internal:
+            raise InternalAgentError(
+                f"agent '{agent_name}' is internal and cannot have tools mounted"
+            )
         if member_state not in _VALID_MEMBER_STATE:
             raise InvalidUnitError(
                 f"member_state must be one of {sorted(_VALID_MEMBER_STATE)}"

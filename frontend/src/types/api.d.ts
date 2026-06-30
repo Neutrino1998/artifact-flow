@@ -1210,8 +1210,6 @@ export interface components {
             name: string;
             /** Description */
             description: string;
-            /** Internal */
-            internal: boolean;
         };
         /**
          * ArtifactListResponse

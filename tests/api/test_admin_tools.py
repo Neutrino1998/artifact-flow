@@ -19,8 +19,9 @@ pytestmark = pytest.mark.asyncio
 # --------------------------------------------------------------------------
 
 
-async def _seed_agent(db_session, name="lead_agent"):
-    db_session.add(Agent(name=name, description="a", model="qwen", role_prompt="r"))
+async def _seed_agent(db_session, name="lead_agent", internal=False):
+    db_session.add(Agent(name=name, description="a", model="qwen", role_prompt="r",
+                         internal=internal))
     await db_session.commit()
 
 
@@ -230,6 +231,17 @@ class TestMount:
         )
         assert resp.status_code == 400
 
+    async def test_mount_internal_agent_rejected(self, admin_client: AsyncClient, db_session):
+        # 内部 agent(compact_agent 等)不跑工具循环 → 挂载端点拒绝
+        await _seed_agent(db_session, "compact_agent", internal=True)
+        await admin_client.post("/api/v1/admin/tools/units", json=_singleton_body())
+        resp = await admin_client.put(
+            "/api/v1/admin/tools/units/weather/agents/compact_agent",
+            json={"member_state": "enabled"},
+        )
+        assert resp.status_code == 400
+        assert "internal" in resp.json()["detail"]
+
     async def test_cannot_override_seeded_binding(self, admin_client: AsyncClient, db_session):
         await _seed_agent(db_session)
         await admin_client.post("/api/v1/admin/tools/units", json=_singleton_body())
@@ -247,6 +259,15 @@ class TestMount:
         await _seed_agent(db_session, "research_agent")
         agents = (await admin_client.get("/api/v1/admin/tools/agents")).json()["agents"]
         assert any(a["name"] == "research_agent" for a in agents)
+
+    async def test_list_agents_excludes_internal(self, admin_client: AsyncClient, db_session):
+        # 挂载列表只含可挂载目标 —— 内部 agent 不出现
+        await _seed_agent(db_session, "research_agent")
+        await _seed_agent(db_session, "compact_agent", internal=True)
+        agents = (await admin_client.get("/api/v1/admin/tools/agents")).json()["agents"]
+        names = [a["name"] for a in agents]
+        assert "research_agent" in names
+        assert "compact_agent" not in names
 
 
 # --------------------------------------------------------------------------

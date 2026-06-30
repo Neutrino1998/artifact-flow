@@ -50,8 +50,8 @@ class ToolRegistryRepository(BaseRepository[ToolUnit]):
             select(Agent).order_by(Agent.name)
         )).scalars().all())
 
-    async def agent_exists(self, name: str) -> bool:
-        return (await self._session.get(Agent, name)) is not None
+    async def get_agent(self, name: str) -> Optional[Agent]:
+        return await self._session.get(Agent, name)
 
     async def agent_units_for_unit(self, unit_name: str) -> List[AgentUnit]:
         return list((await self._session.execute(

@@ -3170,17 +3170,12 @@
           "description": {
             "type": "string",
             "title": "Description"
-          },
-          "internal": {
-            "type": "boolean",
-            "title": "Internal"
           }
         },
         "type": "object",
         "required": [
           "name",
-          "description",
-          "internal"
+          "description"
         ],
         "title": "AgentSummaryResponse"
       },

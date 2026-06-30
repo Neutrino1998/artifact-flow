@@ -362,7 +362,7 @@ function MountSection({
             <option value="">{available.length === 0 ? '无可挂载 agent' : '选择 agent...'}</option>
             {available.map((a) => (
               <option key={a.name} value={a.name}>
-                {a.name}{a.internal ? '（内部）' : ''}
+                {a.name}
               </option>
             ))}
           </select>
