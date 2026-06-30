@@ -17,7 +17,11 @@ set -e
 # trivial. The inline path is kept verbatim for Mode 1 (SQLite single box) + backward compat.
 #
 # NOTE: run_release()'s body is intentionally NOT indented — the PG branch embeds a
-# `python -c "..."` whose Python lines must stay at column 0; re-indenting would corrupt it.
+# python -c "..." whose Python lines must stay at column 0; re-indenting would corrupt it.
+# That Python program lives inside a shell DOUBLE-quoted string, so backticks and $(...) and
+# bare $ stay shell-active in it — even inside Python comments/strings. A stray `word` in a
+# comment makes the shell run `word` as command substitution (harmless empty result, but it
+# emits "word: not found" noise on every release). Keep the embedded program free of them.
 
 DB_URL="${ARTIFACTFLOW_DATABASE_URLS:-$ARTIFACTFLOW_DATABASE_URL}"
 
@@ -81,7 +85,7 @@ async def migrate():
                 sys.exit(result.returncode)
             # config -> DB reconcile under the advisory lock. In the inline path, followers
             # re-run it idempotently too (below) so every replica self-certifies config; the
-            # dedicated `release` step runs only this leader path once (no followers).
+            # dedicated release step runs only this leader path once (no followers).
             print('Reconciling config -> DB (leader)...')
             rec = subprocess.run(['python', 'scripts/reconcile_config.py'])
             if rec.returncode != 0:
