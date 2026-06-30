@@ -78,7 +78,7 @@ tools:
 | `method` | string | 否 | `GET` | HTTP 方法；`POST/PUT/PATCH` 时参数走 JSON body，其他方法走 query string |
 | `headers` | dict | 否 | `{}` | 请求头；值支持 `{{VAR}}` 环境变量模板 |
 | `timeout` | int | 否 | `30` | 请求超时（秒） |
-| `response_extract` | string | 否 | — | JSONPath 表达式，从响应中提取子字段 |
+| `response_extract` | string | 否 | — | JMESPath 表达式（无 `$.` 前缀），从响应中提取子字段 |
 | `parameters` | list | 否 | `[]` | LLM 可传递的参数列表，详见下表 |
 
 ### Parameters 字段
@@ -107,7 +107,7 @@ headers:
 
 未找到的变量保持原样（`{{VAR_NAME}}` 字面量）并记录警告，不阻断加载。
 
-### JSONPath 响应提取
+### JMESPath 响应提取
 
 `response_extract` 是一个 [JMESPath](https://jmespath.org/) 表达式（**无 `$.` 前缀**），常用形态：
 

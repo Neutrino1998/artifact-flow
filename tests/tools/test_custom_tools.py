@@ -106,6 +106,18 @@ class TestValidateResponseExtract:
         with pytest.raises(ValueError, match="invalid JMESPath"):
             validate_response_extract("data[")
 
+    def test_legacy_dollar_prefix_rejected(self):
+        # clean break:旧式 $. 前缀不再兼容(jmespath 无 $ token),写入边界即拒
+        with pytest.raises(ValueError, match="invalid JMESPath"):
+            validate_response_extract("$.data.price")
+
+    def test_non_string_rejected_with_attribution(self):
+        # YAML 未加引号 → int/bool 等非串:在此显式拦成 ValueError(保住 SeedError 文件名归属),
+        # 不漏到 reconcile 顶层裸 traceback。含 falsy 的 0 / False。
+        for bad in (123, True, 0, False):
+            with pytest.raises(ValueError, match="must be a string"):
+                validate_response_extract(bad)
+
 
 # ============================================================
 # MD 文件解析
@@ -585,6 +597,63 @@ class TestHttpToolEndpoint:
         result = await tool.execute()
         assert result.success is True
         assert "endpoint" not in result.metadata
+
+    @staticmethod
+    def _client_returning(payload):
+        """返回一个固定吐 payload(JSON)的 httpx.AsyncClient 替身类。"""
+        class _Resp:
+            status_code = 200
+            headers = {"content-type": "application/json"}
+            text = "{}"
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return payload
+
+        class _Client:
+            def __init__(self, *a, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def request(self, method, url, **kwargs):
+                return _Resp()
+
+        return _Client
+
+    def _tool_extract(self, expr: str) -> HttpTool:
+        return HttpTool(HttpToolConfig(
+            name="probe", description="probe", permission="auto",
+            endpoint="http://10.0.0.1/x", method="GET",
+            parameters=[], response_extract=expr,
+        ))
+
+    async def test_response_extract_pulls_nested_field(self, monkeypatch):
+        # execute() 真正跑提取(测的是集成,不是 jmespath 库本身)
+        monkeypatch.setattr(
+            "tools.custom.http_tool.httpx.AsyncClient",
+            self._client_returning({"data": {"price": 189.5}}),
+        )
+        result = await self._tool_extract("data.price").execute()
+        assert result.success is True
+        assert result.data == "189.5"
+
+    async def test_response_extract_matched_nothing_is_explicit(self, monkeypatch):
+        # 合法表达式但匹配不到 → 显式 "matched nothing"(而非旧的静默空串)。
+        # 锁住本次改动的核心契约:回归(删分支 / is None 改 falsy)会被它抓住。
+        monkeypatch.setattr(
+            "tools.custom.http_tool.httpx.AsyncClient",
+            self._client_returning({"data": {}}),
+        )
+        result = await self._tool_extract("data.price").execute()
+        assert result.success is True
+        assert "matched nothing" in result.data
         meta_str = str(result.metadata)
         assert "93.184.216.34" not in meta_str   # host(拓扑)不外泄
         assert "SUPERSECRET" not in meta_str      # query 密钥不外泄

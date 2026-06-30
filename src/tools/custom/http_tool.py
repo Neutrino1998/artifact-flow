@@ -203,18 +203,27 @@ class HttpTool(BaseTool):
 
 
 def validate_response_extract(expr: Optional[str]) -> None:
-    """response_extract(JMESPath)表达式的写入边界校验 —— 语法错则 raise ValueError。
+    """response_extract(JMESPath)表达式的写入边界校验 —— 非法则 raise ValueError。
 
     两个写入边界(config-seed `seeds._build_http_member` 与 dynamic CRUD
     `tool_registry_manager._build_definition`)都调它,让 typo 的表达式在
     部署/保存期 loud-fail,而不是等到首次调用才在 jmespath.search 里抛。
     各调用方把 ValueError 包成自己的域错误(SeedError / InvalidUnitError)。
 
+    JMESPath 是裸语法(`data.price`),不带 `$.` 前缀;旧式 `$.data.price` 会被
+    jmespath 报 `Unknown token $`(刻意不做兼容 —— 工具 DB 化尚未发版,无存量 `$.` 值
+    需迁移,clean break 优于永久双语法)。
+
     注:能编译但运行期匹配不到(键缺失/null)不是语法错,无法在此判定 —— 由
     HttpTool.execute 在那种情况显式回 "matched nothing",不再静默空。
     """
-    if not expr:
+    if expr is None or expr == "":
         return
+    # 非字符串(如 YAML 未加引号的 `response_extract: 123` → int,或 falsy 的 0/false):
+    # jmespath.compile 会抛 TypeError 而非 JMESPathError,会绕过下面的 except 漏到
+    # reconcile 顶层裸 traceback、丢掉 SeedError 的文件名归属(本函数存在的意义)。在此显式拦。
+    if not isinstance(expr, str):
+        raise ValueError(f"response_extract must be a string, got {type(expr).__name__}")
     try:
         jmespath.compile(expr)
     except JMESPathError as e:
