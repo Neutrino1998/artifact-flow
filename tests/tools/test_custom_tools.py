@@ -597,6 +597,9 @@ class TestHttpToolEndpoint:
         result = await tool.execute()
         assert result.success is True
         assert "endpoint" not in result.metadata
+        meta_str = str(result.metadata)
+        assert "93.184.216.34" not in meta_str   # host(拓扑)不外泄
+        assert "SUPERSECRET" not in meta_str      # query 密钥不外泄
 
     @staticmethod
     def _client_returning(payload):
@@ -654,6 +657,3 @@ class TestHttpToolEndpoint:
         result = await self._tool_extract("data.price").execute()
         assert result.success is True
         assert "matched nothing" in result.data
-        meta_str = str(result.metadata)
-        assert "93.184.216.34" not in meta_str   # host(拓扑)不外泄
-        assert "SUPERSECRET" not in meta_str      # query 密钥不外泄
