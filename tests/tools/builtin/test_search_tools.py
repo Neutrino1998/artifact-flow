@@ -10,15 +10,17 @@ from tools.builtin.search_tools import search_tools_result
 
 
 class _Tool:
-    """最小工具桩:render_tool_docs 读 name/description/get_parameters/show_example。"""
+    """最小工具桩:render_tool_docs 读 name/description/get_parameters/to_xml_example。"""
     def __init__(self, name, description, permission=ToolPermission.AUTO):
         self.name = name
         self.description = description
         self.permission = permission
-        self.show_example = False
 
     def get_parameters(self):
         return [ToolParameter(name="q", type="string", description="a param")]
+
+    def to_xml_example(self):
+        return f"<tool_call><name>{self.name}</name></tool_call>"
 
 
 def _tools(*specs):

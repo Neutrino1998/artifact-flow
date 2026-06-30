@@ -35,7 +35,6 @@ class ToolMemberSpec(BaseModel):
     parameters: List[ToolParamSpec] = Field(default_factory=list)
     response_extract: Optional[str] = None
     timeout: int = Field(60, ge=1, le=600)
-    show_example: bool = True
 
 
 class CreateToolUnitRequest(BaseModel):
@@ -71,7 +70,6 @@ class ToolMemberResponse(BaseModel):
     member_name: str
     full_name: str
     permission: str
-    show_example: bool
     definition: Dict[str, Any]
 
 

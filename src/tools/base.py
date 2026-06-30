@@ -107,7 +107,6 @@ class BaseTool(ABC):
         name: str,
         description: str,
         permission: ToolPermission = ToolPermission.AUTO,
-        show_example: bool = True,
         max_result_size_chars: float = 50000,
     ):
         """
@@ -117,7 +116,6 @@ class BaseTool(ABC):
             name: 工具名称（唯一标识）
             description: 工具描述
             permission: 权限级别
-            show_example: 是否在工具文档中显示XML调用示例
             max_result_size_chars: 工具结果字符数上限。超过则由引擎中间件
                 自动落盘为 artifact，并把回填内容替换为预览 + artifact id。
                 math.inf = 永不落盘（read_artifact 必须用，避免循环）；
@@ -126,7 +124,6 @@ class BaseTool(ABC):
         self.name = name
         self.description = description
         self.permission = permission
-        self.show_example = show_example
         self.max_result_size_chars = max_result_size_chars
     
     @abstractmethod

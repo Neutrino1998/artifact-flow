@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     TOOL_PERSIST_PREVIEW_LENGTH: int = 1000  # 工具结果落盘后回填给模型的预览长度
     SEARCH_TOOLS_MAX_RESULTS: int = 15      # search_tools 单次渲染完整 doc 的工具数上限（隐藏）；
                                             # 超出只列名，防把整集 schema 灌爆下一次 call（压缩不兜底 tool-result overflow）
+    # 是否在工具目录(<available_tools> / search_tools 结果)里给每个工具渲染 XML 调用示例。
+    # 部署级开关(对齐模型能力):弱模型 → 留 True 换调用稳定性;强模型 → 可关省 token,
+    # 调用语法已由 generate_tool_grammar 的稳定前缀(含 CDATA 结构)自洽承载,无示例也能调。
+    # 粒度刻意是 deployment(非 per-tool):示例需不需要取决于这台部署用什么模型,与具体工具无关。
+    RENDER_TOOL_EXAMPLES: bool = True
     # ARTIFACT_CREATED / ARTIFACT_UPDATED(rewrite)整文事件的体积上限。超限则事件
     # 只带"已变更"信号(content 省略、content_omitted=True),前端靠 COMPLETE 后的
     # DB 对齐补全(对齐本就兜底)。update 的 span delta 不受此限(权威且体量随模型输出)。

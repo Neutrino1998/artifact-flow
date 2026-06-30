@@ -789,11 +789,6 @@ class ToolMember(Base):
     # 按 unit.provider 分派解释。
     definition: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
 
-    # 是否在 catalog 渲染 XML 调用示例(对齐 BaseTool.show_example)
-    show_example: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True, server_default=text("true")
-    )
-
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )

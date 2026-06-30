@@ -6,6 +6,7 @@ XML 格式化器
 
 from typing import List, Dict, Any
 
+from config import config
 from tools.base import BaseTool
 
 
@@ -14,14 +15,16 @@ from tools.base import BaseTool
 # 故 catalog 变化只失效消息尾部、这段语法前缀恒稳。
 _TOOL_GRAMMAR_BODY = """<format>
 You may make one or more tool calls per turn. They execute sequentially.
-Wrap ALL parameter values in <![CDATA[...]]>.
+Inside <params>, emit one element per parameter whose tag is that parameter's own name (from the tool's Parameters list) and wrap EVERY value in <![CDATA[...]]>.
 
 Every tool call must include a <reason> sibling before <name>: one short sentence, in the user's language, saying why you are making THIS call. It is shown to the user (and is what they read when a tool needs their approval). <reason> is NOT a parameter — it goes outside <params>, never inside it.
 
 <tool_call>
   <reason><![CDATA[why you are making this call]]></reason>
   <name>tool_name</name>
-  <params>...</params>
+  <params>
+    <replace_with_param_name><![CDATA[value]]></replace_with_param_name>
+  </params>
 </tool_call>
 
 For multiple calls, emit each <tool_call> block one after another — there is NO wrapping container tag:
@@ -102,7 +105,9 @@ def _format_tool_doc(tool: BaseTool) -> str:
     else:
         doc += "Parameters: None\n"
 
-    if tool.show_example:
+    # 部署级开关(config.RENDER_TOOL_EXAMPLES),非 per-tool —— 示例需不需要取决于
+    # 这台部署用什么模型(弱模型留示例换稳定性 / 强模型关掉省 token),与具体工具无关。
+    if config.RENDER_TOOL_EXAMPLES:
         doc += f"Example:\n{tool.to_xml_example()}\n"
 
     doc += "</tool>"

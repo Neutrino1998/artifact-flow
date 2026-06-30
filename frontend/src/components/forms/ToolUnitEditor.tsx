@@ -36,7 +36,6 @@ export interface MemberDraft {
   parameters: ParamDraft[];
   response_extract: string; // '' → null
   timeout: number;
-  show_example: boolean;
 }
 
 export interface UnitDraft {
@@ -62,7 +61,6 @@ function emptyMember(): MemberDraft {
     parameters: [],
     response_extract: '',
     timeout: 60,
-    show_example: true,
   };
 }
 
@@ -111,7 +109,6 @@ export function unitResponseToDraft(u: ToolUnitResponse): UnitDraft {
         })),
         response_extract: typeof def.response_extract === 'string' ? def.response_extract : '',
         timeout: typeof def.timeout === 'number' ? def.timeout : 60,
-        show_example: m.show_example,
       };
     }),
   };
@@ -200,7 +197,6 @@ export function draftToRequest(d: UnitDraft): CreateToolUnitRequest {
       parameters,
       response_extract: m.response_extract.trim() || null,
       timeout: m.timeout,
-      show_example: m.show_example,
     };
   });
 
@@ -548,18 +544,6 @@ function MemberCard({
           className={`${INPUT_ON_PANEL} font-mono`}
         />
       </div>
-
-      <label className="flex items-center gap-3 select-none cursor-pointer">
-        <Checkbox
-          checked={member.show_example}
-          onChange={(c) => onChange({ show_example: c })}
-          disabled={readOnly}
-          ariaLabel="在工具目录展示调用示例"
-        />
-        <span className="text-sm text-text-primary dark:text-text-primary-dark">
-          展示调用示例
-        </span>
-      </label>
     </div>
   );
 }

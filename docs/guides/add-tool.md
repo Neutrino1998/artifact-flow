@@ -267,7 +267,9 @@ bash, mount, persist
 
 ### XML 调用示例自动生成
 
-`BaseTool.to_xml_example()` 会根据 `ToolParameter` 自动生成 XML 调用示例，注入到 system prompt 供 LLM 参考。你不需要手写这部分。
+`BaseTool.to_xml_example()` 会根据 `ToolParameter` 自动生成 XML 调用示例，注入到工具目录供 LLM 参考。你不需要手写这部分。
+
+是否渲染示例由**部署级**开关 `config.RENDER_TOOL_EXAMPLES`（默认 `True`）统一控制，不是 per-tool 配置 —— 示例需不需要取决于这台部署用什么模型（弱模型留示例换调用稳定性 / 强模型可关掉省 token），与具体工具无关。调用语法本身（含 CDATA 结构）由 `generate_tool_grammar` 的稳定 system 前缀承载，关掉示例后模型仍能据语法调用。环境变量 `ARTIFACTFLOW_RENDER_TOOL_EXAMPLES=false` 关闭。
 
 ### 测试建议
 

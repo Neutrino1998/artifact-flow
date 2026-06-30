@@ -2150,8 +2150,6 @@ export interface components {
             full_name: string;
             /** Permission */
             permission: string;
-            /** Show Example */
-            show_example: boolean;
             /** Definition */
             definition: {
                 [key: string]: unknown;
@@ -2198,11 +2196,6 @@ export interface components {
              * @default 60
              */
             timeout: number;
-            /**
-             * Show Example
-             * @default true
-             */
-            show_example: boolean;
         };
         /** ToolParamSpec */
         ToolParamSpec: {

@@ -125,7 +125,6 @@ class ToolRegistryManager:
             "member_name": m.member_name,
             "full_name": m.full_name,
             "permission": m.permission,
-            "show_example": m.show_example,
             # definition 含 endpoint/headers(里头是 {{NAME}} 占位符,非明文 secret)+ params
             "definition": d,
         }
@@ -325,7 +324,6 @@ class ToolRegistryManager:
                 full_name=full_name,
                 permission=permission,
                 definition=self._build_definition(rm),
-                show_example=bool(rm.get("show_example", True)),
             ))
         return out
 

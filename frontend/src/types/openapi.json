@@ -4712,10 +4712,6 @@
             "type": "string",
             "title": "Permission"
           },
-          "show_example": {
-            "type": "boolean",
-            "title": "Show Example"
-          },
           "definition": {
             "additionalProperties": true,
             "type": "object",
@@ -4727,7 +4723,6 @@
           "member_name",
           "full_name",
           "permission",
-          "show_example",
           "definition"
         ],
         "title": "ToolMemberResponse"
@@ -4795,11 +4790,6 @@
             "minimum": 1.0,
             "title": "Timeout",
             "default": 60
-          },
-          "show_example": {
-            "type": "boolean",
-            "title": "Show Example",
-            "default": true
           }
         },
         "type": "object",
@@ -4812,8 +4802,7 @@
           "headers",
           "parameters",
           "response_extract",
-          "timeout",
-          "show_example"
+          "timeout"
         ],
         "title": "ToolMemberSpec"
       },
