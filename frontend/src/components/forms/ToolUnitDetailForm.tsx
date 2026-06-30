@@ -233,15 +233,23 @@ export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps
       {confirmDelete && (
         <DangerConfirmModal
           title="删除工具 unit"
-          message={
-            `unit：${unit.name}\n` +
-            `将删除该 unit 的定义、动态 agent 挂载与已配置凭证。\n` +
-            `操作不可恢复。`
-          }
+          message={'将删除该 unit 的定义、动态 agent 挂载与已配置凭证。\n操作不可恢复。'}
+          requireAcknowledge={false}
           confirmLabel="确认删除"
           onCancel={() => setConfirmDelete(false)}
           onConfirm={handleDelete}
-        />
+        >
+          <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-lg p-3 mb-4">
+            <div className="text-xs font-semibold font-mono text-text-primary dark:text-text-primary-dark">
+              {unit.name}
+            </div>
+            {unit.description && (
+              <div className="text-xs mt-1.5 text-text-secondary dark:text-text-secondary-dark">
+                {unit.description}
+              </div>
+            )}
+          </div>
+        </DangerConfirmModal>
       )}
     </PanelShell>
   );
