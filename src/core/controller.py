@@ -54,10 +54,12 @@ class ExecutionController:
         db_manager: Optional[Any] = None,
         sandbox_session: Optional[Any] = None,  # duck-typed: status_snapshot(动态上下文快照用,
                                                 # 生命周期归 controller_factory + runner cleanup)
+        effective_skillset: Optional[Any] = None,  # EffectiveSkillSet(C-2;None = 无 skill)
     ):
         self.agents = agents
         self.tools = tools
         self.effective_toolsets = effective_toolsets
+        self.effective_skillset = effective_skillset
         self.hooks = hooks
         self.artifact_service = artifact_service
         self.conversation_manager = conversation_manager or ConversationManager()
@@ -189,13 +191,33 @@ class ExecutionController:
         if self.artifact_service:
             self.artifact_service.set_session(session_id)
 
-        # 从父消息 metadata 中恢复 always_allowed_tools
+        # 从父消息 metadata 中恢复 always_allowed_tools + active_skills(同生命周期)
         parent_always_allowed = []
+        parent_active_skills = []
         if resolved_parent:
             parent_meta = await self._with_db_retry(
                 lambda cm, er: cm.get_message_metadata_async(resolved_parent)
             )
             parent_always_allowed = parent_meta.get("always_allowed_tools", [])
+            parent_active_skills = parent_meta.get("active_skills", [])
+
+        # 恢复的 active_skills 立即作用到本 turn 的 EffectiveToolset(能力轴 sticky 跨 turn):
+        # 在已算好的字典上 merge 预烤 skill_grants(全 agent),与 mid-turn read_skill 同入口。
+        # 工具能力跨 turn 持有 ≠ L3 mount 跨 turn(沙盒 per-turn 销毁,原则 8 护栏)。
+        for slug in parent_active_skills:
+            for ets in self.effective_toolsets.values():
+                ets.activate_skill(slug)
+
+        # L1:enabled 可见 skill(全 agent 同一份)→ <available_skills>。effective_skillset
+        # 缺省(无 skill / 测试)→ 空列表,不注入。
+        available_skills = (
+            [
+                {"slug": info.slug, "name": info.name, "description": info.description}
+                for info in self.effective_skillset.available_for_l1()
+            ]
+            if self.effective_skillset
+            else []
+        )
 
         # 创建初始状态
         initial_state = create_initial_state(
@@ -204,6 +226,7 @@ class ExecutionController:
             message_id=message_id,
             path_events=path_events,
             always_allowed_tools=parent_always_allowed,
+            active_skills=parent_active_skills,
             uploaded_files=uploaded_files,
             force_compact=force_compact,
         )
@@ -251,6 +274,7 @@ class ExecutionController:
                         artifact_service=self.artifact_service,
                         emit=emit_to_queue,
                         sandbox_session=self.sandbox_session,
+                        available_skills=available_skills,
                     )
             except TimeoutError:
                 # 引擎执行超时。模仿协作式 cancel:置 flag 正常返回,让 post-processing
@@ -550,6 +574,10 @@ class ExecutionController:
                 always_allowed = pp.final_state.get("always_allowed_tools", [])
                 if always_allowed:
                     metadata_updates["always_allowed_tools"] = always_allowed
+                # active_skills 能力轴持久化(append-only sticky,照抄 always_allowed_tools)
+                active_skills = pp.final_state.get("active_skills", [])
+                if active_skills:
+                    metadata_updates["active_skills"] = active_skills
                 execution_metrics = pp.final_state.get("execution_metrics", {})
                 if execution_metrics:
                     metadata_updates["execution_metrics"] = execution_metrics

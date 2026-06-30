@@ -102,6 +102,7 @@ def create_initial_state(
     message_id: str,
     path_events: Optional[List[Any]] = None,  # List[ExecutionEvent] with is_historical=True
     always_allowed_tools: Optional[List[str]] = None,
+    active_skills: Optional[List[str]] = None,
     uploaded_files: Optional[List[Dict[str, Any]]] = None,
     force_compact: bool = False,
 ) -> Dict[str, Any]:
@@ -131,6 +132,9 @@ def create_initial_state(
         "error": False,
         "current_agent": "lead_agent",
         "always_allowed_tools": list(always_allowed_tools) if always_allowed_tools else [],
+        # 激活的 skill slug(能力轴持久化,照抄 always_allowed_tools 生命周期:回合末写
+        # Message.metadata、下回合父消息捞回;read_skill 期间 append,见 execute_loop)。
+        "active_skills": list(active_skills) if active_skills else [],
         "events": list(path_events) if path_events else [],
         "execution_metrics": create_initial_metrics(),
         "response": "",
@@ -156,6 +160,7 @@ async def execute_loop(
     artifact_service: Optional[Any] = None,
     emit: Optional[EmitFn] = None,
     sandbox_session: Optional[Any] = None,
+    available_skills: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Pi-style 扁平 while loop 执行引擎
@@ -396,6 +401,7 @@ async def execute_loop(
             model=get_litellm_model_id(agents[agent_name].model),
             sandbox_status=sandbox_status,
             tool_round_count=tool_round_count.get(agent_name, 0),
+            available_skills=available_skills,
         )
 
         return messages, reminder
@@ -983,6 +989,19 @@ async def execute_loop(
                     **tc_metadata,
                     "image": {k: v for k, v in _img.items() if k != "data_uri"},
                 }
+
+            # skill 激活(决策 11/原则 8):read_skill 声明式回填 metadata.activated_skill →
+            # append 进 active_skills(能力轴持久化,回合末写 metadata、下回合捞回)+ 在**所有**
+            # agent 已算好的 EffectiveToolset 上 merge 该 skill 的预烤 skill_grants(全 agent 可见、
+            # 各自宇宙收窄)。纯字典操作、本回合即生效,不回 snapshot、不持闭包。仅成功调用、
+            # 仅新激活时动手(幂等)。
+            _activated = (tool_result.metadata or {}).get("activated_skill") if tool_result.success else None
+            if _activated:
+                active_list = state.setdefault("active_skills", [])
+                if _activated not in active_list:
+                    active_list.append(_activated)
+                    for ets in effective_toolsets.values():
+                        ets.activate_skill(_activated)
 
             await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
                 "tool": tool_name,

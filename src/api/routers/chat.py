@@ -191,7 +191,7 @@ async def send_message(
     # 构造执行闭包
     async def execute_and_push():
         try:
-            async with create_controller(conversation_id, message_id) as ctrl:
+            async with create_controller(conversation_id, message_id, user_id) as ctrl:
                 parent_kwargs = {}
                 if 'parent_message_id' in request.model_fields_set:
                     parent_kwargs['parent_message_id'] = request.parent_message_id

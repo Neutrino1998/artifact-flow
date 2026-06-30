@@ -1588,3 +1588,116 @@ class TestInEngineCompaction:
             "if this is 12345, the post-compaction write in compaction_runner is gone "
             "and the gauge will show stale pre-compaction tokens."
         )
+
+
+# ============================================================
+# TestSkillActivation (C-2: read_skill → active_skills + skill_grants merge)
+# ============================================================
+
+
+class _ActivatingTool(BaseTool):
+    """read_skill 替身:返回正文 + activated_skill metadata(引擎据此激活)。"""
+
+    def __init__(self, slug: str):
+        super().__init__(name="read_skill", description="read a skill",
+                         permission=ToolPermission.AUTO)
+        self._slug = slug
+
+    def get_parameters(self):
+        return []
+
+    async def execute(self, **params) -> ToolResult:
+        return ToolResult(success=True, data="GUIDANCE",
+                          metadata={"activated_skill": self._slug})
+
+    async def __call__(self, **params) -> ToolResult:
+        return await self.execute(**params)
+
+
+class TestSkillActivation:
+    async def test_read_skill_activates_and_grants_tool_mid_turn(self):
+        from core.effective_toolset import EffectiveToolset
+
+        read_skill = _ActivatingTool("s")
+        granted = _FakeTool("granted_tool", ToolResult(success=True, data="granted-ran"))
+        tools = {"read_skill": read_skill, "granted_tool": granted}
+
+        # 初始可调集只有 read_skill;granted_tool 不在(模拟 agent disabled),仅在 skill_grants
+        eff = EffectiveToolset(
+            permissions={"read_skill": ToolPermission.AUTO},
+            skill_grants={"s": {"granted_tool": ToolPermission.AUTO}},
+        )
+        agents = {"lead_agent": _FakeAgentConfig()}
+        effective_toolsets = {"lead_agent": eff}
+
+        # 三轮:① 调 read_skill ② 调 granted_tool(激活后才可调)③ 收尾
+        rounds = [
+            _tool_call_chunks(_tool_call_xml("read_skill", slug="s")),
+            _tool_call_chunks(_tool_call_xml("granted_tool")),
+            _simple_llm_chunks("Done"),
+        ]
+        state = create_initial_state(task="hi", session_id="sess", message_id="msg-act")
+        store = InMemoryRuntimeStore()
+        emitted = []
+
+        async def capture_emit(e):
+            emitted.append(e)
+
+        with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
+             patch("core.engine.config") as mock_config:
+            from config import config as real_config
+            for attr in dir(real_config):
+                if attr.isupper():
+                    setattr(mock_config, attr, getattr(real_config, attr))
+            result = await execute_loop(
+                state=state, agents=agents, tools=tools,
+                effective_toolsets=effective_toolsets,
+                hooks=_hooks_from_store(store), emit=capture_emit,
+            )
+
+        # 激活持久进 state(回合末由 controller 写 metadata)
+        assert result["active_skills"] == ["s"]
+        # granted_tool 被激活后翻进可调集
+        assert "granted_tool" in eff
+        # 两个工具都真执行成功(granted_tool 没被白名单闸拒)
+        completes = {e["data"]["tool"]: e["data"]["success"]
+                     for e in emitted if e["type"] == "tool_complete"}
+        assert completes.get("read_skill") is True
+        assert completes.get("granted_tool") is True
+
+    async def test_failed_read_skill_does_not_activate(self):
+        from core.effective_toolset import EffectiveToolset
+
+        class _FailRead(BaseTool):
+            def __init__(self):
+                super().__init__(name="read_skill", description="x",
+                                 permission=ToolPermission.AUTO)
+            def get_parameters(self): return []
+            async def execute(self, **p):
+                return ToolResult(success=False, error="nope",
+                                  metadata={"activated_skill": "s"})
+            async def __call__(self, **p): return await self.execute(**p)
+
+        eff = EffectiveToolset(permissions={"read_skill": ToolPermission.AUTO},
+                               skill_grants={"s": {"granted_tool": ToolPermission.AUTO}})
+        state = create_initial_state(task="hi", session_id="sess", message_id="msg-f")
+        rounds = [_tool_call_chunks(_tool_call_xml("read_skill", slug="s")),
+                  _simple_llm_chunks("Done")]
+        store = InMemoryRuntimeStore()
+
+        with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
+             patch("core.engine.config") as mock_config:
+            from config import config as real_config
+            for attr in dir(real_config):
+                if attr.isupper():
+                    setattr(mock_config, attr, getattr(real_config, attr))
+            result = await execute_loop(
+                state=state, agents={"lead_agent": _FakeAgentConfig()},
+                tools={"read_skill": _FailRead()},
+                effective_toolsets={"lead_agent": eff},
+                hooks=_hooks_from_store(store), emit=lambda e: asyncio.sleep(0),
+            )
+
+        # 失败调用不激活(only on success)
+        assert result["active_skills"] == []
+        assert "granted_tool" not in eff

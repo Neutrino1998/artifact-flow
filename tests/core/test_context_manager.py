@@ -139,6 +139,31 @@ class TestSystemPrompt:
         # 自描述首句：声明这是工作区状态、降权为非指令
         assert "workspace state" in reminder and "not a user instruction" in reminder
 
+    def test_available_skills_in_trailing_reminder(self):
+        """C-2:L1 <available_skills> 在尾部 reminder(slug + description),非 system prompt。"""
+        agent = _FakeAgentConfig()
+        state = _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+        ])
+        skills = [{"slug": "precise-edits", "name": "precise-edits",
+                   "description": "Use when revising an artifact."}]
+        messages = _build(agent, state=state, tools={}, available_skills=skills)
+
+        assert "available_skills" not in messages[0]["content"]  # 不在 system 前缀
+        reminder = messages[-1]["content"]
+        assert "<available_skills>" in reminder
+        assert 'slug="precise-edits"' in reminder
+        assert "Use when revising an artifact." in reminder
+        assert "read_skill" in reminder  # 引导调用提示
+
+    def test_no_available_skills_no_block(self):
+        agent = _FakeAgentConfig()
+        state = _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+        ])
+        messages = _build(agent, state=state, tools={})  # available_skills 缺省
+        assert "<available_skills>" not in messages[-1]["content"]
+
     def test_with_tools_grammar_in_system_docs_in_reminder(self):
         """B-3:system prompt 只放协议语法(稳定前缀),per-tool 描述挪到尾部
         <available_tools> reminder。"""

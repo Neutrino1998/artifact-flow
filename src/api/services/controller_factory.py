@@ -40,7 +40,9 @@ def sanitize_error_event(event: dict) -> dict:
 
 
 @asynccontextmanager
-async def create_controller(conversation_id: str, message_id: str) -> AsyncGenerator:
+async def create_controller(
+    conversation_id: str, message_id: str, user_id: str
+) -> AsyncGenerator:
     """
     Build a fresh ExecutionController wired to the db_manager factory.
 
@@ -61,13 +63,18 @@ async def create_controller(conversation_id: str, message_id: str) -> AsyncGener
                 ...
     """
     from core.controller import ExecutionController
+    from core.department_resolver import load_ancestor_ids
+    from core.effective_skillset import resolve_effective_skillset
     from core.effective_toolset import resolve_all
     from core.engine import EngineHooks
-    from reconcile.snapshot import load_registry_snapshot
+    from reconcile.snapshot import load_registry_snapshot, load_skill_snapshot
+    from repositories.skill_repo import SkillRepository
     from tools.builtin.artifact_service import ArtifactService
     from tools.builtin.artifact_ops import create_artifact_tools
+    from tools.builtin.read_skill import create_skill_tools
     from tools.builtin.sandbox_session import SandboxSession
     from tools.builtin.sandbox_ops import create_sandbox_tools
+    from tools.builtin.skill_service import SkillService
 
     db_manager = get_db_manager()
     runner = get_execution_runner()
@@ -101,22 +108,49 @@ async def create_controller(conversation_id: str, message_id: str) -> AsyncGener
             "(prod: entrypoint does this under the migration lock)."
         )
 
+    # skill 解析(C-2):一条短 session 读 user-agnostic skill 快照 + 该用户的 user_skill
+    # 覆盖 + 部门祖先链命中(决策 10:父覆盖子树)。department_id 从 DB 取(不信 JWT —— dept
+    # 授权是 correctness)。读完即关(B-5);read_skill 的正文取数另由 SkillService lazy。
+    async def _load_skills(session):
+        repo = SkillRepository(session)
+        skill_snap = await load_skill_snapshot(session)
+        dept_id = await repo.user_department_id(user_id)
+        ancestors = await load_ancestor_ids(session, dept_id)
+        overrides = await repo.user_overrides(user_id)
+        dept_matched = await repo.dept_matched_slugs(ancestors)
+        return skill_snap, overrides, dept_matched
+
+    skill_snapshot, skill_overrides, dept_matched = await db_manager.with_retry(_load_skills)
+    effective_skillset = resolve_effective_skillset(
+        user_id, skill_snapshot, skill_overrides, dept_matched
+    )
+
     # 合并工具来源:全局 builtin(进程级) + DB external(快照重建) + 请求级
-    # artifact / 沙盒工具。external 工具自此唯一来源是 DB —— 不再进程级加载
-    # config/tools/*.md(见 dependencies._load_tools)。
+    # artifact / 沙盒 / skill 工具。external 工具自此唯一来源是 DB —— 不再进程级加载
+    # config/tools/*.md(见 dependencies._load_tools)。read_skill 请求级(持 EffectiveSkillSet
+    # 做可见性闸 + SkillService lazy 取正文),仅有可见 skill 时建。
     artifact_tools = create_artifact_tools(artifact_service)
     sandbox_tools = create_sandbox_tools(sandbox_session, artifact_service)
+    skill_tools = create_skill_tools(SkillService(db_manager=db_manager), effective_skillset)
     all_tools = {
         **get_tools(),
         **snapshot.external_tools,
         **{t.name: t for t in artifact_tools},
         **{t.name: t for t in sandbox_tools},
+        **{t.name: t for t in skill_tools},
     }
     agents = snapshot.agents
     # 决策 11 单一解析点:把每 agent 的宇宙(builtin ∪ units)解析成扁平
     # {full_name: 等级};等级从工具对象取(绑定不存等级)。引擎/上下文构建
-    # 全程读这个,不再直读 agent 配置的 tools。
-    effective_toolsets = resolve_all(snapshot, all_tools)
+    # 全程读这个,不再直读 agent 配置的 tools。skill_snapshot → 预烤 skill_grants。
+    effective_toolsets = resolve_all(snapshot, all_tools, skill_snapshot=skill_snapshot)
+
+    # read_skill 注入:skill 全 agent 可见 → 有可见 skill 时把 read_skill 灌进每个 agent
+    # 的可调集(等级取工具定义=AUTO)。setdefault 不覆盖(agent 本不会声明它,纯防御)。
+    if skill_tools:
+        read_skill_perm = all_tools["read_skill"].permission
+        for ets in effective_toolsets.values():
+            ets.permissions.setdefault("read_skill", read_skill_perm)
 
     hooks = EngineHooks(
         check_cancelled=store.is_cancelled,
@@ -139,6 +173,7 @@ async def create_controller(conversation_id: str, message_id: str) -> AsyncGener
         on_engine_exit=_on_engine_exit,
         db_manager=db_manager,
         sandbox_session=sandbox_session,
+        effective_skillset=effective_skillset,
     )
 
 

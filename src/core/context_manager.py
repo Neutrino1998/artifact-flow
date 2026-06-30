@@ -49,6 +49,7 @@ class ContextManager:
         model: Optional[str] = None,
         sandbox_status: Optional[Dict] = None,
         tool_round_count: int = 0,
+        available_skills: Optional[List[Dict]] = None,  # L1 注入(enabled 可见 skill,全 agent 同)
     ) -> tuple[List[Dict[str, Any]], str]:
         """
         构建 LLM 调用所需的完整 messages
@@ -123,6 +124,7 @@ class ContextManager:
         reminder = cls._build_dynamic_context(
             agent_config, effective_toolset, tools, artifacts_inventory, last_usage,
             sandbox_status, tool_round_count=tool_round_count,
+            available_skills=available_skills,
         )
         return cls.assemble(system_prompt, all_messages, reminder), reminder
 
@@ -169,6 +171,7 @@ class ContextManager:
         last_usage: Optional[int] = None,
         sandbox_status: Optional[Dict] = None,
         tool_round_count: int = 0,
+        available_skills: Optional[List[Dict]] = None,
     ) -> str:
         """组装每轮刷新的动态上下文，包裹为 ephemeral <system-reminder>。
 
@@ -197,6 +200,13 @@ class ContextManager:
         available_tools = cls._build_available_tools(effective_toolset, tools)
         if available_tools:
             parts.append(available_tools)
+
+        # 可用 skill 列表(L1,C-2)—— 与 catalog 同处尾部 reminder 而非 system 前缀:
+        # active skill / user toggle 改的是注入集,放前缀会 toggle 一次打掉整条历史 APC
+        # (同 catalog 的处置)。全 agent 注入(skill 全 agent 可见,效果按宇宙收窄)。
+        available_skills_block = cls._build_available_skills(available_skills)
+        if available_skills_block:
+            parts.append(available_skills_block)
 
         # 系统时间 —— 刻意用本地时间（datetime.now，非 utc_now）：注入提示词的是
         # 用户本地时间，属 UX，是全局 naive-UTC 约定的既定例外（见 CLAUDE.md）。
@@ -482,6 +492,25 @@ class ContextManager:
             lines.append("</agent>")
 
         lines.append("</available_subagents>")
+        return "\n".join(lines)
+
+    @classmethod
+    def _build_available_skills(cls, available_skills: Optional[List[Dict]]) -> str:
+        """构建 <available_skills> L1 索引(slug + description;name 仅 UI 用)。
+
+        空 → 空串(不注入,与 available_subagents 的 note 不同:skill 缺席无需占位)。"""
+        if not available_skills:
+            return ""
+        lines = ["<available_skills>"]
+        lines.append(
+            "Reusable guidance for specific scenarios. When one fits the task, call "
+            "`read_skill(slug=...)` to load its full instructions before proceeding.\n"
+        )
+        for skill in available_skills:
+            lines.append(f'<skill slug="{skill["slug"]}">')
+            lines.append((skill.get("description") or "").rstrip())
+            lines.append("</skill>")
+        lines.append("</available_skills>")
         return "\n".join(lines)
 
     @classmethod
