@@ -696,24 +696,22 @@ function ParamEditor({
                 placeholder="参数说明"
                 className={INPUT_ON_PANEL}
               />
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  type="text"
-                  value={p.default}
-                  onChange={(e) => update(idx, { default: e.target.value })}
-                  disabled={readOnly}
-                  placeholder="默认值（可选）"
-                  className={`${INPUT_ON_PANEL} font-mono`}
-                />
-                <textarea
-                  value={p.enum}
-                  onChange={(e) => update(idx, { enum: e.target.value })}
-                  disabled={readOnly}
-                  rows={2}
-                  placeholder="枚举值,每行一个（可选）"
-                  className={`${INPUT_ON_PANEL} font-mono resize-y`}
-                />
-              </div>
+              <input
+                type="text"
+                value={p.default}
+                onChange={(e) => update(idx, { default: e.target.value })}
+                disabled={readOnly}
+                placeholder="默认值（可选）"
+                className={`${INPUT_ON_PANEL} font-mono`}
+              />
+              <textarea
+                value={p.enum}
+                onChange={(e) => update(idx, { enum: e.target.value })}
+                disabled={readOnly}
+                rows={2}
+                placeholder="枚举值,每行一个（可选）"
+                className={`${INPUT_ON_PANEL} font-mono resize-y`}
+              />
               <label className="flex items-center gap-2 select-none cursor-pointer">
                 <Checkbox
                   checked={p.required}
