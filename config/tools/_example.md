@@ -58,8 +58,10 @@ headers:
 # timeout: per-call wall-clock seconds (default: 60).
 timeout: 60
 
-# response_extract: optional JSONPath to pull a value out of the JSON response.
-response_extract: "$.data.price"
+# response_extract: optional JMESPath to pull a value out of the JSON response
+# (no $. prefix; e.g. data.price, results[*].id, items[0].name). Leave unset to
+# return the whole response. A bad expression is rejected at reconcile time.
+response_extract: "data.price"
 
 # parameters: each has name + type + description; optional required (default
 # true), default, and enum (allowed values).

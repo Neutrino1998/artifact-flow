@@ -26,7 +26,7 @@ parameters:
     description: "市场"
     enum: [US, HK, SH]
     default: "US"
-response_extract: "$.data.price"
+response_extract: "data.price"
 timeout: 30
 ---
 

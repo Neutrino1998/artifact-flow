@@ -14,8 +14,9 @@ endpoint: "https://api.example.com/users/search"
 # GET: parameters become the query string.
 method: GET
 
-# JSONPath into the (illustrative) JSON response.
-response_extract: "$.results[*].id"
+# JMESPath into the (illustrative) JSON response. `[*]` projects a field across a
+# list — supported by JMESPath (the old dotted-path parser could not do this).
+response_extract: "results[*].id"
 
 parameters:
   - name: query

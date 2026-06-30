@@ -13,8 +13,8 @@ endpoint: "https://api.example.com/tickets"
 # POST: parameters become the JSON request body (not the query string).
 method: POST
 
-# JSONPath into the (illustrative) JSON response.
-response_extract: "$.id"
+# JMESPath into the (illustrative) JSON response.
+response_extract: "id"
 
 parameters:
   - name: title

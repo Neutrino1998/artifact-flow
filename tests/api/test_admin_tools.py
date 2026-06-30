@@ -170,6 +170,20 @@ class TestUnitCrud:
         assert resp.status_code == 400
         assert "default" in resp.json()["detail"]
 
+    async def test_create_rejects_bad_response_extract(self, admin_client: AsyncClient):
+        # response_extract 语法错 → 400(JMESPath 写入边界校验,与 seeds reconcile 同口径)
+        body = _singleton_body()
+        body["members"][0]["response_extract"] = "data["
+        resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
+        assert resp.status_code == 400
+        assert "JMESPath" in resp.json()["detail"]
+
+    async def test_create_accepts_valid_response_extract(self, admin_client: AsyncClient):
+        body = _singleton_body()
+        body["members"][0]["response_extract"] = "data.items[*].id"
+        resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
+        assert resp.status_code == 201
+
 
 class TestSeededReadOnly:
     async def test_update_seeded_409(self, admin_client: AsyncClient, db_session):

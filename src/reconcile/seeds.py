@@ -21,6 +21,7 @@ import yaml
 
 from agents.loader import load_agent
 from tools.base import BUILTIN_TOOL_NAMES, is_builtin_name
+from tools.custom.http_tool import validate_response_extract
 from tools.custom.secrets import assert_secret_refs_allowed
 
 _VALID_PARAM_TYPES = {"string", "integer", "number", "boolean"}
@@ -153,6 +154,12 @@ def _build_http_member(frontmatter: dict, body: str, *, unit_name: str,
     # SSRF-02 load-time 闸门:endpoint/headers 的 {{VAR}} 必须白名单前缀
     assert_secret_refs_allowed(frontmatter.get("endpoint", ""))
     assert_secret_refs_allowed(frontmatter.get("headers", {}) or {})
+
+    # response_extract(JMESPath)语法在 reconcile 期 loud-fail —— typo 不留到首次调用
+    try:
+        validate_response_extract(frontmatter.get("response_extract"))
+    except ValueError as e:
+        raise SeedError(f"{source}: {e}") from e
 
     # 描述 = frontmatter.description + body(同 loader 的扩展说明拼接)
     description = frontmatter.get("description", "")

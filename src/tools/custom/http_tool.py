@@ -6,6 +6,8 @@ HttpTool — 从 MD 配置生成的 HTTP API 工具
 
 import json
 import httpx
+import jmespath
+from jmespath.exceptions import JMESPathError
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 
@@ -30,7 +32,7 @@ class HttpToolConfig:
     method: str = "GET"
     headers: Dict[str, str] = field(default_factory=dict)
     parameters: List[ToolParameter] = field(default_factory=list)
-    response_extract: Optional[str] = None   # JSONPath 提取表达式
+    response_extract: Optional[str] = None   # JMESPath 提取表达式(无 $. 前缀,如 data.price)
     timeout: int = 60                        # 请求超时（秒）。per-MD 可调;长任务 endpoint 放心设大 ——
                                              # cancel 延迟不再受此值支配(engine 工具 await 期轮询 cancel,
                                              # core/cancellation.py),本值只决定"等上游多久算失败"。
@@ -134,9 +136,19 @@ class HttpTool(BaseTool):
             content_type = response.headers.get("content-type", "")
             if "json" in content_type:
                 data = response.json()
-                # JSONPath 提取
+                # JMESPath 提取
                 if self._response_extract:
-                    data = _extract_jsonpath(data, self._response_extract)
+                    extracted = jmespath.search(self._response_extract, data)
+                    if extracted is None:
+                        # 合法表达式但匹配不到(键缺失 / 值本就是 null)。旧实现这里静默返回 ""，
+                        # 模型无法区分"路径配错"和"字段本就为空"—— 显式告知而非吞掉。
+                        # (语法错的表达式已在写入边界 validate_response_extract loud-fail。)
+                        return ToolResult(
+                            success=True,
+                            data=f"response_extract '{self._response_extract}' matched nothing in the response",
+                            metadata={"status_code": response.status_code},
+                        )
+                    data = extracted
                 # dict/list → JSON（给 LLM 可读的格式，单引号 repr 容易误导）
                 # 含非序列化类型时回退 str()
                 if isinstance(data, (dict, list)):
@@ -190,50 +202,20 @@ class HttpTool(BaseTool):
             )
 
 
-def _extract_jsonpath(data: Any, path: str) -> Any:
+def validate_response_extract(expr: Optional[str]) -> None:
+    """response_extract(JMESPath)表达式的写入边界校验 —— 语法错则 raise ValueError。
+
+    两个写入边界(config-seed `seeds._build_http_member` 与 dynamic CRUD
+    `tool_registry_manager._build_definition`)都调它,让 typo 的表达式在
+    部署/保存期 loud-fail,而不是等到首次调用才在 jmespath.search 里抛。
+    各调用方把 ValueError 包成自己的域错误(SeedError / InvalidUnitError)。
+
+    注:能编译但运行期匹配不到(键缺失/null)不是语法错,无法在此判定 —— 由
+    HttpTool.execute 在那种情况显式回 "matched nothing",不再静默空。
     """
-    简易 JSONPath 提取（支持 $.key1.key2 和 $.key1[0] 格式）
-
-    不依赖外部库，覆盖常见场景即可。
-
-    Args:
-        data: JSON 数据
-        path: JSONPath 表达式（如 $.data.price）
-
-    Returns:
-        提取的值
-    """
-    if not path or path == "$":
-        return data
-
-    # 去掉 $ 前缀
-    path = path.lstrip("$").lstrip(".")
-
-    current = data
-    for part in path.split("."):
-        if not part:
-            continue
-
-        # 处理数组索引 key[0]
-        if "[" in part:
-            key, idx_str = part.split("[", 1)
-            idx = int(idx_str.rstrip("]"))
-            if key:
-                if isinstance(current, dict):
-                    current = current.get(key)
-                else:
-                    return None
-            if isinstance(current, list) and 0 <= idx < len(current):
-                current = current[idx]
-            else:
-                return None
-        else:
-            if isinstance(current, dict):
-                current = current.get(part)
-            else:
-                return None
-
-        if current is None:
-            return None
-
-    return current
+    if not expr:
+        return
+    try:
+        jmespath.compile(expr)
+    except JMESPathError as e:
+        raise ValueError(f"invalid JMESPath expression {expr!r}: {e}") from e

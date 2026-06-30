@@ -21,6 +21,7 @@ from repositories.tool_credential_repo import ToolCredentialRepository
 from repositories.tool_registry_repo import ToolRegistryRepository
 from tools.base import is_builtin_name
 from tools.custom.credentials import get_cipher
+from tools.custom.http_tool import validate_response_extract
 from tools.custom.secrets import assert_secret_refs_allowed, extract_placeholders, SecretResolutionError
 from utils.logger import get_logger
 
@@ -363,6 +364,11 @@ class ToolRegistryManager:
             assert_secret_refs_allowed(endpoint)
             assert_secret_refs_allowed(headers)
         except SecretResolutionError as e:
+            raise InvalidUnitError(str(e)) from e
+        # response_extract(JMESPath)语法在保存期 loud-fail(→400),与 seeds 同口径
+        try:
+            validate_response_extract(rm.get("response_extract"))
+        except ValueError as e:
             raise InvalidUnitError(str(e)) from e
         return {
             "description": rm.get("description", "") or "",

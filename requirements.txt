@@ -47,6 +47,11 @@ google-re2>=1.1.0
 # YAML 解析（Agent MD 文件）
 pyyaml>=6.0
 
+# JMESPath（http_tool response_extract 提取语法）—— 纯 Python、零传递依赖（boto3/awscli
+# 的 --query 同款），单一权威 spec。替代旧手写点号解析器:支持通配/过滤/函数，且能
+# jmespath.compile() 在写入边界校验表达式语法。
+jmespath>=1.0.0
+
 # ========================================
 # 数据库
 # ========================================

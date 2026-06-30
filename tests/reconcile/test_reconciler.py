@@ -36,7 +36,7 @@ def _singleton_tool_md(name="weather", permission="confirm", desc="Get weather")
         "    type: string\n"
         '    description: "city name"\n'
         "    required: true\n"
-        'response_extract: "$.data.temp"\n'
+        'response_extract: "data.temp"\n'
         "timeout: 20\n"
         "---\n"
         f"Body guidance for {name}.\n"

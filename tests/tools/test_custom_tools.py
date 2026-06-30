@@ -18,7 +18,8 @@ from unittest.mock import patch
 
 from tools.base import BaseTool, ToolParameter, ToolPermission, ToolResult
 from tools.custom.loader import load_custom_tool, load_custom_tools
-from tools.custom.http_tool import HttpTool, HttpToolConfig, _extract_jsonpath
+import jmespath
+from tools.custom.http_tool import HttpTool, HttpToolConfig, validate_response_extract
 from tools.custom.secrets import resolve_secrets, SecretResolutionError
 
 
@@ -67,31 +68,43 @@ class TestResolveSecrets:
 
 
 # ============================================================
-# JSONPath 提取
+# response_extract（JMESPath）
 # ============================================================
 
-class TestExtractJsonpath:
-    def test_simple_key(self):
-        assert _extract_jsonpath({"data": {"price": 100}}, "$.data.price") == 100
+class TestResponseExtractSemantics:
+    """response_extract 现在直接用 jmespath.search（无 $. 前缀）。锁定文档承诺的形态。"""
 
-    def test_root(self):
-        data = {"a": 1}
-        assert _extract_jsonpath(data, "$") == data
-        assert _extract_jsonpath(data, "") == data
+    def test_nested_key(self):
+        assert jmespath.search("data.price", {"data": {"price": 100}}) == 100
 
     def test_array_index(self):
         data = {"items": [{"name": "a"}, {"name": "b"}]}
-        assert _extract_jsonpath(data, "$.items[1].name") == "b"
+        assert jmespath.search("items[1].name", data) == "b"
 
-    def test_missing_key_returns_none(self):
-        assert _extract_jsonpath({"a": 1}, "$.b.c") is None
+    def test_wildcard_projection(self):
+        # 旧手写解析器做不到 [*]——正是换 JMESPath 的动机之一
+        data = {"results": [{"id": 1}, {"id": 2}]}
+        assert jmespath.search("results[*].id", data) == [1, 2]
 
-    def test_array_out_of_bounds(self):
-        assert _extract_jsonpath({"items": [1, 2]}, "$.items[5]") is None
+    def test_matched_nothing_is_none(self):
+        # 合法表达式但匹配不到 → None（execute 把它转成显式 "matched nothing"，不静默空）
+        assert jmespath.search("nope.x", {"data": 1}) is None
 
-    def test_nested_path(self):
-        data = {"a": {"b": {"c": {"d": "deep"}}}}
-        assert _extract_jsonpath(data, "$.a.b.c.d") == "deep"
+
+class TestValidateResponseExtract:
+    """写入边界校验：语法错 loud-fail（ValueError），各调用方包成域错误。"""
+
+    def test_valid_expressions_pass(self):
+        for expr in ("data.price", "results[*].id", "id", "items[?price > `10`].name"):
+            validate_response_extract(expr)  # 不抛即通过
+
+    def test_unset_is_ok(self):
+        validate_response_extract(None)
+        validate_response_extract("")
+
+    def test_bad_syntax_raises(self):
+        with pytest.raises(ValueError, match="invalid JMESPath"):
+            validate_response_extract("data[")
 
 
 # ============================================================

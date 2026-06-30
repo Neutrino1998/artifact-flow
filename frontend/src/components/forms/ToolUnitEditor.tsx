@@ -544,7 +544,7 @@ function MemberCard({
           value={member.response_extract}
           onChange={(e) => onChange({ response_extract: e.target.value })}
           disabled={readOnly}
-          placeholder="JMESPath 表达式,留空返回原始响应"
+          placeholder="JMESPath 表达式(如 data.price),留空返回原始响应"
           className={`${INPUT_ON_PANEL} font-mono`}
         />
       </div>

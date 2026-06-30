@@ -112,6 +112,8 @@ jinja2==3.1.6
     # via litellm
 jiter==0.15.0
     # via openai
+jmespath==1.1.0
+    # via -r requirements.txt
 jsonschema==4.26.0
     # via litellm
 jsonschema-specifications==2025.9.1

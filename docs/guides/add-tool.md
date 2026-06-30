@@ -37,7 +37,7 @@ method: POST
 headers:
   Authorization: "Bearer {{STOCK_API_KEY}}"
 timeout: 30
-response_extract: "$.data.price"
+response_extract: "data.price"
 parameters:
   - name: symbol
     type: string
@@ -109,15 +109,17 @@ headers:
 
 ### JSONPath 响应提取
 
-`response_extract` 是一个简易 JSONPath 表达式，支持：
+`response_extract` 是一个 [JMESPath](https://jmespath.org/) 表达式（**无 `$.` 前缀**），常用形态：
 
-- `$` — 根对象
-- `$.key1.key2` — 嵌套访问
-- `$.list[0]` / `$.data.items[2].name` — 数组索引
+- 留空 — 返回整个 JSON 响应
+- `data.price` — 嵌套访问
+- `list[0]` / `data.items[2].name` — 数组索引
+- `results[*].id` — 通配投影（取列表每个元素的某字段）
+- `items[?price > \`10\`].name` — 过滤
 
-示例：API 返回 `{"code": 200, "data": {"price": 189.5}}`，`response_extract: "$.data.price"` 则工具返回 `189.5`。
+示例：API 返回 `{"code": 200, "data": {"price": 189.5}}`，`response_extract: "data.price"` 则工具返回 `189.5`。
 
-超出支持范围（过滤器、通配符、递归下降）的表达式请在 agent role prompt 中引导 LLM 自行解析完整 JSON。
+表达式语法在 reconcile / 保存时即校验，写错会 loud-fail（不会等到首次调用）。表达式合法但匹配不到（键缺失 / 值为 null）时，工具显式返回 “matched nothing”，不会静默返回空串。
 
 ### 参考示例
 
