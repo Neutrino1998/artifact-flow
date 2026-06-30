@@ -523,40 +523,23 @@ class ArtifactService:
             memory = await self.get_artifact(session_id, artifact_id)
             if not memory:
                 return None
-            return {
-                "id": memory.id,
-                "content_type": memory.content_type,
-                "title": memory.title,
-                "content": memory.content,
-                "version": memory.current_version,
-                "source": memory.source,
-                "original_filename": (memory.metadata or {}).get("original_filename"),
-                # 二进制判别:read_artifact 据此给契约文案而非空 content(content_type
-                # 即原件 MIME,XOR 下无需另存 blob MIME)。
-                "has_blob": memory.has_blob,
-                "created_at": memory.created_at.isoformat(),
-                "updated_at": memory.updated_at.isoformat(),
-            }
+            # 当前版本视图 = 与 list_artifacts 同一形状,收敛到单一序列化点
+            # (含 has_blob —— read 工具据此给二进制契约文案;避免 read/list 字段漂移)。
+            return self._serialize_memory(memory, include_content=True)
 
         # 显式 version 读取:优先匹配 in-memory current_version。否则 read 一个还没
         # flush 的 artifact(如刚 web_fetch 持久化的)用它 envelope 里看到的 version=1
         # 会 404,模型困惑。
         memory = await self.get_artifact(session_id, artifact_id)
         if memory and memory.current_version == version:
-            return {
-                "id": memory.id,
-                "content_type": memory.content_type,
-                "title": memory.title,
-                "content": memory.content,
-                "version": memory.current_version,
-                "source": memory.source,
-                "original_filename": (memory.metadata or {}).get("original_filename"),
-                "has_blob": memory.has_blob,
-                "created_at": memory.created_at.isoformat(),
-                "updated_at": memory.updated_at.isoformat(),
-            }
+            # 显式 version 命中当前版本 = 同上当前视图,复用同一序列化点。
+            return self._serialize_memory(memory, include_content=True)
 
-        # 不是当前版本 → 走 DB 取历史版本快照(短 session,B-5;返回纯文本)
+        # 不是当前版本 → 走 DB 取历史版本快照(短 session,B-5;返回纯文本)。
+        # 这是**旧版本快照**,与「当前 artifact 视图」(_serialize_memory)是不同形状,故意不并:
+        #   - updated_at=None —— 旧版本无独立更新时间(不存 per-version 时间戳);套当前版本的会误导
+        #   - 不带 has_blob —— blob artifact 不可变单版、永无历史,走到这必是文本(has_blob 恒 False)
+        #   - memory 可能为 None(当前行已不在、历史 content 仍可取的边界)→ 字段走兜底,helper 给不了
         content = await self._run_with_repo(
             lambda repo: repo.get_version_content(session_id, artifact_id, version)
         )
