@@ -58,7 +58,10 @@ def key(monkeypatch):
 
 async def _run(session, cfg):
     tools, agents = cfg
-    return await reconcile_config_to_db(session, tools_dir=str(tools), agents_dir=str(agents))
+    return await reconcile_config_to_db(
+        session, tools_dir=str(tools), agents_dir=str(agents),
+        skills_dir=str(tools.parent / "skills"),
+    )
 
 
 async def _creds(session, unit):

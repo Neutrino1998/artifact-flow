@@ -242,9 +242,70 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('unit_name', 'placeholder_name'),
     )
 
+    # ------------------------------------------------------------------
+    # Skill 系统(Phase C-1)。就地写进 squash 0001(全新建库假设,无 0002)。建表序:
+    # skills(被 user_skills/department_skill_rules 引用,FK→users/departments 已建)→
+    # user_skills / department_skill_rules / department_unit_rules(refs 已建表)。
+    # 语义见 models.py 同名类。bundle = LargeBinary(MySQL LONGBLOB tier hint;PG/SQLite 忽略)。
+    # ------------------------------------------------------------------
+    op.create_table('skills',
+        sa.Column('slug', sa.String(length=64), nullable=False),
+        sa.Column('name', sa.String(length=128), nullable=False),
+        sa.Column('description', sa.Text(), nullable=False),
+        sa.Column('visibility', sa.String(length=16), nullable=False, server_default='public'),
+        sa.Column('default_enabled', sa.Boolean(), nullable=False, server_default=sa.text('true')),
+        sa.Column('owner_user_id', sa.String(length=64), nullable=True),
+        sa.Column('allowed_tools', sa.JSON(), nullable=True),
+        sa.Column('compatibility', sa.JSON(), nullable=True),
+        sa.Column('metadata', sa.JSON(), nullable=True),
+        sa.Column('skill_md', sa.Text(), nullable=False),
+        sa.Column('bundle', sa.LargeBinary(length=100 * 1024 * 1024), nullable=True),
+        sa.Column('source', sa.String(length=16), nullable=False),
+        sa.Column('seed_hash', sa.String(length=64), nullable=True),
+        sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
+        sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
+        sa.ForeignKeyConstraint(['owner_user_id'], ['users.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('slug'),
+    )
+    op.create_index(op.f('ix_skills_owner_user_id'), 'skills', ['owner_user_id'], unique=False)
+
+    op.create_table('user_skills',
+        sa.Column('user_id', sa.String(length=64), nullable=False),
+        sa.Column('skill_slug', sa.String(length=64), nullable=False),
+        sa.Column('enabled', sa.Boolean(), nullable=False),
+        sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
+        sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
+        sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['skill_slug'], ['skills.slug'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('user_id', 'skill_slug'),
+    )
+
+    op.create_table('department_skill_rules',
+        sa.Column('department_id', sa.String(length=64), nullable=False),
+        sa.Column('skill_slug', sa.String(length=64), nullable=False),
+        sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
+        sa.ForeignKeyConstraint(['department_id'], ['departments.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['skill_slug'], ['skills.slug'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('department_id', 'skill_slug'),
+    )
+
+    op.create_table('department_unit_rules',
+        sa.Column('department_id', sa.String(length=64), nullable=False),
+        sa.Column('unit_name', sa.String(length=64), nullable=False),
+        sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
+        sa.ForeignKeyConstraint(['department_id'], ['departments.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['unit_name'], ['tool_units.name'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('department_id', 'unit_name'),
+    )
+
 
 def downgrade() -> None:
     """Drop all tables."""
+    op.drop_table('department_unit_rules')
+    op.drop_table('department_skill_rules')
+    op.drop_table('user_skills')
+    op.drop_index(op.f('ix_skills_owner_user_id'), table_name='skills')
+    op.drop_table('skills')
     op.drop_table('tool_credentials')
     op.drop_table('agent_units')
     op.drop_table('tool_members')

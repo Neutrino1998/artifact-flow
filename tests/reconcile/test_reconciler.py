@@ -70,8 +70,10 @@ def cfg(tmp_path):
 
 async def _run(session, cfg):
     tools, agents = cfg
+    # 显式指向空 skills 目录(不存在 → parse 返回 []),隔离真实 config/skills
     return await reconcile_config_to_db(
-        session, tools_dir=str(tools), agents_dir=str(agents)
+        session, tools_dir=str(tools), agents_dir=str(agents),
+        skills_dir=str(tools.parent / "skills"),
     )
 
 

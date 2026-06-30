@@ -935,3 +935,162 @@ class ToolCredential(Base):
 
     def __repr__(self) -> str:
         return f"<ToolCredential(unit={self.unit_name}, placeholder={self.placeholder_name}, source={self.source})>"
+
+
+# ============================================================================
+# Skill 系统(Phase C)—— skill 定义 + per-user 覆盖 + 部门授权两张 FK 表。
+#   - 真相源 = config(seeded)/ 原始上传 blob(dynamic);DB 是物化缓存(决策 3/5)。
+#   - identity = natural key(slug),m2m 全按 name 引用 + DB ON DELETE CASCADE
+#     → ABA 由构造消失(决策 10/changelog 06-23)。
+#   - 6 标准字段按"系统消费与否"分流:消费列开独立列、其余归 `metadata` JSON;
+#     原始 frontmatter 结构在 bundle blob 里无损保留(决策 3/9)。
+# ============================================================================
+
+
+class Skill(Base):
+    """
+    Skill 定义(决策 1/3/9)。slug = natural key(PK,kebab-case,= 目录名)。
+
+    可见性两正交字段(替不透明 scope,决策 1):`visibility`(private 仅 owner /
+    public 全员 / department 按 dept rule)+ `default_enabled`(shared skill 默认是否
+    进 L1)。per-user 覆盖在 user_skills 稀疏表;部门可见走 department_skill_rules。
+
+    存储四处(决策 3):①消费列(下列)②`metadata` JSON(系统不单独消费的 license/
+    version/未知扩展)③`skill_md` 正文(去 frontmatter,L2 read_skill 直返)④`bundle`
+    完整原始 zip(L3 mount + 无损导出;单 SKILL.md 无附属文件时为 NULL)。
+    """
+    __tablename__ = "skills"
+
+    # natural key:slug 作 PK(= config 目录名 / 上传归一化名)
+    slug: Mapped[str] = mapped_column(String(64), primary_key=True)
+
+    # 展示名(frontmatter `name`,缺省回落 slug);description 折入 when_to_use
+    name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    # private(仅 owner)/ public(全员)/ department(按 department_skill_rules)。
+    # skill 独有 private(unit 无,决策 1);private + builtin 都不进 dept rule 表。
+    visibility: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="public", server_default="public"
+    )
+    # shared skill 默认是否注入 L1(决策 1:preinstalled=true、marketplace=false)
+    default_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    # private 用(指向 owner);shared(public/department)为 NULL。删用户级联删其私有 skill。
+    owner_user_id: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
+    # frontmatter `allowed-tools` 原样条目列表(unit 名 / `<unit>__<tool>` 全名 / builtin
+    # 名)。import 期校验存在性、runtime(C-2)经共享 resolver 解析到 unit 建 skill_grants
+    # ——只翻 agent 宇宙内 disabled 的(决策 11)。raw 存储、解析靠共享函数(import+runtime 同一个)。
+    allowed_tools: Mapped[Optional[list]] = mapped_column(JSON, nullable=True, default=list)
+    # `compatibility` 声明(气隙依赖校验,决策 6;C 存、D/E 消费)
+    compatibility: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    # 系统不单独消费的 frontmatter 字段杂项(license/标准 metadata 容器[含 version]/未知扩展)。
+    # 属性名避开 SQLAlchemy 保留的 `metadata`,DB 列名仍为 "metadata"(决策 3)。
+    meta: Mapped[Optional[Dict[str, Any]]] = mapped_column("metadata", JSON, nullable=True)
+
+    # SKILL.md 正文(frontmatter 已剥离),L2 read_skill 直返
+    skill_md: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # 完整原始 zip(含 SKILL.md + references + scripts + assets);单文件 skill 无附属 → NULL。
+    # length hint 同 ArtifactBlob(只影响 MySQL LONGBLOB tier,PG/SQLite 忽略)。
+    bundle: Mapped[Optional[bytes]] = mapped_column(
+        LargeBinary(length=_BLOB_TYPE_TIER_HINT), nullable=True
+    )
+
+    # seeded(config/skills 种子,reconciler 拥有,UI 不可改)/ dynamic(UI 上传)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="seeded")
+    seed_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<Skill(slug={self.slug}, visibility={self.visibility}, source={self.source})>"
+
+
+class UserSkill(Base):
+    """
+    用户对 skill 的个人开关(稀疏覆盖,决策 1)。
+
+    无行 = 走 visibility/default_enabled;有行 = 用户显式开/关。marketplace 选用 =
+    enabled 行、关掉预装 = disabled 行(link 与 toggle 同一机制)。两端真 FK + CASCADE。
+    """
+    __tablename__ = "user_skills"
+
+    user_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    skill_slug: Mapped[str] = mapped_column(
+        String(64), ForeignKey("skills.slug", ondelete="CASCADE"), primary_key=True
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserSkill(user={self.user_id}, skill={self.skill_slug}, enabled={self.enabled})>"
+
+
+class DepartmentSkillRule(Base):
+    """
+    部门 ⟷ skill 授权例外(决策 10)。**无 `effect` 列** —— 一行 = 该部门是默认姿态的
+    「例外」,方向从 skill 的 `visibility` 派生(public→deny / department→grant)。
+
+    一资源多部门 = 多行;祖先链解析时父覆盖整子树(各方向只需 1 行)。改 visibility
+    清规则(reconciler + Manager 两路),故行不熬过 visibility 变更。两端真 FK + CASCADE。
+    C 即消费(skill 可见性);unit 侧的 department_unit_rules 建好但空跑到 G。
+    """
+    __tablename__ = "department_skill_rules"
+
+    department_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("departments.id", ondelete="CASCADE"), primary_key=True
+    )
+    skill_slug: Mapped[str] = mapped_column(
+        String(64), ForeignKey("skills.slug", ondelete="CASCADE"), primary_key=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<DepartmentSkillRule(dept={self.department_id}, skill={self.skill_slug})>"
+
+
+class DepartmentUnitRule(Base):
+    """
+    部门 ⟷ tool_unit 授权例外(决策 10)。与 DepartmentSkillRule 同构(无 `effect` 列、
+    方向派生自 unit `visibility`)。**C 建表但空跑**:resolver 的 dept 收窄输入层 G 才加
+    (line 101 分阶段输入);C 接通的只是 reconciler/Manager 改 visibility 时的 clear 钩子。
+    tool/toolset/mcp 细分在 `tool_units.kind`,规则表不存类型列(unit-everywhere)。
+    """
+    __tablename__ = "department_unit_rules"
+
+    department_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("departments.id", ondelete="CASCADE"), primary_key=True
+    )
+    unit_name: Mapped[str] = mapped_column(
+        String(64), ForeignKey("tool_units.name", ondelete="CASCADE"), primary_key=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<DepartmentUnitRule(dept={self.department_id}, unit={self.unit_name})>"

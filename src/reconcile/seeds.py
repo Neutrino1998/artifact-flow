@@ -20,13 +20,21 @@ from typing import Dict, List, Optional, Tuple
 import yaml
 
 from agents.loader import load_agent
-from tools.base import BUILTIN_TOOL_NAMES, is_builtin_name
+from tools.base import BUILTIN_TOOL_NAMES, is_builtin_name, resolve_allowed_tool_entry
 from tools.custom.http_tool import validate_response_extract
 from tools.custom.secrets import assert_secret_refs_allowed
+from utils.logger import get_logger
+
+logger = get_logger("ArtifactFlow")
 
 _VALID_PARAM_TYPES = {"string", "integer", "number", "boolean"}
 _VALID_PERMISSIONS = {"auto", "confirm"}
 _VALID_VISIBILITY = {"public", "department"}  # unit 无 private(决策 1)
+_VALID_SKILL_VISIBILITY = {"private", "public", "department"}  # skill 独有 private(决策 1)
+# skill frontmatter 里系统单独消费的 key(其余 → meta JSON 杂项列,决策 3)
+_SKILL_CONSUMED_FM_KEYS = {
+    "name", "description", "allowed-tools", "compatibility", "visibility", "default_enabled",
+}
 
 
 class SeedError(ValueError):
@@ -74,6 +82,20 @@ class AgentSeed:
     role_prompt: str
     builtin_tools: Dict[str, str]      # {builtin名: enabled|disabled}
     units: List[AgentUnitSeed] = field(default_factory=list)
+    seed_hash: str = ""
+
+
+@dataclass
+class SkillSeed:
+    slug: str                          # = 目录名(natural key / PK)
+    name: str                          # frontmatter `name`(缺省回落 slug)
+    description: str
+    visibility: str                    # public | department(seeded 不可 private)
+    default_enabled: bool
+    allowed_tools: List[str]           # frontmatter `allowed-tools` 原样条目
+    compatibility: Optional[dict]      # 气隙依赖声明(C 存,D/E 消费)
+    meta: Optional[dict]               # license/version/未知扩展(系统不单独消费)
+    skill_md: str                      # SKILL.md 正文(frontmatter 已剥离)
     seed_hash: str = ""
 
 
@@ -424,3 +446,111 @@ def parse_agent_seeds(
         seeds.append(seed)
 
     return seeds
+
+
+# --------------------------------------------------------------------------
+# skills(Phase C)
+# --------------------------------------------------------------------------
+
+
+def parse_skill_seeds(
+    skills_dir: str,
+    *,
+    known_unit_names: set,
+    known_full_names: Dict[str, str],
+) -> List["SkillSeed"]:
+    """解析 config/skills/ → SkillSeed 列表。
+
+    布局:`config/skills/<slug>/SKILL.md`(每个子目录 = 一个 skill,slug = 目录名)。
+    C 只处理单 SKILL.md 的 skill(无 bundle);带 references/scripts 的 bundle skill 归 D。
+
+    `allowed-tools` 在 import 期对全局 ceiling 校验存在性(共享 resolver),解析不到已知 unit
+    的条目 → **warn 不 fail**(skill 全 agent 可见、agent_unit 后续可挂、决策 11 line 237;
+    与 agent 的硬绑定 loud-fail 不同),raw 条目原样保留、runtime 再解析。
+    """
+    seeds: List[SkillSeed] = []
+    if not os.path.isdir(skills_dir):
+        return seeds
+
+    for entry in sorted(os.listdir(skills_dir)):
+        if not _is_config_entry(entry):
+            continue
+        dir_path = os.path.join(skills_dir, entry)
+        if not os.path.isdir(dir_path):
+            continue  # skill = 目录;顶层散文件忽略
+        skill_md_path = os.path.join(dir_path, "SKILL.md")
+        if not os.path.isfile(skill_md_path):
+            raise SeedError(f"skill dir '{entry}/' missing SKILL.md")
+        seeds.append(_parse_skill_dir(
+            dir_path, entry, skill_md_path, known_unit_names, known_full_names
+        ))
+
+    return seeds
+
+
+def _normalize_allowed_tools(raw, source: str) -> List[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        return [s.strip() for s in raw.split(",") if s.strip()]
+    if isinstance(raw, list):
+        return [str(s).strip() for s in raw if str(s).strip()]
+    raise SeedError(f"{source}: allowed-tools must be a list or string")
+
+
+def _parse_skill_dir(
+    dir_path: str,
+    slug: str,
+    skill_md_path: str,
+    known_unit_names: set,
+    known_full_names: Dict[str, str],
+) -> "SkillSeed":
+    frontmatter, body = _split_frontmatter(skill_md_path)
+
+    name = frontmatter.get("name") or slug
+    visibility = frontmatter.get("visibility", "public")
+    if visibility not in _VALID_SKILL_VISIBILITY:
+        raise SeedError(
+            f"{skill_md_path}: invalid visibility '{visibility}' "
+            f"(expected private|public|department)"
+        )
+    if visibility == "private":
+        # seeded skill 是 shared(owner=null),private = owner-only 自相矛盾
+        raise SeedError(
+            f"{skill_md_path}: seeded skill cannot be 'private' (shared, no owner)"
+        )
+
+    allowed_tools = _normalize_allowed_tools(frontmatter.get("allowed-tools"), skill_md_path)
+    for entry in allowed_tools:
+        if resolve_allowed_tool_entry(entry, known_unit_names, known_full_names) is None:
+            # 决策 11 line 237:校验存在性,解析不到 = warn 不 fail(unit 后续可挂 / 可建)
+            logger.warning(
+                "skill %r: allowed-tools entry %r resolves to no known tool unit "
+                "(builtin / external unit / <unit>__<tool>) — kept as-is, resolved at runtime",
+                slug, entry,
+            )
+
+    meta = {k: v for k, v in frontmatter.items() if k not in _SKILL_CONSUMED_FM_KEYS} or None
+
+    seed = SkillSeed(
+        slug=slug,
+        name=name,
+        description=frontmatter.get("description", ""),
+        visibility=visibility,
+        default_enabled=bool(frontmatter.get("default_enabled", True)),
+        allowed_tools=allowed_tools,
+        compatibility=frontmatter.get("compatibility"),
+        meta=meta,
+        skill_md=body,
+    )
+    seed.seed_hash = _content_hash({
+        "name": seed.name,
+        "description": seed.description,
+        "visibility": seed.visibility,
+        "default_enabled": seed.default_enabled,
+        "allowed_tools": sorted(seed.allowed_tools),
+        "compatibility": seed.compatibility,
+        "meta": seed.meta,
+        "skill_md": seed.skill_md,
+    })
+    return seed

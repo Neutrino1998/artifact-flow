@@ -345,6 +345,34 @@ def is_builtin_name(name: str) -> bool:
     return name in BUILTIN_TOOL_NAMES
 
 
+def resolve_allowed_tool_entry(
+    entry: str,
+    known_unit_names: "set",
+    known_full_names: Dict[str, str],
+) -> Optional[str]:
+    """把一条 `allowed-tools` 条目解析到它归属的 **unit**(决策 11 line 235,纯 exact-match)。
+
+    skill 的 `allowed-tools` 与 dept/agent 一律 unit 粒度。import(校验存在性)与
+    runtime(C-2 建 skill_grants)**共用此一个函数**,避免两侧解析口径漂移(reviewer P2)。
+
+    解析序(exact-match,无模糊):
+      ① builtin/reserved 名 → 该 builtin(= singleton unit,标准 allowed-tools 逐名原样工作);
+      ② 已注册 unit 名 → 该 unit;
+      ③ 已注册全名 `<unit>__<tool>` → 其所属 unit(按已知全名查、不 split `__`);
+      ④ 裸成员名(无 `<known-unit>__` 前缀、又非 unit 名)→ 不接受,返回 None
+         (import warn / runtime 忽略)。`search` ≠ `github__search`,裸名永不命中 set 成员。
+
+    返回:命中的 unit 标识(builtin 名 / external unit 名);未命中 None。
+    """
+    if is_builtin_name(entry):
+        return entry
+    if entry in known_unit_names:
+        return entry
+    if entry in known_full_names:
+        return known_full_names[entry]
+    return None
+
+
 def build_tool_map(
     builtin_tools: List[BaseTool],
     custom_tools: List[BaseTool],

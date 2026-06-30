@@ -14,14 +14,26 @@ from typing import Dict, List, Optional
 from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Agent, AgentUnit, ToolCredential, ToolMember, ToolUnit
+from db.models import (
+    Agent,
+    AgentUnit,
+    DepartmentSkillRule,
+    DepartmentUnitRule,
+    Skill,
+    ToolCredential,
+    ToolMember,
+    ToolUnit,
+    UserSkill,
+)
 from reconcile.report import ReconcileReport
 from reconcile.seeds import (
     AgentSeed,
     MemberSeed,
     SeedError,
+    SkillSeed,
     ToolUnitSeed,
     parse_agent_seeds,
+    parse_skill_seeds,
     parse_tool_seeds,
 )
 from tools.custom.credentials import get_cipher
@@ -42,11 +54,14 @@ async def reconcile_config_to_db(
     *,
     tools_dir: Optional[str] = None,
     agents_dir: Optional[str] = None,
+    skills_dir: Optional[str] = None,
     commit: bool = True,
 ) -> ReconcileReport:
-    """把 config/tools + config/agents 物化进 DB。tools 先(agent 分流需已知 unit)。"""
+    """把 config/tools + config/agents + config/skills 物化进 DB。tools 先(agent 分流 +
+    skill allowed-tools 校验都需已知 unit)。"""
     tools_dir = tools_dir or _default_config_dir("tools")
     agents_dir = agents_dir or _default_config_dir("agents")
+    skills_dir = skills_dir or _default_config_dir("skills")
     report = ReconcileReport()
 
     tool_seeds = parse_tool_seeds(tools_dir)
@@ -59,7 +74,7 @@ async def reconcile_config_to_db(
     # 见 _reconcile_credentials)。须在 unit flush 之后(FK 目标存在)。
     await _reconcile_credentials(session, tool_seeds)
 
-    # agent 分流需要「已注册 unit」全集(seeded 刚写 + 任何已存在 dynamic)
+    # agent 分流 + skill allowed-tools 校验都需「已注册 unit」全集(seeded 刚写 + 已存在 dynamic)
     known_unit_names = set(
         (await session.execute(select(ToolUnit.name))).scalars().all()
     )
@@ -74,6 +89,13 @@ async def reconcile_config_to_db(
         known_full_names=known_full_names,
     )
     await _reconcile_agents(session, agent_seeds, report)
+
+    skill_seeds = parse_skill_seeds(
+        skills_dir,
+        known_unit_names=known_unit_names,
+        known_full_names=known_full_names,
+    )
+    await _reconcile_skills(session, skill_seeds, report)
 
     if commit:
         await session.commit()
@@ -172,8 +194,9 @@ def _new_member(unit_name: str, m: MemberSeed) -> ToolMember:
 
 
 async def _prune_unit(session: AsyncSession, name: str) -> None:
-    # 显式删子行(dialect-safe);未来 department_unit_rule(C/G)在此一并删
+    # 显式删子行(dialect-safe,不赖 SQLite per-connection FK pragma)
     await session.execute(delete(AgentUnit).where(AgentUnit.unit_name == name))
+    await session.execute(delete(DepartmentUnitRule).where(DepartmentUnitRule.unit_name == name))
     await session.execute(delete(ToolCredential).where(ToolCredential.unit_name == name))
     await session.execute(delete(ToolMember).where(ToolMember.unit_name == name))
     await session.execute(delete(ToolUnit).where(ToolUnit.name == name))
@@ -182,11 +205,13 @@ async def _prune_unit(session: AsyncSession, name: str) -> None:
 async def _clear_dept_rules_for_unit(session: AsyncSession, name: str) -> None:
     """改 visibility 清该 unit 的 dept 规则(决策 10 第二条路径)。
 
-    当前空跑:`department_unit_rule` 表尚未存在。该表落地后在此 DELETE 它指向本 unit
-    的行,与 Manager UI 改 visibility 路径同语义(否则 seeded 资源经 config 改
-    visibility 时旧例外熬过 UPDATE、方向反转)。
+    与 Manager UI 改 visibility 路径同语义:行不熬过 visibility 变更,否则 seeded 资源经
+    config 改 visibility 时旧例外熬过 UPDATE、方向(派生自 visibility)静默反转 = 反授权。
+    定向删(非 cascade,留 user/agent 等其它指向),C/G 共用。
     """
-    return None
+    await session.execute(
+        delete(DepartmentUnitRule).where(DepartmentUnitRule.unit_name == name)
+    )
 
 
 # --------------------------------------------------------------------------
@@ -377,4 +402,97 @@ def _new_agent_unit(agent_name: str, u) -> AgentUnit:
         unit_name=u.unit_name,
         member_state=u.member_state,
         source="seeded",
+    )
+
+
+# --------------------------------------------------------------------------
+# skills(Phase C:同 tool/agent 的幂等 upsert + prune + clear-on-visibility)
+# --------------------------------------------------------------------------
+
+
+async def _reconcile_skills(
+    session: AsyncSession, seeds: List[SkillSeed], report: ReconcileReport
+) -> None:
+    existing = {
+        s.slug: s for s in (await session.execute(select(Skill))).scalars().all()
+    }
+    desired = {s.slug for s in seeds}
+
+    for seed in seeds:
+        label = f"skill:{seed.slug}"
+        row = existing.get(seed.slug)
+
+        if row is None:
+            session.add(_new_skill(seed))
+            report.created.append(label)
+            continue
+
+        if row.source == "dynamic":
+            raise SeedError(
+                f"seed skill '{seed.slug}' collides with a UI-uploaded (dynamic) skill; "
+                f"rename the config dir or remove the dynamic skill"
+            )
+        if row.seed_hash == seed.seed_hash:
+            report.skipped.append(label)
+            continue
+
+        # UPDATE:visibility 变更先清 dept 规则(决策 10,留 user_skill),再覆盖列
+        if row.visibility != seed.visibility:
+            await _clear_dept_rules_for_skill(session, seed.slug)
+        _apply_skill_cols(row, seed)
+        report.updated.append(label)
+
+    for slug, row in existing.items():
+        if slug in desired or row.source != "seeded":
+            continue
+        await _prune_skill(session, slug)
+        report.pruned.append(f"skill:{slug}")
+
+
+def _new_skill(seed: SkillSeed) -> Skill:
+    return Skill(
+        slug=seed.slug,
+        name=seed.name,
+        description=seed.description,
+        visibility=seed.visibility,
+        default_enabled=seed.default_enabled,
+        owner_user_id=None,            # seeded = shared
+        allowed_tools=seed.allowed_tools,
+        compatibility=seed.compatibility,
+        meta=seed.meta,
+        skill_md=seed.skill_md,
+        bundle=None,                   # C 只处理单 SKILL.md(无 bundle);bundle skill 归 D
+        source="seeded",
+        seed_hash=seed.seed_hash,
+    )
+
+
+def _apply_skill_cols(row: Skill, seed: SkillSeed) -> None:
+    row.name = seed.name
+    row.description = seed.description
+    row.visibility = seed.visibility
+    row.default_enabled = seed.default_enabled
+    row.allowed_tools = seed.allowed_tools
+    row.compatibility = seed.compatibility
+    row.meta = seed.meta
+    row.skill_md = seed.skill_md
+    row.seed_hash = seed.seed_hash
+
+
+async def _prune_skill(session: AsyncSession, slug: str) -> None:
+    # 显式删子行(dialect-safe);改名/删 config 丢规则(决策 10:人工重授,上面 loud-log)
+    await session.execute(delete(UserSkill).where(UserSkill.skill_slug == slug))
+    await session.execute(
+        delete(DepartmentSkillRule).where(DepartmentSkillRule.skill_slug == slug)
+    )
+    await session.execute(delete(Skill).where(Skill.slug == slug))
+
+
+async def _clear_dept_rules_for_skill(session: AsyncSession, slug: str) -> None:
+    """改 visibility 清该 skill 的 dept 规则(决策 10 第二条路径,与 unit 侧同语义)。
+
+    定向删 department_skill_rule(留 user_skill —— 个人开关与部门可见性正交)。
+    """
+    await session.execute(
+        delete(DepartmentSkillRule).where(DepartmentSkillRule.skill_slug == slug)
     )

@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Agent, AgentUnit, ToolMember, ToolUnit
+from db.models import Agent, AgentUnit, Skill, ToolMember, ToolUnit
 from tools.base import BaseTool, ToolParameter, is_builtin_name
 from tools.custom.credentials import CredentialResolver
 from tools.custom.http_tool import HttpTool, HttpToolConfig
@@ -53,6 +53,19 @@ class RegistrySnapshot:
     external_tools: Dict[str, BaseTool]   # full_name -> HttpTool(external 单元成员)
     units: Dict[str, UnitInfo]            # unit_name -> UnitInfo
     agents: Dict[str, AgentSnapshot]      # agent_name -> AgentSnapshot
+
+
+@dataclass
+class SkillInfo:
+    """skill 轻量元数据(user-agnostic)。L1 列举 / 可见性 / skill_grants 用;**不含
+    skill_md / bundle**(大,按需经 repo 读 —— L2 read_skill / L3 mount)。"""
+    slug: str
+    name: str
+    description: str
+    visibility: str
+    default_enabled: bool
+    owner_user_id: Optional[str]
+    allowed_tools: List[str] = field(default_factory=list)
 
 
 def build_http_tool(
@@ -192,3 +205,25 @@ async def load_registry_snapshot(
             agent.units[au.unit_name] = au.member_state
 
     return RegistrySnapshot(external_tools=external_tools, units=units, agents=agents)
+
+
+async def load_skill_snapshot(session: AsyncSession) -> Dict[str, SkillInfo]:
+    """读全部 skill 行,重建轻量 user-agnostic 元数据(`{slug: SkillInfo}`)。
+
+    每 turn 一次快照(同 load_registry_snapshot,controller_factory 调用,C-2 接入);
+    per-user 解析(user_skill 覆盖 + dept 规则)另在 `EffectiveSkillSet` 做(C-2)。
+    slug 定序保 L1 渲染顺序稳定(APC / prompt 快照)。skill_md / bundle 不入快照(大,
+    L2/L3 按需读)。ORM 不外逃:就地物化成 SkillInfo dataclass。"""
+    rows = (await session.execute(select(Skill).order_by(Skill.slug))).scalars().all()
+    return {
+        s.slug: SkillInfo(
+            slug=s.slug,
+            name=s.name,
+            description=s.description,
+            visibility=s.visibility,
+            default_enabled=s.default_enabled,
+            owner_user_id=s.owner_user_id,
+            allowed_tools=list(s.allowed_tools or []),
+        )
+        for s in rows
+    }
