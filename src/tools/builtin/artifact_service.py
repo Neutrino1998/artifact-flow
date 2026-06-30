@@ -299,23 +299,25 @@ class ArtifactService:
             ), None
 
         # Dedup:同时对 WorkingSet(本轮已 stage / 缓存)与 DB(往轮已落库)去重,
-        # 追加后缀直到唯一。DB 查经短 session(B-5)——这里只判存在性(is not None),
-        # 不读返回行的属性,故 ORM 行漏出回调亦无 lazy IO 之虞。
-        artifact_id = id_base
-        suffix = 0
-        original_id = id_base
-        while (
-            self._ws.peek(session_id, artifact_id) is not None
-            or (await self._run_with_repo(
-                lambda repo, aid=artifact_id: repo.get_artifact(session_id, aid)
-            )) is not None
-        ):
-            suffix += 1
-            name_part, _, ext_part = original_id.rpartition('.')
-            if name_part:
-                artifact_id = f"{name_part}_{suffix}.{ext_part}"
-            else:
-                artifact_id = f"{original_id}_{suffix}"
+        # 追加后缀直到唯一。整个冲突扫描在**一条**短 session 内走完(B-5 #4)——不再每探一次
+        # 各开一条 session(K 个同名冲突 → K+1 次借还)。WorkingSet.peek 是内存、放回调内无妨;
+        # 只判存在性(is not None),不读行属性,故 ORM 行不外逃。
+        async def _dedup(repo) -> str:
+            aid = id_base
+            suffix = 0
+            while (
+                self._ws.peek(session_id, aid) is not None
+                or await repo.get_artifact(session_id, aid) is not None
+            ):
+                suffix += 1
+                name_part, _, ext_part = id_base.rpartition('.')
+                if name_part:
+                    aid = f"{name_part}_{suffix}.{ext_part}"
+                else:
+                    aid = f"{id_base}_{suffix}"
+            return aid
+
+        artifact_id = await self._run_with_repo(_dedup)
 
         # 最终守门员:理论上 normalize + dedup(≤4 位后缀)总 ≤ 64,但留个防御性
         # 检查避免万一边界 bug 让脏 ID 进 DB

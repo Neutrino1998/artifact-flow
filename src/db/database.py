@@ -618,7 +618,14 @@ class DatabaseManager:
         用 fresh session 重试 DB 瞬断异常（连接断开/事务回滚）。
 
         fn: async (session: AsyncSession) -> result
-        每次 attempt 创建独立 session，仅用于读操作或幂等写操作。
+        每次 attempt 创建独立 session。
+
+        **契约:fn 必须幂等** —— 失败时本函数把整个 fn 从头重跑。故 fn 只能是读操作,或满足
+        两条的写操作:(1) 幂等键(id)在调 with_retry **之前**定好、跨重试稳定;(2) 写遇到
+        「已存在」当成功而非 raise(否则「首次已 commit、确认包/后续步骤瞬断」会让重试撞重抛出
+        非瞬断异常、逃出本重试)。参考幂等写:start_conversation_async / add_message_async
+        (撞重吞)、batch_create(稳定 event_id)、ArtifactService._flush_one(Duplicate/Integrity
+        当已落库)。
         """
         import asyncio
         from sqlalchemy.exc import OperationalError, DisconnectionError

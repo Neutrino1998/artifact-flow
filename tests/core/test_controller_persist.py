@@ -71,7 +71,7 @@ class TestPersistEvents:
         captured = {}
 
         async def fake_with_retry(fn):
-            # fn = lambda cm, er, am: er.batch_create(db_events)
+            # fn = lambda cm, er: er.batch_create(db_events)  (B-5 reviewer #3: 砍掉 am)
             er = MagicMock()
 
             async def capture_batch(events):
@@ -79,7 +79,7 @@ class TestPersistEvents:
                 return []
 
             er.batch_create = capture_batch
-            return await fn(None, er, None)
+            return await fn(None, er)
 
         ctrl = _make_controller(repo=MagicMock())
         ctrl._with_db_retry = fake_with_retry  # type: ignore
@@ -140,7 +140,7 @@ class TestPersistEvents:
                 return []
 
             er.batch_create = capture_batch
-            return await fn(None, er, None)
+            return await fn(None, er)
 
         ctrl = _make_controller(repo=MagicMock())
         ctrl._with_db_retry = fake_with_retry  # type: ignore

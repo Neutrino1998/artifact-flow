@@ -155,12 +155,19 @@ class ConversationManager:
         now = utc_now().isoformat()
 
         if self.repository:
-            await self.repository.add_message(
-                conversation_id=conv_id,
-                message_id=message_id,
-                user_input=user_input,
-                parent_id=parent_id
-            )
+            try:
+                await self.repository.add_message(
+                    conversation_id=conv_id,
+                    message_id=message_id,
+                    user_input=user_input,
+                    parent_id=parent_id
+                )
+            except DuplicateError:
+                # 幂等(with_retry 契约):本方法被 _with_db_retry 包裹,瞬断会从头重跑;
+                # 若上次尝试已 commit 了这条 message(message_id 是稳定幂等键),重跑会撞重 —
+                # 当作上次已成功,不 raise(否则非瞬断异常逃出 with_retry → 整轮崩,即便消息
+                # 已落库)。与兄弟 start_conversation_async 同范式。title 重设天然幂等,照常走。
+                logger.debug(f"Message {message_id} already exists (idempotent retry)")
 
             # 如果是第一条消息（无 parent），自动生成 title
             if parent_id is None:

@@ -71,22 +71,24 @@ class ExecutionController:
         """
         DB 操作重试适配器。
 
-        fn: async (conv_mgr, event_repo, art_mgr) -> result
+        fn: async (conv_mgr, event_repo) -> result
         有 db_manager 时委托 db_manager.with_retry（fresh session + 瞬断重试）。
         无 db_manager 时回退到 bound 实例（不重试）。
+
+        **fn 必须幂等**(见 db_manager.with_retry 契约):with_retry 失败时从头重跑 fn。
+        幂等键在调用前定好、跨重试稳定;写操作把「已存在」当成功(见 add_message_async /
+        start_conversation_async 的撞重吞、batch_create 的稳定 event_id)。
         """
         if not self._db_manager:
-            return await fn(self.conversation_manager, self.message_event_repo, self.artifact_service)
+            return await fn(self.conversation_manager, self.message_event_repo)
 
         from repositories.conversation_repo import ConversationRepository
         from repositories.message_event_repo import MessageEventRepository
-        from repositories.artifact_repo import ArtifactRepository
 
         async def _with_session(session):
             conv_mgr = ConversationManager(ConversationRepository(session))
             event_repo = MessageEventRepository(session)
-            art_svc = ArtifactService(ArtifactRepository(session))
-            return await fn(conv_mgr, event_repo, art_svc)
+            return await fn(conv_mgr, event_repo)
 
         return await self._db_manager.with_retry(_with_session)
 
@@ -132,18 +134,22 @@ class ExecutionController:
         # setup 期对话读写也走 _with_db_retry(B-5):每调一次开短 retrying session,不再
         # 骑 controller_factory 预开的 turn-long session(那条已退役)。
         if not conversation_id:
-            conversation_id = await self._with_db_retry(
-                lambda cm, er, am: cm.start_conversation_async()
+            # conv_id 在 retry 边界**之前**生成(幂等键稳定):否则瞬断重试会另生成一个
+            # uuid、提交出第二个孤儿会话(reviewer #2)。传入固定 id → 重试复用同 id →
+            # create_conversation 撞重被 start_conversation_async 吞掉 → 幂等。
+            conversation_id = f"conv-{uuid4().hex}"
+            await self._with_db_retry(
+                lambda cm, er: cm.start_conversation_async(conversation_id)
             )
         else:
             await self._with_db_retry(
-                lambda cm, er, am: cm.ensure_conversation_exists(conversation_id)
+                lambda cm, er: cm.ensure_conversation_exists(conversation_id)
             )
 
         # Auto-detect parent
         if parent_message_id is _UNSET:
             parent_message_id = await self._with_db_retry(
-                lambda cm, er, am: cm.get_active_branch(conversation_id)
+                lambda cm, er: cm.get_active_branch(conversation_id)
             )
             if parent_message_id:
                 logger.debug(f"Auto-set parent_message_id to active_branch: {parent_message_id}")
@@ -171,7 +177,7 @@ class ExecutionController:
             path_events = []
         else:
             path_events = await self._with_db_retry(
-                lambda cm, er, am: cm.load_event_history_async(
+                lambda cm, er: cm.load_event_history_async(
                     conv_id=conversation_id, to_message_id=resolved_parent
                 )
             )
@@ -187,7 +193,7 @@ class ExecutionController:
         parent_always_allowed = []
         if resolved_parent:
             parent_meta = await self._with_db_retry(
-                lambda cm, er, am: cm.get_message_metadata_async(resolved_parent)
+                lambda cm, er: cm.get_message_metadata_async(resolved_parent)
             )
             parent_always_allowed = parent_meta.get("always_allowed_tools", [])
 
@@ -206,7 +212,7 @@ class ExecutionController:
 
         # 添加消息到 conversation (after all pre-engine setup to avoid orphaned rows on failure)
         await self._with_db_retry(
-            lambda cm, er, am: cm.add_message_async(
+            lambda cm, er: cm.add_message_async(
                 conv_id=conversation_id,
                 message_id=message_id,
                 user_input=user_input,
@@ -335,7 +341,7 @@ class ExecutionController:
                     response_to_write = choose_response_for_terminal(pp_engine)
                     try:
                         await self._with_db_retry(
-                            lambda cm, er, am: cm.update_response_async(
+                            lambda cm, er: cm.update_response_async(
                                 conv_id=conversation_id,
                                 message_id=message_id,
                                 response=response_to_write,
@@ -433,7 +439,7 @@ class ExecutionController:
             # 或硬删用户触发的 CASCADE）。早返回跳过后续三段写库，避免撞 FK。
             try:
                 pp.conv_alive = await self._with_db_retry(
-                    lambda cm, er, am: cm.exists_async(conversation_id)
+                    lambda cm, er: cm.exists_async(conversation_id)
                 )
             except Exception as exists_err:
                 # exists 探测的瞬断不应阻塞 post-processing —— 当作 alive 走原流程。
@@ -526,7 +532,7 @@ class ExecutionController:
                     pp.response_update_attempted = True
                     try:
                         await self._with_db_retry(
-                            lambda cm, er, am: cm.update_response_async(
+                            lambda cm, er: cm.update_response_async(
                                 conv_id=conversation_id, message_id=message_id,
                                 response=response_to_write,
                             )
@@ -557,7 +563,7 @@ class ExecutionController:
                 if metadata_updates:
                     try:
                         await self._with_db_retry(
-                            lambda cm, er, am: cm.update_message_metadata_async(
+                            lambda cm, er: cm.update_message_metadata_async(
                                 conv_id=conversation_id, message_id=message_id, metadata=metadata_updates,
                             )
                         )
@@ -652,7 +658,7 @@ class ExecutionController:
         pp.response_update_attempted = True
         try:
             await self._with_db_retry(
-                lambda cm, er, am: cm.update_response_async(
+                lambda cm, er: cm.update_response_async(
                     conv_id=pp.conversation_id, message_id=pp.message_id,
                     response=response_to_write,
                 )
@@ -707,7 +713,7 @@ class ExecutionController:
 
         try:
             await self._with_db_retry(
-                lambda cm, er, am: er.batch_create(db_events)
+                lambda cm, er: er.batch_create(db_events)
             )
             logger.info(f"Persisted {len(db_events)} events for message {message_id}")
             return True

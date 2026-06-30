@@ -394,3 +394,36 @@ class TestBranchPath:
         path = await conversation_repo.get_conversation_path(conv_id)
         assert path == []
 
+
+class TestRetryIdempotency:
+    """ConversationManager 的 setup 写被 controller._with_db_retry 包裹;with_retry 在瞬断后
+    从头重跑 fn → 这些写必须幂等(同 id 第二遍不得抛)。锁定 reviewer #1/#2 的修复。"""
+
+    async def test_add_message_async_idempotent_on_retry(
+        self, conversation_repo: ConversationRepository, test_user: User
+    ):
+        # 模拟 with_retry:首次已 commit message 后瞬断 → 重跑 add_message_async。
+        # 修复前第二遍撞 DuplicateError(非瞬断)逃出 with_retry → 整轮崩;修复后撞重当成功。
+        from core.conversation_manager import ConversationManager
+        mgr = ConversationManager(conversation_repo)
+        conv_id = f"conv-{uuid.uuid4().hex}"
+        msg_id = f"msg-{uuid.uuid4().hex}"
+
+        await mgr.add_message_async(conv_id=conv_id, message_id=msg_id, user_input="hi")
+        # 第二遍(= retry 从头重跑)不得抛
+        await mgr.add_message_async(conv_id=conv_id, message_id=msg_id, user_input="hi")
+
+        assert await conversation_repo.get_message(msg_id) is not None
+
+    async def test_start_conversation_async_idempotent_on_same_id(
+        self, conversation_repo: ConversationRepository, test_user: User
+    ):
+        # #2 的修法(controller 在 retry 边界外定 conv_id 再传入)依赖此幂等:固定 id
+        # 重复调用返回同 id、不抛(撞重被 manager 吞)。
+        from core.conversation_manager import ConversationManager
+        mgr = ConversationManager(conversation_repo)
+        conv_id = f"conv-{uuid.uuid4().hex}"
+
+        assert await mgr.start_conversation_async(conv_id) == conv_id
+        assert await mgr.start_conversation_async(conv_id) == conv_id
+

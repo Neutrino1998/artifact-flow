@@ -100,6 +100,8 @@ class CredentialResolver:
             if not rows:
                 return {}
             if self._cipher is None:
+                # 不可达失败:主密钥缺/格式非法已在 startup(validate_config)拦下、config
+                # 不变,故 Fernet 构造不会在此抛 —— 不放进下方 except SecretResolutionError。
                 self._cipher = self._cipher_factory()
             out: Dict[str, str] = {}
             for r in rows:
