@@ -46,7 +46,9 @@ class ConversationManager:
             repository: ConversationRepository 实例（可以为 None）
         """
         self.repository = repository
-        logger.info("ConversationManager initialized")
+        # DEBUG 而非 INFO:构造无上下文、每请求处理器各 new 一个(单轮可达 ~8 次),
+        # INFO 下纯噪音会淹没真实里程碑。真业务事件(start_conversation_async 等)才打 INFO。
+        logger.debug("ConversationManager initialized")
 
     def _ensure_repository(self) -> ConversationRepository:
         """确保 Repository 已设置"""
