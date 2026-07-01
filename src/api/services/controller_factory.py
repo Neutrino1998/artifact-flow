@@ -154,12 +154,21 @@ async def create_controller(
     # {full_name: 等级};等级从工具对象取(绑定不存等级)。引擎/上下文构建全程读这个。
     effective_toolsets = resolve_all(snapshot, all_tools, skill_snapshot=visible_skill_snapshot)
 
-    # skill 工具注入:skill 全 agent 可见 → 有可见 skill 时把 read_skill(+ mount_skill,
-    # D-2)灌进每个 agent 的可调集(等级取工具定义=AUTO)。setdefault 不覆盖(agent 本不会
-    # 声明它们,纯防御)。
-    for t in skill_tools:
+    # skill 工具注入(等级取工具定义=AUTO,setdefault 不覆盖):
+    #  - read_skill 自包含(进 slug 出文本)→ 灌进每个 agent(skill 全 agent 可见)。
+    #  - mount_skill 的产物只有配 bash 才用得上(cat references / 跑 scripts)→ **只灌进
+    #    有沙盒执行的 agent**(`bash` 在其可调集里),不给无 bash 的 agent 死能力。按需
+    #    注入,镜像 search_tools「有 deferred unit 才注入」。mount_skill 本身仅当有可见
+    #    bundle skill 时才被建(见 create_skill_tools),故这里 in all_tools 即已是那道闸。
+    if "read_skill" in all_tools:
+        read_skill_perm = all_tools["read_skill"].permission
         for ets in effective_toolsets.values():
-            ets.permissions.setdefault(t.name, t.permission)
+            ets.permissions.setdefault("read_skill", read_skill_perm)
+    if "mount_skill" in all_tools:
+        mount_skill_perm = all_tools["mount_skill"].permission
+        for ets in effective_toolsets.values():
+            if "bash" in ets.permissions:
+                ets.permissions.setdefault("mount_skill", mount_skill_perm)
 
     hooks = EngineHooks(
         check_cancelled=store.is_cancelled,

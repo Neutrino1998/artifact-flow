@@ -283,6 +283,10 @@ def create_skill_tools(
     if skillset is None or not skillset.visible:
         return []
     tools: List[BaseTool] = [ReadSkillTool(service, skillset)]
-    if sandbox_session is not None:
+    # mount_skill 只在(有沙盒 + 至少一个可见 skill 带 bundle)时才建 —— 全是 prose skill
+    # 时它没东西可挂,建了只是给每个 bash agent 加一条死工具行(按需注入,镜像 search_tools)。
+    if sandbox_session is not None and any(
+        info.has_bundle for info in skillset.visible.values()
+    ):
         tools.append(MountSkillTool(sandbox_session, service, skillset))
     return tools

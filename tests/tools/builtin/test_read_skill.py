@@ -120,13 +120,21 @@ def test_create_skill_tools_empty_when_no_visible():
 
 
 def test_create_skill_tools_read_only_without_session():
-    tools = create_skill_tools(_FakeService(), _skillset("a"))
+    tools = create_skill_tools(_FakeService(), _skillset("a", has_bundle=True))
     assert [t.name for t in tools] == ["read_skill"]
 
 
-def test_create_skill_tools_builds_mount_with_session():
+def test_create_skill_tools_no_mount_when_no_bundled_skill():
+    # 有沙盒但全是 prose skill(无 bundle)→ mount_skill 没东西可挂,不建。
     tools = create_skill_tools(
-        _FakeService(), _skillset("a"), sandbox_session=_FakeSandbox()
+        _FakeService(), _skillset("a", has_bundle=False), sandbox_session=_FakeSandbox()
+    )
+    assert [t.name for t in tools] == ["read_skill"]
+
+
+def test_create_skill_tools_builds_mount_with_session_and_bundle():
+    tools = create_skill_tools(
+        _FakeService(), _skillset("a", has_bundle=True), sandbox_session=_FakeSandbox()
     )
     assert [t.name for t in tools] == ["read_skill", "mount_skill"]
 

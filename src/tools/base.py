@@ -322,7 +322,7 @@ class BaseTool(ABC):
 
 # 请求级创建的工具名字固定（artifact 工具 + 沙盒工具），需要在启动时排除自定义
 # 工具同名冲突。
-RESERVED_TOOL_NAMES = {"create_artifact", "update_artifact", "rewrite_artifact", "read_artifact", "grep_artifact", "bash", "mount", "persist", "read_skill"}
+RESERVED_TOOL_NAMES = {"create_artifact", "update_artifact", "rewrite_artifact", "read_artifact", "grep_artifact", "bash", "mount", "persist", "read_skill", "mount_skill"}
 
 # 渐进式披露检索器的注册名(单一来源)—— 引擎注入 / self-exclusion / ctor / resolver
 # 自动注入四处共用,改名只此一处(否则 routing/self-exclusion 会静默跟丢)。
