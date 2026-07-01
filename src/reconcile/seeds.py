@@ -486,16 +486,30 @@ def parse_skill_seeds(
     if not os.path.isdir(skills_dir):
         return seeds
 
+    seen: Dict[str, str] = {}   # slug -> 产生它的 entry(intra-config 撞名,同工具侧 _check_tool_collisions)
     for entry in sorted(os.listdir(skills_dir)):
         if not _is_config_entry(entry):
             continue
         path = os.path.join(skills_dir, entry)
-        if os.path.isdir(path):
-            seeds.append(_parse_skill_dir(path, entry, known_unit_names, known_full_names))
+        is_dir = os.path.isdir(path)
+        if is_dir:
+            slug = entry
         elif entry.endswith(".zip"):
             slug = entry[: -len(".zip")]
-            seeds.append(_parse_skill_zip(path, slug, known_unit_names, known_full_names))
-        # 其它顶层散文件(非目录、非 .zip)忽略
+        else:
+            continue  # 其它顶层散文件(非目录、非 .zip)忽略
+        # 结构化 pre-parse 撞名:`foo/` 与 `foo.zip` 同 slug → 否则 reconciler 两次 add
+        # 同 PK 炸不透明 IntegrityError / 已种库 last-writer-wins 永久 churn(reviewer)。
+        if slug in seen:
+            raise SeedError(
+                f"skill slug '{slug}' from '{entry}' collides with '{seen[slug]}'; "
+                f"a skill is either a '{slug}/' dir or a '{slug}.zip', not both"
+            )
+        seen[slug] = entry
+        seeds.append(
+            _parse_skill_dir(path, slug, known_unit_names, known_full_names) if is_dir
+            else _parse_skill_zip(path, slug, known_unit_names, known_full_names)
+        )
 
     return seeds
 

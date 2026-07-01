@@ -382,6 +382,15 @@ async def test_bundle_multiple_skill_md_loud_fails(db_session, cfg):
         await _run(db_session, cfg)
 
 
+async def test_dir_and_zip_same_slug_collide_loud_fails(db_session, cfg):
+    """`foo/` + `foo.zip` 同 slug → parse 期干净 loud-fail(不落到 DB 撞 PK)。"""
+    _, _, skills = cfg
+    _write(skills / "foo" / "SKILL.md", _skill_md(name="foo", allowed_tools=None))
+    _write_bundle_zip(skills, "foo")
+    with pytest.raises(SeedError, match="not both"):
+        await _run(db_session, cfg)
+
+
 async def test_prose_dir_with_extras_loud_fails(db_session, cfg):
     """松散目录里出现附属文件 → 指向 zip(防静默丢 asset)。"""
     _, _, skills = cfg
