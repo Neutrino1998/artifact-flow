@@ -116,6 +116,10 @@ class MessageResponse(BaseModel):
         None,
         description="Files the user attached this turn, from Message.metadata_['uploaded_files']. Display-only (best-effort): absent for turns that failed before artifact flush.",
     )
+    active_skills: Optional[List[str]] = Field(
+        None,
+        description="Skill slugs active as of this turn (sticky, from Message.metadata_['active_skills']). The branch-tail message's list is the conversation's current active set; the composer reads it to mark already-active skills in the activation picker. Absent/empty when no skills are active.",
+    )
 
 
 class ConversationSummary(BaseModel):

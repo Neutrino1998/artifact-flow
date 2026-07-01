@@ -449,6 +449,7 @@ async def get_conversation(
                     children=children_map.get(msg.id, []),
                     execution_metrics=(msg.metadata_ or {}).get("execution_metrics"),
                     uploaded_files=(msg.metadata_ or {}).get("uploaded_files"),
+                    active_skills=(msg.metadata_ or {}).get("active_skills"),
                 )
                 for msg in messages
             ],

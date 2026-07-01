@@ -12,6 +12,7 @@ function msg(id: string, parent_id: string | null = null): MessageResponse {
     children: [],
     execution_metrics: null,
     uploaded_files: null,
+    active_skills: null,
   };
 }
 

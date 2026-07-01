@@ -121,6 +121,11 @@ export default function MessageInput() {
     fetchConfig();
   }, [fetchConfig]);
   const lastNode = branchPath.length > 0 ? branchPath[branchPath.length - 1] : null;
+  // Slugs already active on this branch (the tail message's persisted sticky list).
+  // The picker marks these "已激活" so re-checking one — which re-injects its full body,
+  // a deliberate "re-remind" (useful after compaction) — is an informed choice, not a
+  // surprise re-send. Doesn't gate arming: the user can still re-check to re-inject.
+  const alreadyActiveSkills = new Set(lastNode?.active_skills ?? []);
   const lastMetrics = lastNode?.execution_metrics as
     | { last_input_tokens?: number | null; last_output_tokens?: number | null }
     | null
@@ -680,8 +685,18 @@ export default function MessageInput() {
                                 )}
                               </span>
                               <span className="min-w-0">
-                                <span className="block text-xs font-medium text-text-primary dark:text-text-primary-dark truncate">
-                                  {skill.name}
+                                <span className="flex items-center gap-1.5">
+                                  <span className="text-xs font-medium text-text-primary dark:text-text-primary-dark truncate">
+                                    {skill.name}
+                                  </span>
+                                  {alreadyActiveSkills.has(skill.slug) && (
+                                    <span
+                                      className="flex-shrink-0 text-[10px] px-1 py-0.5 rounded text-accent bg-accent/10 border border-accent/30"
+                                      title="该技能已在本对话激活；重新勾选会再次注入其正文（用于压缩后重提醒）"
+                                    >
+                                      已激活
+                                    </span>
+                                  )}
                                 </span>
                                 {skill.description && (
                                   <span className="block text-[11px] text-text-tertiary dark:text-text-tertiary-dark line-clamp-2">

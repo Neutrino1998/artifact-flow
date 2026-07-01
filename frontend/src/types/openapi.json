@@ -4555,6 +4555,21 @@
             ],
             "title": "Uploaded Files",
             "description": "Files the user attached this turn, from Message.metadata_['uploaded_files']. Display-only (best-effort): absent for turns that failed before artifact flush."
+          },
+          "active_skills": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Skills",
+            "description": "Skill slugs active as of this turn (sticky, from Message.metadata_['active_skills']). The branch-tail message's list is the conversation's current active set; the composer reads it to mark already-active skills in the activation picker. Absent/empty when no skills are active."
           }
         },
         "type": "object",
@@ -4566,7 +4581,8 @@
           "created_at",
           "children",
           "execution_metrics",
-          "uploaded_files"
+          "uploaded_files",
+          "active_skills"
         ],
         "title": "MessageResponse",
         "description": "Message in conversation detail response"
