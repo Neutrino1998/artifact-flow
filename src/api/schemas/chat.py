@@ -29,6 +29,17 @@ class ChatRequest(BaseModel):
             "relaxes the empty-input guard so a compact-only turn (no text) is allowed."
         ),
     )
+    activate_skills: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Skill slugs the user activated for this turn (pressed a skill's button). Each "
+            "visible skill's instructions are injected into this turn's context and its "
+            "agent-disabled tools are enabled; the activation is sticky across the "
+            "conversation (mirrors always-allowed tools). Invisible slugs are silently "
+            "dropped. Like force_compact, it relaxes the empty-input guard so an "
+            "activation-only turn (no text) is allowed."
+        ),
+    )
 
 
 class InjectRequest(BaseModel):

@@ -1008,6 +1008,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Skills
+         * @description 列出对当前用户可见的 skill + 有效启用态。
+         */
+        get: operations["list_skills_api_v1_skills_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/skills/{slug}/enabled": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Skill Enabled
+         * @description 个人开关某 skill 是否进 L1 索引(写 user_skill 覆盖)。
+         */
+        put: operations["set_skill_enabled_api_v1_skills__slug__enabled_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health/live": {
         parameters: {
             query?: never;
@@ -2123,6 +2163,64 @@ export interface components {
              * @description 明文,加密落库后永不回读
              */
             value: string;
+        };
+        /**
+         * SkillItem
+         * @description 一个对用户可见的 skill + 其有效启用态。
+         */
+        SkillItem: {
+            /**
+             * Slug
+             * @description Skill slug (natural key)
+             */
+            slug: string;
+            /**
+             * Name
+             * @description Display name
+             */
+            name: string;
+            /**
+             * Description
+             * @description One-line description (the L1 index text)
+             */
+            description: string;
+            /**
+             * Enabled
+             * @description Effective enabled state (config default overridden by the user's setting). Controls whether the skill enters the model's L1 <available_skills> index. A disabled skill is still visible and can be activated on demand via its button.
+             */
+            enabled: boolean;
+            /**
+             * Default Enabled
+             * @description Config-seed default; shown so the UI can flag skills the user overrode.
+             */
+            default_enabled: boolean;
+            /**
+             * Is Overridden
+             * @description Whether the user has an explicit personal enable/disable for this skill.
+             */
+            is_overridden: boolean;
+        };
+        /**
+         * SkillListResponse
+         * @description GET /api/v1/skills response.
+         */
+        SkillListResponse: {
+            /**
+             * Skills
+             * @description Skills visible to the user, with effective enabled state.
+             */
+            skills: components["schemas"]["SkillItem"][];
+        };
+        /**
+         * SkillToggleRequest
+         * @description PUT /api/v1/skills/{slug}/enabled request body.
+         */
+        SkillToggleRequest: {
+            /**
+             * Enabled
+             * @description Personal enable/disable override for this skill.
+             */
+            enabled: boolean;
         };
         /**
          * StorageUsageResponse
@@ -4200,6 +4298,61 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClientConfigResponse"];
+                };
+            };
+        };
+    };
+    list_skills_api_v1_skills_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillListResponse"];
+                };
+            };
+        };
+    };
+    set_skill_enabled_api_v1_skills__slug__enabled_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillToggleRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

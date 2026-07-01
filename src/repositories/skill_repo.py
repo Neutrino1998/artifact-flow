@@ -55,3 +55,21 @@ class SkillRepository:
                 select(Skill.skill_md).where(Skill.slug == slug)
             )
         ).scalar_one_or_none()
+
+    async def set_user_override(self, user_id: str, slug: str, enabled: bool) -> None:
+        """Upsert user_skill 稀疏覆盖行(个人 enable/disable)。stage-only,commit 归 Manager
+        (事务边界 = 每个 use-case,同 ToolRegistryManager)。"""
+        row = (
+            await self._session.execute(
+                select(UserSkill).where(
+                    UserSkill.user_id == user_id, UserSkill.skill_slug == slug
+                )
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            self._session.add(
+                UserSkill(user_id=user_id, skill_slug=slug, enabled=enabled)
+            )
+        else:
+            row.enabled = enabled
+        await self._session.flush()

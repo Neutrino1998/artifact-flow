@@ -336,6 +336,14 @@ async def get_tool_registry_manager(
     return ToolRegistryManager(session)
 
 
+async def get_skill_manager(
+    session: AsyncSession = Depends(get_db_session),
+):
+    """每个请求获得独立的 SkillManager(用户侧 skill 列举 + 个人 toggle;C-3)。"""
+    from core.skill_manager import SkillManager
+    return SkillManager(session)
+
+
 # ============================================================
 # 用户认证依赖
 # ============================================================

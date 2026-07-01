@@ -1701,3 +1701,70 @@ class TestSkillActivation:
         # 失败调用不激活(only on success)
         assert result["active_skills"] == []
         assert "granted_tool" not in eff
+
+    async def test_button_activation_injects_body_into_user_input(self):
+        """C-3:用户按钮激活 → controller 传 activated_skill_bodies → engine 注入 USER_INPUT
+        正文(仅 LLM 可见,同 force_compact/上传路径),让模型即刻看到 skill 指令。"""
+        from core.effective_toolset import EffectiveToolset
+
+        state = create_initial_state(
+            task="use it", session_id="sess", message_id="msg-b",
+            active_skills=["s"],
+            activated_skill_bodies=[
+                {"slug": "s", "name": "My Skill", "body": "DO THE THING"}
+            ],
+        )
+        rounds = [_simple_llm_chunks("Done")]
+        store = InMemoryRuntimeStore()
+
+        with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
+             patch("core.engine.config") as mock_config:
+            from config import config as real_config
+            for attr in dir(real_config):
+                if attr.isupper():
+                    setattr(mock_config, attr, getattr(real_config, attr))
+            result = await execute_loop(
+                state=state, agents={"lead_agent": _FakeAgentConfig()}, tools={},
+                effective_toolsets={"lead_agent": EffectiveToolset(permissions={})},
+                hooks=_hooks_from_store(store), emit=lambda e: asyncio.sleep(0),
+            )
+
+        user_inputs = [
+            e for e in result["events"]
+            if e.event_type == StreamEventType.USER_INPUT.value
+        ]
+        assert user_inputs, "expected a USER_INPUT event"
+        content = user_inputs[-1].data["content"]
+        assert "use it" in content              # 原始输入保留
+        assert "My Skill" in content            # skill 名注入
+        assert "DO THE THING" in content        # skill 正文注入
+
+    async def test_activation_only_turn_body_becomes_content(self):
+        """纯激活轮(无文本):skill 正文即 USER_INPUT 正文,让 lead 总有可回应输入。"""
+        from core.effective_toolset import EffectiveToolset
+
+        state = create_initial_state(
+            task="", session_id="sess", message_id="msg-b2",
+            active_skills=["s"],
+            activated_skill_bodies=[{"slug": "s", "name": "S", "body": "BODY-ONLY"}],
+        )
+        rounds = [_simple_llm_chunks("Done")]
+        store = InMemoryRuntimeStore()
+
+        with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
+             patch("core.engine.config") as mock_config:
+            from config import config as real_config
+            for attr in dir(real_config):
+                if attr.isupper():
+                    setattr(mock_config, attr, getattr(real_config, attr))
+            result = await execute_loop(
+                state=state, agents={"lead_agent": _FakeAgentConfig()}, tools={},
+                effective_toolsets={"lead_agent": EffectiveToolset(permissions={})},
+                hooks=_hooks_from_store(store), emit=lambda e: asyncio.sleep(0),
+            )
+
+        content = [
+            e for e in result["events"]
+            if e.event_type == StreamEventType.USER_INPUT.value
+        ][-1].data["content"]
+        assert "BODY-ONLY" in content

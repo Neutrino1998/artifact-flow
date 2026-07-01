@@ -25,7 +25,7 @@ from api.dependencies import (
     get_execution_runner,
 )
 from api.middleware import RequestContextMiddleware
-from api.routers import admin, admin_tools, admin_users, auth, chat, artifacts, departments, meta, stream
+from api.routers import admin, admin_tools, admin_users, auth, chat, artifacts, departments, meta, skills, stream
 from observability import (
     LoopLagWatchdog, DeadmanSwitch, RuntimeSampler, JsonlSink,
     resolve_mem_limit_bytes,
@@ -351,6 +351,11 @@ def create_app() -> FastAPI:
         meta.router,
         prefix="/api/v1/meta",
         tags=["meta"]
+    )
+    app.include_router(
+        skills.router,
+        prefix="/api/v1/skills",
+        tags=["skills"]
     )
 
     # 健康检查端点

@@ -2738,6 +2738,91 @@
         ]
       }
     },
+    "/api/v1/skills": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "List Skills",
+        "description": "\u5217\u51fa\u5bf9\u5f53\u524d\u7528\u6237\u53ef\u89c1\u7684 skill + \u6709\u6548\u542f\u7528\u6001\u3002",
+        "operationId": "list_skills_api_v1_skills_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/skills/{slug}/enabled": {
+      "put": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Set Skill Enabled",
+        "description": "\u4e2a\u4eba\u5f00\u5173\u67d0 skill \u662f\u5426\u8fdb L1 \u7d22\u5f15(\u5199 user_skill \u8986\u76d6)\u3002",
+        "operationId": "set_skill_enabled_api_v1_skills__slug__enabled_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillToggleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health/live": {
       "get": {
         "summary": "Liveness",
@@ -4671,6 +4756,84 @@
         ],
         "title": "SetCredentialRequest",
         "description": "PUT /api/v1/admin/tools/units/{name}/credentials/{placeholder} \u2014\u2014 \u5199-only\u3002"
+      },
+      "SkillItem": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug",
+            "description": "Skill slug (natural key)"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Display name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "One-line description (the L1 index text)"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Effective enabled state (config default overridden by the user's setting). Controls whether the skill enters the model's L1 <available_skills> index. A disabled skill is still visible and can be activated on demand via its button."
+          },
+          "default_enabled": {
+            "type": "boolean",
+            "title": "Default Enabled",
+            "description": "Config-seed default; shown so the UI can flag skills the user overrode."
+          },
+          "is_overridden": {
+            "type": "boolean",
+            "title": "Is Overridden",
+            "description": "Whether the user has an explicit personal enable/disable for this skill."
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "description",
+          "enabled",
+          "default_enabled",
+          "is_overridden"
+        ],
+        "title": "SkillItem",
+        "description": "\u4e00\u4e2a\u5bf9\u7528\u6237\u53ef\u89c1\u7684 skill + \u5176\u6709\u6548\u542f\u7528\u6001\u3002"
+      },
+      "SkillListResponse": {
+        "properties": {
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/SkillItem"
+            },
+            "type": "array",
+            "title": "Skills",
+            "description": "Skills visible to the user, with effective enabled state."
+          }
+        },
+        "type": "object",
+        "required": [
+          "skills"
+        ],
+        "title": "SkillListResponse",
+        "description": "GET /api/v1/skills response."
+      },
+      "SkillToggleRequest": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Personal enable/disable override for this skill."
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "SkillToggleRequest",
+        "description": "PUT /api/v1/skills/{slug}/enabled request body."
       },
       "StorageUsageResponse": {
         "properties": {

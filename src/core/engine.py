@@ -103,6 +103,7 @@ def create_initial_state(
     path_events: Optional[List[Any]] = None,  # List[ExecutionEvent] with is_historical=True
     always_allowed_tools: Optional[List[str]] = None,
     active_skills: Optional[List[str]] = None,
+    activated_skill_bodies: Optional[List[Dict[str, Any]]] = None,
     uploaded_files: Optional[List[Dict[str, Any]]] = None,
     force_compact: bool = False,
 ) -> Dict[str, Any]:
@@ -121,6 +122,12 @@ def create_initial_state(
                         ArtifactService.create_from_upload stage 进 WorkingSet（发
                         ARTIFACT_CREATED、随 turn 末 flush 落库），并据回填的 id 在
                         USER_INPUT 正文追加归属说明（仅 LLM 可见）。不在 chat 路由即时 commit。
+        active_skills: 跨 turn sticky 的已激活 skill slug(能力轴,父消息 metadata 捞回)。
+        activated_skill_bodies: 本轮经按钮**新**激活的 skill 正文 [{"slug","name","body"}, ...]
+                       (controller 取自 skill_md)。execute_loop 在 USER_INPUT 正文注入其正文(仅
+                       LLM 可见,同 force_compact/上传归属路径),让模型即刻看到指令 —— 与模型自己
+                       调 read_skill 得到正文等价,只是入口是用户按钮。已在往轮激活的 skill 其正文
+                       早在当轮 USER_INPUT 里、随历史带下来,故只注入本轮新激活的(controller 去重)。
         force_compact: 用户手动触发的一次性压缩。execute_loop 据此在 USER_INPUT 正文注入压缩
                        指令；compaction_runner 在 lead 回答后无视阈值强制压缩一次并消费此标志。
     """
@@ -135,6 +142,9 @@ def create_initial_state(
         # 激活的 skill slug(能力轴持久化,照抄 always_allowed_tools 生命周期:回合末写
         # Message.metadata、下回合父消息捞回;read_skill 期间 append,见 execute_loop)。
         "active_skills": list(active_skills) if active_skills else [],
+        # 本轮新激活 skill 的正文(仅供 execute_loop 注入 USER_INPUT,不持久化 —— 正文一旦
+        # 进 USER_INPUT 事件就随历史带下来,active_skills slug 名单才是 sticky 状态)。
+        "activated_skill_bodies": list(activated_skill_bodies) if activated_skill_bodies else [],
         "events": list(path_events) if path_events else [],
         "execution_metrics": create_initial_metrics(),
         "response": "",
@@ -332,6 +342,23 @@ async def execute_loop(
                 f"{user_input_content}\n\n"
                 f"[The user attached {len(_uploaded)} file(s) to this message: {_listing}. "
                 f"Use read_artifact with the id for full content.]"
+            )
+        # 用户点按钮激活 skill：把新激活 skill 的正文注入 USER_INPUT（仅 LLM 可见，同上传/压缩
+        # 路径），让模型即刻看到指令 —— 与模型自调 read_skill 等价,入口是用户按钮。能力(grants)
+        # 已由 controller seed active_skills 烤开,这里只负责让正文可见;正文入 USER_INPUT 后随
+        # 历史带下来,故只本轮新激活的注入(往轮的早在其当轮 USER_INPUT 里)。纯激活轮(无文本)
+        # 时指令即正文,让 lead 总有可回应输入。
+        _skill_bodies = state.get("activated_skill_bodies") or []
+        if _skill_bodies:
+            _blocks = "\n\n".join(
+                f'[The user activated the "{s.get("name") or s["slug"]}" skill. '
+                f'Follow its instructions below for this request:\n\n{s["body"]}]'
+                for s in _skill_bodies
+            )
+            user_input_content = (
+                f"{user_input_content}\n\n{_blocks}"
+                if user_input_content.strip()
+                else _blocks
             )
         # 用户手动触发压缩：在 USER_INPUT 正文注入指令（仅 LLM 可见，同上传归属串路径）。始终
         # 注入 —— 有正文则追加、纯压缩轮次则指令即正文，让 lead 总有可回应的输入。
