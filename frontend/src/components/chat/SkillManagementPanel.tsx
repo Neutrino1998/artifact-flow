@@ -119,7 +119,7 @@ export default function SkillManagementPanel() {
                     </span>
                     {overridden && (
                       <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded text-text-tertiary dark:text-text-tertiary-dark bg-bg dark:bg-bg-dark border border-border dark:border-border-dark">
-                        已自定义
+                        {skill.enabled ? '已开启' : '已关闭'}
                       </span>
                     )}
                   </div>
@@ -142,8 +142,8 @@ export default function SkillManagementPanel() {
                   }`}
                 >
                   <span
-                    className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
-                      skill.enabled ? 'translate-x-4' : 'translate-x-0.5'
+                    className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                      skill.enabled ? 'translate-x-4' : 'translate-x-0'
                     }`}
                   />
                 </button>
