@@ -254,6 +254,19 @@ class ExecutionController:
             for ets in self.effective_toolsets.values():
                 ets.activate_skill(slug)
 
+        # obs:能力变更审计(info)—— 只记本轮**新**授予能力的 skill(button/sticky-new),
+        # 不含 parent 已激活的重放(那非新事件、每轮都有 = 噪音)。无授予=其 allowed-tools 本就可调。
+        for slug in to_inject:
+            if slug in parent_active_skills:
+                continue
+            granted: set = set()
+            for ets in self.effective_toolsets.values():
+                granted.update(ets.skill_grants.get(slug, {}).keys())
+            logger.info(
+                "Skill %r activated via button (message %s); enabled tools: %s",
+                slug, message_id, sorted(granted) or "(none)",
+            )
+
         # 注入集正文:短 session 取 skill_md(B-5),供 engine 注入 USER_INPUT。空正文 skip(不注
         # 入 None);查不到=脏 slug,静默略过。重勾已激活 → 正文重注入(对齐 agent read_skill)。
         activated_skill_bodies: List[Dict[str, Any]] = []
