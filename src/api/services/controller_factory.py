@@ -140,10 +140,17 @@ async def create_controller(
         **{t.name: t for t in skill_tools},
     }
     agents = snapshot.agents
+    # skill_grants 只从**可见**子集烤(能力跟随当前可见性):不给用户已看不见的 skill 烤
+    # 授予 → 跨回合恢复 active_skills 时,被撤销(admin 撤 dept 授权 / public→department /
+    # 换部门)的 skill 其 activate_skill 自然空操作,by-construction 消泄漏,非在恢复循环加闸。
+    # active_skills 名单仍 sticky(= 用户意图),能力每轮按可见性重算 → visible=correctness /
+    # enabled=UX 的切分落到工具授予轴(admin 撤后又授,下轮 slug 仍在、能力自动回来)。
+    visible_skill_snapshot = {
+        slug: skill_snapshot[slug] for slug in effective_skillset.visible
+    }
     # 决策 11 单一解析点:把每 agent 的宇宙(builtin ∪ units)解析成扁平
-    # {full_name: 等级};等级从工具对象取(绑定不存等级)。引擎/上下文构建
-    # 全程读这个,不再直读 agent 配置的 tools。skill_snapshot → 预烤 skill_grants。
-    effective_toolsets = resolve_all(snapshot, all_tools, skill_snapshot=skill_snapshot)
+    # {full_name: 等级};等级从工具对象取(绑定不存等级)。引擎/上下文构建全程读这个。
+    effective_toolsets = resolve_all(snapshot, all_tools, skill_snapshot=visible_skill_snapshot)
 
     # read_skill 注入:skill 全 agent 可见 → 有可见 skill 时把 read_skill 灌进每个 agent
     # 的可调集(等级取工具定义=AUTO)。setdefault 不覆盖(agent 本不会声明它,纯防御)。

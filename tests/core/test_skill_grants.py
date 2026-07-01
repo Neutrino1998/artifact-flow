@@ -4,6 +4,7 @@
 external unit 两路、等级取自工具对象、resolve_all 透传、activate_skill 合并 + 幂等。
 """
 
+from core.effective_skillset import resolve_effective_skillset
 from core.effective_toolset import resolve_all, resolve_effective_toolset
 from reconcile.snapshot import AgentSnapshot, RegistrySnapshot, SkillInfo, UnitInfo
 from tools.base import ToolPermission
@@ -37,9 +38,9 @@ def _snapshot(units=None, agents=None):
     )
 
 
-def _skill(slug, allowed):
+def _skill(slug, allowed, visibility="public"):
     return SkillInfo(
-        slug=slug, name=slug, description="", visibility="public",
+        slug=slug, name=slug, description="", visibility=visibility,
         default_enabled=True, owner_user_id=None, allowed_tools=allowed,
     )
 
@@ -128,3 +129,27 @@ def test_resolve_all_threads_skill_snapshot():
     snap = _snapshot(agents=[agent])
     result = resolve_all(snap, tools, skill_snapshot={"s": _skill("s", ["bash"])})
     assert result["lead_agent"].skill_grants["s"] == {"bash": ToolPermission.CONFIRM}
+
+
+def test_grants_baked_only_for_visible_skills():
+    """controller_factory 组合(Finding 1):full snapshot → EffectiveSkillSet → 只从
+    visible 子集烤授予。看不见的 skill(dept 无 grant)其授予不烤 → 跨回合恢复 active_skills
+    时 activate_skill 对它是空操作(能力跟随可见性,by-construction)。"""
+    full = {
+        "pub": _skill("pub", ["bash"], visibility="public"),        # 可见
+        "dept": _skill("dept", ["bash"], visibility="department"),  # 无 grant → 不可见
+    }
+    eff_skill = resolve_effective_skillset("u1", full, {}, dept_matched=set())
+    assert "pub" in eff_skill.visible and "dept" not in eff_skill.visible
+
+    # 复刻 controller_factory:只把 visible 子集喂进 resolver
+    visible_snap = {s: full[s] for s in eff_skill.visible}
+    agent = _agent(builtin_tools={"bash": "disabled"})
+    tools = {"bash": _Tool("bash", ToolPermission.CONFIRM)}
+    eff = resolve_effective_toolset(agent, _snapshot(), tools, visible_snap)
+
+    assert "pub" in eff.skill_grants        # 可见 → 烤了
+    assert "dept" not in eff.skill_grants   # 不可见 → 没烤(即便在 full snapshot 里)
+    # 恢复被撤销 skill 的 slug → 空操作,bash 仍不可调
+    eff.activate_skill("dept")
+    assert "bash" not in eff
