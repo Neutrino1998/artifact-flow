@@ -8,7 +8,7 @@
 """
 
 import asyncio
-from typing import Awaitable, Callable, Dict, List, Optional, Any, AsyncGenerator
+from typing import Awaitable, Callable, Dict, List, Optional, Any, AsyncGenerator, Tuple
 from uuid import uuid4
 
 from sqlalchemy.exc import IntegrityError
@@ -36,6 +36,30 @@ _UNSET = object()
 
 # Sentinel to signal end of event queue
 _SENTINEL = object()
+
+
+def resolve_skill_activation(
+    activate_skills: Optional[List[str]],
+    visible: Any,  # 支持 `slug in visible` 的容器(EffectiveSkillSet.visible dict)
+    parent_active_skills: List[str],
+) -> Tuple[List[str], List[str]]:
+    """用户按钮激活的 slug 解析(纯函数,C-3)—— 两件正交的事:
+
+      - **to_inject** = 勾选的可见 skill,**只请求内去重**(不按 parent 去重)。重勾一个往轮
+        已激活的 skill = 重新注入正文(对齐 agent 自调 read_skill 每次都返回正文,补"正文被
+        压缩掉后想重提醒"的缺口)。
+      - **active_skills** = parent ∪ to_inject 去重(sticky 名单不堆重复;能力 grant 幂等)。
+
+    可见性 gate 在此(不可见静默丢,不 404 免泄露);空 body gate 另在取正文时(需 DB)。"""
+    to_inject: List[str] = []
+    for slug in (activate_skills or []):
+        if slug in visible and slug not in to_inject:
+            to_inject.append(slug)
+    active_skills = list(parent_active_skills)
+    for slug in to_inject:
+        if slug not in active_skills:
+            active_skills.append(slug)
+    return to_inject, active_skills
 
 
 class ExecutionController:
@@ -212,33 +236,34 @@ class ExecutionController:
 
         # 用户点按钮激活(C-3):activate_skills 经 EffectiveSkillSet.visible 校验(可见=正确性,
         # 不要求 enabled —— 显式激活自己关掉的可见 skill 是合法 opt-in;不可见的静默丢弃,不 404
-        # 避免泄露存在性)。只保留本轮**新**激活的(去重 parent + 请求内自身),它们要注入正文 +
-        # 烤能力;已在往轮激活的正文早随历史带下、能力已由 parent 环节烤过。
+        # 避免泄露存在性)。拆成两件正交的事(对齐 agent 自调 read_skill:正文每次都返回、名单/
+        # 能力幂等去重):
+        #   ① 注入集 to_inject = 所有勾选的可见 skill(**只请求内去重**,不按 parent 去重)——
+        #      重勾一个往轮已激活的 skill = **重新注入正文**,补上"正文被压缩掉后想重提醒"的缺口
+        #      (agent 自调 read_skill 本就每次返回正文,此举把按钮对齐到同一自由度)。
+        #   ② sticky 名单 active_skills = parent ∪ to_inject 去重(名单不堆重复;能力 grant 幂等)。
         visible = self.effective_skillset.visible if self.effective_skillset else {}
-        newly_activated: List[str] = []
-        for slug in (activate_skills or []):
-            if slug in visible and slug not in parent_active_skills and slug not in newly_activated:
-                newly_activated.append(slug)
-        active_skills = parent_active_skills + newly_activated
+        to_inject, active_skills = resolve_skill_activation(
+            activate_skills, visible, parent_active_skills
+        )
 
-        # 恢复的 active_skills 立即作用到本 turn 的 EffectiveToolset(能力轴 sticky 跨 turn):
-        # 在已算好的字典上 merge 预烤 skill_grants(全 agent),与 mid-turn read_skill 同入口。
-        # 工具能力跨 turn 持有 ≠ L3 mount 跨 turn(沙盒 per-turn 销毁,原则 8 护栏)。新激活的
-        # 同样烤开(parent 与 newly 合一遍即可)。
+        # 能力轴 sticky 跨 turn:在已算好的字典上 merge 预烤 skill_grants(全 agent),与 mid-turn
+        # read_skill 同入口。activate_skill 幂等,对全量 active_skills(parent∪注入)跑一遍即可。
+        # 工具能力跨 turn 持有 ≠ L3 mount 跨 turn(沙盒 per-turn 销毁,原则 8 护栏)。
         for slug in active_skills:
             for ets in self.effective_toolsets.values():
                 ets.activate_skill(slug)
 
-        # 本轮新激活 skill 的正文:短 session 取 skill_md(B-5),供 engine 注入 USER_INPUT。
-        # get_skill_md 缺省/空正文的 skip(不注入 None);查不到=按钮传了脏 slug,静默略过。
+        # 注入集正文:短 session 取 skill_md(B-5),供 engine 注入 USER_INPUT。空正文 skip(不注
+        # 入 None);查不到=脏 slug,静默略过。重勾已激活 → 正文重注入(对齐 agent read_skill)。
         activated_skill_bodies: List[Dict[str, Any]] = []
-        if newly_activated and self._db_manager:
+        if to_inject and self._db_manager:
             from repositories.skill_repo import SkillRepository
 
             async def _load_bodies(session):
                 repo = SkillRepository(session)
                 out = []
-                for slug in newly_activated:
+                for slug in to_inject:
                     body = await repo.get_skill_md(slug)
                     if body and body.strip():
                         info = visible.get(slug)
@@ -251,16 +276,16 @@ class ExecutionController:
 
             activated_skill_bodies = await self._db_manager.with_retry(_load_bodies)
 
-        # 权威空输入闸(#1):activate_skills 是意图,经三重过滤后才知本轮真会不会注入内容。
-        # 顶层闸放行了 raw activate_skills;这里按**解析后**的 activated_skill_bodies 收口 ——
-        # 与上传/compact 对齐(三者都以"真会注入非空"为准)。全空(如全传了不可见/脏 slug、
-        # 或重复激活已 active 的 skill)→ 拒,免空 USER_INPUT 击穿 context_manager 的 [-1]。
+        # 权威空输入闸(#1):activate_skills 是意图,经可见性/空 body 过滤后才知本轮真会不会注入
+        # 内容。顶层闸放行 raw activate_skills;这里按**解析后**的 activated_skill_bodies 收口 ——
+        # 与上传/compact 对齐(三者都以"真会注入非空"为准)。全空(勾的全不可见 / 空 body,或
+        # 啥也没勾)→ 拒,免空 USER_INPUT 击穿 context_manager 的 [-1]。
         if not turn_has_content(
             user_input, uploaded_files, force_compact, activated_skill_bodies
         ):
             raise ValueError(
                 "'user_input' resolves to empty content: the activated skill(s) "
-                "produced nothing to inject (not visible / already active / empty body)"
+                "produced nothing to inject (not visible / empty body)"
             )
 
         # L1:enabled 可见 skill(全 agent 同一份)→ <available_skills>。effective_skillset

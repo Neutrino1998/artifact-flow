@@ -123,11 +123,12 @@ def create_initial_state(
                         ARTIFACT_CREATED、随 turn 末 flush 落库），并据回填的 id 在
                         USER_INPUT 正文追加归属说明（仅 LLM 可见）。不在 chat 路由即时 commit。
         active_skills: 跨 turn sticky 的已激活 skill slug(能力轴,父消息 metadata 捞回)。
-        activated_skill_bodies: 本轮经按钮**新**激活的 skill 正文 [{"slug","name","body"}, ...]
-                       (controller 取自 skill_md)。execute_loop 在 USER_INPUT 正文注入其正文(仅
-                       LLM 可见,同 force_compact/上传归属路径),让模型即刻看到指令 —— 与模型自己
-                       调 read_skill 得到正文等价,只是入口是用户按钮。已在往轮激活的 skill 其正文
-                       早在当轮 USER_INPUT 里、随历史带下来,故只注入本轮新激活的(controller 去重)。
+        activated_skill_bodies: 本轮按钮勾选、要注入正文的 skill [{"slug","name","body"}, ...]
+                       (controller 取自 skill_md,已过可见性/空 body 过滤)。execute_loop 在
+                       USER_INPUT 正文注入(仅 LLM 可见,同 force_compact/上传归属路径),让模型即刻
+                       看到指令 —— 与模型自调 read_skill 得正文等价,入口是用户按钮。**重勾一个往轮
+                       已激活的 skill 会重新注入正文**(对齐 read_skill 每次都返回正文,补压缩后重
+                       提醒缺口);名单/能力仍幂等去重(见 controller)。
         force_compact: 用户手动触发的一次性压缩。execute_loop 据此在 USER_INPUT 正文注入压缩
                        指令；compaction_runner 在 lead 回答后无视阈值强制压缩一次并消费此标志。
     """
