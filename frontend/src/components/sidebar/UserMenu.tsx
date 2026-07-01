@@ -198,7 +198,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
                   <circle cx="8" cy="5" r="3" />
                   <path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" />
                 </svg>
-                管理用户
+                用户管理
               </button>
             )}
 
