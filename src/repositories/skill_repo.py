@@ -7,6 +7,7 @@ plain dict / set)。可见性解析(EffectiveSkillSet)、CRUD(C-3 Manager)在上
 from typing import Dict, List, Optional, Set
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import DepartmentSkillRule, Skill, User, UserSkill
@@ -58,18 +59,33 @@ class SkillRepository:
 
     async def set_user_override(self, user_id: str, slug: str, enabled: bool) -> None:
         """Upsert user_skill 稀疏覆盖行(个人 enable/disable)。stage-only,commit 归 Manager
-        (事务边界 = 每个 use-case,同 ToolRegistryManager)。"""
-        row = (
-            await self._session.execute(
-                select(UserSkill).where(
-                    UserSkill.user_id == user_id, UserSkill.skill_slug == slug
+        (事务边界 = 每个 use-case,同 ToolRegistryManager)。
+
+        SELECT→INSERT 非原子:两请求(两标签页/重试客户端)同用户同 slug 首次并发 toggle 会
+        都读到 None、都 insert → 后者撞复合 PK IntegrityError。捕获 → rollback → 重读改 UPDATE
+        (last-writer-wins),把并发首插的自我 500 收成正常写(镜像 ToolRegistryManager._commit)。"""
+        async def _apply() -> bool:
+            """有行则 UPDATE 返 True;无行则 stage INSERT 返 False(供撞 PK 时区分处理)。"""
+            row = (
+                await self._session.execute(
+                    select(UserSkill).where(
+                        UserSkill.user_id == user_id, UserSkill.skill_slug == slug
+                    )
                 )
-            )
-        ).scalar_one_or_none()
-        if row is None:
+            ).scalar_one_or_none()
+            if row is not None:
+                row.enabled = enabled
+                return True
             self._session.add(
                 UserSkill(user_id=user_id, skill_slug=slug, enabled=enabled)
             )
-        else:
-            row.enabled = enabled
-        await self._session.flush()
+            return False
+
+        await _apply()
+        try:
+            await self._session.flush()
+        except IntegrityError:
+            # 并发首插竞态:对方已插同 PK。回滚本次 staged insert,重读改 UPDATE。
+            await self._session.rollback()
+            await _apply()
+            await self._session.flush()

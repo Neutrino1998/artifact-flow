@@ -41,12 +41,11 @@ class TestStreamExecuteInputValidation:
             async for _ in ctrl.stream_execute(user_input=blank):
                 pass
 
-    async def test_blank_input_with_activate_skills_passes_guard(self):
-        """空文本 + activate_skills → 不被空输入闸拒(engine 会注入 skill 正文补足正文,
-        mirrors force_compact)。空输入闸在任何 yield 前 raise ValueError;能跑到产出事件
-        (过闸后无 DB 依赖只会 yield error 事件、不再 raise)即证放行。"""
+    async def test_blank_input_with_unresolvable_skills_rejected(self):
+        """空文本 + activate_skills 但 skill 解析后为空(此 controller 无 effective_skillset →
+        visible 空 → 任何 slug 都被滤掉)→ 权威闸拒(#1)。顶层闸放行 raw activate_skills,
+        但 turn_has_content 按**解析后**的 bodies 收口 —— 无内容可注入 = 空轮,该拒。"""
         ctrl = _make_controller()
-        events = []
-        async for e in ctrl.stream_execute(user_input="", activate_skills=["s"]):
-            events.append(e)
-        assert events  # 过闸(否则 ValueError 会在 yield 前抛出)
+        with pytest.raises(ValueError, match="empty content"):
+            async for _ in ctrl.stream_execute(user_input="", activate_skills=["s"]):
+                pass

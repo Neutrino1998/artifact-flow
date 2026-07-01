@@ -156,6 +156,29 @@ def create_initial_state(
     }
 
 
+def turn_has_content(
+    user_input: str,
+    uploaded_files: Optional[List[Any]] = None,
+    force_compact: bool = False,
+    activated_skill_bodies: Optional[List[Any]] = None,
+) -> bool:
+    """本轮 USER_INPUT 是否会有内容注入 —— 空输入不变量的**单一真相**。
+
+    正文 / 上传归属串 / skill 正文 / 压缩指令,任一非空即有内容(镜像 execute_loop 的
+    `parts` 组装)。全空 → 空 USER_INPUT → 被 EventHistory `if content:` 过滤 → 空 history
+    → context_manager `[-1]` 崩(见 context_manager 注释的上游不变量)。
+
+    关键:`activated_skill_bodies` 是**解析后**的 skill 正文(经可见性/去重/空 body 三重过滤),
+    **不是** raw `activate_skills` 请求 —— 后者是意图、可能全被过滤掉。上传/compact 的判据本
+    就"presence ⟺ 注入非空",skill 不是,故此闸只认解析后的 bodies(三者对齐)。"""
+    return bool(
+        user_input.strip()
+        or uploaded_files
+        or force_compact
+        or activated_skill_bodies
+    )
+
+
 # emit callback type: async (event_dict) -> None
 # Execution always runs to completion regardless of SSE client state.
 EmitFn = Callable[[Dict[str, Any]], Awaitable[None]]
@@ -324,58 +347,49 @@ async def execute_loop(
             # 自然跳过 → finally 解绑 emit → finalize_metrics 序列化 datetime metrics)。
             # 下方 USER_INPUT 构建块由 `if not state["completed"]` 跳过(turn 已在 setup 终止)。
 
-    # 3a. 记录用户原始输入为事件（统一 context 构建路径）。本轮随消息上传的 artifact 在
-    # 事件正文（仅 LLM 可见，不入 Message.user_input display）追加归属说明，让 agent 把
-    # "分析这个"对应到刚传的文件、并知道用 read_artifact 读全文。不改 state["current_task"]
-    # （compaction 复用）。
-    # `if not completed`: staging 失败已置 completed/error 并 emit 过 ERROR —— turn 在
-    # setup 阶段就终止,不再构建 USER_INPUT(否则事件流会变成 [ERROR, USER_INPUT] 的
-    # 错序,且把一条本轮根本没跑的用户输入塞进历史)。下方主循环同样因 completed 跳过。
+    # 3a. 记录用户原始输入为事件（统一 context 构建路径）。USER_INPUT 正文 = 用户原始输入
+    # + 本轮**增补**(turn augmentations，仅 LLM 可见，不入 Message.user_input display)。
+    # 三类增补 —— 上传归属串 / skill 正文 / 压缩指令 —— 产地各异(上传 stage 后拿 id、skill
+    # 由 controller 从 DB 取、compact 静态)，但都汇到这一处:塞进 `parts` list、末尾 join 一次
+    # (取代过去三段各自 `f"{c}\n\n{x}" if c.strip() else x` 的复制注入)。turn 非空的唯一真相
+    # = `bool(parts)`，由 stream_execute 的权威闸 `turn_has_content(解析后)` 保证 —— 到这里
+    # parts 必非空(空 → 空 USER_INPUT → 被 EventHistory 过滤 → 击穿 context_manager 的 [-1])。
+    # `if not completed`: staging 失败已置 completed/error 并 emit 过 ERROR —— turn 在 setup
+    # 阶段就终止,不再构建 USER_INPUT(否则事件流会变成 [ERROR, USER_INPUT] 的错序)。
     if not state["completed"]:
-        user_input_content = state["current_task"]
+        _task = state["current_task"]
+        parts: List[str] = [_task] if _task.strip() else []
+
         _uploaded = state.get("uploaded_artifacts") or []
         if _uploaded:
             # 提示词只列 id —— 模型靠 id 识别文档即可；人读的文件名已在 artifacts inventory
             # 的 title 里。uploaded_artifacts 仍保 filename 作 record，不进提示词避免与 title 重复。
             _listing = ", ".join(a["id"] for a in _uploaded)
-            user_input_content = (
-                f"{user_input_content}\n\n"
+            parts.append(
                 f"[The user attached {len(_uploaded)} file(s) to this message: {_listing}. "
                 f"Use read_artifact with the id for full content.]"
             )
-        # 用户点按钮激活 skill：把新激活 skill 的正文注入 USER_INPUT（仅 LLM 可见，同上传/压缩
-        # 路径），让模型即刻看到指令 —— 与模型自调 read_skill 等价,入口是用户按钮。能力(grants)
-        # 已由 controller seed active_skills 烤开,这里只负责让正文可见;正文入 USER_INPUT 后随
-        # 历史带下来,故只本轮新激活的注入(往轮的早在其当轮 USER_INPUT 里)。纯激活轮(无文本)
-        # 时指令即正文,让 lead 总有可回应输入。
-        _skill_bodies = state.get("activated_skill_bodies") or []
-        if _skill_bodies:
-            _blocks = "\n\n".join(
+
+        # 用户点按钮激活 skill：注入新激活 skill 的正文（与模型自调 read_skill 等价,入口是用户
+        # 按钮）。能力(grants)已由 controller seed active_skills 烤开,这里只让正文可见;正文入
+        # USER_INPUT 后随历史带下,故只注本轮新激活的(往轮的早在其当轮 USER_INPUT 里)。
+        for s in (state.get("activated_skill_bodies") or []):
+            parts.append(
                 f'[The user activated the "{s.get("name") or s["slug"]}" skill. '
                 f'Follow its instructions below for this request:\n\n{s["body"]}]'
-                for s in _skill_bodies
             )
-            user_input_content = (
-                f"{user_input_content}\n\n{_blocks}"
-                if user_input_content.strip()
-                else _blocks
-            )
-        # 用户手动触发压缩：在 USER_INPUT 正文注入指令（仅 LLM 可见，同上传归属串路径）。始终
-        # 注入 —— 有正文则追加、纯压缩轮次则指令即正文，让 lead 总有可回应的输入。
+
+        # 用户手动触发压缩:注入指令,compaction_runner 在 lead 回答后无视阈值强制压缩一次。
         if state.get("force_compact"):
-            _compact_directive = (
+            parts.append(
                 "[Note: the conversation history will be compacted into a summary "
                 "right after your response.]"
             )
-            user_input_content = (
-                f"{user_input_content}\n\n{_compact_directive}"
-                if user_input_content.strip()
-                else _compact_directive
-            )
+
         state["events"].append(ExecutionEvent(
             event_type=StreamEventType.USER_INPUT.value,
             agent_name="lead_agent",
-            data={"content": user_input_content},
+            data={"content": "\n\n".join(parts)},
         ))
 
     def _resolve_tool(name: str):

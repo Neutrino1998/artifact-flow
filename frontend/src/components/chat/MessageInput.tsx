@@ -57,6 +57,7 @@ export default function MessageInput() {
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [enabledSkills, setEnabledSkills] = useState<SkillItem[]>([]);
   const [skillsLoaded, setSkillsLoaded] = useState(false);
+  const [skillsError, setSkillsError] = useState(false);
   // null when idle; only set when a send carried files (text-only sends finish
   // too fast for a progress bar to be useful). Lifecycle is owned by handleSend
   // — it sets this in the onUpload callback and clears it in the finally branch.
@@ -158,12 +159,19 @@ export default function MessageInput() {
     if (!skillPickerOpen) return;
     let alive = true;
     setSkillsLoaded(false);
+    setSkillsError(false);
     (async () => {
       try {
         const data = await getSkills();
         if (alive) setEnabledSkills(data.skills.filter((s) => s.enabled));
       } catch (err) {
         console.error('Failed to load skills:', err);
+        // Distinguish load failure from genuinely-empty (#5): a failed refetch
+        // must not silently show a stale list or masquerade as "no skills".
+        if (alive) {
+          setSkillsError(true);
+          setEnabledSkills([]);
+        }
       } finally {
         if (alive) setSkillsLoaded(true);
       }
@@ -172,6 +180,16 @@ export default function MessageInput() {
       alive = false;
     };
   }, [skillPickerOpen]);
+
+  // Armed skills belong to the conversation they were armed in — clear on any
+  // conversation change, 新建对话 included (#2). Switching to an *existing*
+  // conversation remounts this component (currentLoading flips), but 新建对话 keeps
+  // it mounted, so without this the chips would leak onto the new chat's first
+  // message. Mirrors forceCompact's hygiene (which is gated by hasPersistedHistory).
+  useEffect(() => {
+    setActiveSkills([]);
+    setSkillPickerOpen(false);
+  }, [activeKey]);
 
   const toggleSkill = useCallback((slug: string) => {
     setActiveSkills((prev) =>
@@ -632,6 +650,10 @@ export default function MessageInput() {
                       {!skillsLoaded ? (
                         <div className="px-3 py-3 text-xs text-text-tertiary dark:text-text-tertiary-dark">
                           加载中...
+                        </div>
+                      ) : skillsError ? (
+                        <div className="px-3 py-3 text-xs text-red-600 dark:text-red-400">
+                          技能加载失败,请稍后重试。
                         </div>
                       ) : enabledSkills.length === 0 ? (
                         <div className="px-3 py-3 text-xs text-text-tertiary dark:text-text-tertiary-dark">

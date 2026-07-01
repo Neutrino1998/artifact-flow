@@ -14,7 +14,7 @@ from uuid import uuid4
 from sqlalchemy.exc import IntegrityError
 
 from config import config
-from core.engine import EngineHooks, create_initial_state, execute_loop, finalize_metrics
+from core.engine import EngineHooks, create_initial_state, execute_loop, finalize_metrics, turn_has_content
 from core.events import StreamEventType
 from core.conversation_manager import ConversationManager
 from core.post_processing import (
@@ -127,8 +127,10 @@ class ExecutionController:
         # 为空 → 被 EventHistory 过滤 → 空 history → ContextManager.build 在 [-1] 崩。
         # 在此（任何 yield / DB 写之前）拒掉，不依赖调用方校验；router 另留 422 作为 HTTP
         # 快速边界。带附件时 execute_loop 会给 USER_INPUT 拼归属串（非空），故仅无附件时要求非空。
-        # force_compact / activate_skills 同理：execute_loop 会注入指令/skill 正文补足正文，
-        # 纯激活轮（无文本无附件）放行。
+        # 顶层快速闸(pre-DB):文本/附件/compact/activate_skills 全空 = 真无输入,早拒(免下方
+        # DB setup)。这里对 activate_skills 用 **raw** 值(此刻还没解析可见性/body)—— 它是放行
+        # 代理,非权威;skill 可能全被过滤成空,那种情况由**解析后**的 turn_has_content 闸收口
+        # (见下,#1:raw activate_skills ≠ 会注入内容)。
         if (
             not user_input.strip()
             and not uploaded_files
@@ -248,6 +250,18 @@ class ExecutionController:
                 return out
 
             activated_skill_bodies = await self._db_manager.with_retry(_load_bodies)
+
+        # 权威空输入闸(#1):activate_skills 是意图,经三重过滤后才知本轮真会不会注入内容。
+        # 顶层闸放行了 raw activate_skills;这里按**解析后**的 activated_skill_bodies 收口 ——
+        # 与上传/compact 对齐(三者都以"真会注入非空"为准)。全空(如全传了不可见/脏 slug、
+        # 或重复激活已 active 的 skill)→ 拒,免空 USER_INPUT 击穿 context_manager 的 [-1]。
+        if not turn_has_content(
+            user_input, uploaded_files, force_compact, activated_skill_bodies
+        ):
+            raise ValueError(
+                "'user_input' resolves to empty content: the activated skill(s) "
+                "produced nothing to inject (not visible / already active / empty body)"
+            )
 
         # L1:enabled 可见 skill(全 agent 同一份)→ <available_skills>。effective_skillset
         # 缺省(无 skill / 测试)→ 空列表,不注入。
