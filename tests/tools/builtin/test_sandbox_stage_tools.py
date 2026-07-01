@@ -147,6 +147,13 @@ class TestMountTool:
         result = await MountArtifactTool(session, service)(artifact_id="..")
         assert not result.success
 
+    async def test_mount_dot_skills_reserved(self, session, service):
+        """`.skills` 是 mount_skill 的技能挂载根(id 模式允许字面 `.skills`)→ 保留、拒挂。"""
+        service.add_text(".skills", "collide")
+        result = await MountArtifactTool(session, service)(artifact_id=".skills")
+        assert not result.success
+        assert "reserved" in result.error.lower()
+
     async def test_mount_over_planted_symlink_does_not_follow(self, session, service, tmp_path):
         """容器内代码可在工作区植 symlink 指池外;mount 覆写不得跟链写出去。"""
         outside = tmp_path / "outside.txt"

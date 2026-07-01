@@ -26,6 +26,7 @@ from tools.base import BUILTIN_TOOL_NAMES, is_builtin_name, resolve_allowed_tool
 from tools.custom.http_tool import validate_response_extract
 from tools.custom.secrets import assert_secret_refs_allowed
 from utils.logger import get_logger
+from utils.skill_zip import SkillZipError, locate_skill_md
 
 logger = get_logger("ArtifactFlow")
 
@@ -628,19 +629,14 @@ def _parse_skill_zip(
         zf = zipfile.ZipFile(io.BytesIO(blob))
     except zipfile.BadZipFile as e:
         raise SeedError(f"skill '{slug}.zip' is not a valid zip: {e}")
-    md_members = [
-        n for n in zf.namelist()
-        if not n.endswith("/") and n.rsplit("/", 1)[-1] == "SKILL.md"
-    ]
-    if not md_members:
-        raise SeedError(f"skill '{slug}.zip' contains no SKILL.md")
-    if len(md_members) > 1:
-        raise SeedError(
-            f"skill '{slug}.zip' contains multiple SKILL.md ({sorted(md_members)}); "
-            f"one zip = one skill"
-        )
-    md_text = zf.read(md_members[0]).decode("utf-8")
-    frontmatter, body = _parse_frontmatter_text(md_text, f"{slug}.zip:{md_members[0]}")
+    # 定位唯一 SKILL.md(裸根 / wrapper / 深嵌都吃,0 或多个 loud-fail)。同一个
+    # 定位器供 D-2 mount 算剥壳前缀 —— 两处不漂移(utils.skill_zip)。
+    try:
+        md_member = locate_skill_md(zf.namelist(), f"skill '{slug}.zip'")
+    except SkillZipError as e:
+        raise SeedError(str(e))
+    md_text = zf.read(md_member).decode("utf-8")
+    frontmatter, body = _parse_frontmatter_text(md_text, f"{slug}.zip:{md_member}")
     return _skill_seed_from_md(
         slug, frontmatter, body, bundle=blob, where=f"{slug}.zip",
         known_unit_names=known_unit_names, known_full_names=known_full_names,

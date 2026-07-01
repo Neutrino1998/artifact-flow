@@ -131,7 +131,9 @@ async def create_controller(
     # 做可见性闸 + SkillService lazy 取正文),仅有可见 skill 时建。
     artifact_tools = create_artifact_tools(artifact_service)
     sandbox_tools = create_sandbox_tools(sandbox_session, artifact_service)
-    skill_tools = create_skill_tools(SkillService(db_manager=db_manager), effective_skillset)
+    skill_tools = create_skill_tools(
+        SkillService(db_manager=db_manager), effective_skillset, sandbox_session
+    )
     all_tools = {
         **get_tools(),
         **snapshot.external_tools,
@@ -152,12 +154,12 @@ async def create_controller(
     # {full_name: 等级};等级从工具对象取(绑定不存等级)。引擎/上下文构建全程读这个。
     effective_toolsets = resolve_all(snapshot, all_tools, skill_snapshot=visible_skill_snapshot)
 
-    # read_skill 注入:skill 全 agent 可见 → 有可见 skill 时把 read_skill 灌进每个 agent
-    # 的可调集(等级取工具定义=AUTO)。setdefault 不覆盖(agent 本不会声明它,纯防御)。
-    if skill_tools:
-        read_skill_perm = all_tools["read_skill"].permission
+    # skill 工具注入:skill 全 agent 可见 → 有可见 skill 时把 read_skill(+ mount_skill,
+    # D-2)灌进每个 agent 的可调集(等级取工具定义=AUTO)。setdefault 不覆盖(agent 本不会
+    # 声明它们,纯防御)。
+    for t in skill_tools:
         for ets in effective_toolsets.values():
-            ets.permissions.setdefault("read_skill", read_skill_perm)
+            ets.permissions.setdefault(t.name, t.permission)
 
     hooks = EngineHooks(
         check_cancelled=store.is_cancelled,

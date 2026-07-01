@@ -26,6 +26,7 @@ from tools.builtin.artifact_service import ArtifactService
 from tools.builtin.sandbox_session import (
     SandboxError,
     SandboxSession,
+    SKILLS_SUBDIR,
     WORKSPACE_MOUNT,
 )
 from utils.doc_converter import EXTENSION_MIME_MAP
@@ -154,6 +155,14 @@ class MountArtifactTool(BaseTool):
         artifact_id = artifact_id.strip()
         if not artifact_id:
             return ToolResult(success=False, error="Parameter 'artifact_id' must not be empty.")
+
+        # 保留名:`.skills` 是 mount_skill 的技能挂载根,一个同名 artifact 落成顶层
+        # 文件会与它打架(id 模式允许字面 `.skills`)。loud-fail 让模型换个 id。
+        if artifact_id == SKILLS_SUBDIR:
+            return ToolResult(
+                success=False,
+                error=f"'{SKILLS_SUBDIR}' is reserved for mounted skills; use a different artifact id.",
+            )
 
         session_id = self._service.current_session_id
         if not session_id:

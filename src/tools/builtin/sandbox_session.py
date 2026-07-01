@@ -37,6 +37,11 @@ logger = get_logger("ArtifactFlow")
 # 改路径要连动提示文案,不是配置能独立换的。
 WORKSPACE_MOUNT = "/workspace"
 
+# skill bundle 的 mount 根(mount_skill 把 bundle 解到 {WORKSPACE_MOUNT}/{SKILLS_SUBDIR}/<slug>/)。
+# 保留名:MountArtifactTool 拒绝会撞它的 artifact id(id 模式 `[\w\-.]{1,64}` 允许字面
+# `.skills`,不挡则 mount 一个叫 `.skills` 的 artifact 会与技能挂载目录打架,D-2)。
+SKILLS_SUBDIR = ".skills"
+
 # 容器/scratch 目录的归属标识。reaper(C-reap)按 SANDBOX_LABEL 枚举 daemon 上
 # 的活容器,再按 conv/msg label 与 list_active_executions 做 per-turn 差集;
 # namespace label 隔离共用同一 daemon 的多套部署(各自的 reaper 只认本命名空间)。
