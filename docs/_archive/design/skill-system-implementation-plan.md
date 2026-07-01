@@ -21,20 +21,14 @@
 
 ## 进度
 
-- **当前**:**A 合 main;C 全落地合 main(C-1/C-2/C-3 + reviewer 两轮 + UX 打磨 + E2E 实测,见 Phase C「进展」);B 进行中 —— B-1/B-2/B-3 + B-4 后端已合 main(落地见 Phase B「进展」+ `skill-system-phase-b-design.md`),B-4 前端/B-5/B-6/收尾验收仍挂账(下方「下一步」)。** C 先于这些 B 剩余片落地 = 纯加法、不阻塞,B 剩余是退役 turn-long session / CVE / 多副本验收等独立收尾。 B-3 = deferred 索引行 + `search_tools` + catalog 挪 reminder(grammar 留 system 前缀);**B-4 后端**(凭证统一加密落库 `tool_credential` + Fernet resolver 接进 HttpTool + external 工具 CRUD/agent_unit 挂载/凭证写-only API + provider 缝)两笔合 main。B 内 4 片增量合 main(B-1→B-2→B-3→B-4),**B-4 又切 2 片:后端全先行(已合)+ 前端(待开工)**。架构主分叉已**全部收口** —— 披露归工具层 / 可见性两正交字段 / 依赖三层离线 / 导入硬软双门 / read+mount 零新机制 / external 工具·tool-set·mcp·agent 全 DB 物化(通用 reconciler)/ 部门授权两张 FK 表 / 工具权限两正交轴(等级 + 成员)—— **逐条见「已锁定的决策」+「数据模型总览」,此处不复述**。
-- **B-4 后端 reviewer 收口已合**:两轮 reviewer(15 findings + 复审 N1-N4)+ 乙2 部署门禁,共 7 commit(`cc5ca36`→`59d4205`,见变更日志 06-29)。
-- **下一步(B 剩余片,按序)**:
-  1. **B-4 前端** —— `export_openapi`(已最新)+ `npm run generate-types`;管理页 = 工具 unit 列表/编辑(seeded 只读)+ agent_unit 挂载勾选 + 凭证写-only 配置;`visibility` 列展示但 G 才接 dept 授权 UI。后端 API 已就绪(`/api/v1/admin/tools/*`)。
-  2. **B-5 退役 turn-long session** —— controller 改吃 `db_manager` 工厂而非预开整轮 session;snapshot 短 session 读完即关;artifact 读改短 retrying session;credential 退回 lazy(execute 期短 session 读密文解密,替 slice 甲的 eager 预解、顺手消 N1 明文驻留)。消 idle-in-transaction + 连接整轮被占(等 LLM/授权白占、压并发)+ 补 retry 缺口。闸:审所有 bound-session 消费者无 loop 中段直读 + 无 ORM 逃逸。
-  3. **B-6 依赖 CVE** —— starlette / python-multipart / pydantic-settings 已知漏洞升级(B-4 时明确未并入)+ 按 DEP-02 重生成 `requirements.lock` + CVE 复审。
-  4. **B 收尾验收** —— 开发 Mac docker `--scale backend=2`(intranet compose + `--profile infra`,本地 build 镜像)跑 `deploy/MULTI-REPLICA.md` 清单(尤其 nginx 变量 proxy_pass 是否真轮询、单副本不回归、Redis 跨副本 cancel)+ tool unit CRUD/管理端到端 smoke(建 unit→挂 agent→配凭证→该 http 工具真跑通)。
-- **B 残留延后**(非阻塞):#7-full 抽共享 builder(seeds↔manager,本轮只对齐漂移)/ #11 `list_units` 冷路径 N+1 / #8 `provider!=http` 成员 advertise-but-build → 归 F(MCP)。
+- **当前**:**A / B / C 三阶段全落地合 main。** B 全部子片(B-1 存储→B-2 引擎切快照→B-3 deferred+`search_tools`→B-4 后端凭证加密+CRUD 与前端工具 unit 管理页→B-5 退役 turn-long session→B-6 CVE→收尾验收)+ 两轮 reviewer + 乙2 部署门禁均已合(落地见 Phase B「进展」+ `skill-system-phase-b-design.md`);**唯一挂账 = 真机验收**(真 nginx LB 入口[caddy 要 ACME] + 跨副本执行续接[A 发起 / B 经共享 Redis resolve interrupt],dev-Mac `--scale` 已实证轮询/门禁/撞名,留内网真机)。C = C-1/C-2/C-3 + reviewer 两轮 + UX 打磨 + E2E 实测(见 Phase C「进展」)。架构主分叉已**全部收口** —— 披露归工具层 / 可见性两正交字段 / 依赖三层离线 / 导入硬软双门 / read+mount 零新机制 / external 工具·tool-set·mcp·agent 全 DB 物化(通用 reconciler)/ 部门授权两张 FK 表 / 工具权限两正交轴(等级 + 成员)—— **逐条见「已锁定的决策」+「数据模型总览」,此处不复述**。
+- **下一步 = D/E/F/G**(A/B/C 完结):D(bundle + L3 mount 进沙盒,依赖沙盒执行栈)/ E(导入门禁 validator + verify agent + pandoc-first 预装 + 技能列表搜索/过滤)/ F(MCP client)/ G(部门授权 UI)。**B 残留延后**(非阻塞、归 F):#7-full 抽共享 builder(seeds↔manager)/ #11 `list_units` 冷路径 N+1 / #8 `provider!=http` 成员 advertise-but-build。
 - **分支策略(已定:走 main)**:与沙盒 plan 不同 —— 沙盒走 `feat/sandbox` 不增量合 main 是因为有「半迁移态(md→Word 过渡)漏到生产」的风险。本 plan **无此类破坏性中间态**,A/B/C 是纯加法引擎/存储特性,故**逐阶段直接合 main、再按既有策略 overlay intranet**(遵 `feedback-branch-strategy`),不开长命特性分支。
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | A | 工具结果→富格式 artifact(`create_from_upload` 的第三调用方) | **已完成**(合 main,落地见 A「进展」) |
-| B | 工具渐进式披露(tool-set DB 模型[迁出 config]+ `search_tools` 内建工具;MCP 适配缝) | **进行中**(B-1/B-2/B-3 + B-4 后端合 main;B-4 前端待开工) |
+| B | 工具渐进式披露(tool-set DB 模型[迁出 config]+ `search_tools` 内建工具;MCP 适配缝) | **已完成**(B-1~B-6 + 前端管理页 + reviewer 两轮 + 乙2 门禁合 main;唯真机验收挂账) |
 | C | Skill 核心(存储 + L1 注入 + `read_skill` + 权限/上下文覆盖 + 部门授权解析地基) | **已完成**(C-1/C-2/C-3 合 main + reviewer 两轮 + UX 打磨 + E2E 实测,见该节进展) |
 | D | Skill bundle 执行(L3 挂载进沙盒 + `compatibility` 依赖三层 + 离线 wheel) | 未开始 |
 | E | 导入门禁与预装(硬门槛 validator + 软门槛 verify agent + pandoc-first 预装) | 未开始 |
