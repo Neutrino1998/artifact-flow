@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useUIStore } from '@/stores/uiStore';
 import { getSkills, setSkillEnabled } from '@/lib/api';
 import type { SkillItem } from '@/types';
 
@@ -14,7 +13,6 @@ export default function SkillManagementPanel() {
   const [error, setError] = useState<string | null>(null);
   // 正在写覆盖的 slug 集(禁用其开关防抖动)。
   const [pending, setPending] = useState<Set<string>>(new Set());
-  const setActiveMode = useUIStore((s) => s.setActiveMode);
 
   useEffect(() => {
     let alive = true;
@@ -63,21 +61,9 @@ export default function SkillManagementPanel() {
       <div className="px-4 pt-4 pb-2">
         <div className="max-w-3xl mx-auto">
           <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-2xl shadow-float px-4 py-3">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-sm font-semibold text-text-primary dark:text-text-primary-dark">
-                技能管理
-              </h2>
-              <button
-                onClick={() => setActiveMode('none')}
-                className="flex-shrink-0 p-1 rounded-lg text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark transition-colors"
-                aria-label="关闭"
-                title="关闭"
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                  <path d="M4 4l8 8M12 4l-8 8" />
-                </svg>
-              </button>
-            </div>
+            <h2 className="text-sm font-semibold text-text-primary dark:text-text-primary-dark">
+              技能管理
+            </h2>
             <p className="mt-1 text-xs text-text-tertiary dark:text-text-tertiary-dark">
               关闭的技能不会自动进入对话,也不会出现在输入框的激活选择器里;随时可以重新开启。
             </p>
