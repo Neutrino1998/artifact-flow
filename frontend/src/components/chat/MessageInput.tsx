@@ -592,35 +592,6 @@ export default function MessageInput() {
                 </svg>
               </button>
 
-              {/* Compact context — arms a one-shot compaction on the next send.
-                  Disabled while streaming (compaction rides a fresh turn, and the
-                  composer can't start one mid-stream). */}
-              <button
-                onClick={() => setForceCompact((v) => !v)}
-                disabled={isStreaming || !hasPersistedHistory}
-                className={`h-8 w-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                  effectiveForceCompact
-                    ? 'bg-accent/15 text-accent'
-                    : 'text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark'
-                }`}
-                aria-label="Compact context"
-                aria-pressed={effectiveForceCompact}
-                title={
-                  !hasPersistedHistory
-                    ? '当前会话无历史可压缩'
-                    : effectiveForceCompact
-                      ? '已开启压缩：本轮回答后把之前的对话压缩成摘要（点击取消）'
-                      : '压缩上下文：本轮回答后把之前的对话压缩成摘要'
-                }
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="4 14 10 14 10 20" />
-                  <polyline points="20 10 14 10 14 4" />
-                  <line x1="14" y1="10" x2="21" y2="3" />
-                  <line x1="3" y1="21" x2="10" y2="14" />
-                </svg>
-              </button>
-
               {/* Skill activation picker — arms skills for the next send. Disabled
                   while streaming (activation rides a fresh turn). */}
               <div className="relative">
@@ -712,6 +683,35 @@ export default function MessageInput() {
                   </>
                 )}
               </div>
+
+              {/* Compact context — arms a one-shot compaction on the next send.
+                  Disabled while streaming (compaction rides a fresh turn, and the
+                  composer can't start one mid-stream). */}
+              <button
+                onClick={() => setForceCompact((v) => !v)}
+                disabled={isStreaming || !hasPersistedHistory}
+                className={`h-8 w-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  effectiveForceCompact
+                    ? 'bg-accent/15 text-accent'
+                    : 'text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark'
+                }`}
+                aria-label="Compact context"
+                aria-pressed={effectiveForceCompact}
+                title={
+                  !hasPersistedHistory
+                    ? '当前会话无历史可压缩'
+                    : effectiveForceCompact
+                      ? '已开启压缩：本轮回答后把之前的对话压缩成摘要（点击取消）'
+                      : '压缩上下文：本轮回答后把之前的对话压缩成摘要'
+                }
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="4 14 10 14 10 20" />
+                  <polyline points="20 10 14 10 14 4" />
+                  <line x1="14" y1="10" x2="21" y2="3" />
+                  <line x1="3" y1="21" x2="10" y2="14" />
+                </svg>
+              </button>
 
               {/* Char counter — only when approaching the cap */}
               {nearLimit && (
