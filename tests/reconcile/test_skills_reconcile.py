@@ -382,6 +382,19 @@ async def test_bundle_multiple_skill_md_loud_fails(db_session, cfg):
         await _run(db_session, cfg)
 
 
+async def test_bundle_files_outside_skill_md_root_loud_fails(db_session, cfg):
+    """SKILL.md 在 wrapper 下、却有前缀外的成员(根级 LICENSE)→ import 侧 loud-fail。
+    否则 mount 剥壳只搬 wrapper 子树、把 LICENSE 静默丢(#1,镜像 prose extras)。"""
+    _, _, skills = cfg
+    (skills / "pack.zip").write_bytes(_make_zip({
+        "pack/SKILL.md": _skill_md(name="pack", allowed_tools=None),
+        "pack/references/n.md": "n",
+        "LICENSE": "MIT",                 # 前缀外、剥壳会丢
+    }))
+    with pytest.raises(SeedError, match="outside the SKILL.md root"):
+        await _run(db_session, cfg)
+
+
 async def test_dir_and_zip_same_slug_collide_loud_fails(db_session, cfg):
     """`foo/` + `foo.zip` 同 slug → parse 期干净 loud-fail(不落到 DB 撞 PK)。"""
     _, _, skills = cfg

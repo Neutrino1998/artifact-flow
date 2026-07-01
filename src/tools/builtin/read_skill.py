@@ -56,7 +56,13 @@ _MOUNT_HINT_NO_BUNDLE = (
 # 不与工作区顶层产物撞眼)。宿主侧写进 session.tmp_dir(= 容器 /tmp 的 bind 源)。
 _STAGE_ZIP_NAME = ".skill-bundle.zip"          # 宿主 tmp_dir/<此名> → 容器 /tmp/<此名>
 _STAGE_ZIP_CONTAINER = f"/tmp/{_STAGE_ZIP_NAME}"
-_STAGE_EXTRACT_DIR = "/tmp/.skill-extract"     # 解压落点(再按剥壳前缀 mv 到约定路径)
+# 解压落点**在 /workspace(与目标同一个 bind mount)**:最后一步 mv 退化成同盘 rename、
+# 零拷贝 —— 若解到 /tmp,mv 跨 mount(EXDEV)会 copy+unlink,峰值瞬时翻倍(Z+2X),
+# 近配额 bundle 可能被 watchdog 误杀。`.extract` 点前缀、非合法 slug,不与技能目录撞。
+_STAGE_EXTRACT_DIR = f"{WORKSPACE_MOUNT}/{SKILLS_SUBDIR}/.extract"
+# 成功清单哨兵:ls 输出前 echo 它,解析时只取哨兵后的部分 —— 隔离解压阶段可能的 stderr
+# 告警(_drain_exec 按到达序合流 stdout/stderr,告警在哨兵 echo 前到达 → 被丢弃)。
+_LISTING_SENTINEL = "___MOUNT_SKILL_LISTING___"
 
 
 class ReadSkillTool(BaseTool):
@@ -208,16 +214,18 @@ class MountSkillTool(BaseTool):
         target = f"{WORKSPACE_MOUNT}/{SKILLS_SUBDIR}/{slug}"
         return ToolResult(
             success=True,
-            data=self._render_success(slug, target, listing=result),
+            data=self._render_success(slug, info, target, listing=result),
             metadata={"path": target, "slug": slug},
         )
 
     async def _extract(self, slug: str, prefix: str):
         """沙盒内解压 + 按剥壳前缀就位 + 列顶层;成功返回 listing 文本,失败返回 ToolResult。
 
-        单条 `set -e` 命令:解压静默、失败即 abort(stdout=报错、exit≠0);成功时
-        `ls -1Ap` 的输出即顶层清单。动态段(slug/prefix)全 shlex.quote —— 沙盒内注入
-        非提权(模型本就有 bash),quote 是为怪名不炸命令(correctness)。
+        单条 `set -e` 命令:解压静默、失败即 abort(stdout=报错、exit≠0);成功时哨兵
+        后的 `ls -1Ap` 输出即顶层清单。解压落点在 /workspace(与 target 同盘)→ 末步 mv
+        是同盘 rename、零拷贝(不跨 /tmp↔/workspace 翻倍占用);解完删暂存 zip 减稳态。
+        动态段(slug/prefix)全 shlex.quote —— 沙盒内注入非提权(模型本就有 bash),quote
+        是为怪名不炸命令(correctness)。
         """
         skills_root = f"{WORKSPACE_MOUNT}/{SKILLS_SUBDIR}"
         target = f"{skills_root}/{slug}"
@@ -228,9 +236,11 @@ class MountSkillTool(BaseTool):
             f"mkdir -p {shlex.quote(_STAGE_EXTRACT_DIR)}; "
             f"python3 -m zipfile -e {shlex.quote(_STAGE_ZIP_CONTAINER)} "
             f"{shlex.quote(_STAGE_EXTRACT_DIR)}/; "
-            f"mkdir -p {shlex.quote(skills_root)}; "
             f"rm -rf {shlex.quote(target)}; "
             f"mv {shlex.quote(src)} {shlex.quote(target)}; "
+            f"rm -rf {shlex.quote(_STAGE_EXTRACT_DIR)}; "
+            f"rm -f {shlex.quote(_STAGE_ZIP_CONTAINER)}; "
+            f"echo {shlex.quote(_LISTING_SENTINEL)}; "
             f"ls -1Ap {shlex.quote(target)}"
         )
         try:
@@ -251,16 +261,21 @@ class MountSkillTool(BaseTool):
             return ToolResult(
                 success=False, error=f"Failed to unpack skill '{slug}' into the sandbox."
             )
-        return exec_result.output.strip()
+        # 哨兵后即 ls 清单;哨兵前的一切(解压阶段 stderr 告警)丢弃。缺哨兵(不该发生)
+        # 回落整段 output,不静默吞。
+        out = exec_result.output
+        if _LISTING_SENTINEL in out:
+            return out.split(_LISTING_SENTINEL, 1)[1].strip()
+        return out.strip()
 
-    def _render_success(self, slug: str, target: str, *, listing: str) -> str:
-        """成功文案:路径 + 顶层清单 + compatibility 原样 + 离线装依赖作「例如」。"""
-        info = self._skillset.visible.get(slug)
+    def _render_success(self, slug: str, info, target: str, *, listing: str) -> str:
+        """成功文案:路径 + 顶层清单 + compatibility 原样 + 离线装依赖作「例如」。
+        `info` 由 execute() 传入(已校验非 None),不再二次 lookup。"""
         lines = [f"Mounted skill '{slug}' at {target}/."]
         if listing:
             lines.append("Top-level contents:")
             lines.extend(f"  {ln}" for ln in listing.splitlines())
-        if info is not None and info.compatibility:
+        if info.compatibility:
             lines.append(f"Declared compatibility: {info.compatibility}")
         # 依赖提示作「例如」—— asset 不假设是 pip 包(可能是 xsd/模板/数据/字体/node),
         # 清单 + SKILL.md 驱动用法,pip 只点破气隙坑这一例(原则 8)。

@@ -227,8 +227,8 @@ async def test_mount_wrapper_prefix_stripped_in_command(tmp_path):
     tool, sandbox = _mount_tool(tmp_path, bundle=bundle)
     res = await tool.execute(slug="doc")
     assert res.success, res.error
-    # 剥壳:mv /tmp/.skill-extract/pkg → /workspace/.skills/doc
-    assert "/tmp/.skill-extract/pkg" in sandbox.last_command
+    # 剥壳:解到 /workspace/.skills/.extract(与 target 同盘)→ mv .extract/pkg → target
+    assert "/workspace/.skills/.extract/pkg" in sandbox.last_command
     assert "/workspace/.skills/doc" in sandbox.last_command
     assert "python3 -m zipfile -e" in sandbox.last_command
     # bundle 已 staging 落 tmp_dir
@@ -240,16 +240,19 @@ async def test_mount_bare_root_no_prefix(tmp_path):
     tool, sandbox = _mount_tool(tmp_path, bundle=bundle)
     res = await tool.execute(slug="doc")
     assert res.success, res.error
-    # 裸根:mv /tmp/.skill-extract(整棵)→ target,无子目录后缀
-    assert "mv /tmp/.skill-extract /workspace/.skills/doc" in sandbox.last_command
+    # 裸根:mv .extract(整棵)→ target,无子目录后缀;同盘 rename、无 /tmp 跨挂载
+    assert "mv /workspace/.skills/.extract /workspace/.skills/doc" in sandbox.last_command
 
 
 async def test_mount_success_message_has_path_listing_and_hints(tmp_path):
     bundle = _make_zip({"pkg/SKILL.md": "g", "pkg/wheels/x.whl": "w"})
     svc = _FakeService(bundles={"doc": bundle})
+    # 解压阶段的 stderr 告警在哨兵前 → 应被丢弃,不进清单(#3)
     sandbox = _FakeSandbox(
         tmp_dir=str(tmp_path / "tmp"),
-        exec_result=_ExecResult(0, "SKILL.md\nwheels/\n"),
+        exec_result=_ExecResult(
+            0, "WARNING: noise from extraction\n___MOUNT_SKILL_LISTING___\nSKILL.md\nwheels/\n"
+        ),
     )
     skillset = _skillset("doc", has_bundle=True, compatibility={"python": ">=3.11"})
     tool = MountSkillTool(sandbox, svc, skillset)
@@ -258,6 +261,7 @@ async def test_mount_success_message_has_path_listing_and_hints(tmp_path):
     assert res.metadata["path"] == "/workspace/.skills/doc"
     assert "/workspace/.skills/doc/" in res.data
     assert "wheels/" in res.data                       # 顶层清单透出
+    assert "WARNING: noise" not in res.data            # 哨兵前噪音被隔离(#3)
     assert "python" in res.data                        # compatibility 原样
     assert "--no-index" in res.data                    # 离线装「例如」
     assert "/workspace/.skills/doc/wheels" in res.data # wheel 路径示例

@@ -26,7 +26,7 @@ from tools.base import BUILTIN_TOOL_NAMES, is_builtin_name, resolve_allowed_tool
 from tools.custom.http_tool import validate_response_extract
 from tools.custom.secrets import assert_secret_refs_allowed
 from utils.logger import get_logger
-from utils.skill_zip import SkillZipError, locate_skill_md
+from utils.skill_zip import SkillZipError, locate_skill_md, strip_prefix
 
 logger = get_logger("ArtifactFlow")
 
@@ -631,10 +631,27 @@ def _parse_skill_zip(
         raise SeedError(f"skill '{slug}.zip' is not a valid zip: {e}")
     # 定位唯一 SKILL.md(裸根 / wrapper / 深嵌都吃,0 或多个 loud-fail)。同一个
     # 定位器供 D-2 mount 算剥壳前缀 —— 两处不漂移(utils.skill_zip)。
+    names = zf.namelist()
     try:
-        md_member = locate_skill_md(zf.namelist(), f"skill '{slug}.zip'")
+        md_member = locate_skill_md(names, f"skill '{slug}.zip'")
     except SkillZipError as e:
         raise SeedError(str(e))
+    # 格式校验(import 侧):D-2 mount 剥壳只保留 SKILL.md 所在子树 → 前缀外的成员会被
+    # 静默丢。在受信解析边界 loud-fail(镜像 prose 目录的「附属文件」loud-fail),把「结构
+    # 不对」变成存库前的显式错误;mount 侧据此可信「结构必对」、零校验。跨前缀布局的完整
+    # validator(孤儿/链接/fence)留 E。
+    prefix = strip_prefix(md_member)
+    if prefix:
+        stray = sorted(
+            n for n in names
+            if not n.endswith("/") and not n.startswith(prefix + "/")
+        )
+        if stray:
+            raise SeedError(
+                f"skill '{slug}.zip' has files outside the SKILL.md root '{prefix}/' "
+                f"({stray}); pack everything under one top-level dir so nothing is "
+                f"dropped when the bundle is mounted"
+            )
     md_text = zf.read(md_member).decode("utf-8")
     frontmatter, body = _parse_frontmatter_text(md_text, f"{slug}.zip:{md_member}")
     return _skill_seed_from_md(
