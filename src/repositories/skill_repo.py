@@ -63,7 +63,11 @@ class SkillRepository:
 
         SELECT→INSERT 非原子:两请求(两标签页/重试客户端)同用户同 slug 首次并发 toggle 会
         都读到 None、都 insert → 后者撞复合 PK IntegrityError。捕获 → rollback → 重读改 UPDATE
-        (last-writer-wins),把并发首插的自我 500 收成正常写(镜像 ToolRegistryManager._commit)。"""
+        (last-writer-wins),把并发首插的自我 500 收成正常写(镜像 ToolRegistryManager._commit)。
+
+        **调用约束**:冲突路径 `rollback()` 会回滚**整个 session** —— 故本方法必须在一个
+        use-case 里**先于任何其它 staged 写**调用(今唯一调用者 SkillManager.set_enabled 之前
+        只有读,安全)。若未来有调用者在它之前 stage 了别的写,那些写会在冲突时被静默丢掉。"""
         async def _apply() -> bool:
             """有行则 UPDATE 返 True;无行则 stage INSERT 返 False(供撞 PK 时区分处理)。"""
             row = (
