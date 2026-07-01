@@ -1,7 +1,10 @@
-"""config→DB skill reconciler + snapshot 测试(Phase C-1)。"""
+"""config→DB skill reconciler + snapshot 测试(Phase C-1;bundle = D-1)。"""
 
+import io
 import logging
+import os
 import textwrap
+import zipfile
 
 import pytest
 from sqlalchemy import select
@@ -16,8 +19,9 @@ from db.models import (
     UserSkill,
 )
 from reconcile.reconciler import reconcile_config_to_db
-from reconcile.seeds import SeedError
+from reconcile.seeds import SeedError, parse_skill_seeds
 from reconcile.snapshot import load_skill_snapshot
+from repositories.skill_repo import SkillRepository
 
 
 # --------------------------------------------------------------------------
@@ -309,3 +313,92 @@ async def test_unit_prune_deletes_dept_unit_rule(db_session, cfg):
     assert (await db_session.execute(
         select(DepartmentUnitRule).where(DepartmentUnitRule.unit_name == "weather")
     )).first() is None
+
+
+# --------------------------------------------------------------------------
+# bundle 物化(D-1:目录含附属文件 → 确定性 zip;单文件 → NULL)
+# --------------------------------------------------------------------------
+
+
+def _write_bundle_skill(skills, slug="pack", *, note="see script"):
+    """写一个带 scripts/ + references/ 的多文件 skill,返回目录。"""
+    _write(skills / slug / "SKILL.md", _skill_md(name=slug, allowed_tools=None,
+                                                 body="Mount me."))
+    _write(skills / slug / "scripts" / "run.py", "print('hi')\n")
+    _write(skills / slug / "references" / "notes.md", f"# Notes\n\n{note}\n")
+    return skills / slug
+
+
+async def test_skill_bundle_built_for_multifile(db_session, cfg):
+    _, _, skills = cfg
+    _write_bundle_skill(skills, "pack")
+    await _run(db_session, cfg)
+
+    row = (await db_session.execute(select(Skill).where(Skill.slug == "pack"))).scalar_one()
+    assert row.bundle is not None
+    # 完整 zip 含 SKILL.md + 附属文件(决策 3)
+    names = set(zipfile.ZipFile(io.BytesIO(row.bundle)).namelist())
+    assert names == {"SKILL.md", "scripts/run.py", "references/notes.md"}
+
+    snap = await load_skill_snapshot(db_session)
+    assert snap["pack"].has_bundle is True
+
+
+async def test_single_file_skill_has_no_bundle(db_session, cfg):
+    _, _, skills = cfg
+    _write(skills / "solo" / "SKILL.md", _skill_md(name="solo", allowed_tools=None))
+    await _run(db_session, cfg)
+
+    row = (await db_session.execute(select(Skill).where(Skill.slug == "solo"))).scalar_one()
+    assert row.bundle is None
+    snap = await load_skill_snapshot(db_session)
+    assert snap["solo"].has_bundle is False
+
+
+def test_bundle_zip_deterministic_ignores_mtime(cfg):
+    """同源文件集 → 同 zip 字节,即使文件 mtime 变了(reconciler 幂等的前提)。"""
+    _, _, skills = cfg
+    d = _write_bundle_skill(skills, "det")
+    kw = dict(known_unit_names=set(), known_full_names={})
+
+    first = parse_skill_seeds(str(skills), **kw)[0].bundle
+    # 改所有文件的 mtime(不改内容)
+    for root, _dirs, files in os.walk(d):
+        for f in files:
+            os.utime(os.path.join(root, f), (1_000_000_000, 1_000_000_000))
+    second = parse_skill_seeds(str(skills), **kw)[0].bundle
+
+    assert first is not None
+    assert first == second   # mtime 不泄进 zip 字节
+
+
+async def test_bundle_hash_tracks_asset_change(db_session, cfg):
+    """改附属文件(非 SKILL.md)→ seed_hash 变 → updated(不被 skip)。"""
+    _, _, skills = cfg
+    _write_bundle_skill(skills, "pack", note="v1")
+    assert "skill:pack" in (await _run(db_session, cfg)).created
+    # 重跑无改 → skipped
+    assert "skill:pack" in (await _run(db_session, cfg)).skipped
+
+    # 只改 references/(SKILL.md 不动)→ 必须 updated
+    _write(skills / "pack" / "references" / "notes.md", "# Notes\n\nv2\n")
+    report = await _run(db_session, cfg)
+    assert "skill:pack" in report.updated
+    row = (await db_session.execute(select(Skill).where(Skill.slug == "pack"))).scalar_one()
+    zf = zipfile.ZipFile(io.BytesIO(row.bundle))
+    assert b"v2" in zf.read("references/notes.md")
+
+
+async def test_get_bundle_roundtrip(db_session, cfg):
+    _, _, skills = cfg
+    _write_bundle_skill(skills, "pack")
+    _write(skills / "solo" / "SKILL.md", _skill_md(name="solo", allowed_tools=None))
+    await _run(db_session, cfg)
+
+    repo = SkillRepository(db_session)
+    blob = await repo.get_bundle("pack")
+    assert blob is not None
+    assert "scripts/run.py" in zipfile.ZipFile(io.BytesIO(blob)).namelist()
+    # 单文件 skill / 不存在的 slug → None
+    assert await repo.get_bundle("solo") is None
+    assert await repo.get_bundle("nope") is None

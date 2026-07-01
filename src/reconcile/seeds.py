@@ -12,8 +12,10 @@ config 种子解析 —— 把 `config/tools/` 与 `config/agents/` 解析成归
 """
 
 import hashlib
+import io
 import json
 import os
+import zipfile
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -96,6 +98,7 @@ class SkillSeed:
     compatibility: Optional[dict]      # 气隙依赖声明(C 存,D/E 消费)
     meta: Optional[dict]               # license/version/未知扩展(系统不单独消费)
     skill_md: str                      # SKILL.md 正文(frontmatter 已剥离)
+    bundle: Optional[bytes] = None     # 完整原始 zip(目录有 SKILL.md 以外文件才非 NULL,D-1)
     seed_hash: str = ""
 
 
@@ -453,6 +456,40 @@ def parse_agent_seeds(
 # --------------------------------------------------------------------------
 
 
+# 确定性 zip:固定 mtime + 归一权限 + 条目排序 → 同源文件集必产同字节(reconciler 幂等,
+# changelog 07-01 幂等坑:naive zipfile 嵌 mtime,每次 reconcile 都误判变更)。
+_ZIP_FIXED_MTIME = (1980, 1, 1, 0, 0, 0)  # zip 纪元下限,与 checkout 时间无关
+
+
+def _collect_bundle_files(dir_path: str) -> List[Tuple[str, bytes]]:
+    """递归收集目录下所有普通文件 → 按 posix 相对路径排序的 (relpath, 内容字节) 列表。
+    符号链接 / 非普通文件跳过(config 受信,但保确定性 + 防意外逃逸)。"""
+    collected: List[Tuple[str, bytes]] = []
+    for root, dirs, files in os.walk(dir_path, followlinks=False):
+        for fname in files:
+            fpath = os.path.join(root, fname)
+            if os.path.islink(fpath) or not os.path.isfile(fpath):
+                continue
+            rel = os.path.relpath(fpath, dir_path).replace(os.sep, "/")
+            with open(fpath, "rb") as f:
+                collected.append((rel, f.read()))
+    collected.sort(key=lambda t: t[0])
+    return collected
+
+
+def _build_deterministic_zip(files: List[Tuple[str, bytes]]) -> bytes:
+    """把已排序的 (relpath, 内容) 列表打成确定性 zip:固定 mtime、归一 0o644、按路径序写入。
+    同源 → 同字节 → seed_hash 稳定;导出仍是原始整包(决策 3)。"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for rel, data in files:
+            info = zipfile.ZipInfo(filename=rel, date_time=_ZIP_FIXED_MTIME)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o644 << 16
+            zf.writestr(info, data)
+    return buf.getvalue()
+
+
 def parse_skill_seeds(
     skills_dir: str,
     *,
@@ -462,7 +499,8 @@ def parse_skill_seeds(
     """解析 config/skills/ → SkillSeed 列表。
 
     布局:`config/skills/<slug>/SKILL.md`(每个子目录 = 一个 skill,slug = 目录名)。
-    C 只处理单 SKILL.md 的 skill(无 bundle);带 references/scripts 的 bundle skill 归 D。
+    单 SKILL.md → 无 bundle(NULL);目录含 SKILL.md 以外文件(references/scripts/assets)
+    → 打确定性 zip 进 bundle(D-1,L3 mount 用),bundle 源摘要折进 seed_hash。
 
     `allowed-tools` 在 import 期对全局 ceiling 校验存在性(共享 resolver),解析不到已知 unit
     的条目 → **warn 不 fail**(skill 全 agent 可见、agent_unit 后续可挂、决策 11 line 237;
@@ -532,6 +570,11 @@ def _parse_skill_dir(
 
     meta = {k: v for k, v in frontmatter.items() if k not in _SKILL_CONSUMED_FM_KEYS} or None
 
+    # bundle:目录含 SKILL.md 以外文件才打包(含 SKILL.md,决策 3);单文件 → NULL(C 姿态)。
+    all_files = _collect_bundle_files(dir_path)
+    has_extra = any(rel != "SKILL.md" for rel, _ in all_files)
+    bundle = _build_deterministic_zip(all_files) if has_extra else None
+
     seed = SkillSeed(
         slug=slug,
         name=name,
@@ -542,8 +585,9 @@ def _parse_skill_dir(
         compatibility=frontmatter.get("compatibility"),
         meta=meta,
         skill_md=body,
+        bundle=bundle,
     )
-    seed.seed_hash = _content_hash({
+    payload = {
         "name": seed.name,
         "description": seed.description,
         "visibility": seed.visibility,
@@ -552,5 +596,12 @@ def _parse_skill_dir(
         "compatibility": seed.compatibility,
         "meta": seed.meta,
         "skill_md": seed.skill_md,
-    })
+    }
+    # bundle 源摘要折进 hash → references/scripts 变了(skill_md 没变)也触发 reconcile。
+    # 仅 has_extra 时加 key,单文件 skill 的 hash 与 C 保持一致(不无谓 churn)。
+    if has_extra:
+        payload["bundle"] = [
+            (rel, hashlib.sha256(data).hexdigest()) for rel, data in all_files
+        ]
+    seed.seed_hash = _content_hash(payload)
     return seed

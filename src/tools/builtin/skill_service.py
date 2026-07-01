@@ -20,3 +20,11 @@ class SkillService:
         return await self._db_manager.with_retry(
             lambda session: SkillRepository(session).get_skill_md(slug)
         )
+
+    async def get_bundle(self, slug: str) -> Optional[bytes]:
+        """取 skill bundle(L3,完整原始 zip 字节)。无 db_manager(测试)/ 无 bundle → None。"""
+        if self._db_manager is None:
+            return None
+        return await self._db_manager.with_retry(
+            lambda session: SkillRepository(session).get_bundle(slug)
+        )

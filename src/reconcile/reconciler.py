@@ -461,7 +461,7 @@ def _new_skill(seed: SkillSeed) -> Skill:
         compatibility=seed.compatibility,
         meta=seed.meta,
         skill_md=seed.skill_md,
-        bundle=None,                   # C 只处理单 SKILL.md(无 bundle);bundle skill 归 D
+        bundle=seed.bundle,            # 目录含 SKILL.md 以外文件 → 确定性 zip;单文件 → NULL(D-1)
         source="seeded",
         seed_hash=seed.seed_hash,
     )
@@ -476,6 +476,7 @@ def _apply_skill_cols(row: Skill, seed: SkillSeed) -> None:
     row.compatibility = seed.compatibility
     row.meta = seed.meta
     row.skill_md = seed.skill_md
+    row.bundle = seed.bundle
     row.seed_hash = seed.seed_hash
 
 
