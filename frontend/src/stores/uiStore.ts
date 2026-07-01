@@ -24,12 +24,14 @@ export type ToolUnitRightView =
 // setter 手动 spread `其他: false` 来维持(那是旧设计的反复漏点,如选对话不退工具管理)。
 //   - none               : 普通聊天(右面板由 artifactPanelVisible 这个独立轴控制)
 //   - conversationBrowser : 中间面板接管(不动右面板)
+//   - skills             : 中间面板接管(不动右面板;用户侧技能管理,全用户,非 admin)
 //   - userManagement      : master-detail(中列表 + 右详情)
 //   - toolUnit            : master-detail(中列表 + 右详情)
 //   - observability       : 全屏接管(连右面板一起隐藏)
 export type ActiveMode =
   | 'none'
   | 'conversationBrowser'
+  | 'skills'
   | 'userManagement'
   | 'toolUnit'
   | 'observability';

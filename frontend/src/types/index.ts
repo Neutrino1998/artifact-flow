@@ -62,6 +62,13 @@ export type AgentSummaryResponse = S['AgentSummaryResponse'];
 export type AgentListResponse = S['AgentListResponse'];
 
 // ============================================================
+// Skill Types (C-3) — 用户侧 skill 列举 + 个人 enable toggle
+// ============================================================
+
+export type SkillItem = S['SkillItem'];
+export type SkillListResponse = S['SkillListResponse'];
+
+// ============================================================
 // Chat Types
 // ============================================================
 
@@ -77,6 +84,11 @@ export type ChatRequest = {
   // Relaxes the empty-input requirement (backend injects a directive), so a
   // compact-only send with no text is allowed.
   force_compact?: boolean;
+  // Skill slugs the user activated for this turn (composer skill picker). Each
+  // visible skill's instructions are injected + its agent-disabled tools enabled;
+  // activation is sticky across the conversation. Relaxes the empty-input
+  // requirement, so an activation-only send with no text is allowed.
+  activate_skills?: string[];
 };
 export type ChatResponse = S['ChatResponse'];
 export type InjectResponse = S['InjectResponse'];

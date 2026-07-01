@@ -48,6 +48,10 @@ export function useChat() {
       // Only meaningful when files.length > 0 — for a text-only send the
       // request body is tiny and the events fire once and finish instantly.
       onUpload?: (ev: UploadEvent) => void,
+      // Skill slugs the user activated for this turn (composer picker). Ride the
+      // request as activate_skills; the backend injects each skill's body +
+      // enables its tools. Sticky across the conversation thereafter.
+      activateSkills?: string[],
     ): Promise<boolean> => {
       // Capture nav-gen BEFORE the await. If the user clicks New Chat or
       // switches to another conversation while api.sendMessage() is in
@@ -78,6 +82,9 @@ export function useChat() {
         // User pressed "compact": force a one-shot compaction this turn. Lets a
         // compact-only send (empty text) through too — backend injects a directive.
         if (forceCompact) body.force_compact = true;
+        // Skills the user activated via the composer picker ride along; like
+        // compact, an activation-only send (empty text) is allowed.
+        if (activateSkills && activateSkills.length) body.activate_skills = activateSkills;
 
         if (parentMessageId === undefined) {
           // Default: use last message in current branch

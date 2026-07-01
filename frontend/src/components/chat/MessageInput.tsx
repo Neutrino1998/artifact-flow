@@ -9,8 +9,9 @@ import { useConversationStore } from '@/stores/conversationStore';
 import { useConfigStore } from '@/stores/configStore';
 import { useStagedFilesStore, type StagedFile } from '@/stores/stagedFilesStore';
 import StagedFileChip from './StagedFileChip';
-import { injectMessage, cancelExecution } from '@/lib/api';
+import { injectMessage, cancelExecution, getSkills } from '@/lib/api';
 import type { UploadEvent } from '@/lib/api';
+import type { SkillItem } from '@/types';
 import { formatTokens } from '@/lib/formatTokens';
 import { formatBytes } from '@/lib/formatBytes';
 import { MAX_MESSAGE_CHARS, MAX_CHAT_ATTACHMENTS } from '@/lib/constants';
@@ -48,6 +49,14 @@ export default function MessageInput() {
   // Armed by the "compact" toggle; rides the next send as force_compact and is
   // cleared on a successful send. A compact-only send (no text) is allowed.
   const [forceCompact, setForceCompact] = useState(false);
+  // Skill activation picker (C-3). `activeSkills` = slugs armed for the next send
+  // (rides as activate_skills, cleared on success). The picker lists only ENABLED
+  // skills (a skill disabled in the management page is hidden here — enabled
+  // governs both the model's L1 index and this picker). Loaded lazily on first open.
+  const [activeSkills, setActiveSkills] = useState<string[]>([]);
+  const [skillPickerOpen, setSkillPickerOpen] = useState(false);
+  const [enabledSkills, setEnabledSkills] = useState<SkillItem[]>([]);
+  const [skillsLoaded, setSkillsLoaded] = useState(false);
   // null when idle; only set when a send carried files (text-only sends finish
   // too fast for a progress bar to be useful). Lifecycle is owned by handleSend
   // — it sets this in the onUpload callback and clears it in the finally branch.
@@ -141,6 +150,35 @@ export default function MessageInput() {
     if (!hasPersistedHistory && forceCompact) setForceCompact(false);
   }, [hasPersistedHistory, forceCompact]);
 
+  // Load the enabled-skill list each time the picker opens (refetch, not cache —
+  // a skill just disabled in 技能管理 must not linger here). getSkills returns all
+  // visible skills; the picker shows only enabled ones (a disabled skill is hidden
+  // from activation — re-enable it first).
+  useEffect(() => {
+    if (!skillPickerOpen) return;
+    let alive = true;
+    setSkillsLoaded(false);
+    (async () => {
+      try {
+        const data = await getSkills();
+        if (alive) setEnabledSkills(data.skills.filter((s) => s.enabled));
+      } catch (err) {
+        console.error('Failed to load skills:', err);
+      } finally {
+        if (alive) setSkillsLoaded(true);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [skillPickerOpen]);
+
+  const toggleSkill = useCallback((slug: string) => {
+    setActiveSkills((prev) =>
+      prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug],
+    );
+  }, []);
+
   const handleSend = useCallback(async () => {
     if (isStreaming && !content.trim()) {
       // Stop: cancel backend execution. The cancel signal queues into the
@@ -175,6 +213,9 @@ export default function MessageInput() {
     // raw `forceCompact` on any successful armed send, even if it didn't take
     // effect this turn (state hygiene — don't leave stale armed state behind).
     const compact = effectiveForceCompact;
+    // Snapshot armed skills for this send (cleared on success below). An
+    // activation-only send (no text/files) is allowed, same as compact.
+    const skillsToActivate = activeSkills;
     await submit(async (text, files) => {
       // Only show progress for sends that actually carry files — a text-only
       // POST's body is small enough that the bar would flash and vanish.
@@ -193,8 +234,12 @@ export default function MessageInput() {
           }
         : undefined;
       try {
-        const ok = await sendMessage(text, undefined, files, compact, onUpload);
+        const ok = await sendMessage(
+          text, undefined, files, compact, onUpload,
+          skillsToActivate.length ? skillsToActivate : undefined,
+        );
         if (ok && forceCompact) setForceCompact(false);
+        if (ok && skillsToActivate.length) setActiveSkills([]);
         return ok;
       } finally {
         // Single convergence point: success / failure / throw all clear the
@@ -203,8 +248,8 @@ export default function MessageInput() {
         // by useComposerSend's reconcile-on-success rule.
         setUploadProgress(null);
       }
-    }, compact);
-  }, [content, isStreaming, cancelling, setCancelling, conversationId, streamConversationId, inject, submit, sendMessage, forceCompact, effectiveForceCompact]);
+    }, compact || skillsToActivate.length > 0);
+  }, [content, isStreaming, cancelling, setCancelling, conversationId, streamConversationId, inject, submit, sendMessage, forceCompact, effectiveForceCompact, activeSkills]);
 
   const handleCompositionStart = useCallback(() => {
     isComposingRef.current = true;
@@ -397,6 +442,35 @@ export default function MessageInput() {
             </div>
           )}
 
+          {/* Armed-skill chips — the next send will activate these skills. */}
+          {activeSkills.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {activeSkills.map((slug) => {
+                const info = enabledSkills.find((s) => s.slug === slug);
+                return (
+                  <span
+                    key={slug}
+                    className="inline-flex items-center gap-1 pl-2 pr-1 py-1 rounded-lg bg-accent/10 border border-accent/40 text-xs text-accent"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                      <path d="M6.5 2l1 2.7 2.7 1-2.7 1-1 2.7-1-2.7-2.7-1 2.7-1z" />
+                    </svg>
+                    <span>{info?.name ?? slug}</span>
+                    <button
+                      onClick={() => toggleSkill(slug)}
+                      className="shrink-0 p-0.5 rounded hover:bg-accent/20"
+                      aria-label={`取消激活 ${info?.name ?? slug}`}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                        <path d="M18 6L6 18M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
           {/* Upload progress — visible only while the attached-files POST is
               in flight. Aggregate (single multipart body, all files together);
               per-file granularity would require N parallel POSTs and break the
@@ -524,6 +598,84 @@ export default function MessageInput() {
                 </svg>
               </button>
 
+              {/* Skill activation picker — arms skills for the next send. Disabled
+                  while streaming (activation rides a fresh turn). */}
+              <div className="relative">
+                <button
+                  onClick={() => setSkillPickerOpen((v) => !v)}
+                  disabled={isStreaming}
+                  className={`h-8 w-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    activeSkills.length > 0 || skillPickerOpen
+                      ? 'bg-accent/15 text-accent'
+                      : 'text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark'
+                  }`}
+                  aria-label="激活技能"
+                  aria-pressed={skillPickerOpen}
+                  title="激活技能：让本轮应用某个技能的指令"
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M6.5 2l1 2.7 2.7 1-2.7 1-1 2.7-1-2.7-2.7-1 2.7-1z" />
+                    <path d="M11.5 9.5l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z" />
+                  </svg>
+                </button>
+
+                {skillPickerOpen && (
+                  <>
+                    {/* Click-away backdrop */}
+                    <button
+                      className="fixed inset-0 z-10 cursor-default"
+                      aria-hidden="true"
+                      tabIndex={-1}
+                      onClick={() => setSkillPickerOpen(false)}
+                    />
+                    <div className="absolute bottom-full left-0 mb-2 z-20 w-64 max-h-72 overflow-y-auto rounded-xl bg-surface dark:bg-surface-dark border border-border dark:border-border-dark shadow-float py-1">
+                      {!skillsLoaded ? (
+                        <div className="px-3 py-3 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                          加载中...
+                        </div>
+                      ) : enabledSkills.length === 0 ? (
+                        <div className="px-3 py-3 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                          暂无可激活的技能。可在「技能管理」中开启。
+                        </div>
+                      ) : (
+                        enabledSkills.map((skill) => {
+                          const checked = activeSkills.includes(skill.slug);
+                          return (
+                            <button
+                              key={skill.slug}
+                              onClick={() => toggleSkill(skill.slug)}
+                              className="w-full flex items-start gap-2 px-3 py-2 text-left hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+                            >
+                              <span className={`mt-0.5 flex-shrink-0 h-4 w-4 rounded border flex items-center justify-center ${
+                                checked
+                                  ? 'bg-accent border-accent text-white'
+                                  : 'border-border dark:border-border-dark'
+                              }`}>
+                                {checked && (
+                                  <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M3 8l3.5 3.5L13 5" />
+                                  </svg>
+                                )}
+                              </span>
+                              <span className="min-w-0">
+                                <span className="block text-xs font-medium text-text-primary dark:text-text-primary-dark truncate">
+                                  {skill.name}
+                                </span>
+                                {skill.description && (
+                                  <span className="block text-[11px] text-text-tertiary dark:text-text-tertiary-dark line-clamp-2">
+                                    {skill.description}
+                                  </span>
+                                )}
+                              </span>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+
               {/* Char counter — only when approaching the cap */}
               {nearLimit && (
                 <span className="ml-1 text-xs tabular-nums text-text-tertiary dark:text-text-tertiary-dark">
@@ -605,7 +757,7 @@ export default function MessageInput() {
               // a silent no-op. Re-enables when agent_start clears queuedInfo.
               const queued = queuedInfo !== null;
               const sendDisabled =
-                (!isStreaming && !content.trim() && !hasStaged && !effectiveForceCompact) || cancelling || sending || queued;
+                (!isStreaming && !content.trim() && !hasStaged && !effectiveForceCompact && activeSkills.length === 0) || cancelling || sending || queued;
               return (
                 <button
                   onClick={handleSend}

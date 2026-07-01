@@ -12,6 +12,7 @@ import StreamingMessage from './StreamingMessage';
 import ErrorFlowBlock from './ErrorFlowBlock';
 import UserMessage from './UserMessage';
 import ConversationBrowser from './ConversationBrowser';
+import SkillManagementPanel from './SkillManagementPanel';
 import UserManagementPanel from './UserManagementPanel';
 import ToolUnitManagementPanel from './ToolUnitManagementPanel';
 import ObservabilityPanel from './ObservabilityPanel';
@@ -74,6 +75,11 @@ export default function ChatPanel() {
 
   if (activeMode === 'conversationBrowser') {
     return <ConversationBrowser />;
+  }
+
+  // 技能管理:全用户(非 admin),中间面板接管。
+  if (activeMode === 'skills') {
+    return <SkillManagementPanel />;
   }
 
   if (currentLoading) {

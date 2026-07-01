@@ -43,6 +43,8 @@ import type {
   MountResponse,
   SetCredentialRequest,
   AgentListResponse,
+  SkillItem,
+  SkillListResponse,
 } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
 import { API_URL } from './apiBase';
@@ -192,6 +194,20 @@ export function listConversations(limit = 20, offset = 0, query?: string) {
 // Per-user blob storage usage vs quota (quota_bytes === 0 → unlimited).
 export function getStorageUsage() {
   return request<StorageUsageResponse>('/api/v1/chat/storage');
+}
+
+// Skills (C-3) — user-side list + personal enable/disable. Returns ALL visible
+// skills (including disabled ones — the management page needs them to re-enable);
+// the composer picker filters to `enabled` client-side.
+export function getSkills() {
+  return request<SkillListResponse>('/api/v1/skills');
+}
+
+export function setSkillEnabled(slug: string, enabled: boolean) {
+  return request<SkillItem>(`/api/v1/skills/${encodeURIComponent(slug)}/enabled`, {
+    method: 'PUT',
+    body: JSON.stringify({ enabled }),
+  });
 }
 
 export function getConversation(convId: string, options?: GetConversationOptions) {
