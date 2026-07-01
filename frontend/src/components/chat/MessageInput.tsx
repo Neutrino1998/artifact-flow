@@ -623,6 +623,11 @@ export default function MessageInput() {
                       onClick={() => setSkillPickerOpen(false)}
                     />
                     <div className="absolute bottom-full left-0 mb-2 z-20 w-64 max-h-72 overflow-y-auto rounded-xl bg-surface dark:bg-surface-dark border border-border dark:border-border-dark shadow-float py-1">
+                      <div className="sticky top-0 px-2 pt-1 pb-1.5 mb-1 bg-surface dark:bg-surface-dark select-none">
+                        <span className="flex items-center px-2.5 py-1.5 rounded-lg bg-bg dark:bg-bg-dark text-sm font-medium text-text-secondary dark:text-text-secondary-dark">
+                          选择激活技能
+                        </span>
+                      </div>
                       {!skillsLoaded ? (
                         <div className="px-3 py-3 text-xs text-text-tertiary dark:text-text-tertiary-dark">
                           加载中...
@@ -642,9 +647,10 @@ export default function MessageInput() {
                             <button
                               key={skill.slug}
                               onClick={() => toggleSkill(skill.slug)}
-                              className="w-full flex items-start gap-2 px-3 py-2 text-left hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+                              title={skill.description || undefined}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-bg dark:hover:bg-bg-dark transition-colors"
                             >
-                              <span className={`mt-0.5 flex-shrink-0 h-4 w-4 rounded border flex items-center justify-center ${
+                              <span className={`flex-shrink-0 h-4 w-4 rounded border flex items-center justify-center ${
                                 checked
                                   ? 'bg-accent border-accent text-white'
                                   : 'border-border dark:border-border-dark'
@@ -655,23 +661,16 @@ export default function MessageInput() {
                                   </svg>
                                 )}
                               </span>
-                              <span className="min-w-0">
-                                <span className="flex items-center gap-1.5">
-                                  <span className="text-xs font-medium text-text-primary dark:text-text-primary-dark truncate">
-                                    {skill.name}
-                                  </span>
-                                  {alreadyActiveSkills.has(skill.slug) && (
-                                    <span
-                                      className="flex-shrink-0 text-[10px] px-1 py-0.5 rounded text-accent bg-accent/10 border border-accent/30"
-                                      title="该技能已在本对话激活；重新勾选会再次注入其正文（用于压缩后重提醒）"
-                                    >
-                                      已激活
-                                    </span>
-                                  )}
+                              <span className="min-w-0 flex items-center gap-1.5">
+                                <span className="text-xs font-medium text-text-primary dark:text-text-primary-dark truncate">
+                                  {skill.name}
                                 </span>
-                                {skill.description && (
-                                  <span className="block text-[11px] text-text-tertiary dark:text-text-tertiary-dark line-clamp-2">
-                                    {skill.description}
+                                {alreadyActiveSkills.has(skill.slug) && (
+                                  <span
+                                    className="flex-shrink-0 text-[10px] px-1 py-0.5 rounded text-accent bg-accent/10 border border-accent/30"
+                                    title="该技能已在本对话激活；重新勾选会再次注入其正文（用于压缩后重提醒）"
+                                  >
+                                    已激活
                                   </span>
                                 )}
                               </span>
