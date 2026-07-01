@@ -113,16 +113,23 @@ def _content_hash(payload) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-def _split_frontmatter(path: str) -> Tuple[dict, str]:
-    """读 MD → (frontmatter dict, body)。与 loaders 的切分一致。"""
-    with open(path, "r", encoding="utf-8") as f:
-        content = f.read()
+def _parse_frontmatter_text(content: str, where: str) -> Tuple[dict, str]:
+    """MD 文本 → (frontmatter dict, body)。`where` 仅用于报错定位(文件路径 / zip 成员)。"""
     if not content.startswith("---"):
-        raise SeedError(f"MD file must start with YAML frontmatter: {path}")
-    end_idx = content.index("---", 3)
+        raise SeedError(f"MD file must start with YAML frontmatter: {where}")
+    try:
+        end_idx = content.index("---", 3)
+    except ValueError:
+        raise SeedError(f"MD file has unterminated YAML frontmatter: {where}")
     frontmatter = yaml.safe_load(content[3:end_idx].strip()) or {}
     body = content[end_idx + 3:].strip()
     return frontmatter, body
+
+
+def _split_frontmatter(path: str) -> Tuple[dict, str]:
+    """读 MD 文件 → (frontmatter dict, body)。与 loaders 的切分一致。"""
+    with open(path, "r", encoding="utf-8") as f:
+        return _parse_frontmatter_text(f.read(), path)
 
 
 def _is_config_entry(name: str) -> bool:
@@ -456,55 +463,24 @@ def parse_agent_seeds(
 # --------------------------------------------------------------------------
 
 
-# 确定性 zip:固定 mtime + 归一权限 + 条目排序 → 同源文件集必产同字节(reconciler 幂等,
-# changelog 07-01 幂等坑:naive zipfile 嵌 mtime,每次 reconcile 都误判变更)。
-_ZIP_FIXED_MTIME = (1980, 1, 1, 0, 0, 0)  # zip 纪元下限,与 checkout 时间无关
-
-
-def _collect_bundle_files(dir_path: str) -> List[Tuple[str, bytes]]:
-    """递归收集目录下所有普通文件 → 按 posix 相对路径排序的 (relpath, 内容字节) 列表。
-    符号链接 / 非普通文件跳过(config 受信,但保确定性 + 防意外逃逸)。"""
-    collected: List[Tuple[str, bytes]] = []
-    for root, dirs, files in os.walk(dir_path, followlinks=False):
-        for fname in files:
-            fpath = os.path.join(root, fname)
-            if os.path.islink(fpath) or not os.path.isfile(fpath):
-                continue
-            rel = os.path.relpath(fpath, dir_path).replace(os.sep, "/")
-            with open(fpath, "rb") as f:
-                collected.append((rel, f.read()))
-    collected.sort(key=lambda t: t[0])
-    return collected
-
-
-def _build_deterministic_zip(files: List[Tuple[str, bytes]]) -> bytes:
-    """把已排序的 (relpath, 内容) 列表打成确定性 zip:固定 mtime、归一 0o644、按路径序写入。
-    同源 → 同字节 → seed_hash 稳定;导出仍是原始整包(决策 3)。"""
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for rel, data in files:
-            info = zipfile.ZipInfo(filename=rel, date_time=_ZIP_FIXED_MTIME)
-            info.compress_type = zipfile.ZIP_DEFLATED
-            info.external_attr = 0o644 << 16
-            zf.writestr(info, data)
-    return buf.getvalue()
-
-
 def parse_skill_seeds(
     skills_dir: str,
     *,
     known_unit_names: set,
     known_full_names: Dict[str, str],
 ) -> List["SkillSeed"]:
-    """解析 config/skills/ → SkillSeed 列表。
+    """解析 config/skills/ → SkillSeed 列表。两种形态(D-1):
 
-    布局:`config/skills/<slug>/SKILL.md`(每个子目录 = 一个 skill,slug = 目录名)。
-    单 SKILL.md → 无 bundle(NULL);目录含 SKILL.md 以外文件(references/scripts/assets)
-    → 打确定性 zip 进 bundle(D-1,L3 mount 用),bundle 源摘要折进 seed_hash。
+    - **prose skill = `config/skills/<slug>/` 目录**,仅一个 SKILL.md → `bundle=NULL`。
+      目录里出现 SKILL.md 以外的真实文件(references/scripts)→ **loud-fail 指向 zip**
+      (防"以为打了 bundle、附属文件却被静默丢")。
+    - **bundle skill = `config/skills/<slug>.zip`**,slug = 文件名去 `.zip`。存**原始 zip
+      字节**(决策 3 无损),`seed_hash=sha256(字节)`;从 zip 里定位唯一 SKILL.md 解 frontmatter。
 
-    `allowed-tools` 在 import 期对全局 ceiling 校验存在性(共享 resolver),解析不到已知 unit
-    的条目 → **warn 不 fail**(skill 全 agent 可见、agent_unit 后续可挂、决策 11 line 237;
-    与 agent 的硬绑定 loud-fail 不同),raw 条目原样保留、runtime 再解析。
+    zip 形态对齐社区/Anthropic 分发(claude.ai/API 上传即 zip),我方是"服务端 ingest"场景
+    (读进 DB、沙盒经 mount 消费),故不像本地 agent 用 config 目录当运行时。
+
+    `allowed-tools` import 期对全局 ceiling 校验存在性,解析不到 → warn 不 fail(决策 11 line 237)。
     """
     seeds: List[SkillSeed] = []
     if not os.path.isdir(skills_dir):
@@ -513,15 +489,13 @@ def parse_skill_seeds(
     for entry in sorted(os.listdir(skills_dir)):
         if not _is_config_entry(entry):
             continue
-        dir_path = os.path.join(skills_dir, entry)
-        if not os.path.isdir(dir_path):
-            continue  # skill = 目录;顶层散文件忽略
-        skill_md_path = os.path.join(dir_path, "SKILL.md")
-        if not os.path.isfile(skill_md_path):
-            raise SeedError(f"skill dir '{entry}/' missing SKILL.md")
-        seeds.append(_parse_skill_dir(
-            dir_path, entry, skill_md_path, known_unit_names, known_full_names
-        ))
+        path = os.path.join(skills_dir, entry)
+        if os.path.isdir(path):
+            seeds.append(_parse_skill_dir(path, entry, known_unit_names, known_full_names))
+        elif entry.endswith(".zip"):
+            slug = entry[: -len(".zip")]
+            seeds.append(_parse_skill_zip(path, slug, known_unit_names, known_full_names))
+        # 其它顶层散文件(非目录、非 .zip)忽略
 
     return seeds
 
@@ -536,29 +510,30 @@ def _normalize_allowed_tools(raw, source: str) -> List[str]:
     raise SeedError(f"{source}: allowed-tools must be a list or string")
 
 
-def _parse_skill_dir(
-    dir_path: str,
+def _skill_seed_from_md(
     slug: str,
-    skill_md_path: str,
+    frontmatter: dict,
+    body: str,
+    *,
+    bundle: Optional[bytes],
+    where: str,
     known_unit_names: set,
     known_full_names: Dict[str, str],
 ) -> "SkillSeed":
-    frontmatter, body = _split_frontmatter(skill_md_path)
-
+    """共享:frontmatter + body(+ 可选 bundle 字节)→ 校验 + 组装 SkillSeed。
+    prose(bundle=None):seed_hash 走归一化列 payload;bundle:seed_hash=sha256(字节)
+    —— 提交的 zip 是稳定字节(任何 OS 同 checkout 同哈希),无跨环境 churn。"""
     name = frontmatter.get("name") or slug
     visibility = frontmatter.get("visibility", "public")
     if visibility not in _VALID_SKILL_VISIBILITY:
         raise SeedError(
-            f"{skill_md_path}: invalid visibility '{visibility}' "
-            f"(expected private|public|department)"
+            f"{where}: invalid visibility '{visibility}' (expected private|public|department)"
         )
     if visibility == "private":
         # seeded skill 是 shared(owner=null),private = owner-only 自相矛盾
-        raise SeedError(
-            f"{skill_md_path}: seeded skill cannot be 'private' (shared, no owner)"
-        )
+        raise SeedError(f"{where}: seeded skill cannot be 'private' (shared, no owner)")
 
-    allowed_tools = _normalize_allowed_tools(frontmatter.get("allowed-tools"), skill_md_path)
+    allowed_tools = _normalize_allowed_tools(frontmatter.get("allowed-tools"), where)
     for entry in allowed_tools:
         if resolve_allowed_tool_entry(entry, known_unit_names, known_full_names) is None:
             # 决策 11 line 237:校验存在性,解析不到 = warn 不 fail(unit 后续可挂 / 可建)
@@ -569,11 +544,6 @@ def _parse_skill_dir(
             )
 
     meta = {k: v for k, v in frontmatter.items() if k not in _SKILL_CONSUMED_FM_KEYS} or None
-
-    # bundle:目录含 SKILL.md 以外文件才打包(含 SKILL.md,决策 3);单文件 → NULL(C 姿态)。
-    all_files = _collect_bundle_files(dir_path)
-    has_extra = any(rel != "SKILL.md" for rel, _ in all_files)
-    bundle = _build_deterministic_zip(all_files) if has_extra else None
 
     seed = SkillSeed(
         slug=slug,
@@ -587,21 +557,77 @@ def _parse_skill_dir(
         skill_md=body,
         bundle=bundle,
     )
-    payload = {
-        "name": seed.name,
-        "description": seed.description,
-        "visibility": seed.visibility,
-        "default_enabled": seed.default_enabled,
-        "allowed_tools": sorted(seed.allowed_tools),
-        "compatibility": seed.compatibility,
-        "meta": seed.meta,
-        "skill_md": seed.skill_md,
-    }
-    # bundle 源摘要折进 hash → references/scripts 变了(skill_md 没变)也触发 reconcile。
-    # 仅 has_extra 时加 key,单文件 skill 的 hash 与 C 保持一致(不无谓 churn)。
-    if has_extra:
-        payload["bundle"] = [
-            (rel, hashlib.sha256(data).hexdigest()) for rel, data in all_files
-        ]
-    seed.seed_hash = _content_hash(payload)
+    if bundle is None:
+        seed.seed_hash = _content_hash({
+            "name": seed.name,
+            "description": seed.description,
+            "visibility": seed.visibility,
+            "default_enabled": seed.default_enabled,
+            "allowed_tools": sorted(seed.allowed_tools),
+            "compatibility": seed.compatibility,
+            "meta": seed.meta,
+            "skill_md": seed.skill_md,
+        })
+    else:
+        seed.seed_hash = hashlib.sha256(bundle).hexdigest()
     return seed
+
+
+def _parse_skill_dir(
+    dir_path: str,
+    slug: str,
+    known_unit_names: set,
+    known_full_names: Dict[str, str],
+) -> "SkillSeed":
+    """prose skill(单 SKILL.md 目录,bundle=NULL)。附属文件 → loud-fail 指向 zip。"""
+    skill_md_path = os.path.join(dir_path, "SKILL.md")
+    if not os.path.isfile(skill_md_path):
+        raise SeedError(f"skill dir '{slug}/' missing SKILL.md")
+    # 目录里除 SKILL.md 外的真实条目(忽略 `_`/`.` 垃圾)→ 应打成 <slug>.zip,别用松散目录
+    extras = [e for e in os.listdir(dir_path) if e != "SKILL.md" and _is_config_entry(e)]
+    if extras:
+        raise SeedError(
+            f"skill dir '{slug}/' has files besides SKILL.md ({sorted(extras)}); "
+            f"bundle skills must be provided as '{slug}.zip', not an unzipped directory"
+        )
+    frontmatter, body = _split_frontmatter(skill_md_path)
+    return _skill_seed_from_md(
+        slug, frontmatter, body, bundle=None, where=skill_md_path,
+        known_unit_names=known_unit_names, known_full_names=known_full_names,
+    )
+
+
+def _parse_skill_zip(
+    zip_path: str,
+    slug: str,
+    known_unit_names: set,
+    known_full_names: Dict[str, str],
+) -> "SkillSeed":
+    """bundle skill(`<slug>.zip`)。存原始字节;定位唯一 SKILL.md 解 frontmatter。
+
+    定位规则(裸根 / 单层 wrapper `<name>/SKILL.md` / repo 深层嵌套都吃):zip 里唯一的
+    SKILL.md 成员即入口,0 个 / 多个 → loud-fail。剥壳前缀(SKILL.md 的父目录)是 D-2
+    mount 时的事(解到 /workspace/.skills/<slug>/),此处不需存。"""
+    with open(zip_path, "rb") as f:
+        blob = f.read()
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(blob))
+    except zipfile.BadZipFile as e:
+        raise SeedError(f"skill '{slug}.zip' is not a valid zip: {e}")
+    md_members = [
+        n for n in zf.namelist()
+        if not n.endswith("/") and n.rsplit("/", 1)[-1] == "SKILL.md"
+    ]
+    if not md_members:
+        raise SeedError(f"skill '{slug}.zip' contains no SKILL.md")
+    if len(md_members) > 1:
+        raise SeedError(
+            f"skill '{slug}.zip' contains multiple SKILL.md ({sorted(md_members)}); "
+            f"one zip = one skill"
+        )
+    md_text = zf.read(md_members[0]).decode("utf-8")
+    frontmatter, body = _parse_frontmatter_text(md_text, f"{slug}.zip:{md_members[0]}")
+    return _skill_seed_from_md(
+        slug, frontmatter, body, bundle=blob, where=f"{slug}.zip",
+        known_unit_names=known_unit_names, known_full_names=known_full_names,
+    )
