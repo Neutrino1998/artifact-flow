@@ -156,14 +156,17 @@ export default function MessageInput() {
     if (!hasPersistedHistory && forceCompact) setForceCompact(false);
   }, [hasPersistedHistory, forceCompact]);
 
-  // Load the enabled-skill list each time the picker opens (refetch, not cache —
-  // a skill just disabled in 技能管理 must not linger here). getSkills returns all
-  // visible skills; the picker shows only enabled ones (a disabled skill is hidden
-  // from activation — re-enable it first).
+  // Refresh the enabled-skill list each time the picker opens — still a refetch
+  // (a skill just disabled in 技能管理 must not linger here), but stale-while-
+  // revalidate: keep the previously-loaded list on screen and refetch silently,
+  // so re-opening doesn't flash "加载中" on every open. The spinner shows only on
+  // the first-ever open (no cached list). getSkills returns all visible skills;
+  // the picker shows only enabled ones. On a background-refetch failure we keep
+  // the stale list (render prefers a usable list over the error screen) and only
+  // surface the error when there's nothing cached to show.
   useEffect(() => {
     if (!skillPickerOpen) return;
     let alive = true;
-    setSkillsLoaded(false);
     setSkillsError(false);
     (async () => {
       try {
@@ -171,12 +174,10 @@ export default function MessageInput() {
         if (alive) setEnabledSkills(data.skills.filter((s) => s.enabled));
       } catch (err) {
         console.error('Failed to load skills:', err);
-        // Distinguish load failure from genuinely-empty (#5): a failed refetch
-        // must not silently show a stale list or masquerade as "no skills".
-        if (alive) {
-          setSkillsError(true);
-          setEnabledSkills([]);
-        }
+        // Don't clear the cached list — a failed refresh keeps showing what we
+        // last had (stale, but usable). The error screen only appears when we
+        // have no list at all (render precedence below).
+        if (alive) setSkillsError(true);
       } finally {
         if (alive) setSkillsLoaded(true);
       }
@@ -631,19 +632,7 @@ export default function MessageInput() {
                           选择激活技能
                         </span>
                       </div>
-                      {!skillsLoaded ? (
-                        <div className="px-3 py-3 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                          加载中...
-                        </div>
-                      ) : skillsError ? (
-                        <div className="px-3 py-3 text-xs text-red-600 dark:text-red-400">
-                          技能加载失败,请稍后重试。
-                        </div>
-                      ) : enabledSkills.length === 0 ? (
-                        <div className="px-3 py-3 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                          暂无可激活的技能。可在「技能管理」中开启。
-                        </div>
-                      ) : (
+                      {enabledSkills.length > 0 ? (
                         enabledSkills.map((skill) => {
                           const checked = activeSkills.includes(skill.slug);
                           return (
@@ -680,6 +669,18 @@ export default function MessageInput() {
                             </button>
                           );
                         })
+                      ) : !skillsLoaded ? (
+                        <div className="px-3 py-3 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                          加载中...
+                        </div>
+                      ) : skillsError ? (
+                        <div className="px-3 py-3 text-xs text-red-600 dark:text-red-400">
+                          技能加载失败,请稍后重试。
+                        </div>
+                      ) : (
+                        <div className="px-3 py-3 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                          暂无可激活的技能。可在「技能管理」中开启。
+                        </div>
                       )}
                     </div>
                   </>
