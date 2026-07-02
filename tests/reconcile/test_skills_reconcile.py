@@ -472,26 +472,29 @@ async def test_prose_empty_body_loud_fails(db_session, cfg):
         await _run(db_session, cfg)
 
 
-async def test_bundle_unclosed_fence_loud_fails(db_session, cfg):
+async def test_bundle_unclosed_fence_warns_but_seeds(db_session, cfg, caplog):
+    """启发式规则(fence/链接)降 warning 不拦(2026-07-03 用户拍板):seed 成功 + log。"""
     _, _, skills = cfg
     (skills / "pack.zip").write_bytes(_make_zip({
         "pack/SKILL.md": _skill_md(
             name="pack", allowed_tools=None, body="text\n```python\nprint(1)\n",
         ),
     }))
-    with pytest.raises(SeedError, match="unclosed_fence"):
-        await _run(db_session, cfg)
+    report = await _run(db_session, cfg)
+    assert "skill:pack" in report.created
+    assert any("unclosed_fence" in r.getMessage() for r in caplog.records)
 
 
-async def test_bundle_unresolved_link_loud_fails(db_session, cfg):
+async def test_bundle_unresolved_link_warns_but_seeds(db_session, cfg, caplog):
     _, _, skills = cfg
     (skills / "pack.zip").write_bytes(_make_zip({
         "pack/SKILL.md": _skill_md(
             name="pack", allowed_tools=None, body="See [ref](references/gone.md).",
         ),
     }))
-    with pytest.raises(SeedError, match="link_unresolved"):
-        await _run(db_session, cfg)
+    report = await _run(db_session, cfg)
+    assert "skill:pack" in report.created
+    assert any("link_unresolved" in r.getMessage() for r in caplog.records)
 
 
 async def test_bundle_path_traversal_loud_fails(db_session, cfg):

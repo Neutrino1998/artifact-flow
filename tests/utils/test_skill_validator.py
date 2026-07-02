@@ -140,6 +140,31 @@ def test_skill_md_not_utf8():
     assert result.parsed is None
 
 
+def test_corrupt_member_returns_finding_not_raise():
+    """成员读期异常(坏 CRC 懒触发 BadZipFile)折 Finding —— validator 永不抛。"""
+    blob = bytearray(build_zip({"SKILL.md": GOOD_MD, "scripts/run.py": "print(1)"}))
+    idx = bytes(blob).find(b"# Demo")   # SKILL.md 以 ZIP_STORED 存,正文明文在包里
+    assert idx != -1
+    blob[idx] = blob[idx] ^ 0xFF        # 翻一字节 → 读到 EOF 时 CRC 校验失败
+    result = validate_skill_zip(bytes(blob), where="t")
+    assert "zip.invalid" in rules_of(result, "error")
+    assert result.parsed is None
+
+
+def test_yaml_recursion_bomb_returns_finding_not_raise():
+    """'['*N 深嵌套穿透 yaml.YAMLError 抛 RecursionError —— 须折 Finding 不崩。"""
+    md = "---\n" + "[" * 50000 + "\n---\n\nbody\n"
+    result = validate_skill_zip(build_zip({"SKILL.md": md}), where="t")
+    assert "md.frontmatter_invalid" in rules_of(result, "error")
+
+
+def test_yaml_alias_rejected():
+    """anchor/alias 禁用(billion-laughs 内存 DoS 面;合法 frontmatter 从不用锚点)。"""
+    md = "---\nname: x\na: &x [1, 2]\nb: *x\n---\n\nbody\n"
+    result = validate_skill_zip(build_zip({"SKILL.md": md}), where="t")
+    assert "md.frontmatter_invalid" in rules_of(result, "error")
+
+
 # ---------------------------------------------------------------- 正文层
 
 
@@ -156,10 +181,11 @@ def test_body_empty_rejected():
     assert result.parsed is not None  # 结构可读,只是正文空
 
 
-def test_unclosed_fence():
+def test_unclosed_fence_warns():
     md = "---\nname: x\n---\n\nbody\n```python\nprint(1)\n"
     result = validate_skill_zip(build_zip({"SKILL.md": md}), where="t")
-    assert "md.unclosed_fence" in rules_of(result, "error")
+    assert "md.unclosed_fence" in rules_of(result, "warning")
+    assert result.ok  # 启发式规则不拦(2026-07-03 用户拍板)
 
 
 def test_closed_fences_and_mixed_markers_pass():
@@ -168,12 +194,34 @@ def test_closed_fences_and_mixed_markers_pass():
     assert "md.unclosed_fence" not in rules_of(result)
 
 
-def test_link_unresolved_and_resolved():
+def test_four_backtick_fence_shows_three_backtick_example():
+    """CommonMark 嵌套展示:4 反引号块里的 3 反引号是内容非闭栏(skill-authoring 惯用)。"""
+    md = "---\nname: x\n---\n\n````markdown\n```python\nprint(1)\n```\n````\nprose\n"
+    result = validate_skill_zip(build_zip({"SKILL.md": md}), where="t")
+    assert "md.unclosed_fence" not in rules_of(result)
+
+
+def test_link_unresolved_warns_and_resolved_ok():
     md = "---\nname: x\n---\n\nSee [a](refs/a.md) and [b](refs/missing.md).\n"
     blob = build_zip({"pkg/SKILL.md": md, "pkg/refs/a.md": "hi"})
     result = validate_skill_zip(blob, where="t")
-    errs = [f for f in result.errors if f.rule == "md.link_unresolved"]
-    assert len(errs) == 1 and "missing.md" in errs[0].message and "a.md" not in errs[0].message
+    warns = [f for f in result.warnings if f.rule == "md.link_unresolved"]
+    assert len(warns) == 1 and "missing.md" in warns[0].message and "a.md" not in warns[0].message
+    assert result.ok  # 启发式规则不拦
+
+
+def test_link_in_inline_code_span_ignored():
+    md = "---\nname: x\n---\n\nwrite `[label](docs/missing.md)` in your file\n"
+    result = validate_skill_zip(build_zip({"SKILL.md": md}), where="t")
+    assert "md.link_unresolved" not in rules_of(result)
+
+
+def test_angle_bracket_link_target():
+    md = "---\nname: x\n---\n\nSee [cfg](<refs/a.md>) and [gone](<refs/missing.md>).\n"
+    blob = build_zip({"SKILL.md": md, "refs/a.md": "hi"})
+    result = validate_skill_zip(blob, where="t")
+    warns = [f for f in result.warnings if f.rule == "md.link_unresolved"]
+    assert len(warns) == 1 and "missing.md" in warns[0].message and "refs/a.md" not in warns[0].message
 
 
 def test_links_inside_fences_ignored():

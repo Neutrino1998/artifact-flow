@@ -14,6 +14,10 @@ error=拒收、warning=透出不拦)。**绝不改写 body**(原则 3:lint 标�
 
 复用 skill_zip.locate_skill_md / strip_prefix —— validator / seed / mount 三处对
 「哪个是 SKILL.md、剥壳前缀是什么」永远一致。
+
+**zip 字节总大小(SKILL_BUNDLE_MAX_BYTES)刻意不在此查**:那是按信任分层的配额闸
+(原则 7③:user 上传 25MB、admin/seed 无闸 —— seed 侧 wheels bundle 合法可超),
+归 E-2 导入端点执行,塞进共享 validator 会错杀 seed。
 """
 
 import io
@@ -47,7 +51,8 @@ _KNOWN_FM_KEYS = {
 # CC 私有扩展(Non-goals):在场即提示会被忽略。
 _CC_EXTENSION_KEYS = {"model", "effort", "context", "paths", "disable-model-invocation"}
 
-_LINK_RE = re.compile(r"\[[^\]]*\]\(\s*([^)\s]+)(?:\s+\"[^\"]*\")?\s*\)")
+_LINK_RE = re.compile(r"\[[^\]]*\]\(\s*(<[^>]*>|[^)\s]+)(?:\s+\"[^\"]*\")?\s*\)")
+_INLINE_CODE_RE = re.compile(r"`[^`]*`")
 _EXTERNAL_LINK_PREFIXES = ("http://", "https://", "mailto:", "data:", "#")
 
 
@@ -95,7 +100,10 @@ def slugify_name(raw: str) -> str:
 
 def derive_import_slug(frontmatter: dict, prefix: str, filename: str) -> str:
     """导入侧 slug 派生:frontmatter `name` slug 化 → wrapper 目录名 → 上传文件名 stem。
-    (seed 侧 slug = config 文件名,operator 控,不走这里。)"""
+    (seed 侧 slug = config 文件名,operator 控,不走这里。)
+
+    **契约:可返回 ""(三个来源全空/全非 ASCII),调用方必须紧跟 `validate_slug`**
+    (空串被 slug.invalid 拒)—— 派生与校验是一对,别单用。"""
     name = frontmatter.get("name")
     if isinstance(name, str) and name.strip():
         candidate = slugify_name(name)
@@ -177,8 +185,15 @@ def validate_skill_zip(blob: bytes, *, where: str) -> ValidationResult:
             ))
 
     # ---- 有界读 SKILL.md 成员(bomb-in-member:声明 size 可撒谎,按实际读断) ----
-    with zf.open(md_member) as fh:
-        md_bytes = fh.read(config.SKILL_MD_MAX_BYTES + 1)
+    # 宽 catch:加密成员(RuntimeError)/不支持压缩法(NotImplementedError)/坏 deflate 流
+    # (zlib.error)/懒触发 CRC(BadZipFile)…… 全是不可信 zip 可构造的读期异常 —— validator
+    # 契约 = 永不抛、只产 Finding,此处是唯一的成员 IO 边界。
+    try:
+        with zf.open(md_member) as fh:
+            md_bytes = fh.read(config.SKILL_MD_MAX_BYTES + 1)
+    except Exception as e:  # noqa: BLE001
+        _add(Finding("zip.invalid", "error", f"{where}: SKILL.md member could not be read: {e}"))
+        return result
     if len(md_bytes) > config.SKILL_MD_MAX_BYTES:
         _add(Finding(
             "md.member_too_large", "error",
@@ -208,10 +223,13 @@ def validate_skill_zip(blob: bytes, *, where: str) -> ValidationResult:
             "md.body_empty", "error",
             "SKILL.md body is empty (nothing to inject on activation)",
         ))
+    # fence / 链接是**启发式**内容规则(markdown 无严格文法),修到再准也有误报长尾,
+    # 且硬门无 force 逃生口 → 一律 warning 不拦(用户拍板 2026-07-03);
+    # 结构性规则(空正文/穿越/上限)才是 error。
     prose_lines, unclosed = _split_fences(body)
     if unclosed:
         _add(Finding(
-            "md.unclosed_fence", "error",
+            "md.unclosed_fence", "warning",
             f"SKILL.md has an unclosed code fence (opened with {unclosed!r}) — "
             "likely a truncated or broken file",
         ))
@@ -252,6 +270,8 @@ def validate_skill_zip(blob: bytes, *, where: str) -> ValidationResult:
 
 
 def _traversal_offenders(infos: List[zipfile.ZipInfo]) -> List[str]:
+    # 只查 `/` 分隔的 `..`,不管 `\`:宿主永不解压,沙盒解压在 Linux(`\` 是普通文件名
+    # 字符非分隔符),反斜杠穿越无可达伤害 —— 刻意不做纵深防御白名单。
     bad: List[str] = []
     for zi in infos:
         n = zi.filename
@@ -262,26 +282,26 @@ def _traversal_offenders(infos: List[zipfile.ZipInfo]) -> List[str]:
     return bad
 
 
+_FENCE_RE = re.compile(r"^(`{3,}|~{3,})")
+
+
 def _split_fences(body: str) -> Tuple[List[str], Optional[str]]:
     """有状态扫 fence:返回 (fence 外的 prose 行, 未闭合的开栏标记或 None)。
-    ``` 与 ~~~ 各自配对(块内的另一种标记是内容);比裸奇偶计数少误报。"""
+    按 CommonMark 配对:闭栏须同字符且长度 ≥ 开栏 —— 4 反引号块里展示 3 反引号
+    示例(skill-authoring 文档的标准写法)不会被误当闭栏。"""
     prose: List[str] = []
-    open_marker: Optional[str] = None
+    open_marker: Optional[Tuple[str, int]] = None   # (fence 字符, 开栏长度)
     for line in body.splitlines():
         stripped = line.lstrip()
-        marker = None
-        if stripped.startswith("```"):
-            marker = "```"
-        elif stripped.startswith("~~~"):
-            marker = "~~~"
+        m = _FENCE_RE.match(stripped)
         if open_marker is None:
-            if marker is not None and len(line) - len(stripped) <= 3:
-                open_marker = marker
+            if m and len(line) - len(stripped) <= 3:
+                open_marker = (m.group(1)[0], len(m.group(1)))
             else:
                 prose.append(line)
-        elif marker == open_marker:
+        elif m and m.group(1)[0] == open_marker[0] and len(m.group(1)) >= open_marker[1]:
             open_marker = None
-    return prose, open_marker
+    return prose, (open_marker[0] * open_marker[1] if open_marker else None)
 
 
 def _resolve_links(
@@ -296,7 +316,11 @@ def _resolve_links(
     referenced: Set[str] = set()
     missing: List[str] = []
     for line in prose_lines:
+        # 行内 code span 里的链接是示例文本非引用(`[label](path)` 教学写法),剥掉再扫
+        line = _INLINE_CODE_RE.sub("", line)
         for target in _LINK_RE.findall(line):
+            # CommonMark 尖括号目标 [x](<path>) → 剥括号
+            target = target[1:-1] if target.startswith("<") and target.endswith(">") else target
             if target.startswith(_EXTERNAL_LINK_PREFIXES):
                 continue
             path = target.split("#", 1)[0].strip()
@@ -311,8 +335,10 @@ def _resolve_links(
             else:
                 missing.append(target)
     if missing:
+        # warning 不拦:链接扫描是启发式,误报会把用户卡死在无逃生口的硬门上;
+        # 真缺文件运行时 mount 后 loud-fail 自纠(file-not-found)。
         findings.append(Finding(
-            "md.link_unresolved", "error",
+            "md.link_unresolved", "warning",
             f"SKILL.md links to files missing from {where}: {sorted(set(missing))[:10]}",
         ))
     return referenced
