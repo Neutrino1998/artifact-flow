@@ -1,16 +1,16 @@
-"""Skill 数据访问(纯读,Phase C-2)。
+"""Skill 数据访问(纯读 C-2 + 导入/删除写 E-2)。
 
 三层职责模型的 Repository 层:只取数、不做业务/格式化,ORM 不外逃(返回标量 /
-plain dict / set)。可见性解析(EffectiveSkillSet)、CRUD(C-3 Manager)在上层。
+plain dict / set)。可见性解析(EffectiveSkillSet)、CRUD 编排在上层 Manager。
 """
 
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import DepartmentSkillRule, Skill, User, UserSkill
+from db.models import DepartmentSkillRule, Skill, ToolMember, ToolUnit, User, UserSkill
 
 
 class SkillRepository:
@@ -66,6 +66,59 @@ class SkillRepository:
                 select(Skill.bundle).where(Skill.slug == slug)
             )
         ).scalar_one_or_none()
+
+    async def get_user_bundle_bytes(self, user_id: str) -> int:
+        """该用户私有 skill bundle 的总字节(导入配额记账,E-2)。与 artifact blob 共用
+        一个池(config.ARTIFACT_USER_QUOTA_BYTES),聚合口径在 ConversationManager.
+        get_user_upload_bytes —— 此处只出 skill 一侧的加数。"""
+        return int((
+            await self._session.execute(
+                select(func.coalesce(func.sum(func.length(Skill.bundle)), 0)).where(
+                    Skill.owner_user_id == user_id, Skill.bundle.isnot(None)
+                )
+            )
+        ).scalar_one())
+
+    async def get_skill_row_meta(self, slug: str) -> Optional[dict]:
+        """slug → 行级元数据(admin 删除路径用,绕过可见性;不存在 → None)。"""
+        row = (
+            await self._session.execute(
+                select(Skill.slug, Skill.source, Skill.owner_user_id, Skill.visibility)
+                .where(Skill.slug == slug)
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        return {
+            "slug": row.slug, "source": row.source,
+            "owner_user_id": row.owner_user_id, "visibility": row.visibility,
+        }
+
+    async def slug_exists(self, slug: str) -> bool:
+        return (
+            await self._session.execute(select(Skill.slug).where(Skill.slug == slug))
+        ).scalar_one_or_none() is not None
+
+    async def known_tool_names(self) -> Tuple[Set[str], Dict[str, str]]:
+        """(unit 名集, {full_name: unit 名}) —— 导入侧 allowed-tools 存在性校验用,
+        与 seed / runtime 共用 resolve_allowed_tool_entry,只是取数来源换成 DB 行。"""
+        unit_names = set((
+            await self._session.execute(select(ToolUnit.name))
+        ).scalars().all())
+        member_rows = (
+            await self._session.execute(select(ToolMember.full_name, ToolMember.unit_name))
+        ).all()
+        return unit_names, {fn: un for fn, un in member_rows}
+
+    def stage_insert_skill(self, **fields) -> None:
+        """stage 一行新 skill(commit 归 Manager;并发撞 slug 由 commit 的
+        IntegrityError 暴露,Manager 折成 409)。"""
+        self._session.add(Skill(**fields))
+
+    async def delete_skill(self, slug: str) -> None:
+        """stage 删除(commit 归 Manager)。user_skill / dept 规则由 DB FK CASCADE 清,
+        零 app-side 清理。"""
+        await self._session.execute(delete(Skill).where(Skill.slug == slug))
 
     async def set_user_override(self, user_id: str, slug: str, enabled: bool) -> None:
         """Upsert user_skill 稀疏覆盖行(个人 enable/disable)。stage-only,commit 归 Manager

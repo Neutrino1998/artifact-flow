@@ -68,6 +68,7 @@ class SkillInfo:
     allowed_tools: List[str] = field(default_factory=list)
     has_bundle: bool = False           # 有附属文件可 mount(read_skill 条件化提示,D-1;不载 blob)
     compatibility: Optional[dict] = None  # frontmatter `compatibility` 声明(mount_skill 依赖提示原样透出,D-2;小 JSON、随快照)
+    source: str = "seeded"             # seeded(config 只读)/ dynamic(UI 导入,可删;E-2)
 
 
 def build_http_tool(
@@ -229,6 +230,7 @@ async def load_skill_snapshot(session: AsyncSession) -> Dict[str, SkillInfo]:
                 Skill.allowed_tools,
                 Skill.bundle.isnot(None).label("has_bundle"),
                 Skill.compatibility,
+                Skill.source,
             ).order_by(Skill.slug)
         )
     ).all()
@@ -243,6 +245,7 @@ async def load_skill_snapshot(session: AsyncSession) -> Dict[str, SkillInfo]:
             allowed_tools=list(r.allowed_tools or []),
             has_bundle=bool(r.has_bundle),
             compatibility=r.compatibility,
+            source=r.source,
         )
         for r in rows
     }

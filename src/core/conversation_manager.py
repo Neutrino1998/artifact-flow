@@ -364,17 +364,22 @@ class ConversationManager:
         return await repo.count_conversations(user_id=user_id, title_query=title_query)
 
     async def get_user_upload_bytes(self, user_id: str) -> int:
-        """该用户已占用的 blob 总字节（跨其全部会话）。
+        """该用户已占用的存储总字节 = artifact blob(跨其全部会话)+ 私有 skill bundle。
 
-        上传准入配额检查 + 存储用量进度条共用此口径（单一数据源：DB 现算，
-        不存计数器）。临时实例化 ArtifactRepository 复用本 manager 的 session，
-        维持 router → manager → repo 的三层边界。
+        上传/导入准入配额检查 + 存储用量进度条共用此口径（单一数据源：DB 现算，
+        不存计数器；skill 与 artifact 共用一个池，见 config.ARTIFACT_USER_QUOTA_BYTES）。
+        临时实例化 Repository 复用本 manager 的 session，维持三层边界。
+
+        已接受的软度:artifact 写路径深处的 chokepoint(create_from_upload)保持
+        blob-only 口径 —— 配额本就「挡量级非字节级」,不在 turn 内写路径加跨 repo 读。
         """
         from repositories.artifact_repo import ArtifactRepository
+        from repositories.skill_repo import SkillRepository
 
         repo = self._ensure_repository()
-        art_repo = ArtifactRepository(repo.session)
-        return await art_repo.get_user_blob_bytes(user_id)
+        blob_bytes = await ArtifactRepository(repo.session).get_user_blob_bytes(user_id)
+        bundle_bytes = await SkillRepository(repo.session).get_user_bundle_bytes(user_id)
+        return blob_bytes + bundle_bytes
 
     # ========================================
     # Router 代理方法

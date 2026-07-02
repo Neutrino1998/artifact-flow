@@ -58,6 +58,8 @@ export default function MessageInput() {
   const [enabledSkills, setEnabledSkills] = useState<SkillItem[]>([]);
   const [skillsLoaded, setSkillsLoaded] = useState(false);
   const [skillsError, setSkillsError] = useState(false);
+  // picker 内的即时过滤(技能多了翻不动;关闭时清空,下次打开从全量开始)
+  const [skillFilter, setSkillFilter] = useState('');
   // null when idle; only set when a send carried files (text-only sends finish
   // too fast for a progress bar to be useful). Lifecycle is owned by handleSend
   // — it sets this in the onUpload callback and clears it in the finally branch.
@@ -126,6 +128,15 @@ export default function MessageInput() {
   // a deliberate "re-remind" (useful after compaction) — is an informed choice, not a
   // surprise re-send. Doesn't gate arming: the user can still re-check to re-inject.
   const alreadyActiveSkills = new Set(lastNode?.active_skills ?? []);
+  // picker 过滤视图(name/描述子串,大小写不敏感)。空过滤 = 全量。
+  const skillFilterQ = skillFilter.trim().toLowerCase();
+  const filteredEnabledSkills = skillFilterQ
+    ? enabledSkills.filter(
+        (s) =>
+          s.name.toLowerCase().includes(skillFilterQ) ||
+          (s.description ?? '').toLowerCase().includes(skillFilterQ),
+      )
+    : enabledSkills;
   const lastMetrics = lastNode?.execution_metrics as
     | { last_input_tokens?: number | null; last_output_tokens?: number | null }
     | null
@@ -195,6 +206,7 @@ export default function MessageInput() {
   useEffect(() => {
     setActiveSkills([]);
     setSkillPickerOpen(false);
+    setSkillFilter('');
   }, [activeKey]);
 
   const toggleSkill = useCallback((slug: string) => {
@@ -600,7 +612,10 @@ export default function MessageInput() {
                   while streaming (activation rides a fresh turn). */}
               <div className="relative">
                 <button
-                  onClick={() => setSkillPickerOpen((v) => !v)}
+                  onClick={() => {
+                    setSkillPickerOpen((v) => !v);
+                    setSkillFilter('');
+                  }}
                   disabled={isStreaming}
                   className={`h-8 w-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                     activeSkills.length > 0 || skillPickerOpen
@@ -624,16 +639,28 @@ export default function MessageInput() {
                       className="fixed inset-0 z-10 cursor-default"
                       aria-hidden="true"
                       tabIndex={-1}
-                      onClick={() => setSkillPickerOpen(false)}
+                      onClick={() => {
+                        setSkillPickerOpen(false);
+                        setSkillFilter('');
+                      }}
                     />
                     <div className="absolute bottom-full left-0 mb-2 z-20 w-64 max-h-72 overflow-y-auto rounded-xl bg-surface dark:bg-surface-dark border border-border dark:border-border-dark shadow-float py-1">
-                      <div className="sticky top-0 px-2 pt-1 pb-1.5 mb-1 bg-surface dark:bg-surface-dark select-none">
+                      <div className="sticky top-0 px-2 pt-1 pb-1.5 mb-1 bg-surface dark:bg-surface-dark select-none space-y-1">
                         <span className="flex items-center px-2.5 py-1.5 rounded-lg bg-bg dark:bg-bg-dark text-sm font-medium text-text-secondary dark:text-text-secondary-dark">
                           选择激活技能
                         </span>
+                        {enabledSkills.length > 6 && (
+                          <input
+                            type="text"
+                            value={skillFilter}
+                            onChange={(e) => setSkillFilter(e.target.value)}
+                            placeholder="过滤技能..."
+                            className="w-full px-2.5 py-1 rounded-lg bg-bg dark:bg-bg-dark text-xs text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none border border-transparent focus:border-accent"
+                          />
+                        )}
                       </div>
-                      {enabledSkills.length > 0 ? (
-                        enabledSkills.map((skill) => {
+                      {filteredEnabledSkills.length > 0 ? (
+                        filteredEnabledSkills.map((skill) => {
                           const checked = activeSkills.includes(skill.slug);
                           return (
                             <button
@@ -676,6 +703,10 @@ export default function MessageInput() {
                       ) : skillsError ? (
                         <div className="px-3 py-3 text-xs text-status-error">
                           技能加载失败,请稍后重试。
+                        </div>
+                      ) : enabledSkills.length > 0 ? (
+                        <div className="px-3 py-3 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                          没有匹配的技能。
                         </div>
                       ) : (
                         <div className="px-3 py-3 text-xs text-text-tertiary dark:text-text-tertiary-dark">

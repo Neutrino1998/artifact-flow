@@ -1,26 +1,40 @@
-"""SkillManager —— 用户侧 skill 列举 + 个人 enable/disable 覆盖的用例编排(C-3)。
+"""SkillManager —— 用户侧 skill 列举/toggle(C-3)+ 导入/导出/删除用例编排(E-2)。
 
 三层中的 Manager:经 EffectiveSkillSet 做可见性闸(visible=正确性,miss→404 不泄露存在性),
 序列化成前端列表,个人 toggle 写 user_skill 稀疏覆盖。router 只做 transport(认证/HTTP 映射)。
 
-作用域守 feedback-admin-scope-user-mgmt:这是**用户自己的** skill 偏好(个人 opt-in),非
-admin 管共享资源。seeded skill 的 visibility/default_enabled 归 config 只读 —— 用户能改的只有
-自己的 enabled 覆盖(不进 L1 ≠ 不可见:关掉的 skill 仍可用按钮显式激活)。动态 skill CRUD +
-dept 授权 UI 留后续阶段(E/G)。
+导入是 `source="dynamic"` 的**第一个写入者**:user 私有(audience="private",owner=本人、
+default_enabled=True 即刻进自己 L1)与 admin 共享(audience="marketplace",public、owner=null、
+default_enabled=False 用户自选)双通道同走 import_zip —— 零漂移。硬门 = E-1 validator
+(与 seed 同一道门);「能不能跑」归会话期 checker skill(E-4),导入无 verify/force 交互。
+
+seeded skill 归 config 只读(删除/覆盖一律 400 指回 config);dept 授权 UI 归 G。
 
 事务边界 = 每个 use-case:Manager 持 session、调 stage-only repo 后一次 commit(同
 ToolRegistryManager;单写用例无需跨 repo 原子性)。
 """
 
+from dataclasses import asdict
 from typing import Dict, List, Tuple
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import config
 from core.department_resolver import load_ancestor_ids
 from core.effective_skillset import EffectiveSkillSet, resolve_effective_skillset
-from reconcile.snapshot import load_skill_snapshot
+from reconcile.seeds import _SKILL_CONSUMED_FM_KEYS  # 与 seed 同一份「已消费键」口径
+from reconcile.snapshot import SkillInfo, load_skill_snapshot
 from repositories.skill_repo import SkillRepository
+from tools.base import resolve_allowed_tool_entry
+from utils.frontmatter import normalize_allowed_tools
 from utils.logger import get_logger
+from utils.skill_validator import (
+    Finding,
+    derive_import_slug,
+    validate_skill_zip,
+    validate_slug,
+)
 
 logger = get_logger("ArtifactFlow")
 
@@ -32,6 +46,31 @@ class SkillManagerError(Exception):
 
 class SkillNotFoundError(SkillManagerError):
     status_code = 404
+
+
+class SkillForbiddenError(SkillManagerError):
+    """可见但无权操作(共享 dynamic skill 非本人删除)。共享资源本就可见,无需藏成 404。"""
+    status_code = 403
+
+
+class SkillConflictError(SkillManagerError):
+    """slug 已占用。文案保持中性(不区分 seeded/他人 private —— 轻微存在性信号,已接受;
+    自动改后缀 = 静默 rename 更坏)。"""
+    status_code = 409
+
+
+class SkillQuotaError(SkillManagerError):
+    status_code = 413
+
+
+class SkillValidationError(SkillManagerError):
+    """硬门拒收(E-1 validator error 级 / slug 派生失败 / 单 zip 超限)。findings 结构化
+    透出给 router → 422 detail,前端逐条渲染。"""
+    status_code = 422
+
+    def __init__(self, message: str, findings: List[Finding]):
+        super().__init__(message)
+        self.findings = findings
 
 
 class SkillManager:
@@ -51,7 +90,7 @@ class SkillManager:
         return eff, overrides
 
     @staticmethod
-    def _serialize(info, *, enabled: bool, is_overridden: bool) -> dict:
+    def _serialize(info: SkillInfo, *, enabled: bool, is_overridden: bool, user_id: str) -> dict:
         return {
             "slug": info.slug,
             "name": info.name,
@@ -59,6 +98,10 @@ class SkillManager:
             "enabled": enabled,                       # 有效态(覆盖后,决定进不进 L1)
             "default_enabled": info.default_enabled,  # 系统默认(区分是否被个人改过)
             "is_overridden": is_overridden,
+            "source": info.source,                    # dynamic = UI 导入(前端标 badge/可删)
+            "has_bundle": info.has_bundle,            # 有原始 zip 可导出
+            "visibility": info.visibility,
+            "is_owner": info.owner_user_id == user_id,
         }
 
     async def list_for_user(self, user_id: str) -> List[dict]:
@@ -66,7 +109,8 @@ class SkillManager:
         eff, overrides = await self._resolve(user_id)
         return [
             self._serialize(
-                info, enabled=slug in eff.enabled, is_overridden=slug in overrides
+                info, enabled=slug in eff.enabled, is_overridden=slug in overrides,
+                user_id=user_id,
             )
             for slug, info in eff.visible.items()
         ]
@@ -79,4 +123,205 @@ class SkillManager:
             raise SkillNotFoundError(f"skill '{slug}' not found")
         await self._repo.set_user_override(user_id, slug, enabled)
         await self._session.commit()
-        return self._serialize(info, enabled=enabled, is_overridden=True)
+        return self._serialize(info, enabled=enabled, is_overridden=True, user_id=user_id)
+
+    # ------------------------------------------------------------------
+    # E-2:导入 / 导出 / 删除
+    # ------------------------------------------------------------------
+
+    async def import_zip(
+        self, user_id: str, blob: bytes, filename: str, *, audience: str
+    ) -> dict:
+        """导入一个 skill zip。audience:"private"(user 通道,owner=本人、计配额)/
+        "marketplace"(admin 通道,public 共享、配额豁免)。
+
+        管线:单 zip 字节上限(仅 private —— 信任分层,同 SKILL_BUNDLE_MAX_BYTES 注释)
+        → 配额闸(仅 private)→ E-1 硬门 → slug 派生+校验 → allowed-tools 存在性 warn
+        → 撞名闸 → 建行 commit。全部拒收路径 logger.warning 落原因(req-id ↔ 拒因,
+        否则 grep 只见一条 4xx)。
+        """
+        where = filename or "upload.zip"
+
+        if audience == "private" and len(blob) > config.SKILL_BUNDLE_MAX_BYTES:
+            f = Finding(
+                "zip.bundle_too_large", "error",
+                f"skill zip is {len(blob) / 1024 / 1024:.1f}MB "
+                f"(max {config.SKILL_BUNDLE_MAX_BYTES / 1024 / 1024:.0f}MB)",
+            )
+            logger.warning("Skill import rejected (422): user=%s %s", user_id, f.message)
+            raise SkillValidationError(f.message, [f])
+
+        # 配额:bundle 字节与 artifact blob 共用一个池,口径单点在
+        # ConversationManager.get_user_upload_bytes(已含 skill 字节)。软上限,挡量级。
+        if audience == "private" and config.ARTIFACT_USER_QUOTA_BYTES > 0:
+            from core.conversation_manager import ConversationManager
+            from repositories.conversation_repo import ConversationRepository
+
+            used = await ConversationManager(
+                ConversationRepository(self._session)
+            ).get_user_upload_bytes(user_id)
+            if used + len(blob) > config.ARTIFACT_USER_QUOTA_BYTES:
+                quota_mb = config.ARTIFACT_USER_QUOTA_BYTES / 1024 / 1024
+                logger.warning(
+                    "Skill import rejected (413): user=%s quota exceeded — "
+                    "used=%d incoming=%d quota=%d",
+                    user_id, used, len(blob), config.ARTIFACT_USER_QUOTA_BYTES,
+                )
+                raise SkillQuotaError(
+                    f"存储空间不足：本次导入（{len(blob) / 1024 / 1024:.1f}MB）"
+                    f"将超出你的 {quota_mb:.0f}MB 存储配额"
+                    f"（当前已用 {used / 1024 / 1024:.1f}MB）。"
+                    f"请删除一些对话或已导入的技能以释放空间。"
+                )
+
+        result = validate_skill_zip(blob, where=where)
+        if not result.ok:
+            detail = "; ".join(f"[{f.rule}] {f.message}" for f in result.errors)
+            logger.warning("Skill import rejected (422): user=%s %s", user_id, detail)
+            raise SkillValidationError(
+                f"skill zip failed validation: {detail}", result.findings
+            )
+        parsed = result.parsed
+        findings = list(result.findings)  # 全 warning(ok=True),随成功响应透出
+
+        slug = derive_import_slug(parsed.frontmatter, parsed.prefix, where)
+        slug_finding = validate_slug(slug)
+        if slug_finding is not None:
+            logger.warning(
+                "Skill import rejected (422): user=%s %s", user_id, slug_finding.message
+            )
+            raise SkillValidationError(slug_finding.message, findings + [slug_finding])
+
+        # visibility/default_enabled 由通道决定,frontmatter 里的声明被忽略(validator
+        # 保持 audience 无关,这条提示归导入侧)
+        ignored = sorted({"visibility", "default_enabled"} & parsed.frontmatter.keys())
+        if ignored:
+            findings.append(Finding(
+                "fm.import_ignored_keys", "warning",
+                f"frontmatter keys {ignored} are ignored on import "
+                "(visibility is set by the import channel)",
+            ))
+
+        # allowed-tools 存在性:与 seed / runtime 同一个 resolver,解析不到 = warn 不拦
+        # (unit 后续可挂 / 可建,决策 11)
+        allowed_tools = normalize_allowed_tools(
+            parsed.frontmatter.get("allowed-tools"), where
+        )
+        known_units, known_fulls = await self._repo.known_tool_names()
+        for entry in allowed_tools:
+            if resolve_allowed_tool_entry(entry, known_units, known_fulls) is None:
+                findings.append(Finding(
+                    "tools.unknown_entry", "warning",
+                    f"allowed-tools entry '{entry}' resolves to no known tool unit "
+                    "(builtin / external unit / <unit>__<tool>) — kept as-is, "
+                    "resolved at runtime",
+                ))
+
+        if await self._repo.slug_exists(slug):
+            logger.warning(
+                "Skill import rejected (409): user=%s slug=%s already taken",
+                user_id, slug,
+            )
+            raise SkillConflictError(
+                f"slug '{slug}' 不可用，请修改技能的 name 后重新打包上传"
+            )
+
+        frontmatter = parsed.frontmatter
+        meta = {k: v for k, v in frontmatter.items() if k not in _SKILL_CONSUMED_FM_KEYS} or None
+        is_private = audience == "private"
+        self._repo.stage_insert_skill(
+            slug=slug,
+            name=(frontmatter.get("name") or slug),
+            description=frontmatter.get("description", ""),
+            visibility="private" if is_private else "public",
+            # private:owner-only 可见 ⇒ 直接进自己 L1,免 user_skill 行;
+            # marketplace:默认不进 L1,用户自选(镜像 seed 的 marketplace 语义)
+            default_enabled=is_private,
+            owner_user_id=user_id if is_private else None,
+            allowed_tools=allowed_tools,
+            compatibility=frontmatter.get("compatibility"),
+            meta=meta,
+            skill_md=parsed.body,       # 剥 frontmatter 正文,永不改写(原则 3)
+            bundle=blob,                # 原始上传字节无条件存 → 导出无损 by construction
+            source="dynamic",
+            seed_hash=None,
+        )
+        try:
+            await self._session.commit()
+        except IntegrityError:
+            # 并发同 slug 首插竞态:slug_exists 预查与 commit 之间对方先落行
+            await self._session.rollback()
+            logger.warning(
+                "Skill import rejected (409, concurrent): user=%s slug=%s", user_id, slug
+            )
+            raise SkillConflictError(
+                f"slug '{slug}' 不可用，请修改技能的 name 后重新打包上传"
+            )
+
+        logger.info(
+            "Skill imported: slug=%s audience=%s user=%s bytes=%d",
+            slug, audience, user_id, len(blob),
+        )
+        info = SkillInfo(
+            slug=slug,
+            name=(frontmatter.get("name") or slug),
+            description=frontmatter.get("description", ""),
+            visibility="private" if is_private else "public",
+            default_enabled=is_private,
+            owner_user_id=user_id if is_private else None,
+            allowed_tools=allowed_tools,
+            has_bundle=True,
+            compatibility=frontmatter.get("compatibility"),
+            source="dynamic",
+        )
+        return {
+            "status": "imported",
+            "skill": self._serialize(
+                info, enabled=is_private, is_overridden=False, user_id=user_id
+            ),
+            "findings": [asdict(f) for f in findings],
+        }
+
+    async def export_bundle(self, user_id: str, slug: str) -> bytes:
+        """原始 zip 字节导出(无损 by construction,决策 3)。不可见 → 404;
+        seeded prose(bundle NULL)→ 400。"""
+        eff, _ = await self._resolve(user_id)
+        if slug not in eff.visible:
+            raise SkillNotFoundError(f"skill '{slug}' not found")
+        bundle = await self._repo.get_bundle(slug)
+        if bundle is None:
+            raise SkillManagerError(
+                f"skill '{slug}' has no bundle to export (single-file skill)"
+            )
+        return bundle
+
+    async def delete_skill(self, user_id: str, slug: str, *, as_admin: bool = False) -> None:
+        """删除 dynamic skill。user 通道:不可见→404、seeded→400(config 所有)、
+        可见共享非本人→403、own→删;admin 通道:绕过可见性,任意 dynamic 可删。
+        user_skill / dept 规则随 DB FK CASCADE 消失。"""
+        if as_admin:
+            row = await self._repo.get_skill_row_meta(slug)
+            if row is None:
+                raise SkillNotFoundError(f"skill '{slug}' not found")
+            source, owner = row["source"], row["owner_user_id"]
+        else:
+            eff, _ = await self._resolve(user_id)
+            info = eff.visible.get(slug)
+            if info is None:
+                raise SkillNotFoundError(f"skill '{slug}' not found")
+            source, owner = info.source, info.owner_user_id
+
+        if source == "seeded":
+            logger.warning(
+                "Skill delete rejected (400): slug=%s is seeded (config-owned), user=%s",
+                slug, user_id,
+            )
+            raise SkillManagerError(
+                f"skill '{slug}' 由 config 种子管理，不能在界面删除（改 config/skills/ 后重启生效）"
+            )
+        if not as_admin and owner != user_id:
+            raise SkillForbiddenError(f"skill '{slug}' 不是你导入的技能，无法删除")
+
+        await self._repo.delete_skill(slug)
+        await self._session.commit()
+        logger.info("Skill deleted: slug=%s by user=%s admin=%s", slug, user_id, as_admin)

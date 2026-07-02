@@ -855,6 +855,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/skills/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Admin Import Skill
+         * @description 导入共享 skill(visibility=public、default_enabled=False、owner=null)。
+         */
+        post: operations["admin_import_skill_api_v1_admin_skills_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/skills/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Admin Delete Skill
+         * @description 删除任意 dynamic skill(绕过可见性;seeded → 400)。级联清 user_skill/dept 规则。
+         */
+        delete: operations["admin_delete_skill_api_v1_admin_skills__slug__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/departments": {
         parameters: {
             query?: never;
@@ -1023,6 +1063,67 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/skills/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Skill
+         * @description 导入私有 skill zip(owner=本人,立即进自己的 L1)。硬门拒收 → 422 结构化
+         *     findings;超单包上限 → 422;超存储配额 → 413;slug 撞名 → 409。
+         */
+        post: operations["import_skill_api_v1_skills_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/skills/{slug}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Skill
+         * @description 导出原始 zip 字节(无损 by construction)。不可见 → 404;无 bundle → 400。
+         */
+        get: operations["export_skill_api_v1_skills__slug__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/skills/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Skill
+         * @description 删除自己导入的 dynamic skill。不可见 → 404;seeded → 400;非本人共享 → 403。
+         */
+        delete: operations["delete_skill_api_v1_skills__slug__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1390,8 +1491,24 @@ export interface components {
              */
             updated_at: string;
         };
+        /** Body_admin_import_skill_api_v1_admin_skills_import_post */
+        Body_admin_import_skill_api_v1_admin_skills_import_post: {
+            /**
+             * File
+             * Format: binary
+             */
+            file: string;
+        };
         /** Body_bulk_import_users_api_v1_admin_users_bulk_import_post */
         Body_bulk_import_users_api_v1_admin_users_bulk_import_post: {
+            /**
+             * File
+             * Format: binary
+             */
+            file: string;
+        };
+        /** Body_import_skill_api_v1_skills_import_post */
+        Body_import_skill_api_v1_skills_import_post: {
             /**
              * File
              * Format: binary
@@ -1931,6 +2048,27 @@ export interface components {
             /** Nodes */
             nodes: components["schemas"]["DepartmentTreeNode"][];
         };
+        /**
+         * FindingItem
+         * @description 一条 validator finding(E-1 硬门产出;rule id 稳定,前端按 severity 渲染)。
+         */
+        FindingItem: {
+            /**
+             * Rule
+             * @description Stable rule id, e.g. 'zip.invalid' / 'md.body_empty'.
+             */
+            rule: string;
+            /**
+             * Severity
+             * @description 'error' (rejected) or 'warning' (surfaced only).
+             */
+            severity: string;
+            /**
+             * Message
+             * @description Human-readable explanation.
+             */
+            message: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -2170,6 +2308,25 @@ export interface components {
             value: string;
         };
         /**
+         * SkillImportResponse
+         * @description POST /api/v1/skills/import(+ admin 变体)成功响应。硬门拒收走 422,
+         *     detail = {message, findings[]} 同一 FindingItem 形状。
+         */
+        SkillImportResponse: {
+            /**
+             * Status
+             * @description Always 'imported' on success.
+             */
+            status: string;
+            /** @description The imported skill as it appears in the list. */
+            skill: components["schemas"]["SkillItem"];
+            /**
+             * Findings
+             * @description Non-blocking warnings surfaced by the validator (may be empty).
+             */
+            findings: components["schemas"]["FindingItem"][];
+        };
+        /**
          * SkillItem
          * @description 一个对用户可见的 skill + 其有效启用态。
          */
@@ -2204,6 +2361,26 @@ export interface components {
              * @description Whether the user has an explicit personal enable/disable for this skill.
              */
             is_overridden: boolean;
+            /**
+             * Source
+             * @description 'seeded' (config-owned, read-only in the UI) or 'dynamic' (imported via the UI; deletable by its owner or an admin).
+             */
+            source: string;
+            /**
+             * Has Bundle
+             * @description Whether an original zip bundle exists (enables lossless export).
+             */
+            has_bundle: boolean;
+            /**
+             * Visibility
+             * @description private (owner-only) | public (shared) | department
+             */
+            visibility: string;
+            /**
+             * Is Owner
+             * @description Whether the current user imported (owns) this dynamic skill.
+             */
+            is_owner: boolean;
         };
         /**
          * SkillListResponse
@@ -4039,6 +4216,68 @@ export interface operations {
             };
         };
     };
+    admin_import_skill_api_v1_admin_skills_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_admin_import_skill_api_v1_admin_skills_import_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillImportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_delete_skill_api_v1_admin_skills__slug__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_departments_api_v1_departments_get: {
         parameters: {
             query?: {
@@ -4323,6 +4562,99 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SkillListResponse"];
+                };
+            };
+        };
+    };
+    import_skill_api_v1_skills_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_skill_api_v1_skills_import_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillImportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_skill_api_v1_skills__slug__export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_skill_api_v1_skills__slug__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

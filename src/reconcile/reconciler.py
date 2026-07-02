@@ -422,9 +422,12 @@ async def _reconcile_skills(
             continue
 
         if row.source == "dynamic":
+            owner_hint = (
+                f" (owner_user_id={row.owner_user_id})" if row.owner_user_id else " (shared)"
+            )
             raise SeedError(
-                f"seed skill '{seed.slug}' collides with a UI-uploaded (dynamic) skill; "
-                f"rename the config dir or remove the dynamic skill"
+                f"seed skill '{seed.slug}' collides with a UI-uploaded (dynamic) "
+                f"skill{owner_hint}; rename the config dir or remove the dynamic skill"
             )
         if row.seed_hash == seed.seed_hash:
             report.skipped.append(label)

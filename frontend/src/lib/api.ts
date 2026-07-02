@@ -45,6 +45,7 @@ import type {
   AgentListResponse,
   SkillItem,
   SkillListResponse,
+  SkillImportResponse,
 } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
 import { API_URL } from './apiBase';
@@ -207,6 +208,76 @@ export function setSkillEnabled(slug: string, enabled: boolean) {
   return request<SkillItem>(`/api/v1/skills/${encodeURIComponent(slug)}/enabled`, {
     method: 'PUT',
     body: JSON.stringify({ enabled }),
+  });
+}
+
+/**
+ * 导入 skill zip（E-2）。marketplace=true 走 admin 共享通道（public、默认关、
+ * 全员可见）；否则私有导入（仅自己可见、立即启用）。
+ *
+ * 错误（detail 由 SkillManager 结构化产出）：
+ * - 422 + dict detail（`{message, findings[]}`）→ 硬门拒收，ApiError.body 给 UI
+ *   逐条渲染 rule/severity/message
+ * - 413 → 超存储配额；409 → slug 撞名（改 name 重打包）
+ */
+export async function importSkill(
+  file: File,
+  opts?: { marketplace?: boolean },
+): Promise<SkillImportResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const path = opts?.marketplace
+    ? '/api/v1/admin/skills/import'
+    : '/api/v1/skills/import';
+
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+  if (res.status === 401) {
+    useAuthStore.getState().logout();
+    throw new ApiError(401, 'Session expired');
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    const requestId = res.headers.get('X-Request-ID') ?? undefined;
+    let parsed: unknown = undefined;
+    try { parsed = JSON.parse(text); } catch { /* not JSON */ }
+    throw new ApiError(res.status, formatApiError(res.status, text, requestId), parsed, requestId);
+  }
+  return res.json() as Promise<SkillImportResponse>;
+}
+
+/** 导出原始 zip 字节（无损）。调用方拿 Blob 自己走 objectURL 下载。 */
+export async function downloadSkillBundle(slug: string): Promise<Blob> {
+  const res = await fetch(
+    `${BASE_URL}/api/v1/skills/${encodeURIComponent(slug)}/export`,
+    { headers: authHeaders() },
+  );
+  if (res.status === 401) {
+    useAuthStore.getState().logout();
+    throw new ApiError(401, 'Session expired');
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    const requestId = res.headers.get('X-Request-ID') ?? undefined;
+    throw new ApiError(res.status, formatApiError(res.status, body, requestId), undefined, requestId);
+  }
+  return res.blob();
+}
+
+/** 删除自己导入的 skill（owner 通道）。 */
+export function deleteSkill(slug: string) {
+  return request<void>(`/api/v1/skills/${encodeURIComponent(slug)}`, {
+    method: 'DELETE',
+  });
+}
+
+/** admin 删任意 dynamic skill（含共享/他人私有；seeded 400）。 */
+export function adminDeleteSkill(slug: string) {
+  return request<void>(`/api/v1/admin/skills/${encodeURIComponent(slug)}`, {
+    method: 'DELETE',
   });
 }
 

@@ -2334,6 +2334,94 @@
         }
       }
     },
+    "/api/v1/admin/skills/import": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Import Skill",
+        "description": "\u5bfc\u5165\u5171\u4eab skill(visibility=public\u3001default_enabled=False\u3001owner=null)\u3002",
+        "operationId": "admin_import_skill_api_v1_admin_skills_import_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_admin_import_skill_api_v1_admin_skills_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillImportResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/skills/{slug}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Delete Skill",
+        "description": "\u5220\u9664\u4efb\u610f dynamic skill(\u7ed5\u8fc7\u53ef\u89c1\u6027;seeded \u2192 400)\u3002\u7ea7\u8054\u6e05 user_skill/dept \u89c4\u5219\u3002",
+        "operationId": "admin_delete_skill_api_v1_admin_skills__slug__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/departments": {
       "get": {
         "tags": [
@@ -2763,6 +2851,140 @@
             "HTTPBearer": []
           }
         ]
+      }
+    },
+    "/api/v1/skills/import": {
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Import Skill",
+        "description": "\u5bfc\u5165\u79c1\u6709 skill zip(owner=\u672c\u4eba,\u7acb\u5373\u8fdb\u81ea\u5df1\u7684 L1)\u3002\u786c\u95e8\u62d2\u6536 \u2192 422 \u7ed3\u6784\u5316\nfindings;\u8d85\u5355\u5305\u4e0a\u9650 \u2192 422;\u8d85\u5b58\u50a8\u914d\u989d \u2192 413;slug \u649e\u540d \u2192 409\u3002",
+        "operationId": "import_skill_api_v1_skills_import_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_skill_api_v1_skills_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillImportResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/skills/{slug}/export": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Export Skill",
+        "description": "\u5bfc\u51fa\u539f\u59cb zip \u5b57\u8282(\u65e0\u635f by construction)\u3002\u4e0d\u53ef\u89c1 \u2192 404;\u65e0 bundle \u2192 400\u3002",
+        "operationId": "export_skill_api_v1_skills__slug__export_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{slug}": {
+      "delete": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Delete Skill",
+        "description": "\u5220\u9664\u81ea\u5df1\u5bfc\u5165\u7684 dynamic skill\u3002\u4e0d\u53ef\u89c1 \u2192 404;seeded \u2192 400;\u975e\u672c\u4eba\u5171\u4eab \u2192 403\u3002",
+        "operationId": "delete_skill_api_v1_skills__slug__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/skills/{slug}/enabled": {
@@ -3469,6 +3691,20 @@
         "title": "ArtifactSummary",
         "description": "Artifact summary in list response"
       },
+      "Body_admin_import_skill_api_v1_admin_skills_import_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_admin_import_skill_api_v1_admin_skills_import_post"
+      },
       "Body_bulk_import_users_api_v1_admin_users_bulk_import_post": {
         "properties": {
           "file": {
@@ -3482,6 +3718,20 @@
           "file"
         ],
         "title": "Body_bulk_import_users_api_v1_admin_users_bulk_import_post"
+      },
+      "Body_import_skill_api_v1_skills_import_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_skill_api_v1_skills_import_post"
       },
       "Body_send_message_api_v1_chat_post": {
         "properties": {
@@ -4371,6 +4621,33 @@
         "title": "DepartmentTreeResponse",
         "description": "GET /api/v1/departments/tree response \u2014 \u9876\u5c42\u8282\u70b9\u5217\u8868"
       },
+      "FindingItem": {
+        "properties": {
+          "rule": {
+            "type": "string",
+            "title": "Rule",
+            "description": "Stable rule id, e.g. 'zip.invalid' / 'md.body_empty'."
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity",
+            "description": "'error' (rejected) or 'warning' (surfaced only)."
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable explanation."
+          }
+        },
+        "type": "object",
+        "required": [
+          "rule",
+          "severity",
+          "message"
+        ],
+        "title": "FindingItem",
+        "description": "\u4e00\u6761 validator finding(E-1 \u786c\u95e8\u4ea7\u51fa;rule id \u7a33\u5b9a,\u524d\u7aef\u6309 severity \u6e32\u67d3)\u3002"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -4773,6 +5050,35 @@
         "title": "SetCredentialRequest",
         "description": "PUT /api/v1/admin/tools/units/{name}/credentials/{placeholder} \u2014\u2014 \u5199-only\u3002"
       },
+      "SkillImportResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Always 'imported' on success."
+          },
+          "skill": {
+            "$ref": "#/components/schemas/SkillItem",
+            "description": "The imported skill as it appears in the list."
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/FindingItem"
+            },
+            "type": "array",
+            "title": "Findings",
+            "description": "Non-blocking warnings surfaced by the validator (may be empty)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "skill",
+          "findings"
+        ],
+        "title": "SkillImportResponse",
+        "description": "POST /api/v1/skills/import(+ admin \u53d8\u4f53)\u6210\u529f\u54cd\u5e94\u3002\u786c\u95e8\u62d2\u6536\u8d70 422,\ndetail = {message, findings[]} \u540c\u4e00 FindingItem \u5f62\u72b6\u3002"
+      },
       "SkillItem": {
         "properties": {
           "slug": {
@@ -4804,6 +5110,26 @@
             "type": "boolean",
             "title": "Is Overridden",
             "description": "Whether the user has an explicit personal enable/disable for this skill."
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "'seeded' (config-owned, read-only in the UI) or 'dynamic' (imported via the UI; deletable by its owner or an admin)."
+          },
+          "has_bundle": {
+            "type": "boolean",
+            "title": "Has Bundle",
+            "description": "Whether an original zip bundle exists (enables lossless export)."
+          },
+          "visibility": {
+            "type": "string",
+            "title": "Visibility",
+            "description": "private (owner-only) | public (shared) | department"
+          },
+          "is_owner": {
+            "type": "boolean",
+            "title": "Is Owner",
+            "description": "Whether the current user imported (owns) this dynamic skill."
           }
         },
         "type": "object",
@@ -4813,7 +5139,11 @@
           "description",
           "enabled",
           "default_enabled",
-          "is_overridden"
+          "is_overridden",
+          "source",
+          "has_bundle",
+          "visibility",
+          "is_owner"
         ],
         "title": "SkillItem",
         "description": "\u4e00\u4e2a\u5bf9\u7528\u6237\u53ef\u89c1\u7684 skill + \u5176\u6709\u6548\u542f\u7528\u6001\u3002"
