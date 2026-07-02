@@ -60,10 +60,11 @@ class CallSubagentTool(BaseTool):
 
     async def execute(self, **params) -> ToolResult:
         """
-        验证参数并返回路由信息。
+        纯参数验证，无副作用。
 
-        Engine 在检测到 call_subagent 时会调用此方法进行验证，
-        验证通过后 engine 设置 state["current_agent"] 进行路由。
+        Engine 在检测到 call_subagent 时先调用此方法验证；验证通过后由
+        _execute_tools 原地递归 await 目标 agent 的 _run_agent 循环，
+        返回值包成 <subagent_result> 作为本调用的 tool_result。
         """
         agent_name = params.get("agent_name")
         instruction = params.get("instruction", "").strip()

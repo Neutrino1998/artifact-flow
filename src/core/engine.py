@@ -1077,9 +1077,11 @@ async def execute_loop(
         """跑单个 agent 的循环，直至它给出无工具调用的最终回复。
 
         lead 是顶层调用；subagent 由 _execute_tools 的 call_subagent 分支原地
-        递归调用（互递归，深度由工具面决定 —— call_subagent 只在 lead 的
-        EffectiveToolset 里，即一层）。整个 turn 仍是单 asyncio task、单活跃
-        agent：事件序 = 执行序，取消/超时/终态管线不感知递归深度。
+        递归调用（互递归）。深度无代码级上限，由工具面**配置**约束 —— 当前仅
+        lead 的 EffectiveToolset 含 call_subagent，故为一层；给 subagent 授予
+        call_subagent 即开启更深嵌套（前端 tool_complete 按 name 配对，多层同名
+        在飞时需先改配对策略）。整个 turn 仍是单 asyncio task、单活跃 agent：
+        事件序 = 执行序，取消/超时/终态管线不感知递归深度。
 
         Returns:
             该 agent 的最终文本；None = turn 已终止（cancel / error，state 标志
