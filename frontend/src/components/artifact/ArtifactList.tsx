@@ -51,7 +51,7 @@ export default function ArtifactList() {
                   {artifact.title}
                 </span>
                 {hasPending && (
-                  <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
+                  <span className="w-2 h-2 rounded-full bg-status-error flex-shrink-0" />
                 )}
               </div>
               <div className="flex items-center gap-2 mt-0.5 text-xs text-text-tertiary dark:text-text-tertiary-dark">

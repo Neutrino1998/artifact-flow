@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect } from 'react';
 import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useUIStore } from '@/stores/uiStore';
-import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
+import { BUTTON_DANGER_OUTLINE, BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
 import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
 import type { BulkActionResponse, BulkImpactResponse } from '@/types';
@@ -184,7 +184,7 @@ export default function BulkActionPanel() {
             <button
               onClick={handleStartDelete}
               disabled={empty || submitting}
-              className="w-full px-4 py-2.5 rounded-lg border border-status-error/40 text-status-error hover:bg-status-error/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-left"
+              className={`${BUTTON_DANGER_OUTLINE} w-full rounded-lg px-4 py-2.5 text-left`}
             >
               <div className="font-medium">删除</div>
               <div className="text-xs opacity-80">硬删用户 + 级联会话；操作不可恢复</div>

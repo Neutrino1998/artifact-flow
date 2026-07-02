@@ -14,9 +14,9 @@ import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
 import ToolUnitEditor, {
   draftToRequest,
   unitResponseToDraft,
-  SELECT_CHEVRON,
   type UnitDraft,
 } from '@/components/forms/ToolUnitEditor';
+import { SELECT_CHEVRON } from '@/components/ui/SelectChevron';
 import { SourceBadge, StateBadge } from '@/components/forms/ToolUnitBadges';
 import type {
   AgentSummaryResponse,
@@ -484,8 +484,8 @@ function CredentialRow({
           {`{{${cred.placeholder}}}`}
         </code>
         {cred.configured ? (
-          <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+          <span className="inline-flex items-center gap-1 text-xs text-status-success">
+            <span className="w-1.5 h-1.5 rounded-full bg-status-success" />
             已配置{cred.source ? `（${cred.source}）` : ''}
           </span>
         ) : (

@@ -66,7 +66,7 @@ export default function ToolUnitManagementPanel() {
       <div className="flex-1 overflow-y-auto px-4">
         <div className="max-w-3xl mx-auto">
           {error && (
-            <div className="mb-3 px-3 py-2 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg">
+            <div className="mb-3 px-3 py-2 text-status-error bg-status-error/10 rounded-lg">
               {error}
             </div>
           )}
@@ -170,8 +170,8 @@ function UnitRow({
         <span
           className={`flex-shrink-0 text-xs ${
             configuredCreds === unit.credentials.length
-              ? 'text-green-600 dark:text-green-400'
-              : 'text-amber-600 dark:text-amber-400'
+              ? 'text-status-success'
+              : 'text-status-warning'
           }`}
         >
           凭证 {configuredCreds}/{unit.credentials.length}

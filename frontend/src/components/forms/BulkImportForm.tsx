@@ -490,9 +490,9 @@ function SummaryCard({
 }) {
   const accentClass =
     accent === 'success'
-      ? 'text-green-600 dark:text-green-400'
+      ? 'text-status-success'
       : accent === 'warn'
-      ? 'text-yellow-600 dark:text-yellow-400'
+      ? 'text-status-warning'
       : 'text-status-error';
   return (
     <div className="rounded-lg border border-border dark:border-border-dark p-3 text-center">

@@ -5,10 +5,10 @@
 @tailwind utilities;
 
 ::selection {
-  background: rgba(201, 100, 66, 0.25);
+  @apply bg-accent/25;
 }
 .dark ::selection {
-  background: rgba(201, 100, 66, 0.35);
+  @apply bg-accent/35;
 }
 
 /* PT Serif — newsprint theme font for markdown/prose areas */
@@ -39,6 +39,13 @@
 
 @layer base {
   :root {
+    /* Accent「赭墨」— RGB triplets so tailwind's <alpha-value> opacity
+       modifiers (bg-accent/25 etc.) keep working. DEFAULT is mode-invariant;
+       hover/bg need a per-mode value (light hover darkens, dark hover
+       lightens), which is why accent lives in CSS vars instead of fixed hex. */
+    --accent: 156 112 80;        /* #9C7050 */
+    --accent-hover: 138 97 66;   /* #8A6142 */
+    --accent-bg: 246 239 232;    /* #F6EFE8 */
     --shadow-float: 0 2px 12px rgba(0,0,0,0.08), 0 0 1px rgba(0,0,0,0.05);
     --shadow-sidebar: 2px 0 12px rgba(0,0,0,0.08);
     /* Floating left card: layered for a wide, gradual falloff (vs the tight --shadow-sidebar). */
@@ -47,6 +54,8 @@
     --shadow-hover: 0 1px 2px rgba(0,0,0,0.05);
   }
   .dark {
+    --accent-hover: 172 128 96;  /* #AC8060 */
+    --accent-bg: 50 42 34;       /* #322A22 */
     --shadow-float: 0 2px 12px rgba(0,0,0,0.3), 0 0 1px rgba(0,0,0,0.15);
     --shadow-sidebar: 2px 0 12px rgba(0,0,0,0.18);
     --shadow-sidebar-card: 3px 0 12px rgba(0,0,0,0.16), 8px 0 24px rgba(0,0,0,0.10);

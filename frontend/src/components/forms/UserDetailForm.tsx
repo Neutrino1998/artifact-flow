@@ -17,6 +17,7 @@ import { parseUtcIso } from '@/lib/time';
 import PanelShell from '@/components/layout/PanelShell';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
 import Checkbox from '@/components/forms/Checkbox';
+import { SELECT_CHEVRON } from '@/components/ui/SelectChevron';
 import {
   PASSWORD_POLICY_HINT,
   validatePasswordStrength,
@@ -285,12 +286,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
-            <svg
-              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-tertiary dark:text-text-tertiary-dark"
-              width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
-            >
-              <path d="M3 4.5l3 3 3-3" />
-            </svg>
+            {SELECT_CHEVRON}
           </div>
         </div>
 

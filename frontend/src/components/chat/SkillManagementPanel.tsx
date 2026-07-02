@@ -81,7 +81,7 @@ export default function SkillManagementPanel() {
           )}
 
           {!loading && error && (
-            <div className="py-12 text-center text-sm text-red-600 dark:text-red-400">{error}</div>
+            <div className="py-12 text-center text-sm text-status-error">{error}</div>
           )}
 
           {!loading && !error && skills.length === 0 && (

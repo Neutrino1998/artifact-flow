@@ -1,6 +1,8 @@
 'use client';
 
 import { useMemo } from 'react';
+import { BUTTON_GHOST_ICON, SELECT_COMPACT } from '@/lib/styles';
+import { SELECT_CHEVRON_COMPACT } from '@/components/ui/SelectChevron';
 
 interface PaginationProps {
   /** 1-based current page. */
@@ -58,7 +60,7 @@ export default function Pagination({
           <button
             onClick={() => onPageChange(page - 1)}
             disabled={!canPrev}
-            className="px-2 py-1 rounded-md text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
+            className={`${BUTTON_GHOST_ICON} px-2 py-1`}
             aria-label="上一页"
           >
             ‹
@@ -77,11 +79,11 @@ export default function Pagination({
                 onClick={() => onPageChange(item)}
                 disabled={disabled}
                 aria-current={item === page ? 'page' : undefined}
-                className={`min-w-[28px] px-2 py-1 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                className={
                   item === page
-                    ? 'bg-accent/10 dark:bg-accent/15 text-accent font-medium'
-                    : 'text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark'
-                }`}
+                    ? 'min-w-[28px] px-2 py-1 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed bg-accent/10 dark:bg-accent/15 text-accent font-medium'
+                    : `${BUTTON_GHOST_ICON} min-w-[28px] px-2 py-1`
+                }
               >
                 {item}
               </button>
@@ -90,7 +92,7 @@ export default function Pagination({
           <button
             onClick={() => onPageChange(page + 1)}
             disabled={!canNext}
-            className="px-2 py-1 rounded-md text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
+            className={`${BUTTON_GHOST_ICON} px-2 py-1`}
             aria-label="下一页"
           >
             ›
@@ -108,18 +110,13 @@ export default function Pagination({
             value={pageSize}
             onChange={(e) => onPageSizeChange(Number(e.target.value))}
             disabled={disabled}
-            className="appearance-none pl-2 pr-7 py-1 rounded-md border border-border dark:border-border-dark bg-surface dark:bg-surface-dark text-text-primary dark:text-text-primary-dark text-right focus:outline-none focus:border-accent dark:focus:border-accent disabled:opacity-40"
+            className={SELECT_COMPACT}
           >
             {pageSizeOptions.map((opt) => (
               <option key={opt} value={opt}>{opt}</option>
             ))}
           </select>
-          <svg
-            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary dark:text-text-tertiary-dark"
-            width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"
-          >
-            <path d="M3 4.5l3 3 3-3" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          {SELECT_CHEVRON_COMPACT}
         </div>
         项
       </label>

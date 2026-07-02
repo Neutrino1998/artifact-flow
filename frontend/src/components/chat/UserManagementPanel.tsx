@@ -202,7 +202,7 @@ export default function UserManagementPanel() {
         <div className="max-w-3xl mx-auto">
           {/* Error */}
           {error && (
-            <div className="mb-3 px-3 py-2 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg">
+            <div className="mb-3 px-3 py-2 text-status-error bg-status-error/10 rounded-lg">
               {error}
             </div>
           )}
@@ -428,10 +428,10 @@ function UserRow({
       <span className="flex-shrink-0 inline-flex items-center gap-1.5">
         <span
           className={`inline-block w-2 h-2 rounded-full ${
-            user.is_active ? 'bg-green-500' : 'bg-red-400'
+            user.is_active ? 'bg-status-success' : 'bg-status-error'
           }`}
         />
-        <span className={`text-xs ${user.is_active ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+        <span className={`text-xs ${user.is_active ? 'text-status-success' : 'text-status-error'}`}>
           {user.is_active ? '启用' : '禁用'}
         </span>
       </span>

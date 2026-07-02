@@ -49,3 +49,17 @@ export const BUTTON_DANGER =
 
 export const BUTTON_DANGER_OUTLINE =
   'border border-status-error text-status-error font-medium bg-surface dark:bg-surface-dark hover:bg-status-error/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
+
+// Ghost / icon buttons (toolbar icons, pagination arrows, close buttons).
+// The hover fill is a translucent ink wash so the same recipe works on any
+// parent surface (white panel, bg-chat, sidebar accent) in both modes —
+// solid hover fills (bg-surface / bg-bg) go invisible on same-colored parents.
+// Padding/size stay caller-owned, same as the buttons above.
+export const BUTTON_GHOST_ICON =
+  'rounded-md text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark hover:bg-text-primary/5 dark:hover:bg-text-primary-dark/10 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors';
+
+// Compact <select> for dense toolbars (artifact toolbar, pagination,
+// observability). Full-size selects compose INPUT_ON_PANEL/_ON_SURFACE with
+// ' appearance-none pr-9' + <SelectChevron /> instead.
+export const SELECT_COMPACT =
+  'appearance-none pl-2 pr-7 py-1 text-xs rounded-md border border-border dark:border-border-dark bg-surface dark:bg-surface-dark text-text-secondary dark:text-text-secondary-dark focus:outline-none focus:border-accent dark:focus:border-accent disabled:opacity-40 disabled:cursor-not-allowed';

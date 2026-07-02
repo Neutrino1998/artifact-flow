@@ -11,6 +11,7 @@ import StorageBar from './StorageBar';
 import NotificationCenter from './NotificationCenter';
 import BrandingFooter from '@/components/BrandingFooter';
 import { APP_NAME, APP_TAGLINE } from '@/lib/branding';
+import { BUTTON_GHOST_ICON } from '@/lib/styles';
 
 function IconButton({
   onClick,
@@ -24,7 +25,7 @@ function IconButton({
   return (
     <button
       onClick={onClick}
-      className="w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-chat/60 dark:hover:bg-panel-accent-dark/60 transition-colors"
+      className={`${BUTTON_GHOST_ICON} w-10 h-10 flex items-center justify-center`}
       aria-label={label}
       title={label}
     >
@@ -38,7 +39,7 @@ const navRowClass =
   'w-full flex items-center gap-2.5 px-2 py-1.5 font-medium text-text-primary dark:text-text-primary-dark hover:bg-chat/70 dark:hover:bg-panel-accent-dark/60 rounded-lg transition-colors';
 
 const navRowDangerClass =
-  'w-full flex items-center gap-2.5 px-2 py-1.5 font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-lg transition-colors';
+  'w-full flex items-center gap-2.5 px-2 py-1.5 font-medium text-status-error hover:bg-status-error/10 rounded-lg transition-colors';
 
 const RefreshIcon = ({ size = 16, spinning = false }: { size?: number; spinning?: boolean }) => (
   <svg

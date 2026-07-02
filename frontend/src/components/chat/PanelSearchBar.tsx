@@ -1,6 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import { BUTTON_GHOST_ICON } from '@/lib/styles';
 
 interface PanelSearchBarProps {
   value: string;
@@ -67,7 +68,7 @@ export default function PanelSearchBar({
           {onClose && (
             <button
               onClick={onClose}
-              className="flex-shrink-0 p-1 rounded-lg text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark transition-colors"
+              className={`${BUTTON_GHOST_ICON} flex-shrink-0 p-1`}
               aria-label="关闭"
               title="关闭"
             >

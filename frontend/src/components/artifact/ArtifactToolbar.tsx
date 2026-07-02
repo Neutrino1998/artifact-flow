@@ -6,6 +6,8 @@ import { useStreamStore } from '@/stores/streamStore';
 import { useArtifacts } from '@/hooks/useArtifacts';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { fetchArtifactRawObjectUrl } from '@/lib/api';
+import { BUTTON_GHOST_ICON, BUTTON_PRIMARY, SELECT_COMPACT } from '@/lib/styles';
+import { SELECT_CHEVRON_COMPACT } from '@/components/ui/SelectChevron';
 import ArtifactTabs from './ArtifactTabs';
 
 function getFileExtension(contentType: string): string {
@@ -102,17 +104,20 @@ export default function ArtifactToolbar() {
         <div className="flex items-center gap-1">
           {/* Version selector — hidden during streaming (in-memory versions not in DB yet) */}
           {!isStreaming && versions.length > 1 && (
-            <select
-              value={displayVersion}
-              onChange={handleVersionChange}
-              className="text-xs bg-bg dark:bg-bg-dark border border-border dark:border-border-dark rounded px-1.5 py-0.5 text-text-secondary dark:text-text-secondary-dark"
-            >
-              {versions.map((v) => (
-                <option key={v.version} value={v.version}>
-                  v{v.version} ({v.update_type})
-                </option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                value={displayVersion}
+                onChange={handleVersionChange}
+                className={SELECT_COMPACT}
+              >
+                {versions.map((v) => (
+                  <option key={v.version} value={v.version}>
+                    v{v.version} ({v.update_type})
+                  </option>
+                ))}
+              </select>
+              {SELECT_CHEVRON_COMPACT}
+            </div>
           )}
 
           {/* Refresh — hidden during streaming: it re-reads via REST (pure DB now,
@@ -121,7 +126,7 @@ export default function ArtifactToolbar() {
           {!isStreaming && (
             <button
               onClick={handleRefresh}
-              className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
+              className={`${BUTTON_GHOST_ICON} p-1.5`}
               aria-label="Refresh artifact"
               title="刷新"
             >
@@ -136,7 +141,7 @@ export default function ArtifactToolbar() {
           {!current.has_blob && (
           <button
             onClick={handleCopy}
-            className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
+            className={`${BUTTON_GHOST_ICON} p-1.5`}
             aria-label="Copy content"
             title={copied ? '已复制' : '复制内容'}
           >
@@ -160,7 +165,7 @@ export default function ArtifactToolbar() {
           {!isStreaming && (
             <button
               onClick={handleDownload}
-              className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
+              className={`${BUTTON_GHOST_ICON} p-1.5`}
               aria-label="Download artifact"
               title="下载"
             >
@@ -173,7 +178,7 @@ export default function ArtifactToolbar() {
           {/* Back to list */}
           <button
             onClick={() => setCurrent(null)}
-            className="ml-2 w-7 h-7 flex items-center justify-center rounded-full bg-accent text-white hover:bg-accent-hover transition-colors"
+            className={`${BUTTON_PRIMARY} ml-2 w-7 h-7 flex items-center justify-center rounded-full`}
             aria-label="Back to artifact list"
             title="返回列表"
           >

@@ -7,6 +7,7 @@ import { useConversationStore } from '@/stores/conversationStore';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { parseUtcIso } from '@/lib/time';
 import ConfirmModal from '@/components/layout/ConfirmModal';
+import { BUTTON_GHOST_ICON } from '@/lib/styles';
 
 interface ConversationItemProps {
   conversation: ConversationSummary;
@@ -70,7 +71,7 @@ function ConversationItem({ conversation, isActive, onSelect }: ConversationItem
         <div className={`flex items-center gap-1.5 font-medium text-text-primary dark:text-text-primary-dark ${showMenu || menuOpen ? 'pr-7' : ''}`}>
           {conversation.active_message_id && (
             <span
-              className="inline-block w-2 h-2 rounded-full bg-orange-500 flex-shrink-0"
+              className="inline-block w-2 h-2 rounded-full bg-status-running flex-shrink-0"
               title="运行中"
             />
           )}
@@ -89,7 +90,7 @@ function ConversationItem({ conversation, isActive, onSelect }: ConversationItem
                 e.stopPropagation();
                 setMenuOpen((prev) => !prev);
               }}
-              className="p-1.5 rounded-md text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-surface dark:hover:bg-surface-dark transition-colors"
+              className={`${BUTTON_GHOST_ICON} p-1.5`}
               aria-label="More actions"
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">

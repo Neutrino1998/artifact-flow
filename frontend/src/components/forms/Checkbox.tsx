@@ -6,13 +6,19 @@ interface CheckboxProps {
   disabled?: boolean;
   ariaLabel?: string;
   onClick?: (e: React.MouseEvent) => void;
+  /** 'danger' = destructive acknowledge (checked fill uses status-error) */
+  variant?: 'accent' | 'danger';
 }
 
 // 用 stroked 路径 + 大幅占据 viewBox，比原 filled 路径更厚、更显眼
 const CHECKMARK_SVG =
   "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M3 8.5l3.5 3.5L13 5'/></svg>\")";
 
-export default function Checkbox({ checked, onChange, disabled, ariaLabel, onClick }: CheckboxProps) {
+export default function Checkbox({ checked, onChange, disabled, ariaLabel, onClick, variant = 'accent' }: CheckboxProps) {
+  const checkedColor =
+    variant === 'danger'
+      ? 'checked:bg-status-error checked:border-status-error dark:checked:bg-status-error dark:checked:border-status-error'
+      : 'checked:bg-accent checked:border-accent dark:checked:bg-accent dark:checked:border-accent';
   return (
     <input
       type="checkbox"
@@ -21,7 +27,7 @@ export default function Checkbox({ checked, onChange, disabled, ariaLabel, onCli
       aria-label={ariaLabel}
       onChange={(e) => onChange(e.target.checked)}
       onClick={onClick}
-      className="w-4 h-4 appearance-none rounded border border-border dark:border-border-dark bg-surface dark:bg-surface-dark checked:bg-accent checked:border-accent dark:checked:bg-accent dark:checked:border-accent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0 transition-colors bg-center bg-no-repeat"
+      className={`w-4 h-4 appearance-none rounded border border-border dark:border-border-dark bg-surface dark:bg-surface-dark ${checkedColor} cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0 transition-colors bg-center bg-no-repeat`}
       style={checked ? { backgroundImage: CHECKMARK_SVG, backgroundSize: '100% 100%' } : undefined}
     />
   );

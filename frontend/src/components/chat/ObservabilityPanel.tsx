@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { CopyIcon } from '@/components/ui/CopyIcon';
+import { SELECT_COMPACT } from '@/lib/styles';
+import { SELECT_CHEVRON_COMPACT } from '@/components/ui/SelectChevron';
 import * as api from '@/lib/api';
 import { parseUtcIso } from '@/lib/time';
 import PanelSearchBar from './PanelSearchBar';
@@ -21,12 +23,14 @@ import { useLatestOnly } from '@/hooks/useLatestOnly';
 const DEFAULT_PAGE_SIZE = 20;
 
 // ── Event type colors ──
+// Categorical palette via the scoped `trace` tokens; agent_* shares accent
+// (agent activity = brand hue, same reasoning as status.running).
 function eventColor(type: string): string {
   if (type === 'error') return 'text-status-error';
-  if (type.startsWith('permission')) return 'text-yellow-500 dark:text-yellow-400';
-  if (type === 'llm_complete') return 'text-accent';
-  if (type.startsWith('tool_')) return 'text-blue-500 dark:text-blue-400';
-  if (type.startsWith('agent_')) return 'text-purple-500 dark:text-purple-400';
+  if (type.startsWith('permission')) return 'text-status-warning';
+  if (type === 'llm_complete') return 'text-trace-llm dark:text-trace-llm-dark';
+  if (type.startsWith('tool_')) return 'text-trace-tool dark:text-trace-tool-dark';
+  if (type.startsWith('agent_')) return 'text-accent';
   return 'text-text-tertiary dark:text-text-tertiary-dark';
 }
 
@@ -605,7 +609,7 @@ function AdminConversationBrowser({
             >
               <div className="flex items-center gap-2">
                 {conv.is_active && (
-                  <span className="inline-block w-2 h-2 rounded-full bg-orange-500 flex-shrink-0" title="运行中" />
+                  <span className="inline-block w-2 h-2 rounded-full bg-status-running flex-shrink-0" title="运行中" />
                 )}
                 <span className="font-medium text-text-primary dark:text-text-primary-dark truncate">
                   {conv.title || 'Untitled'}
@@ -692,7 +696,7 @@ function MessageGroupView({
         </span>
         {offActiveBranch ? (
           <span
-            className="flex-shrink-0 px-1 py-px rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[10px]"
+            className="flex-shrink-0 px-1 py-px rounded bg-status-warning/10 text-status-warning text-[10px]"
             title="不在当前活动分支路径上（旁支历史消息）"
           >
             旁支
@@ -720,7 +724,7 @@ function MessageGroupView({
                 {formatTime(event.created_at)}
               </span>
               {event.agent_name != null ? (
-                <span className="flex-shrink-0 px-1 py-px rounded bg-purple-500/10 text-purple-600 dark:text-purple-400 text-[10px]">
+                <span className="flex-shrink-0 px-1 py-px rounded bg-accent/10 text-accent text-[10px]">
                   {event.agent_name.replace('_agent', '')}
                 </span>
               ) : null}
@@ -1006,17 +1010,20 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
                 {detail.versions.length > 0 ? (
                   <>
                     <span>·</span>
-                    <select
-                      value={viewingVersion ?? detail.current_version}
-                      onChange={(e) => setViewingVersion(Number(e.target.value))}
-                      className="text-xs bg-bg dark:bg-bg-dark border border-border dark:border-border-dark rounded px-1.5 py-0.5 text-text-secondary dark:text-text-secondary-dark"
-                    >
-                      {detail.versions.map((v) => (
-                        <option key={v.version} value={v.version}>
-                          v{v.version} ({v.update_type}){v.version === detail.current_version ? ' · current' : ''}
-                        </option>
-                      ))}
-                    </select>
+                    <span className="relative">
+                      <select
+                        value={viewingVersion ?? detail.current_version}
+                        onChange={(e) => setViewingVersion(Number(e.target.value))}
+                        className={SELECT_COMPACT}
+                      >
+                        {detail.versions.map((v) => (
+                          <option key={v.version} value={v.version}>
+                            v{v.version} ({v.update_type}){v.version === detail.current_version ? ' · current' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      {SELECT_CHEVRON_COMPACT}
+                    </span>
                     {versionLoading ? <span>加载...</span> : null}
                   </>
                 ) : null}
@@ -1114,7 +1121,7 @@ function PromptReconstructSection({
           <div className="flex items-center gap-2 flex-wrap text-xs text-text-tertiary dark:text-text-tertiary-dark">
             <span>{result.messages.length} 条消息 · {result.agent_name ?? '-'}</span>
             {!result.has_reminder ? (
-              <span className="px-1 py-px rounded bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 text-[10px]">
+              <span className="px-1 py-px rounded bg-status-warning/10 text-status-warning text-[10px]">
                 无持久化 reminder（旧事件：仅 system + 历史）
               </span>
             ) : null}

@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { BUTTON_PRIMARY } from '@/lib/styles';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -43,7 +44,7 @@ export default class ErrorBoundary extends React.Component<ErrorBoundaryProps, E
             </p>
             <button
               onClick={this.handleRetry}
-              className="px-4 py-1.5 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors"
+              className={`${BUTTON_PRIMARY} px-4 py-1.5 text-xs rounded`}
             >
               Retry
             </button>

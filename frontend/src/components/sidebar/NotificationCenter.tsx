@@ -104,7 +104,7 @@ export default function NotificationCenter({ collapsed }: Props) {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="w-full flex items-center gap-3 px-3 py-2.5 bg-chat dark:bg-panel-accent-dark rounded-card hover:bg-surface dark:hover:bg-[#141414] transition-colors text-left"
+        className="w-full flex items-center gap-3 px-3 py-2.5 bg-chat dark:bg-panel-accent-dark rounded-card hover:bg-surface dark:hover:bg-panel-accent-dark transition-colors text-left"
       >
         <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ring-1 ring-border/60 dark:ring-border-dark/60 ${SEVERITY_BG_TINT[top.severity]}`}>
           <BellIcon className={SEVERITY_TEXT_CLASS[top.severity]} />

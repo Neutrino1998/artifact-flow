@@ -20,7 +20,7 @@ export function SourceBadge({ source }: { source: string }) {
 export function StateBadge({ state }: { state: string }) {
   const enabled = state === 'enabled';
   return (
-    <span className={`flex-shrink-0 text-xs ${enabled ? 'text-green-600 dark:text-green-400' : 'text-text-tertiary dark:text-text-tertiary-dark'}`}>
+    <span className={`flex-shrink-0 text-xs ${enabled ? 'text-status-success' : 'text-text-tertiary dark:text-text-tertiary-dark'}`}>
       {enabled ? '启用' : '停用'}
     </span>
   );

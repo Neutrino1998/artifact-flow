@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from 'react';
 import { ApiError } from '@/lib/api';
 import { BUTTON_DANGER, BUTTON_SECONDARY } from '@/lib/styles';
+import Checkbox from '@/components/forms/Checkbox';
 import DialogShell from './DialogShell';
 
 interface DangerConfirmModalProps {
@@ -102,13 +103,15 @@ export default function DangerConfirmModal({
 
       {requireAcknowledge && (
         <label className="flex items-start gap-3 mb-4 cursor-pointer select-none group">
-          <input
-            type="checkbox"
-            checked={acknowledged}
-            onChange={(e) => setAcknowledged(e.target.checked)}
-            disabled={submitting}
-            className="mt-0.5 w-4 h-4 accent-status-error cursor-pointer disabled:cursor-not-allowed"
-          />
+          <span className="mt-0.5 flex">
+            <Checkbox
+              variant="danger"
+              checked={acknowledged}
+              onChange={setAcknowledged}
+              disabled={submitting}
+              ariaLabel={acknowledgeLabel}
+            />
+          </span>
           <span className="text-sm text-text-secondary dark:text-text-secondary-dark group-hover:text-text-primary dark:group-hover:text-text-primary-dark transition-colors">
             {acknowledgeLabel}
           </span>

@@ -674,7 +674,7 @@ export default function MessageInput() {
                           加载中...
                         </div>
                       ) : skillsError ? (
-                        <div className="px-3 py-3 text-xs text-red-600 dark:text-red-400">
+                        <div className="px-3 py-3 text-xs text-status-error">
                           技能加载失败,请稍后重试。
                         </div>
                       ) : (
@@ -760,7 +760,7 @@ export default function MessageInput() {
                       stroke="currentColor"
                       strokeDasharray={2 * Math.PI * 6.5}
                       strokeDashoffset={2 * Math.PI * 6.5 * (1 - pct / 100)}
-                      className={near ? 'text-amber-500' : 'text-accent'}
+                      className={near ? 'text-status-warning' : 'text-accent'}
                     />
                   </svg>
                   {/* translate-y-[0.5px]: mono digits 的 cap-center 比 line-box
@@ -804,7 +804,7 @@ export default function MessageInput() {
                   disabled={sendDisabled}
                   className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                     isStop || cancelling
-                      ? 'bg-red-500 text-white hover:bg-red-600'
+                      ? 'bg-status-error text-white hover:bg-status-error/80'
                       : 'bg-accent text-white hover:bg-accent-hover'
                   }`}
                   aria-label={

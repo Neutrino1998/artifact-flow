@@ -4,6 +4,7 @@ import { memo, useState, useRef, useEffect, useCallback } from 'react';
 import { useChat } from '@/hooks/useChat';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { useStreamStore } from '@/stores/streamStore';
+import { BUTTON_PRIMARY } from '@/lib/styles';
 import { CopyIcon } from '@/components/ui/CopyIcon';
 import BranchNavigator from './BranchNavigator';
 
@@ -117,7 +118,7 @@ function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCo
               <button
                 onClick={handleSubmitEdit}
                 disabled={!editContent.trim() || isStreaming}
-                className="px-3 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-40 transition-colors"
+                className={`${BUTTON_PRIMARY} px-3 py-1 text-xs rounded`}
               >
                 发送
               </button>

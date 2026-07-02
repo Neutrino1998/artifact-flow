@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import { fetchArtifactRawObjectUrl } from '@/lib/api';
+import { BUTTON_PRIMARY } from '@/lib/styles';
 import { useArtifactStore } from '@/stores/artifactStore';
 
 /** Render a non-image blob-backed artifact (docx / pdf upload — C-0 blob-only:
@@ -70,13 +71,13 @@ export default function BinaryFilePreview({
         ) : (
           <button
             onClick={handleDownload}
-            className="px-3 py-1.5 text-xs rounded-lg bg-accent text-white hover:bg-accent-hover transition-colors"
+            className={`${BUTTON_PRIMARY} px-3 py-1.5 text-xs rounded-lg`}
           >
             下载原件
           </button>
         )}
         {error && (
-          <div className="text-xs text-red-500">{error}</div>
+          <div className="text-xs text-status-error">{error}</div>
         )}
       </div>
     </div>

@@ -37,19 +37,31 @@ const config: Config = {
           'secondary-dark': '#9b9590',
           'tertiary-dark': '#6b6560',
         },
+        // 「赭墨」— values live as RGB-triplet CSS vars in globals.css so
+        // hover/bg can differ per mode without dark: variants at call sites.
         accent: {
-          DEFAULT: '#c96442',
-          hover: '#b5573a',
-          bg: '#fdf4f0',
+          DEFAULT: 'rgb(var(--accent) / <alpha-value>)',
+          hover: 'rgb(var(--accent-hover) / <alpha-value>)',
+          bg: 'rgb(var(--accent-bg) / <alpha-value>)',
         },
         border: {
           DEFAULT: '#d6d3cb',
           dark: '#3a3a3a',
         },
+        // Muted categorical hues for the observability event trace (scoped
+        // to that panel; agent_* events use accent directly).
+        trace: {
+          tool: '#52657F',
+          'tool-dark': '#7E92AC',
+          llm: '#6A5670',
+          'llm-dark': '#9A85A0',
+        },
         status: {
           success: '#4a8c6f',
           error: '#c25d4e',
           warning: '#c49a3c',
+          // running deliberately shares the accent hue (live activity = brand)
+          running: 'rgb(var(--accent) / <alpha-value>)',
         },
       },
       fontFamily: {
