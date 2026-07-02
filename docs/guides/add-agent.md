@@ -140,10 +140,10 @@ YAML 语法错误、缺失必填字段等会被 catch 并 log error，其他 age
 
 ### Agent 完成路由
 
-- **Lead Agent** 无工具调用 → 终止引擎循环（这是对话轮次的唯一出口）
-- **Subagent** 无工具调用 → 响应打包为 `<subagent_result>` 作为 `call_subagent` 的 tool_result 返回给 Lead
+- **Lead Agent** 无工具调用 → 最终回复即对话轮次的响应（这是唯一出口）
+- **Subagent** 无工具调用 → subagent 是 `call_subagent` 的一次原地递归调用，最终回复打包为 `<subagent_result>` 作为 tool_result 返回给 Lead，Lead 同轮剩余工具继续执行
 
-这个不对称设计意味着：不要试图让非 Lead agent "直接输出给用户"，它的输出一定会被包装后回传给 Lead。Lead 才是对用户的唯一出口。
+这意味着：不要试图让非 Lead agent "直接输出给用户"，它的输出一定会被包装后回传给 Lead。Lead 才是对用户的唯一出口。
 
 ## 下一步
 

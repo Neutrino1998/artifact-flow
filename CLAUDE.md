@@ -36,9 +36,9 @@ docker run --rm -v "$PWD":/w -w /w python:3.11-slim sh -c \
 
 Non-obvious design choices you won't infer from reading one file.
 
-- **Pi-style engine** (`src/core/engine.py`): Flat `while not completed` loop — no middleware chain, no framework. Agent calls, tool execution, routing all happen in one loop. Reference: [Pi agent](https://github.com/badlogic/pi-mono).
+- **Pi-style engine, nested serial** (`src/core/engine.py`): Per-agent `_run_agent` loop — no middleware chain, no framework. `call_subagent` recurses in place (`_execute_tools` awaits the target agent's loop; its return value becomes the `<subagent_result>` tool_result), so one round may mix `[tool, subagent, subagent, tool]` in natural order. Invariants the recursion must NOT break: single asyncio task, single active agent, event order = execution order (audit linearity). No prompt special-casing either — same-round params being frozen at generation is the universal multi-call semantics for every tool, and a later subagent can still read artifacts an earlier one wrote (serial execution). Reference: [Pi agent](https://github.com/badlogic/pi-mono).
 
-- **Agent completion routing**: Lead agent with no tool calls → `completed = True` (exit loop). Subagent with no tool calls → pack response as a `call_subagent` tool_result and switch back to lead. This asymmetry is intentional.
+- **Agent completion routing**: an agent's no-tool-call reply is its `_run_agent` return value. Top-level lead return → `completed`/`response`; subagent return → packed by the `call_subagent` branch, caller's remaining same-round tools continue. `None` return = turn terminated inside (cancel/error, flags already set by the fault site) → callers unwind, remaining tools skipped, and the in-flight `call_subagent` keeps an orphan TOOL_START (no COMPLETE) — same contract as cancel-between-tools.
 
 - **Agents are data, not classes**: Each agent is an MD file (`config/agents/*.md`) — YAML frontmatter (model, max_tool_rounds, tool permissions) + role-prompt body. No Python to define an agent.
 

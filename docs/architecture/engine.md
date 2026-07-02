@@ -1,10 +1,12 @@
 # 执行引擎
 
-> Pi-style 扁平 while loop — 无框架、无中间件、无 DAG，一个循环解决所有问题。
+> Pi-style agent loop（嵌套串行）— 无框架、无中间件、无 DAG，一个循环函数解决所有问题。
 
 ## 核心设计
 
-引擎的核心是 `execute_loop()`（`src/core/engine.py`），一个 async 函数内的 `while not completed` 循环。每次迭代执行完整的 **构建上下文 → 调用 LLM → 解析工具 → 串行执行 → 路由** 流程，不持有跨迭代状态。
+引擎的核心是 `execute_loop()`（`src/core/engine.py`）内的 `_run_agent(agent_name)`：一个 per-agent 的 `while` 循环，每次迭代执行完整的 **构建上下文 → 调用 LLM → 解析工具 → 串行执行** 流程，直至该 agent 给出无工具调用的最终回复（即返回值）。lead_agent 是顶层调用；`call_subagent` 在工具执行流水线中**原地递归** await 目标 subagent 的 `_run_agent`，其返回值包成 `<subagent_result>` 作为本次调用的 tool_result。
+
+递归不改变执行模型的三个不变量：整个 turn 仍是**单 asyncio task、单活跃 agent、事件序 = 执行序**（审计线性）。递归深度由工具面决定 — `call_subagent` 只在 lead 的可调集里，即一层；同轮 `[tool, subagent, subagent, tool]` 混合调用按模型给出的自然序串行执行，subagent 返回后同轮剩余工具继续。
 
 ### 执行状态
 
@@ -12,7 +14,7 @@
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `current_agent` | `str` | 当前执行的 agent（初始 `"lead_agent"`） |
+| `current_agent` | `str` | 当前活跃 agent（初始 `"lead_agent"`；由 `_run_agent` 进入/`call_subagent` 返回时维护，用于错误归因和外部观察，不再承担路由） |
 | `completed` | `bool` | 是否完成（退出循环条件） |
 | `error` | `bool` | 是否出错 |
 | `events` | `List[ExecutionEvent]` | 事件流（路径历史事件 `is_historical=True` + 本轮新追加事件 `is_historical=False`；新事件在引擎退出后 batch write） |
@@ -25,27 +27,28 @@
 
 轮起始时，Controller 从 `MessageEvent` 表按 conversation path 加载全部历史事件（`is_historical=True`）填入 `state["events"]`；引擎循环中新增事件 `is_historical=False`。**没有单独的 `conversation_history` 字段** — 历史和当前轮事件统一来自 `state["events"]`，由 `EventHistory` 在 build 时做 boundary 扫描 + agent 过滤（详见下文"消息构建"）。
 
-## 主循环流程
+## 主循环流程（`_run_agent`，per-agent）
 
 ```mermaid
 flowchart TD
-    START([开始]) --> CHECK_CANCEL{检查取消?}
-    CHECK_CANCEL -->|已取消| EXIT([退出])
-    CHECK_CANCEL -->|继续| VALIDATE{Agent 存在?}
-    VALIDATE -->|不存在| ERROR([错误退出])
-    VALIDATE -->|存在| BUILD[构建上下文]
+    START([进入 _run_agent]) --> VALIDATE{Agent 存在?}
+    VALIDATE -->|不存在| ERROR([错误退栈, 返回 None])
+    VALIDATE -->|存在| CHECK_CANCEL{检查取消?}
+    CHECK_CANCEL -->|已取消| EXIT([返回 None])
+    CHECK_CANCEL -->|继续| BUILD[构建上下文]
     BUILD --> AGENT_START[发送 agent_start 事件]
     AGENT_START --> LLM[流式调用 LLM]
     LLM -->|失败| ERROR
     LLM -->|成功| PARSE[解析工具调用]
     PARSE -->|无工具调用| DRAIN{Lead 有待处理消息?}
     DRAIN -->|有| CONTINUE[注入消息, 继续循环]
-    DRAIN -->|无| COMPLETE[完成当前 Agent]
-    PARSE -->|有工具调用| EXEC[串行执行工具]
+    DRAIN -->|无| COMPLETE([agent_complete, 返回最终文本])
+    PARSE -->|有工具调用| EXEC[串行执行工具<br/>call_subagent → 递归 _run_agent]
     EXEC --> CHECK_CANCEL
-    COMPLETE --> CHECK_CANCEL
     CONTINUE --> CHECK_CANCEL
 ```
+
+返回值路由：lead 的返回值由顶层收口为 `state["completed"]/["response"]`；subagent 的返回值由 `call_subagent` 分支包成 `<subagent_result>` tool_result。返回 `None` = turn 已终止（cancel / error，state 标志已由故障点设好），调用方逐层退栈、同轮剩余工具不再执行。
 
 ### 每轮迭代详解
 
@@ -77,40 +80,40 @@ flowchart TD
 
 **4. 串行执行工具**（`_execute_tools`）
 
-- 工具排序：`call_subagent` 延后到最后执行，确保同一轮的常规工具不会被 break 跳过
-- 每个工具执行前检查取消状态
+- 按模型给出的自然序执行；`call_subagent` 与常规工具同一条流水线，命中时原地递归 await 目标 agent 的 `_run_agent`，返回后同轮剩余工具继续（`[tool, subagent, tool]` 混合序成立）
+- 每个工具执行前检查取消状态；turn 在子 agent 内终止（cancel / error）时 break，剩余工具不执行
 - 执行流水线详见[工具系统 → 工具执行流水线](tools.md#工具执行流水线)
 
-**5. Agent 完成路由**（`_complete_agent`）
+**5. Agent 完成**
 
-见下节。
+无工具调用 = 该 agent 的最终回复，`_run_agent` 发送 `agent_complete` 事件后把文本作为返回值返回。见下节。
 
 ## Agent 完成路由
 
-这是引擎最核心的不对称设计：
+Agent 的最终回复就是 `_run_agent` 的返回值，路由由调用栈决定：
 
 ```mermaid
 flowchart LR
-    NO_TOOLS[Agent 无工具调用] --> IS_LEAD{是 Lead Agent?}
-    IS_LEAD -->|是| EXIT["completed = True<br/>退出循环"]
-    IS_LEAD -->|否| PACK["打包响应为<br/>call_subagent tool_result"]
-    PACK --> SWITCH["切回 lead_agent<br/>继续循环"]
+    NO_TOOLS[Agent 无工具调用] --> RET["agent_complete<br/>返回最终文本"]
+    RET --> IS_LEAD{调用方?}
+    IS_LEAD -->|顶层 lead| EXIT["completed = True<br/>state.response = 返回值"]
+    IS_LEAD -->|call_subagent 分支| PACK["包成 subagent_result<br/>作为 tool_complete 回填调用方"]
 ```
 
 **Lead Agent 无工具调用：**
 
 - 先检查是否有待处理消息（`drain_messages`）
 - 有 → 注入为 `QUEUED_MESSAGE` 事件，`continue` 回到循环顶部
-- 无 → `state["completed"] = True`，退出循环
+- 无 → 发送 `agent_complete`，返回最终文本；顶层收口 `state["completed"]/["response"]`
 
 **Subagent 无工具调用：**
 
-- 将 subagent 的响应打包为 XML：`<subagent_result agent="research_agent">...</subagent_result>`
-- 作为 `TOOL_COMPLETE` 事件（tool=`call_subagent`）追加到 lead_agent 的事件流
-- 切换 `current_agent` 回 `"lead_agent"`
-- 下次循环时 lead_agent 的 `_build_context` 会看到这个 tool_result
+- 发送 `agent_complete`，返回最终文本
+- `call_subagent` 分支将其打包为 XML：`<subagent_result agent="research_agent">...</subagent_result>`
+- 作为 `TOOL_COMPLETE` 事件（tool=`call_subagent`，带本次调用的 parser_warnings 与实际耗时）追加到调用方的事件流
+- 调用方同轮剩余工具继续执行；下次 `_build_context` 会看到这个 tool_result
 
-**设计意图：** Lead Agent 是唯一出口。Subagent 完成后必须经过 Lead 决定是否继续。
+**设计意图：** Lead Agent 是唯一出口 — 只有顶层 `_run_agent("lead_agent")` 的返回值会成为用户可见的最终响应。Subagent 的输出永远经 `<subagent_result>` 包装回传给调用方，由 Lead 决定下一步。
 
 ## 上下文加载策略
 

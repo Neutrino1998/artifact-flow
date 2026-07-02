@@ -142,11 +142,11 @@ XML parser 返回的值统一为字符串，需要根据 `ToolParameter.type` �
 
 引擎的 `_execute_tools()` 在 BaseTool 管道之上增加了额外逻辑：
 
-1. **排序**：`call_subagent` 排最后
+1. **自然序执行**：按模型给出的顺序，不重排
 2. **取消检查**：每个工具执行前检查 `hooks.check_cancelled()`
 3. **Agent 白名单校验**：工具必须在当前 agent 的 `tools` 配置中
 4. **权限处理**：CONFIRM 级工具触发 Permission Interrupt
-5. **call_subagent 特殊路径**：成功则切换 agent + break 跳出工具循环
+5. **call_subagent 路径**：验证通过则原地递归 await 目标 agent 的循环（`_run_agent`），返回值包成 `<subagent_result>` tool_result，同轮剩余工具继续执行
 6. **超长结果落盘**：成功结果若超过 `tool.max_result_size_chars`，经 `_maybe_persist_tool_result` 落盘为 artifact，回填预览（见下节）
 7. **事件推送**：每个工具推送 `TOOL_START` 和 `TOOL_COMPLETE` 事件（含参数、结果、耗时）
 
@@ -214,7 +214,7 @@ class ToolParameter:
 - Artifact 工具（create/update/rewrite/read/grep）是请求级创建的（绑定 `ArtifactService` 实例），名称为保留名（`RESERVED_TOOL_NAMES`），自定义工具不可同名
 - **沙盒工具（`bash` / `mount` / `persist`）也是请求级创建的**（`create_sandbox_tools`，绑定一个 per-turn `SandboxSession` + `ArtifactService`），容器 **lazy** 于首个沙盒工具调用。三者是语义不同的动词、共享一个 session；只挂在拥有它们的 agent（当前 `lead` / `research`）的 `tools` 白名单里。机制全貌见 [sandbox.md](sandbox.md)
 - `read_artifact` 不分页 / 无 `limit` 时仍受隐藏字符上限 `READ_ARTIFACT_MAX_CHARS`（默认 50000）保护，超出后 `has_more=true` 并附续读 hint，模型按 hint 调用下一段
-- `call_subagent` 的 `execute()` 仅做路由验证（目标 agent 是否存在、是否非 internal），实际的 agent 切换由引擎的 `_execute_tools` 处理
+- `call_subagent` 的 `execute()` 仅做路由验证（目标 agent 是否存在、是否非 internal），实际的子 agent 执行由引擎的 `_execute_tools` 原地递归 `_run_agent` 完成
 
 ## 工具注册
 
@@ -280,8 +280,8 @@ Example:
 - **简单可靠**：不需要处理并行工具的依赖、竞争、部分失败等复杂场景
 - **可观测性友好**：事件流按时间顺序线性排列，易于调试和回放
 
-### 为什么 call_subagent 排最后
+### 为什么 call_subagent 不需要特殊排序
 
-- `call_subagent` 成功后会 `break` 跳出工具循环（切换到目标 agent）
-- 如果不排最后，同一轮 LLM 响应中 `call_subagent` 之后的常规工具会被跳过
-- 排最后确保所有常规工具先完成，再进行 agent 切换
+- `call_subagent` 是原地递归 await：子 agent 的整个循环作为一次工具执行完成，返回后同轮剩余工具照常继续
+- 因此同一轮 `[tool, subagent, subagent, tool]` 混合调用按自然序串行执行，没有"之后的工具被跳过"的问题
+- 同轮多个调用的参数在模型生成时已冻结 — 这是多调用协议对**所有工具**的通用语义，`call_subagent` 不需要（也没有）额外说明；且串行执行下后一个 subagent 运行时能看到前一个写入的 artifact，指令写成"读某 artifact 再继续"即可表达依赖

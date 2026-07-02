@@ -65,7 +65,19 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
       }
 
       case 'tool_start': {
-        const seg = current();
+        // Lane by agent (TWIN of useSSE TOOL_START): with in-place subagent
+        // recursion the caller's later tools arrive AFTER the subagent's
+        // segment — current() would misfile them onto the subagent's lane.
+        // Fall back to current() when no lane matches (agent missing).
+        const lane = agent_name ?? 'Agent';
+        let seg: ExecutionSegment | undefined;
+        for (let i = segments.length - 1; i >= 0; i--) {
+          if (segments[i].agent === lane) {
+            seg = segments[i];
+            break;
+          }
+        }
+        if (!seg) seg = current();
         if (!seg) break;
         const toolName = (data?.tool as string) ?? '';
         // Preserve LLM output before clearing content

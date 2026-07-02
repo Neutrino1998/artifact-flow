@@ -1,6 +1,6 @@
 # 架构概览
 
-ArtifactFlow 采用三层责任模型和 Pi-style 扁平执行引擎，以最小抽象实现多 Agent 协作。
+ArtifactFlow 采用三层责任模型和 Pi-style 执行引擎（per-agent 循环 + 嵌套串行委派），以最小抽象实现多 Agent 协作。
 
 ## 整体架构
 
@@ -104,14 +104,14 @@ sequenceDiagram
 
         E->>E: parse_tool_calls
         alt 有工具调用
-            E->>T: 串行执行工具
+            E->>T: 串行执行工具（call_subagent = 原地递归子 agent 循环）
             T-->>E: ToolResult
             E-->>SSE: tool_start / tool_complete
         else 无工具调用
             alt Lead Agent
                 E->>E: completed = true
             else Subagent
-                E->>E: 切回 Lead，打包为 tool_result
+                E->>E: 递归返回，打包为 tool_result 回填调用方
             end
         end
     end
@@ -188,7 +188,7 @@ ArtifactFlow 的执行引擎是一个朴素的 `while not completed` 循环，�
 - **透明性** — 每一轮做什么完全由代码决定：build context → call LLM → parse tools → execute → route。没有需要理解的框架概念
 - **足够用** — 当前的 Agent 协作模型（Lead 分发 → Subagent 执行 → 结果回传）不需要 DAG 级别的复杂路由
 
-**参考：** [Pi agent](https://github.com/badlogic/pi-mono) — 同样采用扁平循环的 Agent 实现
+**参考：** [Pi agent](https://github.com/badlogic/pi-mono) — 同样采用单循环、无框架的 Agent 实现（Pi 核心无 subagent；ArtifactFlow 把委派做成循环的原地递归，保持单 task 串行）
 
 ### 三层模型的边界划分原则
 

@@ -181,6 +181,7 @@ interface StreamState {
   // Segment actions
   pushSegment: (agent: string) => void;
   updateCurrentSegment: (update: Partial<ExecutionSegment>) => void;
+  updateAgentSegment: (agent: string, update: Partial<ExecutionSegment>) => void;
   appendCurrentSegmentContent: (content: string) => void;
   addToolCallToSegment: (tc: ToolCallInfo) => void;
   updateToolCallInSegment: (id: string, update: Partial<ToolCallInfo>) => void;
@@ -355,17 +356,39 @@ export const useStreamStore = create<StreamState>((set, get) => {
         };
       }),
 
+    updateAgentSegment: (agent, update) =>
+      set((s) => {
+        const segs = s.segments;
+        for (let i = segs.length - 1; i >= 0; i--) {
+          if (segs[i].agent === agent) {
+            const newSegs = [...segs];
+            newSegs[i] = { ...newSegs[i], ...update };
+            return { segments: newSegs };
+          }
+        }
+        return s;
+      }),
+
     addToolCallToSegment: (tc) =>
       set((s) => {
         const segs = s.segments;
         if (segs.length === 0) return s;
-        const last = segs[segs.length - 1];
-        return {
-          segments: [
-            ...segs.slice(0, -1),
-            { ...last, toolCalls: [...last.toolCalls, tc] },
-          ],
-        };
+        // Lane by agent: with in-place subagent recursion (nested serial
+        // delegation) the caller's later tool_starts arrive AFTER the
+        // subagent's segment, so "append to last" would misfile them onto
+        // the subagent's lane. Fall back to the last segment when no lane
+        // matches (agent missing on old replays).
+        let idx = segs.length - 1;
+        for (let i = segs.length - 1; i >= 0; i--) {
+          if (segs[i].agent === tc.agent) {
+            idx = i;
+            break;
+          }
+        }
+        const target = segs[idx];
+        const newSegs = [...segs];
+        newSegs[idx] = { ...target, toolCalls: [...target.toolCalls, tc] };
+        return { segments: newSegs };
       }),
 
     updateToolCallInSegment: (id, update) =>

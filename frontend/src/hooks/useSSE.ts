@@ -45,6 +45,7 @@ export function useSSE() {
   // Stream store actions
   const pushSegment = useStreamStore((s) => s.pushSegment);
   const updateCurrentSegment = useStreamStore((s) => s.updateCurrentSegment);
+  const updateAgentSegment = useStreamStore((s) => s.updateAgentSegment);
   const addToolCallToSegment = useStreamStore((s) => s.addToolCallToSegment);
   const updateToolCallInSegment = useStreamStore((s) => s.updateToolCallInSegment);
   const snapshotSegments = useStreamStore((s) => s.snapshotSegments);
@@ -296,11 +297,23 @@ export function useSSE() {
           const reason = data?.reason as string | undefined;
           const agent = event.agent ?? '';
 
-          // Preserve LLM output before clearing content (only on first tool_start)
+          // Lane by agent (TWIN: reconstructSegments.ts `tool_start` mirrors
+          // this): with in-place subagent recursion the caller's later tools
+          // arrive AFTER the subagent's segment — "last segment" would misfile
+          // them onto the subagent's lane and wrongly clear its content.
+          const agentLane = event.agent ?? 'Agent';
           const segs = useStreamStore.getState().segments;
-          const lastSeg = segs[segs.length - 1];
-          const preserveLlmOutput = lastSeg?.content && !lastSeg.llmOutput
-            ? { llmOutput: lastSeg.content }
+          let laneSeg = segs[segs.length - 1];
+          for (let i = segs.length - 1; i >= 0; i--) {
+            if (segs[i].agent === agentLane) {
+              laneSeg = segs[i];
+              break;
+            }
+          }
+
+          // Preserve LLM output before clearing content (only on first tool_start)
+          const preserveLlmOutput = laneSeg?.content && !laneSeg.llmOutput
+            ? { llmOutput: laneSeg.content }
             : {};
 
           // Latch a just-resolved permission_result onto this tool call (the
@@ -318,8 +331,8 @@ export function useSSE() {
             ...(reason ? { reason } : {}),
             ...(permission ? { permission } : {}),
           });
-          // Clear streaming content when entering tool phase
-          updateCurrentSegment({ content: '', ...preserveLlmOutput });
+          // Clear streaming content when entering tool phase (laned segment)
+          updateAgentSegment(laneSeg ? laneSeg.agent : agentLane, { content: '', ...preserveLlmOutput });
           break;
         }
 
@@ -532,7 +545,7 @@ export function useSSE() {
       }
     },
     [
-      pushSegment, updateCurrentSegment, addToolCallToSegment,
+      pushSegment, updateCurrentSegment, updateAgentSegment, addToolCallToSegment,
       updateToolCallInSegment, snapshotSegments, setPermissionRequest,
       setError, endStream, refreshAfterComplete, setArtifactPanelVisible,
       setArtifactSessionId, setArtifactCurrent, setArtifacts,

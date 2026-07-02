@@ -1768,3 +1768,210 @@ class TestSkillActivation:
             if e.event_type == StreamEventType.USER_INPUT.value
         ][-1].data["content"]
         assert "BODY-ONLY" in content
+
+
+# ============================================================
+# TestMixedSerialDelegation — 同轮 [tool, subagent, subagent, tool] 混合串行
+# ============================================================
+
+
+class TestMixedSerialDelegation:
+    """call_subagent 原地递归后:同轮混合调用按自然序串行执行,不再 sort-to-end
+    + break;turn 在子 agent 内终止(cancel / error)则剩余工具不执行。"""
+
+    @staticmethod
+    def _real_call_subagent(valid_agents):
+        from tools.builtin.call_subagent import CallSubagentTool
+        return CallSubagentTool(valid_agents=valid_agents)
+
+    async def test_mixed_order_natural_serial(self):
+        """[tool_a, sub_a, sub_b, tool_b] 按模型给出的顺序执行,结果按序回填。"""
+        lead = _FakeAgentConfig(
+            tools={"call_subagent": "auto", "tool_a": "auto", "tool_b": "auto"}
+        )
+        sub_a = _FakeAgentConfig(name="sub_a", tools={})
+        sub_b = _FakeAgentConfig(name="sub_b", tools={})
+
+        response_r1 = "\n".join([
+            _tool_call_xml("tool_a"),
+            _tool_call_xml("call_subagent", agent_name="sub_a", instruction="task A"),
+            _tool_call_xml("call_subagent", agent_name="sub_b", instruction="task B"),
+            _tool_call_xml("tool_b"),
+        ])
+        rounds = [
+            _tool_call_chunks(response_r1),       # lead round 1: 4 calls
+            _simple_llm_chunks("result from A"),  # sub_a
+            _simple_llm_chunks("result from B"),  # sub_b
+            _simple_llm_chunks("Final answer"),   # lead round 2
+        ]
+
+        result, emitted, store = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": lead, "sub_a": sub_a, "sub_b": sub_b},
+            tools={
+                "tool_a": _FakeTool("tool_a", ToolResult(success=True, data="A-ok")),
+                "tool_b": _FakeTool("tool_b", ToolResult(success=True, data="B-ok")),
+                "call_subagent": self._real_call_subagent(["sub_a", "sub_b"]),
+            },
+        )
+
+        assert result["completed"] is True
+        assert result["response"] == "Final answer"
+
+        # 自然序:call_subagent 不再被排到末尾
+        start_names = [e["data"]["tool"] for e in _events_of_type(emitted, "tool_start")]
+        assert start_names == ["tool_a", "call_subagent", "call_subagent", "tool_b"]
+
+        # agent 泳道按执行序展开
+        agent_starts = [e["agent"] for e in _events_of_type(emitted, "agent_start")]
+        assert agent_starts == ["lead_agent", "sub_a", "sub_b", "lead_agent"]
+
+        # 两个 subagent 的结果按序回填成 <subagent_result>
+        sub_results = [
+            e["data"]["result_data"]
+            for e in _events_of_type(emitted, "tool_complete")
+            if e["data"].get("tool") == "call_subagent"
+        ]
+        assert len(sub_results) == 2
+        assert 'agent="sub_a"' in sub_results[0] and "result from A" in sub_results[0]
+        assert 'agent="sub_b"' in sub_results[1] and "result from B" in sub_results[1]
+
+        # 事件序 = 执行序:tool_b 的 START 在 sub_b 完成之后
+        idx_sub_b_done = next(
+            i for i, e in enumerate(emitted)
+            if e["type"] == "agent_complete" and e.get("agent") == "sub_b"
+        )
+        idx_tool_b = next(
+            i for i, e in enumerate(emitted)
+            if e["type"] == "tool_start" and (e.get("data") or {}).get("tool") == "tool_b"
+        )
+        assert idx_tool_b > idx_sub_b_done
+
+        # 两条 SUBAGENT_INSTRUCTION 各归其主
+        instr = [
+            e for e in result["events"]
+            if e.event_type == StreamEventType.SUBAGENT_INSTRUCTION.value
+        ]
+        assert [e.agent_name for e in instr] == ["sub_a", "sub_b"]
+
+    async def test_cancel_during_subagent_skips_remaining_tools(self):
+        """cancel 落在子 agent 的 LLM 流期间:call_subagent 留 orphan TOOL_START
+        (无 COMPLETE = 调用未完成),同轮剩余工具不执行,turn 收口 CANCELLED。"""
+        lead = _FakeAgentConfig(tools={"call_subagent": "auto", "tool_b": "auto"})
+        sub_a = _FakeAgentConfig(name="sub_a", tools={})
+        store = InMemoryRuntimeStore()
+
+        r1 = "\n".join([
+            _tool_call_xml("call_subagent", agent_name="sub_a", instruction="task A"),
+            _tool_call_xml("tool_b"),
+        ])
+        call_count = {"n": 0}
+
+        async def fake(messages, **kwargs):
+            idx = call_count["n"]
+            call_count["n"] += 1
+            if idx == 0:
+                for c in _tool_call_chunks(r1):
+                    yield c
+            else:
+                chunks = _simple_llm_chunks("partial sub answer")
+                for i, c in enumerate(chunks):
+                    if i == 1:
+                        store._cancellations["msg-1"] = asyncio.Event()
+                        store._cancellations["msg-1"].set()
+                    yield c
+
+        result, emitted, _ = await _run_engine(
+            fake,
+            agents={"lead_agent": lead, "sub_a": sub_a},
+            tools={
+                "call_subagent": self._real_call_subagent(["sub_a"]),
+                "tool_b": _FakeTool("tool_b"),
+            },
+            store=store,
+            cancel_check_interval=0,
+        )
+
+        assert result["completed"] is True
+        assert result.get("cancelled") is True
+        start_names = [e["data"]["tool"] for e in _events_of_type(emitted, "tool_start")]
+        assert start_names == ["call_subagent"]  # tool_b 从未启动
+        sub_completes = [
+            e for e in _events_of_type(emitted, "tool_complete")
+            if e["data"].get("tool") == "call_subagent"
+        ]
+        assert sub_completes == []
+
+    async def test_subagent_llm_error_skips_remaining_tools(self):
+        """子 agent 的 LLM 失败:error 归因到子 agent,同轮剩余工具不执行,
+        turn 收口 ERROR(record-not-emit,详见 decide_terminal)。"""
+        lead = _FakeAgentConfig(tools={"call_subagent": "auto", "tool_b": "auto"})
+        sub_a = _FakeAgentConfig(name="sub_a", tools={})
+
+        r1 = "\n".join([
+            _tool_call_xml("call_subagent", agent_name="sub_a", instruction="task A"),
+            _tool_call_xml("tool_b"),
+        ])
+        call_count = {"n": 0}
+
+        async def fake(messages, **kwargs):
+            idx = call_count["n"]
+            call_count["n"] += 1
+            if idx == 0:
+                for c in _tool_call_chunks(r1):
+                    yield c
+            else:
+                raise RuntimeError("llm boom")
+                yield  # pragma: no cover — 保持 async generator 形态
+
+        result, emitted, _ = await _run_engine(
+            fake,
+            agents={"lead_agent": lead, "sub_a": sub_a},
+            tools={
+                "call_subagent": self._real_call_subagent(["sub_a"]),
+                "tool_b": _FakeTool("tool_b"),
+            },
+        )
+
+        assert result["error"] is True
+        assert result["error_detail"]["agent"] == "sub_a"
+        assert "llm boom" in result["error_detail"]["error"]
+        start_names = [e["data"]["tool"] for e in _events_of_type(emitted, "tool_start")]
+        assert start_names == ["call_subagent"]  # tool_b 从未启动
+
+    async def test_call_subagent_parser_warnings_in_tool_complete(self):
+        """repair 过的 call_subagent 调用,其 TOOL_COMPLETE 原地带 parser_warnings
+        (旧实现经 state 暂存槽 deferred 回填,新实现随结果直接写入)。"""
+        lead = _FakeAgentConfig(tools={"call_subagent": "auto"})
+        sub_a = _FakeAgentConfig(name="sub_a", tools={})
+
+        # <name=...</name> 等号语法触发 _repair_tag_equals_syntax warning
+        xml_with_repair = """<tool_call>
+<name=call_subagent</name>
+<params>
+<agent_name><![CDATA[sub_a]]></agent_name>
+<instruction><![CDATA[do it]]></instruction>
+</params>
+</tool_call>"""
+        rounds = [
+            _tool_call_chunks(xml_with_repair),
+            _simple_llm_chunks("sub done"),
+            _simple_llm_chunks("lead done"),
+        ]
+
+        result, emitted, _ = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": lead, "sub_a": sub_a},
+            tools={"call_subagent": self._real_call_subagent(["sub_a"])},
+        )
+
+        assert result["completed"] is True
+        sub_completes = [
+            e for e in _events_of_type(emitted, "tool_complete")
+            if e["data"].get("tool") == "call_subagent"
+        ]
+        assert len(sub_completes) == 1
+        assert sub_completes[0]["data"]["success"] is True
+        assert sub_completes[0]["data"].get("parser_warnings"), (
+            "call_subagent TOOL_COMPLETE 应带上本次调用的 parser_warnings"
+        )

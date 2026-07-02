@@ -1,9 +1,12 @@
 """
-执行引擎 — Pi-style 扁平 while loop
+执行引擎 — Pi-style agent loop（嵌套串行）
 
 设计文档 §执行引擎设计方向：
 - 唯一的抽象是 context 构建
-- call_llm → parse_tool_calls → 串行执行 → route → repeat
+- call_llm → parse_tool_calls → 串行执行 → repeat（_run_agent，每 agent 一个循环实例）
+- call_subagent = 原地递归 await 子 agent 的循环，返回值即 tool_result ——
+  同轮 [tool, subagent, tool] 混合调用按模型给出的自然序串行执行；
+  整个 turn 单 asyncio task、单活跃 agent，事件序 = 执行序（审计线性不变量）
 - Interrupt = asyncio.Event（in-memory await）
 - 多工具支持（parse_tool_calls 返回列表，串行执行）
 - Tool limit → 注入 system message 提醒总结
@@ -409,7 +412,7 @@ async def execute_loop(
         返回 (messages, reminder)：reminder 是并入末条消息的 <system-reminder> 原文，
         供调用处落进 agent_start 事件（持久化动态上下文，admin 据此重建 prompt）。
         """
-        if current_agent_name == "lead_agent":
+        if agent_name == "lead_agent":
             for msg in await hooks.drain_messages(message_id):
                 wrapped = (
                     "[The user has injected a message during execution. "
@@ -453,43 +456,6 @@ async def execute_loop(
         )
 
         return messages, reminder
-
-    async def _complete_agent(agent_name: str, response_content: str) -> None:
-        """
-        完成当前 agent，发送 agent_complete 事件。
-
-        - lead 无工具调用 → completed = True
-        - subagent 无工具调用 → 切回 lead，追加 call_subagent tool_complete
-        """
-        await _emit(StreamEventType.AGENT_COMPLETE.value, agent_name, {
-            "agent": agent_name,
-            "content": response_content,
-        })
-
-        if agent_name == "lead_agent":
-            state["completed"] = True
-            state["response"] = response_content
-            logger.info("Lead agent completed, execution done")
-        else:
-            # Subagent 完成 → 切回 lead
-            # subagent 的响应作为 call_subagent 的 tool_result 返回给 lead
-            state["current_agent"] = "lead_agent"
-            logger.info(f"Subagent {agent_name} completed, switching back to lead_agent")
-
-            subagent_xml = (
-                f'<subagent_result agent="{agent_name}">'
-                f'\n{response_content}'
-                f'\n</subagent_result>'
-            )
-            await _emit(StreamEventType.TOOL_COMPLETE.value, "lead_agent", {
-                "tool": "call_subagent",
-                "success": True,
-                "result_data": subagent_xml,
-                "duration_ms": 0,
-                # call_subagent 调用本身的 parser_warnings 在 _execute_tools 切换 agent 时
-                # 暂存到 state，这里取回写入 deferred tool_complete。
-                "parser_warnings": state.pop("pending_subagent_parser_warnings", None),
-            })
 
     async def _call_llm(messages: list, agent_name: str, model: str) -> Optional[Tuple[str, Optional[str], dict]]:
         """
@@ -580,7 +546,7 @@ async def execute_loop(
             state["completed"] = True
             state["cancelled"] = True
             # 只有"无工具调用的纯文本"才作为 display 快照写入 state["response"] ——
-            # 与 _complete_agent 的不变量一致（有 tool call 的轮次从不把 XML 写进
+            # 与 _run_agent 正常完成路径的不变量一致（有 tool call 的轮次从不把 XML 写进
             # state["response"]）。半截 tool-call XML / 纯 reasoning / TTFT 阶段取消时
             # response_content 不可呈现，留空，由 controller 兜底成占位文案。
             if response_content and "<tool_call>" not in response_content:
@@ -838,10 +804,11 @@ async def execute_loop(
         return persisted
 
     async def _execute_tools(tool_calls: list, agent_name: str) -> None:
-        """串行执行工具列表，处理权限中断和 subagent 切换。
-        call_subagent 延后到最后执行，确保同一轮的常规工具不会被 break 跳过。
+        """按模型给出的自然序串行执行工具列表，处理权限中断。
+        call_subagent 与常规工具同一条流水线：原地递归 await 子 agent，返回后
+        继续执行同轮剩余工具（[tool, subagent, tool] 混合序成立）。
+        turn 在某个工具/子 agent 内终止（cancel / error）→ break，剩余工具不执行。
         """
-        tool_calls = sorted(tool_calls, key=lambda tc: tc.name == "call_subagent")
         for tool_call in tool_calls:
             if await _check_cancelled():
                 break
@@ -902,7 +869,7 @@ async def execute_loop(
                 tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                 continue
 
-            # call_subagent 特殊处理
+            # call_subagent:原地递归 await 子 agent 的循环（嵌套串行）
             if tool_name == "call_subagent":
                 try:
                     result = await tool(**params)
@@ -917,6 +884,7 @@ async def execute_loop(
                     instruction = params["instruction"]
                     fresh_start = CallSubagentTool.parse_fresh_start(params)
 
+                    subagent_start_time = utc_now()
                     await _emit(StreamEventType.TOOL_START.value, agent_name, {
                         "tool": "call_subagent",
                         "params": {
@@ -936,14 +904,35 @@ async def execute_loop(
                         data={"instruction": instruction, "fresh_start": fresh_start},
                     ))
 
-                    # tool_complete 在 subagent 完成后由 _complete_agent 路径追加。
-                    # 此处把 call_subagent 调用本身的 parser_warnings 暂存 state，
-                    # _complete_agent 拿到时一并写入 deferred tool_complete。
-                    state["pending_subagent_parser_warnings"] = parser_warnings
-                    state["current_agent"] = target_agent
-                    logger.info(f"Switching to subagent: {target_agent}")
+                    logger.info(f"Delegating to subagent: {target_agent}")
+                    sub_response = await _run_agent(target_agent)
+                    # 归因恢复：递归正常返回后当前 agent 是调用方。_run_agent 若抛
+                    # 异常则不经过这里 —— 外层 except 按 current_agent 归因到出事的
+                    # 子 agent（与旧 switch 模型的归因语义一致）。
+                    state["current_agent"] = agent_name
+
+                    if sub_response is None:
+                        # turn 已在子 agent 内终止（cancel / error，state 标志已由
+                        # 故障点设好）。与 cancel-between-tools 一致：orphan TOOL_START
+                        # = 调用未完成，不补 TOOL_COMPLETE，剩余工具不再执行。
+                        break
+
+                    tool_duration_ms = int(
+                        (utc_now() - subagent_start_time).total_seconds() * 1000
+                    )
+                    await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
+                        "tool": "call_subagent",
+                        "success": True,
+                        "result_data": (
+                            f'<subagent_result agent="{target_agent}">'
+                            f'\n{sub_response}'
+                            f'\n</subagent_result>'
+                        ),
+                        "duration_ms": tool_duration_ms,
+                        "parser_warnings": parser_warnings,
+                    })
                     tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
-                    break  # 跳出 tool_calls 循环，继续 while loop
+                    continue
                 else:
                     await _emit(StreamEventType.TOOL_START.value, agent_name, {
                         "tool": "call_subagent", "params": params,
@@ -1084,36 +1073,47 @@ async def execute_loop(
             return True
         return False
 
-    # ── main loop ──
-    # (_emit already bound to artifact_service above, before upload staging;
-    #  unbound in the finally below.)
+    async def _run_agent(agent_name: str) -> Optional[str]:
+        """跑单个 agent 的循环，直至它给出无工具调用的最终回复。
 
-    try:
+        lead 是顶层调用；subagent 由 _execute_tools 的 call_subagent 分支原地
+        递归调用（互递归，深度由工具面决定 —— call_subagent 只在 lead 的
+        EffectiveToolset 里，即一层）。整个 turn 仍是单 asyncio task、单活跃
+        agent：事件序 = 执行序，取消/超时/终态管线不感知递归深度。
+
+        Returns:
+            该 agent 的最终文本；None = turn 已终止（cancel / error，state 标志
+            已由故障点按 record-not-emit 设好），调用方据此逐层退栈。
+        """
+        if agent_name not in agents:
+            logger.error(f"Agent '{agent_name}' not found")
+            state["error"] = True
+            state["response"] = f"Agent '{agent_name}' not found"
+            # record-not-emit:turn 末由 decide_terminal 统一发射 ERROR。
+            state["error_detail"] = {
+                "error": f"Agent '{agent_name}' not found",
+                "agent": agent_name,
+                "request_id": get_request_id() or None,
+            }
+            # completed 一并置位：递归调用方的 while 靠它退栈（decide_terminal
+            # 以 error flag 定终态，completed 不改变 ERROR 判定 —— 同 staging 失败路径）。
+            state["completed"] = True
+            return None
+
+        state["current_agent"] = agent_name  # 错误归因 + 外部观察
+
         while not state["completed"]:
             if await _check_cancelled():
-                break
+                return None
 
-            current_agent_name = state["current_agent"]
-            if current_agent_name not in agents:
-                logger.error(f"Agent '{current_agent_name}' not found")
-                state["error"] = True
-                state["response"] = f"Agent '{current_agent_name}' not found"
-                # record-not-emit:turn 末由 decide_terminal 统一发射 ERROR。
-                state["error_detail"] = {
-                    "error": f"Agent '{current_agent_name}' not found",
-                    "agent": current_agent_name,
-                    "request_id": get_request_id() or None,
-                }
-                break
-
-            messages, reminder = await _build_context(current_agent_name)
+            messages, reminder = await _build_context(agent_name)
 
             # agent_start 持久化「发给模型的非历史输入」：静态 system_prompt + 动态 reminder。
             # 历史可由 event 流确定性重放，这两块（尤其 reminder：现拼即丢、不入 event）补上后，
             # admin 即可零重生成、忠实重建这一发的完整 prompt。reminder 不进 LLM 输入缓存前缀，
             # 落进事件 payload 对 prompt cache 零影响。
-            await _emit(StreamEventType.AGENT_START.value, current_agent_name, {
-                "agent": current_agent_name,
+            await _emit(StreamEventType.AGENT_START.value, agent_name, {
+                "agent": agent_name,
                 "system_prompt": messages[0]["content"] if messages and messages[0].get("role") == "system" else None,
                 "reminder": reminder,
             })
@@ -1121,12 +1121,12 @@ async def execute_loop(
             # 守卫:format_messages_for_debug 会遍历 messages,识图块列表里若有图(已压成
             # 摘要、不吐 base64,但仍要遍历)——非 DEBUG 时跳过 eager 求值。
             if logger.debug_mode:
-                logger.debug(f"[{current_agent_name}] Messages:\n{format_messages_for_debug(messages)}")
+                logger.debug(f"[{agent_name}] Messages:\n{format_messages_for_debug(messages)}")
 
             # 调用 LLM（流式）
-            llm_result = await _call_llm(messages, current_agent_name, agents[current_agent_name].model)
+            llm_result = await _call_llm(messages, agent_name, agents[agent_name].model)
             if llm_result is None:
-                break
+                return None
 
             response_content, reasoning_content, normalized_usage = llm_result
 
@@ -1146,7 +1146,7 @@ async def execute_loop(
             try:
                 await compaction_runner.maybe_trigger(
                     state=state,
-                    agent_name=current_agent_name,
+                    agent_name=agent_name,
                     input_tokens=normalized_usage["input_tokens"],
                     output_tokens=normalized_usage["output_tokens"],
                 )
@@ -1157,24 +1157,24 @@ async def execute_loop(
                 # boundary）—— 此处只需路由到 CANCELLED 终态，不能落进下面的
                 # ERROR 分支。
                 logger.info(
-                    f"Compaction for {current_agent_name} interrupted by user cancel"
+                    f"Compaction for {agent_name} interrupted by user cancel"
                 )
                 state["completed"] = True
                 state["cancelled"] = True
                 state["response"] = state.get("response", "") or ""
-                break
+                return None
             except Exception as compact_error:
-                logger.error(f"Compaction failed for {current_agent_name}: {compact_error}")
+                logger.error(f"Compaction failed for {agent_name}: {compact_error}")
                 # record-not-emit:turn 末由 decide_terminal 统一发射 ERROR。
                 state["error_detail"] = {
                     "error": f"Compaction failed: {str(compact_error)}",
-                    "agent": current_agent_name,
+                    "agent": agent_name,
                     "request_id": get_request_id() or None,
                 }
                 state["completed"] = True
                 state["error"] = True
                 state["response"] = f"Compaction failed: {str(compact_error)}"
-                break
+                return None
 
             # 解析工具调用
             tool_calls = parse_tool_calls(response_content)
@@ -1182,7 +1182,7 @@ async def execute_loop(
             if not tool_calls:
                 # Lead 无工具调用但队列中有待处理消息 → 不退出，继续循环
                 # 这处理了 inject 消息在最后一次 LLM 调用期间到达的情况
-                if current_agent_name == "lead_agent":
+                if agent_name == "lead_agent":
                     pending = await hooks.drain_messages(message_id)
                     if pending:
                         for msg in pending:
@@ -1194,13 +1194,32 @@ async def execute_loop(
                             await _emit(StreamEventType.QUEUED_MESSAGE.value, "lead_agent", {"content": wrapped})
                         continue  # 回到 while loop 顶部，下次 _build_context 会看到新事件
 
-                # 无待处理消息 → 正常完成当前 agent
-                await _complete_agent(current_agent_name, response_content)
-                tool_round_count.pop(current_agent_name, None)
-                continue
+                # 无待处理消息 → 该 agent 正常完成，最终文本即返回值
+                # （lead → 顶层收口 completed/response；subagent → call_subagent
+                # 分支包成 <subagent_result> tool_complete）
+                await _emit(StreamEventType.AGENT_COMPLETE.value, agent_name, {
+                    "agent": agent_name,
+                    "content": response_content,
+                })
+                tool_round_count.pop(agent_name, None)
+                return response_content
 
-            # 串行执行工具
-            await _execute_tools(tool_calls, current_agent_name)
+            # 串行执行工具（内部可能递归 _run_agent；turn 终止由 while 顶部条件
+            # + _check_cancelled 收口）
+            await _execute_tools(tool_calls, agent_name)
+
+        return None  # while 因 state["completed"]（cancel / 递归内 error）退出
+
+    # ── main loop ──
+    # (_emit already bound to artifact_service above, before upload staging;
+    #  unbound in the finally below.)
+
+    try:
+        final_response = await _run_agent("lead_agent")
+        if final_response is not None:
+            state["completed"] = True
+            state["response"] = final_response
+            logger.info("Lead agent completed, execution done")
 
     except Exception as e:
         logger.exception(f"Execution loop error: {e}")
