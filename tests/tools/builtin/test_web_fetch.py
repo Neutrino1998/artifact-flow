@@ -67,7 +67,6 @@ class TestFallbackRebindGuard:
         monkeypatch.setattr(tool, "_fetch_via_jina", fake_jina)
         monkeypatch.setattr(url_guard, "_resolve_host_ips", flipped_resolve)
         monkeypatch.setattr(tool, "_fetch_via_bs4", must_not_run)
-        monkeypatch.setattr(tool, "_fetch_pdf", must_not_run)
 
         result = await tool._fetch_single_url("http://rebind.example.com/page")
         assert result["success"] is False

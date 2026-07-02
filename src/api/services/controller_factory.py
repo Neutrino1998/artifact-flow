@@ -15,18 +15,22 @@ from api.dependencies import (
     get_tools,
 )
 from api.services.stream_transport import StreamTransport
+from core.engine import EmptyTurnInputError
 from utils.logger import get_logger, get_request_id
 from utils.time import utc_now
 
 logger = get_logger("ArtifactFlow")
 
 
-def sanitize_error_event(event: dict) -> dict:
+def sanitize_error_event(event: dict, client_safe: bool = False) -> dict:
     """脱敏 error 事件并注入 request_id 定位码。
 
     request_id 不论 DEBUG 都注入(prod 回传给用户安全,是可回传的错误码);
     脱敏只删 error 文本,绝不删定位码。request_id 取自当前 context —— 后台
     引擎任务由 chat 请求 create_task 起,会继承发起请求的 request_id。
+
+    client_safe=True:文案本身就是给用户的(client-caused 预期失败,4xx 档),
+    跳过脱敏、只注 request_id —— 脱敏是 5xx 档待遇,不适用。
     """
     if event.get("type") != "error" or not isinstance(event.get("data"), dict):
         return event
@@ -34,7 +38,7 @@ def sanitize_error_event(event: dict) -> dict:
     req_id = get_request_id()
     if req_id and not data.get("request_id"):
         data["request_id"] = req_id
-    if not config.DEBUG:
+    if not config.DEBUG and not client_safe:
         data["error"] = "Internal server error"
     return {**event, "data": data}
 
@@ -248,6 +252,16 @@ async def run_and_push(
                     stream_closed = True
 
         await flush_pending()  # 流结束 flush 残余
+
+    except EmptyTurnInputError as e:
+        # client-caused 预期失败(如 stale picker:勾选的 skill 已被删/不可见)。两受众分开:
+        # ops 记 warning(非 bug,栈无价值);用户拿原文案自纠,不脱敏成 "Internal server error"。
+        logger.warning(f"Turn rejected, input resolves to empty: {e}")
+        await stream_transport.push_event(stream_id, sanitize_error_event({
+            "type": "error",
+            "timestamp": utc_now().isoformat(),
+            "data": {"success": False, "error": str(e)}
+        }, client_safe=True))
 
     except Exception as e:
         logger.exception(f"Error in execution: {e}")

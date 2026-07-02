@@ -20,7 +20,6 @@ import random
 
 from bs4 import BeautifulSoup
 
-from utils.doc_converter import DocConverter
 
 logger = get_logger("ArtifactFlow")
 
@@ -171,7 +170,9 @@ class WebFetchTool(BaseTool):
                     blob=blob,
                     metadata={"source_url": url, "fetched_at": result["fetched_at"]},
                 )
-                # 兜底 data(仅当引擎无法落盘时模型才看到此条):简短说明,不含字节。
+                # 占位 data:引擎 _maybe_persist_tool_result 两路都会替换它(落盘成功
+                # → 预览,失败 → error),模型任何现有路径都看不到 —— 仅防 artifact
+                # 中间件被旁路时裸 blob 无说明。
                 note = (
                     f'<file url="{url}" content_type="{content_type}" '
                     f'bytes="{len(blob)}">Downloaded binary file; stored as artifact.</file>'
@@ -196,7 +197,8 @@ class WebFetchTool(BaseTool):
 
     def _detect_content_type(self, url: str) -> str:
         """
-        通过 URL 后缀检测内容类型
+        通过 URL 后缀检测内容类型(仅用于 Jina 结果的 source_type 标注;
+        真 PDF 在 Jina 之前已走 blob 旁路,不再有按此分流的抓取路径)
 
         Args:
             url: 目标URL
@@ -204,7 +206,7 @@ class WebFetchTool(BaseTool):
         Returns:
             'pdf' 或 'html'
         """
-        url_lower = url.lower().split('?')[0]  # 去掉查询参数
+        url_lower = url.lower().split('?')[0].split('#')[0]  # 去掉查询参数/片段
         if url_lower.endswith('.pdf'):
             return 'pdf'
         return 'html'
@@ -263,14 +265,10 @@ class WebFetchTool(BaseTool):
                 "error": "URL is not an allowed public address",
             }
 
-        # 降级路径：按类型分别处理
-        content_type = self._detect_content_type(url)
-        if content_type == 'pdf':
-            logger.info(f"Jina failed for PDF, falling back to pypdf: {url}")
-            return await self._fetch_pdf(url)
-        else:
-            logger.info(f"Jina failed for HTML, falling back to BeautifulSoup: {url}")
-            return await self._fetch_via_bs4(url)
+        # 降级路径:直连 + BeautifulSoup 抽文本。真 PDF 到不了这里(`.pdf` ∈
+        # WEB_FETCH_BLOB_SUFFIXES,在 Jina 之前已走 blob 旁路),旧 pypdf 降级分支已删。
+        logger.info(f"Jina failed, falling back to BeautifulSoup: {url}")
+        return await self._fetch_via_bs4(url)
 
     async def _fetch_via_jina(self, url: str) -> Optional[Dict[str, Any]]:
         """
@@ -403,62 +401,6 @@ class WebFetchTool(BaseTool):
             # str(e) 可能含内网地址/连接细节，不回显给 LLM（SSRF-06）
             logger.warning(f"BS4 fetch failed for {url}: {e}")
             return {"success": False, "url": url, "error": "Failed to fetch content"}
-
-    async def _fetch_pdf(self, url: str) -> Dict[str, Any]:
-        """
-        降级路径：抓取并解析PDF文件（DocConverter / pymupdf）
-
-        Args:
-            url: PDF文件URL
-
-        Returns:
-            抓取结果字典
-        """
-        try:
-            logger.info(f"Fetching PDF: {url}")
-
-            timeout = aiohttp.ClientTimeout(total=60)
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url,
-                    timeout=timeout,
-                    headers={'User-Agent': random.choice(self.user_agents)},
-                    allow_redirects=False,
-                ) as response:
-                    if response.status != 200:
-                        return {
-                            "success": False,
-                            "url": url,
-                            "error": f"HTTP {response.status}"
-                        }
-
-                    # 流式读取并封顶字节（先于全量入内存，保护下载本身）
-                    pdf_bytes = await _read_capped(response, config.WEB_FETCH_MAX_BYTES)
-
-                    # PDF 文本抽取(网页内容阅读路径)。不走 convert() 上传入口——
-                    # 上传的 .pdf 自 C-0 起 blob-only,文本抽取仅 web_fetch 保留。
-                    converter = DocConverter()
-                    content, page_count = await converter.extract_pdf_text(pdf_bytes)
-                    logger.info(f"PDF extracted: {page_count} pages, {len(content)} chars")
-
-                    return {
-                        "success": True,
-                        "url": url,
-                        "title": "PDF Document",
-                        "content": content,
-                        "word_count": len(content.split()),
-                        "fetched_at": utc_now().isoformat(),
-                        "source_type": "pdf",
-                        "page_count": page_count,
-                    }
-
-        except _ResponseTooLargeError as e:
-            logger.warning(f"PDF fetch too large for {url}: {e}")
-            return {"success": False, "url": url, "error": "PDF too large"}
-        except Exception as e:
-            # 不回显 str(e)（可能含内网地址/路径），仅入 server 日志（SSRF-06）
-            logger.exception(f"PDF fetch failed for {url}")
-            return {"success": False, "url": url, "error": "PDF extraction failed"}
 
     async def _fetch_file_as_blob(
         self, url: str, suffix: str, fallback_mime: str

@@ -11,6 +11,7 @@ from jmespath.exceptions import JMESPathError
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 
+from config import config
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from tools.custom.secrets import (
     resolve_secrets,
@@ -161,8 +162,8 @@ class HttpTool(BaseTool):
             else:
                 result_text = response.text
 
-            # 限制返回长度
-            max_len = 50000
+            # 限制返回长度(隐藏常量,operator 可调、模型不可见)
+            max_len = config.HTTP_TOOL_MAX_RESULT_CHARS
             if len(result_text) > max_len:
                 result_text = result_text[:max_len] + "\n\n[Response truncated...]"
 

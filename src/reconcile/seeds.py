@@ -397,7 +397,8 @@ def parse_agent_seeds(
 
     seen_names: set = set()
     for filename in sorted(os.listdir(agents_dir)):
-        if not filename.endswith(".md") or filename.startswith("."):
+        # `_` 前缀 = 禁用约定,与 tools/skills(_is_config_entry)一致;`.` = 隐藏/传输垃圾
+        if not filename.endswith(".md") or filename.startswith(("_", ".")):
             continue
         path = os.path.join(agents_dir, filename)
         config = load_agent(path)  # 复用现有解析(含 model 必填 loud-fail)

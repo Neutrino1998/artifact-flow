@@ -14,7 +14,7 @@ from uuid import uuid4
 from sqlalchemy.exc import IntegrityError
 
 from config import config
-from core.engine import EngineHooks, create_initial_state, execute_loop, finalize_metrics, turn_has_content
+from core.engine import EmptyTurnInputError, EngineHooks, create_initial_state, execute_loop, finalize_metrics, turn_has_content
 from core.events import StreamEventType
 from core.conversation_manager import ConversationManager
 from core.post_processing import (
@@ -296,7 +296,7 @@ class ExecutionController:
         if not turn_has_content(
             user_input, uploaded_files, force_compact, activated_skill_bodies
         ):
-            raise ValueError(
+            raise EmptyTurnInputError(
                 "'user_input' resolves to empty content: the activated skill(s) "
                 "produced nothing to inject (not visible / empty body)"
             )

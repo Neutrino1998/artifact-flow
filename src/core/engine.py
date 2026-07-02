@@ -157,6 +157,12 @@ def create_initial_state(
     }
 
 
+class EmptyTurnInputError(ValueError):
+    """解析后本轮无任何可注入内容 —— client-caused 的预期失败(典型:stale skill picker,
+    勾选的 skill 已被删/不可见/空正文)。上层按 4xx 档处理:warning + 原文案放行给用户,
+    不走 exception+脱敏(那是服务端 5xx 档待遇)。"""
+
+
 def turn_has_content(
     user_input: str,
     uploaded_files: Optional[List[Any]] = None,
@@ -1013,7 +1019,8 @@ async def execute_loop(
             tool_end_time = utc_now()
             tool_duration_ms = int((tool_end_time - tool_start_time).total_seconds() * 1000)
 
-            # 超长成功结果统一落盘为 artifact，回填预览（fail-open）
+            # 超长成功结果统一落盘为 artifact，回填预览；必须落盘的结果(artifact spec /
+            # 超长)落盘失败 → loud-fail 替换为 error 结果，不放行原文（见 callee docstring）
             tool_result = await _maybe_persist_tool_result(tool_name, tool, tool_result)
 
             # 识图:把图块 data-URI 从将入事件的 metadata 里摘出 → 存进本 turn 的

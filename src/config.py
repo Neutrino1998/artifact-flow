@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     COMPACTION_TIMEOUT: int = 300            # 秒, 单次 compact LLM 调用超时（thinking 模型压缩 ~100k token 输入需较长 TTFT+生成时间，120s 偏紧）
     INVENTORY_PREVIEW_LENGTH: int = 200     # artifact 清单内容预览截断长度
     READ_ARTIFACT_MAX_CHARS: int = 50000    # read_artifact 默认字符上限（隐藏，模型不可见）
+    HTTP_TOOL_MAX_RESULT_CHARS: int = 50000  # external http 工具响应文本上限（隐藏）；超限尾部截断并显式标记
     TOOL_PERSIST_PREVIEW_LENGTH: int = 1000  # 工具结果落盘后回填给模型的预览长度
     SEARCH_TOOLS_MAX_RESULTS: int = 15      # search_tools 单次渲染完整 doc 的工具数上限（隐藏）；
                                             # 超出只列名，防把整集 schema 灌爆下一次 call（压缩不兜底 tool-result overflow）
