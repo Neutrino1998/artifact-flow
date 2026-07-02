@@ -180,6 +180,18 @@ class Settings(BaseSettings):
     # 软上限:跨会话并发可略微超额,挡量级非字节级。0 = 不限(禁用)。operator 经 env 可调。
     ARTIFACT_USER_QUOTA_BYTES: int = 2 * 1024 * 1024 * 1024  # 2GB
 
+    # Skill 导入硬门槛(Phase E,utils/skill_validator;隐藏常量,operator 经 env 可调)。
+    # 宿主侧只读 namelist + SKILL.md 一个成员,全包解压归沙盒 —— 这组上限是 bomb 预拒,
+    # 沙盒 watchdog 仍是真兜底。单 zip 字节上限刻意 ≤ 代理层 client_max_body_size,
+    # 别声明一个过不了边缘的数(deploy/nginx.conf|Caddyfile)。
+    # 用户 skill 总量不设独立配额:bundle 字节计入 ARTIFACT_USER_QUOTA_BYTES 同一池
+    # (原则 7③;记账在 ConversationManager.get_user_upload_bytes,413 闸与存储条同口径)。
+    SKILL_BUNDLE_MAX_BYTES: int = 25 * 1024 * 1024      # 单个 skill zip 上限
+    SKILL_ZIP_MAX_MEMBERS: int = 2000                   # zip 文件成员数上限
+    SKILL_ZIP_MAX_UNCOMPRESSED_BYTES: int = 500 * 1024 * 1024  # 声明解压总量上限
+    SKILL_MD_MAX_BYTES: int = 5 * 1024 * 1024           # SKILL.md 成员实际读取硬帽(bomb-in-member)
+    SKILL_MD_LEGIBILITY_WARN_CHARS: int = 20_000        # 正文 legibility 警告阈值(不拦)
+
     # 沙盒（C 阶段;隐藏常量,operator 经 env 可调,模型不可见）。
     # DooD:镜像 / 挂载 / runtime 全部固定在代码侧 —— 容器创建参数绝不可被模型
     # 生成内容污染(backend 持 docker.sock = host root,这是硬安全边界)。

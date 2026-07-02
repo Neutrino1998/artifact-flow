@@ -447,3 +447,58 @@ async def test_get_bundle_roundtrip(db_session, cfg):
     # 单文件 skill / 不存在的 slug → None
     assert await repo.get_bundle("solo") is None
     assert await repo.get_bundle("nope") is None
+
+
+# --------------------------------------------------------------------------
+# E-1:seed 侧经由 skill_validator 的新规则(zip/prose 空正文、fence、链接、穿越)
+# --------------------------------------------------------------------------
+
+
+async def test_bundle_empty_body_loud_fails(db_session, cfg):
+    """空正文 = 激活「授能力、永不注正文」→ 写侧拒(07-02 联审立项)。"""
+    _, _, skills = cfg
+    (skills / "pack.zip").write_bytes(_make_zip({
+        "pack/SKILL.md": _skill_md(name="pack", allowed_tools=None, body="  "),
+    }))
+    with pytest.raises(SeedError, match="body_empty"):
+        await _run(db_session, cfg)
+
+
+async def test_prose_empty_body_loud_fails(db_session, cfg):
+    """prose 目录不走 validator,空正文由 _skill_seed_from_md 兜。"""
+    _, _, skills = cfg
+    _write(skills / "solo" / "SKILL.md", _skill_md(name="solo", allowed_tools=None, body=" "))
+    with pytest.raises(SeedError, match="body is empty"):
+        await _run(db_session, cfg)
+
+
+async def test_bundle_unclosed_fence_loud_fails(db_session, cfg):
+    _, _, skills = cfg
+    (skills / "pack.zip").write_bytes(_make_zip({
+        "pack/SKILL.md": _skill_md(
+            name="pack", allowed_tools=None, body="text\n```python\nprint(1)\n",
+        ),
+    }))
+    with pytest.raises(SeedError, match="unclosed_fence"):
+        await _run(db_session, cfg)
+
+
+async def test_bundle_unresolved_link_loud_fails(db_session, cfg):
+    _, _, skills = cfg
+    (skills / "pack.zip").write_bytes(_make_zip({
+        "pack/SKILL.md": _skill_md(
+            name="pack", allowed_tools=None, body="See [ref](references/gone.md).",
+        ),
+    }))
+    with pytest.raises(SeedError, match="link_unresolved"):
+        await _run(db_session, cfg)
+
+
+async def test_bundle_path_traversal_loud_fails(db_session, cfg):
+    _, _, skills = cfg
+    (skills / "pack.zip").write_bytes(_make_zip({
+        "SKILL.md": _skill_md(name="pack", allowed_tools=None),
+        "../evil.txt": "x",
+    }))
+    with pytest.raises(SeedError, match="path_traversal"):
+        await _run(db_session, cfg)

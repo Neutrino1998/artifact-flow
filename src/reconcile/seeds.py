@@ -12,21 +12,18 @@ config 种子解析 —— 把 `config/tools/` 与 `config/agents/` 解析成归
 """
 
 import hashlib
-import io
 import json
 import os
-import zipfile
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
-
-import yaml
 
 from agents.loader import load_agent
 from tools.base import BUILTIN_TOOL_NAMES, is_builtin_name, resolve_allowed_tool_entry
 from tools.custom.http_tool import validate_response_extract
 from tools.custom.secrets import assert_secret_refs_allowed
+from utils.frontmatter import FrontmatterError, normalize_allowed_tools, parse_frontmatter_text
 from utils.logger import get_logger
-from utils.skill_zip import SkillZipError, locate_skill_md, strip_prefix
+from utils.skill_validator import validate_skill_zip
 from utils.validators import is_config_entry
 
 logger = get_logger("ArtifactFlow")
@@ -115,23 +112,15 @@ def _content_hash(payload) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-def _parse_frontmatter_text(content: str, where: str) -> Tuple[dict, str]:
-    """MD 文本 → (frontmatter dict, body)。`where` 仅用于报错定位(文件路径 / zip 成员)。"""
-    if not content.startswith("---"):
-        raise SeedError(f"MD file must start with YAML frontmatter: {where}")
-    try:
-        end_idx = content.index("---", 3)
-    except ValueError:
-        raise SeedError(f"MD file has unterminated YAML frontmatter: {where}")
-    frontmatter = yaml.safe_load(content[3:end_idx].strip()) or {}
-    body = content[end_idx + 3:].strip()
-    return frontmatter, body
-
-
 def _split_frontmatter(path: str) -> Tuple[dict, str]:
-    """读 MD 文件 → (frontmatter dict, body)。与 loaders 的切分一致。"""
+    """读 MD 文件 → (frontmatter dict, body)。方言在 utils.frontmatter(E-1 抽出,
+    validator/seed 共用一套解析);此处只把 FrontmatterError 转 SeedError。"""
     with open(path, "r", encoding="utf-8") as f:
-        return _parse_frontmatter_text(f.read(), path)
+        content = f.read()
+    try:
+        return parse_frontmatter_text(content, path)
+    except FrontmatterError as e:
+        raise SeedError(str(e))
 
 
 def _validate_unit_name(name: str, source: str) -> None:
@@ -512,13 +501,10 @@ def parse_skill_seeds(
 
 
 def _normalize_allowed_tools(raw, source: str) -> List[str]:
-    if raw is None:
-        return []
-    if isinstance(raw, str):
-        return [s.strip() for s in raw.split(",") if s.strip()]
-    if isinstance(raw, list):
-        return [str(s).strip() for s in raw if str(s).strip()]
-    raise SeedError(f"{source}: allowed-tools must be a list or string")
+    try:
+        return normalize_allowed_tools(raw, source)
+    except FrontmatterError as e:
+        raise SeedError(str(e))
 
 
 def _skill_seed_from_md(
@@ -534,6 +520,10 @@ def _skill_seed_from_md(
     """共享:frontmatter + body(+ 可选 bundle 字节)→ 校验 + 组装 SkillSeed。
     prose(bundle=None):seed_hash 走归一化列 payload;bundle:seed_hash=sha256(字节)
     —— 提交的 zip 是稳定字节(任何 OS 同 checkout 同哈希),无跨环境 churn。"""
+    if not body.strip():
+        # 空正文 = 激活会「授能力、永不注正文」(07-02 联审):写侧拒。zip 路径已被
+        # validator 的 md.body_empty 拦,此检查兜 prose 目录路径(不走 validator)。
+        raise SeedError(f"{where}: SKILL.md body is empty (nothing to inject on activation)")
     name = frontmatter.get("name") or slug
     visibility = frontmatter.get("visibility", "public")
     if visibility not in _VALID_SKILL_VISIBILITY:
@@ -614,43 +604,20 @@ def _parse_skill_zip(
     known_unit_names: set,
     known_full_names: Dict[str, str],
 ) -> "SkillSeed":
-    """bundle skill(`<slug>.zip`)。存原始字节;定位唯一 SKILL.md 解 frontmatter。
-
-    定位规则(裸根 / 单层 wrapper `<name>/SKILL.md` / repo 深层嵌套都吃):zip 里唯一的
-    SKILL.md 成员即入口,0 个 / 多个 → loud-fail。剥壳前缀(SKILL.md 的父目录)是 D-2
-    mount 时的事(解到 /workspace/.skills/<slug>/),此处不需存。"""
+    """bundle skill(`<slug>.zip`)。存原始字节;结构/内容校验整体走 E-1 硬门槛
+    validator(`utils.skill_validator`,seed 与用户导入同一道门、永不漂移):error
+    findings → SeedError(seed 受信边界 loud-fail,operator 改 config);warning →
+    log 不拦(operator 自负)。mount 侧据此可信「结构必对」、零校验。"""
     with open(zip_path, "rb") as f:
         blob = f.read()
-    try:
-        zf = zipfile.ZipFile(io.BytesIO(blob))
-    except zipfile.BadZipFile as e:
-        raise SeedError(f"skill '{slug}.zip' is not a valid zip: {e}")
-    # 定位唯一 SKILL.md(裸根 / wrapper / 深嵌都吃,0 或多个 loud-fail)。同一个
-    # 定位器供 D-2 mount 算剥壳前缀 —— 两处不漂移(utils.skill_zip)。
-    names = zf.namelist()
-    try:
-        md_member = locate_skill_md(names, f"skill '{slug}.zip'")
-    except SkillZipError as e:
-        raise SeedError(str(e))
-    # 格式校验(import 侧):D-2 mount 剥壳只保留 SKILL.md 所在子树 → 前缀外的成员会被
-    # 静默丢。在受信解析边界 loud-fail(镜像 prose 目录的「附属文件」loud-fail),把「结构
-    # 不对」变成存库前的显式错误;mount 侧据此可信「结构必对」、零校验。跨前缀布局的完整
-    # validator(孤儿/链接/fence)留 E。
-    prefix = strip_prefix(md_member)
-    if prefix:
-        stray = sorted(
-            n for n in names
-            if not n.endswith("/") and not n.startswith(prefix + "/")
-        )
-        if stray:
-            raise SeedError(
-                f"skill '{slug}.zip' has files outside the SKILL.md root '{prefix}/' "
-                f"({stray}); pack everything under one top-level dir so nothing is "
-                f"dropped when the bundle is mounted"
-            )
-    md_text = zf.read(md_member).decode("utf-8")
-    frontmatter, body = _parse_frontmatter_text(md_text, f"{slug}.zip:{md_member}")
+    result = validate_skill_zip(blob, where=f"skill '{slug}.zip'")
+    for w in result.warnings:
+        logger.warning("skill '%s.zip': [%s] %s", slug, w.rule, w.message)
+    if not result.ok:
+        detail = "; ".join(f"[{f.rule}] {f.message}" for f in result.errors)
+        raise SeedError(f"skill '{slug}.zip' failed validation: {detail}")
+    parsed = result.parsed
     return _skill_seed_from_md(
-        slug, frontmatter, body, bundle=blob, where=f"{slug}.zip",
+        slug, parsed.frontmatter, parsed.body, bundle=blob, where=f"{slug}.zip",
         known_unit_names=known_unit_names, known_full_names=known_full_names,
     )
