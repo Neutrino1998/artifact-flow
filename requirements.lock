@@ -164,8 +164,6 @@ pyjwt==2.13.0
     # via
     #   -r requirements.txt
     #   redis
-pymupdf==1.27.2.3
-    # via -r requirements.txt
 pymysql==1.2.0
     # via aiomysql
 python-dotenv==1.2.2

@@ -18,7 +18,6 @@ from db.models import (
     Agent,
     AgentUnit,
     DepartmentSkillRule,
-    DepartmentUnitRule,
     Skill,
     ToolCredential,
     ToolMember,
@@ -36,6 +35,7 @@ from reconcile.seeds import (
     parse_skill_seeds,
     parse_tool_seeds,
 )
+from repositories.tool_registry_repo import ToolRegistryRepository
 from tools.custom.credentials import get_cipher
 from tools.custom.secrets import extract_placeholders
 from utils.logger import get_logger
@@ -196,22 +196,16 @@ def _new_member(unit_name: str, m: MemberSeed) -> ToolMember:
 async def _prune_unit(session: AsyncSession, name: str) -> None:
     # 显式删子行(dialect-safe,不赖 SQLite per-connection FK pragma)
     await session.execute(delete(AgentUnit).where(AgentUnit.unit_name == name))
-    await session.execute(delete(DepartmentUnitRule).where(DepartmentUnitRule.unit_name == name))
+    await _clear_dept_rules_for_unit(session, name)
     await session.execute(delete(ToolCredential).where(ToolCredential.unit_name == name))
     await session.execute(delete(ToolMember).where(ToolMember.unit_name == name))
     await session.execute(delete(ToolUnit).where(ToolUnit.name == name))
 
 
 async def _clear_dept_rules_for_unit(session: AsyncSession, name: str) -> None:
-    """改 visibility 清该 unit 的 dept 规则(决策 10 第二条路径)。
-
-    与 Manager UI 改 visibility 路径同语义:行不熬过 visibility 变更,否则 seeded 资源经
-    config 改 visibility 时旧例外熬过 UPDATE、方向(派生自 visibility)静默反转 = 反授权。
-    定向删(非 cascade,留 user/agent 等其它指向),C/G 共用。
-    """
-    await session.execute(
-        delete(DepartmentUnitRule).where(DepartmentUnitRule.unit_name == name)
-    )
+    """决策 10 clear-on-visibility 的薄转发 —— 唯一实现(含语义说明)在
+    `ToolRegistryRepository.clear_dept_rules`,config 改 visibility / prune 两处经此调。"""
+    await ToolRegistryRepository(session).clear_dept_rules(name)
 
 
 # --------------------------------------------------------------------------

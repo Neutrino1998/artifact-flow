@@ -27,6 +27,7 @@ from tools.custom.http_tool import validate_response_extract
 from tools.custom.secrets import assert_secret_refs_allowed
 from utils.logger import get_logger
 from utils.skill_zip import SkillZipError, locate_skill_md, strip_prefix
+from utils.validators import is_config_entry
 
 logger = get_logger("ArtifactFlow")
 
@@ -131,11 +132,6 @@ def _split_frontmatter(path: str) -> Tuple[dict, str]:
     """读 MD 文件 → (frontmatter dict, body)。与 loaders 的切分一致。"""
     with open(path, "r", encoding="utf-8") as f:
         return _parse_frontmatter_text(f.read(), path)
-
-
-def _is_config_entry(name: str) -> bool:
-    """跳过 `_`(operator 禁用)/ `.`(隐藏/垃圾)前缀。"""
-    return not name.startswith(("_", "."))
 
 
 def _validate_unit_name(name: str, source: str) -> None:
@@ -249,7 +245,7 @@ def parse_tool_seeds(tools_dir: str) -> List[ToolUnitSeed]:
         return seeds
 
     for entry in sorted(os.listdir(tools_dir)):
-        if not _is_config_entry(entry):
+        if not is_config_entry(entry):
             continue
         path = os.path.join(tools_dir, entry)
 
@@ -296,7 +292,7 @@ def _parse_toolset_dir(dir_path: str, dir_name: str) -> ToolUnitSeed:
     members: List[MemberSeed] = []
     seen: set = set()
     for entry in sorted(os.listdir(dir_path)):
-        if not _is_config_entry(entry) or not entry.endswith(".md"):
+        if not is_config_entry(entry) or not entry.endswith(".md"):
             continue
         member_path = os.path.join(dir_path, entry)
         fm, body = _split_frontmatter(member_path)
@@ -397,8 +393,7 @@ def parse_agent_seeds(
 
     seen_names: set = set()
     for filename in sorted(os.listdir(agents_dir)):
-        # `_` 前缀 = 禁用约定,与 tools/skills(_is_config_entry)一致;`.` = 隐藏/传输垃圾
-        if not filename.endswith(".md") or filename.startswith(("_", ".")):
+        if not filename.endswith(".md") or not is_config_entry(filename):
             continue
         path = os.path.join(agents_dir, filename)
         config = load_agent(path)  # 复用现有解析(含 model 必填 loud-fail)
@@ -490,7 +485,7 @@ def parse_skill_seeds(
 
     seen: Dict[str, str] = {}   # slug -> 产生它的 entry(intra-config 撞名,同工具侧 _check_tool_collisions)
     for entry in sorted(os.listdir(skills_dir)):
-        if not _is_config_entry(entry):
+        if not is_config_entry(entry):
             continue
         path = os.path.join(skills_dir, entry)
         is_dir = os.path.isdir(path)
@@ -600,7 +595,7 @@ def _parse_skill_dir(
     if not os.path.isfile(skill_md_path):
         raise SeedError(f"skill dir '{slug}/' missing SKILL.md")
     # 目录里除 SKILL.md 外的真实条目(忽略 `_`/`.` 垃圾)→ 应打成 <slug>.zip,别用松散目录
-    extras = [e for e in os.listdir(dir_path) if e != "SKILL.md" and _is_config_entry(e)]
+    extras = [e for e in os.listdir(dir_path) if e != "SKILL.md" and is_config_entry(e)]
     if extras:
         raise SeedError(
             f"skill dir '{slug}/' has files besides SKILL.md ({sorted(extras)}); "

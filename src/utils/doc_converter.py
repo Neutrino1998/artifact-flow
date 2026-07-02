@@ -9,29 +9,18 @@ charset 启发式不参与路由判定 —— 改后缀 / 损坏 / 不认识的�
 magic 闸与拒绝名单。仅存的上传期 ValueError:体积超限、png/jpg 扩展名但
 Pillow 探不出合法 PNG/JPEG(识图路由是上传期决策,这道闸是路由正确性、
 不是格式预判)。
-
-- PDF text extraction (pymupdf) survives as a standalone helper for
-  web_fetch's PDF fallback — that is web-content reading, not upload.
 """
 
 import asyncio
 import mimetypes
 import os
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 
 from config import config
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
-
-# PyMuPDF 在 import 时调 mupdf.reinit_singlethreaded()，底层是单线程模式 ——
-# 多线程并发调用会得到错误结果或直接段错误。用专属 single-worker executor
-# 把 PDF 解析序列化掉，event loop 仍然不卡（其他请求继续跑），但 PyMuPDF 调用
-# 永远在同一固定线程上执行，符合上游约束。详见：
-# https://pymupdf.readthedocs.io/en/latest/recipes-multiprocessing.html
-_PYMUPDF_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pymupdf")
 
 # Extension -> MIME type mapping
 EXTENSION_MIME_MAP: Dict[str, str] = {
@@ -180,7 +169,6 @@ class DocConverter:
     # that materializes full content+wordlist, so it keeps a tighter cap — over
     # it the file falls to blob, not 422).
     MAX_FILE_SIZE = config.MAX_UPLOAD_SIZE
-    MAX_PDF_PAGES = 200                # extract_pdf_text (web_fetch fallback) only
 
     async def convert(self, file_bytes: bytes, filename: str) -> ConvertResult:
         """
@@ -219,18 +207,6 @@ class DocConverter:
             # 后自己诊断(见模块 docstring)。
             mime = _BINARY_EXTENSION_MIME.get(ext) or _guess_blob_mime(filename)
             return _blob_result(file_bytes, filename, mime)
-
-    async def extract_pdf_text(self, file_bytes: bytes) -> Tuple[str, int]:
-        """Extract text from PDF bytes via pymupdf. Returns (text, page_count).
-
-        web_fetch 的 PDF 降级路径专用(网页内容阅读,非上传)。上传的 .pdf 走
-        blob-only(已知二进制路由),不经此函数 —— 富格式的读归沙盒(原则 6)。
-        """
-        # PyMuPDF 必须串行（见模块顶部 _PYMUPDF_EXECUTOR 注释），同时不卡 event loop
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            _PYMUPDF_EXECUTOR, _extract_pdf_text, file_bytes, self.MAX_PDF_PAGES
-        )
 
     async def _convert_image(self, file_bytes: bytes, filename: str) -> ConvertResult:
         """图片(png/jpeg)→ blob 存储。
@@ -357,25 +333,3 @@ def _probe_image(file_bytes: bytes) -> Optional[str]:
         return fmt
     except Exception:
         return None
-
-
-def _extract_pdf_text(file_bytes: bytes, max_pages: int) -> tuple[str, int]:
-    """Sync pymupdf extraction. Designed to run inside asyncio.to_thread."""
-    import pymupdf
-
-    doc = pymupdf.open(stream=file_bytes, filetype="pdf")
-    try:
-        page_count = len(doc)
-        if page_count > max_pages:
-            raise ValueError(f"PDF has {page_count} pages (max {max_pages})")
-
-        text_parts = []
-        for page_num in range(page_count):
-            page = doc[page_num]
-            text = page.get_text()
-            if text.strip():
-                text_parts.append(f"## Page {page_num + 1}\n\n{text.strip()}")
-
-        return "\n\n".join(text_parts), page_count
-    finally:
-        doc.close()

@@ -1,7 +1,8 @@
 """
 Web内容抓取工具
-基于Jina Reader API实现网页内容抓取，支持HTML和PDF文件
-降级路径：HTML → BeautifulSoup纯文本提取，PDF → pypdf文本提取
+基于Jina Reader API实现网页内容抓取
+文件类 URL(.pdf 等 WEB_FETCH_BLOB_SUFFIXES 尾缀)在 Jina 之前走直连 blob 旁路
+降级路径：Jina 失败 → BeautifulSoup 纯文本提取
 """
 
 import asyncio
@@ -81,12 +82,12 @@ class WebFetchTool(BaseTool):
     """
     Web内容抓取工具
     使用Jina Reader API抓取网页内容并转换为Markdown格式
-    支持HTML和PDF文件的统一处理
+    文件类 URL(blob 尾缀)在 Jina 之前走直连 blob 旁路
 
     特性：
-    - Jina Reader API：统一处理HTML和PDF，返回clean markdown
+    - Jina Reader API：网页 → clean markdown
     - 429重试：命中限额时自动等待重试
-    - 智能降级：Jina失败后按类型降级（PDF → pypdf，HTML → BeautifulSoup）
+    - 降级：Jina 失败 → BeautifulSoup 纯文本提取
     """
 
     def __init__(self):
@@ -195,19 +196,26 @@ class WebFetchTool(BaseTool):
             logger.exception(f"Fetch failed: {str(e)}")
             return ToolResult(success=False, error=f"Fetch failed: {str(e)}")
 
+    @staticmethod
+    def _url_path_lower(url: str) -> str:
+        """URL → 小写、去查询参数/片段的路径,尾缀判断的**唯一归一化**。
+
+        _detect_content_type 与 _blob_route_for_url 共用 —— 两处各自手写时
+        已漂移过一次(`#`-strip 只有一边有),归一化不一致 = 同一 URL 两处
+        判型不同。
+        """
+        return url.lower().split('?')[0].split('#')[0]
+
     def _detect_content_type(self, url: str) -> str:
         """
         通过 URL 后缀检测内容类型(仅用于 Jina 结果的 source_type 标注;
-        真 PDF 在 Jina 之前已走 blob 旁路,不再有按此分流的抓取路径)
-
-        Args:
-            url: 目标URL
+        默认配置下 .pdf ∈ blob 尾缀、在 Jina 之前已被旁路截走,'pdf' 仅在
+        operator 从 WEB_FETCH_BLOB_SUFFIXES 移除 .pdf 时可达)
 
         Returns:
             'pdf' 或 'html'
         """
-        url_lower = url.lower().split('?')[0].split('#')[0]  # 去掉查询参数/片段
-        if url_lower.endswith('.pdf'):
+        if self._url_path_lower(url).endswith('.pdf'):
             return 'pdf'
         return 'html'
 
@@ -216,7 +224,7 @@ class WebFetchTool(BaseTool):
 
         命中即走直连 blob 旁路(Jina 之前),不抽文本——Jina 对二进制本就坏。
         """
-        path = url.lower().split('?')[0].split('#')[0]
+        path = self._url_path_lower(url)
         for suffix, mime in config.WEB_FETCH_BLOB_SUFFIXES.items():
             if path.endswith(suffix):
                 return suffix, mime
@@ -476,8 +484,6 @@ class WebFetchTool(BaseTool):
             source_type = result.get("source_type", "unknown")
             words = result["word_count"]
             attrs = f'type="{source_type}" words="{words}"'
-            if result.get("page_count"):
-                attrs += f' pages="{result["page_count"]}"'
 
             xml_parts = [f"<page {attrs}>"]
             xml_parts.append(f"  <url>{result['url']}</url>")

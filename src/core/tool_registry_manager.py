@@ -13,11 +13,10 @@ ToolRegistryManager —— external 工具 unit / 成员 / agent 挂载 / 凭证
 
 from typing import Dict, List, Optional
 
-from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import AgentUnit, DepartmentUnitRule, ToolMember, ToolUnit
+from db.models import AgentUnit, ToolMember, ToolUnit
 from repositories.tool_credential_repo import ToolCredentialRepository
 from repositories.tool_registry_repo import ToolRegistryRepository
 from tools.base import is_builtin_name
@@ -176,14 +175,11 @@ class ToolRegistryManager:
         await self._validate_names(name, members, exclude_unit=name)
 
         u.description = spec.get("description", "") or ""
-        # 决策 10:visibility 变更先清 dept 规则(与 reconciler._clear_dept_rules_for_unit
-        # 同语义)—— 规则行的 grant/deny 方向派生自 visibility,行熬过变更 = 方向静默反转
-        # (反授权)。G 前 department_unit_rules 恒空,delete 为 no-op。
+        # 决策 10:visibility 变更先清 dept 规则(唯一实现 = repo.clear_dept_rules,
+        # 语义见其 docstring)。G 前 department_unit_rules 恒空,no-op。
         new_visibility = self._check_visibility(spec.get("visibility", "public"))
         if u.visibility != new_visibility:
-            await self._session.execute(
-                delete(DepartmentUnitRule).where(DepartmentUnitRule.unit_name == name)
-            )
+            await self._registry.clear_dept_rules(name)
             logger.info(
                 f"Unit '{name}' visibility changed "
                 f"('{u.visibility}' → '{new_visibility}'); department rules cleared"

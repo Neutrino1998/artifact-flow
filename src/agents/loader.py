@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from utils.logger import get_logger
+from utils.validators import is_config_entry
 
 logger = get_logger("ArtifactFlow")
 
@@ -102,8 +103,7 @@ def load_all_agents(agents_dir: Optional[str] = None) -> dict[str, AgentConfig]:
         # 隐藏文件(`.` 前缀)永远不是配置:macOS 传输垃圾(AppleDouble `._x.md`、
         # .DS_Store)/编辑器临时文件混进目录时不应阻断启动(2026-06-12 内网部署
         # `._lead_agent.md` 二进制解码失败拒启)。真实坏配置(非隐藏)仍 loud-fail。
-        # `_` 前缀 = operator 禁用约定,与 tools/skills 的 seed 解析一致(seeds._is_config_entry)。
-        if not filename.endswith(".md") or filename.startswith(("_", ".")):
+        if not filename.endswith(".md") or not is_config_entry(filename):
             continue
 
         md_path = os.path.join(agents_dir, filename)

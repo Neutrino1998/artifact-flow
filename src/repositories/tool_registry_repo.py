@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Agent, AgentUnit, ToolMember, ToolUnit
+from db.models import Agent, AgentUnit, DepartmentUnitRule, ToolMember, ToolUnit
 from repositories.base import BaseRepository
 
 
@@ -76,8 +76,24 @@ class ToolRegistryRepository(BaseRepository[ToolUnit]):
         for m in members:
             self._session.add(m)
 
+    async def clear_dept_rules(self, unit_name: str) -> None:
+        """删该 unit 的 dept 规则 —— 决策 10 clear-on-visibility 的**唯一实现**。
+
+        规则行的 grant/deny 方向派生自资源 visibility,行熬过 visibility 变更 / unit
+        删除重建 = 方向静默反转(反授权)。三条路径同调:Manager update_unit(UI 改
+        visibility)、本 Repo delete_unit(删 unit)、reconciler(config 改 visibility /
+        prune)。定向删(非 cascade,留 user/agent 等其它指向)。G 前表恒空,no-op。
+        """
+        await self._session.execute(
+            delete(DepartmentUnitRule).where(DepartmentUnitRule.unit_name == unit_name)
+        )
+
     async def delete_unit(self, name: str) -> None:
-        """显式删子行(dialect-safe,不赖 per-connection FK pragma);DB FK 是双保险。"""
+        """显式删子行(dialect-safe,不赖 per-connection FK pragma);DB FK 是双保险。
+
+        凭证行归 ToolCredentialRepository,由 Manager 的 delete 用例先删。
+        """
+        await self.clear_dept_rules(name)
         await self._session.execute(delete(AgentUnit).where(AgentUnit.unit_name == name))
         await self._session.execute(delete(ToolMember).where(ToolMember.unit_name == name))
         await self._session.execute(delete(ToolUnit).where(ToolUnit.name == name))
