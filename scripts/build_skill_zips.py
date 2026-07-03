@@ -8,8 +8,10 @@ config/skills-src/(可读可审),本脚本产 zip。**改了 skills-src 必须�
 tests/reconcile/test_preinstalled_skills.py 会对比「重建 == 已提交」抓漂移。
 
 Deterministic:成员按路径排序、时间戳固定 1980-01-01、权限固定 0644、
-ZIP_DEFLATED 固定压缩级 —— 同源必产同字节,seed_hash(sha256(bundle))才稳定,
-重跑构建不会造成 reconcile 无谓换血。
+create_system 固定 3(Unix)、ZIP_DEFLATED 固定压缩级 —— 同机重跑必产同字节,
+seed_hash(sha256(bundle))才稳定,重跑构建不会造成 reconcile 无谓换血。
+注意压缩字节依赖 zlib 实现(zlib-ng 同输入不同 DEFLATE 流),跨机重建以
+「成员内容等价」为准 —— 防漂移测试比较的是 manifest 而非压缩字节。
 
 用法:
     python scripts/build_skill_zips.py            # 全部重建
@@ -59,6 +61,7 @@ def build_zip(slug: str) -> bytes:
             arcname = f"{slug}/{path.relative_to(src).as_posix()}"
             zi = zipfile.ZipInfo(arcname, date_time=_FIXED_DATE)
             zi.compress_type = zipfile.ZIP_DEFLATED
+            zi.create_system = 3   # Unix;ZipInfo 默认跟构建平台走(Windows→0)
             zi.external_attr = _FIXED_MODE << 16
             zf.writestr(zi, path.read_bytes(), compresslevel=9)
     return buf.getvalue()

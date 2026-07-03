@@ -1,8 +1,9 @@
 """预装 skill 集(E-4)回归 —— 三道闸:
 
-1. **防漂移**:config/skills/<slug>.zip 必须等于从 config/skills-src/<slug>/
-   重建的字节(构建是 deterministic 的)。改了 skills-src 忘跑
-   `python scripts/build_skill_zips.py` 时在这里响。
+1. **防漂移**:config/skills/<slug>.zip 必须与从 config/skills-src/<slug>/
+   重建的结果**内容等价**(manifest:成员路径/时间戳/属性/解压字节)。改了
+   skills-src 忘跑 `python scripts/build_skill_zips.py` 时在这里响。
+   不比压缩字节 —— DEFLATE 输出依赖 zlib 实现(zlib-ng 机器会假失败)。
 2. **过自家硬门**:每个预装 zip 过 E-1 validator 必须零 error 零 warning
    (预装集是"真语料验证",warning 也不许 —— 用户导入才允许 warning 放行)。
 3. **seed 解析干净**:parse_skill_seeds 吃下 config/skills/ 全量不抛 SeedError,
@@ -10,6 +11,8 @@
 """
 
 import importlib.util
+import io
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -40,11 +43,20 @@ def test_src_dirs_and_zips_in_sync_roster():
         assert (ZIP_DIR / f"{slug}.zip").is_file(), f"{slug}.zip 未构建"
 
 
+def _zip_manifest(blob: bytes):
+    with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+        return [
+            (i.filename, i.date_time, i.external_attr, i.create_system,
+             zf.read(i.filename))
+            for i in sorted(zf.infolist(), key=lambda i: i.filename)
+        ]
+
+
 @pytest.mark.parametrize("slug", PREINSTALLED)
 def test_committed_zip_matches_rebuild(slug):
     committed = (ZIP_DIR / f"{slug}.zip").read_bytes()
-    assert committed == _build_zip(slug), (
-        f"{slug}.zip 与 skills-src 重建结果不一致 —— "
+    assert _zip_manifest(committed) == _zip_manifest(_build_zip(slug)), (
+        f"{slug}.zip 与 skills-src 重建结果内容不一致 —— "
         "改了源没跑 scripts/build_skill_zips.py"
     )
 

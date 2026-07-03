@@ -37,16 +37,33 @@ _CT_TYPE = (
 
 
 def _run_visible_text(run) -> str:
+    # 只数直接子 w:t:run 内嵌 w:pict/文本框时,iter 会把内层段落的文字
+    # 混进本 run 的 offset 映射(正常内容里 w:t 都是 w:r 的直接子节点)
     parts = []
-    for t in run.iter(W + "t"):
-        parts.append(t.text or "")
+    for t in run:
+        if t.tag == W + "t":
+            parts.append(t.text or "")
     return "".join(parts)
+
+
+def _para_runs(p):
+    """本段落自己的 run —— 不下潜嵌套段落(w:txbxContent 文本框里的 run 属于
+    内层 w:p,混进外层 offset 映射会让批注括号锚到错误文字;文本框内的锚点由
+    root.iter 迭代到内层 p 时自然命中)。w:hyperlink 等中间层不隔断。"""
+    out = []
+    for r in p.iter(W + "r"):
+        anc = r.getparent()
+        while anc is not None and anc.tag != W + "p":
+            anc = anc.getparent()
+        if anc is p:
+            out.append(r)
+    return out
 
 
 def _find_anchor(root, anchor):
     """返回 (段落序号, 首个重叠 run, 末个重叠 run);找不到 → None。"""
     for p_idx, p in enumerate(root.iter(W + "p")):
-        runs = [r for r in p.iter(W + "r")]
+        runs = _para_runs(p)
         texts = [_run_visible_text(r) for r in runs]
         full = "".join(texts)
         pos = full.find(anchor)

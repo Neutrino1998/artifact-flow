@@ -10,6 +10,8 @@
   如 `2026-07-03T10:00:00Z`)。
 - 只做**增量标注**:原文任何字符都不许静默消失或改写——删除也是"包进 w:del",
   不是"移除文本"。
+- **移动内容一律表达为 w:del(原位置)+ w:ins(新位置)两步**,不要使用
+  `w:moveFrom`/`w:moveTo` —— `check_redlines.py` 不识别 move 元素,会误报 FAIL。
 - `<w:delText>` 与 `<w:t>` 一样,首尾有空格时要加 `xml:space="preserve"`。
 
 ## 插入文本

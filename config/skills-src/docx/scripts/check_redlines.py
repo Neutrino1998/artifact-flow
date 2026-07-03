@@ -10,13 +10,18 @@
 
 比较仅覆盖 document.xml 正文(不含页眉页脚/脚注);空白折叠比较(段落合并类
 修订会扰动换行,不构成破坏)。
+
+已知不覆盖:w:moveFrom/w:moveTo(遇到本作者的 move 会误报 FAIL)——
+写侧规范(references/redlines.md)要求移动一律用 w:del + w:ins 对表达,
+不产生 move 元素;他人文档里已有的 move 在两份文档中一致,自然抵消。
 """
 
 import argparse
 import difflib
 import sys
-import xml.etree.ElementTree as ET
 import zipfile
+
+from lxml import etree
 
 NS_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 W = "{%s}" % NS_W
@@ -29,7 +34,7 @@ def _visible_text(blob: bytes, revert_author=None):
     revert_author=X:回滚 X 的修订 —— X 的 w:ins 内容跳过,X 的 w:del 内容计入;
     其他作者的修订仍按所见即所得(它们在两份文档里应当一致)。
     """
-    root = ET.fromstring(blob)
+    root = etree.fromstring(blob)
     paras = []
     for p in root.iter(W + "p"):
         buf = []
@@ -53,35 +58,25 @@ def _visible_text(blob: bytes, revert_author=None):
     return paras
 
 
-def _ancestors(node, stop, tree_index):
-    cur = tree_index.get(id(node))
+def _ancestors(node, stop):
+    cur = node.getparent()
     while cur is not None and cur is not stop:
         yield cur
-        cur = tree_index.get(id(cur))
-
-
-# stdlib ET 没有 getparent —— 构建一次 child→parent 索引,挂在函数属性上缓存
-def _build_index(p):
-    return {id(c): parent for parent in p.iter() for c in parent}
+        cur = cur.getparent()
 
 
 def _inside(node, p, tag, author):
-    idx = _INDEX_CACHE.setdefault(id(p), _build_index(p))
-    for anc in _ancestors(node, p, idx):
+    for anc in _ancestors(node, p):
         if anc.tag == tag:
             return author is None or anc.get(W + "author") == author
     return False
 
 
 def _enclosing_author(node, p, tag):
-    idx = _INDEX_CACHE.setdefault(id(p), _build_index(p))
-    for anc in _ancestors(node, p, idx):
+    for anc in _ancestors(node, p):
         if anc.tag == tag:
             return anc.get(W + "author")
     return None
-
-
-_INDEX_CACHE = {}
 
 
 def _read_document(path):
@@ -97,7 +92,6 @@ def main():
     args = ap.parse_args()
 
     baseline = _visible_text(_read_document(args.original))
-    _INDEX_CACHE.clear()
     reverted = _visible_text(_read_document(args.edited), revert_author=args.author)
 
     norm = lambda paras: " ".join(" ".join(paras).split())  # noqa: E731 — 空白折叠

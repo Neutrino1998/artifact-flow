@@ -19,7 +19,9 @@ import sys
 
 from openpyxl import load_workbook
 
-_SHEET_REF_RE = re.compile(r"(?:'([^']+)'|([A-Za-z0-9_一-鿿]+))!")
+# 带引号表名支持 '' 转义('John''s Data'!);裸表名前有 ] 的是外部工作簿引用,不查
+_SHEET_REF_RE = re.compile(r"(?:'((?:[^']|'')+)'|(?<!\])([A-Za-z0-9_一-鿿]+))!")
+_STRING_LITERAL_RE = re.compile(r'"(?:[^"]|"")*"')
 _ERROR_VALUES = {"#REF!", "#DIV/0!", "#VALUE!", "#NAME?", "#NULL!", "#NUM!", "#N/A"}
 
 
@@ -42,8 +44,12 @@ def main():
                 loc = f"{ws.title}!{cell.coordinate}"
                 if "#REF!" in formula:
                     issues.append({"cell": loc, "kind": "broken_ref", "formula": formula[:80]})
-                for m in _SHEET_REF_RE.finditer(formula):
-                    ref = m.group(1) or m.group(2)
+                # 先剥字符串字面量:"完成!" 这类文本里的 ! 不是表引用
+                scannable = _STRING_LITERAL_RE.sub('""', formula)
+                for m in _SHEET_REF_RE.finditer(scannable):
+                    ref = (m.group(1) or m.group(2)).replace("''", "'")
+                    if "[" in ref:      # 外部工作簿引用('[Book1]Sheet1'!),不查
+                        continue
                     # 纯行列引用(如 A1)会被误捕为表名,只查真名单外且非单元格样式的
                     if ref not in sheet_names and not re.fullmatch(r"[A-Za-z]{1,3}[0-9]*", ref):
                         issues.append({"cell": loc, "kind": "unknown_sheet",

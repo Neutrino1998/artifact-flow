@@ -44,8 +44,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 中文图表场景。不用 apt fonts-noto-cjk —— 它只装 .ttc 集合,matplotlib 只注册
 # 集合第一个 face(JP,简体字形有日式变体),实测 "Noto Sans CJK SC" 查无此名;
 # 直接烤两个 SC 单 .otf(Regular/Bold,共 ~32MB,比 apt 包省 ~60MB)。
-ADD https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf \
-    https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Bold.otf \
+# URL 钉 commit SHA + --checksum:mutable main 会让多月后的重建静默换字节/404,
+# 且 raw.githubusercontent 直连不走 pip 镜像,构建机代理有抽风案底 —— 字节级钉死。
+ADD --checksum=sha256:2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b \
+    https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf \
+    /usr/share/fonts/opentype/noto-sc/
+ADD --checksum=sha256:b5f0d1a190a7f9b43c310a8850630af12553df32c4c050543f9059732d9b4c0a \
+    https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Bold.otf \
     /usr/share/fonts/opentype/noto-sc/
 RUN chmod 644 /usr/share/fonts/opentype/noto-sc/*.otf
 

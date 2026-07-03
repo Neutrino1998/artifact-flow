@@ -14,7 +14,8 @@ from pathlib import Path
 
 import pypdfium2 as pdfium
 
-MAX_PAGES_PER_RUN = 20
+MAX_PAGES_PER_RUN = 20   # 显式 --pages 也不越过:单次渲染的算法上界,长文档分批
+MAX_DPI = 300            # vision 识别 300dpi 足够,封顶防超采样烧时间
 
 
 def _parse_pages(expr, total):
@@ -24,12 +25,24 @@ def _parse_pages(expr, total):
     out = []
     for part in expr.split(","):
         part = part.strip()
-        if "-" in part:
-            a, b = part.split("-", 1)
-            out.extend(range(int(a) - 1, min(int(b), total)))
-        else:
-            out.append(int(part) - 1)
-    return sorted({p for p in out if 0 <= p < total})
+        try:
+            if "-" in part:
+                a, b = part.split("-", 1)
+                lo, hi = int(a), int(b)
+                if lo > hi:
+                    raise ValueError
+                out.extend(range(lo - 1, min(hi, total)))
+            else:
+                out.append(int(part) - 1)
+        except ValueError:
+            raise SystemExit(
+                f'error: --pages 片段无法解析: {part!r}(格式如 "1-5,8",1 基页码)')
+    pages = sorted({p for p in out if 0 <= p < total})
+    if len(pages) > MAX_PAGES_PER_RUN:
+        print(f"note: 请求 {len(pages)} 页,单次上限 {MAX_PAGES_PER_RUN} 页,"
+              f"只渲染其中前 {MAX_PAGES_PER_RUN} 张 —— 其余分批")
+        pages = pages[:MAX_PAGES_PER_RUN]
+    return pages
 
 
 def main():
@@ -39,6 +52,12 @@ def main():
     ap.add_argument("--pages", default=None, help='如 "1-5,8"(1 基页码)')
     ap.add_argument("--dpi", type=int, default=150)
     args = ap.parse_args()
+
+    if args.dpi <= 0:
+        raise SystemExit("error: --dpi 必须为正整数")
+    dpi = min(args.dpi, MAX_DPI)
+    if dpi != args.dpi:
+        print(f"note: --dpi {args.dpi} 超上限,按 {MAX_DPI} 渲染")
 
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -51,12 +70,15 @@ def main():
 
     for idx in pages:
         page = doc[idx]
-        bitmap = page.render(scale=args.dpi / 72)
+        bitmap = page.render(scale=dpi / 72)
         img = bitmap.to_pil()
         target = out / f"page_{idx + 1:04d}.png"
         img.save(target)
         print(f"{target}  ({img.width}x{img.height})")
-    print(f"rendered {len(pages)}/{total} pages at {args.dpi} dpi")
+        bitmap.close()
+        page.close()
+    doc.close()
+    print(f"rendered {len(pages)}/{total} pages at {dpi} dpi")
 
 
 if __name__ == "__main__":

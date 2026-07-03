@@ -61,6 +61,8 @@ def main():
             text = _shape_text(shape)
             if text:
                 any_content = True
+            elif getattr(shape, "has_table", False) or getattr(shape, "has_chart", False):
+                any_content = True   # GraphicFrame 无 text_frame,表格/图表页不是空页
             else:
                 try:
                     any_content = any_content or shape.image is not None

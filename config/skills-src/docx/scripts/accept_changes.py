@@ -41,6 +41,22 @@ _PROP_CHANGE = {
     W + "trPrChange": W + "trPr",
     W + "tcPrChange": W + "tcPr",
 }
+# reject 回滚属性时必须原样保留的兄弟元素:*PrChange 的快照类型(如 CT_PPrBase/
+# CT_SectPrBase)不可能包含它们 —— 清掉即静默丢内容(sectPr 没了=两节合并、
+# header/footerReference 没了=页眉页脚脱钩、段落标记 rPr 没了=其中的修订标记丢失)。
+_REJECT_PRESERVE = (
+    {
+        W + "ins", W + "del", W + "moveFrom", W + "moveTo",
+        W + "sectPr", W + "rPr",
+        W + "headerReference", W + "footerReference",
+    }
+    | {W + "cellIns", W + "cellDel", W + "cellMerge"}
+    | set(_PROP_CHANGE)
+)
+# 保留项相对快照属性的落位(照各 holder 的 schema 顺序):段落标记 rPr 的
+# ins/del 与 sectPr 的 header/footerReference 在属性之前,其余(pPr 的
+# rPr/sectPr、trPr/tcPr 的行/格标记)在属性之后。
+_PRESERVE_LEADS = {W + "rPr", W + "sectPr"}
 _RANGE_MARKERS = {
     W + "moveFromRangeStart", W + "moveFromRangeEnd",
     W + "moveToRangeStart", W + "moveToRangeEnd",
@@ -183,11 +199,17 @@ def process_tree(root, mode, author, stats):
                 old = el.find(_PROP_CHANGE[tag])
                 holder = el.getparent()  # 当前生效的 rPr/pPr/...
                 if old is not None:
+                    kept = [c for c in holder
+                            if c is not el and c.tag in _REJECT_PRESERVE]
                     for child in list(holder):
                         if child is not el:
                             holder.remove(child)
-                    for child in list(old):
-                        holder.append(child)
+                    if holder.tag in _PRESERVE_LEADS:
+                        new_children = kept + list(old)
+                    else:
+                        new_children = list(old) + kept
+                    for child in new_children:
+                        el.addprevious(child)
                 _remove(el)
             stats["changes_applied"] += 1
 
