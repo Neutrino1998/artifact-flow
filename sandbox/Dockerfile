@@ -1,3 +1,8 @@
+# syntax=docker/dockerfile:1.7
+# ^ ADD --checksum 需要 frontend ≥1.6;不钉的话用构建机 BuildKit 内置版本,
+#   老 Docker 会在 ADD 行硬报错。钉版会在构建时拉 frontend 镜像 —— 构建必须
+#   在联网机做(本文件既有前提),气隙节点只 docker load,不受影响。
+#
 # ArtifactFlow sandbox image — gVisor (runsc) functional verification (plan §B).
 #
 # This is the "tier-1 baked environment" (plan 原则 7): interpreter + scientific

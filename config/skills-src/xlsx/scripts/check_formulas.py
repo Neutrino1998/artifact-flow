@@ -19,9 +19,12 @@ import sys
 
 from openpyxl import load_workbook
 
-# 带引号表名支持 '' 转义('John''s Data'!);裸表名前有 ] 的是外部工作簿引用,不查
-_SHEET_REF_RE = re.compile(r"(?:'((?:[^']|'')+)'|(?<!\])([A-Za-z0-9_一-鿿]+))!")
+# 带引号表名支持 '' 转义('John''s Data'!)
+_SHEET_REF_RE = re.compile(r"(?:'((?:[^']|'')+)'|([A-Za-z0-9_一-鿿]+))!")
 _STRING_LITERAL_RE = re.compile(r'"(?:[^"]|"")*"')
+# 裸外部工作簿引用([1]Sheet1!)整 token 剥掉 —— 不能用 lookbehind 挡:
+# 引擎在 ] 后一位重试会匹配出残名(heet1)
+_EXTERNAL_REF_RE = re.compile(r"\[[^\]]+\][A-Za-z0-9_一-鿿]*!")
 _ERROR_VALUES = {"#REF!", "#DIV/0!", "#VALUE!", "#NAME?", "#NULL!", "#NUM!", "#N/A"}
 
 
@@ -44,8 +47,9 @@ def main():
                 loc = f"{ws.title}!{cell.coordinate}"
                 if "#REF!" in formula:
                     issues.append({"cell": loc, "kind": "broken_ref", "formula": formula[:80]})
-                # 先剥字符串字面量:"完成!" 这类文本里的 ! 不是表引用
+                # 先剥字符串字面量("完成!" 里的 ! 不是表引用)与裸外部引用
                 scannable = _STRING_LITERAL_RE.sub('""', formula)
+                scannable = _EXTERNAL_REF_RE.sub("", scannable)
                 for m in _SHEET_REF_RE.finditer(scannable):
                     ref = (m.group(1) or m.group(2)).replace("''", "'")
                     if "[" in ref:      # 外部工作簿引用('[Book1]Sheet1'!),不查
