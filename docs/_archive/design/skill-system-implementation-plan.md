@@ -22,7 +22,7 @@
 ## 进度
 
 - **当前**:**A / B / C / D 四阶段全落地合 main。** B 全部子片(B-1 存储→B-2 引擎切快照→B-3 deferred+`search_tools`→B-4 后端凭证加密+CRUD 与前端工具 unit 管理页→B-5 退役 turn-long session→B-6 CVE→收尾验收)+ 两轮 reviewer + 乙2 部署门禁均已合(落地见 Phase B「进展」+ `skill-system-phase-b-design.md`);**唯一挂账 = 真机验收**(真 nginx LB 入口[caddy 要 ACME] + 跨副本执行续接[A 发起 / B 经共享 Redis resolve interrupt],dev-Mac `--scale` 已实证轮询/门禁/撞名,留内网真机)。C = C-1/C-2/C-3 + reviewer 两轮 + UX 打磨 + E2E 实测(见 Phase C「进展」)。D = D-1/D-2/D-3 全落地(bundle 物化 → `mount_skill` 沙盒解压 + 依赖透出 → docx 闭环 E2E 通过;见 Phase D「进展」)。架构主分叉已**全部收口** —— 披露归工具层 / 可见性两正交字段 / 依赖三层离线 / 导入硬软双门 / read+mount 零新机制 / external 工具·tool-set·mcp·agent 全 DB 物化(通用 reconciler)/ 部门授权两张 FK 表 / 工具权限两正交轴(等级 + 成员)—— **逐条见「已锁定的决策」+「数据模型总览」,此处不复述**。
-- **E 亦已落地(2026-07-03)**:E-1 validator 硬门 → E-2 双通道导入/导出/删除 + 共池配额 + 前端(含技能搜索/过滤)→ E-4 预装集五 skill(全部原创)+ 镜像文档栈扩容 + vision_agent;E-3 verify agent 用户定向删除、改向会话期 checker skill(见 Phase E「进展」+ changelog 07-02/07-03)。
+- **E 亦已落地(2026-07-03)**:E-1 validator 硬门 → E-2 双通道导入/导出/删除 + 共池配额 + 前端(含技能搜索/过滤)→ E-4 预装集六 skill(全部原创;五 zip + artifact-design 散文)+ 镜像文档栈扩容 + vision_agent;E-3 verify agent 用户定向删除、改向会话期 checker skill(见 Phase E「进展」+ changelog 07-02/07-03)。
 - **下一步 = F/G**:F(MCP client)/ G(部门授权 UI)。**B 残留延后**(非阻塞、归 F):#7-full 抽共享 builder(seeds↔manager)/ #11 `list_units` 冷路径 N+1 / #8 `provider!=http` 成员 advertise-but-build。
 - **分支策略(已定:走 main)**:与沙盒 plan 不同 —— 沙盒走 `feat/sandbox` 不增量合 main 是因为有「半迁移态(md→Word 过渡)漏到生产」的风险。本 plan **无此类破坏性中间态**,A/B/C 是纯加法引擎/存储特性,故**逐阶段直接合 main、再按既有策略 overlay intranet**(遵 `feedback-branch-strategy`),不开长命特性分支。
 
@@ -283,7 +283,7 @@ user_skill ─user_id─> user ;  ─skill_slug─> skill              (真 FK,�
 
 **到时再敲定**:validator 借哪些具体规则、阈值;verify agent 自身是不是个预装 skill(自举);预装集最终名单;ZIP 导入导出端点(决策 6)。
 
-**进展**:**全落地(2026-07-03)**。E-1 硬门槛 validator + seed 全量切换(`af9e994`,reviewer 收口 `95c7f77`)→ E-2 user/admin 双通道导入/导出/删除 + 共池配额 + 前端管理面与两处搜索/过滤(`f86d270`+单包上限 100MB `8996cd8`,reviewer 收口 `83cd332`——SQLite per-connection pragma 为首)→ E-3 verify agent 删除(改向会话期 checker skill,见 changelog 07-02)→ E-4 预装集五 skill(docx/pptx/xlsx/pdf/skill-creator,**全部原创实现**——官方四件套 license 为 source-available 专有,只借设计)+ 沙盒镜像文档栈扩容(python-docx/python-pptx/lxml/pdfplumber/pypdfium2 + Noto Sans CJK SC 字体与 matplotlib 全局中文配置)+ `vision_agent` 多模态子代理(扫描件/文档图链路,引擎零改动)。预装源码目录 `config/skills-src/` + deterministic zip 构建(`scripts/build_skill_zips.py`)+ 防漂移/零 warning/seed 干净三道回归(`tests/reconcile/test_preinstalled_skills.py`)。**遗留**:预装集经引擎的会话级全链 E2E(激活→mount_skill→脚本→persist)待内网镜像发版随真机验;dept-visibility 导入通道归 G;单机 docker dev 手测链同 D-3 姿态可随时补。
+**进展**:**全落地(2026-07-03)**。E-1 硬门槛 validator + seed 全量切换(`af9e994`,reviewer 收口 `95c7f77`)→ E-2 user/admin 双通道导入/导出/删除 + 共池配额 + 前端管理面与两处搜索/过滤(`f86d270`+单包上限 100MB `8996cd8`,reviewer 收口 `83cd332`——SQLite per-connection pragma 为首)→ E-3 verify agent 删除(改向会话期 checker skill,见 changelog 07-02)→ E-4 预装集六 skill(docx/pptx/xlsx/pdf/skill-creator 五个 zip 形态 + artifact-design 纯散文目录形态[HTML artifact 设计指导,按本平台「script/外部资源不加载」约束重写],**全部原创实现**——官方四件套 license 为 source-available 专有、artifact-design 存货自述为 CC 二进制重建件,均只借设计)+ 沙盒镜像文档栈扩容(python-docx/python-pptx/lxml/pdfplumber/pypdfium2 + Noto Sans CJK SC 字体与 matplotlib 全局中文配置)+ `vision_agent` 多模态子代理(扫描件/文档图链路,引擎零改动)。预装源码目录 `config/skills-src/` + deterministic zip 构建(`scripts/build_skill_zips.py`)+ 防漂移/零 warning/seed 干净三道回归(`tests/reconcile/test_preinstalled_skills.py`)。**遗留**:预装集经引擎的会话级全链 E2E(激活→mount_skill→脚本→persist)待内网镜像发版随真机验;dept-visibility 导入通道归 G;单机 docker dev 手测链同 D-3 姿态可随时补。
 
 ### F — MCP client(把 MCP server 接成又一个 deferred tool-set provider)
 

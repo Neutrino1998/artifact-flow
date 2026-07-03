@@ -21,6 +21,8 @@ ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = ROOT / "config" / "skills-src"
 ZIP_DIR = ROOT / "config" / "skills"
 PREINSTALLED = ["docx", "pdf", "pptx", "skill-creator", "xlsx"]
+# 纯散文预装(SKILL.md-only 目录形态,bundle=NULL,无 zip/构建链)
+PREINSTALLED_PROSE = ["artifact-design"]
 
 
 def _build_zip(slug: str) -> bytes:
@@ -61,10 +63,13 @@ def test_seed_parse_clean_and_defaults():
     seeds = parse_skill_seeds(
         str(ZIP_DIR), known_unit_names=set(), known_full_names={})
     by_slug = {s.slug: s for s in seeds}
-    for slug in PREINSTALLED:
+    for slug in PREINSTALLED + PREINSTALLED_PROSE:
         assert slug in by_slug, f"seed 解析缺 {slug}"
         seed = by_slug[slug]
         assert seed.visibility == "public"
         assert seed.default_enabled is True
-        assert seed.bundle is not None, "预装 skill 应为 bundle 形态(带脚本)"
+        is_prose = slug in PREINSTALLED_PROSE
+        assert (seed.bundle is None) == is_prose, (
+            f"{slug}: bundle 形态与预期不符(带脚本的走 zip,纯散文走目录)"
+        )
         assert seed.skill_md.strip()
