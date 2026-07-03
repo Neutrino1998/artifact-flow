@@ -482,8 +482,23 @@ class DatabaseManager:
 
         self._engine = create_async_engine(engine_url, **engine_kwargs)
 
-        # 配置 SQLite WAL 模式
+        # 配置 SQLite:WAL(文件持久)+ per-connection pragma(connect 事件)
         if self._is_sqlite():
+            # journal_mode=WAL 之外的 pragma 全是 **per-connection** 的:旧实现只在
+            # init 连接跑一遍,文件库默认多连接池的其余连接全部裸奔 —— 最要命的是
+            # foreign_keys=OFF 让 DB 级 ondelete=CASCADE 静默不生效(skill/user 删除
+            # 的级联清理依赖它,孤儿 user_skill 行会让同 slug 重导入继承陈旧开关态)。
+            # 挂 connect 事件让每条新连接都带上,dev 文件库与 test(:memory: 单连接
+            # pragma 常驻)/ prod(PG 原生强制 FK)三态语义对齐。
+            @event.listens_for(self._engine.sync_engine, "connect")
+            def _set_sqlite_pragmas(dbapi_conn, _record):  # noqa: ANN001
+                cursor = dbapi_conn.cursor()
+                cursor.execute("PRAGMA foreign_keys=ON")     # FK 强制(级联删除正确性)
+                cursor.execute("PRAGMA synchronous=NORMAL")  # 平衡性能与安全
+                cursor.execute("PRAGMA cache_size=-64000")   # 64MB(负数 = KB)
+                cursor.execute("PRAGMA busy_timeout=5000")   # 5s,避免 database is locked
+                cursor.close()
+
             await self._configure_sqlite_wal()
 
         # 创建 session 工厂
@@ -506,24 +521,19 @@ class DatabaseManager:
 
     async def _configure_sqlite_wal(self) -> None:
         """
-        配置 SQLite WAL 模式
+        配置 SQLite WAL 模式（journal_mode 是**文件持久**属性,设一次全库生效）。
 
         WAL (Write-Ahead Logging) 模式的优势：
         - 读写可以并发进行
         - 写操作不会阻塞读操作
         - 更好的崩溃恢复能力
+
+        其余 pragma（foreign_keys / synchronous / cache_size / busy_timeout）都是
+        **per-connection** 的,归 initialize 里的 connect 事件监听器 —— 在这条
+        init-only 连接上设只覆盖它自己,对池里其它连接是静默 no-op。
         """
         async with self._engine.begin() as conn:
-            # 设置 WAL 模式
             await conn.execute(text("PRAGMA journal_mode=WAL"))
-            # 设置同步模式为 NORMAL（平衡性能和安全）
-            await conn.execute(text("PRAGMA synchronous=NORMAL"))
-            # 设置缓存大小（负数表示 KB）
-            await conn.execute(text("PRAGMA cache_size=-64000"))  # 64MB
-            # 启用外键约束
-            await conn.execute(text("PRAGMA foreign_keys=ON"))
-            # 设置忙等待超时（毫秒），避免 database is locked 错误
-            await conn.execute(text("PRAGMA busy_timeout=5000"))  # 5 秒
 
         logger.info("SQLite WAL mode configured")
 

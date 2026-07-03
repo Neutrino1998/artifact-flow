@@ -170,7 +170,7 @@ async def send_message(
                     f"存储空间不足：本次上传（{incoming_blob_bytes / 1024 / 1024:.1f}MB）"
                     f"将超出你的 {quota_mb:.0f}MB 存储配额"
                     f"（当前已用 {used_bytes / 1024 / 1024:.1f}MB）。"
-                    f"请删除一些对话以释放空间后重试。"
+                    f"请删除一些对话或已导入的技能以释放空间后重试。"
                 ),
             )
 

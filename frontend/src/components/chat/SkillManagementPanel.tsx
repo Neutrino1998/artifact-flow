@@ -13,6 +13,7 @@ import {
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
+import { triggerBlobDownload } from '@/lib/download';
 import PanelSearchBar from './PanelSearchBar';
 import type { SkillItem, SkillFindingItem, SkillImportResponse } from '@/types';
 
@@ -81,14 +82,7 @@ export default function SkillManagementPanel() {
     setRowError(null);
     try {
       const blob = await downloadSkillBundle(slug);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${slug}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      triggerBlobDownload(`${slug}.zip`, blob);
     } catch (err) {
       setRowError(err instanceof Error ? err.message : '导出失败');
     }

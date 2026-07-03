@@ -4,13 +4,13 @@
 plain dict / set)。可见性解析(EffectiveSkillSet)、CRUD 编排在上层 Manager。
 """
 
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import DepartmentSkillRule, Skill, ToolMember, ToolUnit, User, UserSkill
+from db.models import DepartmentSkillRule, Skill, User, UserSkill
 
 
 class SkillRepository:
@@ -98,17 +98,6 @@ class SkillRepository:
         return (
             await self._session.execute(select(Skill.slug).where(Skill.slug == slug))
         ).scalar_one_or_none() is not None
-
-    async def known_tool_names(self) -> Tuple[Set[str], Dict[str, str]]:
-        """(unit 名集, {full_name: unit 名}) —— 导入侧 allowed-tools 存在性校验用,
-        与 seed / runtime 共用 resolve_allowed_tool_entry,只是取数来源换成 DB 行。"""
-        unit_names = set((
-            await self._session.execute(select(ToolUnit.name))
-        ).scalars().all())
-        member_rows = (
-            await self._session.execute(select(ToolMember.full_name, ToolMember.unit_name))
-        ).all()
-        return unit_names, {fn: un for fn, un in member_rows}
 
     def stage_insert_skill(self, **fields) -> None:
         """stage 一行新 skill(commit 归 Manager;并发撞 slug 由 commit 的

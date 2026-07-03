@@ -8,6 +8,7 @@ import { SELECT_COMPACT } from '@/lib/styles';
 import { SELECT_CHEVRON_COMPACT } from '@/components/ui/SelectChevron';
 import * as api from '@/lib/api';
 import { parseUtcIso } from '@/lib/time';
+import { triggerBlobDownload } from '@/lib/download';
 import PanelSearchBar from './PanelSearchBar';
 import Pagination from './Pagination';
 import type {
@@ -1083,12 +1084,7 @@ function PromptReconstructSection({
     const blob = new Blob([JSON.stringify(result.messages, null, 2)], {
       type: 'application/json;charset=utf-8',
     });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `prompt-${messageId ?? 'msg'}-${eventId ?? 'evt'}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    triggerBlobDownload(`prompt-${messageId ?? 'msg'}-${eventId ?? 'evt'}.json`, blob);
   }, [result, messageId, eventId]);
 
   return (

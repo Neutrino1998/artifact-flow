@@ -534,8 +534,10 @@ class Artifact(Base):
     # 关系：一对一 -> blob（二进制存储，与热路径隔离）。
     # **刻意 lazy="select"（非 selectin）**：list/inventory 查询绝不能把 MB 级字节
     # 拖进每次列表读——只有显式访问 `.blob`（仅 raw-fetch 路径）才发 SQL 载入。
-    # cascade 由 ORM 驱动（SQLite dev 不开 FK pragma，DB 级 ondelete 不生效）；
-    # DB 级 ondelete=CASCADE 作 prod 兜底。除 raw 端点外，任何序列化都不得碰 .blob。
+    # cascade 由 ORM 驱动,DB 级 ondelete=CASCADE 双保险。（曾注:SQLite dev 不开
+    # FK pragma、DB 级 ondelete 不生效 —— 已修,database.py 的 connect 事件监听器
+    # per-connection 强制 FK,dev/test/prod 三态语义一致,Core DELETE 的级联也可靠。）
+    # 除 raw 端点外，任何序列化都不得碰 .blob。
     blob: Mapped[Optional["ArtifactBlob"]] = relationship(
         "ArtifactBlob",
         back_populates="artifact",

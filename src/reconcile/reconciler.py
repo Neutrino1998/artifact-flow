@@ -74,14 +74,12 @@ async def reconcile_config_to_db(
     # 见 _reconcile_credentials)。须在 unit flush 之后(FK 目标存在)。
     await _reconcile_credentials(session, tool_seeds)
 
-    # agent 分流 + skill allowed-tools 校验都需「已注册 unit」全集(seeded 刚写 + 已存在 dynamic)
-    known_unit_names = set(
-        (await session.execute(select(ToolUnit.name))).scalars().all()
-    )
-    fn_rows = (
-        await session.execute(select(ToolMember.full_name, ToolMember.unit_name))
-    ).all()
-    known_full_names: Dict[str, str] = {fn: un for fn, un in fn_rows}
+    # agent 分流 + skill allowed-tools 校验都需「已注册 unit」全集(seeded 刚写 + 已存在
+    # dynamic)。inventory loader 与 B-4 撞名闸 / E-2 导入校验共用 ToolRegistryRepository
+    # 同两个方法 —— seed 期与 UI 导入期对「已知工具」的口径永不漂移。
+    registry = ToolRegistryRepository(session)
+    known_unit_names = await registry.existing_unit_names()
+    known_full_names: Dict[str, str] = await registry.existing_full_names()
 
     agent_seeds = parse_agent_seeds(
         agents_dir,

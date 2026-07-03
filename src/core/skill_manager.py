@@ -26,6 +26,7 @@ from core.effective_skillset import EffectiveSkillSet, resolve_effective_skillse
 from reconcile.seeds import _SKILL_CONSUMED_FM_KEYS  # 与 seed 同一份「已消费键」口径
 from reconcile.snapshot import SkillInfo, load_skill_snapshot
 from repositories.skill_repo import SkillRepository
+from repositories.tool_registry_repo import ToolRegistryRepository
 from tools.base import resolve_allowed_tool_entry
 from utils.frontmatter import normalize_allowed_tools
 from utils.logger import get_logger
@@ -55,8 +56,12 @@ class SkillForbiddenError(SkillManagerError):
 
 class SkillConflictError(SkillManagerError):
     """slug 已占用。文案保持中性(不区分 seeded/他人 private —— 轻微存在性信号,已接受;
-    自动改后缀 = 静默 rename 更坏)。"""
+    自动改后缀 = 静默 rename 更坏)。默认消息在此单点,预查与并发 IntegrityError 两个
+    raise 点共享,不可漂移。"""
     status_code = 409
+
+    def __init__(self, slug: str):
+        super().__init__(f"slug '{slug}' 不可用，请修改技能的 name 后重新打包上传")
 
 
 class SkillQuotaError(SkillManagerError):
@@ -202,12 +207,15 @@ class SkillManager:
                 "(visibility is set by the import channel)",
             ))
 
-        # allowed-tools 存在性:与 seed / runtime 同一个 resolver,解析不到 = warn 不拦
+        # allowed-tools 存在性:与 seed / runtime 同一个 resolver + 同一个 inventory
+        # loader(ToolRegistryRepository,B-4 撞名闸同款),解析不到 = warn 不拦
         # (unit 后续可挂 / 可建,决策 11)
         allowed_tools = normalize_allowed_tools(
             parsed.frontmatter.get("allowed-tools"), where
         )
-        known_units, known_fulls = await self._repo.known_tool_names()
+        registry = ToolRegistryRepository(self._session)
+        known_units = await registry.existing_unit_names()
+        known_fulls = await registry.existing_full_names()
         for entry in allowed_tools:
             if resolve_allowed_tool_entry(entry, known_units, known_fulls) is None:
                 findings.append(Finding(
@@ -222,14 +230,14 @@ class SkillManager:
                 "Skill import rejected (409): user=%s slug=%s already taken",
                 user_id, slug,
             )
-            raise SkillConflictError(
-                f"slug '{slug}' 不可用，请修改技能的 name 后重新打包上传"
-            )
+            raise SkillConflictError(slug)
 
+        # 单一派生源:行字段与响应序列化都从这一个 SkillInfo 出,POST 响应与后续
+        # GET/list_for_user 不可能各算各的(reviewer:两处派生必漂移)。
         frontmatter = parsed.frontmatter
         meta = {k: v for k, v in frontmatter.items() if k not in _SKILL_CONSUMED_FM_KEYS} or None
         is_private = audience == "private"
-        self._repo.stage_insert_skill(
+        info = SkillInfo(
             slug=slug,
             name=(frontmatter.get("name") or slug),
             description=frontmatter.get("description", ""),
@@ -239,11 +247,23 @@ class SkillManager:
             default_enabled=is_private,
             owner_user_id=user_id if is_private else None,
             allowed_tools=allowed_tools,
+            has_bundle=True,
             compatibility=frontmatter.get("compatibility"),
+            source="dynamic",
+        )
+        self._repo.stage_insert_skill(
+            slug=info.slug,
+            name=info.name,
+            description=info.description,
+            visibility=info.visibility,
+            default_enabled=info.default_enabled,
+            owner_user_id=info.owner_user_id,
+            allowed_tools=info.allowed_tools,
+            compatibility=info.compatibility,
             meta=meta,
             skill_md=parsed.body,       # 剥 frontmatter 正文,永不改写(原则 3)
             bundle=blob,                # 原始上传字节无条件存 → 导出无损 by construction
-            source="dynamic",
+            source=info.source,
             seed_hash=None,
         )
         try:
@@ -254,25 +274,11 @@ class SkillManager:
             logger.warning(
                 "Skill import rejected (409, concurrent): user=%s slug=%s", user_id, slug
             )
-            raise SkillConflictError(
-                f"slug '{slug}' 不可用，请修改技能的 name 后重新打包上传"
-            )
+            raise SkillConflictError(slug)
 
         logger.info(
             "Skill imported: slug=%s audience=%s user=%s bytes=%d",
             slug, audience, user_id, len(blob),
-        )
-        info = SkillInfo(
-            slug=slug,
-            name=(frontmatter.get("name") or slug),
-            description=frontmatter.get("description", ""),
-            visibility="private" if is_private else "public",
-            default_enabled=is_private,
-            owner_user_id=user_id if is_private else None,
-            allowed_tools=allowed_tools,
-            has_bundle=True,
-            compatibility=frontmatter.get("compatibility"),
-            source="dynamic",
         )
         return {
             "status": "imported",
@@ -290,6 +296,12 @@ class SkillManager:
             raise SkillNotFoundError(f"skill '{slug}' not found")
         bundle = await self._repo.get_bundle(slug)
         if bundle is None:
+            # 导出按钮只在 has_bundle 时渲染 —— 走到这 = 前端陈旧态或直接 API 敲,
+            # 非自明 4xx,落原因(req-id ↔ 拒因)
+            logger.warning(
+                "Skill export rejected (400): slug=%s has no bundle, user=%s",
+                slug, user_id,
+            )
             raise SkillManagerError(
                 f"skill '{slug}' has no bundle to export (single-file skill)"
             )

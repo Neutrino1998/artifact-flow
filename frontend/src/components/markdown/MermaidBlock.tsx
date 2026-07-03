@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState, useCallback } from 'react';
 import { useUIStore } from '@/stores/uiStore';
+import { triggerBlobDownload } from '@/lib/download';
 import ErrorFlowBlock from '@/components/chat/ErrorFlowBlock';
 
 interface MermaidBlockProps {
@@ -91,12 +92,10 @@ export default function MermaidBlock({ code }: MermaidBlockProps) {
     // canvas entirely — works in every browser and stays vector-quality.
     const serialized = new XMLSerializer().serializeToString(svgEl);
     const doc = `<?xml version="1.0" encoding="UTF-8"?>\n${serialized}`;
-    const url = URL.createObjectURL(new Blob([doc], { type: 'image/svg+xml;charset=utf-8' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'diagram.svg';
-    a.click();
-    URL.revokeObjectURL(url);
+    triggerBlobDownload(
+      'diagram.svg',
+      new Blob([doc], { type: 'image/svg+xml;charset=utf-8' }),
+    );
   }, []);
 
   if (error !== null) {

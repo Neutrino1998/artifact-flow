@@ -6,6 +6,7 @@ import { useStreamStore } from '@/stores/streamStore';
 import { useArtifacts } from '@/hooks/useArtifacts';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { fetchArtifactRawObjectUrl } from '@/lib/api';
+import { triggerBlobDownload, triggerObjectUrlDownload } from '@/lib/download';
 import { BUTTON_GHOST_ICON, BUTTON_PRIMARY, SELECT_COMPACT } from '@/lib/styles';
 import { SELECT_CHEVRON_COMPACT } from '@/components/ui/SelectChevron';
 import ArtifactTabs from './ArtifactTabs';
@@ -47,11 +48,7 @@ export default function ArtifactToolbar() {
     if (current.has_blob) {
       try {
         const url = await fetchArtifactRawObjectUrl(current.session_id, current.id);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = current.original_filename ?? current.title;
-        a.click();
-        URL.revokeObjectURL(url);
+        triggerObjectUrlDownload(current.original_filename ?? current.title, url);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Download failed';
         window.alert(message);
@@ -61,13 +58,7 @@ export default function ArtifactToolbar() {
     const content = selectedVersion?.content ?? current.content;
     const ext = getFileExtension(current.content_type);
     const filename = current.title.replace(/[/\\?%*:|"<>]/g, '-') + ext;
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
+    triggerBlobDownload(filename, new Blob([content], { type: 'text/plain;charset=utf-8' }));
   }, [current, selectedVersion]);
 
   const handleRefresh = useCallback(() => {

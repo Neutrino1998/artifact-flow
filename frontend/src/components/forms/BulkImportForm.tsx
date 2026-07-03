@@ -5,6 +5,7 @@ import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useUIStore } from '@/stores/uiStore';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
+import { triggerBlobDownload } from '@/lib/download';
 import PanelShell from '@/components/layout/PanelShell';
 import type { BulkImportResponse, BulkImportFailedRow } from '@/types';
 
@@ -21,15 +22,10 @@ const TEMPLATE_SAMPLE =
 
 function downloadCsv(filename: string, content: string) {
   // Excel 中文环境识别 UTF-8 BOM 为 UTF-8；不带 BOM 会被当 GBK 乱码
-  const blob = new Blob(['﻿' + content], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  triggerBlobDownload(
+    filename,
+    new Blob(['﻿' + content], { type: 'text/csv;charset=utf-8' }),
+  );
 }
 
 function failedRowsToCsv(rows: BulkImportFailedRow[]): string {
