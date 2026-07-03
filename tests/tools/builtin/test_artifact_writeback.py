@@ -9,9 +9,10 @@ numbers may be sparse (intermediate in-memory versions are not recorded).
 import uuid
 
 import pytest
+from sqlalchemy import select
 
 from config import config
-from db.models import User
+from db.models import ArtifactBlob, User
 from repositories.artifact_repo import ArtifactRepository
 from repositories.conversation_repo import ConversationRepository
 from tools.base import ArtifactSpec
@@ -739,8 +740,8 @@ _DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.doc
 
 
 class TestBinaryArtifactImmutable:
-    """update/rewrite 在 blob artifact 上会长出文本 content,与不可变 blob 形成
-    双轨 —— service 层统一拒绝;改 = persist/create 新 artifact。"""
+    """update/rewrite 在 blob artifact 上会长出文本 content,与 blob 形成
+    双轨 —— service 层统一拒绝;改二进制 = 沙盒 persist 覆盖回写或产新件。"""
 
     async def _upload_docx(self, artifact_service: ArtifactService, session_id: str) -> str:
         artifact_service.set_session(session_id)
@@ -762,7 +763,9 @@ class TestBinaryArtifactImmutable:
             session_id, aid, old_str="a", new_str="b"
         )
         assert not ok
-        assert "immutable" in msg
+        assert "no editable text" in msg
+        # 拒绝文案指路覆盖回写(mount → 编辑 → persist artifact_id=...)
+        assert "persist" in msg
 
     async def test_rewrite_refused(
         self, artifact_service: ArtifactService, session_id: str
@@ -772,7 +775,7 @@ class TestBinaryArtifactImmutable:
             session_id, aid, new_content="injected text"
         )
         assert not ok
-        assert "immutable" in msg
+        assert "no editable text" in msg
 
     async def test_read_dict_carries_has_blob(
         self, artifact_service: ArtifactService, session_id: str
@@ -872,6 +875,203 @@ class TestUploadQuota:
         ok, msg, _ = await _persist_blob(artifact_service, session_id, "f.bin", 600)
         assert not ok
         assert "quota" in msg.lower()
+
+
+async def _read_blob_row(artifact_repo: ArtifactRepository, session_id: str, aid: str):
+    """列级 select 取 (data, size_bytes) —— 绕开 identity map(expire_on_commit=False
+    下,bulk-UPDATE 后同 session 的 ORM 实例是 stale 的,直读实例会拿到旧字节)。"""
+    result = await artifact_repo._session.execute(
+        select(ArtifactBlob.data, ArtifactBlob.size_bytes).where(
+            ArtifactBlob.session_id == session_id, ArtifactBlob.artifact_id == aid
+        )
+    )
+    return result.one_or_none()
+
+
+class TestReplaceFromUpload:
+    """persist 覆盖回写:同一 artifact 换内容。文本走 rewrite(版本 +1),blob 走
+    可变单版原地替换(不产版本行);种类错配 loud-fail;配额按净增量准入。"""
+
+    async def _upload_text(self, svc, session_id, name="notes.md", body="v1") -> str:
+        svc.set_session(session_id)
+        ok, _, info = await svc.create_from_upload(
+            session_id=session_id, filename=name, content=body,
+            content_type="text/markdown", source="sandbox",
+        )
+        assert ok
+        return info["id"]
+
+    async def _upload_blob(self, svc, session_id, name="pkg.zip", data=b"old-bytes") -> str:
+        svc.set_session(session_id)
+        ok, _, info = await svc.create_from_upload(
+            session_id=session_id, filename=name, content="",
+            content_type="application/zip", blob=data, source="sandbox",
+        )
+        assert ok
+        return info["id"]
+
+    async def test_text_replace_bumps_version_and_flushes(
+        self, artifact_service: ArtifactService, artifact_repo: ArtifactRepository, session_id: str
+    ):
+        aid = await self._upload_text(artifact_service, session_id)
+        await artifact_service.flush_all(session_id)
+
+        ok, msg, info = await artifact_service.replace_from_upload(
+            session_id, aid, content="v2 body"
+        )
+        assert ok, msg
+        assert info["current_version"] == 2
+        assert info["has_blob"] is False
+        await artifact_service.flush_all(session_id)
+
+        row = await artifact_repo.get_artifact(session_id, aid)
+        assert row.content == "v2 body"
+        assert row.current_version == 2
+        assert row.source == "sandbox"
+        # 文本历史照常可回溯
+        old = await artifact_repo.get_version_content(session_id, aid, 1)
+        assert old == "v1"
+
+    async def test_blob_replace_swaps_bytes_no_version_row(
+        self, artifact_service: ArtifactService, artifact_repo: ArtifactRepository, session_id: str
+    ):
+        aid = await self._upload_blob(artifact_service, session_id)
+        await artifact_service.flush_all(session_id)
+
+        ok, msg, info = await artifact_service.replace_from_upload(
+            session_id, aid, blob=b"new-bytes-longer"
+        )
+        assert ok, msg
+        assert info["has_blob"] is True
+        await artifact_service.flush_all(session_id)
+
+        data, size = await _read_blob_row(artifact_repo, session_id, aid)
+        assert data == b"new-bytes-longer"
+        assert size == len(b"new-bytes-longer")
+        # 可变单版:版本号不动、不产新版本行
+        row = await artifact_repo.get_artifact(session_id, aid)
+        assert row.current_version == 1
+        assert await artifact_repo.get_version(session_id, aid, 2) is None
+
+    async def test_kind_mismatch_rejected_both_ways(
+        self, artifact_service: ArtifactService, session_id: str
+    ):
+        text_id = await self._upload_text(artifact_service, session_id)
+        blob_id = await self._upload_blob(artifact_service, session_id)
+        ok, msg, _ = await artifact_service.replace_from_upload(
+            session_id, text_id, blob=b"binary"
+        )
+        assert not ok and "text artifact" in msg
+        ok, msg, _ = await artifact_service.replace_from_upload(
+            session_id, blob_id, content="text"
+        )
+        assert not ok and "binary artifact" in msg
+
+    async def test_replace_unknown_artifact_fails(
+        self, artifact_service: ArtifactService, session_id: str
+    ):
+        artifact_service.set_session(session_id)
+        ok, msg, _ = await artifact_service.replace_from_upload(
+            session_id, "ghost", content="x"
+        )
+        assert not ok and "not found" in msg
+
+    async def test_blob_replace_quota_credits_replaced_bytes(
+        self, artifact_service: ArtifactService, session_id: str, monkeypatch
+    ):
+        """净增量准入:800 已落库,配额 1000,替换成 900 = 净 +100 → 必须放行
+        (若按新增全额记账会误拒:800+900>1000)。换成 1100 → 净超 → 拒。"""
+        monkeypatch.setattr(config, "ARTIFACT_USER_QUOTA_BYTES", 1000)
+        aid = await self._upload_blob(artifact_service, session_id, data=b"x" * 800)
+        await artifact_service.flush_all(session_id)
+
+        ok, msg, _ = await artifact_service.replace_from_upload(
+            session_id, aid, blob=b"y" * 900
+        )
+        assert ok, msg
+        await artifact_service.flush_all(session_id)
+
+        ok, msg, _ = await artifact_service.replace_from_upload(
+            session_id, aid, blob=b"z" * 1100
+        )
+        assert not ok
+        assert "quota" in msg.lower()
+
+    async def test_blob_double_replace_same_turn_excludes_own_staged(
+        self, artifact_service: ArtifactService, session_id: str, monkeypatch
+    ):
+        """同轮二次覆盖:staged 计数须剔除本 artifact 上一次 stage 的字节,
+        否则 600(DB)-600(credit)+500(上次staged)+550 会误拒。"""
+        monkeypatch.setattr(config, "ARTIFACT_USER_QUOTA_BYTES", 1000)
+        aid = await self._upload_blob(artifact_service, session_id, data=b"x" * 600)
+        await artifact_service.flush_all(session_id)
+
+        ok1, msg1, _ = await artifact_service.replace_from_upload(
+            session_id, aid, blob=b"y" * 500
+        )
+        assert ok1, msg1
+        ok2, msg2, _ = await artifact_service.replace_from_upload(
+            session_id, aid, blob=b"z" * 550
+        )
+        assert ok2, msg2
+
+    async def test_same_turn_create_then_replace_folds_into_create(
+        self, artifact_service: ArtifactService, artifact_repo: ArtifactRepository, session_id: str
+    ):
+        """同轮"新建 + 覆盖"折叠:flush 走 create 一次写成最终字节。"""
+        aid = await self._upload_blob(artifact_service, session_id, data=b"first")
+        ok, msg, _ = await artifact_service.replace_from_upload(
+            session_id, aid, blob=b"second"
+        )
+        assert ok, msg
+        await artifact_service.flush_all(session_id)
+
+        data, _ = await _read_blob_row(artifact_repo, session_id, aid)
+        assert data == b"second"
+
+    async def test_replaced_bytes_visible_to_same_turn_get_blob(
+        self, artifact_service: ArtifactService, session_id: str
+    ):
+        """同轮 mount(get_blob)读到的是 staged 新字节,不是 DB 旧字节。"""
+        aid = await self._upload_blob(artifact_service, session_id, data=b"old")
+        await artifact_service.flush_all(session_id)
+        ok, msg, _ = await artifact_service.replace_from_upload(
+            session_id, aid, blob=b"fresh"
+        )
+        assert ok, msg
+        blob_info = await artifact_service.get_blob(session_id, aid)
+        assert blob_info["data"] == b"fresh"
+
+    async def test_blob_replace_cross_turn_fresh_service(
+        self, artifact_service: ArtifactService, artifact_repo: ArtifactRepository, session_id: str
+    ):
+        """跨轮覆盖(prod 真实路径):新 turn 的 fresh service 空 WorkingSet,
+        从 DB 载入 memory(blob lazy 未载,has_blob 取列值)→ 种类判别与
+        原地替换照常工作。"""
+        aid = await self._upload_blob(artifact_service, session_id, data=b"turn1")
+        await artifact_service.flush_all(session_id)
+
+        fresh = ArtifactService(artifact_repo)
+        fresh.set_session(session_id)
+        ok, msg, _ = await fresh.replace_from_upload(session_id, aid, blob=b"turn2!")
+        assert ok, msg
+        # 判别来自 DB 列:文本内容打 blob 目标照拒
+        ok2, msg2, _ = await fresh.replace_from_upload(session_id, aid, content="txt")
+        assert not ok2 and "binary artifact" in msg2
+        await fresh.flush_all(session_id)
+        data, _ = await _read_blob_row(artifact_repo, session_id, aid)
+        assert data == b"turn2!"
+
+    async def test_xor_guard_rejects_both_or_neither(
+        self, artifact_service: ArtifactService, session_id: str
+    ):
+        aid = await self._upload_text(artifact_service, session_id)
+        ok, _, _ = await artifact_service.replace_from_upload(
+            session_id, aid, content="x", blob=b"y"
+        )
+        assert not ok
+        ok, _, _ = await artifact_service.replace_from_upload(session_id, aid)
+        assert not ok
 
     async def test_text_persist_not_gated(
         self, artifact_service: ArtifactService, session_id: str, monkeypatch

@@ -622,8 +622,10 @@ class ArtifactBlob(Base):
     Artifact 二进制存储表（与文本/inventory 热路径隔离）
 
     1:1 绑定 Artifact（复合主键 = 复合外键 (artifact_id, session_id)），承载用户
-    上传的富格式原始字节（docx/pdf）与图片（png/jpeg）—— **源不可变，A 阶段不随
-    版本走**（一个 artifact 一条 blob；版本化 blob 是 C 阶段沙盒回写才有的问题）。
+    上传的富格式原始字节（docx/pdf）与图片（png/jpeg）—— **可变单版,不随版本走**
+    （一个 artifact 一条 blob,永远只存最新字节;沙盒 persist 覆盖回写原地替换,
+    不产版本历史 —— 迭代改包的历史归沙盒内 git 管,刻意不做版本化 blob,避免
+    平凡修改在 DB 里堆字节）。
 
     刻意独立成表而非在 Artifact 上加 nullable 列：list/inventory 查询永不 JOIN
     此表，字节仅在显式 raw-fetch（`Artifact.blob` 关系 lazy 载入）时进内存，避免

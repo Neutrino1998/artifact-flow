@@ -6,7 +6,7 @@ Artifact Repository
 
 from typing import Optional, List, Dict, Any, Tuple
 
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, update, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -296,6 +296,75 @@ class ArtifactRepository(BaseRepository[Artifact]):
         )
         result = await self._session.execute(query)
         return result.scalar_one_or_none()
+
+    async def get_blob_size(
+        self,
+        session_id: str,
+        artifact_id: str,
+    ) -> Optional[int]:
+        """获取 blob 的字节数（只读 size_bytes 冗余列，不载入 data）。
+
+        配额抵扣用：persist 覆盖回写时，被替换的旧 blob 字节应从「已占用」里
+        扣除，否则替换大文件在配额边缘会被误拒。无 blob → None。
+        """
+        query = select(ArtifactBlob.size_bytes).where(
+            and_(
+                ArtifactBlob.session_id == session_id,
+                ArtifactBlob.artifact_id == artifact_id,
+            )
+        )
+        result = await self._session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def update_artifact_blob(
+        self,
+        session_id: str,
+        artifact_id: str,
+        data: bytes,
+        source: Optional[str] = None,
+    ) -> None:
+        """原地替换 blob 字节（persist 覆盖回写的 flush 路径）。
+
+        blob = 可变单版：不产 ArtifactVersion 行、current_version 不动 —— 二进制
+        历史归沙盒内 git 管，DB 永远只存最新字节。两条 bulk UPDATE：blob 行避免
+        把旧 MB 级字节先 SELECT 进内存；artifact 行不能走「同值 ORM 赋值」触
+        onupdate（SQLAlchemy 判无净变化会跳过 UPDATE），故显式 SET
+        updated_at=func.now()（行需要 DB 侧值，符合 bulk-UPDATE 使用约定）。
+
+        Raises:
+            NotFoundError: artifact 不存在或无 blob 行
+        """
+        await self.get_artifact_or_raise(session_id, artifact_id)
+
+        result = await self._session.execute(
+            update(ArtifactBlob)
+            .where(
+                and_(
+                    ArtifactBlob.session_id == session_id,
+                    ArtifactBlob.artifact_id == artifact_id,
+                )
+            )
+            .values(data=data, size_bytes=len(data))
+        )
+        if result.rowcount == 0:
+            raise NotFoundError("ArtifactBlob", f"{session_id}/{artifact_id}")
+
+        artifact_values: Dict[str, Any] = {"updated_at": func.now()}
+        if source is not None:
+            artifact_values["source"] = source
+        await self._session.execute(
+            update(Artifact)
+            .where(
+                and_(
+                    Artifact.session_id == session_id,
+                    Artifact.id == artifact_id,
+                )
+            )
+            .values(**artifact_values)
+        )
+
+        await self._session.flush()
+        await self._session.commit()
 
     # ========================================
     # 存储配额聚合（只读 size_bytes 冗余列，绝不载入 data）

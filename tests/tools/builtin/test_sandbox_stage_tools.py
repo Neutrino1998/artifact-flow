@@ -50,6 +50,7 @@ class FakeArtifactService:
         self.memories: dict = {}
         self.blobs: dict = {}
         self.create_calls: list = []
+        self.replace_calls: list = []
         self.session_id = "sess-1"
 
     @property
@@ -76,6 +77,20 @@ class FakeArtifactService:
     async def create_from_upload(self, **kwargs):
         self.create_calls.append(kwargs)
         return True, "Created", {"id": kwargs["filename"], "has_blob": kwargs.get("blob") is not None}
+
+    async def replace_from_upload(self, session_id, artifact_id, *, content=None, blob=None):
+        self.replace_calls.append({
+            "session_id": session_id, "artifact_id": artifact_id,
+            "content": content, "blob": blob,
+        })
+        memory = self.memories.get(artifact_id)
+        if memory is None:
+            return False, f"Artifact '{artifact_id}' not found", None
+        return True, "Replaced", {
+            "id": artifact_id,
+            "content_type": memory.content_type,
+            "has_blob": memory.has_blob,
+        }
 
 
 @pytest.fixture
@@ -201,7 +216,9 @@ class TestPersistTool:
         tool = PersistFileTool(session, service)
         assert tool.name == "persist"
         assert tool.permission == ToolPermission.AUTO
-        assert [p.name for p in tool.get_parameters()] == ["path"]
+        assert [p.name for p in tool.get_parameters()] == ["path", "artifact_id"]
+        # artifact_id 可选:缺省 = 产新件(旧调用形态不破)
+        assert [p.required for p in tool.get_parameters()] == [True, False]
 
     async def test_persist_text_file(self, session, service):
         await session.ensure_container()
@@ -228,6 +245,47 @@ class TestPersistTool:
         assert call["content_type"] == "image/png"
         assert call["source"] == "sandbox"
         assert result.metadata["has_blob"] is True
+
+    async def test_persist_text_with_artifact_id_routes_to_replace(self, session, service):
+        """给 artifact_id → 走 replace_from_upload(覆盖回写),不产新件。"""
+        await session.ensure_container()
+        service.add_text("notes.md", "old")
+        _write_ws(session, "notes.md", "new body".encode())
+        result = await PersistFileTool(session, service)(
+            path="notes.md", artifact_id="notes.md"
+        )
+        assert result.success
+        assert service.create_calls == []
+        call = service.replace_calls[0]
+        assert call["artifact_id"] == "notes.md"
+        assert call["content"] == "new body"
+        assert call["blob"] is None
+        assert result.metadata["replaced"] is True
+        assert "over existing artifact 'notes.md'" in result.data
+
+    async def test_persist_binary_with_artifact_id_routes_to_replace(self, session, service):
+        await session.ensure_container()
+        payload = b"PK\x03\x04\xff\xfe" + b"\x00" * 16  # \xff\xfe:非法 UTF-8 → 判二进制
+        service.add_blob("pkg.zip", b"PK old", "application/zip")
+        _write_ws(session, "pkg.zip", payload)
+        result = await PersistFileTool(session, service)(
+            path="pkg.zip", artifact_id="pkg.zip"
+        )
+        assert result.success
+        call = service.replace_calls[0]
+        assert call["blob"] == payload
+        assert call["content"] is None
+        assert result.metadata["has_blob"] is True
+        assert result.metadata["replaced"] is True
+
+    async def test_persist_replace_unknown_artifact_fails(self, session, service):
+        await session.ensure_container()
+        _write_ws(session, "a.txt", b"hi")
+        result = await PersistFileTool(session, service)(
+            path="a.txt", artifact_id="nope"
+        )
+        assert not result.success
+        assert "not found" in result.error
 
     async def test_persist_absolute_workspace_path_accepted(self, session, service):
         await session.ensure_container()
