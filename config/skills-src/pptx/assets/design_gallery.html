@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>演示文稿风格样单</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    background: #f6f5f2; color: #2b2b2b; padding: 40px 32px 56px;
+  }
+  header { max-width: 1080px; margin: 0 auto 28px; }
+  header h1 { font-size: 24px; font-weight: 700; letter-spacing: .02em; }
+  header p { margin-top: 8px; font-size: 14px; color: #6b7280; line-height: 1.7; }
+  header p b { color: #2b2b2b; }
+  .grid {
+    max-width: 1080px; margin: 0 auto; display: grid; gap: 24px;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  }
+  .card {
+    background: #fff; border: 1px solid #e5e2dc; border-radius: 12px;
+    padding: 18px 18px 16px; box-shadow: 0 1px 3px rgba(0,0,0,.04);
+  }
+  .card h2 { font-size: 16px; display: flex; align-items: baseline; gap: 8px; }
+  .card h2 .no { font-size: 12px; color: #9ca3af; font-weight: 600; }
+  .card .use { font-size: 12px; color: #6b7280; margin: 4px 0 12px; }
+  .slides { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .slide {
+    aspect-ratio: 16/9; border-radius: 6px; overflow: hidden; position: relative;
+    border: 1px solid rgba(0,0,0,.08); font-size: 8px; line-height: 1.35;
+  }
+  .chips { display: flex; gap: 6px; margin-top: 12px; }
+  .chip { width: 22px; height: 22px; border-radius: 6px; border: 1px solid rgba(0,0,0,.10); }
+  .bar { position: absolute; }
+  .t { position: absolute; font-weight: 700; }
+  .lines { position: absolute; display: flex; flex-direction: column; gap: 3px; }
+  .lines i { display: block; height: 3px; border-radius: 2px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>演示文稿风格样单</h1>
+  <p>每个主题 = 一套固定的配色、题头与版式配方,整份 PPT 按所选主题一致生成。
+     <b>回复主题名称或编号</b>(如「用 1 号」/「曜石蓝」),也可以指定自定义主色。
+     左图为封面页效果,右图为内容页效果。</p>
+</header>
+<div class="grid">
+
+  <div class="card">
+    <h2><span class="no">01</span>曜石蓝<span class="use" style="margin-left:auto">商务汇报 · 经营分析</span></h2>
+    <div class="slides">
+      <div class="slide" style="background:#1B2A4A">
+        <span class="bar" style="left:9%;top:44%;width:12%;height:3px;background:#C9A227"></span>
+        <span class="t" style="left:9%;top:52%;color:#fff;font-size:10px">季度经营分析</span>
+        <span class="t" style="left:9%;top:70%;color:#9aa3b5;font-weight:400">2026 · 第二季度</span>
+      </div>
+      <div class="slide" style="background:#fff">
+        <span class="bar" style="left:8%;top:12%;width:8%;height:3px;background:#C9A227"></span>
+        <span class="t" style="left:8%;top:20%;color:#1B2A4A;font-size:9px">核心结论</span>
+        <span class="lines" style="left:8%;top:44%;width:84%">
+          <i style="background:#d5d9e2;width:92%"></i><i style="background:#d5d9e2;width:78%"></i>
+          <i style="background:#d5d9e2;width:85%"></i><i style="background:#eef1f6;width:60%"></i>
+        </span>
+      </div>
+    </div>
+    <div class="chips">
+      <span class="chip" style="background:#1B2A4A"></span><span class="chip" style="background:#C9A227"></span>
+      <span class="chip" style="background:#EEF1F6"></span><span class="chip" style="background:#252A33"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="no">02</span>赭墨<span class="use" style="margin-left:auto">品牌 · 文化 · 提案</span></h2>
+    <div class="slides">
+      <div class="slide" style="background:#9C7050">
+        <span class="bar" style="left:9%;top:44%;width:12%;height:3px;background:#3E3A36"></span>
+        <span class="t" style="left:9%;top:52%;color:#fff;font-size:10px">品牌年度提案</span>
+        <span class="t" style="left:9%;top:70%;color:#e8dccf;font-weight:400">主题与叙事</span>
+      </div>
+      <div class="slide" style="background:#FAF6F0">
+        <span class="bar" style="left:8%;top:12%;width:8%;height:3px;background:#9C7050"></span>
+        <span class="t" style="left:8%;top:20%;color:#3E3A36;font-size:9px">叙事主线</span>
+        <span class="lines" style="left:8%;top:44%;width:84%">
+          <i style="background:#e3d7c8;width:90%"></i><i style="background:#e3d7c8;width:70%"></i>
+          <i style="background:#e3d7c8;width:82%"></i><i style="background:#f0e7dc;width:55%"></i>
+        </span>
+      </div>
+    </div>
+    <div class="chips">
+      <span class="chip" style="background:#9C7050"></span><span class="chip" style="background:#3E3A36"></span>
+      <span class="chip" style="background:#FAF6F0"></span><span class="chip" style="background:#F0E7DC"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="no">03</span>松石<span class="use" style="margin-left:auto">科技 · 产品 · 可持续</span></h2>
+    <div class="slides">
+      <div class="slide" style="background:#0F6B5C">
+        <span class="bar" style="left:9%;top:44%;width:12%;height:3px;background:#D97706"></span>
+        <span class="t" style="left:9%;top:52%;color:#fff;font-size:10px">产品发布方案</span>
+        <span class="t" style="left:9%;top:70%;color:#bcd8d1;font-weight:400">路线与节奏</span>
+      </div>
+      <div class="slide" style="background:#fff">
+        <span class="bar" style="left:8%;top:12%;width:8%;height:3px;background:#D97706"></span>
+        <span class="t" style="left:8%;top:20%;color:#0F6B5C;font-size:9px">发布节奏</span>
+        <span class="lines" style="left:8%;top:44%;width:84%">
+          <i style="background:#cfe2dd;width:88%"></i><i style="background:#cfe2dd;width:75%"></i>
+          <i style="background:#cfe2dd;width:81%"></i><i style="background:#e8f2ef;width:58%"></i>
+        </span>
+      </div>
+    </div>
+    <div class="chips">
+      <span class="chip" style="background:#0F6B5C"></span><span class="chip" style="background:#D97706"></span>
+      <span class="chip" style="background:#E8F2EF"></span><span class="chip" style="background:#1F2937"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="no">04</span>绛红<span class="use" style="margin-left:auto">政务 · 正式场合</span></h2>
+    <div class="slides">
+      <div class="slide" style="background:#8C2F39">
+        <span class="bar" style="left:9%;top:44%;width:12%;height:3px;background:#B08D57"></span>
+        <span class="t" style="left:9%;top:52%;color:#fff;font-size:10px">年度工作报告</span>
+        <span class="t" style="left:9%;top:70%;color:#d9bfc2;font-weight:400">总结与规划</span>
+      </div>
+      <div class="slide" style="background:#fff">
+        <span class="bar" style="left:8%;top:12%;width:8%;height:3px;background:#B08D57"></span>
+        <span class="t" style="left:8%;top:20%;color:#8C2F39;font-size:9px">重点工作</span>
+        <span class="lines" style="left:8%;top:44%;width:84%">
+          <i style="background:#e2d2d3;width:90%"></i><i style="background:#e2d2d3;width:73%"></i>
+          <i style="background:#e2d2d3;width:84%"></i><i style="background:#f5ecec;width:57%"></i>
+        </span>
+      </div>
+    </div>
+    <div class="chips">
+      <span class="chip" style="background:#8C2F39"></span><span class="chip" style="background:#B08D57"></span>
+      <span class="chip" style="background:#F5ECEC"></span><span class="chip" style="background:#2B2B2B"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="no">05</span>极简<span class="use" style="margin-left:auto">学术 · 技术分享</span></h2>
+    <div class="slides">
+      <div class="slide" style="background:#333333">
+        <span class="bar" style="left:9%;top:44%;width:12%;height:3px;background:#2563EB"></span>
+        <span class="t" style="left:9%;top:52%;color:#fff;font-size:10px">系统架构解析</span>
+        <span class="t" style="left:9%;top:70%;color:#9ca3af;font-weight:400">设计与权衡</span>
+      </div>
+      <div class="slide" style="background:#fff">
+        <span class="bar" style="left:8%;top:12%;width:8%;height:3px;background:#2563EB"></span>
+        <span class="t" style="left:8%;top:20%;color:#333;font-size:9px">设计要点</span>
+        <span class="lines" style="left:8%;top:44%;width:84%">
+          <i style="background:#dcdfe4;width:86%"></i><i style="background:#dcdfe4;width:77%"></i>
+          <i style="background:#dcdfe4;width:83%"></i><i style="background:#f3f4f6;width:52%"></i>
+        </span>
+      </div>
+    </div>
+    <div class="chips">
+      <span class="chip" style="background:#333333"></span><span class="chip" style="background:#2563EB"></span>
+      <span class="chip" style="background:#F3F4F6"></span><span class="chip" style="background:#9CA3AF"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="no">06</span>晨橙<span class="use" style="margin-left:auto">发布会 · 培训 · 活力场</span></h2>
+    <div class="slides">
+      <div class="slide" style="background:#C2570B">
+        <span class="bar" style="left:9%;top:44%;width:12%;height:3px;background:#334155"></span>
+        <span class="t" style="left:9%;top:52%;color:#fff;font-size:10px">新人训练营</span>
+        <span class="t" style="left:9%;top:70%;color:#f3d4b8;font-weight:400">课程总览</span>
+      </div>
+      <div class="slide" style="background:#FFFDF9">
+        <span class="bar" style="left:8%;top:12%;width:8%;height:3px;background:#C2570B"></span>
+        <span class="t" style="left:8%;top:20%;color:#334155;font-size:9px">课程安排</span>
+        <span class="lines" style="left:8%;top:44%;width:84%">
+          <i style="background:#f0dcc8;width:91%"></i><i style="background:#f0dcc8;width:74%"></i>
+          <i style="background:#f0dcc8;width:80%"></i><i style="background:#fdebd9;width:59%"></i>
+        </span>
+      </div>
+    </div>
+    <div class="chips">
+      <span class="chip" style="background:#C2570B"></span><span class="chip" style="background:#334155"></span>
+      <span class="chip" style="background:#FDEBD9"></span><span class="chip" style="background:#292524"></span>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

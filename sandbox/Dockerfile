@@ -40,6 +40,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
+# 中文字形(E-4):没有 CJK 字体 matplotlib 中文标签全是豆腐块,gate 所有内网
+# 中文图表场景。不用 apt fonts-noto-cjk —— 它只装 .ttc 集合,matplotlib 只注册
+# 集合第一个 face(JP,简体字形有日式变体),实测 "Noto Sans CJK SC" 查无此名;
+# 直接烤两个 SC 单 .otf(Regular/Bold,共 ~32MB,比 apt 包省 ~60MB)。
+ADD https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf \
+    https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Bold.otf \
+    /usr/share/fonts/opentype/noto-sc/
+RUN chmod 644 /usr/share/fonts/opentype/noto-sc/*.otf
+
+# matplotlib 全局默认:中文字体优先 + 正确的负号渲染。放镜像层而非要求每个
+# 脚本各设一遍 rcParams —— 沙盒里任何画图代码(不止 skill 脚本)自动受益。
+ENV MATPLOTLIBRC=/opt/sandbox/matplotlibrc
+RUN mkdir -p /opt/sandbox && printf '%s\n' \
+    'font.sans-serif: Noto Sans CJK SC, DejaVu Sans' \
+    'axes.unicode_minus: False' \
+    > /opt/sandbox/matplotlibrc
+
 # Baked git defaults — `git commit` hard-errors without user.name/email and the
 # sandbox has no interactive way to set one. --system so it applies to uid 1000.
 # safe.directory '*': the dubious-ownership check protects multi-user hosts;

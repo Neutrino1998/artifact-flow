@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import { fetchArtifactRawObjectUrl } from '@/lib/api';
+import { triggerObjectUrlDownload } from '@/lib/download';
 import { BUTTON_PRIMARY } from '@/lib/styles';
 import { useArtifactStore } from '@/stores/artifactStore';
 
@@ -32,11 +33,7 @@ export default function BinaryFilePreview({
     setError(null);
     try {
       const url = await fetchArtifactRawObjectUrl(sessionId, artifactId);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = originalFilename ?? artifactId;
-      a.click();
-      URL.revokeObjectURL(url);
+      triggerObjectUrlDownload(originalFilename ?? artifactId, url);
     } catch {
       // Generic, user-facing — the raw error + request id are logged server-side.
       setError('下载失败，请稍后重试');
