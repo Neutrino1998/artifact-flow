@@ -42,21 +42,28 @@ MARGIN = 0.83  # 统一页边距
 
 # 主题 token:primary 承担 60-70% 的色彩存在感,accent 只点睛(条/数字/强调),
 # 绝不大面积使用 —— 单页超过两种彩色就已经太多。
+# font_title 缺省 = FONT;人文/正式主题给衬线标题(楷体/宋体),正文一律雅黑。
 THEMES = {
     "曜石蓝": {"primary": "1B2A4A", "accent": "C9A227", "bg": "FFFFFF",
                "text": "252A33", "muted": "6B7280", "light": "EEF1F6"},
     "赭墨":   {"primary": "9C7050", "accent": "3E3A36", "bg": "FAF6F0",
-               "text": "2B2B2B", "muted": "8A8378", "light": "F0E7DC"},
+               "text": "2B2B2B", "muted": "8A8378", "light": "F0E7DC",
+               "font_title": "楷体"},
     "松石":   {"primary": "0F6B5C", "accent": "D97706", "bg": "FFFFFF",
                "text": "1F2937", "muted": "6B7280", "light": "E8F2EF"},
     "绛红":   {"primary": "8C2F39", "accent": "B08D57", "bg": "FFFFFF",
-               "text": "2B2B2B", "muted": "757575", "light": "F5ECEC"},
+               "text": "2B2B2B", "muted": "757575", "light": "F5ECEC",
+               "font_title": "宋体"},
     "极简":   {"primary": "333333", "accent": "2563EB", "bg": "FFFFFF",
                "text": "333333", "muted": "9CA3AF", "light": "F3F4F6"},
     "晨橙":   {"primary": "C2570B", "accent": "334155", "bg": "FFFDF9",
                "text": "292524", "muted": "78716C", "light": "FDEBD9"},
 }
 FONT = "微软雅黑"  # 字体名只是文件里的引用串,渲染发生在用户机器上
+
+
+def _title_font(t):
+    return t.get("font_title", FONT)
 
 
 def _c(hexstr):
@@ -83,7 +90,7 @@ def _textbox(slide, x, y, w, h):
 
 
 def _put_text(tf, lines, *, size, color, bold=False, leading=1.15,
-              space_after=6, align=PP_ALIGN.LEFT):
+              space_after=6, align=PP_ALIGN.LEFT, font=FONT):
     """lines: [str | {"text":…, "level":0/1}];首段复用 tf.paragraphs[0]。"""
     first = True
     for item in lines:
@@ -97,7 +104,7 @@ def _put_text(tf, lines, *, size, color, bold=False, leading=1.15,
         run = p.add_run()
         run.text = text
         lv_size = size if level == 0 else size - 2
-        _style_run(run, size=lv_size, color=color, bold=bold)
+        _style_run(run, size=lv_size, color=color, bold=bold, font=font)
     return tf
 
 
@@ -119,7 +126,8 @@ def _title_bar(slide, t, title):
     """内容页统一题头:accent 短条 + 标题 —— 全篇同一视觉锚点。"""
     _rect(slide, MARGIN, 0.62, 0.55, 0.09, t["accent"])
     box = _textbox(slide, MARGIN, 0.78, PAGE_W - 2 * MARGIN, 0.9)
-    _put_text(box.text_frame, [title], size=28, color=t["primary"], bold=True)
+    _put_text(box.text_frame, [title], size=28, color=t["primary"], bold=True,
+              font=_title_font(t))
 
 
 def slide_cover(prs, t, spec):
@@ -127,7 +135,8 @@ def slide_cover(prs, t, spec):
     _rect(s, 0, 0, PAGE_W, PAGE_H, t["primary"])
     _rect(s, MARGIN, 3.02, 1.2, 0.12, t["accent"])
     box = _textbox(s, MARGIN, 3.3, PAGE_W - 2 * MARGIN, 1.6)
-    _put_text(box.text_frame, [spec["title"]], size=40, color="FFFFFF", bold=True)
+    _put_text(box.text_frame, [spec["title"]], size=40, color="FFFFFF", bold=True,
+              font=_title_font(t))
     if spec.get("subtitle"):
         box = _textbox(s, MARGIN, 4.75, PAGE_W - 2 * MARGIN, 0.8)
         _put_text(box.text_frame, [spec["subtitle"]], size=18, color="D9DEE8")
@@ -144,7 +153,8 @@ def slide_section(prs, t, spec):
         box = _textbox(s, MARGIN, 2.2, 3.0, 1.6)
         _put_text(box.text_frame, [spec["number"]], size=66, color=t["accent"], bold=True)
     box = _textbox(s, MARGIN, 3.7, PAGE_W - 2 * MARGIN, 1.4)
-    _put_text(box.text_frame, [spec["title"]], size=34, color=t["primary"], bold=True)
+    _put_text(box.text_frame, [spec["title"]], size=34, color=t["primary"], bold=True,
+              font=_title_font(t))
 
 
 def slide_bullets(prs, t, spec):
@@ -223,7 +233,7 @@ def slide_closing(prs, t, spec):
     _rect(s, 0, 0, PAGE_W, PAGE_H, t["primary"])
     box = _textbox(s, MARGIN, 3.1, PAGE_W - 2 * MARGIN, 1.2)
     _put_text(box.text_frame, [spec.get("title", "谢谢")], size=40, color="FFFFFF",
-              bold=True, align=PP_ALIGN.CENTER)
+              bold=True, align=PP_ALIGN.CENTER, font=_title_font(t))
     if spec.get("subtitle"):
         box = _textbox(s, MARGIN, 4.4, PAGE_W - 2 * MARGIN, 0.7)
         _put_text(box.text_frame, [spec["subtitle"]], size=16, color="D9DEE8",
