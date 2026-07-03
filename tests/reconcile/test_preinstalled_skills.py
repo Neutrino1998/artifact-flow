@@ -22,7 +22,7 @@ SRC_DIR = ROOT / "config" / "skills-src"
 ZIP_DIR = ROOT / "config" / "skills"
 PREINSTALLED = ["docx", "pdf", "pptx", "skill-creator", "xlsx"]
 # 纯散文预装(SKILL.md-only 目录形态,bundle=NULL,无 zip/构建链)
-PREINSTALLED_PROSE = ["artifact-design"]
+PREINSTALLED_PROSE = ["html-artifact-design"]
 
 
 def _build_zip(slug: str) -> bytes:

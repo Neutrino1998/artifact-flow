@@ -1,5 +1,5 @@
 ---
-name: artifact-design
+name: html-artifact-design
 description: >
   HTML artifact 的设计指导。在产出任何 HTML 页面型 artifact(报告页、落地页、
   展示页、数据看板、图文页)之前激活,用来校准这个请求值得多少设计投入,并做出
