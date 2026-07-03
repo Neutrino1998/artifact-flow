@@ -33,6 +33,7 @@
 | C | Skill 核心(存储 + L1 注入 + `read_skill` + 权限/上下文覆盖 + 部门授权解析地基) | **已完成**(C-1/C-2/C-3 合 main + reviewer 两轮 + UX 打磨 + E2E 实测,见该节进展) |
 | D | Skill bundle 执行(L3 挂载进沙盒 + `compatibility` 依赖三层 + 离线 wheel) | 全落地(D-1/D-2/D-3;闭环 E2E 实测通过) |
 | E | 导入门禁与预装(硬门槛 validator + 导入双通道 + 预装集五 skill + vision_agent) | **已完成**(E-1/E-2/E-4 合 main + reviewer 各一轮;E-3 verify agent 改向会话期 checker skill,见该节进展) |
+| E-optional | 前端 office 预览批(pdf/docx/轻档 xlsx 客户端预览;pptx 归服务端转换) | 未开始(**选型已定**,纯前端独立批,不阻塞 F/G,随时可开工,见 Phase E「E-optional」) |
 | F | MCP client(传输/协议客户端 + JSON-Schema→XML 适配 + provider 接入 B 的 deferred 披露) | 未开始 |
 | G | 部门作用域授权 + 管理 UI(两张 dept rule 表[skill/unit] + 引擎组合有效集 + skill/toolset/mcp/tool 接入) | 未开始 |
 
@@ -284,6 +285,12 @@ user_skill ─user_id─> user ;  ─skill_slug─> skill              (真 FK,�
 **到时再敲定**:validator 借哪些具体规则、阈值;verify agent 自身是不是个预装 skill(自举);预装集最终名单;ZIP 导入导出端点(决策 6)。
 
 **进展**:**全落地(2026-07-03)**。E-1 硬门槛 validator + seed 全量切换(`af9e994`,reviewer 收口 `95c7f77`)→ E-2 user/admin 双通道导入/导出/删除 + 共池配额 + 前端管理面与两处搜索/过滤(`f86d270`+单包上限 100MB `8996cd8`,reviewer 收口 `83cd332`——SQLite per-connection pragma 为首)→ E-3 verify agent 删除(改向会话期 checker skill,见 changelog 07-02)→ E-4 预装集六 skill(docx/pptx/xlsx/pdf/skill-creator 五个 zip 形态 + html-artifact-design 纯散文目录形态[HTML artifact 设计指导,按本平台「script/外部资源不加载」约束重写],**全部原创实现**——官方四件套 license 为 source-available 专有、html-artifact-design 原型(存货 artifact-design)自述为 CC 二进制重建件,均只借设计)+ 沙盒镜像文档栈扩容(python-docx/python-pptx/lxml/pdfplumber/pypdfium2 + Noto Sans CJK SC 字体与 matplotlib 全局中文配置)+ `vision_agent` 多模态子代理(扫描件/文档图链路,引擎零改动)。预装源码目录 `config/skills-src/` + deterministic zip 构建(`scripts/build_skill_zips.py`)+ 防漂移/零 warning/seed 干净三道回归(`tests/reconcile/test_preinstalled_skills.py`)。**遗留**:预装集经引擎的会话级全链 E2E(激活→mount_skill→脚本→persist)待内网镜像发版随真机验;dept-visibility 导入通道归 G;单机 docker dev 手测链同 D-3 姿态可随时补。
+
+**E-optional — 前端 office 预览批(选型已定,独立可开工,不阻塞 F/G)**:E-4 讨论期一并调研定案、纯前端零后端改动(artifact 二进制字节 REST 已可取,接入点 = `ArtifactPanel` 按 contentType 分流,现状 fallback = `BinaryFilePreview` 下载卡);估 1-2 天,什么时候回来做都可以。选型结论(2026-07-03 拍板,开工时校一遍版本/CVE 即可):
+- **pdf** = `pdfjs-dist`(或 `react-pdf` 包装),**cmaps + standard_fonts 必须本地托管**(默认 CDN,内网死);中文 PDF 没 cmaps 是白屏级故障,验收必须用中文样张。
+- **docx** = `docx-preview`(Apache-2.0,纯浏览器渲染);`renderChanges`/`renderComments`(修订/批注显示)是 experimental —— **验收必须用真审阅稿**(E-4 skill 产出的 redline docx 正好是现成夹具),不达标降级为「正文预览 + 提示下载看修订」;备选 Docxodus(MIT,WASM,重)。
+- **xlsx** = SheetJS CE **≥0.20.2 且必须从 cdn.sheetjs.com vendor**(npm 上 0.18.5 是弃更旧版、带已知 CVE)+ 轻档表格组件只做只读预览(首 sheet/限行数),不做公式重算。
+- **pptx 客户端不做**(js 生态无可靠渲染器;「前端转 pdf 预览」已论证不可行——循环依赖),归未来服务端转换链路(LibreOffice/OfficeCLI → pdf),与本批解耦。
 
 ### F — MCP client(把 MCP server 接成又一个 deferred tool-set provider)
 
