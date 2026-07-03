@@ -186,9 +186,10 @@ class Settings(BaseSettings):
     # 别声明一个过不了边缘的数(deploy/nginx.conf|Caddyfile)。
     # 用户 skill 总量不设独立配额:bundle 字节计入 ARTIFACT_USER_QUOTA_BYTES 同一池
     # (原则 7③;记账在 ConversationManager.get_user_upload_bytes,413 闸与存储条同口径)。
-    SKILL_BUNDLE_MAX_BYTES: int = 25 * 1024 * 1024      # 单个 skill zip 上限。执行点 = E-2 导入
-                                                        # 端点(非 validator:按信任分层,seed/admin
-                                                        # 无闸,seed 侧 wheels bundle 合法可超)
+    SKILL_BUNDLE_MAX_BYTES: int = 100 * 1024 * 1024     # 单个 skill zip 上限,对齐 MAX_UPLOAD_SIZE
+                                                        # 的「单文件 100MB」口径(边缘 210M 放得下)。
+                                                        # 执行点 = E-2 导入端点(非 validator:按信任
+                                                        # 分层,seed/admin 无闸,wheels bundle 合法可超)
     SKILL_ZIP_MAX_MEMBERS: int = 2000                   # zip 文件成员数上限
     SKILL_ZIP_MAX_UNCOMPRESSED_BYTES: int = 500 * 1024 * 1024  # 声明解压总量上限
     SKILL_MD_MAX_BYTES: int = 5 * 1024 * 1024           # SKILL.md 成员实际读取硬帽(bomb-in-member)
