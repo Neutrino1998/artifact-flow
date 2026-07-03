@@ -261,7 +261,9 @@ class ExecutionController:
                 continue
             granted: set = set()
             for ets in self.effective_toolsets.values():
-                granted.update(ets.skill_grants.get(slug, {}).keys())
+                grant = ets.skill_grants.get(slug)
+                if grant is not None:
+                    granted.update(grant.permissions)
             logger.info(
                 "Skill %r activated via button (message %s); enabled tools: %s",
                 slug, message_id, sorted(granted) or "(none)",

@@ -54,7 +54,7 @@ def test_grant_flips_disabled_builtin():
 
     # bash disabled → 不在初始可调集,但在 skill_grants
     assert "bash" not in eff
-    assert eff.skill_grants["s"] == {"bash": ToolPermission.CONFIRM}
+    assert eff.skill_grants["s"].permissions == {"bash": ToolPermission.CONFIRM}
 
     eff.activate_skill("s")
     assert "bash" in eff
@@ -87,7 +87,7 @@ def test_grant_flips_disabled_external_unit_all_members():
     eff = resolve_effective_toolset(agent, _snapshot(units=[unit]), tools, skills)
 
     assert "github__list" not in eff
-    assert eff.skill_grants["s"] == {
+    assert eff.skill_grants["s"].permissions == {
         "github__list": ToolPermission.AUTO,
         "github__create": ToolPermission.CONFIRM,
     }
@@ -104,7 +104,7 @@ def test_full_name_entry_resolves_to_unit():
     eff = resolve_effective_toolset(
         agent, _snapshot(units=[unit]), tools, {"s": _skill("s", ["github__list"])}
     )
-    assert set(eff.skill_grants["s"]) == {"github__list", "github__create"}
+    assert set(eff.skill_grants["s"].permissions) == {"github__list", "github__create"}
 
 
 def test_no_skill_snapshot_empty_grants():
@@ -128,7 +128,7 @@ def test_resolve_all_threads_skill_snapshot():
     tools = {"bash": _Tool("bash", ToolPermission.CONFIRM)}
     snap = _snapshot(agents=[agent])
     result = resolve_all(snap, tools, skill_snapshot={"s": _skill("s", ["bash"])})
-    assert result["lead_agent"].skill_grants["s"] == {"bash": ToolPermission.CONFIRM}
+    assert result["lead_agent"].skill_grants["s"].permissions == {"bash": ToolPermission.CONFIRM}
 
 
 def test_grants_baked_only_for_visible_skills():

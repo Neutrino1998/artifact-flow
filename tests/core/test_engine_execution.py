@@ -1616,7 +1616,7 @@ class _ActivatingTool(BaseTool):
 
 class TestSkillActivation:
     async def test_read_skill_activates_and_grants_tool_mid_turn(self):
-        from core.effective_toolset import EffectiveToolset
+        from core.effective_toolset import EffectiveToolset, SkillGrant
 
         read_skill = _ActivatingTool("s")
         granted = _FakeTool("granted_tool", ToolResult(success=True, data="granted-ran"))
@@ -1625,7 +1625,7 @@ class TestSkillActivation:
         # 初始可调集只有 read_skill;granted_tool 不在(模拟 agent disabled),仅在 skill_grants
         eff = EffectiveToolset(
             permissions={"read_skill": ToolPermission.AUTO},
-            skill_grants={"s": {"granted_tool": ToolPermission.AUTO}},
+            skill_grants={"s": SkillGrant(permissions={"granted_tool": ToolPermission.AUTO})},
         )
         agents = {"lead_agent": _FakeAgentConfig()}
         effective_toolsets = {"lead_agent": eff}
@@ -1666,7 +1666,7 @@ class TestSkillActivation:
         assert completes.get("granted_tool") is True
 
     async def test_failed_read_skill_does_not_activate(self):
-        from core.effective_toolset import EffectiveToolset
+        from core.effective_toolset import EffectiveToolset, SkillGrant
 
         class _FailRead(BaseTool):
             def __init__(self):
@@ -1678,8 +1678,10 @@ class TestSkillActivation:
                                   metadata={"activated_skill": "s"})
             async def __call__(self, **p): return await self.execute(**p)
 
-        eff = EffectiveToolset(permissions={"read_skill": ToolPermission.AUTO},
-                               skill_grants={"s": {"granted_tool": ToolPermission.AUTO}})
+        eff = EffectiveToolset(
+            permissions={"read_skill": ToolPermission.AUTO},
+            skill_grants={"s": SkillGrant(permissions={"granted_tool": ToolPermission.AUTO})},
+        )
         state = create_initial_state(task="hi", session_id="sess", message_id="msg-f")
         rounds = [_tool_call_chunks(_tool_call_xml("read_skill", slug="s")),
                   _simple_llm_chunks("Done")]

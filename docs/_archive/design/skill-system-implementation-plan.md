@@ -310,7 +310,9 @@ user_skill ─user_id─> user ;  ─skill_slug─> skill              (真 FK,�
 
 **到时再敲定**:MCP server 连接配置列的精确形状(F-1);权限 set 粒度的具体语法(与 B 的 `always_allow` 跨 set 语意对齐);`list_changed` 刷新后历史里旧 tool 描述如何过期/自纠(**无「已发现集」状态机**,决策 2;靠常驻索引行变化 + 模型重 `search_tools` 自纠);凭证注入细节(走统一加密落库模型 = 同 B-4 `tool_credential`,operator/工具级密钥;**用户级身份透传是另一根轴、推迟**,见 Non-goals);migration 姿态(是否仍沿「就地写进 squash `0001`」,视内网发版状态定)。
 
-**进展**:规划细化完成(2026-07-03,拆 F-0~F-3 + 3 决策,见 changelog);F-0 待开工。
+**进展**:规划细化完成(2026-07-03,拆 F-0~F-3 + 3 决策,见 changelog)。
+
+- **F-0 落地(2026-07-03)**:注入收成 `EffectiveToolset.apply_injection_invariants()` 单点规则 —— resolve 末尾与 `activate_skill` 变异后跑同一份;`injectable_builtins`(⊆ {search_tools, read_skill, mount_skill} 的 `{name: 等级}`)在 resolve 期从本 turn tools 烤入,**presence 即闸**(read_skill/mount_skill 仅当有可见 (bundle) skill 时被建)。`skill_grants` 值升级 `SkillGrant`(permissions + 授予涉及 defer unit 时随带的 `DeferredUnit`)→ 激活翻开 defer unit 时注册索引行、渐进披露不退化;`controller_factory` 两段手动 setdefault 删除。loud 契约保留:deferred 非空而 search_tools 未注册 → 下标 KeyError 当场炸(resolve 与 activate 两时点同待遇)。测试 `test_injection_invariants.py` 9 例(两条运行时不对称/搬家等价/幂等/loud)+ 全后端回归绿(1674 passed)。MCP 注入(F-2)作规则函数第三个消费方接入。
 
 ### G — 部门作用域授权 + 管理 UI(横切:skill/tool-set/mcp/tool 四类一套机制)
 

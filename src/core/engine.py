@@ -1040,7 +1040,9 @@ async def execute_loop(
                     active_list.append(_activated)
                     _granted: set = set()
                     for ets in effective_toolsets.values():
-                        _granted.update(ets.skill_grants.get(_activated, {}).keys())
+                        _grant = ets.skill_grants.get(_activated)
+                        if _grant is not None:
+                            _granted.update(_grant.permissions)
                         ets.activate_skill(_activated)
                     # obs:能力变更审计(info)—— skill 激活把 agent-disabled 工具翻开。仅本轮
                     # 新激活打一次(sticky 重放不到这条路径);无授予=其 allowed-tools 本就可调。
