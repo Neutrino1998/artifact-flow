@@ -5,6 +5,7 @@ import * as api from '@/lib/api';
 import type { InstanceHeartbeat, AdminInstancesResponse } from '@/lib/api';
 import { parseUtcIso } from '@/lib/time';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
+import { useUIStore } from '@/stores/uiStore';
 
 // 实例监控面板轮询周期。心跳 sample 周期是 30s,面板 10s 轮询让状态色(尤其
 // 陈旧→红)在心跳停更后一个 sample 周期内可见,又不过度打后端。
@@ -166,6 +167,8 @@ export default function InstancePanel() {
   const [loading, setLoading] = useState(true);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const claim = useLatestOnly();
+  // 刷新按钮已上移到侧栏(与会话监控一致);bump 这个 tick 触发一次 reload。
+  const refreshTick = useUIStore((s) => s.instancesRefreshTick);
 
   const load = useCallback(async () => {
     const isLatest = claim();
@@ -187,14 +190,14 @@ export default function InstancePanel() {
     load();
     const id = setInterval(load, POLL_MS);
     return () => clearInterval(id);
-  }, [load]);
+  }, [load, refreshTick]);
 
   const instances = data?.instances ?? [];
   const selfId = data?.instance_id;
 
   return (
     <div className="flex-1 flex flex-col bg-chat dark:bg-chat-dark overflow-hidden">
-      {/* Header */}
+      {/* Header — 刷新按钮已上移到侧栏(触发 instancesRefreshTick),这里不再自带 */}
       <div className="flex items-center gap-3 px-5 py-3 border-b border-border dark:border-border-dark">
         <div className="flex items-baseline gap-2 min-w-0">
           <h2 className="text-base font-semibold text-text-primary dark:text-text-primary-dark">实例监控</h2>
@@ -202,12 +205,6 @@ export default function InstancePanel() {
             {data ? (data.shared ? `多实例 · ${instances.length} 个` : '单机本地视图') : ''}
           </span>
         </div>
-        <button
-          onClick={load}
-          className="ml-auto text-xs text-text-secondary dark:text-text-secondary-dark hover:text-accent transition-colors"
-        >
-          刷新
-        </button>
       </div>
 
       {/* Body */}

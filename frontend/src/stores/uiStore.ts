@@ -76,6 +76,9 @@ interface UIState {
   observabilitySelectedConvId: string | null;
   observabilityBrowseVisible: boolean;
   observabilityRefreshTick: number;
+  // 实例监控刷新版本号 —— 侧栏「刷新」按钮 bump,InstancePanel 订阅触发 reload
+  // (与 observabilityRefreshTick 同构:刷新动作上移到侧栏,面板不再自带按钮)。
+  instancesRefreshTick: number;
   theme: 'light' | 'dark';
 
   toggleSidebar: () => void;
@@ -96,6 +99,7 @@ interface UIState {
   setObservabilitySelectedConvId: (id: string | null) => void;
   setObservabilityBrowseVisible: (visible: boolean) => void;
   triggerObservabilityRefresh: () => void;
+  triggerInstancesRefresh: () => void;
   setTheme: (theme: 'light' | 'dark') => void;
   toggleTheme: () => void;
 }
@@ -108,7 +112,7 @@ type UIData = Omit<UIState,
   | 'setToolUnitRightView' | 'bumpToolUnitListVersion' | 'enterSelectionMode' | 'exitSelectionMode'
   | 'toggleUserSelection' | 'setUserManagementSelection' | 'clearUserSelection'
   | 'setObservabilitySelectedConvId' | 'setObservabilityBrowseVisible' | 'triggerObservabilityRefresh'
-  | 'setTheme' | 'toggleTheme'
+  | 'triggerInstancesRefresh' | 'setTheme' | 'toggleTheme'
 >;
 
 export const INITIAL_UI_STATE: UIData = {
@@ -125,6 +129,7 @@ export const INITIAL_UI_STATE: UIData = {
   observabilitySelectedConvId: null,
   observabilityBrowseVisible: false,
   observabilityRefreshTick: 0,
+  instancesRefreshTick: 0,
   theme: 'dark',
 };
 
@@ -158,8 +163,10 @@ export const useUIStore = create<UIState>((set) => ({
       toolUnitRightView: { type: 'empty' },
       observabilitySelectedConvId: null,
       observabilityBrowseVisible: false,
-      // observability / instances 全屏接管中间面板 → 关掉默认 artifact 面板
-      ...((mode === 'observability' || mode === 'instances') && { artifactPanelVisible: false }),
+      // 进入任一接管右面板的模式(用户管理/工具管理/会话监控/实例监控)→ 收起已展开的
+      // 文件面板:全屏接管的(observability/instances)本就不该露出,master-detail 的
+      // (userManagement/toolUnit)则避免退出时残留的 artifactPanelVisible 让文件面板弹回。
+      ...(RIGHT_PANEL_MODES.has(mode) && { artifactPanelVisible: false }),
       // 仅当进/出影响右面板的模式时才 bump(conversationBrowser 只动中间面板,不算)
       ...(affectsRight && { rightPanelIntentEpoch: s.rightPanelIntentEpoch + 1 }),
     };
@@ -199,6 +206,9 @@ export const useUIStore = create<UIState>((set) => ({
   }),
   triggerObservabilityRefresh: () => set((s) => ({
     observabilityRefreshTick: s.observabilityRefreshTick + 1,
+  })),
+  triggerInstancesRefresh: () => set((s) => ({
+    instancesRefreshTick: s.instancesRefreshTick + 1,
   })),
 
   setTheme: (theme) => {

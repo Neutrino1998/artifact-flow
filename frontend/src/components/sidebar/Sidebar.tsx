@@ -66,6 +66,7 @@ export default function Sidebar() {
   const setActiveMode = useUIStore((s) => s.setActiveMode);
   const setObservabilityBrowseVisible = useUIStore((s) => s.setObservabilityBrowseVisible);
   const triggerObservabilityRefresh = useUIStore((s) => s.triggerObservabilityRefresh);
+  const triggerInstancesRefresh = useUIStore((s) => s.triggerInstancesRefresh);
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
   const { startNewChat } = useChat();
 
@@ -82,6 +83,12 @@ export default function Sidebar() {
     setRefreshSpinning(true);
     setTimeout(() => setRefreshSpinning(false), 600);
   }, [triggerObservabilityRefresh]);
+
+  const handleRefreshInstances = useCallback(() => {
+    triggerInstancesRefresh();
+    setRefreshSpinning(true);
+    setTimeout(() => setRefreshSpinning(false), 600);
+  }, [triggerInstancesRefresh]);
 
   const handleSearchChat = () => {
     setActiveMode('conversationBrowser');
@@ -112,6 +119,17 @@ export default function Sidebar() {
   // Fleet instances (Phase C) — center takeover, admin-only, like observability
   // but without the conversation search/refresh actions.
   const inInstances = activeMode === 'instances' && isAdmin;
+
+  // 「全接管」admin 模式:实例监控/工具管理/用户管理。这三个把中间/右面板整个接管,
+  // 与对话无关 → 侧栏隐藏对话列表 + 文件面板/搜索对话/新建对话/技能管理,只留退出
+  // (实例监控额外留一个刷新)。会话监控(observability)不算 —— 它本就是看对话的,
+  // 保留 admin 对话列表 + 搜索/刷新。
+  const inAdminTakeover = inUserMgmt || inToolUnitMgmt || inInstances;
+  const takeoverExitLabel = inUserMgmt
+    ? '退出用户管理'
+    : inToolUnitMgmt
+      ? '退出工具管理'
+      : '退出实例监控';
 
   // ── Collapsed: 48px icon bar ──
   if (sidebarCollapsed) {
@@ -147,17 +165,31 @@ export default function Sidebar() {
               </svg>
             </IconButton>
           </>
-        ) : (
+        ) : inAdminTakeover ? (
           <>
-            {/* Artifacts — hidden while admin management owns the right panel */}
-            {!inUserMgmt && !inToolUnitMgmt && !inInstances && (
-              <IconButton onClick={toggleArtifactPanel} label="文件面板">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <rect x="2" y="2" width="12" height="12" rx="1.5" />
-                  <path d="M5 6h6M5 8.5h4" />
-                </svg>
+            {/* Refresh — instances only */}
+            {inInstances && (
+              <IconButton onClick={handleRefreshInstances} label="刷新">
+                <RefreshIcon spinning={refreshSpinning} />
               </IconButton>
             )}
+
+            {/* Exit the active takeover */}
+            <IconButton onClick={handleExit} label={takeoverExitLabel}>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <path d="M4 4l8 8M12 4l-8 8" />
+              </svg>
+            </IconButton>
+          </>
+        ) : (
+          <>
+            {/* Artifacts */}
+            <IconButton onClick={toggleArtifactPanel} label="文件面板">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="2" y="2" width="12" height="12" rx="1.5" />
+                <path d="M5 6h6M5 8.5h4" />
+              </svg>
+            </IconButton>
 
             {/* Search conversations */}
             <IconButton onClick={handleSearchChat} label="搜索对话">
@@ -185,33 +217,6 @@ export default function Sidebar() {
             {/* Exit skill management */}
             {inSkills && (
               <IconButton onClick={handleExit} label="退出技能管理">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                  <path d="M4 4l8 8M12 4l-8 8" />
-                </svg>
-              </IconButton>
-            )}
-
-            {/* Exit user management */}
-            {inUserMgmt && (
-              <IconButton onClick={handleExit} label="退出用户管理">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                  <path d="M4 4l8 8M12 4l-8 8" />
-                </svg>
-              </IconButton>
-            )}
-
-            {/* Exit tool-unit management */}
-            {inToolUnitMgmt && (
-              <IconButton onClick={handleExit} label="退出工具管理">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                  <path d="M4 4l8 8M12 4l-8 8" />
-                </svg>
-              </IconButton>
-            )}
-
-            {/* Exit fleet instances */}
-            {inInstances && (
-              <IconButton onClick={handleExit} label="退出实例监控">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                   <path d="M4 4l8 8M12 4l-8 8" />
                 </svg>
@@ -286,21 +291,40 @@ export default function Sidebar() {
               退出监控
             </button>
           </>
-        ) : (
+        ) : inAdminTakeover ? (
           <>
-            {/* Artifacts — hidden while admin management owns the right panel */}
-            {!inUserMgmt && !inToolUnitMgmt && !inInstances && (
+            {/* Refresh — instances only (mirrors observability's 刷新对话) */}
+            {inInstances && (
               <button
-                onClick={toggleArtifactPanel}
+                onClick={handleRefreshInstances}
                 className={navRowClass}
               >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <rect x="2" y="2" width="12" height="12" rx="1.5" />
-                  <path d="M5 6h6M5 8.5h4" />
-                </svg>
-                文件面板
+                <RefreshIcon size={16} spinning={refreshSpinning} />
+                刷新
               </button>
             )}
+            <button
+              onClick={handleExit}
+              className={navRowDangerClass}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <path d="M9 3H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h5M7 8h6m0 0l-2-2m2 2l-2 2" />
+              </svg>
+              {takeoverExitLabel}
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={toggleArtifactPanel}
+              className={navRowClass}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="2" y="2" width="12" height="12" rx="1.5" />
+                <path d="M5 6h6M5 8.5h4" />
+              </svg>
+              文件面板
+            </button>
             <button
               onClick={handleSearchChat}
               className={navRowClass}
@@ -341,52 +365,28 @@ export default function Sidebar() {
                 退出技能管理
               </button>
             )}
-            {inUserMgmt && (
-              <button
-                onClick={handleExit}
-                className={navRowDangerClass}
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                  <path d="M9 3H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h5M7 8h6m0 0l-2-2m2 2l-2 2" />
-                </svg>
-                退出用户管理
-              </button>
-            )}
-            {inToolUnitMgmt && (
-              <button
-                onClick={handleExit}
-                className={navRowDangerClass}
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                  <path d="M9 3H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h5M7 8h6m0 0l-2-2m2 2l-2 2" />
-                </svg>
-                退出工具管理
-              </button>
-            )}
-            {inInstances && (
-              <button
-                onClick={handleExit}
-                className={navRowDangerClass}
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                  <path d="M9 3H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h5M7 8h6m0 0l-2-2m2 2l-2 2" />
-                </svg>
-                退出实例监控
-              </button>
-            )}
           </>
         )}
       </div>
 
-      {/* Conversation list */}
-      <div className="px-5 pt-2 pb-1 text-xs font-semibold text-text-tertiary dark:text-text-tertiary-dark">
-        对话列表
-      </div>
-      {inObservability ? <AdminConversationList /> : <ConversationList />}
+      {/* Conversation list — hidden in the full-takeover admin modes (they have
+          nothing to do with conversations); observability keeps its admin list. */}
+      {!inAdminTakeover && (
+        <>
+          <div className="px-5 pt-2 pb-1 text-xs font-semibold text-text-tertiary dark:text-text-tertiary-dark">
+            对话列表
+          </div>
+          {inObservability ? <AdminConversationList /> : <ConversationList />}
+        </>
+      )}
+
+      {/* Spacer — the conversation lists carry flex-1; without them the bottom
+          section would float up, so pin it down in the takeover modes. */}
+      {inAdminTakeover && <div className="flex-1" />}
 
       {/* Notifications + user menu at bottom */}
       <div className="px-3 pb-3 pt-2 space-y-2">
-        {!inObservability && !inUserMgmt && !inToolUnitMgmt && !inInstances && <StorageBar />}
+        {!inObservability && !inAdminTakeover && <StorageBar />}
         <NotificationCenter />
         <UserMenu />
       </div>

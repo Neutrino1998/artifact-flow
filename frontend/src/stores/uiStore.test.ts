@@ -29,10 +29,22 @@ describe('uiStore activeMode mutual exclusion', () => {
     expect(useUIStore.getState().activeMode).toBe('none');
   });
 
-  test('entering observability hides the default artifact panel', () => {
-    useUIStore.setState({ artifactPanelVisible: true });
-    useUIStore.getState().setActiveMode('observability');
-    expect(useUIStore.getState().artifactPanelVisible).toBe(false);
+  test('entering any right-panel-takeover mode collapses the artifact panel', () => {
+    // observability/instances 全屏接管、userManagement/toolUnit master-detail —
+    // 进入任一都应收起已展开的文件面板(退出后也不弹回)。
+    for (const mode of ['observability', 'instances', 'userManagement', 'toolUnit'] as const) {
+      useUIStore.setState({ artifactPanelVisible: true });
+      useUIStore.getState().setActiveMode(mode);
+      expect(useUIStore.getState().artifactPanelVisible).toBe(false);
+      useUIStore.getState().setActiveMode('none');
+    }
+  });
+
+  test('triggerInstancesRefresh bumps instancesRefreshTick', () => {
+    expect(useUIStore.getState().instancesRefreshTick).toBe(0);
+    useUIStore.getState().triggerInstancesRefresh();
+    useUIStore.getState().triggerInstancesRefresh();
+    expect(useUIStore.getState().instancesRefreshTick).toBe(2);
   });
 
   test('switching mode resets all per-mode transient sub-state', () => {
