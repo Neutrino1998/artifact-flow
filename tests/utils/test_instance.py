@@ -26,3 +26,13 @@ def test_mint_sanitizes_unsafe_chars(monkeypatch):
 def test_mint_truncates_to_64(monkeypatch):
     monkeypatch.setenv("ARTIFACTFLOW_INSTANCE_ID", "x" * 200)
     assert len(instance._mint()) == 64
+
+
+def test_mint_rejects_path_semantic_values(monkeypatch):
+    """'.' 会使分目录静默塌回平铺、'..' 逃逸到上级 —— 字符集守卫拦不住,单独拒。"""
+    for bad in (".", ".."):
+        monkeypatch.setenv("ARTIFACTFLOW_INSTANCE_ID", bad)
+        assert instance._mint() == "unknown", bad
+    # '/' 属字符集守卫的辖区:替换成 '-' 即无路径语义,不必拒
+    monkeypatch.setenv("ARTIFACTFLOW_INSTANCE_ID", "/")
+    assert instance._mint() == "-"

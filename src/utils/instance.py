@@ -20,7 +20,12 @@ def _mint() -> str:
     raw = os.environ.get("ARTIFACTFLOW_INSTANCE_ID") or socket.gethostname() or "unknown"
     # 会用作日志子目录名与 HTTP 响应头值:收窄字符集(hostname 本就近似此集,
     # 防的是 env 覆盖时手滑塞进路径分隔符/非 ASCII)
-    return re.sub(r"[^A-Za-z0-9._-]", "-", raw)[:64] or "unknown"
+    minted = re.sub(r"[^A-Za-z0-9._-]", "-", raw)[:64]
+    # 字符集内仍具路径语义的值单独拒:'.' 使分目录静默塌回平铺(rotate 互覆
+    # 悄悄回归),'..' 逃逸到上级目录 —— 都是本守卫要防的那类事故
+    if minted in ("", ".", ".."):
+        return "unknown"
+    return minted
 
 
 INSTANCE_ID: str = _mint()
