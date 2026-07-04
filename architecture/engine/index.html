@@ -617,15 +617,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#主循环流程" class="md-nav__link">
+  <a href="#主循环流程_run_agentper-agent" class="md-nav__link">
     <span class="md-ellipsis">
       
-        主循环流程
+        主循环流程（_run_agent，per-agent）
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="主循环流程">
+    <nav class="md-nav" aria-label="主循环流程（_run_agent，per-agent）">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1517,15 +1517,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#主循环流程" class="md-nav__link">
+  <a href="#主循环流程_run_agentper-agent" class="md-nav__link">
     <span class="md-ellipsis">
       
-        主循环流程
+        主循环流程（_run_agent，per-agent）
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="主循环流程">
+    <nav class="md-nav" aria-label="主循环流程（_run_agent，per-agent）">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1799,10 +1799,11 @@
 
 <h1 id="执行引擎">执行引擎</h1>
 <blockquote>
-<p>Pi-style 扁平 while loop — 无框架、无中间件、无 DAG，一个循环解决所有问题。</p>
+<p>Pi-style agent loop（嵌套串行）— 无框架、无中间件、无 DAG，一个循环函数解决所有问题。</p>
 </blockquote>
 <h2 id="核心设计">核心设计</h2>
-<p>引擎的核心是 <code>execute_loop()</code>（<code>src/core/engine.py</code>），一个 async 函数内的 <code>while not completed</code> 循环。每次迭代执行完整的 <strong>构建上下文 → 调用 LLM → 解析工具 → 串行执行 → 路由</strong> 流程，不持有跨迭代状态。</p>
+<p>引擎的核心是 <code>execute_loop()</code>（<code>src/core/engine.py</code>）内的 <code>_run_agent(agent_name)</code>：一个 per-agent 的 <code>while</code> 循环，每次迭代执行完整的 <strong>构建上下文 → 调用 LLM → 解析工具 → 串行执行</strong> 流程，直至该 agent 给出无工具调用的最终回复（即返回值）。lead_agent 是顶层调用；<code>call_subagent</code> 在工具执行流水线中<strong>原地递归</strong> await 目标 subagent 的 <code>_run_agent</code>，其返回值包成 <code>&lt;subagent_result&gt;</code> 作为本次调用的 tool_result。</p>
+<p>递归不改变执行模型的三个不变量：整个 turn 仍是<strong>单 asyncio task、单活跃 agent、事件序 = 执行序</strong>（审计线性）。递归深度由工具面决定 — <code>call_subagent</code> 只在 lead 的可调集里，即一层；同轮 <code>[tool, subagent, subagent, tool]</code> 混合调用按模型给出的自然序串行执行，subagent 返回后同轮剩余工具继续。</p>
 <h3 id="执行状态">执行状态</h3>
 <p>引擎通过一个普通 <code>dict</code> 维护状态，<code>create_initial_state()</code> 创建初始值：</p>
 <table>
@@ -1817,7 +1818,7 @@
 <tr>
 <td><code>current_agent</code></td>
 <td><code>str</code></td>
-<td>当前执行的 agent（初始 <code>"lead_agent"</code>）</td>
+<td>当前活跃 agent（初始 <code>"lead_agent"</code>；由 <code>_run_agent</code> 进入/<code>call_subagent</code> 返回时维护，用于错误归因和外部观察，不再承担路由）</td>
 </tr>
 <tr>
 <td><code>completed</code></td>
@@ -1867,24 +1868,24 @@
 </tbody>
 </table>
 <p>轮起始时，Controller 从 <code>MessageEvent</code> 表按 conversation path 加载全部历史事件（<code>is_historical=True</code>）填入 <code>state["events"]</code>；引擎循环中新增事件 <code>is_historical=False</code>。<strong>没有单独的 <code>conversation_history</code> 字段</strong> — 历史和当前轮事件统一来自 <code>state["events"]</code>，由 <code>EventHistory</code> 在 build 时做 boundary 扫描 + agent 过滤（详见下文"消息构建"）。</p>
-<h2 id="主循环流程">主循环流程</h2>
+<h2 id="主循环流程_run_agentper-agent">主循环流程（<code>_run_agent</code>，per-agent）</h2>
 <pre class="mermaid"><code>flowchart TD
-    START([开始]) --&gt; CHECK_CANCEL{检查取消?}
-    CHECK_CANCEL --&gt;|已取消| EXIT([退出])
-    CHECK_CANCEL --&gt;|继续| VALIDATE{Agent 存在?}
-    VALIDATE --&gt;|不存在| ERROR([错误退出])
-    VALIDATE --&gt;|存在| BUILD[构建上下文]
+    START([进入 _run_agent]) --&gt; VALIDATE{Agent 存在?}
+    VALIDATE --&gt;|不存在| ERROR([错误退栈, 返回 None])
+    VALIDATE --&gt;|存在| CHECK_CANCEL{检查取消?}
+    CHECK_CANCEL --&gt;|已取消| EXIT([返回 None])
+    CHECK_CANCEL --&gt;|继续| BUILD[构建上下文]
     BUILD --&gt; AGENT_START[发送 agent_start 事件]
     AGENT_START --&gt; LLM[流式调用 LLM]
     LLM --&gt;|失败| ERROR
     LLM --&gt;|成功| PARSE[解析工具调用]
     PARSE --&gt;|无工具调用| DRAIN{Lead 有待处理消息?}
     DRAIN --&gt;|有| CONTINUE[注入消息, 继续循环]
-    DRAIN --&gt;|无| COMPLETE[完成当前 Agent]
-    PARSE --&gt;|有工具调用| EXEC[串行执行工具]
+    DRAIN --&gt;|无| COMPLETE([agent_complete, 返回最终文本])
+    PARSE --&gt;|有工具调用| EXEC[串行执行工具&lt;br/&gt;call_subagent → 递归 _run_agent]
     EXEC --&gt; CHECK_CANCEL
-    COMPLETE --&gt; CHECK_CANCEL
     CONTINUE --&gt; CHECK_CANCEL</code></pre>
+<p>返回值路由：lead 的返回值由顶层收口为 <code>state["completed"]/["response"]</code>；subagent 的返回值由 <code>call_subagent</code> 分支包成 <code>&lt;subagent_result&gt;</code> tool_result。返回 <code>None</code> = turn 已终止（cancel / error，state 标志已由故障点设好），调用方逐层退栈、同轮剩余工具不再执行。</p>
 <h3 id="每轮迭代详解">每轮迭代详解</h3>
 <p><strong>1. 构建上下文</strong>（<code>_build_context</code>）</p>
 <ul>
@@ -1934,33 +1935,33 @@
 </ul>
 <p><strong>4. 串行执行工具</strong>（<code>_execute_tools</code>）</p>
 <ul>
-<li>工具排序：<code>call_subagent</code> 延后到最后执行，确保同一轮的常规工具不会被 break 跳过</li>
-<li>每个工具执行前检查取消状态</li>
+<li>按模型给出的自然序执行；<code>call_subagent</code> 与常规工具同一条流水线，命中时原地递归 await 目标 agent 的 <code>_run_agent</code>，返回后同轮剩余工具继续（<code>[tool, subagent, tool]</code> 混合序成立）</li>
+<li>每个工具执行前检查取消状态；turn 在子 agent 内终止（cancel / error）时 break，剩余工具不执行</li>
 <li>执行流水线详见<a href="../tools/#工具执行流水线">工具系统 → 工具执行流水线</a></li>
 </ul>
-<p><strong>5. Agent 完成路由</strong>（<code>_complete_agent</code>）</p>
-<p>见下节。</p>
+<p><strong>5. Agent 完成</strong></p>
+<p>无工具调用 = 该 agent 的最终回复，<code>_run_agent</code> 发送 <code>agent_complete</code> 事件后把文本作为返回值返回。见下节。</p>
 <h2 id="agent-完成路由">Agent 完成路由</h2>
-<p>这是引擎最核心的不对称设计：</p>
+<p>Agent 的最终回复就是 <code>_run_agent</code> 的返回值，路由由调用栈决定：</p>
 <pre class="mermaid"><code>flowchart LR
-    NO_TOOLS[Agent 无工具调用] --&gt; IS_LEAD{是 Lead Agent?}
-    IS_LEAD --&gt;|是| EXIT["completed = True&lt;br/&gt;退出循环"]
-    IS_LEAD --&gt;|否| PACK["打包响应为&lt;br/&gt;call_subagent tool_result"]
-    PACK --&gt; SWITCH["切回 lead_agent&lt;br/&gt;继续循环"]</code></pre>
+    NO_TOOLS[Agent 无工具调用] --&gt; RET["agent_complete&lt;br/&gt;返回最终文本"]
+    RET --&gt; IS_LEAD{调用方?}
+    IS_LEAD --&gt;|顶层 lead| EXIT["completed = True&lt;br/&gt;state.response = 返回值"]
+    IS_LEAD --&gt;|call_subagent 分支| PACK["包成 subagent_result&lt;br/&gt;作为 tool_complete 回填调用方"]</code></pre>
 <p><strong>Lead Agent 无工具调用：</strong></p>
 <ul>
 <li>先检查是否有待处理消息（<code>drain_messages</code>）</li>
 <li>有 → 注入为 <code>QUEUED_MESSAGE</code> 事件，<code>continue</code> 回到循环顶部</li>
-<li>无 → <code>state["completed"] = True</code>，退出循环</li>
+<li>无 → 发送 <code>agent_complete</code>，返回最终文本；顶层收口 <code>state["completed"]/["response"]</code></li>
 </ul>
 <p><strong>Subagent 无工具调用：</strong></p>
 <ul>
-<li>将 subagent 的响应打包为 XML：<code>&lt;subagent_result agent="research_agent"&gt;...&lt;/subagent_result&gt;</code></li>
-<li>作为 <code>TOOL_COMPLETE</code> 事件（tool=<code>call_subagent</code>）追加到 lead_agent 的事件流</li>
-<li>切换 <code>current_agent</code> 回 <code>"lead_agent"</code></li>
-<li>下次循环时 lead_agent 的 <code>_build_context</code> 会看到这个 tool_result</li>
+<li>发送 <code>agent_complete</code>，返回最终文本</li>
+<li><code>call_subagent</code> 分支将其打包为 XML：<code>&lt;subagent_result agent="research_agent"&gt;...&lt;/subagent_result&gt;</code></li>
+<li>作为 <code>TOOL_COMPLETE</code> 事件（tool=<code>call_subagent</code>，带本次调用的 parser_warnings 与实际耗时）追加到调用方的事件流</li>
+<li>调用方同轮剩余工具继续执行；下次 <code>_build_context</code> 会看到这个 tool_result</li>
 </ul>
-<p><strong>设计意图：</strong> Lead Agent 是唯一出口。Subagent 完成后必须经过 Lead 决定是否继续。</p>
+<p><strong>设计意图：</strong> Lead Agent 是唯一出口 — 只有顶层 <code>_run_agent("lead_agent")</code> 的返回值会成为用户可见的最终响应。Subagent 的输出永远经 <code>&lt;subagent_result&gt;</code> 包装回传给调用方，由 Lead 决定下一步。</p>
 <h2 id="上下文加载策略">上下文加载策略</h2>
 <p><code>ContextManager.build()</code>（<code>src/core/context_manager.py</code>）是一个纯静态类方法，为每次 LLM 调用构建完整的 messages 列表。</p>
 <h3 id="system-prompt-组装稳定可缓存前缀">System Prompt 组装（稳定可缓存前缀）</h3>

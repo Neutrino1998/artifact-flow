@@ -818,10 +818,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#完成路由不对称性的意图" class="md-nav__link">
+  <a href="#完成路由的意图lead-唯一出口" class="md-nav__link">
     <span class="md-ellipsis">
       
-        完成路由不对称性的意图
+        完成路由的意图（Lead 唯一出口）
       
     </span>
   </a>
@@ -1562,10 +1562,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#完成路由不对称性的意图" class="md-nav__link">
+  <a href="#完成路由的意图lead-唯一出口" class="md-nav__link">
     <span class="md-ellipsis">
       
-        完成路由不对称性的意图
+        完成路由的意图（Lead 唯一出口）
       
     </span>
   </a>
@@ -1794,18 +1794,18 @@
     Lead-&gt;&gt;Lead: 分析任务, 创建 task_plan
 
     Lead-&gt;&gt;Sub: call_subagent(instruction)
-    Note over Lead,Sub: current_agent 切换为 subagent
+    Note over Lead,Sub: 引擎原地递归 await 子 agent 的循环
 
     Sub-&gt;&gt;Sub: 执行工具 (web_search / web_fetch / read_artifact / grep_artifact)
     Sub--&gt;&gt;Lead: 返回结果 (subagent_result XML)
-    Note over Lead,Sub: current_agent 切回 lead_agent
+    Note over Lead,Sub: 递归返回，Lead 同轮剩余工具继续执行
 
     Lead-&gt;&gt;Lead: 整合结果, 更新 Artifact
     Lead--&gt;&gt;User: 最终响应</code></pre>
 <p><strong>协作流程：</strong></p>
 <ol>
-<li><strong>Lead 分发</strong>：Lead 调用 <code>call_subagent</code> 工具，提供 <code>agent_name</code> 和 <code>instruction</code></li>
-<li><strong>Agent 切换</strong>：引擎将 <code>state["current_agent"]</code> 设为目标 subagent，instruction 作为 <code>SUBAGENT_INSTRUCTION</code> 事件注入</li>
+<li><strong>Lead 分发</strong>：Lead 调用 <code>call_subagent</code> 工具，提供 <code>agent_name</code> 和 <code>instruction</code>。同一轮可与其他工具/多个 <code>call_subagent</code> 混排，按自然序串行执行（多调用协议的通用语义，无 per-tool 特殊约束；后一个 subagent 运行时可读前一个写入的 artifact）</li>
+<li><strong>子 agent 执行</strong>：引擎原地递归 await 目标 subagent 的 <code>_run_agent</code> 循环，instruction 作为 <code>SUBAGENT_INSTRUCTION</code> 事件注入</li>
 <li><strong>Sub 执行</strong>：Subagent 不看 lead 的对话历史，只看自己那部分 agent_name-filtered 事件（instruction、LLM 响应、tool results）。<code>EventHistory</code> 扫 boundary 时对 subagent 还会停在 <code>SUBAGENT_INSTRUCTION.fresh_start=True</code> 上 — <code>call_subagent</code> 的 <code>fresh_start</code> <strong>默认 True</strong>，所以 Lead 默认每次调用都给 subagent 一个干净起点；仅当 Lead 显式传 <code>fresh_start=false</code> 时，第二次调用才能延续第一次调用的上下文，<strong>直到最近的 <code>COMPACTION_SUMMARY</code> boundary</strong>（如第一次调用中途触发过 compaction，第二次看到的仍是摘要 + 其后的事件，而非第一次的完整原始上下文）</li>
 <li><strong>结果回传</strong>：Subagent 无工具调用时，响应打包为 <code>&lt;subagent_result&gt;</code> XML，作为 <code>call_subagent</code> 的 tool_result 返回给 Lead</li>
 <li><strong>Lead 继续</strong>：Lead 看到 tool_result 后决定下一步（继续分发、整合结果、或完成）</li>
@@ -1839,10 +1839,10 @@
 <li><strong>关注点分离</strong>：Agent 的行为完全由提示词决定，执行逻辑统一在引擎中处理</li>
 <li><strong>可审查性</strong>：所有 Agent 的配置集中在 <code>config/agents/</code>，一目了然</li>
 </ul>
-<h3 id="完成路由不对称性的意图">完成路由不对称性的意图</h3>
+<h3 id="完成路由的意图lead-唯一出口">完成路由的意图（Lead 唯一出口）</h3>
 <ul>
-<li><strong>Lead 是唯一出口</strong>：只有 Lead Agent 的无工具调用才会终止执行循环</li>
-<li><strong>Subagent 必须回传</strong>：Subagent 完成后其响应作为工具结果返回给 Lead，由 Lead 决定下一步</li>
+<li><strong>Lead 是唯一出口</strong>：只有顶层 <code>_run_agent("lead_agent")</code> 的返回值会成为用户可见的最终响应</li>
+<li><strong>Subagent 必须回传</strong>：subagent 是 lead 的一次递归调用，其最终回复永远被包成 <code>&lt;subagent_result&gt;</code> tool_result 回到调用方，由 Lead 决定下一步</li>
 <li><strong>统一控制流</strong>：所有的任务调度、结果整合、最终响应都经过 Lead，避免 subagent 直接对用户输出</li>
 <li>这个设计使得 Lead 拥有全局视角，可以在多个 subagent 结果之间做出取舍和整合</li>
 </ul>

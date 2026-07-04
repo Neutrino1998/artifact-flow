@@ -924,10 +924,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#为什么-call_subagent-排最后" class="md-nav__link">
+  <a href="#为什么-call_subagent-不需要特殊排序" class="md-nav__link">
     <span class="md-ellipsis">
       
-        为什么 call_subagent 排最后
+        为什么 call_subagent 不需要特殊排序
       
     </span>
   </a>
@@ -1718,10 +1718,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#为什么-call_subagent-排最后" class="md-nav__link">
+  <a href="#为什么-call_subagent-不需要特殊排序" class="md-nav__link">
     <span class="md-ellipsis">
       
-        为什么 call_subagent 排最后
+        为什么 call_subagent 不需要特殊排序
       
     </span>
   </a>
@@ -1904,11 +1904,11 @@ ToolCall</strong>（不再 salvage 残缺内容，因为残缺的 <code>new_str<
 <h3 id="引擎中的工具执行">引擎中的工具执行</h3>
 <p>引擎的 <code>_execute_tools()</code> 在 BaseTool 管道之上增加了额外逻辑：</p>
 <ol>
-<li><strong>排序</strong>：<code>call_subagent</code> 排最后</li>
+<li><strong>自然序执行</strong>：按模型给出的顺序，不重排</li>
 <li><strong>取消检查</strong>：每个工具执行前检查 <code>hooks.check_cancelled()</code></li>
 <li><strong>Agent 白名单校验</strong>：工具必须在当前 agent 的 <code>tools</code> 配置中</li>
 <li><strong>权限处理</strong>：CONFIRM 级工具触发 Permission Interrupt</li>
-<li><strong>call_subagent 特殊路径</strong>：成功则切换 agent + break 跳出工具循环</li>
+<li><strong>call_subagent 路径</strong>：验证通过则原地递归 await 目标 agent 的循环（<code>_run_agent</code>），返回值包成 <code>&lt;subagent_result&gt;</code> tool_result，同轮剩余工具继续执行</li>
 <li><strong>超长结果落盘</strong>：成功结果若超过 <code>tool.max_result_size_chars</code>，经 <code>_maybe_persist_tool_result</code> 落盘为 artifact，回填预览（见下节）</li>
 <li><strong>事件推送</strong>：每个工具推送 <code>TOOL_START</code> 和 <code>TOOL_COMPLETE</code> 事件（含参数、结果、耗时）</li>
 </ol>
@@ -2032,8 +2032,8 @@ ToolCall</strong>（不再 salvage 残缺内容，因为残缺的 <code>new_str<
 <td><code>persist</code></td>
 <td><code>PersistFileTool</code></td>
 <td>AUTO</td>
-<td><code>path</code> (string)</td>
-<td>把工作区文件回写成<strong>新 artifact</strong>（显式 stage-out）</td>
+<td><code>path</code> (string), <code>artifact_id</code> (string, 可选)</td>
+<td>把工作区文件回写成 artifact（显式 stage-out）：默认按文件名产新件，给 <code>artifact_id</code> 走 upsert（不存在则以该 id 新建，存在则原地覆盖）</td>
 </tr>
 </tbody>
 </table>
@@ -2042,7 +2042,7 @@ ToolCall</strong>（不再 salvage 残缺内容，因为残缺的 <code>new_str<
 <li>Artifact 工具（create/update/rewrite/read/grep）是请求级创建的（绑定 <code>ArtifactService</code> 实例），名称为保留名（<code>RESERVED_TOOL_NAMES</code>），自定义工具不可同名</li>
 <li><strong>沙盒工具（<code>bash</code> / <code>mount</code> / <code>persist</code>）也是请求级创建的</strong>（<code>create_sandbox_tools</code>，绑定一个 per-turn <code>SandboxSession</code> + <code>ArtifactService</code>），容器 <strong>lazy</strong> 于首个沙盒工具调用。三者是语义不同的动词、共享一个 session；只挂在拥有它们的 agent（当前 <code>lead</code> / <code>research</code>）的 <code>tools</code> 白名单里。机制全貌见 <a href="../sandbox/">sandbox.md</a></li>
 <li><code>read_artifact</code> 不分页 / 无 <code>limit</code> 时仍受隐藏字符上限 <code>READ_ARTIFACT_MAX_CHARS</code>（默认 50000）保护，超出后 <code>has_more=true</code> 并附续读 hint，模型按 hint 调用下一段</li>
-<li><code>call_subagent</code> 的 <code>execute()</code> 仅做路由验证（目标 agent 是否存在、是否非 internal），实际的 agent 切换由引擎的 <code>_execute_tools</code> 处理</li>
+<li><code>call_subagent</code> 的 <code>execute()</code> 仅做路由验证（目标 agent 是否存在、是否非 internal），实际的子 agent 执行由引擎的 <code>_execute_tools</code> 原地递归 <code>_run_agent</code> 完成</li>
 </ul>
 <h2 id="工具注册">工具注册</h2>
 <h3 id="工具映射构建">工具映射构建</h3>
@@ -2097,11 +2097,11 @@ ToolCall</strong>（不再 salvage 残缺内容，因为残缺的 <code>new_str<
 <li><strong>简单可靠</strong>：不需要处理并行工具的依赖、竞争、部分失败等复杂场景</li>
 <li><strong>可观测性友好</strong>：事件流按时间顺序线性排列，易于调试和回放</li>
 </ul>
-<h3 id="为什么-call_subagent-排最后">为什么 call_subagent 排最后</h3>
+<h3 id="为什么-call_subagent-不需要特殊排序">为什么 call_subagent 不需要特殊排序</h3>
 <ul>
-<li><code>call_subagent</code> 成功后会 <code>break</code> 跳出工具循环（切换到目标 agent）</li>
-<li>如果不排最后，同一轮 LLM 响应中 <code>call_subagent</code> 之后的常规工具会被跳过</li>
-<li>排最后确保所有常规工具先完成，再进行 agent 切换</li>
+<li><code>call_subagent</code> 是原地递归 await：子 agent 的整个循环作为一次工具执行完成，返回后同轮剩余工具照常继续</li>
+<li>因此同一轮 <code>[tool, subagent, subagent, tool]</code> 混合调用按自然序串行执行，没有"之后的工具被跳过"的问题</li>
+<li>同轮多个调用的参数在模型生成时已冻结 — 这是多调用协议对<strong>所有工具</strong>的通用语义，<code>call_subagent</code> 不需要（也没有）额外说明；且串行执行下后一个 subagent 运行时能看到前一个写入的 artifact，指令写成"读某 artifact 再继续"即可表达依赖</li>
 </ul>
 
 

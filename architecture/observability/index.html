@@ -1880,12 +1880,12 @@
 </tr>
 <tr>
 <td><code>ERROR</code></td>
-<td><code>success=false</code>, <code>conversation_id</code>, <code>message_id</code>, <code>error</code>, <code>agent?</code>, <code>request_id?</code>, <code>execution_metrics</code></td>
+<td><code>success=false</code>, <code>conversation_id</code>, <code>message_id</code>, <code>error</code>, <code>agent?</code>, <code>request_id?</code>, <code>instance_id?</code>, <code>execution_metrics</code></td>
 </tr>
 </tbody>
 </table>
 <p><code>execution_metrics</code> 汇总整次执行指标（总耗时、总 token、每 agent 轮数等），是监控面板的核心字段。</p>
-<p>四个终态都由后处理的 <code>decide_terminal</code>（flush 之后、单一裁判）构建。<code>ERROR</code> 的 <code>request_id</code> 在错误创建时冻结写入 <code>data</code>（不是读边界注入），是日志定位锚点。两处 transport 层直发的 ERROR（events 持久化失败 / post-processing 异常）绕过 <code>decide_terminal</code>。<strong>注意</strong>：<code>MessageEvent</code> 表存的是<strong>未脱敏</strong>的原始 <code>error</code> 文本（事件溯源 = 完整审计 + DEBUG replay）；脱敏（<code>error</code> → <code>"Internal server error"</code>）只在用户面读边界 DEBUG-gated 施加，admin 观测端点不脱敏。</p>
+<p>四个终态都由后处理的 <code>decide_terminal</code>（flush 之后、单一裁判）构建。<code>ERROR</code> 的 <code>request_id</code> 与 <code>instance_id</code>（受理实例，多副本下答"这次失败发生在哪台"）在错误创建时冻结写入 <code>data</code>（不是读边界注入——读边界拿到的会是 replay 请求落到的那个实例，错的），是日志定位锚点。两处 transport 层直发的 ERROR（events 持久化失败 / post-processing 异常）绕过 <code>decide_terminal</code>。<strong>注意</strong>：<code>MessageEvent</code> 表存的是<strong>未脱敏</strong>的原始 <code>error</code> 文本（事件溯源 = 完整审计 + DEBUG replay）；脱敏（<code>error</code> → <code>"Internal server error"</code>）只在用户面读边界 DEBUG-gated 施加，admin 观测端点不脱敏。</p>
 <h3 id="agent-层">Agent 层</h3>
 <table>
 <thead>

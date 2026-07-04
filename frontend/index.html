@@ -2157,7 +2157,7 @@
 <h2 id="安全响应头与-csp">安全响应头与 CSP</h2>
 <p><code>src/middleware.ts</code>（Next middleware，每请求执行）+ <code>src/lib/csp.ts</code> 注入 Content-Security-Policy 与一组静态加固头：</p>
 <ul>
-<li><strong>每请求随机 nonce</strong>：middleware 生成 base64 nonce 写进 <code>script-src 'nonce-&lt;nonce&gt;' 'strict-dynamic'</code>，并经 <code>x-nonce</code> 请求头传给 <code>app/layout.tsx</code>，盖到那条内联主题 bootstrap 脚本上（暗色无闪烁那段）。<strong>CSP 放 Next 而非 nginx</strong>：nonce 必须与渲染同源生成，nginx 看不到它、只能退回 <code>'unsafe-inline'</code>，失去意义。</li>
+<li><strong>每请求随机 nonce</strong>：middleware 生成 base64 nonce 写进 <code>script-src 'nonce-&lt;nonce&gt;' 'strict-dynamic'</code>，并经 <code>x-nonce</code> 请求头传给 <code>app/layout.tsx</code>，盖到那条内联主题 bootstrap 脚本上（暗色无闪烁那段）。<strong>CSP 放 Next 而非反向代理</strong>：nonce 必须与渲染同源生成，代理层（Caddy）看不到它、只能退回 <code>'unsafe-inline'</code>，失去意义。</li>
 <li><strong><code>connect-src</code> 从 <code>NEXT_PUBLIC_API_URL</code> 派生</strong>：prod 同源部署时为空 → 退回 <code>'self'</code>；配置独立后端域时把该 origin 显式列入（dev 放宽）。</li>
 <li><strong><code>img-src 'self' data: blob:</code></strong>（<strong>刻意不含 <code>https:</code></strong>）：作为补偿控制收窄信标外泄面；下载 / 预览用图走 data/blob。</li>
 <li><code>frame-ancestors 'none'</code> 防点击劫持；另有静态头 <code>X-Frame-Options: DENY</code> / <code>X-Content-Type-Options</code> / <code>Referrer-Policy</code> / <code>Permissions-Policy</code>。</li>
