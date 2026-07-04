@@ -126,6 +126,13 @@ export interface ArtifactUpdatedData {
     deleted_len: number;
     inserted_text: string;
   };
+  // Blob overwrite (sandbox persist artifact_id=…): bytes replaced in place,
+  // no text payload (content=""). Carries content_type so a cross-turn artifact
+  // whose first event this turn is this one still renders the binary view
+  // (no live base to inherit from). Bytes via GET …/raw after flush.
+  has_blob?: boolean;
+  blob_size?: number;
+  content_type?: string;
 }
 
 export interface PermissionRequestData {

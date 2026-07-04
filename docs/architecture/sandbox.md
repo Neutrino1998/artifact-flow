@@ -92,7 +92,7 @@ controller_factory（每 turn）
 读写两侧都做 **realpath 圈地 + `O_NOFOLLOW`**（`src/tools/builtin/sandbox_fs.py`）：容器内代码（含 bash 留下的后台进程）能在工作区造任意 symlink，宿主侧跟链会读 / 写池外文件。所有工作区文件访问一律走 `sandbox_fs` 的逐级 `openat` 原语，**业务代码不得再手写 `os.walk` / `os.open` / `os.path` 访问工作区**。`mount` 写后 `fchmod(fd, 0o666)`——绕过 backend umask，否则 umask 077 下落 0600、容器 uid 1000 读不了。
 
 - `mount` 的字节来源二分：blob artifact 取原始字节（本轮 staged 上传经 `get_blob`，其余走 DB）；文本 artifact 取 WorkingSet overlay 的**当前内容**（本轮 dirty / new 必须可 mount，直读 DB 是空的）按 UTF-8 写盘。on-disk 名 = artifact id（已是 fs-safe 句柄）。
-- `persist` 默认产新 artifact（同名 `_N` dedup）；给 `artifact_id` 则**原地覆盖**既有 artifact——文本走 rewrite（版本 +1 可回溯），blob 走可变单版原地替换（不产版本行，配额按净增量准入：抵扣被替换的旧字节）。种类错配（文本↔二进制）loud-fail，`has_blob` 判别 set-once 不因覆盖翻转。**刻意不做版本化 blob**：迭代改包（写代码等平凡修改）的历史归沙盒内 git 管，避免每次小改在 DB 里堆一份 MB 级字节。文本 / 二进制二分：可严格 UTF-8 解码且 ≤ `SANDBOX_PERSIST_MAX_TEXT_BYTES` → 文本 artifact（可编辑、版本化）；否则 blob（可变单版、可下载）。
+- `persist` 默认产新 artifact（同名 `_N` dedup）；给 `artifact_id` 则**原地覆盖**既有 artifact——文本目标走 rewrite（版本 +1 可回溯），blob 目标走可变单版原地替换（不产版本行，配额按净占用投影准入：本轮全部 replace-staged 的 DB 旧字节整体抵扣，否则同轮覆盖多个已落库 blob 会双份记账误拒）。**target 类型优先**（`has_blob` 判别 set-once 不因覆盖翻转）：blob 目标接受任意内容（恰好可解码的文本按字节存，不因新字节可解码就拒掉逼模型堆新件）；唯一拒绝方向 = 二进制内容盖文本 artifact（字节无文本表示）。**刻意不做版本化 blob**：迭代改包（写代码等平凡修改）的历史归沙盒内 git 管，避免每次小改在 DB 里堆一份 MB 级字节。配套：`/raw` 响应带 `Cache-Control: no-cache`——可变单版下 URL 与 version 都不变，旧契约「字节变 = 新 id = 新 URL」的天然 cache-bust 已不存在。文本 / 二进制二分（产新件时）：可严格 UTF-8 解码且 ≤ `SANDBOX_PERSIST_MAX_TEXT_BYTES` → 文本 artifact（可编辑、版本化）；否则 blob（可变单版、可下载）。
 
 ## 磁盘配额：三层
 

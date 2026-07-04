@@ -280,15 +280,17 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
         content = base?.content ?? '';
         omitted = base?.omitted ?? true;
       }
+      // Blob overwrite carries has_blob/content_type so a cross-turn artifact
+      // with no live base still renders as binary, not an empty markdown view.
       const live: LiveArtifact = {
         content,
         version: d.current_version,
-        contentType: base?.contentType ?? 'text/markdown',
+        contentType: d.content_type ?? base?.contentType ?? 'text/markdown',
         title: base?.title ?? d.id,
         source: base?.source ?? 'agent',
         omitted,
         originalFilename: base?.originalFilename ?? null,
-        hasBlob: base?.hasBlob ?? false,
+        hasBlob: d.has_blob ?? base?.hasBlob ?? false,
       };
       const liveContent = { ...s.liveContent, [d.id]: live };
       const artifacts = s.artifacts.map((a) =>

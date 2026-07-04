@@ -233,6 +233,34 @@ describe('artifactStore live reduce (ARTIFACT_* events)', () => {
     expect(useArtifactStore.getState().liveContent['doc'].content).toBe('brand new');
   });
 
+  test('UPDATED blob overwrite with NO live base renders binary, not empty markdown', () => {
+    // Cross-turn `mount → edit → persist artifact_id=…`: the artifact came from a
+    // prior turn, so its first event this turn is the blob ARTIFACT_UPDATED. It must
+    // synthesize a binary live entry from the event's has_blob/content_type — not an
+    // empty text/markdown view (reviewer #1 regression).
+    useArtifactStore.getState().applyArtifactUpdated({
+      id: 'pkg.zip', current_version: 1, content: '',
+      has_blob: true, blob_size: 2048, content_type: 'application/zip',
+    });
+    const st = useArtifactStore.getState();
+    expect(st.liveContent['pkg.zip'].hasBlob).toBe(true);
+    expect(st.liveContent['pkg.zip'].contentType).toBe('application/zip');
+  });
+
+  test('UPDATED without blob fields keeps base hasBlob/contentType (text path unchanged)', () => {
+    const s = useArtifactStore.getState();
+    s.applyArtifactCreated({
+      id: 'doc', title: 'Doc', content_type: 'text/plain',
+      source: 'agent', current_version: 1, content: 'old',
+    });
+    useArtifactStore.getState().applyArtifactUpdated({
+      id: 'doc', current_version: 2, content: 'new',
+    });
+    const st = useArtifactStore.getState();
+    expect(st.liveContent['doc'].hasBlob).toBe(false);
+    expect(st.liveContent['doc'].contentType).toBe('text/plain');
+  });
+
   test('selectFromLive returns true and opens user-picked (not auto)', () => {
     const s = useArtifactStore.getState();
     s.applyArtifactCreated({

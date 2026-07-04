@@ -296,6 +296,17 @@ class TestHasBlobField:
         resp = await client.get(f"/api/v1/artifacts/{text_session}/{text_artifact}")
         assert resp.json()["has_blob"] is False
 
+    async def test_raw_disables_caching(
+        self, client: AsyncClient, seed_blob_artifact: Tuple[str, str]
+    ):
+        """blob 可变单版(persist 覆盖回写原地换字节,URL/version 均不变)后,
+        /raw 必须显式禁缓存 —— 旧契约「字节变=新 id=新 URL」的天然 cache-bust
+        已不存在,浏览器/中间代理复用旧字节会看到覆盖前的内容。"""
+        session_id, artifact_id = seed_blob_artifact
+        resp = await client.get(f"/api/v1/artifacts/{session_id}/{artifact_id}/raw")
+        assert resp.status_code == 200
+        assert resp.headers["cache-control"] == "no-cache"
+
     async def test_admin_routes_mark_blob(
         self, admin_client: AsyncClient, seed_blob_artifact: Tuple[str, str]
     ):

@@ -297,24 +297,28 @@ class ArtifactRepository(BaseRepository[Artifact]):
         result = await self._session.execute(query)
         return result.scalar_one_or_none()
 
-    async def get_blob_size(
+    async def get_blob_sizes_total(
         self,
         session_id: str,
-        artifact_id: str,
-    ) -> Optional[int]:
-        """获取 blob 的字节数（只读 size_bytes 冗余列，不载入 data）。
+        artifact_ids: List[str],
+    ) -> int:
+        """一批 artifact 的 blob 总字节（只读 size_bytes 冗余列，不载入 data）。
 
-        配额抵扣用：persist 覆盖回写时，被替换的旧 blob 字节应从「已占用」里
-        扣除，否则替换大文件在配额边缘会被误拒。无 blob → None。
+        配额抵扣用：本轮所有 replace-staged 的 blob,其 DB 旧字节在 flush 前
+        仍计在 committed 里、新字节又已进 staged —— 准入时须把这批旧字节整体
+        扣除,否则同轮覆盖多个已落库 blob 会按「旧+新」双份记账而误拒。
+        空入参短路返回 0。
         """
-        query = select(ArtifactBlob.size_bytes).where(
+        if not artifact_ids:
+            return 0
+        stmt = select(func.coalesce(func.sum(ArtifactBlob.size_bytes), 0)).where(
             and_(
                 ArtifactBlob.session_id == session_id,
-                ArtifactBlob.artifact_id == artifact_id,
+                ArtifactBlob.artifact_id.in_(artifact_ids),
             )
         )
-        result = await self._session.execute(query)
-        return result.scalar_one_or_none()
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one())
 
     async def update_artifact_blob(
         self,

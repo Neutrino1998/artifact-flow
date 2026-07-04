@@ -224,7 +224,11 @@ async def get_artifact_raw(
             "Content-Disposition": (
                 f'{disposition}; filename="{ascii_fallback}"; '
                 f"filename*=UTF-8''{utf8_encoded}"
-            )
+            ),
+            # blob 是可变单版(persist 覆盖回写原地换字节,URL 与 version 都不变),
+            # 旧契约「字节变 = 新 id = 新 URL」的天然 cache-bust 已不存在 —— 显式
+            # 禁缓存,否则浏览器内存缓存 / 中间代理可能继续供旧字节。
+            "Cache-Control": "no-cache",
         },
     )
 

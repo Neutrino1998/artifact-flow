@@ -953,19 +953,31 @@ class TestReplaceFromUpload:
         assert row.current_version == 1
         assert await artifact_repo.get_version(session_id, aid, 2) is None
 
-    async def test_kind_mismatch_rejected_both_ways(
+    async def test_binary_over_text_rejected(
         self, artifact_service: ArtifactService, session_id: str
     ):
+        """唯一不可覆盖方向:字节无文本表示,不能盖文本 artifact。"""
         text_id = await self._upload_text(artifact_service, session_id)
-        blob_id = await self._upload_blob(artifact_service, session_id)
         ok, msg, _ = await artifact_service.replace_from_upload(
             session_id, text_id, blob=b"binary"
         )
         assert not ok and "text artifact" in msg
-        ok, msg, _ = await artifact_service.replace_from_upload(
-            session_id, blob_id, content="text"
+
+    async def test_text_content_over_blob_coerced_to_bytes(
+        self, artifact_service: ArtifactService, artifact_repo: ArtifactRepository, session_id: str
+    ):
+        """target 类型优先:blob 目标 + 恰好 UTF-8 可解码的内容 → 按字节存,
+        不拒掉逼模型堆新件(二进制编辑成可解码文本 / 截空文件的场景)。"""
+        blob_id = await self._upload_blob(artifact_service, session_id)
+        await artifact_service.flush_all(session_id)
+        ok, msg, info = await artifact_service.replace_from_upload(
+            session_id, blob_id, content="now plain text"
         )
-        assert not ok and "binary artifact" in msg
+        assert ok, msg
+        assert info["has_blob"] is True  # 类型保持,不翻转
+        await artifact_service.flush_all(session_id)
+        data, _ = await _read_blob_row(artifact_repo, session_id, blob_id)
+        assert data == "now plain text".encode("utf-8")
 
     async def test_replace_unknown_artifact_fails(
         self, artifact_service: ArtifactService, session_id: str
@@ -996,6 +1008,47 @@ class TestReplaceFromUpload:
         )
         assert not ok
         assert "quota" in msg.lower()
+
+    async def test_replace_two_committed_blobs_same_turn_credits_both(
+        self, artifact_service: ArtifactService, session_id: str, monkeypatch
+    ):
+        """净占用投影回归(reviewer #2):credit 覆盖本轮**全部** replace-staged,
+        不止当前目标。DB A=600,B=600,配额 1500;A→500 再 B→500(真实终态
+        1000)——只按单目标 credit 时 B 的准入算 1200+500-600+500=1600 误拒。"""
+        monkeypatch.setattr(config, "ARTIFACT_USER_QUOTA_BYTES", 1500)
+        aid_a = await self._upload_blob(artifact_service, session_id, name="a.zip", data=b"a" * 600)
+        aid_b = await self._upload_blob(artifact_service, session_id, name="b.zip", data=b"b" * 600)
+        await artifact_service.flush_all(session_id)
+
+        ok1, msg1, _ = await artifact_service.replace_from_upload(
+            session_id, aid_a, blob=b"x" * 500
+        )
+        assert ok1, msg1
+        ok2, msg2, _ = await artifact_service.replace_from_upload(
+            session_id, aid_b, blob=b"y" * 500
+        )
+        assert ok2, msg2
+        # 真超限仍拦:再把 A 换成 600 → 投影 500+600=1100... 换成 1100 → 500+1100=1600 > 1500
+        ok3, msg3, _ = await artifact_service.replace_from_upload(
+            session_id, aid_a, blob=b"z" * 1100
+        )
+        assert not ok3 and "quota" in msg3.lower()
+
+    async def test_create_after_replace_credits_replaced_bytes(
+        self, artifact_service: ArtifactService, session_id: str, monkeypatch
+    ):
+        """新建路径同样吃 credit:覆盖 A(600→500)后新建 500,投影 1000 ≤ 1100
+        须放行(不抵扣 A 旧字节会算 600+500+500=1600 误拒)。"""
+        monkeypatch.setattr(config, "ARTIFACT_USER_QUOTA_BYTES", 1100)
+        aid = await self._upload_blob(artifact_service, session_id, data=b"a" * 600)
+        await artifact_service.flush_all(session_id)
+
+        ok, msg, _ = await artifact_service.replace_from_upload(
+            session_id, aid, blob=b"x" * 500
+        )
+        assert ok, msg
+        ok2, msg2, _ = await _persist_blob(artifact_service, session_id, "new.bin", 500)
+        assert ok2, msg2
 
     async def test_blob_double_replace_same_turn_excludes_own_staged(
         self, artifact_service: ArtifactService, session_id: str, monkeypatch
@@ -1055,12 +1108,13 @@ class TestReplaceFromUpload:
         fresh.set_session(session_id)
         ok, msg, _ = await fresh.replace_from_upload(session_id, aid, blob=b"turn2!")
         assert ok, msg
-        # 判别来自 DB 列:文本内容打 blob 目标照拒
-        ok2, msg2, _ = await fresh.replace_from_upload(session_id, aid, content="txt")
-        assert not ok2 and "binary artifact" in msg2
+        # 判别来自 DB 列:文本内容打 blob 目标 → target 类型优先,按字节 coerce
+        ok2, msg2, info2 = await fresh.replace_from_upload(session_id, aid, content="txt")
+        assert ok2, msg2
+        assert info2["has_blob"] is True
         await fresh.flush_all(session_id)
         data, _ = await _read_blob_row(artifact_repo, session_id, aid)
-        assert data == b"turn2!"
+        assert data == b"txt"
 
     async def test_xor_guard_rejects_both_or_neither(
         self, artifact_service: ArtifactService, session_id: str

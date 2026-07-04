@@ -228,9 +228,11 @@ class PersistFileTool(BaseTool):
     """把工作区文件回写成 artifact(显式 stage-out,原则 4)。
 
     - 默认产新 artifact(同名 `_N` dedup);给 `artifact_id` 则**原地覆盖**既有
-      artifact —— 文本走 rewrite(版本 +1 可回溯),blob 走可变单版原地替换
-      (不产版本历史;迭代改包的版本管理归沙盒内 git,避免平凡修改堆出一摞
-      `_N` 副本吃掉配额)。种类错配(文本↔二进制)loud-fail。
+      artifact —— 文本目标走 rewrite(版本 +1 可回溯),blob 目标走可变单版
+      原地替换(不产版本历史;迭代改包的版本管理归沙盒内 git,避免平凡修改
+      堆出一摞 `_N` 副本吃掉配额)。target 类型优先:blob 目标接受任意内容
+      (可解码文本按字节存);唯一拒绝方向 = 二进制内容盖文本 artifact
+      (字节无文本表示)。
     - persist 落回来就是一次普通 artifact 写:进 WorkingSet,随 turn 末
       flush_all 落库,与 create_artifact 同路。
     - 文本/二进制二分:可严格 UTF-8 解码且 ≤ SANDBOX_PERSIST_MAX_TEXT_BYTES
@@ -270,16 +272,52 @@ class PersistFileTool(BaseTool):
                 description=(
                     "Optional: id of an existing artifact to overwrite in place with "
                     "this file's content (id, title and type are kept; the target "
-                    "must be the same kind — text over text, binary over binary). "
-                    "Use it when saving back an updated version of something you "
-                    "mounted (e.g. an edited code package), so trivial edits don't "
-                    "pile up duplicate artifacts. Overwriting a binary artifact "
-                    "replaces its bytes permanently — no version history is kept "
-                    "for binaries; rely on git inside the sandbox if you need history."
+                    "keeps its kind — a binary file cannot overwrite a text "
+                    "artifact). Use it when saving back an updated version of "
+                    "something you mounted (e.g. an edited code package), so "
+                    "trivial edits don't pile up duplicate artifacts. Overwriting "
+                    "a binary artifact replaces its bytes permanently — no version "
+                    "history is kept for binaries; rely on git inside the sandbox "
+                    "if you need history."
                 ),
                 required=False,
             ),
         ]
+
+    @staticmethod
+    def _persist_success(
+        raw_path: str,
+        artifact_id: str,
+        n_bytes: int,
+        content_type: str,
+        has_blob: bool,
+        *,
+        replaced: bool,
+    ) -> ToolResult:
+        """新建 / 覆盖共用的成功收尾(kind 标签与 metadata 单点拼装,防两处 drift)。"""
+        kind = (
+            "binary artifact (user-downloadable)" if has_blob
+            else "editable text artifact"
+        )
+        if replaced:
+            data = (
+                f"Persisted '{raw_path}' over existing artifact '{artifact_id}' "
+                f"({n_bytes} bytes, {content_type}, {kind}, content replaced in place)."
+            )
+        else:
+            data = (
+                f"Persisted '{raw_path}' as new artifact '{artifact_id}' "
+                f"({n_bytes} bytes, {content_type}, {kind})."
+            )
+        metadata = {
+            "artifact_id": artifact_id,
+            "bytes": n_bytes,
+            "content_type": content_type,
+            "has_blob": has_blob,
+        }
+        if replaced:
+            metadata["replaced"] = True
+        return ToolResult(success=True, data=data, metadata=metadata)
 
     @staticmethod
     def _classify(filename: str, data: bytes) -> Tuple[Optional[str], str]:
@@ -377,8 +415,9 @@ class PersistFileTool(BaseTool):
         text, mime = self._classify(filename, data)
 
         if target_id:
-            # 覆盖回写:同一 artifact 换内容(文本 rewrite / blob 原地替换),
-            # 种类校验与配额净增量准入都在 service 层。
+            # 覆盖回写:同一 artifact 换内容(文本目标 rewrite / blob 目标原地替换,
+            # target 类型优先),种类校验与配额准入都在 service 层。content_type 用
+            # info 里的(目标 artifact 的权威 MIME,覆盖不改型,非本文件的猜测值)。
             success, message, info = await self._service.replace_from_upload(
                 session_id=session_id,
                 artifact_id=target_id,
@@ -387,23 +426,9 @@ class PersistFileTool(BaseTool):
             )
             if not success:
                 return ToolResult(success=False, error=message)
-            kind = (
-                "editable text artifact" if not info["has_blob"]
-                else "binary artifact (user-downloadable)"
-            )
-            return ToolResult(
-                success=True,
-                data=(
-                    f"Persisted '{raw_path}' over existing artifact '{target_id}' "
-                    f"({len(data)} bytes, {kind}, content replaced in place)."
-                ),
-                metadata={
-                    "artifact_id": target_id,
-                    "bytes": len(data),
-                    "content_type": info["content_type"],
-                    "has_blob": info["has_blob"],
-                    "replaced": True,
-                },
+            return self._persist_success(
+                raw_path, target_id, len(data),
+                info["content_type"], info["has_blob"], replaced=True,
             )
 
         if text is not None:
@@ -428,20 +453,8 @@ class PersistFileTool(BaseTool):
         if not success:
             return ToolResult(success=False, error=message)
 
-        new_id = info["id"]
-        kind = "editable text artifact" if text is not None else "binary artifact (user-downloadable)"
-        return ToolResult(
-            success=True,
-            data=(
-                f"Persisted '{raw_path}' as new artifact '{new_id}' "
-                f"({len(data)} bytes, {mime}, {kind})."
-            ),
-            metadata={
-                "artifact_id": new_id,
-                "bytes": len(data),
-                "content_type": mime,
-                "has_blob": text is None,
-            },
+        return self._persist_success(
+            raw_path, info["id"], len(data), mime, text is None, replaced=False,
         )
 
 
