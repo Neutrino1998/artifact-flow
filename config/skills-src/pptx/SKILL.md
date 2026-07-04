@@ -69,7 +69,10 @@ for i, slide in enumerate(Presentation("输入.pptx").slides, 1):
             print(shape.text_frame.text)
 ```
 
-页内图片:`shape.image.blob` 写出文件 → `persist` → 委派 vision_agent 识别。
+页内图片:`shape.image.blob` 写出文件 → `persist` → 视觉识别。识别按你自己的
+识图能力分流:`read_artifact` 能看到图像内容就直接读;只拿到占位文本(你的模型
+不支持识图)则 `call_subagent` 委派 `vision_agent`(若 `available_subagents` 里没有,
+说明本部署无图片识别能力,如实告知用户)。
 
 ## 修改已有 pptx
 

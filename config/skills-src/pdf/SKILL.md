@@ -1,8 +1,9 @@
 ---
 name: pdf
 description: >
-  读取 PDF:提取文本与表格、拆分合并页面;扫描件/纯图 PDF 渲染成图片后交给
-  vision_agent 识别。当用户上传 PDF 要读内容、抽表格、拆合文档时激活。
+  读取 PDF:提取文本与表格、拆分合并页面;扫描件/纯图 PDF 渲染成图片后做视觉
+  识别(自己能识图就直接读,否则委派视觉子代理)。当用户上传 PDF 要读内容、
+  抽表格、拆合文档时激活。
   工作在沙盒中进行。
 license: Apache-2.0
 compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 pypdf、pdfplumber、pypdfium2;无网络,无 OCR 引擎。
@@ -14,7 +15,7 @@ metadata:
 
 先 `mount` 文件、`mount_skill` 本技能(`/workspace/.skills/pdf/`,记作 `$SKILL`)。
 包内文件:[pdf_to_images.py](scripts/pdf_to_images.py)。
-第一步永远是**判断文本层**:有文本层走 pdfplumber,没有(扫描件)走渲染+vision_agent。
+第一步永远是**判断文本层**:有文本层走 pdfplumber,没有(扫描件)走渲染+视觉识别。
 
 ## 判断与提取文本
 
@@ -41,19 +42,24 @@ with pdfplumber.open("输入.pdf") as pdf:
 
 线框不规整时表格会拆错行列——抽完抽查几行对原文,不对就调
 `table_settings`(`{"vertical_strategy": "text"}` 应对无框线表),仍不行按
-§扫描件把该页渲染成图交 vision_agent 读。
+§扫描件把该页渲染成图做视觉识别。
 
-## 扫描件 / 纯图 PDF(无 OCR,走视觉子代理)
+## 扫描件 / 纯图 PDF(无 OCR,靠视觉识别)
 
-本环境没有 OCR 引擎,识别靠 vision_agent:
+本环境没有 OCR 引擎,靠多模态视觉识别。先把页面渲染成图:
 
 ```bash
 python $SKILL/scripts/pdf_to_images.py 输入.pdf pages/ --pages 1-5 --dpi 150
 ```
 
-然后逐张 `persist` 需要识别的 `pages/page_*.png` 为 artifact,`call_subagent`
-委派 vision_agent(给 artifact id + 具体问题:转写全文/读某个表/找某个字段)。
-长文档分批(每批 ≤5 页)委派,拿回结果再继续,不要一次全转。
+逐张 `persist` 需要识别的 `pages/page_*.png` 为 artifact,然后按你自己的识图能力分流:
+
+- **你自己能识图**——`read_artifact` 该图能看到图像内容 → 直接读、转写,无需委派。
+- **看不到图**——`read_artifact` 只拿到占位文本(你的模型不支持识图)→ `call_subagent`
+  委派 `vision_agent`(给 artifact id + 具体问题:转写全文/读某个表/找某个字段)。
+  若 `available_subagents` 里没有 `vision_agent`,说明本部署无图片识别能力,如实告知用户。
+
+长文档分批(每批 ≤5 页),拿回结果再继续,不要一次全转。
 
 ## 拆分 / 合并 / 旋转
 
@@ -74,7 +80,7 @@ with open("输出.pdf", "wb") as f:
 
 - **不生成 PDF**(镜像无 reportlab/LaTeX)——用户要"生成 PDF 报告"时,产出
   docx(可用 Word 另存 PDF)或 HTML artifact(浏览器可打印为 PDF),并说明。
-- **不做 OCR**:识别质量取决于 vision_agent;手写体/低分辨率扫描的结果要
+- **不做 OCR**:识别质量取决于视觉模型;手写体/低分辨率扫描的结果要
   标注不确定性。
 - PDF 内嵌图片的批量抽取:渲染整页(pdf_to_images.py)通常够用;确需原图时用
   `page.images`(pdfplumber)定位后截取。

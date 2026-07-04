@@ -4,7 +4,8 @@ description: >
   读取、创建、编辑 Word 文档(.docx),含审阅能力:读出/产生/接受/拒绝修订
   (track changes)与批注。当用户上传 docx 要提取内容,或要求生成 Word 文档、
   按要求改文档、处理修订与批注时激活。工作在沙盒中进行(mount 文档 →
-  bash 处理 → persist 结果),扫描件与文档内图片交给 vision_agent 识别。
+  bash 处理 → persist 结果),扫描件与文档内图片做视觉识别(自己能识图就直接读,
+  否则委派视觉子代理)。
 license: Apache-2.0
 compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 pandoc 3.x、python-docx、lxml;无网络。
 metadata:
@@ -30,7 +31,7 @@ metadata:
 | 常规修改(不留痕) | 小改 python-docx;结构性改动 unpack→改 XML→pack(§编辑) |
 | 以修订方式修改(留痕) | unpack→按 references/redlines.md 写标记→pack→必跑校验(§修订) |
 | 接受/拒绝修订、加批注 | 现成脚本,一条命令(§修订) |
-| 文档带图/扫描件 | 提取图片 → persist → 委派 vision_agent(§图片) |
+| 文档带图/扫描件 | 提取图片 → persist → 视觉识别(§图片) |
 
 ## 读取
 
@@ -127,12 +128,15 @@ python $SKILL/scripts/add_comment.py 输入.docx 输出.docx \
 
 ## 图片与扫描件
 
-你看不到图,vision_agent 看得到。链路:
+链路:
 
 1. 抽图:读取时 `--extract-media=media`,或 unpack 后拿 `work/word/media/*`。
 2. `persist` 图片文件为 artifact。
-3. `call_subagent` 委派 vision_agent,给出 artifact id + 具体问题
-   (转写文字/描述图表/读表格)。
+3. 按你自己的识图能力分流:
+   - **你自己能识图**——`read_artifact` 该图能看到图像内容 → 直接读、转写。
+   - **看不到图**——只拿到占位文本(你的模型不支持识图)→ `call_subagent` 委派
+     `vision_agent`,给出 artifact id + 具体问题(转写文字/描述图表/读表格);若
+     `available_subagents` 里没有 `vision_agent`,说明本部署无图片识别能力,如实告知用户。
 
 写入图片:python-docx `add_picture`(见§创建);向既有文档插图优先也走
 python-docx,手写 OOXML 插图涉及 rels+Content_Types 样板,费力易错。

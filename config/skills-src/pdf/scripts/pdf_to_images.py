@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""PDF 页面渲染成 PNG —— 扫描件/纯图 PDF 交给 vision_agent 的前置步骤。
+"""PDF 页面渲染成 PNG —— 扫描件/纯图 PDF 视觉识别的前置步骤。
 
 用法:
     python pdf_to_images.py 输入.pdf 输出目录/ [--pages 1-5,8] [--dpi 150]
 
 产出 输出目录/page_0001.png …(页码从 1 计)。默认渲染前 20 页 —— 更长的文档
-分批渲染分批委派,不要一次转几百页把配额打爆。渲染后把需要识别的页
-`persist` 成 artifact,再委派 vision_agent。
+分批渲染,不要一次转几百页把配额打爆。渲染后把需要识别的页 `persist` 成
+artifact,再按识图能力分流:自己能识图就 `read_artifact` 直接读,否则委派 vision_agent。
 """
 
 import argparse
