@@ -6,7 +6,7 @@ import type { InstanceHeartbeat, AdminInstancesResponse } from '@/lib/api';
 import { parseUtcIso } from '@/lib/time';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 
-// 舰队实例面板轮询周期。心跳 sample 周期是 30s,面板 10s 轮询让状态色(尤其
+// 实例监控面板轮询周期。心跳 sample 周期是 30s,面板 10s 轮询让状态色(尤其
 // 陈旧→红)在心跳停更后一个 sample 周期内可见,又不过度打后端。
 const POLL_MS = 10_000;
 
@@ -186,10 +186,12 @@ export default function InstancePanel() {
     <div className="flex-1 flex flex-col bg-chat dark:bg-chat-dark overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-3 px-5 py-3 border-b border-border dark:border-border-dark">
-        <h2 className="text-base font-semibold text-text-primary dark:text-text-primary-dark">舰队实例</h2>
-        <span className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-          {data ? (data.shared ? `Redis 舰队 · ${instances.length} 个` : '单机本地视图') : ''}
-        </span>
+        <div className="flex items-baseline gap-2 min-w-0">
+          <h2 className="text-base font-semibold text-text-primary dark:text-text-primary-dark">实例监控</h2>
+          <span className="text-xs text-text-tertiary dark:text-text-tertiary-dark truncate">
+            {data ? (data.shared ? `多实例 · ${instances.length} 个` : '单机本地视图') : ''}
+          </span>
+        </div>
         <button
           onClick={load}
           className="ml-auto text-xs text-text-secondary dark:text-text-secondary-dark hover:text-accent transition-colors"

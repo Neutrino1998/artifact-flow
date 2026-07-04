@@ -231,7 +231,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
                   <path d="M8 12l3-4" />
                   <circle cx="8" cy="12" r="0.6" fill="currentColor" stroke="none" />
                 </svg>
-                运行监控
+                会话监控
               </button>
             )}
 
@@ -247,7 +247,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
                   <circle cx="4.5" cy="4.5" r="0.6" fill="currentColor" stroke="none" />
                   <circle cx="4.5" cy="11.5" r="0.6" fill="currentColor" stroke="none" />
                 </svg>
-                舰队实例
+                实例监控
               </button>
             )}
 

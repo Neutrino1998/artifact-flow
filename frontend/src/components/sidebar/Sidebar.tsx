@@ -239,7 +239,7 @@ export default function Sidebar() {
       <div className="flex items-center justify-between px-4 py-3 border-b border-border dark:border-border-dark">
         <div className="min-w-0">
           <h1 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark">
-            {inObservability ? '运行监控' : inUserMgmt ? '用户管理' : inToolUnitMgmt ? '工具管理' : inSkills ? '技能管理' : inInstances ? '舰队实例' : APP_NAME}
+            {inObservability ? '会话监控' : inUserMgmt ? '用户管理' : inToolUnitMgmt ? '工具管理' : inSkills ? '技能管理' : inInstances ? '实例监控' : APP_NAME}
           </h1>
           {!inObservability && !inUserMgmt && !inToolUnitMgmt && !inSkills && !inInstances && (
             <p className="text-xs text-text-secondary dark:text-text-secondary-dark">
