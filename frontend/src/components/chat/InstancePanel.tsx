@@ -55,11 +55,11 @@ function uptime(iso: string | undefined, nowMs: number): string {
 
 function Metric({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
-    <div className="flex flex-col">
-      <span className="text-[10px] uppercase tracking-wide text-text-tertiary dark:text-text-tertiary-dark">
+    <div className="flex flex-col min-w-0">
+      <span className="text-[10px] uppercase tracking-wide text-text-tertiary dark:text-text-tertiary-dark whitespace-nowrap truncate">
         {label}
       </span>
-      <span className={`text-sm tabular-nums ${tone ?? 'text-text-primary dark:text-text-primary-dark'}`}>
+      <span className={`text-sm tabular-nums whitespace-nowrap ${tone ?? 'text-text-primary dark:text-text-primary-dark'}`}>
         {value}
       </span>
     </div>
@@ -101,14 +101,24 @@ function InstanceCard({ inst, nowMs, isSelf }: { inst: InstanceHeartbeat; nowMs:
           (前端不再自判阈:旧的 loop≥500 高亮复制了 LOOP_LAG_WARN_MS、errCount>0 红
           又与窗口化的绿点矛盾——lifetime 计数 hours 后仍红。单点归后端 = by-construction
           消除两处漂移)。*/}
-      <div className="mt-3 grid grid-cols-4 gap-3">
-        <Metric label="RSS" value={proc.rss_mb != null ? `${proc.rss_mb}M` : '—'} />
-        <Metric
-          label="loop p50/max"
-          value={`${loop.p50_ms ?? '—'}/${loop.max_1m_ms ?? '—'}`}
-        />
-        <Metric label="在途" value={String(inst.in_flight ?? 0)} />
-        <Metric label="ERROR" value={String(errCount)} />
+      <div className="mt-3 grid grid-cols-9 gap-3">
+        {/* loop 值(p50/max)比其它 tile 长,给它 1.5 倍宽(3 份)防折行挤歪整排;
+            其它三个各 2 份 → 3 + 2×3 = 9。 */}
+        <div className="col-span-2 min-w-0">
+          <Metric label="RSS" value={proc.rss_mb != null ? `${proc.rss_mb}M` : '—'} />
+        </div>
+        <div className="col-span-3 min-w-0">
+          <Metric
+            label="loop p50/max"
+            value={`${loop.p50_ms ?? '—'}/${loop.max_1m_ms ?? '—'}`}
+          />
+        </div>
+        <div className="col-span-2 min-w-0">
+          <Metric label="在途" value={String(inst.in_flight ?? 0)} />
+        </div>
+        <div className="col-span-2 min-w-0">
+          <Metric label="ERROR" value={String(errCount)} />
+        </div>
       </div>
 
       {/* Anomaly badges */}
