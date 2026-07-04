@@ -99,19 +99,22 @@ const config: Config = {
         'sidebar-card': 'var(--shadow-sidebar-card)',
       },
       keyframes: {
-        'slide-in-right': {
-          '0%': { transform: 'translateX(100%)', opacity: '0' },
-          '100%': { transform: 'translateX(0)', opacity: '1' },
+        // 欢迎页 hint 切换:淡入 + 轻微上浮 + 微模糊。由 WelcomeTips 顺序驱动
+        // (先 tip-out 淡出旧的、再 tip-in 淡入新的),故不重叠;替换原先整宽
+        // translateX 横滑(观感偏「糙」)。无障碍:reduced-motion 退化为纯淡入,见 globals.css。
+        'tip-in': {
+          '0%': { opacity: '0', transform: 'translateY(6px)', filter: 'blur(2.5px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)', filter: 'blur(0)' },
         },
-        'slide-out-left': {
-          '0%': { transform: 'translateX(0)', opacity: '1' },
-          '100%': { transform: 'translateX(-100%)', opacity: '0' },
+        'tip-out': {
+          '0%': { opacity: '1', transform: 'translateY(0)', filter: 'blur(0)' },
+          '100%': { opacity: '0', transform: 'translateY(-6px)', filter: 'blur(2.5px)' },
         },
       },
       animation: {
         'spin-once': 'spin 0.6s ease-in-out',
-        'slide-in-right': 'slide-in-right 500ms ease-out forwards',
-        'slide-out-left': 'slide-out-left 500ms ease-in forwards',
+        'tip-in': 'tip-in 300ms ease-out forwards',
+        'tip-out': 'tip-out 300ms ease-in forwards',
       },
     },
   },

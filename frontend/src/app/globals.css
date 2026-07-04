@@ -114,6 +114,15 @@ pre code {
   border-radius: 0 !important;
 }
 
+/* 无障碍:降低动态偏好时,欢迎页 hint 切换退化为纯淡入(去掉位移 / 模糊,
+   但保留 opacity 交叉过渡 —— 否则出场层不透明会与入场层文字重叠) */
+@media (prefers-reduced-motion: reduce) {
+  .animate-tip-in { animation: tip-in-rm 300ms ease-out forwards; }
+  .animate-tip-out { animation: tip-out-rm 300ms ease-in forwards; }
+  @keyframes tip-in-rm { from { opacity: 0 } to { opacity: 1 } }
+  @keyframes tip-out-rm { from { opacity: 1 } to { opacity: 0 } }
+}
+
 /* Dark mode: swap to github-dark highlight colors */
 .dark .hljs{color:#c9d1d9}
 .dark .hljs-doctag,.dark .hljs-keyword,.dark .hljs-meta .hljs-keyword,.dark .hljs-template-tag,.dark .hljs-template-variable,.dark .hljs-type,.dark .hljs-variable.language_{color:#ff7b72}
