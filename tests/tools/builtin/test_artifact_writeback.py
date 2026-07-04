@@ -344,7 +344,7 @@ class TestCreateFromUpload:
     async def test_explicit_artifact_id_used_verbatim(
         self, artifact_service: ArtifactService, session_id: str
     ):
-        """显式 artifact_id(persist upsert 新建路径)→ 原样落 id,不派生自文件名。"""
+        """显式 artifact_id(persist upsert 新建路径)→ 原样落 id + title,不派生自文件名。"""
         artifact_service.set_session(session_id)
         ok, _, info = await artifact_service.create_from_upload(
             session_id=session_id, filename="gallery.html",
@@ -353,6 +353,8 @@ class TestCreateFromUpload:
         )
         assert ok
         assert info["id"] == "风格样单"
+        # title 跟随语义 id(而非临时文件名 "gallery"),面板显示模型挑的名字
+        assert info["title"] == "风格样单"
 
     async def test_explicit_invalid_artifact_id_loud_fails(
         self, artifact_service: ArtifactService, session_id: str

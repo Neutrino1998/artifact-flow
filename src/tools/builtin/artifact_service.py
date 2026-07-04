@@ -510,16 +510,19 @@ class ArtifactService:
         产出可被 ``artifact://风格样单`` 引用的具名件。校验规则与 ``create_artifact``
         一致(不合法即 loud-fail,不静默 normalize);None 时保持文件名派生。
         """
-        title = os.path.splitext(filename)[0]
         if artifact_id is not None:
             if not _ARTIFACT_ID_PATTERN.match(artifact_id):
                 return False, (
                     f"Invalid artifact_id '{artifact_id}': must be 1-64 chars of "
                     f"letters/digits/underscore/hyphen/dot only."
                 ), None
+            # 显式 id 同时兜底 title:面板/inventory 显示模型挑的语义名,而非 path 里
+            # 那个随手起的临时文件名(原样用,不剥扩展名:id 是模型敲的句柄,不替它猜)。
             id_base = artifact_id
+            title = artifact_id
         else:
             id_base = _normalize_filename_to_id(filename)
+            title = os.path.splitext(filename)[0]
         ok, message, artifact_id = await self._stage_artifact(
             session_id=session_id,
             id_base=id_base,
