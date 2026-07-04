@@ -22,8 +22,10 @@ dept/skill/MCP 是后续阶段各加一个输入层(不再碰这些读点);本�
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional
 
-from reconcile.snapshot import AgentSnapshot, RegistrySnapshot, SkillInfo
+from reconcile.snapshot import AgentSnapshot, RegistrySnapshot, SkillInfo, UnitInfo
 from tools.base import (
+    MOUNT_SKILL_NAME,
+    READ_SKILL_NAME,
     SEARCH_TOOLS_NAME,
     BaseTool,
     ToolPermission,
@@ -43,10 +45,15 @@ class DeferredUnit:
     description: str
     member_full_names: List[str] = field(default_factory=list)
 
-
-# 请求级 builtin 名(注入不变量用;工具本体在 tools/builtin 各自定义)。
-_READ_SKILL = "read_skill"
-_MOUNT_SKILL = "mount_skill"
+    @classmethod
+    def from_unit(cls, unit: UnitInfo, present_members: List[str]) -> "DeferredUnit":
+        """从 unit + 本 turn 可建成员构造索引行(「只列可建成员、不挂死链」契约的单一
+        出口)—— resolve ② 与 _bake_skill_grants 共用,判据同为 `unit.defer and present`。"""
+        return cls(
+            name=unit.name,
+            description=unit.description,
+            member_full_names=present_members,
+        )
 
 
 @dataclass
@@ -110,7 +117,8 @@ class EffectiveToolset:
         (search_tools)与 controller_factory(read_skill/mount_skill setdefault)的两家
         注入 —— 修两条运行时不对称:skill 翻开 defer unit 后 search_tools 不注入 /
         翻开 bash 后 mount_skill 不连动。将来 MCP 注入作第三个消费方接进这里,不打
-        新补丁。setdefault 语义:已在集内的不覆盖(等级唯一来源仍是工具定义)。
+        新补丁(新可注入 builtin 须同步进 resolve ③ 的烤入元组,见该处注释)。
+        setdefault 语义:已在集内的不覆盖(等级唯一来源仍是工具定义)。
         """
         # deferred ⟹ search_tools(2026-06-26 决策):有 ≥1 deferred unit 的 agent 必须能
         # search,否则 deferred 工具成死工具。search_tools 是常驻 builtin,有 deferred unit
@@ -119,14 +127,14 @@ class EffectiveToolset:
         if self.deferred_units and SEARCH_TOOLS_NAME not in self.permissions:
             self.permissions[SEARCH_TOOLS_NAME] = self.injectable_builtins[SEARCH_TOOLS_NAME]
         # 有可见 skill ⟹ read_skill:自包含(进 slug 出文本)→ 每个 agent 都注入。
-        read_perm = self.injectable_builtins.get(_READ_SKILL)
+        read_perm = self.injectable_builtins.get(READ_SKILL_NAME)
         if read_perm is not None:
-            self.permissions.setdefault(_READ_SKILL, read_perm)
+            self.permissions.setdefault(READ_SKILL_NAME, read_perm)
         # bash ∧ 有可见 bundle skill ⟹ mount_skill:产物只有配 bash 才用得上(cat
         # references / 跑 scripts),无 bash 的 agent 不给死能力(按需注入)。
-        mount_perm = self.injectable_builtins.get(_MOUNT_SKILL)
+        mount_perm = self.injectable_builtins.get(MOUNT_SKILL_NAME)
         if mount_perm is not None and "bash" in self.permissions:
-            self.permissions.setdefault(_MOUNT_SKILL, mount_perm)
+            self.permissions.setdefault(MOUNT_SKILL_NAME, mount_perm)
 
     def names(self) -> List[str]:
         return list(self.permissions.keys())
@@ -188,17 +196,15 @@ def resolve_effective_toolset(
         # defer 的 unit:成员仍可调(已进 permissions),但只渲索引行 → 记进 deferred_units。
         # 只在有可调成员时记(空 unit 无可披露内容,索引行也无意义)。
         if unit.defer and present_members:
-            deferred_units[unit_name] = DeferredUnit(
-                name=unit.name,
-                description=unit.description,
-                member_full_names=present_members,
-            )
+            deferred_units[unit_name] = DeferredUnit.from_unit(unit, present_members)
 
     # ③ 请求级 builtin 注入上下文(F-0):从本 turn 的 tools 烤入三个可注入 builtin 的
     # 等级(presence 即闸:read_skill/mount_skill 只在有可见 (bundle) skill 时存在)。
     # 注入本身收进 apply_injection_invariants —— resolve 与 activate_skill 跑同一份规则。
+    # F-2 接 MCP 注入时:此元组与 apply_injection_invariants 的分支集是一对同步编辑点,
+    # 新可注入 builtin 两处都要加(烤不进 = 规则永不触发,加规则不烤 = 静默 no-op)。
     injectable: Dict[str, ToolPermission] = {}
-    for name in (SEARCH_TOOLS_NAME, _READ_SKILL, _MOUNT_SKILL):
+    for name in (SEARCH_TOOLS_NAME, READ_SKILL_NAME, MOUNT_SKILL_NAME):
         tool = tools.get(name)
         if tool is not None:
             injectable[name] = tool.permission
@@ -252,11 +258,7 @@ def _bake_skill_grants(
                             grant.permissions[fn] = tool.permission
                             present.append(fn)
                     if u.defer and present:
-                        grant.deferred_units[unit] = DeferredUnit(
-                            name=u.name,
-                            description=u.description,
-                            member_full_names=present,
-                        )
+                        grant.deferred_units[unit] = DeferredUnit.from_unit(u, present)
         if grant.permissions:
             grants_by_slug[slug] = grant
     return grants_by_slug

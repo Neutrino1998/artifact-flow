@@ -25,7 +25,14 @@ import zipfile
 from typing import List, Optional
 
 from core.effective_skillset import EffectiveSkillSet
-from tools.base import BaseTool, ToolParameter, ToolPermission, ToolResult
+from tools.base import (
+    MOUNT_SKILL_NAME,
+    READ_SKILL_NAME,
+    BaseTool,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+)
 from tools.builtin import sandbox_fs
 from tools.builtin.sandbox_session import (
     SKILLS_SUBDIR,
@@ -68,7 +75,7 @@ _LISTING_SENTINEL = "___MOUNT_SKILL_LISTING___"
 class ReadSkillTool(BaseTool):
     def __init__(self, service: SkillService, skillset: EffectiveSkillSet):
         super().__init__(
-            name="read_skill",
+            name=READ_SKILL_NAME,
             description=(
                 "Load a skill's full guidance (its SKILL.md body) by slug. Call this when a "
                 "skill listed in <available_skills> fits the current task — it returns the "
@@ -130,7 +137,7 @@ class MountSkillTool(BaseTool):
         skillset: EffectiveSkillSet,
     ):
         super().__init__(
-            name="mount_skill",
+            name=MOUNT_SKILL_NAME,
             description=(
                 "Unpack a skill's bundled files into the sandbox at "
                 f"{WORKSPACE_MOUNT}/{SKILLS_SUBDIR}/<slug>/, so bash can read its references "
