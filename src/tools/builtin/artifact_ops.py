@@ -236,7 +236,14 @@ class ReadArtifactTool(BaseTool):
             version = params.get("version")
             if version:
                 return ToolResult(success=False, error=f"Version {version} not found")
-            return ToolResult(success=False, error=f"Artifact '{params['id']}' not found")
+            return ToolResult(
+                success=False,
+                error=(
+                    f"Artifact '{params['id']}' not found. Note: files created in "
+                    "the sandbox are not artifacts — read them with bash, or "
+                    "persist them first."
+                ),
+            )
 
         artifact_id = result.get("id", "")
         content_type = result.get("content_type", "")

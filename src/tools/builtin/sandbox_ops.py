@@ -49,7 +49,7 @@ class BashTool(BaseTool):
     """
 
     def __init__(self, session: SandboxSession):
-        # 能力清单按镜像现状列全(python 科学栈/pandoc/ripgrep/git)。版本号刻意
+        # 能力清单按镜像现状列全(python 科学栈+文档栈/pandoc/ripgrep/git)。版本号刻意
         # 不写 —— 会与镜像漂移,且非模型决策所需(CLAUDE.md:一次性事实进描述、
         # 克制噪声)。场景 how-to 留 skill 系统。git 仅本地仓库操作(无网下
         # clone/fetch 死属 by design,描述里无网已声明,不重复)。
@@ -58,7 +58,8 @@ class BashTool(BaseTool):
             description=(
                 "Run a bash command inside this conversation's sandboxed Linux container. "
                 "The sandbox has NO network access. Preinstalled: Python 3.11 with a "
-                "scientific stack (numpy/pandas/matplotlib/Pillow/openpyxl/pypdf), pandoc, ripgrep, "
+                "scientific stack (numpy/pandas/matplotlib/Pillow/openpyxl/pypdf), a document "
+                "stack (python-docx/python-pptx/lxml/pdfplumber/pypdfium2), pandoc, ripgrep, "
                 "and git (local repository operations only). "
                 f"The working directory {WORKSPACE_MOUNT} persists across bash calls "
                 "within the current turn and is discarded when the turn ends. "
@@ -243,8 +244,10 @@ class PersistFileTool(BaseTool):
         super().__init__(
             name="persist",
             description=(
-                "Save a file from the sandbox workspace as an artifact. The sandbox "
-                "workspace is discarded when the turn ends — persist is the only way to "
+                "Save a file from the sandbox workspace as an artifact. A workspace "
+                "file is NOT an artifact until persisted — read_artifact/grep_artifact "
+                "cannot see it; inspect it with bash instead. The sandbox workspace is "
+                "discarded when the turn ends — persist is the only way to "
                 "keep results. Text files become editable text artifacts; binary files "
                 "(docx/xlsx/images/archives...) become artifacts the user can download. "
                 "Creates a new artifact by default (an existing id gets a numeric "
