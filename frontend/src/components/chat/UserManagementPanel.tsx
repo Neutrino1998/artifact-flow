@@ -363,7 +363,7 @@ function UserRow({
 
       {/* Role badge */}
       <span
-        className={`flex-shrink-0 inline-block px-1.5 py-0.5 text-xs rounded ${
+        className={`flex-shrink-0 inline-block px-2 py-0.5 text-xs rounded-full ${
           user.role === 'admin'
             ? 'bg-accent/10 text-accent'
             : 'bg-bg dark:bg-bg-dark text-text-secondary dark:text-text-secondary-dark'

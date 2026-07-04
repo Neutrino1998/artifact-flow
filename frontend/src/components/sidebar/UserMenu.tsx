@@ -120,7 +120,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
               <div className="font-medium text-text-primary dark:text-text-primary-dark truncate flex items-center gap-1.5">
                 <span className="truncate">{user.display_name || user.username}</span>
                 {isAdmin && (
-                  <span className="inline-block px-1 py-px text-[10px] rounded bg-accent/10 text-accent shrink-0">
+                  <span className="inline-block px-1.5 py-px text-[10px] rounded-full bg-accent/10 text-accent shrink-0">
                     admin
                   </span>
                 )}

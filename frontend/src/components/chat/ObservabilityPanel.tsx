@@ -723,7 +723,7 @@ function MessageGroupView({
                 {formatTime(event.created_at)}
               </span>
               {event.agent_name != null ? (
-                <span className="flex-shrink-0 px-1 py-px rounded bg-accent/10 text-accent text-[10px]">
+                <span className="flex-shrink-0 px-1.5 py-px rounded-full bg-accent/10 text-accent text-[10px]">
                   {event.agent_name.replace('_agent', '')}
                 </span>
               ) : null}
