@@ -6,7 +6,9 @@
 
 services:
   caddy:
-    image: caddy:2-alpine
+    # Tag kept in lockstep with scripts/release.sh CADDY_TAG and the intranet
+    # compose — both modes run the same Mac-validated Caddy version.
+    image: caddy:2.10-alpine
     # Caddy owns 80 (ACME HTTP-01 challenge + auto-redirect to https) and 443
     # (TLS). Both are fixed by protocol — no AF_HTTP_PORT knob like the old nginx
     # had. Both must be open to the public in the host firewall.

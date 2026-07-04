@@ -33,8 +33,8 @@ backend ×N (AF_SKIP_RELEASE=1)  ──serve only, no reconcile─────�
 - Reverse proxy is **Caddy** (both modes; intranet nginx retired): it resolves
   `backend:8000` through docker DNS at request time and round-robins across all
   scaled replicas natively — no static-upstream staleness to work around.
-  Intranet entry config: `deploy/Caddyfile.intranet` (static cert HTTPS), shared
-  site body in `deploy/caddy-common.caddy`.
+  Intranet entry config: `deploy/caddy/Caddyfile.intranet` (static cert HTTPS),
+  shared site body in `deploy/caddy/common.caddy`.
 
 ## Prerequisites for multi-replica
 

@@ -26,7 +26,7 @@
 # from drifting apart over time.
 
 # Default through-proxy health probe: exec into the caddy container and hit
-# Caddy's internal health listener (`:2021` in caddy-common.caddy — HTTP, no
+# Caddy's internal health listener (`:2021` in deploy/caddy/common.caddy — HTTP, no
 # TLS, NOT published to the host). The request flows Caddy(:2021) →
 # reverse_proxy → backend:8000, so a green result means Caddy is up, its
 # config loaded, and the proxy path to backend works. /health is not gated by

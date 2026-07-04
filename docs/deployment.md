@@ -584,7 +584,7 @@ flowchart TD
 
 ### 反向代理配置
 
-两种部署统一用 Caddy。共性机制（SSE 不缓冲 `flush_interval -1`、挡 Swagger `/docs|/redoc|/openapi.json`→404、维护页 `file` matcher 每请求 stat `MAINTENANCE_ON`、真实 IP `header_up X-Real-IP {remote_host}`、上传总量闸 `request_body max_size 210MiB`、内部健康监听 `:2021`）全部住在共享片段 `deploy/caddy-common.caddy`，只写一遍；入口文件只差 TLS 姿态：
+两种部署统一用 Caddy。共性机制（SSE 不缓冲 `flush_interval -1`、挡 Swagger `/docs|/redoc|/openapi.json`→404、维护页 `file` matcher 每请求 stat `MAINTENANCE_ON`、真实 IP `header_up X-Real-IP {remote_host}`、上传总量闸 `request_body max_size 210MiB`、内部健康监听 `:2021`）全部住在共享片段 `deploy/caddy/common.caddy`，只写一遍；入口文件只差 TLS 姿态：
 
 | 维度 | **Mode 2（公网）** | **Mode 3（内网）** |
 |---|---|---|
