@@ -18,6 +18,8 @@ from datetime import datetime
 from typing import Optional, Union, Dict
 from logging.handlers import RotatingFileHandler
 
+from utils.instance import INSTANCE_ID
+
 
 # ── 请求级上下文 ──────────────────────────────────────────────
 # 利用 contextvars 天然的 asyncio 支持：
@@ -82,6 +84,7 @@ class RequestContextFilter(logging.Filter):
     从 contextvars 读取请求上下文，自动注入到每条日志记录
 
     注入字段（完整，用于文件日志）：
+    - record.instance_id: 实例 ID（进程常量,多副本下定位受理实例）
     - record.request_id: 请求 ID（每个 HTTP 请求，空值 'no-req'）
     - record.message_id: 消息 ID（一整轮对话，空值 'no-ctx'）
     - record.conv_id: 对话 ID（一整轮对话，空值 'no-ctx'）
@@ -104,6 +107,7 @@ class RequestContextFilter(logging.Filter):
 
     def filter(self, record):
         ctx = _request_ctx.get({})
+        record.instance_id = INSTANCE_ID
         record.message_id = ctx.get("message_id", "no-ctx")
         record.conv_id = ctx.get("conv_id", "no-ctx")
         record.request_id = _request_id_ctx.get("") or "no-req"
@@ -175,9 +179,10 @@ class Logger:
         # 生产 data/logs),部署时也可落到挂载卷。
         log_dir = os.environ.get("ARTIFACTFLOW_LOG_DIR") or log_dir
 
-        # 创建日志目录
+        # 创建日志目录 — 按实例分子目录:多副本共享卷时各写各的,
+        # 消 RotatingFileHandler 多写者 rotate 互覆(rename 竞态)
         if file:
-            self.log_dir = Path(log_dir)
+            self.log_dir = Path(log_dir) / INSTANCE_ID
             self.log_dir.mkdir(parents=True, exist_ok=True)
         
         # 创建logger
@@ -211,7 +216,7 @@ class Logger:
             )
             # 文件使用无颜色的普通formatter
             file_formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - [%(request_id)s|%(conv_id)s|%(message_id)s] %(filename)s:%(funcName)s:%(lineno)d - %(message)s'
+                '%(asctime)s - %(name)s - %(levelname)s - [%(instance_id)s|%(request_id)s|%(conv_id)s|%(message_id)s] %(filename)s:%(funcName)s:%(lineno)d - %(message)s'
             )
             file_handler.addFilter(context_filter)
             file_handler.setFormatter(file_formatter)

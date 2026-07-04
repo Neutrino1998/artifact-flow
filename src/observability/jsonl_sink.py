@@ -11,8 +11,9 @@ JsonlSink — 轮转写盘 + 可选 stdout mirror 的 jsonl 写入器
   `ARTIFACTFLOW_OBS_STDOUT_MIRROR=true` 打开(Settings 强制
   `env_prefix="ARTIFACTFLOW_"`,裸 `OBS_STDOUT_MIRROR` 不会生效)
 - 写入异常一律吞 — observability 失败决不能拖累业务路径
-- 单进程同写假设(backend 单进程,RotatingFileHandler 内置锁就够;
-  日后切多 worker 需重新设计:rotate 瞬间会互相覆盖)
+- 单写者假设(RotatingFileHandler 内置锁只防线程,多进程 rotate 瞬间
+  会互相覆盖)——由调用方保证:obs 路径按 instance_id 分子目录
+  (main._obs_path),多副本共享卷时各写各的
 """
 
 import json

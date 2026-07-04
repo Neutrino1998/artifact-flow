@@ -31,9 +31,17 @@ from observability import (
     resolve_mem_limit_bytes,
 )
 from observability import admin_runtime
+from utils.instance import INSTANCE_ID
 from utils.logger import get_logger, get_request_id
 
 logger = get_logger("ArtifactFlow")
+
+
+def _obs_path(configured: str) -> Path:
+    """obs jsonl 路径按实例分子目录(同 file-log):多副本共享卷各写各的,
+    消 RotatingFileHandler 多写者 rotate 互覆。"""
+    p = Path(configured)
+    return p.parent / INSTANCE_ID / p.name
 
 
 # Observability 组件句柄（生命周期跨 lifespan;在 startup 创建,shutdown 关闭)
@@ -77,7 +85,7 @@ def _start_observability(loop: asyncio.AbstractEventLoop) -> None:
 
     # loop-lag.jsonl sink
     _loop_lag_sink = JsonlSink(
-        Path(config.OBS_LOOP_LAG_LOG_PATH),
+        _obs_path(config.OBS_LOOP_LAG_LOG_PATH),
         max_mb=config.OBS_JSONL_MAX_MB,
         backups=config.OBS_JSONL_BACKUP_COUNT,
         mirror_stdout=config.OBS_STDOUT_MIRROR,
@@ -93,7 +101,7 @@ def _start_observability(loop: asyncio.AbstractEventLoop) -> None:
     _deadman.start()
 
     _metrics_sink = JsonlSink(
-        Path(config.OBS_METRICS_LOG_PATH),
+        _obs_path(config.OBS_METRICS_LOG_PATH),
         max_mb=config.OBS_JSONL_MAX_MB,
         backups=config.OBS_JSONL_BACKUP_COUNT,
         mirror_stdout=config.OBS_STDOUT_MIRROR,
@@ -180,7 +188,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     关闭时：对称清理
     """
     # 启动
-    logger.info("Starting ArtifactFlow API...")
+    logger.info(f"Starting ArtifactFlow API... (instance_id={INSTANCE_ID})")
     validate_config()
     await init_globals()
 
@@ -286,7 +294,7 @@ def create_app() -> FastAPI:
         allow_credentials=config.CORS_ALLOW_CREDENTIALS,
         allow_methods=config.CORS_ALLOW_METHODS,
         allow_headers=config.CORS_ALLOW_HEADERS,
-        expose_headers=["X-Request-ID"],
+        expose_headers=["X-Request-ID", "X-Instance-ID"],
     )
 
     # 全局 ValueError → 400(防御纵深;ACC-04)。业务校验失败大多在 Pydantic

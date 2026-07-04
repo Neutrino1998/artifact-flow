@@ -28,6 +28,7 @@ from core.cancellation import CooperativeCancelled, run_cancellable
 from tools.artifact_envelope import make_preview_slice, render_artifact_slice
 from tools.xml_parser import parse_tool_calls
 from tools.base import ArtifactSpec, BaseTool, ToolExecutionContext, ToolPermission, ToolResult
+from utils.instance import INSTANCE_ID
 from utils.logger import get_logger, get_request_id
 from utils.time import utc_now
 
@@ -266,17 +267,17 @@ async def execute_loop(
 
     async def _emit(event_type: str, agent: Optional[str] = None, data: Any = None, *, sse_only: bool = False) -> None:
         """推送事件。sse_only=True 仅推 SSE 不入内存事件列表（如 llm_chunk）"""
-        # 错误事件统一在此戳入 request_id（发起轮 POST 的 req-id，引擎任务继承），
-        # 让 live SSE 与持久化/replay 都带可回传定位码 —— replay 经 read 边界脱敏后
-        # 仍保留此码（sanitize 不覆盖已有 request_id）。
-        if (
-            event_type == StreamEventType.ERROR.value
-            and isinstance(data, dict)
-            and not data.get("request_id")
-        ):
-            _rid = get_request_id()
-            if _rid:
-                data = {**data, "request_id": _rid}
+        # 错误事件统一在此戳入 request_id（发起轮 POST 的 req-id，引擎任务继承）
+        # 与 instance_id（受理实例，创建时冻结 —— 读边界注入拿到的是 replay 那个
+        # 实例，错的），让 live SSE 与持久化/replay 都带可回传定位码 —— replay 经
+        # read 边界脱敏后仍保留（sanitize 不覆盖已有定位字段）。
+        if event_type == StreamEventType.ERROR.value and isinstance(data, dict):
+            if not data.get("request_id"):
+                _rid = get_request_id()
+                if _rid:
+                    data = {**data, "request_id": _rid}
+            if not data.get("instance_id"):
+                data = {**data, "instance_id": INSTANCE_ID}
         event_dict = {
             "type": event_type,
             "agent": agent,

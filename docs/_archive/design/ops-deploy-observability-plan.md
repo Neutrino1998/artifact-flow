@@ -15,12 +15,12 @@
 
 ## 进度
 
-- **当前**:未开工。前置已就绪:乙2 门禁合 main、runbook 写好、Redis RuntimeStore/Stream 落地。
-- **下一步**:Phase A(instance 身份地基,小改)→ Phase B(真机 `--scale` 验证,runbook 现成)。
+- **当前**:Phase A 已完成(2026-07-04)。
+- **下一步**:Phase B(Mac 跑 `deploy/MULTI-REPLICA.md` 清单全项,Caddy 入口 + 测试证书)。
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| A | instance 身份地基(日志/jsonl/响应头/lease/错误事件 五处注入 + jsonl 按实例分目录) | 未开始 |
+| A | instance 身份地基(日志/jsonl/响应头/lease/错误事件 五处注入 + jsonl 按实例分目录) | **已完成**(2026-07-04) |
 | B | Mac 全功能验证(`--scale` 清单,以 Caddy 为入口)+ 内网 nginx→Caddy 收敛 + HTTPS 静态证书 + 真机 smoke | 未开始 |
 | C | 舰队可观测 + 自愈(Redis 心跳注册表 + `/admin/instances` + 前端实例面板 + autoheal) | 未开始 |
 | D | 多机 fleet(fleet.conf + fleet.sh 单命令发布 + LB 模板生成 + env 单源推送) | 未开始 |
@@ -84,9 +84,9 @@
 
 **做什么**:决策 4 的心跳注册表 + 前端实例面板,决策 5 的 autoheal。做完后「实例是否存活 / 是否有 error / watchdog 是否抓到过异常」在管理端一眼可见,wedge 副本自动重启。
 
-**包含**:sampler 快照写 Redis(TTL);ERROR 计数 Handler + watchdog 最近事件透出(进程内计数/摘要 → 心跳字段);`GET /admin/instances`(scan + pipelined GET);前端运行监控页「实例」面板(红黄绿 + 点开看摘要);活跃对话列表加「实例」列(数据源 = lease owner,A 已备好);autoheal systemd timer 脚本(进 bundle,fleet.sh/手工均可装);Redis 全局资源告警(如 used_memory)保持各副本各报、容忍重复(去重不值机器)。
+**包含**:sampler 快照写 Redis(TTL);ERROR 计数 Handler + watchdog 最近事件透出(进程内计数/摘要 → 心跳字段);`GET /admin/instances`(scan + pipelined GET);前端运行监控页「实例」面板(红黄绿 + 点开看摘要);活跃对话列表加「实例」列(数据源 = lease owner,A 已备好);autoheal systemd timer 脚本(进 bundle,fleet.sh/手工均可装);**autoheal 行为本身可见**:脚本重启时追加「时间+容器名+原因」到宿主约定文件,该目录只读挂进容器,实例心跳带 `last_autoheal`(最近时间+累计次数)→ 面板显示「曾被 autoheal 重启」——宿主脚本不直连 Redis(免 client/凭证/Cluster 姿态,保十行可审计),经挂载文件中转、本机容器代报;`docker restart` 保留容器身份,面板同一行连续,`started_at` 变新即重启轨迹;Redis 全局资源告警(如 used_memory)保持各副本各报、容忍重复(去重不值机器)。
 
-**到时再敲定**:黄色阈值(loop_lag / ERROR 窗口);实例面板并进现有运行监控页还是独立 tab;心跳字段精确集;autoheal timer 间隔与「维护窗口暂停」(pause.sh)的互斥。
+**到时再敲定**:黄色阈值(loop_lag / ERROR 窗口);实例面板并进现有运行监控页还是独立 tab;心跳字段精确集;autoheal timer 间隔与「维护窗口暂停」(pause.sh)的互斥;autoheal marker 文件路径/格式与保留长度(追加型,按行数或 mtime 截断)。
 
 **验收**:`--scale backend=2` 下面板见两实例;`kill -STOP` 一个副本(模拟 wedge)→ 面板 ≤90s 变红 → autoheal 重启 → 恢复绿;制造一条 ERROR 日志 → 对应实例变黄且计数可见。
 
@@ -102,6 +102,8 @@
 
 ## 变更日志
 
+- **2026-07-04 Phase A 完成**。instance_id = `utils/instance.py` 启动铸造(容器 hostname=容器短 id,`ARTIFACTFLOW_INSTANCE_ID` 可覆盖,字符集收窄防路径/头注入)。五处注入全落:① 日志四元组 `[instance_id|request_id|conv_id|message_id]` + file-log/obs-jsonl 都按 `<dir>/<instance_id>/` 分子目录(rotate 互覆 by-construction 消除;控制台短格式不带 instance——docker logs 天然按容器分流);② sampler/watchdog 记录内也带 `instance_id` 字段(文件拷走聚合后目录信息即丢);③ 中间件 `X-Instance-ID` 响应头(正常 + 兜底 500,CORS expose);④ lease owner 取「旁挂同 slot key」方案(`{prefix:conv_id}:owner`,acquire/release Lua 顺带写删、renew 续 TTL——lease value=msg_id 是所有 compare 脚本的既定契约,不改复合值;InMemory 降级=有 lease 即返回本进程 id);⑤ ERROR 事件 `data` 创建时冻结 `instance_id`(engine `_emit` + `decide_terminal` + 两处 transport 直发,共四个构建点;sanitize 只重写 `error` 字段,定位码保留)。`/admin/runtime` 响应标注应答实例。验收:单测全绿(1693 passed;Redis 集成 22 项含 owner 生命周期,一次性容器跑通);`--scale 2` 三处一致性留待 Phase B 清单一并验(观察手段已备好)。
+- **2026-07-03 autoheal 可见性补入(用户提问驱动)**:Phase C 补「autoheal 行为本身可见」——结果可见白拿(`docker restart` 保容器身份,面板同行连续 + `started_at` 变新);归因可见走「宿主脚本追加 marker 文件 → 只读挂载 → 实例心跳代报 `last_autoheal`」,宿主脚本不直连 Redis(保十行可审计);进程内证据随重启消失,宿主 marker + deadman stderr 是幸存取证链。
 - **2026-07-03 决策 7 补入(用户确认)**:fleet.sh 定为生产部署统一入口 —— 单机/多 worker/多机是同一连续谱(一行清单 + scale 参数 → 多行),同一段 deploy 序列,单机是退化情形;价值 = 生产单机日常发版持续排练多机路径,消「两套流程 drift」。边界:Mode 1 试用/dev 保持裸 compose 不强制;本机 host `local` 特判不经 ssh(特判只在传输层)。D 阶段验收补「单机形态回归」项,落地即替代手工 scp/ssh 发版配方。
 - **2026-07-03 环境轴修正(用户指正)**:删掉「CentOS 7 老 compose 认不认 `service_completed_successfully` 门禁」这个风险项 —— 它来自旧记忆(bsyshealthyapc),实际目标机将换成两台麒麟 V10 鲲鹏 arm,且 docker+compose 本就是自带静态离线包(`sandbox/docker-pkg/`,版本自己控),沙盒 plan 已在这两台真机验完 docker/runsc/DooD/agent 端到端 → 该风险 by-construction 不存在。连带:Phase B 的真机 smoke 从「专门验证」降为「随首次多副本发版顺手确认」,B 的价值主体重申为 Caddy+HTTPS 切换 + 三项从未跑过的跨副本功能(cancel/interrupt、SSE 经真 LB、reaper 跨副本);决策 1 去掉 CentOS 7 Python 论据(离线装负担 + 规模 + 自家离线包模式已覆盖 provisioning 三条仍立);D 补 per-host arch 标注(产物已双架构后缀并存)。
 - **2026-07-03 B 阶段改形 + Caddy 收敛并入**(用户三问驱动):① 验证 Mac-first —— 功能轴在 Mac compose 与真机等价(dev-Mac 已实证过一部分),真机降为发版窗口 smoke,唯一 Mac 测不出的是环境轴(CentOS 7 老 compose 认不认 `service_completed_successfully` 门禁 = 首要确认项);② 内网 nginx→Caddy 收敛从「deferred 等 prod 真机验证」改为**并入 Phase B**——推翻旧定调的两个新事实:用户不愿并行维护两套反代 + 内网要上 HTTPS(测试中心静态证书),Caddy 功能收益不再为零(静态 tls + 主动健康检查),验证闸由「Mac 以 Caddy 入口跑全清单」替代;③ D 的 LB 模板从 nginx/Caddy 双份改单 Caddy。

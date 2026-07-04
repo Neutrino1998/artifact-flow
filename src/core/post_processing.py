@@ -30,6 +30,7 @@ from typing import Any, Dict, Optional
 
 from config import config
 from core.events import ExecutionEvent, StreamEventType, TERMINAL_EVENT_TYPES
+from utils.instance import INSTANCE_ID
 
 
 @dataclass
@@ -102,6 +103,7 @@ def decide_terminal(pp: PostProcessState) -> None:
                 "conversation_id": pp.conversation_id,
                 "message_id": pp.message_id,
                 "error": pp.flush_error,
+                "instance_id": INSTANCE_ID,
                 "execution_metrics": metrics,
             },
         )
@@ -164,6 +166,8 @@ def decide_terminal(pp: PostProcessState) -> None:
                 "error": detail.get("error") or response or "An error occurred during execution.",
                 "agent": detail.get("agent"),
                 "request_id": detail.get("request_id"),
+                # 受理实例,创建时冻结(decide_terminal 与故障引擎同进程,常量即正确)
+                "instance_id": INSTANCE_ID,
                 "execution_metrics": metrics,
             },
         )

@@ -28,6 +28,7 @@ from typing import Any, Optional
 
 import psutil
 
+from utils.instance import INSTANCE_ID
 from utils.time import utc_now
 
 from observability.jsonl_sink import JsonlSink
@@ -138,6 +139,8 @@ class RuntimeSampler:
         """采一次并写 jsonl。返回采集的 snapshot(便于测试与 /admin/runtime 复用)。"""
         snapshot: dict = {
             "ts": utc_now().isoformat(),
+            # 目录已按实例分,但记录内也带:文件被拷走聚合后目录信息即丢
+            "instance_id": INSTANCE_ID,
         }
 
         # ── loop lag(来自 watchdog 滚动窗口) ──

@@ -26,6 +26,7 @@ from core.post_processing import (
 )
 from tools.base import BaseTool
 from tools.builtin.artifact_service import ArtifactService
+from utils.instance import INSTANCE_ID
 from utils.logger import get_logger, get_request_id
 from utils.time import utc_now
 
@@ -634,6 +635,7 @@ class ExecutionController:
                             "conversation_id": conversation_id,
                             "message_id": message_id,
                             "error": "Event persistence failed — turn aborted, please retry",
+                            "instance_id": INSTANCE_ID,
                             "execution_metrics": pp.final_state.get("execution_metrics", {}),
                         },
                     }
@@ -719,6 +721,7 @@ class ExecutionController:
                         "conversation_id": conversation_id,
                         "message_id": message_id,
                         "error": str(e),
+                        "instance_id": INSTANCE_ID,
                     }
                 }
         except asyncio.CancelledError:

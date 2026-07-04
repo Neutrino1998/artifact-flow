@@ -31,6 +31,7 @@ from collections import deque
 from typing import Optional
 
 from observability.jsonl_sink import JsonlSink
+from utils.instance import INSTANCE_ID
 from utils.logger import get_logger
 from utils.time import utc_now
 
@@ -170,6 +171,8 @@ class LoopLagWatchdog:
         try:
             self._sink.write({
                 "ts": utc_now().isoformat(),
+                # 目录已按实例分,但记录内也带:文件被拷走聚合后目录信息即丢
+                "instance_id": INSTANCE_ID,
                 "lag_ms": round(lag_ms, 1),
                 "wedged": wedged,
                 "warn_ms": self._warn_ms,

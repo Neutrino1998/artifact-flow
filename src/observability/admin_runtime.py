@@ -18,6 +18,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from api.dependencies import get_runtime_store, get_execution_runner, require_admin
+from utils.instance import INSTANCE_ID
 from utils.time import utc_now
 from api.services.auth import TokenPayload
 
@@ -48,6 +49,8 @@ async def get_runtime(
     Response:
         {
             "ts": ISO8601,
+            "instance_id": str,   # 本次应答实例 — sampler/active_tasks 是进程本地视图,
+                                  # 多副本经 LB 随机路由时读数跳变由此可解释
             "sampler": {<sampler.latest_snapshot 结构,见 sampler.py 文档>},
             "active_conversations": [conv_id, ...],
             "active_tasks": int,
@@ -66,6 +69,7 @@ async def get_runtime(
 
     return {
         "ts": utc_now().isoformat(),
+        "instance_id": INSTANCE_ID,
         "sampler": snapshot,
         "active_conversations": active_conv_ids,
         "active_tasks": runner.active_task_count,

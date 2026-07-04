@@ -89,6 +89,41 @@ class TestLease:
         msg = await store.get_leased_message_id("test_conv_2")
         assert msg == "test_msg_a"
 
+    async def test_lease_owner_lifecycle(self, store, redis_client):
+        """owner 旁挂 key 全生命周期:acquire 写本实例 id、错误持有者 release
+        不动它、正确 release 连带删、renew 给它续 TTL。lease/owner 同 conv
+        hash tag 同 slot(acquire/release Lua 多 key 的 Cluster-safety 前提)。
+        """
+        from utils.instance import INSTANCE_ID
+
+        conv = "test_conv_owner"
+        assert await store.get_lease_owner(conv) is None
+
+        await store.try_acquire_lease(conv, "msg-own")
+        assert await store.get_lease_owner(conv) == INSTANCE_ID
+
+        # 错误持有者 release:lease 与 owner 都不动
+        await store.release_lease(conv, "msg-wrong")
+        assert await store.get_lease_owner(conv) == INSTANCE_ID
+
+        # renew 连带续 owner TTL
+        await redis_client.expire(store._lease_owner_key(conv), 2)
+        assert await store.renew_lease(conv, "msg-own", ttl=10)
+        assert await redis_client.ttl(store._lease_owner_key(conv)) > 2
+
+        # 正确 release 连带删 owner
+        await store.release_lease(conv, "msg-own")
+        assert await store.get_lease_owner(conv) is None
+
+    async def test_cleanup_execution_clears_owner(self, store):
+        from utils.instance import INSTANCE_ID
+
+        conv = "test_conv_owner_cleanup"
+        await store.try_acquire_lease(conv, "msg-oc")
+        assert await store.get_lease_owner(conv) == INSTANCE_ID
+        await store.cleanup_execution(conv, "msg-oc")
+        assert await store.get_lease_owner(conv) is None
+
     async def test_list_active_executions_pairs_conv_with_msg(self, store):
         await store.try_acquire_lease("test_conv_listA", "msg-A")
         await store.try_acquire_lease("test_conv_listB", "msg-B")

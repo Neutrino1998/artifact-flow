@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable, Optional, Dict, Any, List, Literal
 
 from config import config
+from utils.instance import INSTANCE_ID
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -50,6 +51,14 @@ class RuntimeStore(Protocol):
     async def try_acquire_lease(self, conversation_id: str, message_id: str) -> Optional[str]: ...
     async def release_lease(self, conversation_id: str, message_id: str) -> None: ...
     async def get_leased_message_id(self, conversation_id: str) -> Optional[str]: ...
+
+    async def get_lease_owner(self, conversation_id: str) -> Optional[str]:
+        """当前 lease 持有实例的 instance_id（观测维度；无 lease → None）。
+
+        Redis 实现读 acquire 时旁挂的 owner key；InMemory 是进程本地
+        （lease 存在即本实例持有），退化为返回本进程 INSTANCE_ID。
+        """
+        ...
 
     # ── Engine interactive（inject/cancel 有效）──
 
@@ -151,6 +160,12 @@ class InMemoryRuntimeStore:
 
     async def get_leased_message_id(self, conversation_id: str) -> Optional[str]:
         return self._conversation_leases.get(conversation_id)
+
+    async def get_lease_owner(self, conversation_id: str) -> Optional[str]:
+        """进程本地 store:lease 存在即本实例持有。"""
+        if conversation_id in self._conversation_leases:
+            return INSTANCE_ID
+        return None
 
     # ── Engine interactive ──
 
