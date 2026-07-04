@@ -138,8 +138,6 @@ export default function Sidebar() {
   const inUserMgmt = activeMode === 'userManagement' && isAdmin;
   // Tool-unit management is the same master-detail shape as user-mgmt.
   const inToolUnitMgmt = activeMode === 'toolUnit' && isAdmin;
-  // Skill management (C-3) — center takeover like conversationBrowser, all users.
-  const inSkills = activeMode === 'skills';
   // Fleet instances (Phase C) — center takeover, admin-only, like observability
   // but without the conversation search/refresh actions.
   const inInstances = activeMode === 'instances' && isAdmin;
@@ -273,15 +271,6 @@ export default function Sidebar() {
                 <path d="M11.5 9.5l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z" />
               </svg>
             </IconButton>
-
-            {/* Exit skill management */}
-            {inSkills && (
-              <IconButton onClick={handleExit} label="退出技能管理">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                  <path d="M4 4l8 8M12 4l-8 8" />
-                </svg>
-              </IconButton>
-            )}
           </>
         )}
 
@@ -304,9 +293,9 @@ export default function Sidebar() {
       <div className="flex items-center justify-between px-4 py-3 border-b border-border dark:border-border-dark">
         <div className="min-w-0">
           <h1 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark">
-            {inObservability ? '会话监控' : inUserMgmt ? '用户管理' : inToolUnitMgmt ? '工具管理' : inSkills ? '技能管理' : inInstances ? '实例监控' : APP_NAME}
+            {inObservability ? '会话监控' : inUserMgmt ? '用户管理' : inToolUnitMgmt ? '工具管理' : inInstances ? '实例监控' : APP_NAME}
           </h1>
-          {!inObservability && !inUserMgmt && !inToolUnitMgmt && !inSkills && !inInstances && (
+          {!inObservability && !inUserMgmt && !inToolUnitMgmt && !inInstances && (
             <p className="text-xs text-text-secondary dark:text-text-secondary-dark">
               {APP_TAGLINE}
             </p>
@@ -455,17 +444,6 @@ export default function Sidebar() {
               </svg>
               技能管理
             </button>
-            {inSkills && (
-              <button
-                onClick={handleExit}
-                className={navRowDangerClass}
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                  <path d="M9 3H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h5M7 8h6m0 0l-2-2m2 2l-2 2" />
-                </svg>
-                退出技能管理
-              </button>
-            )}
           </>
         )}
       </div>
