@@ -56,6 +56,42 @@ const RefreshIcon = ({ size = 16, spinning = false }: { size?: number; spinning?
   </svg>
 );
 
+// Admin-takeover action icons — shared by the collapsed icon bar and the
+// expanded nav rows so the two render paths can't drift (mirrors RefreshIcon).
+const iconProps = {
+  width: 16,
+  height: 16,
+  viewBox: '0 0 14 14',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.5,
+} as const;
+
+const PlusIcon = () => (
+  <svg {...iconProps}>
+    <path d="M7 2v10M2 7h10" />
+  </svg>
+);
+
+const BulkImportIcon = () => (
+  <svg {...iconProps}>
+    <path d="M7 2v8M3 8l4 4 4-4M2 13h10" />
+  </svg>
+);
+
+const DeptIcon = () => (
+  <svg {...iconProps}>
+    <path d="M2 3h10M2 7h10M2 11h6" />
+  </svg>
+);
+
+const SelectIcon = () => (
+  <svg {...iconProps}>
+    <rect x="2" y="2" width="10" height="10" rx="1.5" />
+    <path d="M5 7l1.5 1.5L9 6" />
+  </svg>
+);
+
 export default function Sidebar() {
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
@@ -193,25 +229,16 @@ export default function Sidebar() {
             {inUserMgmt && (
               <>
                 <IconButton onClick={handleCreateUser} label="新建用户">
-                  <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M7 2v10M2 7h10" />
-                  </svg>
+                  <PlusIcon />
                 </IconButton>
                 <IconButton onClick={handleBulkImport} label="批量导入">
-                  <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M7 2v8M3 8l4 4 4-4M2 13h10" />
-                  </svg>
+                  <BulkImportIcon />
                 </IconButton>
                 <IconButton onClick={handleDeptManager} label="管理部门">
-                  <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M2 3h10M2 7h10M2 11h6" />
-                  </svg>
+                  <DeptIcon />
                 </IconButton>
                 <IconButton onClick={handleToggleSelection} label="批量管理">
-                  <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <rect x="2" y="2" width="10" height="10" rx="1.5" />
-                    <path d="M5 7l1.5 1.5L9 6" />
-                  </svg>
+                  <SelectIcon />
                 </IconButton>
               </>
             )}
@@ -219,9 +246,7 @@ export default function Sidebar() {
             {/* Tool-unit management action */}
             {inToolUnitMgmt && (
               <IconButton onClick={handleCreateUnit} label="新建工具 unit">
-                <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M7 2v10M2 7h10" />
-                </svg>
+                <PlusIcon />
               </IconButton>
             )}
 
@@ -346,28 +371,19 @@ export default function Sidebar() {
             {inUserMgmt && (
               <>
                 <button onClick={handleCreateUser} className={navRowClass}>
-                  <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M7 2v10M2 7h10" />
-                  </svg>
+                  <PlusIcon />
                   新建用户
                 </button>
                 <button onClick={handleBulkImport} className={navRowClass}>
-                  <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M7 2v8M3 8l4 4 4-4M2 13h10" />
-                  </svg>
+                  <BulkImportIcon />
                   批量导入
                 </button>
                 <button onClick={handleDeptManager} className={navRowClass}>
-                  <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M2 3h10M2 7h10M2 11h6" />
-                  </svg>
+                  <DeptIcon />
                   管理部门
                 </button>
                 <button onClick={handleToggleSelection} className={navRowClass}>
-                  <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <rect x="2" y="2" width="10" height="10" rx="1.5" />
-                    <path d="M5 7l1.5 1.5L9 6" />
-                  </svg>
+                  <SelectIcon />
                   批量管理
                 </button>
               </>
@@ -376,9 +392,7 @@ export default function Sidebar() {
             {/* Tool-unit management action — hoisted from ToolUnitManagementPanel */}
             {inToolUnitMgmt && (
               <button onClick={handleCreateUnit} className={navRowClass}>
-                <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M7 2v10M2 7h10" />
-                </svg>
+                <PlusIcon />
                 新建工具 unit
               </button>
             )}

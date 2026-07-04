@@ -34,9 +34,9 @@ export default function UserManagementDetailPanel() {
   return (
     <div className="flex-1 flex flex-col min-h-0 items-center justify-center bg-chat dark:bg-chat-dark p-6">
       <div className="text-sm text-text-tertiary dark:text-text-tertiary-dark text-center">
-        选择左侧用户查看详情，
+        从中间列表选择用户查看详情，
         <br />
-        或点击 + 新建用户 / 管理部门
+        或从左侧栏新建用户 / 管理部门
       </div>
     </div>
   );
