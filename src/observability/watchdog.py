@@ -74,6 +74,10 @@ class LoopLagWatchdog:
         # snapshot(对外暴露给 sampler / /admin/runtime;原子赋值,无锁)
         self._snapshot: dict = {"p50_ms": 0, "p99_ms": 0, "max_1m_ms": 0, "samples": 0}
 
+        # 最近一次 wedge/超阈事件摘要(供 Phase C 心跳读):watchdog 线程写、loop
+        # 线程读,dict 整体赋值原子、无锁(同 _snapshot)。None = 本进程从未抓到过。
+        self._last_wedge: Optional[dict] = None
+
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
@@ -101,6 +105,14 @@ class LoopLagWatchdog:
     def snapshot(self) -> dict:
         """供 sampler / /admin/runtime 读取当前 loop_lag 滚动统计。"""
         return dict(self._snapshot)
+
+    def last_wedge(self) -> Optional[dict]:
+        """供 Phase C 心跳读取最近一次 wedge/超阈事件摘要;从未抓到过返回 None。
+
+        栈明细仍只落 loop-lag.jsonl(取证用),这里只带面板变黄要用的轻摘要
+        {ts, lag_ms, wedged}。
+        """
+        return dict(self._last_wedge) if self._last_wedge else None
 
     # ── 内部实现 ─────────────────────────────────────────────
 
@@ -167,6 +179,13 @@ class LoopLagWatchdog:
             tasks_info = self._collect_task_stacks()
         except Exception:
             tasks_info = []
+
+        # 轻摘要留内存供心跳读(整体赋值原子,loop 线程无锁读)。
+        self._last_wedge = {
+            "ts": utc_now().isoformat(),
+            "lag_ms": round(lag_ms, 1),
+            "wedged": wedged,
+        }
 
         try:
             self._sink.write({
