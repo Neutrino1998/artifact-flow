@@ -25,8 +25,9 @@ from api.services.auth import TokenPayload
 router = APIRouter()
 
 
-# 单例 RuntimeSampler 由 lifespan 注入(避免硬循环依赖 dependencies.py)
+# 单例 RuntimeSampler / HeartbeatWriter 由 lifespan 注入(避免硬循环依赖 dependencies.py)
 _sampler: Any = None
+_heartbeat: Any = None
 
 
 def set_sampler(sampler: Any) -> None:
@@ -37,6 +38,16 @@ def set_sampler(sampler: Any) -> None:
 
 def get_sampler() -> Any:
     return _sampler
+
+
+def set_heartbeat(heartbeat: Any) -> None:
+    """由 lifespan 注入 HeartbeatWriter;/instances 读侧用其 key 形状 + 本机 payload 构造。"""
+    global _heartbeat
+    _heartbeat = heartbeat
+
+
+def get_heartbeat() -> Any:
+    return _heartbeat
 
 
 @router.get("/runtime")

@@ -108,6 +108,9 @@ services:
       # Release handled by the one-shot `release` service above; this backend only serves
       # (no inline migrate/reconcile). Safe to `--scale backend=N` (also enable Redis).
       - AF_SKIP_RELEASE=1
+      # Image version surfaced into the fleet heartbeat (/admin/instances panel).
+      # Not an ARTIFACTFLOW_ tunable — read straight from env, defaults to "dev".
+      - AF_VERSION=${AF_VERSION:-latest}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/ready"]
       interval: 30s

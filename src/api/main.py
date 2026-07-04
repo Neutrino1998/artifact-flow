@@ -28,7 +28,7 @@ from api.middleware import RequestContextMiddleware
 from api.routers import admin, admin_skills, admin_tools, admin_users, auth, chat, artifacts, departments, meta, skills, stream
 from observability import (
     LoopLagWatchdog, DeadmanSwitch, RuntimeSampler, JsonlSink,
-    resolve_mem_limit_bytes,
+    resolve_mem_limit_bytes, HeartbeatWriter, error_counter,
 )
 from observability import admin_runtime
 from utils.instance import INSTANCE_ID
@@ -120,18 +120,37 @@ def _start_observability(loop: asyncio.AbstractEventLoop) -> None:
             "Observability mem_limit unset (no env override and no readable cgroup) — "
             "RSS high-water WARN disabled"
         )
+    # 进程内 ERROR 计数:挂到已构造好的 ArtifactFlow logger(此时各模块 import 早已
+    # 触发其构造,不会被后续 handlers.clear() 清掉),喂心跳「黄色」信号。
+    _error_counter = error_counter.install()
+
+    # 舰队心跳:sampler 每 tick 把快照子集多写一份到 Redis。redis 为 None(单机
+    # InMemory)时 HeartbeatWriter.write no-op,/admin/instances 走本机 snapshot。
+    redis_client = get_redis_client()
+    _heartbeat = HeartbeatWriter(
+        redis_client=redis_client,
+        key_prefix=config.REDIS_KEY_PREFIX,
+        ttl_sec=config.OBS_HEARTBEAT_TTL_SEC,
+        error_counter=_error_counter,
+        watchdog=_watchdog,
+        autoheal_marker_path=config.OBS_AUTOHEAL_MARKER_PATH,
+    )
+
     _sampler = RuntimeSampler(
         sink=_metrics_sink,
         watchdog=_watchdog,
         execution_runner=get_execution_runner(),
         db_manager=get_db_manager(),
-        redis_client=get_redis_client(),
+        redis_client=redis_client,
         long_task_age_sec=config.OBS_LONG_TASK_AGE_SEC,
         interval_sec=config.OBS_SAMPLE_INTERVAL_SEC,
         mem_limit_bytes=mem_limit_bytes,
+        heartbeat=_heartbeat,
     )
     _sampler.start()
     admin_runtime.set_sampler(_sampler)
+    # /admin/instances 读侧要用 heartbeat 的 key 形状 + 本机 payload 构造器。
+    admin_runtime.set_heartbeat(_heartbeat)
 
 
 async def _stop_observability() -> None:
@@ -142,6 +161,7 @@ async def _stop_observability() -> None:
         await _sampler.stop()
         _sampler = None
         admin_runtime.set_sampler(None)
+        admin_runtime.set_heartbeat(None)
     if _deadman is not None:
         await _deadman.stop()
         _deadman = None

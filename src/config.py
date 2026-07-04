@@ -145,6 +145,14 @@ class Settings(BaseSettings):
                                                # 打开作为 "持久卷未挂载" 的兜底,代价是污染主应用日志流 / docker logs)
                                                # env 覆盖:`ARTIFACTFLOW_OBS_STDOUT_MIRROR=true`(env_prefix 强制带前缀)
 
+    # 舰队心跳注册表(Phase C):sampler 每 tick 把快照子集写 `{prefix:instance:<id>}`,
+    # 管理端 /admin/instances scan 出全舰队。双时间轴红/黄:key TTL 放长,颜色由
+    # payload 内 `ts` 新鲜度在读侧判(详见 observability/heartbeat.py 文档)。
+    OBS_HEARTBEAT_TTL_SEC: int = 300           # 心跳 key TTL;> STALE 数倍,给 wedge 实例留「在册显红」窗口
+    OBS_HEARTBEAT_STALE_SEC: int = 60          # ts 超此值 = 陈旧 → 面板红(wedge/停更);约 2× sample interval
+    OBS_ERROR_WINDOW_SEC: int = 300            # last_error 在此窗口内 → 面板黄(近期出过 ERROR)
+    OBS_AUTOHEAL_MARKER_PATH: str = ""         # 宿主 autoheal marker(JSONL)容器内只读路径;空=未挂载,面板不显示重启轨迹
+
     # Redis（空 = InMemory fallback，非空 = Redis）
     REDIS_URL: str = ""
     REDIS_CLUSTER: bool = False           # 生产 Cluster 模式
