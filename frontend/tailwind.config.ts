@@ -58,7 +58,10 @@ const config: Config = {
         },
         status: {
           success: '#4a8c6f',
-          error: '#c25d4e',
+          // 危险红:从 #c25d4e(HSL 8°/49%/53%,为贴合赭墨被压得过温吞)提饱和到
+          // #d0432f(7°/63%/50%)—— 色相仍锁暖家族,但明显读作「警示」而非陈旧砖色;
+          // 刻意比 success/warning 更冲(危险色该抢注意力,音量梯度 error>warning>success)。
+          error: '#d0432f',
           warning: '#c49a3c',
           // running deliberately shares the accent hue (live activity = brand)
           running: 'rgb(var(--accent) / <alpha-value>)',
