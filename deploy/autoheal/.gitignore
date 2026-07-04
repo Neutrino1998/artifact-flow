@@ -1,0 +1,4 @@
+# 运行时产物:autoheal.sh 追加的重启痕迹(宿主写、backend 只读挂载代报)。
+# 目录本身要进版本库(README + systemd units + 作为挂载源),但 marker 不进。
+restart-marker.jsonl
+restart-marker.jsonl.tmp

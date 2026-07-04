@@ -101,6 +101,9 @@ services:
       - artifactflow_data:/app/data
       - ../config:/app/config:ro
       - /etc/localtime:/etc/localtime:ro
+      # autoheal marker (Phase C):宿主 autoheal.sh 追加重启痕迹,backend 只读挂载
+      # 读本机 instance_id 匹配的最近一条,经心跳 last_autoheal 在面板代报。
+      - ./autoheal:/app/autoheal:ro
     env_file:
       - .env
     environment:
@@ -111,6 +114,8 @@ services:
       # Image version surfaced into the fleet heartbeat (/admin/instances panel).
       # Not an ARTIFACTFLOW_ tunable — read straight from env, defaults to "dev".
       - AF_VERSION=${AF_VERSION:-latest}
+      # autoheal marker 容器内路径(挂载点 + 文件名);空=不读。
+      - ARTIFACTFLOW_OBS_AUTOHEAL_MARKER_PATH=/app/autoheal/restart-marker.jsonl
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/ready"]
       interval: 30s

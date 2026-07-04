@@ -460,6 +460,16 @@ docker compose -f deploy/docker-compose.intranet.yml \
 | `ARTIFACTFLOW_DEFAULT_PAGE_SIZE` | `20` | 分页默认每页条数 |
 | `ARTIFACTFLOW_MAX_PAGE_SIZE` | `100` | 分页最大每页条数 |
 
+### 舰队可观测（Phase C）
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `AF_VERSION` | `latest` | 镜像版本,由 compose 注入 backend、透出到实例面板(非 `ARTIFACTFLOW_` 前缀) |
+| `ARTIFACTFLOW_OBS_HEARTBEAT_TTL_SEC` | `300` | 心跳 key TTL;放长于 STALE,给 wedge 实例留「在册显红」窗口 |
+| `ARTIFACTFLOW_OBS_HEARTBEAT_STALE_SEC` | `60` | 心跳 `ts` 超此值 = 陈旧 → 面板红(约 2× sample 周期) |
+| `ARTIFACTFLOW_OBS_ERROR_WINDOW_SEC` | `300` | 最近 ERROR / autoheal 在此窗口内 → 面板黄 |
+| `ARTIFACTFLOW_OBS_AUTOHEAL_MARKER_PATH` | `` | autoheal marker 容器内路径;compose 已设为 `/app/autoheal/restart-marker.jsonl`,空=不读 |
+
 ### LLM 与工具 API Key
 
 以下变量**不使用** `ARTIFACTFLOW_` 前缀，由 LiteLLM / 工具直接读取：
@@ -696,6 +706,32 @@ docker compose -f deploy/docker-compose.intranet.yml restart backend
 |------|------|----------|
 | `GET /health/live` | 存活探测（Mode 1 / K8s liveness） | 进程存活，始终返回 200 |
 | `GET /health/ready` | 就绪探测（Mode 2/3 / K8s readiness） | 进程 + DB + Redis 连通性，失败返回 503 |
+
+### 舰队可观测与自愈（Phase C）
+
+多副本下「哪个实例活着 / 有没有出错 / watchdog 抓没抓到过异常」在管理端一眼可见，
+wedge 副本自动重启。三件套，都复用已有件、不引外部监控栈：
+
+- **心跳注册表**：每个 backend 的 `RuntimeSampler`（30s 周期）把快照子集多写一份到
+  Redis `{prefix:instance:<id>}`（单 SET+EX，每实例独占 slot）。字段含版本 / 上线时间 /
+  loop_lag / RSS / 在途 turn 数 / **ERROR 计数** / **watchdog 最近 wedge 摘要** /
+  **autoheal 重启轨迹**。单机（无 Redis）无注册表，面板退化成本机一行。
+- **实例面板**：管理端菜单 →「舰队实例」（admin-only 独立 tab）。红黄绿：
+  - 🟢 绿 = 心跳新鲜（`ts` < `OBS_HEARTBEAT_STALE_SEC`，默认 60s）且无异常
+  - 🟡 黄 = 活着但 loop_lag 近分钟峰值超阈 / 窗口内出过 ERROR / watchdog 抓到过 wedge /
+    近期被 autoheal 重启
+  - 🔴 红 = 心跳 `ts` 陈旧（停更）但 key 仍在 TTL 窗口内 —— wedge「在册可见」，给自愈留窗口；
+    key 真过期（> `OBS_HEARTBEAT_TTL_SEC`，默认 300s）才从列表消失（死透已收殓）
+  - **双时间轴**是刻意的:TTL 若只有 ~ STALE，wedge 实例的 key 直接过期蒸发、面板根本
+    没机会显红。颜色由读侧按 `ts` 新鲜度算(阈值可调不需回填)。
+- **autoheal**：宿主 systemd timer 每 60s 把 unhealthy 容器 `docker restart`。装法与约束
+  见 `deploy/autoheal/README.md`。两个要点：(1) 与维护窗口互斥（`MAINTENANCE_ON` 旗标在
+  即整轮 no-op，不拉活 pause.sh 有意停掉的服务）；(2) 归因经 marker 文件中转、backend
+  只读挂载代报（脚本不直连 Redis，保十行可审计），`docker restart` 保容器身份 → 面板
+  同一行连续、`started_at` 变新即重启轨迹。
+
+验收（真机随发版窗口）：`--scale backend=2` 面板见两实例；`kill -STOP` 一个副本模拟
+wedge → ≤90s 变红 → autoheal 重启 → 恢复绿；制造一条 ERROR 日志 → 对应实例变黄且计数可见。
 
 ### 数据卷
 

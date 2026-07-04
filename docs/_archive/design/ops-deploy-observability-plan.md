@@ -15,14 +15,14 @@
 
 ## 进度
 
-- **当前**:Phase B 的 Mac 侧已完成(2026-07-04)——清单全绿(reaper 项除外)+ nginx→Caddy 配置切换全部落仓。
-- **下一步**:Phase B 剩余 = 内网真机切换(随下次发版窗口:证书就位 → down/up,见 docs/deployment.md「nginx→Caddy 一次性切换」)+ 顺手 smoke;之后 Phase C。
+- **当前**:Phase C 代码已全部落仓(2026-07-04)——心跳注册表 + `/admin/instances` + 前端独立「舰队实例」tab + autoheal 脚本/systemd units/marker 链路。Mac 侧验过后端语义(心跳读写、判色、ERROR 计数、marker→心跳代报);autoheal 的 systemd 周期触发闭环标真机验收。Phase B 的 Mac 侧此前已完成。
+- **下一步**:(a) Phase C 真机验收随发版窗口:`--scale backend=2` 面板见两实例 + `kill -STOP` 模拟 wedge→面板红→autoheal 重启→恢复绿 + 造 ERROR→变黄;(b) Phase B 剩余 = 内网真机 nginx→Caddy 切换(证书就位 → down/up)。之后 Phase D。
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | A | instance 身份地基(日志/jsonl/响应头/lease/错误事件 五处注入 + jsonl 按实例分目录) | **已完成**(2026-07-04) |
 | B | Mac 全功能验证(`--scale` 清单,以 Caddy 为入口)+ 内网 nginx→Caddy 收敛 + HTTPS 静态证书 + 真机 smoke | **Mac 侧已完成**(2026-07-04);剩内网真机切换随发版窗口 |
-| C | 舰队可观测 + 自愈(Redis 心跳注册表 + `/admin/instances` + 前端实例面板 + autoheal) | 未开始 |
+| C | 舰队可观测 + 自愈(Redis 心跳注册表 + `/admin/instances` + 前端实例面板 + autoheal) | **代码已落仓**(2026-07-04);autoheal systemd 周期闭环标真机验收 |
 | D | 多机 fleet(fleet.conf + fleet.sh 单命令发布 + LB 模板生成 + env 单源推送) | 未开始 |
 
 依赖:**B 依赖 A**(instance_id 是「请求真的落在两个副本」的观察手段);**C 依赖 A**(心跳/面板都以 instance_id 为 key);**D 依赖 B**(单机多副本验证过、内网入口已收敛 Caddy,才谈多机);A/C 与 D 内部无耦合、可穿插。1–3 阶段做完,单机多副本即生产可用 + 可观测;D 是多机的全部增量。
@@ -101,6 +101,8 @@
 **验收**:两台真机从「装好 docker + runsc 的空机」到可服务 = `preflight` + `deploy` 两条命令;发布期间持续请求不中断(滚动);杀掉一台的 backend,服务经 LB 继续可用、面板显示该实例红;`rollback` 一条命令回上一版本;全程 release 恰跑一次;**单机形态回归**:一行 fleet.conf(host=`local`)走完同一 deploy 序列,替代手工发版配方。
 
 ## 变更日志
+
+- **2026-07-04 Phase C 代码落仓(可观测 + 自愈)**。五个提交:① ERROR 计数 `logging.Handler`(挂 `ArtifactFlow` logger 非 root,避掺第三方 ERROR 噪声)+ watchdog `_record_wedge` 额外留 `{ts,lag_ms,wedged}` 轻摘要供心跳读(栈明细仍只落 loop-lag.jsonl);② 心跳注册表 `HeartbeatWriter`——不新增常驻循环,`RuntimeSampler` 每 tick 把快照子集多写一份到 `{prefix:instance:<id>}`(单 `SET+EX`、hash-tag 每实例独占 slot,读侧 scan+pipelined GET fan-out 三形态通用;redis=None 单机 no-op);③ `GET /admin/instances`(scan+pipeline 镜像 `list_active_executions`,读侧判色);④ 前端独立「舰队实例」admin tab(10s 轮询、红黄绿卡片 + wedge/autoheal 徽章 + 展开详情);⑤ autoheal.sh + systemd `.service`/`.timer` + marker 挂载(backend `:ro` `/app/autoheal`)。**判色定案(到时再敲定项)**:双时间轴——key TTL(默认 300s)放长于 STALE(默认 60s),颜色由 payload 内 `ts` 新鲜度**读侧**算,不落 Redis(阈值可调不需回填);绿=新鲜无异常,黄=loop_lag 近分钟峰值超阈/窗口内出过 ERROR/watchdog 抓到过 wedge/近期被 autoheal,红=`ts` 陈旧但 key 未过期(wedge 在册可见,留自愈窗口)。**对 plan「TTL ~90s」草图的构造性修正**:90s TTL 下 wedge 实例 key 直接过期蒸发、面板根本没机会显红——与 Phase B 那三个 LB bug 同性质(不真想清楚就埋)。**其余到时再敲定项定案**:面板并入 vs 独立 tab → 用户选**独立 tab**;心跳字段集 = sampler 快照子集 + version/started_at/error_count/last_error_ts/last_wedge/last_autoheal;ERROR 窗口 5min 单值(不做滑窗 deque);autoheal 与 pause 互斥 = 查 `MAINTENANCE_ON` 旗标在即 no-op;marker = `deploy/autoheal/restart-marker.jsonl` 追加型 JSONL、按行数 500 截断,归因经文件中转 backend 代报(脚本不碰 Redis)。**Mac 验**:后端语义单测级验过(心跳读写/判色八态/ERROR 计数只认 ERROR/marker 追加+截断/backend 按 instance_id 过滤读取);前端 tsc+lint 绿;两份 compose config 校验通过。**遗留真机验收**(随发版窗口,无 systemd 的 Mac 测不了):`--scale backend=2` 面板见两实例 + `kill -STOP` 模拟 wedge→面板红→systemd timer 自动重启→恢复绿 + 造 ERROR→变黄。**归因前提**:backend `instance_id`=容器 hostname(docker 默认);若显式设 `ARTIFACTFLOW_INSTANCE_ID` 覆盖则 marker 归因需调整(默认部署不设)。
 
 - **2026-07-04 Phase B Mac 侧完成(用户定调:跳过专门真机行程,Mac 能测的测完 + nginx→Caddy)**。**配置形态**:`deploy/caddy/` 整目录挂载(`common.caddy` 共享站点主体 + 薄壳 `Caddyfile`/`Caddyfile.intranet`),intranet compose nginx→caddy(`AF_HTTP_PORT`/`AF_HTTPS_PORT`,HTTP 只做 308 跳转且带公开端口),`deploy/certs/` 放静态证书(gitignore + release tar 排除),`nginx.conf` 删除;pause/resume 探针统一「exec caddy 打 :2021」下沉 `_maint_lib.sh`;release.sh infra 镜像 `caddy:2.10-alpine`(slug `caddy2.10-pg16-redis7`)。**验证结果**(backend×2 + Redis + PG + 自签证书,真实 LLM turn):release 恰跑一次 / HTTPS 健康 / 维护页 gate / Swagger 404 / SSE 整流程含断线重连(断在 22 chunk 重连续到 complete)/ 跨副本 cancel(B 副本受理、DB 落 cancelled、lease+owner 同释放)/ 逐实例日志目录(`--scale 2` 三处一致性,A 阶段验收销账)/ wedge 摘除(pause 副本后 20/20 零失败)/ 单副本回归。**Mac 实测抓到并修掉三个 LB 真 bug**(全是不真跑发现不了的):① `reverse_proxy backend:8000` 经 keepalive 连接池钉死单副本(12/12 同实例)→ `dynamic a` 动态 upstream + round_robin;② 单文件 bind-mount pin inode,主机编辑/tar 覆盖后容器内 reload 断(实测复现)→ 整目录挂载 by-construction 修掉;③ wedge 副本摘不掉——主动健康检查(health_uri)不作用于 dynamic upstream(决策 2 的「主动健康检查白拿」在单机 dynamic 形态下**不成立**,多机 fleet 静态 upstream 时才成立),且 pause/wedge 下 TCP 握手由内核完成、dial_timeout 不触发 → 被动摘除:分路径 `response_header_timeout`(health 3s / SSE 15s / API 60s——上传转换在 POST 请求内,必须留宽)+ `fail_duration 30s` 失败记忆(upstream 健康按 dial 地址全局共享)+ caddy 容器 healthcheck 打 :2021 兼作穿过 dynamic upstream 的探针。**跳过**:reaper 跨副本回收(需沙盒镜像,留真机窗口,MULTI-REPLICA.md 已标注)。**遗留到发版窗口**:内网真机 down/up 切换(注意旧 nginx 容器是 orphan,`up` 不会自动移除——Mac 上真实撞到,3 周前的旧 nginx 容器一直占着 80)+ 真证书链验证。
 

@@ -1,0 +1,19 @@
+# ArtifactFlow autoheal — oneshot,由 .timer 周期触发。
+# 安装:把本文件与 .timer 拷到 /etc/systemd/system/,按实际解包路径改下面两处路径,
+#   systemctl daemon-reload && systemctl enable --now artifactflow-autoheal.timer
+# 详见 deploy/autoheal/README.md。
+[Unit]
+Description=ArtifactFlow autoheal — restart unhealthy fleet containers
+Documentation=file:deploy/autoheal/README.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# ↓↓↓ 改成你的实际 bundle 解包路径(deploy 目录 + 脚本绝对路径) ↓↓↓
+WorkingDirectory=/opt/artifactflow/deploy
+ExecStart=/opt/artifactflow/deploy/scripts/autoheal.sh
+# ↑↑↑ systemd 不认相对路径,必须绝对 ↑↑↑
+# 可选覆盖(默认见 autoheal.sh 头注释):
+# Environment=AF_COMPOSE_FILE=/opt/artifactflow/deploy/docker-compose.intranet.yml
+# Environment=AUTOHEAL_SERVICES=backend frontend caddy
