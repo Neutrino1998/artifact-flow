@@ -404,7 +404,7 @@ function BrowserItem({
                     e.stopPropagation();
                     handleCopyId();
                   }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-sm text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-surface-dark rounded-md transition-colors"
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-sm font-medium text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-surface-dark rounded-md transition-colors"
                 >
                   <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <rect x="5" y="5" width="9" height="9" rx="1.5" />
@@ -418,7 +418,7 @@ function BrowserItem({
                     setMenuOpen(false);
                     setConfirmDelete(true);
                   }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-sm text-status-error hover:bg-status-error/10 rounded-md transition-colors"
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-sm font-medium text-status-error hover:bg-status-error/10 rounded-md transition-colors"
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6" />
