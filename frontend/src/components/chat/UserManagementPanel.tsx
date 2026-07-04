@@ -65,7 +65,6 @@ export default function UserManagementPanel() {
   const listVersion = useUIStore((s) => s.userMgmtListVersion);
   const selectionMode = useUIStore((s) => s.selectionMode);
   const selection = useUIStore((s) => s.userManagementSelection);
-  const enterSelectionMode = useUIStore((s) => s.enterSelectionMode);
   const exitSelectionMode = useUIStore((s) => s.exitSelectionMode);
   const toggleUserSelection = useUIStore((s) => s.toggleUserSelection);
   const setUserManagementSelection = useUIStore((s) => s.setUserManagementSelection);
@@ -199,7 +198,7 @@ export default function UserManagementPanel() {
 
       {/* Content */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4">
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-3xl mx-auto pt-3">
           {/* Error */}
           {error && (
             <div className="mb-3 px-3 py-2 text-status-error bg-status-error/10 rounded-lg">
@@ -207,60 +206,11 @@ export default function UserManagementPanel() {
             </div>
           )}
 
-          {/* Top-level actions — selection mode shows selection toolbar instead */}
-          {!selectionMode ? (
-            <div className="mb-3 flex items-center gap-2">
-              <button
-                onClick={() => setRightView({ type: 'create-user' })}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border font-medium transition-colors ${
-                  rightView.type === 'create-user'
-                    ? 'text-accent border-accent bg-bg dark:bg-bg-dark'
-                    : 'text-accent border-border dark:border-border-dark bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark'
-                }`}
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M7 2v10M2 7h10" />
-                </svg>
-                新建用户
-              </button>
-              <button
-                onClick={() => setRightView({ type: 'bulk-import' })}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border font-medium transition-colors ${
-                  rightView.type === 'bulk-import'
-                    ? 'text-accent border-accent bg-bg dark:bg-bg-dark'
-                    : 'text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark'
-                }`}
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M7 2v8M3 8l4 4 4-4M2 13h10" />
-                </svg>
-                批量导入
-              </button>
-              <button
-                onClick={() => setRightView({ type: 'dept-manager' })}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border font-medium transition-colors ${
-                  rightView.type === 'dept-manager'
-                    ? 'text-accent border-accent bg-bg dark:bg-bg-dark'
-                    : 'text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark'
-                }`}
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M2 3h10M2 7h10M2 11h6" />
-                </svg>
-                管理部门
-              </button>
-              <button
-                onClick={enterSelectionMode}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border font-medium text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <rect x="2" y="2" width="10" height="10" rx="1.5" />
-                  <path d="M5 7l1.5 1.5L9 6" />
-                </svg>
-                批量管理
-              </button>
-            </div>
-          ) : (
+          {/* Selection toolbar — shown only in selection mode. The top-level
+              actions (新建用户 / 批量导入 / 管理部门 / 批量管理) live in the
+              sidebar now; this toolbar stays here because 全选当前页 is scoped
+              to the visible page. */}
+          {selectionMode && (
             <div className="mb-3 flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-accent/40 bg-accent/5 dark:bg-accent/10">
               <span className="text-sm text-text-secondary dark:text-text-secondary-dark">
                 已选 <span className="text-text-primary dark:text-text-primary-dark font-medium">{selection.length}</span> 项

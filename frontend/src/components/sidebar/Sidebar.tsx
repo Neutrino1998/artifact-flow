@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { useUIStore } from '@/stores/uiStore';
+import { useUIStore, type UserMgmtRightView } from '@/stores/uiStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useChat } from '@/hooks/useChat';
 import ConversationList from './ConversationList';
@@ -70,6 +70,14 @@ export default function Sidebar() {
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
   const { startNewChat } = useChat();
 
+  // Admin-takeover actions — hoisted out of the middle master-list panels
+  // into the sidebar. They just re-target the right master-detail panel.
+  const setUserManagementRightView = useUIStore((s) => s.setUserManagementRightView);
+  const setToolUnitRightView = useUIStore((s) => s.setToolUnitRightView);
+  const selectionMode = useUIStore((s) => s.selectionMode);
+  const enterSelectionMode = useUIStore((s) => s.enterSelectionMode);
+  const exitSelectionMode = useUIStore((s) => s.exitSelectionMode);
+
   const handleNewChat = () => {
     startNewChat();
     setArtifactPanelVisible(false);
@@ -105,6 +113,22 @@ export default function Sidebar() {
   const handleExit = () => {
     setActiveMode('none');
   };
+
+  // Opening a form leaves selection mode — the old middle-panel button row was
+  // replaced wholesale while selecting, so form + selection could never coexist;
+  // keep that single-active invariant now that the buttons persist in the sidebar.
+  const openUserView = (view: UserMgmtRightView) => {
+    if (selectionMode) exitSelectionMode();
+    setUserManagementRightView(view);
+  };
+  const handleCreateUser = () => openUserView({ type: 'create-user' });
+  const handleBulkImport = () => openUserView({ type: 'bulk-import' });
+  const handleDeptManager = () => openUserView({ type: 'dept-manager' });
+  // Toggle: 批量管理 enters selection mode; pressing it again (or the middle
+  // toolbar's 退出 / Esc) leaves it — keeps the sidebar in sync with the panel.
+  const handleToggleSelection = () =>
+    (selectionMode ? exitSelectionMode() : enterSelectionMode());
+  const handleCreateUnit = () => setToolUnitRightView({ type: 'create-unit' });
 
   const inObservability = activeMode === 'observability' && isAdmin;
   // While a master-detail mode owns the right panel (force-shown on desktop,
@@ -167,6 +191,42 @@ export default function Sidebar() {
           </>
         ) : inAdminTakeover ? (
           <>
+            {/* User-management actions */}
+            {inUserMgmt && (
+              <>
+                <IconButton onClick={handleCreateUser} label="新建用户">
+                  <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M7 2v10M2 7h10" />
+                  </svg>
+                </IconButton>
+                <IconButton onClick={handleBulkImport} label="批量导入">
+                  <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M7 2v8M3 8l4 4 4-4M2 13h10" />
+                  </svg>
+                </IconButton>
+                <IconButton onClick={handleDeptManager} label="管理部门">
+                  <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M2 3h10M2 7h10M2 11h6" />
+                  </svg>
+                </IconButton>
+                <IconButton onClick={handleToggleSelection} label="批量管理">
+                  <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <rect x="2" y="2" width="10" height="10" rx="1.5" />
+                    <path d="M5 7l1.5 1.5L9 6" />
+                  </svg>
+                </IconButton>
+              </>
+            )}
+
+            {/* Tool-unit management action */}
+            {inToolUnitMgmt && (
+              <IconButton onClick={handleCreateUnit} label="新建工具 unit">
+                <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M7 2v10M2 7h10" />
+                </svg>
+              </IconButton>
+            )}
+
             {/* Refresh — instances only */}
             {inInstances && (
               <IconButton onClick={handleRefreshInstances} label="刷新">
@@ -293,6 +353,47 @@ export default function Sidebar() {
           </>
         ) : inAdminTakeover ? (
           <>
+            {/* User-management actions — hoisted from UserManagementPanel */}
+            {inUserMgmt && (
+              <>
+                <button onClick={handleCreateUser} className={navRowClass}>
+                  <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M7 2v10M2 7h10" />
+                  </svg>
+                  新建用户
+                </button>
+                <button onClick={handleBulkImport} className={navRowClass}>
+                  <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M7 2v8M3 8l4 4 4-4M2 13h10" />
+                  </svg>
+                  批量导入
+                </button>
+                <button onClick={handleDeptManager} className={navRowClass}>
+                  <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M2 3h10M2 7h10M2 11h6" />
+                  </svg>
+                  管理部门
+                </button>
+                <button onClick={handleToggleSelection} className={navRowClass}>
+                  <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <rect x="2" y="2" width="10" height="10" rx="1.5" />
+                    <path d="M5 7l1.5 1.5L9 6" />
+                  </svg>
+                  批量管理
+                </button>
+              </>
+            )}
+
+            {/* Tool-unit management action — hoisted from ToolUnitManagementPanel */}
+            {inToolUnitMgmt && (
+              <button onClick={handleCreateUnit} className={navRowClass}>
+                <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M7 2v10M2 7h10" />
+                </svg>
+                新建工具 unit
+              </button>
+            )}
+
             {/* Refresh — instances only (mirrors observability's 刷新对话) */}
             {inInstances && (
               <button

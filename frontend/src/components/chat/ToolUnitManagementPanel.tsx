@@ -64,29 +64,14 @@ export default function ToolUnitManagementPanel() {
       />
 
       <div className="flex-1 overflow-y-auto px-4">
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-3xl mx-auto pt-3">
           {error && (
             <div className="mb-3 px-3 py-2 text-status-error bg-status-error/10 rounded-lg">
               {error}
             </div>
           )}
 
-          <div className="mb-3">
-            <button
-              onClick={() => setRightView({ type: 'create-unit' })}
-              className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border font-medium transition-colors ${
-                rightView.type === 'create-unit'
-                  ? 'text-accent border-accent bg-bg dark:bg-bg-dark'
-                  : 'text-accent border-border dark:border-border-dark bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark'
-              }`}
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M7 2v10M2 7h10" />
-              </svg>
-              新建工具 unit
-            </button>
-          </div>
-
+          {/* 新建工具 unit action lives in the sidebar now. */}
           {loading && units.length === 0 ? (
             <div className="py-12 text-center text-sm text-text-tertiary dark:text-text-tertiary-dark">
               加载中...
