@@ -13,9 +13,13 @@ import { BUTTON_GHOST_ICON } from '@/lib/styles';
 // 挂载方式(约束共同决定):
 //   1) 触发器/下拉靠 hover 显露、并需 absolute+translate 定位在行内 → kebab 必须是行的
 //      后代(相对行定位);
-//   2) 删除确认弹窗(ConfirmModal → DialogShell 的 `fixed inset-0`)若落在行内:会被 kebab
-//      wrapper 的 transform 祖先改掉定位基准(全屏遮罩错位),且点弹窗会冒泡到行的 onClick
-//      (误触 onSelect)。→ 弹窗 **createPortal 到 document.body**,脱离行子树,两问题一并消。
+//   2) 删除确认弹窗(ConfirmModal → DialogShell 的 `fixed inset-0`)若落在行内会被 kebab
+//      wrapper 的 transform 祖先改掉定位基准(全屏遮罩错位)→ **createPortal 到 document.body**
+//      脱离 DOM 子树修掉定位(fixed 按 DOM 祖先算)。
+//      ⚠ portal 只搬 DOM,**不改 React 合成事件冒泡**(合成事件走 fiber 树,本组件仍是行
+//      onClick 的 fiber 后代)—— 点弹窗遮罩(DialogShell backdrop 的 onClose 不 stopPropagation)
+//      仍会冒到行 onClick 误触 onSelect/切会话。故 portal 内容再包一层 stopPropagation 的 div
+//      在 fiber 边界拦掉(旧代码弹窗是行的**兄弟**、天然不冒到行,搬进子组件才有此坑)。
 // 本组件由父级**无条件挂载**在行内(不放进 hover 门里,否则 hover 移开会连带卸载正打开的
 // 弹窗):kebab 由 `visible` 自收显、包在 `wrapperClassName`(带 transform)里;弹窗走 portal。
 //
@@ -129,14 +133,19 @@ export default function ConversationActionsMenu({
       )}
 
       {confirmDelete && typeof document !== 'undefined' && createPortal(
-        <ConfirmModal
-          title="删除对话"
-          message={`确定要删除对话「${title}」吗？此操作无法撤销。`}
-          confirmLabel="删除"
-          destructive
-          onConfirm={handleConfirmDelete}
-          onCancel={() => setConfirmDelete(false)}
-        />,
+        // stopPropagation 拦在 fiber 边界:portal 只搬 DOM,合成事件仍按 fiber 树冒到行
+        // onClick(遮罩 onClose 不 stopPropagation),不拦会误触 onSelect/切会话。div 布局
+        // 中性(DialogShell 根为 fixed inset-0,不占流)。
+        <div onClick={(e) => e.stopPropagation()}>
+          <ConfirmModal
+            title="删除对话"
+            message={`确定要删除对话「${title}」吗？此操作无法撤销。`}
+            confirmLabel="删除"
+            destructive
+            onConfirm={handleConfirmDelete}
+            onCancel={() => setConfirmDelete(false)}
+          />
+        </div>,
         document.body,
       )}
     </>
