@@ -109,6 +109,9 @@ export default function Sidebar() {
   const inToolUnitMgmt = activeMode === 'toolUnit' && isAdmin;
   // Skill management (C-3) — center takeover like conversationBrowser, all users.
   const inSkills = activeMode === 'skills';
+  // Fleet instances (Phase C) — center takeover, admin-only, like observability
+  // but without the conversation search/refresh actions.
+  const inInstances = activeMode === 'instances' && isAdmin;
 
   // ── Collapsed: 48px icon bar ──
   if (sidebarCollapsed) {
@@ -147,7 +150,7 @@ export default function Sidebar() {
         ) : (
           <>
             {/* Artifacts — hidden while admin management owns the right panel */}
-            {!inUserMgmt && !inToolUnitMgmt && (
+            {!inUserMgmt && !inToolUnitMgmt && !inInstances && (
               <IconButton onClick={toggleArtifactPanel} label="文件面板">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <rect x="2" y="2" width="12" height="12" rx="1.5" />
@@ -205,6 +208,15 @@ export default function Sidebar() {
                 </svg>
               </IconButton>
             )}
+
+            {/* Exit fleet instances */}
+            {inInstances && (
+              <IconButton onClick={handleExit} label="退出实例监控">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                  <path d="M4 4l8 8M12 4l-8 8" />
+                </svg>
+              </IconButton>
+            )}
           </>
         )}
 
@@ -227,9 +239,9 @@ export default function Sidebar() {
       <div className="flex items-center justify-between px-4 py-3 border-b border-border dark:border-border-dark">
         <div className="min-w-0">
           <h1 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark">
-            {inObservability ? '运行监控' : inUserMgmt ? '用户管理' : inToolUnitMgmt ? '工具管理' : inSkills ? '技能管理' : APP_NAME}
+            {inObservability ? '运行监控' : inUserMgmt ? '用户管理' : inToolUnitMgmt ? '工具管理' : inSkills ? '技能管理' : inInstances ? '舰队实例' : APP_NAME}
           </h1>
-          {!inObservability && !inUserMgmt && !inToolUnitMgmt && !inSkills && (
+          {!inObservability && !inUserMgmt && !inToolUnitMgmt && !inSkills && !inInstances && (
             <p className="text-xs text-text-secondary dark:text-text-secondary-dark">
               {APP_TAGLINE}
             </p>
@@ -277,7 +289,7 @@ export default function Sidebar() {
         ) : (
           <>
             {/* Artifacts — hidden while admin management owns the right panel */}
-            {!inUserMgmt && !inToolUnitMgmt && (
+            {!inUserMgmt && !inToolUnitMgmt && !inInstances && (
               <button
                 onClick={toggleArtifactPanel}
                 className={navRowClass}
@@ -351,6 +363,17 @@ export default function Sidebar() {
                 退出工具管理
               </button>
             )}
+            {inInstances && (
+              <button
+                onClick={handleExit}
+                className={navRowDangerClass}
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                  <path d="M9 3H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h5M7 8h6m0 0l-2-2m2 2l-2 2" />
+                </svg>
+                退出实例监控
+              </button>
+            )}
           </>
         )}
       </div>
@@ -363,7 +386,7 @@ export default function Sidebar() {
 
       {/* Notifications + user menu at bottom */}
       <div className="px-3 pb-3 pt-2 space-y-2">
-        {!inObservability && !inUserMgmt && !inToolUnitMgmt && <StorageBar />}
+        {!inObservability && !inUserMgmt && !inToolUnitMgmt && !inInstances && <StorageBar />}
         <NotificationCenter />
         <UserMenu />
       </div>

@@ -16,6 +16,7 @@ import SkillManagementPanel from './SkillManagementPanel';
 import UserManagementPanel from './UserManagementPanel';
 import ToolUnitManagementPanel from './ToolUnitManagementPanel';
 import ObservabilityPanel from './ObservabilityPanel';
+import InstancePanel from './InstancePanel';
 import { useAuthStore } from '@/stores/authStore';
 
 function getGreeting(): string {
@@ -63,6 +64,10 @@ export default function ChatPanel() {
 
   if (activeMode === 'observability' && isAdmin) {
     return <ObservabilityPanel />;
+  }
+
+  if (activeMode === 'instances' && isAdmin) {
+    return <InstancePanel />;
   }
 
   if (activeMode === 'userManagement' && isAdmin) {

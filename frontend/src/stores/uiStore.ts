@@ -34,7 +34,8 @@ export type ActiveMode =
   | 'skills'
   | 'userManagement'
   | 'toolUnit'
-  | 'observability';
+  | 'observability'
+  | 'instances';
 
 // 哪些 mode 接管/影响**右面板**(master-detail 重定向 or 全屏隐藏)。
 // conversationBrowser 只接管中间面板 → 进出它不算右面板意图变更,不 bump epoch。
@@ -42,6 +43,7 @@ const RIGHT_PANEL_MODES: ReadonlySet<ActiveMode> = new Set([
   'userManagement',
   'toolUnit',
   'observability',
+  'instances',
 ]);
 
 interface UIState {
@@ -156,8 +158,8 @@ export const useUIStore = create<UIState>((set) => ({
       toolUnitRightView: { type: 'empty' },
       observabilitySelectedConvId: null,
       observabilityBrowseVisible: false,
-      // observability 全屏接管 → 关掉默认 artifact 面板(沿用旧 setObservabilityVisible 行为)
-      ...(mode === 'observability' && { artifactPanelVisible: false }),
+      // observability / instances 全屏接管中间面板 → 关掉默认 artifact 面板
+      ...((mode === 'observability' || mode === 'instances') && { artifactPanelVisible: false }),
       // 仅当进/出影响右面板的模式时才 bump(conversationBrowser 只动中间面板,不算)
       ...(affectsRight && { rightPanelIntentEpoch: s.rightPanelIntentEpoch + 1 }),
     };

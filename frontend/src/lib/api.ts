@@ -594,6 +594,39 @@ export function getAdminConversationEvents(convId: string) {
   );
 }
 
+// ── Fleet instances (Phase C) ──
+// The backend endpoint returns a dynamic dict (no response_model), so the shape
+// is hand-declared here rather than generated. One entry per live heartbeat.
+export interface InstanceHeartbeat {
+  instance_id: string;
+  version?: string;
+  started_at?: string;
+  ts?: string | null;
+  loop_lag_ms?: { p50_ms?: number; p99_ms?: number; max_1m_ms?: number; samples?: number };
+  in_flight?: number;
+  tasks_long_running?: number;
+  process?: { rss_mb?: number; cpu_pct?: number; open_fds?: number };
+  db_pool?: { in_use?: number; size?: number; overflow?: number };
+  redis?: { used_mb?: number; maxmemory_mb?: number };
+  data_dir_mb?: number;
+  error_count?: number;
+  last_error_ts?: string | null;
+  last_wedge?: { ts?: string; lag_ms?: number; wedged?: boolean } | null;
+  last_autoheal?: { ts?: string; reason?: string; count?: number } | null;
+  status: 'green' | 'yellow' | 'red';
+}
+
+export interface AdminInstancesResponse {
+  ts: string;
+  instance_id: string;   // the instance that answered this request
+  shared: boolean;       // true = Redis fleet view; false = single-instance local view
+  instances: InstanceHeartbeat[];
+}
+
+export function getAdminInstances() {
+  return request<AdminInstancesResponse>('/api/v1/admin/instances');
+}
+
 export function getAdminPromptReconstruct(
   convId: string,
   messageId: string,
