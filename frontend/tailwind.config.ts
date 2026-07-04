@@ -44,9 +44,14 @@ const config: Config = {
           hover: 'rgb(var(--accent-hover) / <alpha-value>)',
           bg: 'rgb(var(--accent-bg) / <alpha-value>)',
         },
+        // 边框/分割线:统一一个实色令牌(描边 + 实色填充:滚动条/分栏条/开关轨道/
+        // 细线),全站同一值。浅色 #dddbd4(暖米灰,较原 #d6d3cb 提亮一档、更贴浅底);
+        // 深色 #333333(中性,较原 #3a3a3a 略深一档、更贴深色卡面 #2a2a2a)。
+        // 必须用实色:opacity 修饰(border/60、ring-border/40 等)会缩放它;若填半透明
+        // 色值,/NN 会改写其 alpha、暴露底色 → 描边突然变重(头像/通知环那个 bug)。
         border: {
-          DEFAULT: '#d6d3cb',
-          dark: '#3a3a3a',
+          DEFAULT: '#dddbd4',
+          dark: '#333333',
         },
         // Muted categorical hues for the observability event trace (scoped
         // to that panel; agent_* events use accent directly).
