@@ -228,10 +228,11 @@ class MountArtifactTool(BaseTool):
 class PersistFileTool(BaseTool):
     """把工作区文件回写成 artifact(显式 stage-out,原则 4)。
 
-    - 默认产新 artifact(同名 `_N` dedup);给 `artifact_id` 则**原地覆盖**既有
-      artifact —— 文本目标走 rewrite(版本 +1 可回溯),blob 目标走可变单版
-      原地替换(不产版本历史;迭代改包的版本管理归沙盒内 git,避免平凡修改
-      堆出一摞 `_N` 副本吃掉配额)。target 类型优先:blob 目标接受任意内容
+    - 默认按文件名产新 artifact(同名 `_N` dedup);给 `artifact_id` 走 **upsert**:
+      目标不存在则以该 id 新建(模型给产出物起语义 id,供 `artifact://<id>` 引用),
+      存在则**原地覆盖** —— 文本目标走 rewrite(版本 +1 可回溯),blob 目标走可变
+      单版原地替换(不产版本历史;迭代改包的版本管理归沙盒内 git,避免平凡修改
+      堆出一摞 `_N` 副本吃掉配额)。覆盖时 target 类型优先:blob 目标接受任意内容
       (可解码文本按字节存);唯一拒绝方向 = 二进制内容盖文本 artifact
       (字节无文本表示)。
     - persist 落回来就是一次普通 artifact 写:进 WorkingSet,随 turn 末
@@ -250,8 +251,8 @@ class PersistFileTool(BaseTool):
                 "discarded when the turn ends — persist is the only way to "
                 "keep results. Text files become editable text artifacts; binary files "
                 "(docx/xlsx/images/archives...) become artifacts the user can download. "
-                "Creates a new artifact by default (an existing id gets a numeric "
-                "suffix); to overwrite an existing artifact instead, see artifact_id."
+                "Auto-names the artifact from the filename by default (an existing "
+                "id gets a numeric suffix); pass artifact_id to choose the id yourself."
             ),
             permission=ToolPermission.AUTO,
         )
@@ -273,15 +274,16 @@ class PersistFileTool(BaseTool):
                 name="artifact_id",
                 type="string",
                 description=(
-                    "Optional: id of an existing artifact to overwrite in place with "
-                    "this file's content (id, title and type are kept; the target "
-                    "keeps its kind — a binary file cannot overwrite a text "
-                    "artifact). Use it when saving back an updated version of "
-                    "something you mounted (e.g. an edited code package), so "
-                    "trivial edits don't pile up duplicate artifacts. Overwriting "
-                    "a binary artifact replaces its bytes permanently — no version "
-                    "history is kept for binaries; rely on git inside the sandbox "
-                    "if you need history."
+                    "Optional: the id to give this artifact. If no artifact with "
+                    "this id exists yet, it is created with this id (use it to give "
+                    "an output a meaningful id you can reference as artifact://<id>). "
+                    "If one already exists, its content is overwritten in place "
+                    "(title and type kept; a binary file cannot overwrite a text "
+                    "artifact) — use this when saving back something you mounted "
+                    "(e.g. an edited code package) so trivial edits don't pile up "
+                    "duplicate artifacts. Overwriting a binary artifact replaces its "
+                    "bytes permanently — no version history is kept for binaries; "
+                    "rely on git inside the sandbox if you need history."
                 ),
                 required=False,
             ),
@@ -418,20 +420,40 @@ class PersistFileTool(BaseTool):
         text, mime = self._classify(filename, data)
 
         if target_id:
-            # 覆盖回写:同一 artifact 换内容(文本目标 rewrite / blob 目标原地替换,
-            # target 类型优先),种类校验与配额准入都在 service 层。content_type 用
-            # info 里的(目标 artifact 的权威 MIME,覆盖不改型,非本文件的猜测值)。
-            success, message, info = await self._service.replace_from_upload(
+            # upsert:目标存在 → 覆盖回写;不存在 → 以模型给的 id 新建。persist 的
+            # 新建 id 只能派生自文件名,模型要给产出物起语义 id(为了 artifact://<id>
+            # 引用)唯有此路。存在性探测决定路由 —— 沙盒内单任务串行、无并发写者,
+            # check-then-act 无 TOCTOU;真撞并发也由 create 侧 dedup/ID 校验兜底。
+            existing = await self._service.get_artifact(session_id, target_id)
+            if existing is not None:
+                # 覆盖:同一 artifact 换内容(文本目标 rewrite / blob 目标原地替换,
+                # target 类型优先),种类校验与配额准入都在 service 层。content_type
+                # 用 info 里的(目标 artifact 的权威 MIME,覆盖不改型,非本文件的猜测)。
+                success, message, info = await self._service.replace_from_upload(
+                    session_id=session_id,
+                    artifact_id=target_id,
+                    content=text,
+                    blob=data if text is None else None,
+                )
+                if not success:
+                    return ToolResult(success=False, error=message)
+                return self._persist_success(
+                    raw_path, target_id, len(data),
+                    info["content_type"], info["has_blob"], replaced=True,
+                )
+            success, message, info = await self._service.create_from_upload(
                 session_id=session_id,
-                artifact_id=target_id,
-                content=text,
+                filename=filename,
+                content=text if text is not None else "",
+                content_type=mime,
                 blob=data if text is None else None,
+                source="sandbox",
+                artifact_id=target_id,
             )
             if not success:
                 return ToolResult(success=False, error=message)
             return self._persist_success(
-                raw_path, target_id, len(data),
-                info["content_type"], info["has_blob"], replaced=True,
+                raw_path, info["id"], len(data), mime, text is None, replaced=False,
             )
 
         if text is not None:

@@ -341,6 +341,33 @@ class TestCreateFromUpload:
         assert ok
         assert info["id"] == "upload"
 
+    async def test_explicit_artifact_id_used_verbatim(
+        self, artifact_service: ArtifactService, session_id: str
+    ):
+        """显式 artifact_id(persist upsert 新建路径)→ 原样落 id,不派生自文件名。"""
+        artifact_service.set_session(session_id)
+        ok, _, info = await artifact_service.create_from_upload(
+            session_id=session_id, filename="gallery.html",
+            content="<html/>", content_type="text/html",
+            artifact_id="风格样单",
+        )
+        assert ok
+        assert info["id"] == "风格样单"
+
+    async def test_explicit_invalid_artifact_id_loud_fails(
+        self, artifact_service: ArtifactService, session_id: str
+    ):
+        """显式 id 不合法 → loud-fail(与 create_artifact 一致,不静默 normalize)。"""
+        artifact_service.set_session(session_id)
+        ok, message, info = await artifact_service.create_from_upload(
+            session_id=session_id, filename="x.txt",
+            content="x", content_type="text/plain",
+            artifact_id="bad id/with space",
+        )
+        assert not ok
+        assert info is None
+        assert "Invalid artifact_id" in message
+
     async def test_chinese_filename_preserved(
         self, artifact_service: ArtifactService, session_id: str
     ):

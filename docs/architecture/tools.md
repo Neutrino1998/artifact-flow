@@ -207,7 +207,7 @@ class ToolParameter:
 | `call_subagent` | `CallSubagentTool` | AUTO | `agent_name` (string), `instruction` (string), `fresh_start` (boolean, 默认 true) | 调用 subagent（仅路由验证，不执行）；`fresh_start=false` 时延续本 session 中该 subagent 上一次会话的上下文 |
 | `bash` | `BashTool` | **CONFIRM** | `command` (string) | 在本轮沙盒容器内执行 bash（跑不可信模型代码 → CONFIRM）。详见 [sandbox.md](sandbox.md) |
 | `mount` | `MountArtifactTool` | AUTO | `artifact_id` (string) | 把一个 artifact 物化进沙盒工作区（显式 stage-in） |
-| `persist` | `PersistFileTool` | AUTO | `path` (string), `artifact_id` (string, 可选) | 把工作区文件回写成 artifact（显式 stage-out）：默认产新件，给 `artifact_id` 则原地覆盖既有 artifact |
+| `persist` | `PersistFileTool` | AUTO | `path` (string), `artifact_id` (string, 可选) | 把工作区文件回写成 artifact（显式 stage-out）：默认按文件名产新件，给 `artifact_id` 走 upsert（不存在则以该 id 新建，存在则原地覆盖） |
 
 **注意：**
 

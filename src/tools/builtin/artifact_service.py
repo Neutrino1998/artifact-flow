@@ -494,6 +494,7 @@ class ArtifactService:
         metadata: Optional[Dict] = None,
         blob: Optional[bytes] = None,
         source: str = "user_upload",
+        artifact_id: Optional[str] = None,
     ) -> Tuple[bool, str, Optional[Dict]]:
         """从一个「文件」**stage** 一个 artifact 进 WorkingSet(不即时 commit)。
 
@@ -501,13 +502,27 @@ class ArtifactService:
         flush_all 落库。两个调用方:① 用户上传(execute_loop 在 turn 起点调用,uploads
         closure-carry 进引擎;turn 中途死 = 与模型产物一致地丢失,用户重选文件重试);
         ② 沙盒 persist 产新件(source="sandbox",同一套 `_normalize` + `_N` dedup;
-        覆盖既有 artifact 走 ``replace_from_upload``)。dedup / blob 上限 / 配额走
+        既有 artifact 覆盖走 ``replace_from_upload``)。dedup / blob 上限 / 配额走
         共享 ``_stage_artifact``。
+
+        ``artifact_id`` 显式指定:persist 的 upsert 路径在目标不存在时以模型给的 id
+        新建(而非文件名派生),使 ``persist(path=X.html, artifact_id=风格样单)`` 能一步
+        产出可被 ``artifact://风格样单`` 引用的具名件。校验规则与 ``create_artifact``
+        一致(不合法即 loud-fail,不静默 normalize);None 时保持文件名派生。
         """
         title = os.path.splitext(filename)[0]
+        if artifact_id is not None:
+            if not _ARTIFACT_ID_PATTERN.match(artifact_id):
+                return False, (
+                    f"Invalid artifact_id '{artifact_id}': must be 1-64 chars of "
+                    f"letters/digits/underscore/hyphen/dot only."
+                ), None
+            id_base = artifact_id
+        else:
+            id_base = _normalize_filename_to_id(filename)
         ok, message, artifact_id = await self._stage_artifact(
             session_id=session_id,
-            id_base=_normalize_filename_to_id(filename),
+            id_base=id_base,
             content_type=content_type,
             title=title,
             content=content,

@@ -76,7 +76,9 @@ class FakeArtifactService:
 
     async def create_from_upload(self, **kwargs):
         self.create_calls.append(kwargs)
-        return True, "Created", {"id": kwargs["filename"], "has_blob": kwargs.get("blob") is not None}
+        # 显式 artifact_id 优先(upsert 新建路径),否则文件名派生 id
+        new_id = kwargs.get("artifact_id") or kwargs["filename"]
+        return True, "Created", {"id": new_id, "has_blob": kwargs.get("blob") is not None}
 
     async def replace_from_upload(self, session_id, artifact_id, *, content=None, blob=None):
         self.replace_calls.append({
@@ -247,7 +249,7 @@ class TestPersistTool:
         assert result.metadata["has_blob"] is True
 
     async def test_persist_text_with_artifact_id_routes_to_replace(self, session, service):
-        """给 artifact_id → 走 replace_from_upload(覆盖回写),不产新件。"""
+        """artifact_id 命中既有件 → 走 replace_from_upload(覆盖回写),不产新件。"""
         await session.ensure_container()
         service.add_text("notes.md", "old")
         _write_ws(session, "notes.md", "new body".encode())
@@ -278,14 +280,21 @@ class TestPersistTool:
         assert result.metadata["has_blob"] is True
         assert result.metadata["replaced"] is True
 
-    async def test_persist_replace_unknown_artifact_fails(self, session, service):
+    async def test_persist_artifact_id_absent_upserts_new_with_that_id(self, session, service):
+        """artifact_id 未命中 → upsert 新建,以模型给的 id 落件(不回退文件名派生)。"""
         await session.ensure_container()
-        _write_ws(session, "a.txt", b"hi")
+        _write_ws(session, "gallery.html", b"<html>x</html>")
         result = await PersistFileTool(session, service)(
-            path="a.txt", artifact_id="nope"
+            path="gallery.html", artifact_id="style_gallery"
         )
-        assert not result.success
-        assert "not found" in result.error
+        assert result.success
+        assert service.replace_calls == []
+        call = service.create_calls[0]
+        assert call["artifact_id"] == "style_gallery"
+        assert call["filename"] == "gallery.html"
+        assert call["source"] == "sandbox"
+        assert "replaced" not in result.metadata   # 新建路径不打 replaced 标
+        assert "as new artifact 'style_gallery'" in result.data
 
     async def test_persist_absolute_workspace_path_accepted(self, session, service):
         await session.ensure_container()
