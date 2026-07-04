@@ -1,0 +1,433 @@
+#!/usr/bin/env bash
+# fleet.sh — ArtifactFlow unified deploy entrypoint (Phase D, 决策 7).
+#
+# One command surface for the whole "single box → multi-worker → multi-host"
+# continuum. Single machine is the DEGENERATE case, not a separate flow: the
+# same deploy sequence runs, the transport layer just resolves `host=local` to
+# local execution (no ssh). Running single-box daily keeps the multi-host path
+# continuously rehearsed — that's the anti-drift value.
+#
+# Topology lives in deploy/fleet.conf (copy from fleet.conf.example). Roles:
+# infra (pg+redis) / release (one-shot migrate+reconcile) / app (backend×scale
+# + frontend) / lb (caddy).
+#
+# Subcommands:
+#   fleet.sh preflight                 per-host docker/compose/disk/port/clock checks
+#   fleet.sh deploy <bundle-dir>       load bundle → release gate → (rolling) up → LB → smoke
+#   fleet.sh deploy --dry-run <dir>    print the plan, touch nothing
+#   fleet.sh status                    per-host `compose ps` + /health/ready probe
+#   fleet.sh rollback                  re-up the previously-deployed version (images kept)
+#   fleet.sh rollback --dry-run        print the rollback plan
+#
+# Env (all optional):
+#   AF_FLEET_CONF     topology file           (default deploy/fleet.conf)
+#   AF_FLEET_STATE    version state file      (default deploy/.fleet-state)
+#   AF_SSH_USER       ssh user for remote hosts (default: current user)
+#   AF_SSH_OPTS       extra ssh/scp options   (e.g. "-i ~/.ssh/fleet -p 2222")
+#   AF_REMOTE_DIR     install dir on remote hosts (default /opt/artifactflow)
+#   AF_READY_TIMEOUT  seconds to wait for /health/ready green (default 120)
+#   AF_HTTPS_PORT     LB HTTPS port for smoke (default 443)
+#
+# Exit: 0 = success; non-zero = a step failed (message on stderr, sequence stops).
+#
+# ── Single-host vs multi-host (what's TESTED) ──
+# Single-host (all roles `local`) is the near-term path and is Mac-testable end
+# to end — it delegates ordering to compose's own depends_on (release gate +
+# healthchecks). Multi-host is authored but UNEXERCISED until a 2nd machine:
+# cross-host role split needs backend port publishing, a static Caddy upstream
+# (not docker-DNS `dynamic a`), and per-host DB/Redis URLs — see deploy/FLEET.md
+# "Multi-host: unexercised seams". Those seams loud-fail rather than pretend.
+
+set -uo pipefail  # not -e: we drive the sequence with explicit die() so every
+                  # stop point carries a diagnostic, and per-host loops report
+                  # which host failed instead of a bare non-zero.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+DEPLOY_DIR="$ROOT/deploy"
+COMPOSE_FILE="$DEPLOY_DIR/docker-compose.intranet.yml"
+
+FLEET_CONF="${AF_FLEET_CONF:-$DEPLOY_DIR/fleet.conf}"
+STATE_FILE="${AF_FLEET_STATE:-$DEPLOY_DIR/.fleet-state}"
+SSH_USER="${AF_SSH_USER:-$(id -un)}"
+SSH_OPTS="${AF_SSH_OPTS:-}"
+REMOTE_DIR="${AF_REMOTE_DIR:-/opt/artifactflow}"
+READY_TIMEOUT="${AF_READY_TIMEOUT:-120}"
+HTTPS_PORT="${AF_HTTPS_PORT:-443}"
+
+# ── output helpers ──────────────────────────────────────────────────
+ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
+bad()  { printf '  \033[31m✗\033[0m %s\n' "$1" >&2; }
+info() { printf '  \033[2mℹ %s\033[0m\n' "$1"; }
+step() { printf '\033[1m▶ %s\033[0m\n' "$1"; }
+die()  { bad "$1"; exit "${2:-1}"; }
+
+# ── fleet.conf parsing → parallel arrays ROLE/HOST/ARCH/SCALE ───────
+ROLE=(); HOST=(); ARCH=(); SCALE=()
+parse_conf() {
+  [[ -f "$FLEET_CONF" ]] || die "fleet.conf not found: $FLEET_CONF (copy from fleet.conf.example)"
+  local line role host rest kv a s
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%%#*}"                       # strip inline comment
+    read -r role host rest <<<"$line"        # split first two + remainder
+    [[ -z "${role:-}" ]] && continue
+    [[ -z "${host:-}" ]] && die "fleet.conf: role '$role' has no host"
+    a=""; s=""
+    for kv in $rest; do
+      case "$kv" in
+        arch=*)  a="${kv#arch=}" ;;
+        scale=*) s="${kv#scale=}" ;;
+        *) die "fleet.conf: unknown field '$kv' on row '$role $host'" ;;
+      esac
+    done
+    case "$role" in infra|release|app|lb) ;; *) die "fleet.conf: bad role '$role'";; esac
+    ROLE+=("$role"); HOST+=("$host"); ARCH+=("$a"); SCALE+=("$s")
+  done < "$FLEET_CONF"
+  [[ ${#ROLE[@]} -gt 0 ]] || die "fleet.conf is empty"
+  # cardinality: exactly one release + one lb; at least one app
+  local nr=0 nl=0 na=0 i
+  for i in "${!ROLE[@]}"; do
+    case "${ROLE[$i]}" in release) nr=$((nr+1));; lb) nl=$((nl+1));; app) na=$((na+1));; esac
+  done
+  (( nr == 1 )) || die "fleet.conf needs exactly one 'release' row (found $nr)"
+  (( nl == 1 )) || die "fleet.conf needs exactly one 'lb' row (found $nl)"
+  (( na >= 1 )) || die "fleet.conf needs at least one 'app' row (found $na)"
+}
+
+role_host() {  # echo the (first) host for a role; empty if absent
+  local want="$1" i
+  for i in "${!ROLE[@]}"; do [[ "${ROLE[$i]}" == "$want" ]] && { echo "${HOST[$i]}"; return 0; }; done
+  return 1
+}
+app_indices() { local i; for i in "${!ROLE[@]}"; do [[ "${ROLE[$i]}" == app ]] && echo "$i"; done; }
+has_infra()   { role_host infra >/dev/null; }
+
+# distinct host list across all roles (order-preserving)
+all_hosts() {
+  local i h seen=" "
+  for i in "${!HOST[@]}"; do
+    h="${HOST[$i]}"
+    [[ "$seen" == *" $h "* ]] || { echo "$h"; seen="$seen$h "; }
+  done
+}
+is_local() { [[ "$1" == local ]]; }
+target_dir() { is_local "$1" && echo "$ROOT" || echo "$REMOTE_DIR"; }
+
+# ── transport: local runs in-place, remote over ssh ─────────────────
+run_on() {  # run_on <host> <command-string>
+  local host="$1"; shift
+  if is_local "$host"; then
+    bash -c "$*"
+  else
+    # shellcheck disable=SC2086
+    ssh $SSH_OPTS "$SSH_USER@$host" "$*"
+  fi
+}
+copy_to() {  # copy_to <host> <local-src> <dst-path>
+  local host="$1" src="$2" dst="$3"
+  if is_local "$host"; then
+    [[ "$src" == "$dst" ]] || cp -a "$src" "$dst"
+  else
+    # shellcheck disable=SC2086
+    scp $SSH_OPTS -q "$src" "$SSH_USER@$host:$dst"
+  fi
+}
+
+# compose on a host: cd into its deploy dir, export AF_VERSION, run given args.
+compose_on() {  # compose_on <host> <version> <compose-args...>
+  local host="$1" ver="$2"; shift 2
+  local dir; dir="$(target_dir "$host")"
+  run_on "$host" "cd '$dir/deploy' && AF_VERSION='$ver' docker compose -f '$dir/deploy/docker-compose.intranet.yml' $*"
+}
+
+# ── bundle introspection (manifest is source of truth) ──────────────
+BUNDLE=""; BUNDLE_VER=""; BUNDLE_PLATFORM=""
+load_bundle_meta() {
+  BUNDLE="$1"
+  [[ -d "$BUNDLE" ]] || die "bundle dir not found: $BUNDLE"
+  local mf; mf="$(ls "$BUNDLE"/artifactflow-*.manifest.txt 2>/dev/null | head -1)"
+  [[ -n "$mf" ]] || die "no artifactflow-*.manifest.txt in $BUNDLE"
+  BUNDLE_VER="$(awk 'NR==1{print $NF}' "$mf")"
+  BUNDLE_PLATFORM="$(awk -F': *' '/^Platform:/{print $2}' "$mf")"
+  [[ -n "$BUNDLE_VER" ]] || die "cannot read version from manifest $mf"
+  ls "$BUNDLE"/artifactflow-app-*.tar.gz >/dev/null 2>&1 \
+    || die "no artifactflow-app-*.tar.gz in $BUNDLE"
+}
+
+# Normalize any arch spelling to a canonical family token, so a compose
+# Platform (linux/arm64), a Linux `uname -m` (aarch64) and a Darwin one (arm64)
+# all compare equal. Same for amd64/x86_64.
+canon_arch() {
+  case "$1" in
+    */amd64|amd64|x86_64|x64) echo x86_64 ;;
+    */arm64|arm64|aarch64)    echo arm64 ;;
+    *) echo "$1" ;;
+  esac
+}
+
+# assert a host's CPU arch matches the bundle Platform + the conf arch column.
+# Under --dry-run a mismatch is informational (you may be planning on a Mac for
+# an amd64/arm64 target); a real deploy loud-fails.
+assert_arch() {  # assert_arch <host> <conf-arch>
+  local host="$1" conf_arch="$2"
+  local afail; afail() { (( DRY )) && info "$1" || die "$1"; }
+  local want; want="$(canon_arch "$BUNDLE_PLATFORM")"
+  local raw; raw="$(run_on "$host" 'uname -m' 2>/dev/null | tr -d '[:space:]')"
+  [[ -n "$raw" ]] || { afail "$host: cannot read uname -m"; return 0; }
+  local got; got="$(canon_arch "$raw")"
+  if [[ "$got" != "$want" ]]; then
+    afail "$host: arch mismatch — host is '$raw' ($got) but bundle Platform is '$BUNDLE_PLATFORM' ($want). release.sh builds one arch per run; rebuild with PLATFORM=linux/${conf_arch:-arm64}."
+  else
+    ok "arch $raw matches bundle ($want)"
+  fi
+  if [[ -n "$conf_arch" ]]; then
+    [[ "$(canon_arch "$conf_arch")" == "$got" ]] || afail "$host: fleet.conf says arch=$conf_arch but host reports '$raw'"
+  fi
+}
+
+# ── version state (for rollback) ────────────────────────────────────
+state_get() { [[ -f "$STATE_FILE" ]] && awk -F= -v k="$1" '$1==k{print $2}' "$STATE_FILE"; }
+state_write() {  # state_write <current> <previous>
+  printf 'current=%s\nprevious=%s\n' "$1" "$2" > "$STATE_FILE"
+}
+
+# ── readiness + smoke through the LB ────────────────────────────────
+lb_ready_cmd() {  # a curl that returns 0 iff /health/ready is green via the LB
+  # self-signed intranet cert → -k; loopback on the lb host's published HTTPS port
+  echo "curl -fsk --max-time 5 https://localhost:${HTTPS_PORT}/health/ready >/dev/null"
+}
+wait_ready() {  # wait_ready <lb-host>
+  local host="$1" waited=0 cmd; cmd="$(lb_ready_cmd)"
+  step "wait for /health/ready via LB ($host, timeout ${READY_TIMEOUT}s)"
+  while (( waited < READY_TIMEOUT )); do
+    if run_on "$host" "$cmd" 2>/dev/null; then ok "LB healthy after ${waited}s"; return 0; fi
+    sleep 3; waited=$((waited+3))
+  done
+  die "LB /health/ready not green within ${READY_TIMEOUT}s on $host"
+}
+smoke() {  # smoke <lb-host>
+  local host="$1" cmd; cmd="$(lb_ready_cmd)"
+  step "smoke: /health/ready through LB ($host)"
+  run_on "$host" "$cmd" 2>/dev/null && ok "smoke passed" || die "smoke failed on $host"
+}
+
+# ════════════════════════════════════════════════════════════════════
+# preflight
+# ════════════════════════════════════════════════════════════════════
+cmd_preflight() {
+  parse_conf
+  local fail=0 host
+  step "preflight across $(all_hosts | wc -l | tr -d ' ') host(s)"
+  while IFS= read -r host; do
+    printf '\n  \033[1m[%s]\033[0m\n' "$host"
+    run_on "$host" 'command -v docker >/dev/null'       && ok "docker present"           || { bad "docker missing"; fail=1; }
+    run_on "$host" 'docker compose version >/dev/null 2>&1' && ok "docker compose v2"     || { bad "docker compose v2 missing"; fail=1; }
+    run_on "$host" 'docker info >/dev/null 2>&1'         && ok "docker daemon reachable"  || { bad "docker daemon down / no perms"; fail=1; }
+    # disk: warn under 5 GiB free on the install dir's filesystem
+    local dir; dir="$(target_dir "$host")"
+    run_on "$host" "df -Pk '$dir' 2>/dev/null | awk 'NR==2{exit (\$4<5242880)}'" \
+      && ok "disk ≥5GiB free on $dir" || { bad "low disk (<5GiB) on $dir"; fail=1; }
+    # clock: skew vs control host (informational — NTP is the real fix)
+    if ! is_local "$host"; then
+      local rt lt; rt="$(run_on "$host" 'date -u +%s' 2>/dev/null)"; lt="$(date -u +%s)"
+      if [[ -n "$rt" ]]; then
+        local skew=$(( rt>lt ? rt-lt : lt-rt ))
+        (( skew <= 5 )) && ok "clock skew ${skew}s" || info "clock skew ${skew}s vs control (check NTP)"
+      fi
+    fi
+    # runsc only needed where app (sandbox) runs
+    local i is_app=0; for i in $(app_indices); do [[ "${HOST[$i]}" == "$host" ]] && is_app=1; done
+    if (( is_app )); then
+      run_on "$host" 'command -v runsc >/dev/null 2>&1' && ok "runsc present" \
+        || info "runsc not found (sandbox tools will fall back to runc)"
+    fi
+  done < <(all_hosts)
+  echo
+  (( fail == 0 )) && ok "preflight OK" || die "preflight found blockers"
+}
+
+# ════════════════════════════════════════════════════════════════════
+# deploy
+# ════════════════════════════════════════════════════════════════════
+DRY=0
+cmd_deploy() {
+  local bundle=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run) DRY=1 ;;
+      -*) die "unknown deploy flag: $1" ;;
+      *) bundle="$1" ;;
+    esac
+    shift
+  done
+  [[ -n "$bundle" ]] || die "usage: fleet.sh deploy [--dry-run] <bundle-dir>"
+  parse_conf
+  load_bundle_meta "$bundle"
+  (( DRY )) && info "DRY-RUN — no host will be touched"
+  step "deploy version=$BUNDLE_VER platform=$BUNDLE_PLATFORM from $BUNDLE"
+
+  # verify checksums up front (verify-bundle.sh handles the cd dance)
+  if (( ! DRY )); then
+    step "verify bundle checksums"
+    "$SCRIPT_DIR/verify-bundle.sh" "$BUNDLE" || die "bundle checksum verification failed"
+  else
+    info "would run verify-bundle.sh $BUNDLE"
+  fi
+
+  local hosts; hosts="$(all_hosts)"
+  local single=0
+  [[ "$hosts" == "local" ]] && single=1
+
+  if (( single )); then
+    deploy_single_local
+  else
+    info "MULTI-HOST path — authored but UNEXERCISED (see deploy/FLEET.md). Aborting real run for safety; --dry-run to inspect the plan."
+    (( DRY )) || die "multi-host deploy is gated off until validated on a 2nd machine; remove this guard in fleet.sh cmd_deploy after acceptance"
+    deploy_multi_host
+  fi
+
+  local prev; prev="$(state_get current)"
+  echo
+  if (( DRY )); then
+    info "dry-run complete — plan above, nothing changed"
+  else
+    state_write "$BUNDLE_VER" "${prev:-}"
+    ok "deploy done — version $BUNDLE_VER live${prev:+, previous was $prev}"
+  fi
+}
+
+# single box: every role local. compose owns ordering (release gate +
+# healthchecks); we just load images and up the whole stack.
+deploy_single_local() {
+  assert_arch local ""
+  local app_tar; app_tar="$(ls "$BUNDLE"/artifactflow-app-*.tar.gz | head -1)"
+  step "load app images ($(basename "$app_tar"))"
+  if (( DRY )); then info "would: docker load -i $app_tar"; else docker load -i "$app_tar" || die "docker load failed"; ok "images loaded"; fi
+
+  if has_infra; then
+    local infra_tar; infra_tar="$(ls "$BUNDLE"/artifactflow-infra-*.tar.gz 2>/dev/null | head -1 || true)"
+    if [[ -n "$infra_tar" ]]; then
+      step "load infra images ($(basename "$infra_tar"))"
+      if (( DRY )); then info "would: docker load -i $infra_tar"; else docker load -i "$infra_tar" || die "infra load failed"; ok "infra images loaded"; fi
+    else
+      info "no infra tar in bundle — assuming caddy/pg/redis images already loaded"
+    fi
+  fi
+
+  # scale for the (single) app row
+  local i n="" profile=""
+  for i in $(app_indices); do n="${SCALE[$i]}"; done
+  has_infra && profile="--profile infra"
+  local scale_arg=""; [[ -n "$n" ]] && scale_arg="--scale backend=$n"
+
+  step "compose up (profile='${profile:-none}' ${scale_arg:-scale=1})"
+  if (( DRY )); then
+    info "would: AF_VERSION=$BUNDLE_VER docker compose -f $COMPOSE_FILE $profile up -d --remove-orphans $scale_arg"
+    info "would: wait for /health/ready, then smoke"
+    return 0
+  fi
+  # shellcheck disable=SC2086
+  env AF_VERSION="$BUNDLE_VER" docker compose -f "$COMPOSE_FILE" $profile up -d --remove-orphans $scale_arg \
+    || die "compose up failed (release gate may have aborted — check 'docker compose logs release')"
+  ok "stack up"
+  wait_ready local
+  smoke local
+}
+
+# multi-host: fleet.sh owns cross-host ordering (compose depends_on is same-host
+# only). Structured but UNEXERCISED — the cross-host seams are marked below.
+deploy_multi_host() {
+  info "plan for version $BUNDLE_VER:"
+  local i h n
+  # 1. per-host: copy bundle + load images (+ untar config/deploy on remotes)
+  while IFS= read -r h; do
+    info "  [$h] scp bundle → docker load app$(has_infra && [[ "$(role_host infra)" == "$h" ]] && echo ' + infra') → untar config/deploy into $(target_dir "$h")"
+  done < <(all_hosts)
+  # 2. push single-source .env + per-host override
+  info "  push deploy/.env (+ per-host .env.<host> override) to every host"
+  # 3. release gate on the one release host
+  info "  [$(role_host release)] docker compose run --rm --no-deps release  (must exit 0)"
+  # 4. rolling app up, host by host
+  for i in $(app_indices); do
+    h="${HOST[$i]}"; n="${SCALE[$i]:-1}"
+    info "  [$h] compose up -d --no-deps --scale backend=$n backend frontend → wait /health/ready → next"
+  done
+  # 5. regenerate static Caddy upstream from app hosts + reload
+  info "  [$(role_host lb)] render static upstream ($(for i in $(app_indices); do printf '%s:8000 ' "${HOST[$i]}"; done)) → caddy reload"
+  # 6. smoke through LB
+  info "  smoke via LB ($(role_host lb))"
+  echo
+  info "UNEXERCISED SEAMS (must validate on the 2nd machine before un-gating):"
+  info "  a) backend port publishing — base compose only 'expose: 8000' (compose-internal);"
+  info "     cross-host LB needs it host-published. Add a fleet overlay, do NOT edit the"
+  info "     single-host compose (keeps the tested dynamic-DNS path intact)."
+  info "  b) static Caddy upstream — single-host uses 'dynamic a { name backend }' (docker"
+  info "     DNS); cross-host has no shared DNS, needs a generated 'k1:8000 k2:8000' list."
+  info "  c) per-host .env DB/Redis URLs must point at the infra host, not localhost."
+}
+
+# ════════════════════════════════════════════════════════════════════
+# status
+# ════════════════════════════════════════════════════════════════════
+cmd_status() {
+  parse_conf
+  local cur; cur="$(state_get current)"
+  step "fleet status${cur:+ (deployed version: $cur)}"
+  local host
+  while IFS= read -r host; do
+    printf '\n  \033[1m[%s]\033[0m\n' "$host"
+    local ps
+    ps="$(compose_on "$host" "${cur:-latest}" ps --format 'table {{.Service}}\t{{.Status}}' 2>/dev/null)"
+    if [[ -n "$ps" ]]; then printf '%s\n' "$ps" | sed 's/^/    /'; else info "no compose project up (or unreachable)"; fi
+  done < <(all_hosts)
+  # health via LB
+  local lb; lb="$(role_host lb)"
+  echo
+  if run_on "$lb" "$(lb_ready_cmd)" 2>/dev/null; then ok "LB /health/ready green ($lb)"; else bad "LB /health/ready NOT green ($lb)"; fi
+}
+
+# ════════════════════════════════════════════════════════════════════
+# rollback
+# ════════════════════════════════════════════════════════════════════
+cmd_rollback() {
+  [[ "${1:-}" == "--dry-run" ]] && DRY=1
+  parse_conf
+  local prev cur; prev="$(state_get previous)"; cur="$(state_get current)"
+  [[ -n "$prev" ]] || die "no previous version recorded in $STATE_FILE — nothing to roll back to"
+  step "rollback: $cur → $prev (images for $prev must still be loaded)"
+  local hosts; hosts="$(all_hosts)"
+  if [[ "$hosts" != "local" ]]; then
+    info "multi-host rollback authored but UNEXERCISED — inspect and run per-host manually"
+    (( DRY )) || die "multi-host rollback gated off until validated"
+  fi
+  local i n="" profile="" scale_arg=""
+  for i in $(app_indices); do n="${SCALE[$i]}"; done
+  has_infra && profile="--profile infra"
+  [[ -n "$n" ]] && scale_arg="--scale backend=$n"
+  if (( DRY )); then
+    info "would: AF_VERSION=$prev docker compose -f $COMPOSE_FILE $profile up -d --remove-orphans $scale_arg"
+    return 0
+  fi
+  # shellcheck disable=SC2086
+  env AF_VERSION="$prev" docker compose -f "$COMPOSE_FILE" $profile up -d --remove-orphans $scale_arg \
+    || die "rollback compose up failed"
+  wait_ready local
+  smoke local
+  state_write "$prev" "$cur"   # swap: now-current is prev, and cur becomes the thing to re-forward to
+  ok "rolled back to $prev"
+}
+
+# ── dispatch ────────────────────────────────────────────────────────
+usage() { sed -n '2,40p' "$0"; }
+main() {
+  local sub="${1:-}"; shift || true
+  case "$sub" in
+    preflight) cmd_preflight "$@" ;;
+    deploy)    cmd_deploy "$@" ;;
+    status)    cmd_status "$@" ;;
+    rollback)  cmd_rollback "$@" ;;
+    ""|-h|--help|help) usage ;;
+    *) die "unknown subcommand: $sub (try: preflight | deploy | status | rollback)" ;;
+  esac
+}
+main "$@"

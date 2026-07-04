@@ -1,0 +1,8 @@
+# Deployment-specific topology (may carry host IPs) — commit fleet.conf.example,
+# not the real file. Mirrors the .env pattern.
+fleet.conf
+# Per-host .env overrides (multi-host: DB/Redis URLs, per-host tuning).
+.env.*
+!.env.example
+# fleet.sh version state (records current/previous for rollback).
+.fleet-state
