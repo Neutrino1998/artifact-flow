@@ -251,7 +251,7 @@ cd frontend && npm run generate-types   # openapi-typescript 生成 api.d.ts
 
 `src/middleware.ts`（Next middleware，每请求执行）+ `src/lib/csp.ts` 注入 Content-Security-Policy 与一组静态加固头：
 
-- **每请求随机 nonce**：middleware 生成 base64 nonce 写进 `script-src 'nonce-<nonce>' 'strict-dynamic'`，并经 `x-nonce` 请求头传给 `app/layout.tsx`，盖到那条内联主题 bootstrap 脚本上（暗色无闪烁那段）。**CSP 放 Next 而非 nginx**：nonce 必须与渲染同源生成，nginx 看不到它、只能退回 `'unsafe-inline'`，失去意义。
+- **每请求随机 nonce**：middleware 生成 base64 nonce 写进 `script-src 'nonce-<nonce>' 'strict-dynamic'`，并经 `x-nonce` 请求头传给 `app/layout.tsx`，盖到那条内联主题 bootstrap 脚本上（暗色无闪烁那段）。**CSP 放 Next 而非反向代理**：nonce 必须与渲染同源生成，代理层（Caddy）看不到它、只能退回 `'unsafe-inline'`，失去意义。
 - **`connect-src` 从 `NEXT_PUBLIC_API_URL` 派生**：prod 同源部署时为空 → 退回 `'self'`；配置独立后端域时把该 origin 显式列入（dev 放宽）。
 - **`img-src 'self' data: blob:`**（**刻意不含 `https:`**）：作为补偿控制收窄信标外泄面；下载 / 预览用图走 data/blob。
 - `frame-ancestors 'none'` 防点击劫持；另有静态头 `X-Frame-Options: DENY` / `X-Content-Type-Options` / `Referrer-Policy` / `Permissions-Policy`。

@@ -1,0 +1,171 @@
+# ArtifactFlow — shared Caddy snippets, imported by BOTH entry configs:
+#   deploy/caddy/Caddyfile          (Mode 2, public: ACME TLS on AF_DOMAIN)
+#   deploy/caddy/Caddyfile.intranet (Mode 3, intranet: static cert, auto_https off)
+# The whole deploy/caddy/ DIRECTORY is mounted at /etc/caddy/conf — a directory
+# mount, deliberately not per-file: single-file bind mounts pin the file's
+# INODE at container start, so a host-side edit or `tar xzf` that replaces the
+# file (new inode) silently detaches the mount and `caddy reload` fails with
+# "File to import not found" (hit exactly this during Mac validation). A
+# directory mount resolves names per access, so overwrite + reload just works.
+# Everything mode-agnostic lives here exactly once; the entry configs only
+# differ in TLS posture and listener addresses.
+
+# Shared body of every backend reverse_proxy — import INSIDE a reverse_proxy
+# block. Three concerns live here:
+#
+# 1. Multi-replica balancing: `--scale backend=N` gives the service name N
+#    A-records in docker DNS. A plain `reverse_proxy backend:8000` treats that
+#    as ONE upstream and pins to a single replica via its keepalive pool
+#    (verified empirically — 12/12 requests hit the same instance). `dynamic a`
+#    re-resolves the name every `refresh` and makes EACH returned IP an
+#    upstream, so lb_policy actually has something to balance across.
+# 2. Wedged-replica removal is PASSIVE. Active health checks (health_uri)
+#    do NOT run against dynamic upstreams — Caddy only probes statically
+#    configured ones, so a health_uri here would be silently ignored
+#    (verified empirically: with health_uri configured, a paused replica
+#    kept receiving its round-robin share and requests hung). Instead:
+#    the binding control is response_header_timeout — NOT dial_timeout: the
+#    TCP handshake to a wedged/paused replica still completes (the KERNEL
+#    answers SYN; the frozen process never has to accept), so dials succeed
+#    and the hang happens waiting for response headers (verified: with only
+#    dial_timeout, requests to a paused replica hung indefinitely).
+#    On a header timeout the request is retried on the other replica
+#    (lb_try_*) when retryable, and fail_duration remembers the bad address
+#    so subsequent requests skip it — upstream health is shared GLOBALLY by
+#    dial address, so a failure seen by any handler protects all of them.
+#    The timeout is the snippet ARGUMENT ({args[0]}): /health/* imports with
+#    a tight 3s (always-fast endpoints — they double as the wedge detector,
+#    fed by the caddy container's own healthcheck probing :2021 every 10s),
+#    /api/* with a generous 60s (upload conversion runs inside the POST
+#    handler and legitimately takes tens of seconds), SSE with 15s (headers
+#    arrive immediately once the backend accepts the stream).
+# 3. Real client IP: the backend login throttle reads ONLY X-Real-IP (it
+#    deliberately ignores the spoofable X-Forwarded-For). {remote_host} is the
+#    direct peer: correct while clients connect straight to Caddy (grey-cloud /
+#    intranet). Behind another proxy layer (CF orange-cloud), switch to
+#    trusted_proxies + {client_ip} in the ENTRY config.
+(backend_upstream) {
+	dynamic a {
+		name backend
+		port 8000
+		refresh 10s
+	}
+	lb_policy round_robin
+	lb_try_duration 5s
+	lb_try_interval 250ms
+	fail_duration 30s
+	transport http {
+		dial_timeout 2s
+		response_header_timeout {args[0]}
+	}
+	header_up X-Real-IP {remote_host}
+}
+
+# The whole site body — matchers + route. Import inside a site block.
+(af_site) {
+	# Batched upload ceiling — the AUTHORITATIVE total-bytes cap. POST /api/v1/chat
+	# sends ALL attachments in ONE multipart request, so the body is the SUM of the
+	# batch. Three INDEPENDENT axes: per-file ≤100MB (MAX_UPLOAD_SIZE, app 422),
+	# count ≤10 (MAX_CHAT_ATTACHMENTS, app 422), and total ≤200MiB (THIS cap, 413).
+	# Total is deliberately LESS than per-file×count (100MB×10=1GB): the design
+	# intent is "one big file OR many small ones, but a bounded total". So this
+	# DOES fire ahead of the per-file/count checks for a large batch, by design
+	# (a single oversize file still gets the backend's clean 422). 210MiB =
+	# 200MiB content + 10MiB multipart boundary/header overhead.
+	# UNITS — must be MiB, not MB: Caddy parses `MB` as decimal 10^6 and only
+	# `MiB` as binary 2^20. `210MB` would shrink the overhead budget over a
+	# 200MiB batch from 10 MiB to ~285 KB.
+	request_body {
+		max_size 210MiB
+	}
+
+	# Maintenance flag: present iff `maintenance.sh on` has run. Stat'd
+	# per-request (no reload needed).
+	@maintenance_on file {
+		root /etc/caddy/maintenance
+		try_files /MAINTENANCE_ON
+	}
+
+	# Swagger / OpenAPI are 404'd in production.
+	@docs path /docs /redoc /openapi.json
+
+	# `route` evaluates handles top-to-bottom, first match wins and terminates.
+	route {
+		# 1. Maintenance page's own assets — ALWAYS reachable, even mid-window,
+		#    or the page's own <img>/note.txt would 503 too. handle_path strips
+		#    the /__maintenance prefix before hitting the file root.
+		handle_path /__maintenance/* {
+			root * /etc/caddy/maintenance
+			header Cache-Control "no-store"
+			file_server
+		}
+
+		# 2. Health — intentionally NOT gated by maintenance. Container
+		#    healthchecks + external monitors must keep seeing real status.
+		#    Placed before the maintenance gate so it always passes through;
+		#    real upstream 503s (e.g. /health/ready dep-failure JSON) are
+		#    untouched.
+		handle /health/* {
+			reverse_proxy {
+				import backend_upstream 3s
+			}
+		}
+
+		# 3. Block Swagger in production.
+		handle @docs {
+			respond 404
+		}
+
+		# 4. Maintenance gate: flag present → everything below returns the 503
+		#    page instead of proxying (API, SSE, frontend all caught here).
+		handle @maintenance_on {
+			root * /etc/caddy/maintenance
+			rewrite * /maintenance.html
+			header Cache-Control "no-store"
+			header Retry-After "60"
+			file_server {
+				status 503
+			}
+		}
+
+		# 5. SSE streaming: disable response buffering so chunks flush live
+		#    (flush_interval -1 == nginx proxy_buffering off).
+		handle /api/v1/stream/* {
+			reverse_proxy {
+				import backend_upstream 15s
+				flush_interval -1
+			}
+		}
+
+		# 6. Backend API.
+		handle /api/* {
+			reverse_proxy {
+				import backend_upstream 60s
+			}
+		}
+
+		# 7. Frontend catch-all.
+		handle {
+			reverse_proxy frontend:3000
+		}
+	}
+}
+
+# Internal health listener body — served on :2021 in both modes: HTTP, NO TLS,
+# and deliberately NOT published to the host (compose only maps 80/443).
+# Reachable only from inside the caddy container / docker network.
+# resume.sh / resume-prod.sh probe this via `docker exec <caddy> wget`, so the
+# health check flows through Caddy's real reverse_proxy machinery (proving the
+# config loaded + Caddy → backend works) instead of bypassing Caddy by hitting
+# backend:8000 directly. A port-only address serves plain HTTP (no TLS / SNI /
+# Host-header gymnastics for the busybox-wget probe).
+(af_health_probe) {
+	handle /health/* {
+		reverse_proxy {
+			import backend_upstream 3s
+		}
+	}
+	handle {
+		respond "not found" 404
+	}
+}

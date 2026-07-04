@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Shared library for the maintenance-window scripts, sourced by both the
-# intranet (Mode 3, nginx) and public (Mode 2, Caddy) pause/resume entrypoints.
+# intranet (Mode 3) and public (Mode 2) pause/resume entrypoints — both modes
+# front with Caddy (nginx retired).
 #
 # This file is SOURCED, never executed directly. Before sourcing, the entrypoint
 # MUST:
@@ -12,14 +13,41 @@
 #     hint. Defaults to " [VERSION]" (intranet, versioned images). Public sets
 #     it to "" because its images are built locally as :latest, with no
 #     AF_VERSION tag to switch to (see maint_resume).
-#   - for resume: define a `maint_probe` function — the mode-specific
-#     through-proxy health check, returning 0 on success / non-zero on failure.
-#     It may use the globals DC and COMPOSE_FILE (set by the time it's called).
+#   - for resume: a `maint_probe` function — the through-proxy health check,
+#     returning 0 on success / non-zero on failure. A default implementation
+#     (below: exec into the caddy container, probe its :2021 internal health
+#     listener) is provided since both modes now use the same Caddy probe;
+#     entrypoints only override it if their proxy topology diverges again
+#     (define the override AFTER sourcing this file, or it gets clobbered).
 #
 # Why the split: the pause/resume MECHANISM is identical across deployments
 # (maintenance flag file + stop/start backend+frontend). Only the compose file
-# and the final through-proxy health probe differ. Centralising the logic here
-# stops the intranet and prod scripts from drifting apart over time.
+# differs. Centralising the logic here stops the intranet and prod scripts
+# from drifting apart over time.
+
+# Default through-proxy health probe: exec into the caddy container and hit
+# Caddy's internal health listener (`:2021` in caddy-common.caddy — HTTP, no
+# TLS, NOT published to the host). The request flows Caddy(:2021) →
+# reverse_proxy → backend:8000, so a green result means Caddy is up, its
+# config loaded, and the proxy path to backend works. /health is not gated by
+# maintenance, so this is safe to run before lifting the flag. Running
+# in-container avoids depending on host-published ports and sidesteps the
+# TLS-on-localhost hostname mismatch (cert is for the domain, not localhost).
+maint_probe() {
+  local caddy_cid
+  caddy_cid=$("${DC[@]}" -f "$COMPOSE_FILE" ps -q caddy 2>/dev/null || true)
+  if [[ -z "$caddy_cid" ]]; then
+    echo "⚠ caddy 容器未运行，无法验证链路，维护页保持开启"
+    echo "  先确保 caddy 已启动：${DC[*]} -f $COMPOSE_FILE up -d caddy"
+    return 1
+  fi
+  # caddy:alpine ships busybox wget (no curl). -q --spider = HEAD-ish probe.
+  if ! docker exec "$caddy_cid" wget -q --spider -T 5 http://localhost:2021/health/ready; then
+    echo "⚠ /health/ready 经 Caddy(:2021)→backend 不可达，维护页保持开启"
+    echo "  排查：${DC[*]} -f $COMPOSE_FILE logs --tail=40 caddy backend"
+    return 1
+  fi
+}
 
 # Pick docker compose CLI: V2 plugin ("docker compose") preferred, V1 standalone
 # ("docker-compose") fallback for older intranet CentOS 7 hosts. Both speak the

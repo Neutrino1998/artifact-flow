@@ -3,10 +3,14 @@
 How ArtifactFlow scales to `--scale backend=N` on one host (compose), and the
 real-machine checks you MUST run before relying on it.
 
-> Status: the code/config below is implemented and statically validated
-> (`docker compose config`, `sh -n`), but the runtime behavior under `--scale`
-> has NOT been exercised on a live box. Run the **Validation** checklist before
-> trusting it in production.
+> Status: the full **Validation** checklist below (minus item 7, reaper) ran
+> green on a dev Mac on 2026-07-04 — `--scale backend=2`, Caddy HTTPS entry
+> (self-signed cert), real LLM turns, Redis profile. That run also caught and
+> fixed three LB bugs (single-upstream pinning → `dynamic a`; single-file
+> mount inode pinning → directory mount; wedged-replica removal → passive
+> timeouts + caddy healthcheck probe) — see deploy/caddy/common.caddy comments.
+> Item 7 (reaper cross-replica reclaim) has NOT been exercised anywhere; run it
+> before relying on sandbox turns under multi-replica in production.
 
 ## What changed
 
@@ -26,11 +30,11 @@ backend ×N (AF_SKIP_RELEASE=1)  ──serve only, no reconcile─────�
   Mode 1 (SQLite single box) and backward compatibility.
 - `docker-compose.prod.yml` and `deploy/docker-compose.intranet.yml` add the
   `release` service + `AF_SKIP_RELEASE=1` on the backend + the gate.
-- `deploy/nginx.conf`: backend is proxied via a **variable** (`$af_backend`) so
-  nginx re-resolves through docker DNS and round-robins across scaled replicas.
-  A static `upstream { server backend:8000; }` resolves once at boot and pins to
-  one replica. Trade-off: variable proxy_pass loses upstream keepalive (fine on
-  the internal docker network). Prod uses Caddy, which re-resolves automatically.
+- Reverse proxy is **Caddy** (both modes; intranet nginx retired): it resolves
+  `backend:8000` through docker DNS at request time and round-robins across all
+  scaled replicas natively — no static-upstream staleness to work around.
+  Intranet entry config: `deploy/Caddyfile.intranet` (static cert HTTPS), shared
+  site body in `deploy/caddy-common.caddy`.
 
 ## Prerequisites for multi-replica
 
@@ -59,12 +63,13 @@ delegated to one host) before starting backends on all hosts. Not wired here.
    "Release complete."; backends' logs show "AF_SKIP_RELEASE set — skipping…".
 3. **Scale up:** `--scale backend=2` → both backends healthy; exactly ONE release
    ran (not one per backend).
-4. **nginx balances:** hammer `GET /api/v1/meta` (or any cheap authed endpoint) and
-   confirm requests land on BOTH backends (compare container logs / a per-instance
-   marker). This is the part most likely to surprise — verify the variable
-   proxy_pass actually round-robins and that single-replica still routes.
-5. **SSE under scale:** start a chat turn through nginx; the stream stays on one
-   backend for its life and completes. Reconnect/`/resume` still works.
+4. **Caddy balances:** hammer a cheap endpoint through the Caddy entry and
+   confirm requests land on BOTH backends — the `X-Instance-ID` response header
+   names the serving replica, so `curl -sk -o /dev/null -w '%{header_json}'` in a
+   loop is enough. Verify single-replica still routes too.
+5. **SSE under scale:** start a chat turn through Caddy (HTTPS entry); the
+   stream stays on one backend for its life and completes. Reconnect/`/resume`
+   still works.
 6. **Cross-replica control (Redis):** start a long turn on one backend, cancel it
    from another tab (likely a different backend) — cancel must take effect.
 7. **Reaper:** kill a backend mid-sandbox-turn; confirm the lease-anchored reaper on
@@ -73,6 +78,5 @@ delegated to one host) before starting backends on all hosts. Not wired here.
 ## Rollback
 
 Revert to the inline model: drop the `release` service + `AF_SKIP_RELEASE` from the
-backend (it then self-releases on start), and restore the static `upstream backend`
-in `deploy/nginx.conf`. The advisory-lock inline path supports `--scale` too (each
-replica reconciles under the lock — correct, just redundant).
+backend (it then self-releases on start). The advisory-lock inline path supports
+`--scale` too (each replica reconciles under the lock — correct, just redundant).

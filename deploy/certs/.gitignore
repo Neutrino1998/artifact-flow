@@ -1,0 +1,4 @@
+# 证书/私钥不入库 —— 目标机本地材料,同 .env 待遇
+*
+!README.md
+!.gitignore

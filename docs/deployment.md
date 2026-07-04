@@ -22,14 +22,14 @@ graph TD
 | **1: Quick Trial** | 本地试用 | backend + frontend | SQLite + InMemory | `docker-compose.yml` |
 | **2A: Prod 自建** | 生产 + 自建基础设施 | Caddy + backend + frontend + PG + Redis | 容器化 | `docker-compose.prod.yml --profile infra` |
 | **2B: Prod 云数据库** | 生产 + RDS/ElastiCache | Caddy + backend + frontend | 外部托管 | `docker-compose.prod.yml` |
-| **3A: 内网 自建** | 离线/内网部署 | nginx + backend + frontend + PG + Redis | 容器化 | `deploy/docker-compose.intranet.yml --profile infra` |
-| **3B: 内网 托管DB** | 离线 + 内部DB服务 | nginx + backend + frontend | 内部托管 | `deploy/docker-compose.intranet.yml` |
+| **3A: 内网 自建** | 离线/内网部署 | Caddy + backend + frontend + PG + Redis | 容器化 | `deploy/docker-compose.intranet.yml --profile infra` |
+| **3B: 内网 托管DB** | 离线 + 内部DB服务 | Caddy + backend + frontend | 内部托管 | `deploy/docker-compose.intranet.yml` |
 
 **关键区别：**
 
 - **Mode 2 vs 1：** Caddy 反向代理（自动 HTTPS / Let's Encrypt，端口 80+443）、PG + Redis 持久化、Alembic 自动迁移
-- **Mode 3 vs 2：** 反向代理用 **nginx**（内网无公网域名 / 不签证书，HTTP 单端口 80 即可）；`image:` 替代 `build:`，通过 `docker save/load` 离线部署，无需访问外部镜像仓库
-- **代理分叉的原因：** 公网（Mode 2）需要自动签发 / 续期 TLS 证书 → Caddy 一行配置搞定；内网（Mode 3）是气隙环境，Let's Encrypt 不可达、也不需要域名证书 → 保留零依赖的 nginx。两套反向代理共用同一套维护页 flag 机制（`deploy/maintenance/`）。
+- **Mode 3 vs 2：** 同为 Caddy，但 **TLS 姿态相反**——内网是气隙环境，ACME 不可达，用**静态证书**（公司测试中心/内部 CA 签发，放 `deploy/certs/`，见该目录 README）+ 全局 `auto_https off`（防手滑写出裸域名 site 触发 ACME 拨号卡死）；`image:` 替代 `build:`，通过 `docker save/load` 离线部署，无需访问外部镜像仓库
+- **代理配置的组织：** 两个模式共用 `deploy/caddy/common.caddy`（路由顺序 / 维护页 gate / SSE flush / 上传总量闸 / X-Real-IP / 多副本轮询 + wedge 副本被动摘除，全部模式无关机制只写一遍），入口文件各留薄壳——`deploy/caddy/Caddyfile`（Mode 2：ACME + AF_DOMAIN）/ `deploy/caddy/Caddyfile.intranet`（Mode 3：静态 tls + HTTP→HTTPS 跳转）。`deploy/caddy/` 整目录挂载进容器（单文件挂载 pin inode，编辑/tar 覆盖后 reload 会断）。维护页 flag 机制（`deploy/maintenance/`）同一套。
 - **2A/3A vs 2B/3B：** `--profile infra` 控制是否启动 PG/Redis 容器
 
 ---
@@ -190,17 +190,17 @@ docker compose -f docker-compose.prod.yml up -d
 #   artifactflow-1.0.0.manifest.txt       发版清单（commit、镜像 id、关键文件）
 #   *.sha256                              逐 tar 校验和
 
-# 首次部署 / nginx-pg-redis 版本升级 —— 显式加 infra
+# 首次部署 / caddy-pg-redis 版本升级 —— 显式加 infra
 ./scripts/release.sh 1.0.0 --with-infra
 # 额外产出：
-#   artifactflow-infra-nginx1.30.1-pg16-redis7.tar.gz  (~130MB)
+#   artifactflow-infra-caddy2.10-pg16-redis7.tar.gz  (~130MB)
 # 文件名按 base image 版本内容寻址 —— 目标机已有同名 tar 就跳过 scp
 ```
 
 > **拆 4 tar 按变更频率分层：**
-> - `config` / `deploy` 是 bind-mount 进容器的,改 prompt / nginx / scripts 重传对应 tar 即可,不动镜像。
+> - `config` / `deploy` 是 bind-mount 进容器的,改 prompt / Caddyfile / scripts 重传对应 tar 即可,不动镜像。
 > - `app` 是 backend + frontend,几乎每次发版都改。
-> - `infra` 是 nginx / postgres / redis 三个 base image,版本动得极少（半年一次量级）,默认**不打**,显式 `--with-infra` 才生成。命名带 base image 版本号方便目标机一眼看出"我已经有这个 infra tar 了"。
+> - `infra` 是 caddy / postgres / redis 三个 base image,版本动得极少（半年一次量级）,默认**不打**,显式 `--with-infra` 才生成。命名带 base image 版本号方便目标机一眼看出"我已经有这个 infra tar 了"。
 
 > **目标平台默认 `linux/amd64`。** Apple Silicon 上跑 `release.sh` 会自动通过 buildx + QEMU 交叉编译，省得装到 x86_64 服务器后撞 `exec format error`。要构建别的平台传 `PLATFORM=linux/arm64 ./scripts/release.sh ...`。
 
@@ -209,7 +209,7 @@ docker compose -f docker-compose.prod.yml up -d
 ```bash
 # 1. 传 4 个 tar + sha256 + manifest 到目标机
 scp dist/artifactflow-{app,config,deploy}-1.0.0.tar.gz{,.sha256} \
-    dist/artifactflow-infra-nginx1.30.1-pg16-redis7.tar.gz{,.sha256} \
+    dist/artifactflow-infra-caddy2.10-pg16-redis7.tar.gz{,.sha256} \
     dist/artifactflow-1.0.0.manifest.txt \
     target:/opt/artifactflow/
 
@@ -220,7 +220,7 @@ cd /opt/artifactflow
 sha256sum -c artifactflow-*.tar.gz.sha256
 tar xzf artifactflow-deploy-1.0.0.tar.gz       # 解出 ./deploy/(下次升级起就能用 verify-bundle.sh)
 tar xzf artifactflow-config-1.0.0.tar.gz       # 解出 ./config/
-docker load -i artifactflow-infra-nginx1.30.1-pg16-redis7.tar.gz
+docker load -i artifactflow-infra-caddy2.10-pg16-redis7.tar.gz
 docker load -i artifactflow-app-1.0.0.tar.gz
 
 # 3. 配置 .env
@@ -258,20 +258,16 @@ docker load -i tmp/artifactflow-app-1.0.1.tar.gz
 ./deploy/scripts/resume.sh 1.0.1
 ```
 
-> **首次启用维护页（一次性 bootstrap）：** 如果现有 nginx 容器是用旧 compose 起的（没有 maintenance 卷挂载），先 force-recreate 一次让它读新 nginx.conf：
-> ```bash
-> docker compose -f deploy/docker-compose.intranet.yml up -d --force-recreate nginx
-> ```
-> 之后 `pause.sh` 写的 flag 文件才能被 nginx 看到。后续升级直接 pause/resume 即可，不再需要 force-recreate。
+> **nginx→Caddy 一次性切换（既有内网部署首次升到 Caddy 版）：** 新 compose 里反向代理服务从 `nginx` 换成了 `caddy`，`up -d` 不会自动移除旧服务的容器。切换步骤：证书就位（`deploy/certs/server.crt` + `server.key`，完整链，见该目录 README）→ 常规 prep（verify-bundle / docker load / tar xzf deploy+config）→ `docker compose -f deploy/docker-compose.intranet.yml --profile infra down` → `AF_VERSION=<版本> ... up -d`（infra 服务定义变更走 down/up，不走 pause/resume）。防火墙记得放行 HTTPS 端口（默认 443，`AF_HTTPS_PORT` 可改）。切换后旧的 `nginx:*` 镜像可 `docker rmi` 回收。
 
-> **涉及 compose infra config 变更的升级（罕见）：** 多数升级只改 backend / frontend 镜像和它们用到的 `ARTIFACTFLOW_*` env，`pause/resume` 已覆盖（resume.sh `up backend frontend` → compose 自动 diff config-hash → 改了就 recreate）。但若本版本动了 `postgres` / `redis` / `nginx` 服务块的 HostConfig 字段（`image` / `logging` / `mem_limit` / `volumes` / `ports` / `cap_add` / `command`，典型例：commit `d7f26f8`），或 `.env` 里 `AF_HTTP_PORT`（nginx `ports:` interpolation），resume.sh 不触碰 infra 容器，新配置永远不生效。**前提**：先按上面常规流程完成 `verify-bundle.sh` + `docker load` + `tar xzf deploy/config`，让新 compose + 新 nginx.conf 就位，再进入下面两个时机（否则 recreate 用的是旧 compose / 旧 nginx.conf）：
+> **涉及 compose infra config 变更的升级（罕见）：** 多数升级只改 backend / frontend 镜像和它们用到的 `ARTIFACTFLOW_*` env，`pause/resume` 已覆盖（resume.sh `up backend frontend` → compose 自动 diff config-hash → 改了就 recreate）。但若本版本动了 `postgres` / `redis` / `caddy` 服务块的 HostConfig 字段（`image` / `logging` / `mem_limit` / `volumes` / `ports` / `cap_add` / `command`），`deploy/caddy/` 下的配置，或 `.env` 里 `AF_HTTP_PORT` / `AF_HTTPS_PORT`（caddy `ports:` interpolation），resume.sh 不触碰 infra 容器，新配置永远不生效。**前提**：先按上面常规流程完成 `verify-bundle.sh` + `docker load` + `tar xzf deploy/config`，让新 compose + 新 Caddyfile 就位，再进入下面两个时机（否则 recreate 用的是旧 compose / 旧 Caddyfile）：
 >
-> **(a) nginx 块或 `AF_HTTP_PORT` 变了 → 在 `pause.sh` 之前 recreate**：
+> **(a) caddy 块 / Caddyfile / `AF_HTTP(S)_PORT` 变了 → 在 `pause.sh` 之前 recreate**：
 > ```bash
 > docker compose -f deploy/docker-compose.intranet.yml --profile infra \
->     up -d --force-recreate --no-deps nginx
+>     up -d --force-recreate --no-deps caddy
 > ```
-> 接受 1–2 秒 nginx 重启的连接 RST（量级跟任意一次 nginx restart 一致，可由维护窗口公告吸收）。**为什么不能放到 pause 之后**：`deploy/nginx.conf:1-7` 用静态 `upstream backend { server backend:8000; }`，OSS nginx 启动时**一次性**解析 upstream 名称（`resolver 127.0.0.11` 只对 `proxy_pass http://$variable` 这种变量写法生效；静态 upstream 块的运行时重解析需要 nginx-plus 的 `resolve` flag，OSS 没有）。pause 后 backend/frontend 已 stopped，从 Docker DNS 消失 → nginx 启动时 upstream 解析失败 → nginx 进程退出 → 维护页连同 nginx 一起掉。
+> 接受 1–2 秒 caddy 重启的连接 RST（可由维护窗口公告吸收）。放 pause 之前只是流程简单（维护页全程可用）；Caddy 按请求时解析 upstream，backend 停止时启动也不会崩，没有旧 nginx 静态 upstream 的顺序硬约束。仅改 `deploy/caddy/` 配置内容（不动 compose 字段）时也可以用零停机的 `docker compose ... exec caddy caddy reload --config /etc/caddy/conf/Caddyfile.intranet --adapter caddyfile` 代替 recreate。
 >
 > **(b) postgres 或 redis 块变了 → 在 `pause` 与 `resume` 之间 recreate**：
 > ```bash
@@ -282,27 +278,27 @@ docker load -i tmp/artifactflow-app-1.0.1.tar.gz
 >
 > ⚠️ **`POSTGRES_*` 不属于本流程**：`POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` 是 init-only —— `postgres:16-alpine` 的 entrypoint 只在 `postgres_data` 卷**为空**时用这些 env 跑 `initdb`，已有卷的情况下完全忽略。改 .env 里这些值然后 recreate postgres，**库内用户/密码不会变**：backend 会用 `DATABASE_URL` 里的新密码、PG 库内仍是旧密码 → 认证失败 → backend 起不来（`pg_isready` 不做认证 → PG healthy 但 backend 连不上，故障表现更隐蔽）。旋转密码 / 改用户的正确流程：连进 PG 跑 `ALTER USER artifactflow WITH PASSWORD '...';`（或 `CREATE USER` / `CREATE DATABASE`），改完同步 `.env` 里 `ARTIFACTFLOW_DATABASE_URL`（backend 真正用的值）和 `POSTGRES_PASSWORD`（仅作 .env 文档，给未来 fresh-init 用），然后走 pause/resume（无需 infra recreate）。`POSTGRES_*` 真正生效的场景只有清空数据卷重新 init（生产几乎不会做）。
 >
-> 两条 recreate 都必须 `--no-deps`：不加 compose 会顺手把 backend/frontend 也起来（nginx `depends_on` 它俩），违反前提，且会用 `${AF_VERSION:-latest}` 拉镜像（内网通常没有 `latest` tag）。数据安全：named volume 在 recreate 中不动；PG 走 crash recovery 启动（5–15s），Redis 控制状态全是 TTL key 应用层自愈，nginx 无状态。
+> 两条 recreate 都必须 `--no-deps`：不加 compose 会顺手把 backend/frontend 也起来（caddy `depends_on` 它俩），违反前提，且会用 `${AF_VERSION:-latest}` 拉镜像（内网通常没有 `latest` tag）。数据安全：named volume 在 recreate 中不动；PG 走 crash recovery 启动（5–15s），Redis 控制状态全是 TTL key 应用层自愈，caddy 无状态（静态证书在 bind-mount 目录，不在容器里）。
 >
 > **`.env` 变量归属(`.env.{intranet,prod}.example` 头注释也复述了同样规则)**：
 >
 > | 变量 | 走哪条路径 |
 > |---|---|
 > | `ARTIFACTFLOW_*`（JWT / DATABASE_URL / REDIS_URL / MAX_CONCURRENT_TASKS / API keys 等） | 常规 pause/resume（resume.sh up backend → compose 检测 env_file 变化 → recreate backend） |
-> | `AF_HTTP_PORT`（仅 prod 模板有；nginx `ports:` interpolation） | 上面 (a) —— nginx pre-pause force-recreate |
+> | `AF_HTTP_PORT` / `AF_HTTPS_PORT`（caddy `ports:` interpolation；后者兼作 HTTP→HTTPS 跳转目标端口） | 上面 (a) —— caddy pre-pause force-recreate |
 > | `POSTGRES_*` | 见上方 ⚠ 块 —— **不能**走 recreate，必须 SQL `ALTER USER` |
 > | `AF_VERSION` | `resume.sh <VERSION>` 显式传入即可 |
 >
 > **验证 HostConfig 已生效**（recreate 完毕后、resume 之前；容器名按当前 compose project 实际命名，默认 `artifactflow-<svc>-1`）：
 >
 > ```bash
-> for s in nginx backend frontend postgres redis; do
+> for s in caddy backend frontend postgres redis; do
 >   echo "--- $s ---"
 >   docker inspect artifactflow-${s}-1 --format \
 >     '{{.HostConfig.LogConfig.Type}} {{.HostConfig.LogConfig.Config}} mem={{.HostConfig.Memory}}'
 > done
 > # 期望 LogConfig.Type=json-file，Config 含 max-size:100m / max-file:3；
-> # Memory（字节）：nginx=0 / backend=2147483648 / frontend=1073741824 /
+> # Memory（字节）：caddy=0 / backend=2147483648 / frontend=1073741824 /
 > # postgres=2147483648 / redis=805306368
 > ```
 
@@ -316,7 +312,8 @@ docker load -i tmp/artifactflow-app-1.0.1.tar.gz
 | `config/site/notifications.json`（左栏通知） | 直接编辑宿主机文件，schema 见 `config/site/README.md` | **无需 restart** — 挂载在 frontend 容器，前端 60s 轮询自动重拉（标签回前台时立即重拉） |
 | `config/site/welcome_tips.json` / `branding.json`（欢迎页提示 / 版权页脚） | 直接编辑宿主机文件；`branding.json` 首次启用需 `cp branding.example.json branding.json` 再填值（仓库 `.gitignore` 排除真实文件） | **无需 restart**，但**只在挂载时拉一次、不轮询**——改完需用户刷新页面才看到。文件缺失 / schema 错位 → 对应 UI 自动隐藏或回落默认（fail-closed）。 |
 | `deploy/.env`（任何 `ARTIFACTFLOW_*` 变量） | 直接编辑 | **`up -d backend`**（restart 不会重读 .env，up 会检测 env 变化重建容器） |
-| `deploy/nginx.conf` | 直接编辑 | `docker compose -f deploy/docker-compose.intranet.yml restart nginx` |
+| `deploy/caddy/`（Caddyfile.intranet / common.caddy） | 直接编辑（或 tar 覆盖） | `docker compose -f deploy/docker-compose.intranet.yml exec caddy caddy reload --config /etc/caddy/conf/Caddyfile.intranet --adapter caddyfile`（零停机；`restart caddy` 也行） |
+| `deploy/certs/`（换证书） | 覆盖 `server.crt` / `server.key` | 同上 — `caddy reload` |
 | `deploy/docker-compose.intranet.yml`（端口、profile 等） | 直接编辑 | `up -d` |
 
 > **关键区别：** 改 `config/*` 用 `restart backend`（让进程重读文件），改 `.env` 用 `up -d`（让 compose 重建容器注入环境变量）。`config/site/` 是例外：挂在 frontend 容器，无需重启；其中 `notifications.json` 前端轮询自动重拉，`welcome_tips.json` / `branding.json` 只在页面加载时读取，运维改完需用户刷新。
@@ -550,7 +547,7 @@ Mode A 的 compose 把 Redis `--maxmemory` 从默认 `256mb` 提到 **`512mb`**�
 
 `mem_limit` 在这里**是 tripwire 不是分配额度**（loud-failure 原则，与上一节 Redis `noeviction` 同一思路）：触上限 → OOM kill → 容器 restart → 运维收到告警，而不是悄无声息吃满 host 把同机服务一起拖死。Postgres `2g` 的稳态保守估算 `256MB shared_buffers + 200 connection × 典型 work_mem + 内核 buffer ≈ 1.2–1.5g`，留 ~30% safety margin。若 p99 RSS 长期超过 1.5g，先排查异常（慢查询/连接泄漏）再谈调参，不要直接放宽。
 
-反向代理（nginx / Caddy）不设 `mem_limit`：长期 < 50 MB，加了纯属冗余。
+反向代理（Caddy）不设 `mem_limit`：长期 < 50 MB，加了纯属冗余。
 
 ---
 
@@ -587,54 +584,49 @@ flowchart TD
 
 ### 反向代理配置
 
-两种部署用不同的反向代理，但职责（SSE 不缓冲、挡 Swagger、维护页 flag、真实 IP 透传、上传上限）一一对应：
+两种部署统一用 Caddy。共性机制（SSE 不缓冲 `flush_interval -1`、挡 Swagger `/docs|/redoc|/openapi.json`→404、维护页 `file` matcher 每请求 stat `MAINTENANCE_ON`、真实 IP `header_up X-Real-IP {remote_host}`、上传总量闸 `request_body max_size 210MiB`、内部健康监听 `:2021`）全部住在共享片段 `deploy/caddy-common.caddy`，只写一遍；入口文件只差 TLS 姿态：
 
-| 维度 | **Mode 2（公网）= Caddy** | **Mode 3（内网）= nginx** |
+| 维度 | **Mode 2（公网）** | **Mode 3（内网）** |
 |---|---|---|
-| 配置文件 | `deploy/Caddyfile` | `deploy/nginx.conf` |
-| TLS | **自动 HTTPS**（Let's Encrypt，端口 80+443） | 无（HTTP 单端口 80，内网气隙环境） |
-| SSE | `flush_interval -1`（关响应缓冲） | `proxy_buffering off`，超时 1800s |
-| Swagger | `/docs`、`/redoc`、`/openapi.json` → 404 | 同左 |
-| 上传上限 | `request_body max_size 210MiB` | `client_max_body_size 210M` |
-| 维护开关 | `file` matcher 每请求 stat `MAINTENANCE_ON` | `if (-f ... MAINTENANCE_ON) return 503` |
-| 真实 IP | `header_up X-Real-IP {remote_host}` | `proxy_set_header X-Real-IP $remote_addr` |
+| 入口文件 | `deploy/caddy/Caddyfile` | `deploy/caddy/Caddyfile.intranet` |
+| TLS | **自动 HTTPS**（Let's Encrypt / ACME，端口 80+443；证书状态在 `caddy_data` 卷） | **静态证书**（`tls /etc/caddy/certs/server.crt server.key`，全局 `auto_https off` 防 ACME 拨号；证书在 bind-mount 目录，无状态卷） |
+| HTTP :80 | ACME 验证 + 自动跳 https（Caddy 内建） | 显式 `redir` 到 `https://{host}:{$AF_HTTPS_PORT}`（`auto_https off` 关掉了内建跳转） |
+| 端口 | 80/443 固定（协议要求） | `AF_HTTP_PORT`（默认 80）/ `AF_HTTPS_PORT`（默认 443）可改 |
 
-- **上传上限（代理层是总量权威闸）**：`POST /api/v1/chat` 把整批附件放进**一个** multipart 请求，body 是整批之和。三轴**独立**：单文件 ≤100MB（`MAX_UPLOAD_SIZE`，后端 422）、数量 ≤10（`MAX_CHAT_ATTACHMENTS`，后端 422）、**总量 ≤200MB（代理层 413）**。总量**刻意小于** per-file×count（100MB×10=1GB）——设计意图是"1 个大文件 or 多个小文件，但控总量"，故大批量时代理层**会按设计抢先** 413（单个超大文件仍由后端给干净 422）。`210M`/`210MiB` = 200MiB 内容 + 10MiB multipart 开销。**单位注意**：nginx `210M` 与 Caddy `210MiB` 都是二进制 2²⁰；Caddy 的 `MB` 会被当 decimal 10⁶（偏小），故必须写 `MiB`。另：文本转换路径有更低的独立闸 `MAX_TEXT_CONVERT_BYTES`（20MB，防解码+词表物化的内存放大），blob 路径（图片/PDF/docx/其它二进制）不受此限；**超文本闸不 422**，文件落为二进制 blob artifact（可下载、可 mount 进沙盒处理）。
+- **上传上限（代理层是总量权威闸）**：`POST /api/v1/chat` 把整批附件放进**一个** multipart 请求，body 是整批之和。三轴**独立**：单文件 ≤100MB（`MAX_UPLOAD_SIZE`，后端 422）、数量 ≤10（`MAX_CHAT_ATTACHMENTS`，后端 422）、**总量 ≤200MiB（代理层 413）**。总量**刻意小于** per-file×count（100MB×10=1GB）——设计意图是"1 个大文件 or 多个小文件，但控总量"，故大批量时代理层**会按设计抢先** 413（单个超大文件仍由后端给干净 422）。`210MiB` = 200MiB 内容 + 10MiB multipart 开销。**单位注意**：Caddy 的 `MB` 是 decimal 10⁶、`MiB` 才是二进制 2²⁰——写 `210MB` 会把 200MiB 批次的开销预算从 10MiB 压到 ~285KB，必须写 `MiB`。另：文本转换路径有更低的独立闸 `MAX_TEXT_CONVERT_BYTES`（20MB，防解码+词表物化的内存放大），blob 路径（图片/PDF/docx/其它二进制）不受此限；**超文本闸不 422**，文件落为二进制 blob artifact（可下载、可 mount 进沙盒处理）。
 - **`X-Real-IP`（登录频控依赖）**：后端 per-IP 登录频控**只读这个头**（刻意不信可被客户端伪造的 `X-Forwarded-For`）。安全前提是 backend 仅 `expose`、不发布主机端口，只经反向代理可达，故这个头不可伪造。删掉它 / 换不写该头的代理 → per-IP 限流静默退化成"所有请求共用代理容器一个 IP 桶"（per-username 主防线仍在）。
   - **Mode 2 灰云（CF DNS only）直连**：`{remote_host}` 就是真实客户端 IP，直接写进 `X-Real-IP`，不退化。
-  - **Mode 2 若改用 CF 橙云（proxied）**：真实客户端 IP 移到 `X-Forwarded-For`、`{remote_host}` 变成 CF 边缘 IP —— 需在 Caddyfile 加 `trusted_proxies`（CF IP 段）并改用 `{client_ip}`，否则 per-IP 限流退化。`deploy/Caddyfile` 头部注释了这一点。
-- **`--scale` 支持**：nginx 用 Docker 内部 DNS resolver `127.0.0.11`；Caddy 用服务名 `backend:8000` / `frontend:3000`，运行时按需解析，原生支持多副本。
+  - **Mode 2 若改用 CF 橙云（proxied）**：真实客户端 IP 移到 `X-Forwarded-For`、`{remote_host}` 变成 CF 边缘 IP —— 需在 Caddyfile 加 `trusted_proxies`（CF IP 段）并改用 `{client_ip}`，否则 per-IP 限流退化。`deploy/caddy/Caddyfile` 头部注释了这一点。
+- **`--scale` 支持**：backend 走 `dynamic a` 动态 upstream（按 DNS 刷新把每个副本 IP 当独立 upstream + `round_robin`）——直接写 `reverse_proxy backend:8000` 会经 keepalive 连接池钉死单副本，实测 12/12 同实例。wedge 副本摘除是**被动**的（主动健康检查不作用于 dynamic upstream）：分路径 `response_header_timeout` + 失败重试 + `fail_duration` 记忆，caddy 容器自身的 healthcheck 打 `:2021` 兼作探针。机制详注在 `deploy/caddy/common.caddy`。frontend 单副本，保持静态 upstream。
 
 ### 维护模式（无停机更新窗口）
 
-适用于 **Mode 2（公网 / Caddy）** 和 **Mode 3（内网 / nginx）**。Mode 1 无反向代理，不适用。
+适用于 **Mode 2（公网）** 和 **Mode 3（内网）**（都是 Caddy 入口）。Mode 1 无反向代理，不适用。
 
-**脚本分两套，机制完全相同（共享 `deploy/scripts/_maint_lib.sh`），只差 compose 文件与健康探针：**
+**脚本分两套，机制完全相同（共享 `deploy/scripts/_maint_lib.sh`，含同一个 resume 健康探针），只差 compose 文件：**
 
 | | Mode 2（公网） | Mode 3（内网） |
 |---|---|---|
 | 进维护窗口 | `pause-prod.sh` | `pause.sh` |
 | 退维护窗口 | `resume-prod.sh` | `resume.sh` |
 | compose 文件 | `docker-compose.prod.yml` | `deploy/docker-compose.intranet.yml` |
-| resume 健康探针 | caddy 容器内经 Caddy 内部端口 `wget localhost:2021/health`（真正过 Caddy 反代 → 验证配置已加载 + Caddy→backend 通；该端口不发布到宿主机，避开 TLS-on-localhost 域名不匹配） | host → nginx 发布端口 `localhost:${AF_HTTP_PORT}/health`（顺带验证 nginx 静态 upstream 解析未过期） |
+| resume 健康探针 | 共用：caddy 容器内经 Caddy 内部端口 `wget localhost:2021/health/ready`（真正过 Caddy 反代 → 验证配置已加载 + Caddy→backend 通；该端口不发布到宿主机，避开 TLS-on-localhost 域名不匹配） | 同左（`_maint_lib.sh` 默认实现） |
 
 **两层接口：** 镜像升级（典型场景）用 `pause*.sh` / `resume*.sh`，封装"维护页 + 停服务 → 起新版本 + 关维护页"全套；config-only 改动不需要停服务，直接用底层的 `maintenance.sh on|off`（公网内网共用同一个）。
 
 **机制：**
 
 - `deploy/scripts/maintenance.sh on|off|status` 在宿主机 `deploy/maintenance/` 下写入 / 删除 `MAINTENANCE_ON` flag 文件（两套部署共用同一目录、同一脚本）
-- 反向代理每请求检查该 flag → 命中渲染 `maintenance.html`（带睡猫的静态页）：
-  - **nginx**：每个 gated location 头部 `if (-f ... MAINTENANCE_ON) { return 503; }` → `error_page 503 @maintenance`
-  - **Caddy**：`file` matcher stat `MAINTENANCE_ON` → `file_server { status 503 }` 直接服务维护页
+- Caddy 每请求检查该 flag（`file` matcher stat `MAINTENANCE_ON`）→ 命中由 `file_server { status 503 }` 直接服务 `maintenance.html`（带睡猫的静态页）
 - 检查是 per-request 的，**无需 reload**，切换秒级生效
 - `/health/` 故意不挡——容器 healthcheck 和外部监控仍要看到真实状态
-- **上游真实 503 原样穿透**：维护页 503 只在 gated 路径内产生，`/health/ready` 在 DB/Redis 异常时返回的 JSON 503 不会被改写为 HTML（nginx 靠 `error_page` 不放 server 级 + `proxy_intercept_errors off`；Caddy 靠 `/health` 在 handle 链里排在维护 gate 之前）
+- **上游真实 503 原样穿透**：维护页 503 只在 gated 路径内产生，`/health/ready` 在 DB/Redis 异常时返回的 JSON 503 不会被改写为 HTML（`/health` 的 handle 在链里排在维护 gate 之前）
 
 **首次启用（仅一次）：** compose 已声明 `deploy/maintenance` 卷挂载，但既有代理容器需要 force-recreate 一次才会挂上：
 
 ```bash
-# Mode 3（内网 / nginx）
-docker compose -f deploy/docker-compose.intranet.yml up -d --force-recreate nginx
+# Mode 3（内网）
+docker compose -f deploy/docker-compose.intranet.yml up -d --force-recreate --no-deps caddy
 # Mode 2（公网 / Caddy）
 docker compose -f docker-compose.prod.yml --profile infra up -d --force-recreate caddy
 ```

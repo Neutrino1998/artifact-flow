@@ -15,13 +15,13 @@
 
 ## 进度
 
-- **当前**:Phase A 已完成(2026-07-04)。
-- **下一步**:Phase B(Mac 跑 `deploy/MULTI-REPLICA.md` 清单全项,Caddy 入口 + 测试证书)。
+- **当前**:Phase B 的 Mac 侧已完成(2026-07-04)——清单全绿(reaper 项除外)+ nginx→Caddy 配置切换全部落仓。
+- **下一步**:Phase B 剩余 = 内网真机切换(随下次发版窗口:证书就位 → down/up,见 docs/deployment.md「nginx→Caddy 一次性切换」)+ 顺手 smoke;之后 Phase C。
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | A | instance 身份地基(日志/jsonl/响应头/lease/错误事件 五处注入 + jsonl 按实例分目录) | **已完成**(2026-07-04) |
-| B | Mac 全功能验证(`--scale` 清单,以 Caddy 为入口)+ 内网 nginx→Caddy 收敛 + HTTPS 静态证书 + 真机 smoke | 未开始 |
+| B | Mac 全功能验证(`--scale` 清单,以 Caddy 为入口)+ 内网 nginx→Caddy 收敛 + HTTPS 静态证书 + 真机 smoke | **Mac 侧已完成**(2026-07-04);剩内网真机切换随发版窗口 |
 | C | 舰队可观测 + 自愈(Redis 心跳注册表 + `/admin/instances` + 前端实例面板 + autoheal) | 未开始 |
 | D | 多机 fleet(fleet.conf + fleet.sh 单命令发布 + LB 模板生成 + env 单源推送) | 未开始 |
 
@@ -101,6 +101,8 @@
 **验收**:两台真机从「装好 docker + runsc 的空机」到可服务 = `preflight` + `deploy` 两条命令;发布期间持续请求不中断(滚动);杀掉一台的 backend,服务经 LB 继续可用、面板显示该实例红;`rollback` 一条命令回上一版本;全程 release 恰跑一次;**单机形态回归**:一行 fleet.conf(host=`local`)走完同一 deploy 序列,替代手工发版配方。
 
 ## 变更日志
+
+- **2026-07-04 Phase B Mac 侧完成(用户定调:跳过专门真机行程,Mac 能测的测完 + nginx→Caddy)**。**配置形态**:`deploy/caddy/` 整目录挂载(`common.caddy` 共享站点主体 + 薄壳 `Caddyfile`/`Caddyfile.intranet`),intranet compose nginx→caddy(`AF_HTTP_PORT`/`AF_HTTPS_PORT`,HTTP 只做 308 跳转且带公开端口),`deploy/certs/` 放静态证书(gitignore + release tar 排除),`nginx.conf` 删除;pause/resume 探针统一「exec caddy 打 :2021」下沉 `_maint_lib.sh`;release.sh infra 镜像 `caddy:2.10-alpine`(slug `caddy2.10-pg16-redis7`)。**验证结果**(backend×2 + Redis + PG + 自签证书,真实 LLM turn):release 恰跑一次 / HTTPS 健康 / 维护页 gate / Swagger 404 / SSE 整流程含断线重连(断在 22 chunk 重连续到 complete)/ 跨副本 cancel(B 副本受理、DB 落 cancelled、lease+owner 同释放)/ 逐实例日志目录(`--scale 2` 三处一致性,A 阶段验收销账)/ wedge 摘除(pause 副本后 20/20 零失败)/ 单副本回归。**Mac 实测抓到并修掉三个 LB 真 bug**(全是不真跑发现不了的):① `reverse_proxy backend:8000` 经 keepalive 连接池钉死单副本(12/12 同实例)→ `dynamic a` 动态 upstream + round_robin;② 单文件 bind-mount pin inode,主机编辑/tar 覆盖后容器内 reload 断(实测复现)→ 整目录挂载 by-construction 修掉;③ wedge 副本摘不掉——主动健康检查(health_uri)不作用于 dynamic upstream(决策 2 的「主动健康检查白拿」在单机 dynamic 形态下**不成立**,多机 fleet 静态 upstream 时才成立),且 pause/wedge 下 TCP 握手由内核完成、dial_timeout 不触发 → 被动摘除:分路径 `response_header_timeout`(health 3s / SSE 15s / API 60s——上传转换在 POST 请求内,必须留宽)+ `fail_duration 30s` 失败记忆(upstream 健康按 dial 地址全局共享)+ caddy 容器 healthcheck 打 :2021 兼作穿过 dynamic upstream 的探针。**跳过**:reaper 跨副本回收(需沙盒镜像,留真机窗口,MULTI-REPLICA.md 已标注)。**遗留到发版窗口**:内网真机 down/up 切换(注意旧 nginx 容器是 orphan,`up` 不会自动移除——Mac 上真实撞到,3 周前的旧 nginx 容器一直占着 80)+ 真证书链验证。
 
 - **2026-07-04 Phase A 完成**。instance_id = `utils/instance.py` 启动铸造(容器 hostname=容器短 id,`ARTIFACTFLOW_INSTANCE_ID` 可覆盖,字符集收窄防路径/头注入)。五处注入全落:① 日志四元组 `[instance_id|request_id|conv_id|message_id]` + file-log/obs-jsonl 都按 `<dir>/<instance_id>/` 分子目录(rotate 互覆 by-construction 消除;控制台短格式不带 instance——docker logs 天然按容器分流);② sampler/watchdog 记录内也带 `instance_id` 字段(文件拷走聚合后目录信息即丢);③ 中间件 `X-Instance-ID` 响应头(正常 + 兜底 500,CORS expose);④ lease owner 取「旁挂同 slot key」方案(`{prefix:conv_id}:owner`,acquire/release Lua 顺带写删、renew 续 TTL——lease value=msg_id 是所有 compare 脚本的既定契约,不改复合值;InMemory 降级=有 lease 即返回本进程 id);⑤ ERROR 事件 `data` 创建时冻结 `instance_id`(engine `_emit` + `decide_terminal` + 两处 transport 直发,共四个构建点;sanitize 只重写 `error` 字段,定位码保留)。`/admin/runtime` 响应标注应答实例。验收:单测全绿(1693 passed;Redis 集成 22 项含 owner 生命周期,一次性容器跑通);`--scale 2` 三处一致性留待 Phase B 清单一并验(观察手段已备好)。
 - **2026-07-03 autoheal 可见性补入(用户提问驱动)**:Phase C 补「autoheal 行为本身可见」——结果可见白拿(`docker restart` 保容器身份,面板同行连续 + `started_at` 变新);归因可见走「宿主脚本追加 marker 文件 → 只读挂载 → 实例心跳代报 `last_autoheal`」,宿主脚本不直连 Redis(保十行可审计);进程内证据随重启消失,宿主 marker + deadman stderr 是幸存取证链。

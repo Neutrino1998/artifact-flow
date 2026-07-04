@@ -16,14 +16,42 @@
 name: artifactflow
 
 services:
-  nginx:
-    image: nginx:1.30.1-alpine
+  # Reverse proxy — Caddy (nginx retired: one proxy for both modes, intranet
+  # HTTPS via static cert). Tag kept in lockstep with scripts/release.sh
+  # CADDY_TAG (content-addressed infra tar name). No caddy_data/config volume:
+  # with auto_https off + a static cert there is no ACME state worth persisting.
+  caddy:
+    image: caddy:2.10-alpine
+    # Explicit config path: the config DIRECTORY is mounted (not per-file —
+    # single-file binds pin the inode; a host edit / tar-overwrite detaches the
+    # mount and `caddy reload` breaks), so the image's default
+    # /etc/caddy/Caddyfile doesn't exist and we point at the intranet entry.
+    command: ["caddy", "run", "--config", "/etc/caddy/conf/Caddyfile.intranet", "--adapter", "caddyfile"]
     ports:
       - "${AF_HTTP_PORT:-80}:80"
+      - "${AF_HTTPS_PORT:-443}:443"
+    environment:
+      # Host-published HTTPS port, echoed into the container so the HTTP→HTTPS
+      # redirect in Caddyfile.intranet points at the PUBLIC port.
+      - AF_HTTPS_PORT=${AF_HTTPS_PORT:-443}
     volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./maintenance:/etc/nginx/maintenance:ro
+      - ./caddy:/etc/caddy/conf:ro
+      - ./certs:/etc/caddy/certs:ro
+      - ./maintenance:/etc/caddy/maintenance:ro
       - /etc/localtime:/etc/localtime:ro
+    # Dual-purpose probe: (a) container health; (b) the wedge DETECTOR for
+    # passive upstream removal — active health checks don't run against
+    # dynamic upstreams, so this periodic request through :2021 is what makes
+    # a wedged replica fail fast (3s handle timeout) and get marked down
+    # (fail_duration) before user traffic finds it. Round-robin alternates
+    # which replica each probe exercises. retries=3 keeps caddy itself green
+    # when a single probe eats the one-off failure that marks a replica down.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "-T", "8", "http://localhost:2021/health/live"]
+      interval: 10s
+      timeout: 9s
+      start_period: 5s
+      retries: 3
     depends_on:
       backend:
         condition: service_healthy

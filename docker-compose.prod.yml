@@ -18,10 +18,17 @@ services:
       # domain, and Let's Encrypt wants a contact email.
       - AF_DOMAIN=${AF_DOMAIN:?Set AF_DOMAIN in .env (e.g. twctoolbox.com)}
       - AF_ACME_EMAIL=${AF_ACME_EMAIL:?Set AF_ACME_EMAIL in .env}
+    # Explicit config path: the config DIRECTORY is mounted (not per-file —
+    # single-file binds pin the inode; a host edit that replaces the file
+    # detaches the mount and `caddy reload` breaks), so the image's default
+    # /etc/caddy/Caddyfile doesn't exist and we point at the prod entry.
+    command: ["caddy", "run", "--config", "/etc/caddy/conf/Caddyfile", "--adapter", "caddyfile"]
     volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      # Same flag-file + assets dir the nginx setup used; maintenance.sh writes
-      # MAINTENANCE_ON here and Caddy stat's it per-request.
+      # deploy/caddy/ = entry configs (Caddyfile prod / Caddyfile.intranet) +
+      # shared site body (common.caddy) both entries import.
+      - ./deploy/caddy:/etc/caddy/conf:ro
+      # Flag-file + assets dir; maintenance.sh writes MAINTENANCE_ON here and
+      # Caddy stat's it per-request.
       - ./deploy/maintenance:/etc/caddy/maintenance:ro
       # caddy_data holds issued certs + the ACME account key. MUST persist —
       # losing it forces re-issuance on every recreate and can trip Let's
@@ -29,6 +36,17 @@ services:
       - caddy_data:/data
       - caddy_config:/config
       - /etc/localtime:/etc/localtime:ro
+    # Dual-purpose probe: (a) container health; (b) the wedge DETECTOR for
+    # passive upstream removal under --scale — active health checks don't run
+    # against dynamic upstreams, so this periodic request through :2021 is
+    # what makes a wedged replica fail fast and get marked down before user
+    # traffic finds it (full rationale: deploy/caddy/common.caddy).
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "-T", "8", "http://localhost:2021/health/live"]
+      interval: 10s
+      timeout: 9s
+      start_period: 5s
+      retries: 3
     depends_on:
       backend:
         condition: service_healthy

@@ -13,7 +13,7 @@ set -euo pipefail
 # Output (in dist/):
 #   artifactflow-app-<VERSION>.tar.gz             backend + frontend images
 #   artifactflow-config-<VERSION>.tar.gz          config/ tree (prompts + site + models)
-#   artifactflow-deploy-<VERSION>.tar.gz          deploy/ tree (compose + nginx + scripts)
+#   artifactflow-deploy-<VERSION>.tar.gz          deploy/ tree (compose + Caddyfiles + scripts)
 #   artifactflow-<VERSION>.manifest.txt           human-readable release manifest
 #   *.sha256                                       per-tar checksums
 #   artifactflow-infra-<infra-slug>.tar.gz        ONLY if --with-infra (content-
@@ -71,10 +71,10 @@ MANIFEST="$OUTDIR/artifactflow-${VERSION}.manifest.txt"
 
 # Infra base image tags — kept in lockstep with deploy/docker-compose.intranet.yml.
 # Content-addressed tar name lets ops see at a glance "do I already have this?"
-NGINX_TAG="1.30.1-alpine"
+CADDY_TAG="2.10-alpine"
 POSTGRES_TAG="16-alpine"
 REDIS_TAG="7-alpine"
-INFRA_SLUG="nginx${NGINX_TAG%%-*}-pg${POSTGRES_TAG%%-*}-redis${REDIS_TAG%%-*}"
+INFRA_SLUG="caddy${CADDY_TAG%%-*}-pg${POSTGRES_TAG%%-*}-redis${REDIS_TAG%%-*}"
 INFRA_ARCHIVE="$OUTDIR/artifactflow-infra-${INFRA_SLUG}.tar.gz"
 
 # Analyst-tools bundle — pandas/numpy offline wheels for the analyst machine
@@ -143,7 +143,7 @@ docker save "${APP_IMAGES[@]}" | gzip > "$APP_ARCHIVE"
 
 if [[ $WITH_INFRA == 1 ]]; then
   INFRA_IMAGES=(
-    "nginx:${NGINX_TAG}"
+    "caddy:${CADDY_TAG}"
     "postgres:${POSTGRES_TAG}"
     "redis:${REDIS_TAG}"
   )
@@ -180,9 +180,11 @@ echo "Packaging config/ to ${CONFIG_ARCHIVE}..."
 export COPYFILE_DISABLE=1
 tar --no-xattrs --no-fflags --exclude='.DS_Store' --exclude='._*' -czf "$CONFIG_ARCHIVE" config/
 
-# Package deploy/ (compose file, nginx.conf, scripts, maintenance assets).
-# Three exclusions:
+# Package deploy/ (compose file, Caddyfiles, scripts, maintenance assets).
+# Exclusions:
 #   - .env / .env.local: secrets, never shipped from build host
+#   - certs/ contents (README stays): TLS cert + private key are target-host
+#     material, same treatment as .env — never shipped from build host
 #   - maintenance/MAINTENANCE_ON, maintenance/note.txt: runtime state files
 #     written by maintenance.sh — shipping a "maintenance ON" flag would put
 #     a freshly-deployed host into maintenance mode on first boot.
@@ -195,6 +197,9 @@ tar --no-xattrs --no-fflags \
     --exclude='._*' \
     --exclude='deploy/.env' \
     --exclude='deploy/.env.local' \
+    --exclude='deploy/certs/*.crt' \
+    --exclude='deploy/certs/*.key' \
+    --exclude='deploy/certs/*.pem' \
     --exclude='deploy/maintenance/MAINTENANCE_ON' \
     --exclude='deploy/maintenance/note.txt' \
     -czf "$DEPLOY_ARCHIVE" deploy/
@@ -337,12 +342,12 @@ fi
   echo ""
   if [[ $WITH_INFRA == 1 ]]; then
     echo "Infra images (in artifactflow-infra-${INFRA_SLUG}.tar.gz):"
-    echo "  nginx:${NGINX_TAG}"
+    echo "  caddy:${CADDY_TAG}"
     echo "  postgres:${POSTGRES_TAG}"
     echo "  redis:${REDIS_TAG}"
   else
     echo "Infra images: skipped — target must already have these loaded:"
-    echo "  nginx:${NGINX_TAG}"
+    echo "  caddy:${CADDY_TAG}"
     echo "  postgres:${POSTGRES_TAG}"
     echo "  redis:${REDIS_TAG}"
     echo "  (run release with --with-infra to ship them)"
@@ -357,7 +362,7 @@ fi
   echo ""
   echo "Deploy tar highlights:"
   tar tzf "$DEPLOY_ARCHIVE" \
-    | grep -E '^deploy/[^/]+/$|\.sh$|\.yml$|nginx\.conf$|\.env\.example$' \
+    | grep -E '^deploy/[^/]+/$|\.sh$|\.yml$|Caddyfile|\.caddy$|\.env\.example$' \
     | sort -u \
     | sed 's/^/  /'
   echo ""
@@ -406,7 +411,7 @@ if [[ $WITH_INFRA == 1 ]]; then
 else
   INFRA_SCP_LN=""
   INFRA_LOAD_LN=""
-  INFRA_FOOTER="  # (infra tar omitted — re-run release with --with-infra to ship nginx/postgres/redis images)"
+  INFRA_FOOTER="  # (infra tar omitted — re-run release with --with-infra to ship caddy/postgres/redis images)"
 fi
 if [[ $WITH_ANALYST_TOOLS == 1 ]]; then
   ANALYST_SCP_LN=$'\n      dist/artifactflow-analyst-tools-'"${ANALYST_SLUG}"$'.tar.gz{,.sha256}           \\'
@@ -456,13 +461,15 @@ $ANALYST_FOOTER
     tar xzf tmp/artifactflow-deploy-${VERSION}.tar.gz
     tar xzf tmp/artifactflow-config-${VERSION}.tar.gz
     # ─── compose infra changes (rare) ────────────────────────────
-    # If this version changed compose \`nginx\` / \`postgres\` / \`redis\` service
-    # blocks (image / logging / mem_limit / volumes / ports / cap_add / command),
-    # or .env's AF_HTTP_PORT (nginx ports: interpolation), resume.sh won't
-    # propagate the change — see docs/deployment.md → 滚动更新已有部署 →
-    # "涉及 compose infra 服务 config 变更的升级". Two-step due to nginx static
-    # upstream resolution:
-    #   - nginx / AF_HTTP_PORT: recreate BEFORE pause.sh below
+    # If this version changed compose \`caddy\` / \`postgres\` / \`redis\` service
+    # blocks (image / logging / mem_limit / volumes / ports / command), the
+    # Caddyfiles, or .env's AF_HTTP_PORT / AF_HTTPS_PORT (caddy ports:
+    # interpolation), resume.sh won't propagate the change — see
+    # docs/deployment.md → 滚动更新已有部署 → "涉及 compose infra 服务 config
+    # 变更的升级". Recreate windows:
+    #   - caddy / AF_HTTP(S)_PORT: recreate BEFORE pause.sh below (keeps the
+    #     maintenance page servable through the window; Caddy dials upstreams
+    #     lazily, so recreating with backends stopped is also safe)
     #   - PG/Redis: recreate between pause and resume
     # POSTGRES_* env are init-only — changing user/password/db on a live
     # cluster needs SQL (\`ALTER USER ...\`), NOT container recreate.
