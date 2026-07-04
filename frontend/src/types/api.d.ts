@@ -751,12 +751,47 @@ export interface paths {
          *     Response:
          *         {
          *             "ts": ISO8601,
+         *             "instance_id": str,   # 本次应答实例 — sampler/active_tasks 是进程本地视图,
+         *                                   # 多副本经 LB 随机路由时读数跳变由此可解释
          *             "sampler": {<sampler.latest_snapshot 结构,见 sampler.py 文档>},
          *             "active_conversations": [conv_id, ...],
          *             "active_tasks": int,
          *         }
          */
         get: operations["get_runtime_api_v1_admin_runtime_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/instances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Instances
+         * @description 舰队实例面板数据源(Phase C 决策 4)。
+         *
+         *     多副本(Redis):scan `{prefix:instance:*}` + pipelined GET fan-out(镜像
+         *     RedisRuntimeStore.list_active_executions,Cluster-safe —— 无跨 slot 多 key 操作),
+         *     每条心跳 payload 读侧附一个 status(green/yellow/red)。
+         *     单机(InMemory,无 Redis):没有注册表可 scan,用本机最近 snapshot 造出唯一一行。
+         *
+         *     Response:
+         *         {
+         *             "ts": ISO8601,
+         *             "instance_id": str,        # 本次应答实例
+         *             "shared": bool,            # True=Redis 舰队视图;False=单机本地视图
+         *             "instances": [ {<心跳 payload>, "status": "green|yellow|red"}, ... ],
+         *         }
+         */
+        get: operations["list_instances_api_v1_admin_instances_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3899,6 +3934,26 @@ export interface operations {
         };
     };
     get_runtime_api_v1_admin_runtime_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_instances_api_v1_admin_instances_get: {
         parameters: {
             query?: never;
             header?: never;
