@@ -141,7 +141,7 @@ compose_on() {  # compose_on <host> <version> <compose-args...>
 }
 
 # ── bundle introspection (manifest is source of truth) ──────────────
-BUNDLE=""; BUNDLE_VER=""; BUNDLE_PLATFORM=""
+BUNDLE=""; BUNDLE_VER=""; BUNDLE_PLATFORM=""; APP_TAR=""
 load_bundle_meta() {
   BUNDLE="$1"
   [[ -d "$BUNDLE" ]] || die "bundle dir not found: $BUNDLE"
@@ -150,8 +150,12 @@ load_bundle_meta() {
   BUNDLE_VER="$(awk 'NR==1{print $NF}' "$mf")"
   BUNDLE_PLATFORM="$(awk -F': *' '/^Platform:/{print $2}' "$mf")"
   [[ -n "$BUNDLE_VER" ]] || die "cannot read version from manifest $mf"
-  ls "$BUNDLE"/artifactflow-app-*.tar.gz >/dev/null 2>&1 \
-    || die "no artifactflow-app-*.tar.gz in $BUNDLE"
+  # Select the app tar by the manifest version, NOT a glob head -1 — keeps the
+  # loaded image locked to the AF_VERSION compose resolves at `up` even if a dir
+  # ever holds two versions' tars (release.sh writes one version per dist/, so
+  # this is defensive, but the coupling is free).
+  APP_TAR="$BUNDLE/artifactflow-app-${BUNDLE_VER}.tar.gz"
+  [[ -f "$APP_TAR" ]] || die "app tar for version $BUNDLE_VER not found: $APP_TAR"
 }
 
 # Normalize any arch spelling to a canonical family token, so a compose
@@ -188,7 +192,10 @@ assert_arch() {  # assert_arch <host> <conf-arch>
 # ── version state (for rollback) ────────────────────────────────────
 state_get() { [[ -f "$STATE_FILE" ]] && awk -F= -v k="$1" '$1==k{print $2}' "$STATE_FILE"; }
 state_write() {  # state_write <current> <previous>
-  printf 'current=%s\nprevious=%s\n' "$1" "$2" > "$STATE_FILE"
+  # Atomic: write a temp then rename, so a crash never leaves a half-written /
+  # empty .fleet-state that would strand `rollback` with no `previous`.
+  printf 'current=%s\nprevious=%s\n' "$1" "$2" > "$STATE_FILE.tmp" \
+    && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
 }
 
 # ── readiness + smoke through the LB ────────────────────────────────
@@ -223,10 +230,14 @@ cmd_preflight() {
     run_on "$host" 'command -v docker >/dev/null'       && ok "docker present"           || { bad "docker missing"; fail=1; }
     run_on "$host" 'docker compose version >/dev/null 2>&1' && ok "docker compose v2"     || { bad "docker compose v2 missing"; fail=1; }
     run_on "$host" 'docker info >/dev/null 2>&1'         && ok "docker daemon reachable"  || { bad "docker daemon down / no perms"; fail=1; }
-    # disk: warn under 5 GiB free on the install dir's filesystem
+    # disk: warn under 5 GiB free on the install dir's filesystem. On a fresh
+    # host the install dir doesn't exist yet, so `df $dir` would measure nothing
+    # and (df fails, awk sees no NR==2 row → exits 0) FALSELY report OK — the
+    # transport shells don't inherit our pipefail. Walk up to the nearest
+    # existing ancestor and df THAT filesystem (the one that will hold $dir).
     local dir; dir="$(target_dir "$host")"
-    run_on "$host" "df -Pk '$dir' 2>/dev/null | awk 'NR==2{exit (\$4<5242880)}'" \
-      && ok "disk ≥5GiB free on $dir" || { bad "low disk (<5GiB) on $dir"; fail=1; }
+    run_on "$host" "d='$dir'; while [ ! -e \"\$d\" ] && [ \"\$d\" != / ]; do d=\$(dirname \"\$d\"); done; df -Pk \"\$d\" 2>/dev/null | awk 'NR==2{exit (\$4<5242880)} END{if(NR<2)exit 1}'" \
+      && ok "disk ≥5GiB free for $dir" || { bad "low disk (<5GiB) or unreadable for $dir"; fail=1; }
     # clock: skew vs control host (informational — NTP is the real fix)
     if ! is_local "$host"; then
       local rt lt; rt="$(run_on "$host" 'date -u +%s' 2>/dev/null)"; lt="$(date -u +%s)"
@@ -300,9 +311,8 @@ cmd_deploy() {
 # healthchecks); we just load images and up the whole stack.
 deploy_single_local() {
   assert_arch local ""
-  local app_tar; app_tar="$(ls "$BUNDLE"/artifactflow-app-*.tar.gz | head -1)"
-  step "load app images ($(basename "$app_tar"))"
-  if (( DRY )); then info "would: docker load -i $app_tar"; else docker load -i "$app_tar" || die "docker load failed"; ok "images loaded"; fi
+  step "load app images ($(basename "$APP_TAR"))"
+  if (( DRY )); then info "would: docker load -i $APP_TAR"; else docker load -i "$APP_TAR" || die "docker load failed"; ok "images loaded"; fi
 
   if has_infra; then
     local infra_tar; infra_tar="$(ls "$BUNDLE"/artifactflow-infra-*.tar.gz 2>/dev/null | head -1 || true)"
@@ -377,6 +387,9 @@ cmd_status() {
   while IFS= read -r host; do
     printf '\n  \033[1m[%s]\033[0m\n' "$host"
     local ps
+    # No `--profile infra` needed: `docker compose ps` lists ALL running project
+    # containers regardless of which profiles are active (verified on compose
+    # v2), so pg/redis show up here even though they're profile-gated.
     ps="$(compose_on "$host" "${cur:-latest}" ps --format 'table {{.Service}}\t{{.Status}}' 2>/dev/null)"
     if [[ -n "$ps" ]]; then printf '%s\n' "$ps" | sed 's/^/    /'; else info "no compose project up (or unreachable)"; fi
   done < <(all_hosts)
