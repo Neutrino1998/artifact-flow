@@ -1,13 +1,24 @@
 #!/usr/bin/env bash
-# proxy_contract_smoke.sh — verify nginx and Caddy enforce the SAME reverse-proxy
-# contract. Runs the real proxy container against a stub upstream (proxy_stub.py)
-# and asserts behaviour. One assertion battery, two targets: a divergence shows
-# up as one target passing and the other failing the identical check — exactly
-# the drift this guards against, and the equivalence gate before migrating the
-# intranet (Mode 3) from nginx to Caddy.
+# proxy_contract_smoke.sh — regression battery for the Caddy reverse-proxy
+# contract. Runs the real caddy container against a stub upstream
+# (proxy_stub.py) and asserts the behaviours that must survive any edit to
+# deploy/caddy/common.caddy: routing ownership, Swagger block, X-Real-IP
+# overwrite, upload cap, SSE flush, maintenance gate. Run it after touching
+# the caddy configs.
+#
+# History: born as the nginx⇆Caddy equivalence gate for the Mode 3 migration
+# (one battery, two targets). nginx retired 2026-07 (commit d489c0e) — the
+# nginx half is gone; the battery itself is what still earns its keep.
+#
+# Target config: the PROD entry (deploy/caddy/Caddyfile) with
+# AF_DOMAIN=http://test.local to neuter TLS/ACME. Deliberate: the whole
+# contract lives in common.caddy, which both entry shells import — testing
+# through the prod shell covers it without cert scaffolding. The intranet
+# shell's own delta (static tls + HTTP→HTTPS redirect) is two thin lines,
+# validated live during the migration.
 #
 # Usage:
-#   tests/manual/proxy_contract_smoke.sh [nginx|caddy|both]   (default: both)
+#   tests/manual/proxy_contract_smoke.sh
 #
 # Env knobs:
 #   SMOKE_HOST_PORT   host port to publish the proxy on (default 18080)
@@ -17,7 +28,7 @@
 # Requires: docker, curl, python3 on the host. No project services needed.
 # NOT collected by pytest (no test_ prefix, lives in tests/manual/).
 #
-# Contract checked (mirror of deploy/nginx.conf ⇆ deploy/Caddyfile):
+# Contract checked (mirror of deploy/caddy/common.caddy):
 #   1. Swagger 404                          5. maintenance gate → 503 for /, /api, SSE
 #   2. /health ungated AND routed to backend   6. /__maintenance/* reachable mid-window
 #   3. routing (api & health→8000, /→3000)  7. upload: 211MiB→413, 200MiB legit→backend 200
@@ -25,7 +36,6 @@
 
 set -uo pipefail  # NOT -e: run every assertion, tally at the end
 
-TARGET="${1:-both}"
 HOST_PORT="${SMOKE_HOST_PORT:-18080}"
 SMOKE_SSE="${SMOKE_SSE:-fail}"
 BASE="http://localhost:${HOST_PORT}"
@@ -33,8 +43,7 @@ BASE="http://localhost:${HOST_PORT}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 STUB_PY="$SCRIPT_DIR/proxy_stub.py"
-NGINX_CONF="$ROOT/deploy/nginx.conf"
-CADDYFILE="$ROOT/deploy/Caddyfile"
+CADDY_CONF_DIR="$ROOT/deploy/caddy"
 
 NET="af-proxy-smoke-net"
 STUB_CTR="af-proxy-smoke-stub"
@@ -47,7 +56,7 @@ PASS=0; FAIL=0
 declare -a FAILED_TARGETS
 
 # host-side curl always sends Host: test.local — Caddy's site address is
-# http://test.local (TLS neutered for the test); nginx's server_name _ matches it.
+# http://test.local (TLS neutered for the test).
 # --noproxy '*' is mandatory: a dev box with http_proxy/all_proxy set (Clash etc.)
 # would otherwise route localhost through the proxy, which 502s the published port
 # before the request ever reaches the container.
@@ -86,9 +95,9 @@ trap cleanup EXIT
 preflight() {
   command -v docker >/dev/null || { echo "docker 不可用"; exit 2; }
   command -v python3 >/dev/null || { echo "python3 不可用"; exit 2; }
-  [[ -f "$STUB_PY" ]]    || { echo "缺 $STUB_PY"; exit 2; }
-  [[ -f "$NGINX_CONF" ]] || { echo "缺 $NGINX_CONF"; exit 2; }
-  [[ -f "$CADDYFILE" ]]  || { echo "缺 $CADDYFILE"; exit 2; }
+  [[ -f "$STUB_PY" ]]                       || { echo "缺 $STUB_PY"; exit 2; }
+  [[ -f "$CADDY_CONF_DIR/Caddyfile" ]]      || { echo "缺 $CADDY_CONF_DIR/Caddyfile"; exit 2; }
+  [[ -f "$CADDY_CONF_DIR/common.caddy" ]]   || { echo "缺 $CADDY_CONF_DIR/common.caddy"; exit 2; }
 }
 
 start_stub() {
@@ -97,8 +106,8 @@ start_stub() {
     --network-alias backend --network-alias frontend \
     -v "$STUB_PY":/app/proxy_stub.py:ro \
     python:3.11-slim python /app/proxy_stub.py >/dev/null
-  # Wait until both upstream ports listen before starting nginx — nginx resolves
-  # its static `upstream` at boot and refuses to start on an unresolvable name.
+  # Wait until both upstream ports listen before starting the proxy, so the
+  # first assertions don't race the stub's boot.
   local i
   for i in $(seq 1 30); do
     if docker exec "$STUB_CTR" python -c \
@@ -110,23 +119,16 @@ start_stub() {
 }
 
 start_proxy() {
-  local proxy="$1"
   docker rm -f "$PROXY_CTR" >/dev/null 2>&1 || true
-  if [[ "$proxy" == nginx ]]; then
-    docker run -d --name "$PROXY_CTR" --network "$NET" -p "$HOST_PORT:80" \
-      -v "$NGINX_CONF":/etc/nginx/conf.d/default.conf:ro \
-      -v "$TMP_MAINT":/etc/nginx/maintenance:ro \
-      nginx:1.30.1-alpine >/dev/null
-  else
-    # AF_DOMAIN=http://... makes Caddy serve plain HTTP on :80 — no ACME, no TLS,
-    # which is mandatory for an offline/CI run (and is the exact `auto_https off`
-    # posture the air-gapped intranet would need post-migration).
-    docker run -d --name "$PROXY_CTR" --network "$NET" -p "$HOST_PORT:80" \
-      -e AF_DOMAIN=http://test.local -e AF_ACME_EMAIL=smoke@test.local \
-      -v "$CADDYFILE":/etc/caddy/Caddyfile:ro \
-      -v "$TMP_MAINT":/etc/caddy/maintenance:ro \
-      caddy:2-alpine >/dev/null
-  fi
+  # AF_DOMAIN=http://... makes Caddy serve plain HTTP on :80 — no ACME, no TLS.
+  # Directory mount + explicit --config mirror the compose files exactly (a
+  # single-file mount would pin the inode AND break the common.caddy import).
+  # Tag kept in lockstep with release.sh CADDY_TAG / both compose files.
+  docker run -d --name "$PROXY_CTR" --network "$NET" -p "$HOST_PORT:80" \
+    -e AF_DOMAIN=http://test.local -e AF_ACME_EMAIL=smoke@test.local \
+    -v "$CADDY_CONF_DIR":/etc/caddy/conf:ro \
+    -v "$TMP_MAINT":/etc/caddy/maintenance:ro \
+    caddy:2.10-alpine caddy run --config /etc/caddy/conf/Caddyfile --adapter caddyfile >/dev/null
 }
 
 wait_ready() {
@@ -294,20 +296,19 @@ PY
 }
 
 run_target() {
-  local proxy="$1"
   echo ""
-  echo "═══ 目标: $proxy ═══"
+  echo "═══ 目标: caddy ═══"
   PASS=0; FAIL=0
-  # Fresh maintenance dir per target (see assert_maintenance for why we never
-  # delete the flag once set).
-  TMP_MAINT="$MAINT_BASE/$proxy"
+  # Fresh maintenance dir (see assert_maintenance for why we never delete the
+  # flag once set).
+  TMP_MAINT="$MAINT_BASE/caddy"
   FLAG="$TMP_MAINT/MAINTENANCE_ON"
   mkdir -p "$TMP_MAINT"
   cp -R "$ROOT/deploy/maintenance/." "$TMP_MAINT/"
   rm -f "$FLAG"
-  start_proxy "$proxy"
+  start_proxy
   if ! wait_ready; then
-    FAILED_TARGETS+=("$proxy(启动失败)")
+    FAILED_TARGETS+=("caddy(启动失败)")
     docker rm -f "$PROXY_CTR" >/dev/null 2>&1 || true
     return
   fi
@@ -317,29 +318,22 @@ run_target() {
   assert_upload_cap
   assert_sse
   assert_maintenance   # LAST: sets the flag, which we can't reliably clear
-  echo "  ── $proxy: $PASS 通过 / $FAIL 失败"
-  [[ $FAIL -gt 0 ]] && FAILED_TARGETS+=("$proxy($FAIL 失败)")
+  echo "  ── caddy: $PASS 通过 / $FAIL 失败"
+  [[ $FAIL -gt 0 ]] && FAILED_TARGETS+=("caddy($FAIL 失败)")
   docker rm -f "$PROXY_CTR" >/dev/null 2>&1 || true
 }
 
 # ---------------------------------------------------------------------------
 preflight
 start_stub
-
-case "$TARGET" in
-  nginx) run_target nginx ;;
-  caddy) run_target caddy ;;
-  both)  run_target nginx; run_target caddy ;;
-  *)     echo "用法: $0 [nginx|caddy|both]"; exit 2 ;;
-esac
+run_target
 
 echo ""
 echo "═══════════════════════════════"
 if [[ ${#FAILED_TARGETS[@]} -eq 0 ]]; then
-  echo "✓ 全部通过 — nginx 与 Caddy 行为一致"
+  echo "✓ 全部通过 — Caddy 反代契约完好"
   exit 0
 else
-  echo "✗ 有目标未通过: ${FAILED_TARGETS[*]}"
-  echo "  (两个目标对同一断言一过一挂 = 契约漂移)"
+  echo "✗ 未通过: ${FAILED_TARGETS[*]}"
   exit 1
 fi
