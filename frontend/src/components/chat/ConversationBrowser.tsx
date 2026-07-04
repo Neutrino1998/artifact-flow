@@ -205,7 +205,7 @@ export default function ConversationBrowser() {
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4">
         <div className="max-w-3xl mx-auto">
         {selectionMode && (
-          <div className="mb-3 flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-accent/40 bg-accent/5 dark:bg-accent/10">
+          <div className="mb-3 flex items-center gap-2 px-4 py-2.5 rounded-xl border border-accent/40 bg-accent/5 dark:bg-accent/10">
             <span className="text-sm text-text-secondary dark:text-text-secondary-dark">
               已选 <span className="text-text-primary dark:text-text-primary-dark font-medium">{selectedCount}</span> 项
             </span>
@@ -226,7 +226,7 @@ export default function ConversationBrowser() {
             <button
               onClick={() => setConfirmBulkDelete(true)}
               disabled={selectedCount === 0}
-              className={`${BUTTON_DANGER} rounded-md px-3 py-1 text-xs`}
+              className={`${BUTTON_DANGER} rounded-lg px-3 py-1 text-xs`}
             >
               删除 ({selectedCount})
             </button>

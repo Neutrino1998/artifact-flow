@@ -211,7 +211,7 @@ export default function UserManagementPanel() {
               sidebar now; this toolbar stays here because 全选当前页 is scoped
               to the visible page. */}
           {selectionMode && (
-            <div className="mb-3 flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-accent/40 bg-accent/5 dark:bg-accent/10">
+            <div className="mb-3 flex items-center gap-2 px-4 py-2.5 rounded-xl border border-accent/40 bg-accent/5 dark:bg-accent/10">
               <span className="text-sm text-text-secondary dark:text-text-secondary-dark">
                 已选 <span className="text-text-primary dark:text-text-primary-dark font-medium">{selection.length}</span> 项
               </span>

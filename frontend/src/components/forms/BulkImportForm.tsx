@@ -300,7 +300,7 @@ function UploadStage({
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
-        className={`rounded-2xl border-2 border-dashed p-8 text-center transition-colors ${
+        className={`rounded-xl border-2 border-dashed p-8 text-center transition-colors ${
           dragActive
             ? 'border-accent bg-panel/50 dark:bg-panel-accent-dark/50'
             : 'border-border dark:border-border-dark'

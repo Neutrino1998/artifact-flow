@@ -147,7 +147,7 @@ export default function SkillManagementPanel() {
           {/* 导入入口 + 内联导入卡片(中间面板接管,不动右面板) */}
           <button
             onClick={() => setImportOpen((v) => !v)}
-            className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border font-medium transition-colors ${
+            className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border font-medium transition-colors ${
               importOpen
                 ? 'text-accent border-accent bg-bg dark:bg-bg-dark'
                 : 'text-accent border-border dark:border-border-dark bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark'
@@ -200,7 +200,7 @@ export default function SkillManagementPanel() {
             return (
               <div
                 key={skill.slug}
-                className="flex items-start gap-3 px-4 py-3 rounded-2xl bg-surface dark:bg-surface-dark border border-border dark:border-border-dark"
+                className="flex items-start gap-3 px-4 py-3 rounded-xl bg-surface dark:bg-surface-dark border border-border dark:border-border-dark"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
@@ -386,7 +386,7 @@ function SkillImportCard({
   }, [clearNativeInput]);
 
   return (
-    <div className="rounded-2xl bg-surface dark:bg-surface-dark border border-border dark:border-border-dark p-4 space-y-3">
+    <div className="rounded-xl bg-surface dark:bg-surface-dark border border-border dark:border-border-dark p-4 space-y-3">
       {stage.kind !== 'result' && (
         <>
           <div

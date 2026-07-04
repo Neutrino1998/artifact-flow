@@ -118,7 +118,7 @@ function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCo
               <button
                 onClick={handleSubmitEdit}
                 disabled={!editContent.trim() || isStreaming}
-                className={`${BUTTON_PRIMARY} px-3 py-1 text-xs rounded`}
+                className={`${BUTTON_PRIMARY} px-3 py-1 text-xs rounded-lg`}
               >
                 发送
               </button>

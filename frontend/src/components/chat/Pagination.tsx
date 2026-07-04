@@ -54,7 +54,7 @@ export default function Pagination({
   const canNext = page < totalPages && !disabled;
 
   return (
-    <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-2xl px-4 flex items-center justify-between gap-3 py-2 text-sm">
+    <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-xl px-4 flex items-center justify-between gap-3 py-2 text-sm">
       {totalPages > 1 ? (
         <div className="flex items-center gap-1">
           <button
