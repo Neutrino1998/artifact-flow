@@ -180,12 +180,18 @@ class LoopLagWatchdog:
         except Exception:
             tasks_info = []
 
-        # 轻摘要留内存供心跳读(整体赋值原子,loop 线程无锁读)。
-        self._last_wedge = {
-            "ts": utc_now().isoformat(),
-            "lag_ms": round(lag_ms, 1),
-            "wedged": wedged,
-        }
+        # 只有**硬 wedge**(回调彻底不来)才留 last_wedge 摘要 —— 心跳的「黄色」里
+        # 「watchdog 抓到过 wedge」这一档是永久标记(进程生命周期不清),必须只对真
+        # wedge 生效。软告警(lag≥warn 但回调仍来)是 routine 抖动(GC/冷 import),
+        # 若也写 last_wedge,一次 550ms 抖动就把实例永久钉黄 + 假报「抓到 wedge」到
+        # 重启为止——毁掉面板信号。软告警的可见性由 loop_lag.max_1m_ms(60s 窗口自愈)
+        # 承载;jsonl 两者都记(取证不受影响)。
+        if wedged:
+            self._last_wedge = {
+                "ts": utc_now().isoformat(),
+                "lag_ms": round(lag_ms, 1),
+                "wedged": True,
+            }
 
         try:
             self._sink.write({

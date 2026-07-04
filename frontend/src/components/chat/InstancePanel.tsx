@@ -22,6 +22,9 @@ function ago(iso: string | null | undefined, nowMs: number): string {
   if (!iso) return '—';
   try {
     const then = parseUtcIso(iso).getTime();
+    // parseUtcIso 对坏字符串返回 Invalid Date(不抛)→ getTime() 是 NaN,catch 够不着;
+    // 显式挡一下,否则渲染成 "NaNd 前"。
+    if (Number.isNaN(then)) return '—';
     const sec = Math.max(0, Math.round((nowMs - then) / 1000));
     if (sec < 60) return `${sec}s 前`;
     if (sec < 3600) return `${Math.floor(sec / 60)}m 前`;
@@ -36,7 +39,9 @@ function ago(iso: string | null | undefined, nowMs: number): string {
 function uptime(iso: string | undefined, nowMs: number): string {
   if (!iso) return '—';
   try {
-    const sec = Math.max(0, Math.round((nowMs - parseUtcIso(iso).getTime()) / 1000));
+    const t = parseUtcIso(iso).getTime();
+    if (Number.isNaN(t)) return '—';
+    const sec = Math.max(0, Math.round((nowMs - t) / 1000));
     const d = Math.floor(sec / 86400);
     const h = Math.floor((sec % 86400) / 3600);
     const m = Math.floor((sec % 3600) / 60);
@@ -92,20 +97,18 @@ function InstanceCard({ inst, nowMs, isSelf }: { inst: InstanceHeartbeat; nowMs:
         <span title="运行时长">上线 {uptime(inst.started_at, nowMs)}</span>
       </div>
 
-      {/* Metrics grid */}
+      {/* Metrics grid — 数值 tile 一律中性色,健康颜色只由后端算好的 status 圆点承载
+          (前端不再自判阈:旧的 loop≥500 高亮复制了 LOOP_LAG_WARN_MS、errCount>0 红
+          又与窗口化的绿点矛盾——lifetime 计数 hours 后仍红。单点归后端 = by-construction
+          消除两处漂移)。*/}
       <div className="mt-3 grid grid-cols-4 gap-3">
         <Metric label="RSS" value={proc.rss_mb != null ? `${proc.rss_mb}M` : '—'} />
         <Metric
           label="loop p50/max"
           value={`${loop.p50_ms ?? '—'}/${loop.max_1m_ms ?? '—'}`}
-          tone={(loop.max_1m_ms ?? 0) >= 500 ? 'text-status-warning tabular-nums' : undefined}
         />
         <Metric label="在途" value={String(inst.in_flight ?? 0)} />
-        <Metric
-          label="ERROR"
-          value={String(errCount)}
-          tone={errCount > 0 ? 'text-status-error tabular-nums' : undefined}
-        />
+        <Metric label="ERROR" value={String(errCount)} />
       </div>
 
       {/* Anomaly badges */}

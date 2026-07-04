@@ -210,10 +210,11 @@ async def list_instances(
                     payload = {"instance_id": HeartbeatWriter.instance_id_from_key(k), "ts": None}
                 payload["status"] = _compute_status(payload, now)
                 instances.append(payload)
-    except Exception:
-        # scan/pipeline 失败:记 error(server-side 失败,无 useful stack),返回空表
-        # 而非 500 —— 面板「暂时读不到舰队」比整页崩要好。
-        logger.error("Failed to scan instance heartbeats for /admin/instances", exc_info=True)
+    except Exception as e:
+        # scan/pipeline 失败是**已处理的降级**(返空表 200,非 5xx),按 CLAUDE.md 日志
+        # 规矩属 expected/handled → warning 且不带栈(栈无 useful 信息)。面板 10s 轮询,
+        # 带 exc_info 会让一次 Redis 抖动每 10s 每个管理员刷一坨栈。
+        logger.warning(f"Failed to scan instance heartbeats for /admin/instances: {e}")
 
     # 新→旧稳定排序:先按 status 严重度(red>yellow>green),再按 instance_id。
     severity = {"red": 0, "yellow": 1, "green": 2}

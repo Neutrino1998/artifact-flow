@@ -25,6 +25,7 @@ observer 不能拖累 observee:写失败一律吞(debug 一行),绝不冒泡回 
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -87,18 +88,37 @@ class HeartbeatWriter:
         if self._redis is None:
             return
         try:
-            payload = self._build_payload(snapshot)
+            # marker 是文件 IO —— 丢线程池,别在 sampler await 的热路径上同步读盘:
+            # 若 :ro 挂载指向慢/卡的 FS,同步读会把 event loop 卡住,心跳写手自己
+            # 变成它要观测的 wedge(2026-05-14 事故的同一类坑)。
+            last_autoheal = await asyncio.to_thread(self._read_autoheal_marker)
+            payload = self._build_payload(snapshot, last_autoheal)
             key = self.instance_key(self._prefix, INSTANCE_ID)
             await self._redis.set(key, json.dumps(payload), ex=self._ttl)
         except Exception:
             # observer 不能挂应用;debug 级别(多副本高频路径,warn 会刷屏)。
             logger.debug("Heartbeat write failed; skipping this tick", exc_info=True)
 
-    def build_local_payload(self, snapshot: dict) -> dict:
-        """读侧在单机(无 Redis)形态下,用本机最近 snapshot 造出与注册表同构的一行。"""
-        return self._build_payload(snapshot)
+    async def delete(self) -> None:
+        """优雅停机/缩容时删掉本实例心跳 key —— 否则退掉的副本 key 带冻结 ts 挂到
+        TTL 过期(最长 OBS_HEARTBEAT_TTL_SEC),面板显红「失联」与真 wedge 分不清。
+        滚动发版每次都会这样红一片。SIGKILL 硬杀跑不到这 → 走 TTL 兜底(那本就该红)。
+        redis=None no-op;删失败吞(停机路径,别拦关停)。"""
+        if self._redis is None:
+            return
+        try:
+            await self._redis.delete(self.instance_key(self._prefix, INSTANCE_ID))
+        except Exception:
+            logger.debug("Heartbeat delete failed on shutdown", exc_info=True)
 
-    def _build_payload(self, snapshot: dict) -> dict:
+    def build_local_payload(self, snapshot: dict) -> dict:
+        """读侧在单机(无 Redis)形态下,用本机最近 snapshot 造出与注册表同构的一行。
+
+        这是**请求路径**(非 sampler 每 tick 热路径)且仅单机 fallback 触发,marker
+        同步读可接受 —— 不需要像 write() 那样 to_thread。"""
+        return self._build_payload(snapshot, self._read_autoheal_marker())
+
+    def _build_payload(self, snapshot: dict, last_autoheal: Optional[dict]) -> dict:
         ec = self._error_counter
         wd = self._watchdog
         return {
@@ -118,8 +138,8 @@ class HeartbeatWriter:
             "error_count": getattr(ec, "count", 0) if ec else 0,
             "last_error_ts": getattr(ec, "last_ts", None) if ec else None,
             "last_wedge": wd.last_wedge() if wd is not None else None,
-            # 宿主 autoheal marker 代报(见 _read_autoheal_marker)
-            "last_autoheal": self._read_autoheal_marker(),
+            # 宿主 autoheal marker 代报(调用方读好传入 —— write() 走 to_thread)
+            "last_autoheal": last_autoheal,
         }
 
     # ── autoheal marker 代报 ──

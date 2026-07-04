@@ -49,6 +49,13 @@ def install() -> ErrorCounterHandler:
     必须在 `ArtifactFlow` Logger 首次构造之后调用(构造函数会
     `handlers.clear()`,先挂会被清掉)—— 由 lifespan 的 _start_observability
     调用,那时 logger 早已被各模块 import 触发构造。
+
+    残留隐患(当前不可达,备注留痕):`utils.logger` 的裸函数(`logger.error(...)`)
+    走 `get_logger(None)` 会**首次**构造一个独立的 `_default_logger`,底层同名
+    `logging.getLogger("ArtifactFlow")`,其 `__init__` 也 `handlers.clear()`。若这条
+    路径在 install() **之后**才第一次触发,会把本 handler 清掉、`error_count` 冻死在 0。
+    src/ 里目前无裸函数调用者(全走 `get_logger("ArtifactFlow")` 缓存实例,import 期已
+    构造),故不可达 —— 不加防御机器,仅在此备注,新增裸调用时需重挂。
     """
     global _handler
     if _handler is None:

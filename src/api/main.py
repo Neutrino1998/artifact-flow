@@ -161,6 +161,11 @@ async def _stop_observability() -> None:
         await _sampler.stop()
         _sampler = None
         admin_runtime.set_sampler(None)
+        # sampler 已停 = 不再有 in-flight 写 → 现在删本实例心跳 key,优雅停机/缩容
+        # 不留幽灵红行(见 HeartbeatWriter.delete)。
+        _hb = admin_runtime.get_heartbeat()
+        if _hb is not None:
+            await _hb.delete()
         admin_runtime.set_heartbeat(None)
     if _deadman is not None:
         await _deadman.stop()

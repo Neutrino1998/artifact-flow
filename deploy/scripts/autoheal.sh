@@ -91,7 +91,9 @@ for svc in $SERVICES; do
     # 没有 healthcheck 的容器 .Health 为空 → 视作 "none",不动它
     health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo unknown)"
     name="$(docker inspect -f '{{.Name}}' "$cid" 2>/dev/null | sed 's#^/##')"
-    hostname="$(docker inspect -f '{{.Config.Hostname}}' "$cid" 2>/dev/null || echo "$cid")"
+    # fallback 用短 id(前 12 位):compose ps -q 给的是 64 位全 id,而 backend 的
+    # INSTANCE_ID=docker 默认 hostname=短 id,直接用全 id 会对不上、marker 归因被丢。
+    hostname="$(docker inspect -f '{{.Config.Hostname}}' "$cid" 2>/dev/null || echo "${cid:0:12}")"
     if [[ "$health" == "unhealthy" ]]; then
       if (( DRY_RUN )); then
         echo "would restart: $name ($svc, unhealthy, id=$hostname)"

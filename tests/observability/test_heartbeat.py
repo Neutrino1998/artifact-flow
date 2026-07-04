@@ -53,6 +53,28 @@ async def test_write_sets_key_with_ttl():
     assert payload["version"]  # 至少 "dev"
 
 
+async def test_delete_removes_key():
+    """#2 回归:优雅停机删本实例 key,不留幽灵红行。"""
+    class FakeRedis:
+        def __init__(self):
+            self.store = {"{af:instance:" + INSTANCE_ID + "}": ("x", 300)}
+            self.deleted = []
+
+        async def set(self, k, v, ex=None):
+            self.store[k] = (v, ex)
+
+        async def delete(self, k):
+            self.deleted.append(k)
+            self.store.pop(k, None)
+
+    fr = FakeRedis()
+    hb = HeartbeatWriter(redis_client=fr, key_prefix="af", ttl_sec=300)
+    await hb.delete()
+    assert fr.deleted == [HeartbeatWriter.instance_key("af", INSTANCE_ID)]
+    # redis=None 时 delete no-op(不抛)
+    await HeartbeatWriter(redis_client=None, key_prefix="af", ttl_sec=300).delete()
+
+
 async def test_write_swallows_redis_error():
     class BoomRedis:
         async def set(self, *a, **k):
