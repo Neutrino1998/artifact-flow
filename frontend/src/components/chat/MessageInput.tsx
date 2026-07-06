@@ -466,7 +466,7 @@ export default function MessageInput() {
                   <line x1="14" y1="10" x2="21" y2="3" />
                   <line x1="3" y1="21" x2="10" y2="14" />
                 </svg>
-                <span>本轮回答后压缩上下文</span>
+                <span>发送后压缩一次上下文</span>
                 <button
                   onClick={() => setForceCompact(false)}
                   className="shrink-0 p-0.5 rounded hover:bg-accent/20"
@@ -729,14 +729,14 @@ export default function MessageInput() {
                     ? 'bg-accent/15 text-accent'
                     : 'text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark'
                 }`}
-                aria-label="Compact context"
+                aria-label="压缩上下文"
                 aria-pressed={effectiveForceCompact}
                 title={
                   !hasPersistedHistory
                     ? '当前会话无历史可压缩'
                     : effectiveForceCompact
-                      ? '已开启压缩：本轮回答后把之前的对话压缩成摘要（点击取消）'
-                      : '压缩上下文：本轮回答后把之前的对话压缩成摘要'
+                      ? '已开启：下次发送后，自动把已有对话整理成摘要（点击取消）'
+                      : '下次发送后，自动把已有对话整理成摘要'
                 }
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
