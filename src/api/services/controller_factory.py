@@ -12,6 +12,7 @@ from config import config
 from api.dependencies import (
     get_db_manager,
     get_execution_runner,
+    get_mcp_client_manager,
     get_tools,
 )
 from api.services.stream_transport import StreamTransport
@@ -101,7 +102,11 @@ async def create_controller(
     # 短 session 读完即关;凭证 resolver 拿 db_manager(execute 期再各开短 session lazy
     # 解密),不被快照 session 骑成 turn-long 连接。
     snapshot = await db_manager.with_retry(
-        lambda session: load_registry_snapshot(session, db_manager=db_manager)
+        lambda session: load_registry_snapshot(
+            session,
+            db_manager=db_manager,
+            mcp_manager=get_mcp_client_manager(),
+        )
     )
     if "lead_agent" not in snapshot.agents:
         # DB 注册表为空/缺 lead_agent = reconcile 没跑(或跑挂)。引擎此时无可执行

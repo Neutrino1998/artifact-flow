@@ -33,10 +33,11 @@ def _agent(name="lead_agent", builtin_tools=None, units=None):
     )
 
 
-def _unit(name, members, kind="tool", defer=False, description=""):
+def _unit(name, members, kind="tool", defer=False, description="", discovery_error=None):
     return UnitInfo(
         name=name, kind=kind, description=description, visibility="public",
         defer=defer, provider="http", source="seeded",
+        discovery_error=discovery_error,
         member_full_names=list(members),
     )
 
@@ -213,6 +214,27 @@ def test_search_tools_auto_injected_when_deferred_present():
     eff = resolve_effective_toolset(agent, snap, tools)
     assert "search_tools" in eff
     assert eff.level("search_tools") == ToolPermission.AUTO
+
+
+def test_deferred_unit_with_discovery_error_still_registers_index_row():
+    agent = _agent(units={"inventory": "enabled"})
+    snap = _snapshot(units=[
+        _unit(
+            "inventory",
+            [],
+            kind="mcp",
+            defer=True,
+            description="Inventory MCP",
+            discovery_error="MCP server is unavailable",
+        )
+    ])
+    tools = {"search_tools": _Tool("search_tools", ToolPermission.AUTO)}
+
+    eff = resolve_effective_toolset(agent, snap, tools)
+
+    assert "search_tools" in eff
+    assert eff.deferred_units["inventory"].member_full_names == []
+    assert eff.deferred_units["inventory"].discovery_error == "MCP server is unavailable"
 
 
 def test_search_tools_not_injected_without_deferred():

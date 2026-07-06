@@ -9,6 +9,7 @@ FastAPI 依赖注入
     get_execution_runner()    # ExecutionRunner — 后台任务调度 + RuntimeStore
     get_agents()              # Agent 配置字典
     get_tools()               # 全局工具字典
+    get_mcp_client_manager()  # MCP client manager — per-worker discovery/call facade
 
 请求级依赖（每次 HTTP 请求独立创建）：
     get_db_session()            # AsyncSession
@@ -56,6 +57,7 @@ _stream_transport: Optional["StreamTransport"] = None
 _execution_runner: Optional["ExecutionRunner"] = None
 _redis_client: Optional[Any] = None               # redis.asyncio.Redis (optional)
 _login_rate_limiter: Optional[Any] = None         # Redis / InMemory LoginRateLimiter
+_mcp_client_manager: Optional[Any] = None         # tools.custom.mcp_client.McpClientManager
 
 # Agent configs + tools（启动时加载一次）
 _agents: Optional[dict] = None                    # {name: AgentConfig}
@@ -71,7 +73,7 @@ async def init_globals() -> None:
     from pathlib import Path
 
     global _db_manager, _stream_transport, _execution_runner, _redis_client, _agents, _tools
-    global _login_rate_limiter
+    global _login_rate_limiter, _mcp_client_manager
 
     # 0. 确保 data 目录存在
     data_dir = Path("data")
@@ -185,6 +187,10 @@ async def init_globals() -> None:
     _tools = _load_tools()
     logger.info(f"Loaded {len(_tools)} global tools")
 
+    # 6. MCP client manager(per-worker):每 turn 快照时按已保存 server 配置 lazy discovery。
+    from tools.custom.mcp_client import McpClientManager
+    _mcp_client_manager = McpClientManager()
+
 
 def _load_tools() -> Dict[str, BaseTool]:
     """启动时加载进程级全局 builtin 工具（无状态，跨请求共享）。
@@ -221,6 +227,7 @@ async def close_globals() -> None:
     在 FastAPI lifespan 中调用。
     """
     global _db_manager, _stream_transport, _execution_runner, _redis_client, _login_rate_limiter
+    global _mcp_client_manager
 
     # 1. 先关闭 ExecutionRunner（等待运行中的任务完成）
     if _execution_runner:
@@ -242,6 +249,7 @@ async def close_globals() -> None:
     _db_manager = None
     _stream_transport = None
     _login_rate_limiter = None
+    _mcp_client_manager = None
 
 
 def get_execution_runner() -> "ExecutionRunner":
@@ -294,6 +302,13 @@ def get_tools() -> Dict[str, BaseTool]:
     if _tools is None:
         raise RuntimeError("Tools not loaded. Call init_globals() first.")
     return _tools
+
+
+def get_mcp_client_manager():
+    """获取 per-worker MCP client manager。"""
+    if _mcp_client_manager is None:
+        raise RuntimeError("MCP client manager not initialized. Call init_globals() first.")
+    return _mcp_client_manager
 
 
 # ============================================================

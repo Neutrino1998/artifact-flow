@@ -9,6 +9,7 @@ from db.models import Agent, AgentUnit, ToolMember, ToolUnit
 from reconcile.reconciler import reconcile_config_to_db
 from reconcile.seeds import SeedError
 from reconcile.snapshot import load_registry_snapshot
+from tools.custom.mcp_client import McpClientManager, McpToolDefinition
 
 
 # --------------------------------------------------------------------------
@@ -537,6 +538,51 @@ async def test_snapshot_keeps_mcp_unit_without_external_tool(db_session, cfg, tm
     assert snap.units["inventory"].member_full_names == []
     assert snap.units["inventory"].provider_config["url"] == "https://mcp.example.com/inventory"
     assert "inventory" not in snap.external_tools
+
+
+async def test_snapshot_discovers_mcp_tools_when_manager_is_available(db_session, cfg, tmp_path):
+    mcp = tmp_path / "mcp"
+    _write(mcp / "inventory.md", _mcp_server_md())
+    await _run_with_mcp(db_session, cfg, mcp)
+
+    async def fake_list(url, headers, timeout):
+        assert url == "https://mcp.example.com/inventory"
+        assert headers == {"X-Tenant": "ops"}
+        assert timeout == 15
+        return [
+            McpToolDefinition(
+                name="lookup",
+                description="Lookup inventory",
+                input_schema={
+                    "type": "object",
+                    "properties": {"sku": {"type": "string"}},
+                    "required": ["sku"],
+                },
+            ),
+            # Spec-invalid names are skipped loudly, not transformed.
+            McpToolDefinition(
+                name="bad:name",
+                description="Bad",
+                input_schema={"type": "object", "properties": {}},
+            ),
+            McpToolDefinition(
+                name="bad_param",
+                description="Bad param",
+                input_schema={
+                    "type": "object",
+                    "properties": {"bad:param": {"type": "string"}},
+                },
+            ),
+        ]
+
+    manager = McpClientManager(list_callable=fake_list)
+    snap = await load_registry_snapshot(db_session, mcp_manager=manager)
+
+    assert snap.units["inventory"].member_full_names == ["inventory__lookup"]
+    assert "inventory__lookup" in snap.external_tools
+    tool = snap.external_tools["inventory__lookup"]
+    assert tool.permission.value == "confirm"
+    assert [p.name for p in tool.get_parameters()] == ["sku"]
 
 
 async def test_snapshot_skips_member_shadowing_builtin(db_session, cfg):

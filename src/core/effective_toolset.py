@@ -43,6 +43,7 @@ class DeferredUnit:
     """
     name: str
     description: str
+    discovery_error: Optional[str] = None
     member_full_names: List[str] = field(default_factory=list)
 
     @classmethod
@@ -52,6 +53,7 @@ class DeferredUnit:
         return cls(
             name=unit.name,
             description=unit.description,
+            discovery_error=unit.discovery_error,
             member_full_names=present_members,
         )
 
@@ -194,8 +196,9 @@ def resolve_effective_toolset(
                 permissions[full_name] = tool.permission
                 present_members.append(full_name)
         # defer 的 unit:成员仍可调(已进 permissions),但只渲索引行 → 记进 deferred_units。
-        # 只在有可调成员时记(空 unit 无可披露内容,索引行也无意义)。
-        if unit.defer and present_members:
+        # 只在有可调成员或 discovery_error 时记;后者让 MCP server 不可达时在目录/search_tools
+        # 中显式可见,而不是静默消失。
+        if unit.defer and (present_members or unit.discovery_error):
             deferred_units[unit_name] = DeferredUnit.from_unit(unit, present_members)
 
     # ③ 请求级 builtin 注入上下文(F-0):从本 turn 的 tools 烤入三个可注入 builtin 的
@@ -257,7 +260,7 @@ def _bake_skill_grants(
                         if tool is not None:
                             grant.permissions[fn] = tool.permission
                             present.append(fn)
-                    if u.defer and present:
+                    if u.defer and (present or u.discovery_error):
                         grant.deferred_units[unit] = DeferredUnit.from_unit(u, present)
         if grant.permissions:
             grants_by_slug[slug] = grant

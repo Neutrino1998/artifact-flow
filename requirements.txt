@@ -90,6 +90,12 @@ aiofiles>=23.2.0
 # 异步 HTTP 客户端（http_tool + CLI api_client 运行时使用）
 httpx>=0.26.0
 
+# MCP client（F 阶段）：只启用 streamable HTTP 传输；stdio 明确 non-goal。
+mcp>=1.28.1,<2
+
+# MCP JSON Schema 参数校验（SDK 传递依赖也会带；这里作为直接消费依赖声明）。
+jsonschema>=4.0.0
+
 # ========================================
 # 认证依赖
 # ========================================

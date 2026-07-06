@@ -324,12 +324,15 @@ class ContextManager:
             lines.append(f'<tool_unit name="{safe_name}" disclosure="deferred">')
             if unit.description:
                 lines.append(xml_escape(unit.description.rstrip()))
-            lines.append(
-                "Tools below are available but listed by name only. Call `search_tools` "
-                "(select:<full_name> or a keyword) to load full parameters before calling:"
-            )
-            for full_name in unit.member_full_names:
-                lines.append(f"- {full_name}")
+            if unit.discovery_error:
+                lines.append(xml_escape(f"This tool server is currently unavailable: {unit.discovery_error}"))
+            if unit.member_full_names:
+                lines.append(
+                    "Tools below are available but listed by name only. Call `search_tools` "
+                    "(select:<full_name> or a keyword) to load full parameters before calling:"
+                )
+                for full_name in unit.member_full_names:
+                    lines.append(f"- {full_name}")
             lines.append('</tool_unit>')
         lines.append('</available_tools>')
         return "\n".join(lines)

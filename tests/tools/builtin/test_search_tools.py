@@ -4,7 +4,7 @@
 无匹配的引导文案 / unknown 名提示 / 空 query loud-fail。
 """
 
-from core.effective_toolset import EffectiveToolset
+from core.effective_toolset import DeferredUnit, EffectiveToolset
 from tools.base import ToolParameter, ToolPermission
 from tools.builtin.search_tools import search_tools_result
 
@@ -102,6 +102,22 @@ def test_no_match_lists_callable_tools():
     assert res.success
     assert "No tools matched" in res.data
     assert "stocks" in res.data and "weather" in res.data
+
+
+def test_no_match_reports_matching_deferred_unit_discovery_error():
+    eff = _eff("search_tools")
+    eff.deferred_units["inventory"] = DeferredUnit(
+        name="inventory",
+        description="Inventory MCP",
+        discovery_error="MCP server is unavailable",
+        member_full_names=[],
+    )
+
+    res = search_tools_result("inventory", eff, {})
+
+    assert res.success
+    assert "inventory" in res.data
+    assert "MCP server is unavailable" in res.data
 
 
 def test_empty_query_fails_loudly():

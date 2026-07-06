@@ -15,6 +15,7 @@ from db.models import Agent, AgentUnit, Skill, ToolMember, ToolUnit
 from tools.base import BaseTool, ToolParameter, is_builtin_name
 from tools.custom.credentials import CredentialResolver
 from tools.custom.http_tool import HttpTool, HttpToolConfig
+from tools.custom.mcp_tool import build_mcp_tool
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -31,6 +32,7 @@ class UnitInfo:
     provider: str
     source: str
     provider_config: Optional[dict] = None
+    discovery_error: Optional[str] = None
     member_full_names: List[str] = field(default_factory=list)
 
 
@@ -51,7 +53,7 @@ class AgentSnapshot:
 
 @dataclass
 class RegistrySnapshot:
-    external_tools: Dict[str, BaseTool]   # full_name -> HttpTool(external 单元成员)
+    external_tools: Dict[str, BaseTool]   # full_name -> HttpTool/McpTool(external 单元成员)
     units: Dict[str, UnitInfo]            # unit_name -> UnitInfo
     agents: Dict[str, AgentSnapshot]      # agent_name -> AgentSnapshot
 
@@ -112,7 +114,7 @@ def build_http_tool(
 
 
 async def load_registry_snapshot(
-    session: AsyncSession, *, db_manager=None
+    session: AsyncSession, *, db_manager=None, mcp_manager=None
 ) -> RegistrySnapshot:
     """一次性读全部注册表行,重建 external 工具 + unit 元数据 + agent 元数据。
 
@@ -184,7 +186,7 @@ async def load_registry_snapshot(
         # (无需在此再判 / 再 log,unit 级 WARNING 已覆盖)。
         if m.unit_name in units:
             units[m.unit_name].member_full_names.append(m.full_name)
-        # 仅 http provider 重建为 HttpTool;mcp provider 的成员运行期另接
+        # 仅 http provider 从 DB member 重建为 HttpTool;mcp provider 从 tools/list 填。
         unit = units.get(m.unit_name)
         if unit is not None and unit.provider == "http":
             external_tools[m.full_name] = build_http_tool(
@@ -192,6 +194,36 @@ async def load_registry_snapshot(
                 unit_name=m.unit_name,
                 credential_resolver=credential_resolver,
             )
+
+    if mcp_manager is not None:
+        for unit in units.values():
+            if unit.provider != "mcp":
+                continue
+            listing = await mcp_manager.list_tools(
+                unit.name,
+                unit.provider_config or {},
+                credential_resolver=credential_resolver,
+            )
+            unit.discovery_error = listing.error
+            for definition in listing.tools:
+                tool = build_mcp_tool(
+                    server_name=unit.name,
+                    provider_config=unit.provider_config or {},
+                    definition=definition,
+                    client_manager=mcp_manager,
+                    credential_resolver=credential_resolver,
+                )
+                if tool is None:
+                    continue
+                if tool.name in external_tools:
+                    logger.warning(
+                        "Skipping MCP tool %r from server %r: full_name already exists",
+                        tool.name,
+                        unit.name,
+                    )
+                    continue
+                unit.member_full_names.append(tool.name)
+                external_tools[tool.name] = tool
 
     agents: Dict[str, AgentSnapshot] = {
         a.name: AgentSnapshot(

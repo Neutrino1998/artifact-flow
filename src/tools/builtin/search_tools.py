@@ -115,6 +115,9 @@ def search_tools_result(
         unknown = []
 
     if not matched:
+        unit_error = _matching_deferred_unit_error(query, effective_toolset)
+        if unit_error is not None:
+            return ToolResult(success=True, data=unit_error)
         available = ", ".join(sorted(callable_names)) or "(none)"
         msg = f"No tools matched '{query}'. Tools you can call: {available}."
         if unknown:
@@ -140,3 +143,21 @@ def search_tools_result(
     if notes:
         body += "\n\n" + "\n".join(notes)
     return ToolResult(success=True, data=body)
+
+
+def _matching_deferred_unit_error(query: str, effective_toolset) -> Optional[str]:
+    if query.startswith(_SELECT_PREFIX):
+        raw = query[len(_SELECT_PREFIX):].strip().lower()
+    else:
+        raw = query.lower()
+    for unit in getattr(effective_toolset, "deferred_units", {}).values():
+        error = getattr(unit, "discovery_error", None)
+        if not error:
+            continue
+        haystack = f"{unit.name} {unit.description}".lower()
+        if raw and (raw in haystack or raw.startswith(f"{unit.name.lower()}__")):
+            return (
+                f"MCP tool server '{unit.name}' is currently unavailable: {error}. "
+                "No tools from this server can be loaded in this turn."
+            )
+    return None
