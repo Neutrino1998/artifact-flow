@@ -35,7 +35,7 @@ export default function CreateToolUnitForm() {
       const created = await api.createToolUnit(body);
       bumpListVersion();
       // 落到刚建好的 unit 详情:可立即挂载 agent / 配凭证
-      setRightView({ type: 'edit-unit', unitName: created.name });
+      setRightView({ type: 'edit-unit', unitName: created.name, showMountReminder: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : '创建失败');
     } finally {

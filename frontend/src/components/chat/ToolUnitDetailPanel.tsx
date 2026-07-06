@@ -8,7 +8,13 @@ export default function ToolUnitDetailPanel() {
   const view = useUIStore((s) => s.toolUnitRightView);
 
   if (view.type === 'edit-unit') {
-    return <ToolUnitDetailForm key={view.unitName} unitName={view.unitName} />;
+    return (
+      <ToolUnitDetailForm
+        key={view.unitName}
+        unitName={view.unitName}
+        initialShowMountReminder={view.showMountReminder === true}
+      />
+    );
   }
 
   if (view.type === 'create-unit') {

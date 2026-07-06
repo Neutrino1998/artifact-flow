@@ -11,6 +11,7 @@ import {
   LABEL_CLASS,
 } from '@/lib/styles';
 import PanelShell from '@/components/layout/PanelShell';
+import ConfirmModal from '@/components/layout/ConfirmModal';
 import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
 import ToolUnitEditor, {
   draftToRequest,
@@ -28,11 +29,16 @@ import type {
 
 interface ToolUnitDetailFormProps {
   unitName: string;
+  initialShowMountReminder?: boolean;
 }
 
-export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps) {
+export default function ToolUnitDetailForm({
+  unitName,
+  initialShowMountReminder = false,
+}: ToolUnitDetailFormProps) {
   const setRightView = useUIStore((s) => s.setToolUnitRightView);
   const bumpListVersion = useUIStore((s) => s.bumpToolUnitListVersion);
+  const mountSectionRef = useRef<HTMLDivElement | null>(null);
 
   const [unit, setUnit] = useState<ToolUnitResponse | null>(null);
   const [agents, setAgents] = useState<AgentSummaryResponse[]>([]);
@@ -47,6 +53,7 @@ export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps
   const [saveError, setSaveError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [mcpTestEpoch, setMcpTestEpoch] = useState(0);
+  const [showMountReminder, setShowMountReminder] = useState(initialShowMountReminder);
 
   const isDynamic = unit?.source === 'dynamic';
 
@@ -136,6 +143,17 @@ export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps
     }
   }, [refreshLiveState, unit?.kind]);
 
+  const closeMountReminder = () => {
+    setShowMountReminder(false);
+  };
+
+  const scrollToMountSection = () => {
+    setShowMountReminder(false);
+    requestAnimationFrame(() => {
+      mountSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
+  };
+
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center bg-chat dark:bg-chat-dark p-6">
@@ -224,23 +242,28 @@ export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps
         {saveError && <div className="text-status-error text-sm">{saveError}</div>}
 
         {unit.kind === 'mcp' && (
-          <McpTestSection
-            unitName={unit.name}
-            disabled={saving || dirty}
-            dirty={dirty}
-            resetKey={`${unit.name}:${mcpTestEpoch}:${dirty ? 'dirty' : 'saved'}`}
-          />
+          <>
+            <div className="border-t border-border dark:border-border-dark" />
+            <McpTestSection
+              unitName={unit.name}
+              disabled={saving || dirty}
+              dirty={dirty}
+              resetKey={`${unit.name}:${mcpTestEpoch}:${dirty ? 'dirty' : 'saved'}`}
+            />
+          </>
         )}
 
         <div className="border-t border-border dark:border-border-dark" />
 
         {/* 挂载管理 — 对所有 unit 可用(创建 dynamic 绑定);seeded 绑定只读 */}
-        <MountSection
-          unitName={unit.name}
-          mounted={unit.mounted_agents}
-          agents={agents}
-          onChanged={refreshLiveState}
-        />
+        <div ref={mountSectionRef}>
+          <MountSection
+            unitName={unit.name}
+            mounted={unit.mounted_agents}
+            agents={agents}
+            onChanged={refreshLiveState}
+          />
+        </div>
 
         <div className="border-t border-border dark:border-border-dark" />
 
@@ -273,6 +296,17 @@ export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps
             )}
           </div>
         </DangerConfirmModal>
+      )}
+
+      {showMountReminder && (
+        <ConfirmModal
+          title="工具已创建"
+          message="还需要挂载到 agent 后，模型才能在对话中使用这个工具。"
+          cancelLabel="稍后"
+          confirmLabel="去挂载"
+          onCancel={closeMountReminder}
+          onConfirm={scrollToMountSection}
+        />
       )}
     </PanelShell>
   );

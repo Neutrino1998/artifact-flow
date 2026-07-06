@@ -17,7 +17,7 @@ export type UserMgmtRightView =
 export type ToolUnitRightView =
   | { type: 'empty' }
   | { type: 'create-unit' }
-  | { type: 'edit-unit'; unitName: string };
+  | { type: 'edit-unit'; unitName: string; showMountReminder?: boolean };
 
 // 顶层互斥 UI 模式。这是「同一时刻最多一个接管面板」这个不变量的**唯一真相源**:
 // 一个变量不可能同时取两个值,所以「两个面板同时开」按构造不可表示 —— 不再靠每个
