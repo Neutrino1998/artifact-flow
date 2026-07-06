@@ -705,7 +705,10 @@ class TestPermissionInterrupt:
         assert len(tool_starts) == 1
         assert len(tool_completes) == 1
         assert tool_completes[0]["data"]["success"] is False
-        assert "timed out" in tool_completes[0]["data"]["error"].lower()
+        timeout_error = tool_completes[0]["data"]["error"].lower()
+        assert "without user approval" in timeout_error
+        assert "not a tool failure" in timeout_error
+        assert "necessary to complete the task" in timeout_error
         # START 必须在 COMPLETE 之前
         assert emitted.index(tool_starts[0]) < emitted.index(tool_completes[0])
 

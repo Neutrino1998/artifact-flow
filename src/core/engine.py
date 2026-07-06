@@ -656,8 +656,12 @@ async def execute_loop(
             await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
                 "tool": tool_name, "success": False,
                 "error": (
-                    f"Permission request timed out after {config.PERMISSION_TIMEOUT}s "
-                    f"with no response, treated as denied. The tool was not executed."
+                    f"Permission request expired after {config.PERMISSION_TIMEOUT}s "
+                    "without user approval. The user may be away or unavailable. "
+                    "The tool was not executed, so this is not a tool failure. "
+                    "Treat it as denied for this turn. If this tool is still "
+                    "necessary to complete the task, ask the user whether they "
+                    "want to approve and retry; otherwise continue without it."
                 ),
                 "duration_ms": 0,
                 "parser_warnings": parser_warnings,
