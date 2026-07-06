@@ -121,6 +121,21 @@ class McpTool(BaseTool):
                 error=f"MCP tool returned unsupported non-text content block(s): {unsupported}",
             )
 
+        if summary.artifact_blocks and (summary.text_blocks or result.structured_content is not None):
+            logger.warning(
+                "MCP tool %r from server %r returned mixed text/structured and artifact content; "
+                "mixed result payloads are not supported",
+                self._tool_name,
+                self._server_name,
+            )
+            return ToolResult(
+                success=False,
+                error=(
+                    "MCP tool returned mixed text/structured and artifact content; "
+                    "mixed result payloads are not supported in this version"
+                ),
+            )
+
         if len(summary.artifact_blocks) > 1:
             logger.warning(
                 "MCP tool %r from server %r returned %d artifact-capable content blocks; "
@@ -299,8 +314,9 @@ def summarize_mcp_content(result) -> _McpContentSummary:
         if kind == "resource":
             resource = _get_field(block, "resource")
             text = _resource_text(resource)
-            if text:
-                text_blocks.append(text)
+            if text is not None:
+                if text:
+                    text_blocks.append(text)
                 continue
             artifact = _artifact_block_from_resource(resource)
             if artifact is not None:
@@ -399,9 +415,9 @@ def _artifact_block_from_resource(resource: Any) -> Optional[_McpArtifactBlock]:
     )
 
 
-def _resource_text(resource: Any) -> str:
+def _resource_text(resource: Any) -> Optional[str]:
     text = _get_field(resource, "text")
-    return text if isinstance(text, str) else ""
+    return text if isinstance(text, str) else None
 
 
 def _decode_base64_content(value: Any, kind: str) -> bytes:

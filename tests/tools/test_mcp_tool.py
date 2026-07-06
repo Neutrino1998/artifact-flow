@@ -224,6 +224,48 @@ async def test_mcp_tool_converts_embedded_blob_resource_to_artifact():
     assert result.artifact.metadata["mcp_resource_uri"] == "file:///report.csv"
 
 
+async def test_mcp_tool_rejects_mixed_text_and_artifact_blocks():
+    payload = base64.b64encode(b"x").decode("ascii")
+
+    async def fake_call(url, headers, timeout, tool_name, arguments):
+        return McpToolCallResult(
+            is_error=False,
+            content=[
+                {"type": "text", "text": "generated report"},
+                {"type": "image", "mimeType": "image/png", "data": payload},
+            ],
+        )
+
+    result = await _tool(McpClientManager(call_callable=fake_call))()
+
+    assert result.success is False
+    assert result.artifact is None
+    assert "mixed text/structured and artifact content" in result.error
+
+
+async def test_mcp_tool_accepts_empty_text_resource():
+    async def fake_call(url, headers, timeout, tool_name, arguments):
+        return McpToolCallResult(
+            is_error=False,
+            content=[
+                {
+                    "type": "resource",
+                    "resource": {
+                        "uri": "file:///empty.txt",
+                        "mimeType": "text/plain",
+                        "text": "",
+                    },
+                }
+            ],
+        )
+
+    result = await _tool(McpClientManager(call_callable=fake_call))()
+
+    assert result.success is True
+    assert result.data == ""
+    assert result.artifact is None
+
+
 async def test_mcp_tool_rejects_multiple_non_text_artifact_blocks():
     payload = base64.b64encode(b"x").decode("ascii")
 
