@@ -1,5 +1,6 @@
 """
-config 种子解析 —— 把 `config/tools/` 与 `config/agents/` 解析成归一化 seed 记录。
+config 种子解析 —— 把 `config/tools/` / `config/mcp/` / `config/agents/`
+解析成归一化 seed 记录。
 
 纯文件 IO + 校验,**不碰 DB**(DB upsert 在 reconciler.py)。每条 seed 自带内容哈希
 (`seed_hash`),reconciler 据此幂等(hash 同则 skip)。
@@ -58,12 +59,13 @@ class MemberSeed:
 @dataclass
 class ToolUnitSeed:
     name: str
-    kind: str                 # tool(singleton) | toolset
+    kind: str                 # tool(singleton) | toolset | mcp
     description: str          # set 级描述(singleton == member 描述)
     visibility: str
     defer: bool
-    provider: str             # http(B)
+    provider: str             # http(B) | mcp(F)
     members: List[MemberSeed]
+    provider_config: Optional[Dict] = None
     seed_hash: str = ""
 
 
@@ -214,6 +216,7 @@ def _finalize_unit(seed: ToolUnitSeed) -> ToolUnitSeed:
         "visibility": seed.visibility,
         "defer": seed.defer,
         "provider": seed.provider,
+        "provider_config": seed.provider_config,
         "members": sorted(
             (m.member_name, m.full_name, m.permission, m.definition)
             for m in seed.members
@@ -244,8 +247,89 @@ def parse_tool_seeds(tools_dir: str) -> List[ToolUnitSeed]:
             seeds.append(_parse_singleton_tool(path))
         # 其余(顶层非 .md 文件)忽略
 
-    _check_tool_collisions(seeds)
+    check_tool_collisions(seeds)
     return seeds
+
+
+def parse_mcp_seeds(mcp_dir: str) -> List[ToolUnitSeed]:
+    """解析 config/mcp/*.md → ToolUnitSeed(kind=mcp,provider=mcp)。
+
+    F-1 只物化 server unit,不调用 `tools/list`,也不写 tool_members。运行期成员由 F-2M
+    的 MCP client 填入 snapshot/registry。
+    """
+    seeds: List[ToolUnitSeed] = []
+    if not os.path.isdir(mcp_dir):
+        return seeds
+
+    for entry in sorted(os.listdir(mcp_dir)):
+        if not is_config_entry(entry) or not entry.endswith(".md"):
+            continue
+        seeds.append(_parse_mcp_server(os.path.join(mcp_dir, entry)))
+
+    check_tool_collisions(seeds, label="config/mcp")
+    return seeds
+
+
+def _parse_mcp_server(path: str) -> ToolUnitSeed:
+    frontmatter, body = _split_frontmatter(path)
+    unit_name = frontmatter.get("name")
+    _validate_unit_name(unit_name, path)
+
+    kind = frontmatter.get("type", "mcp")
+    if kind != "mcp":
+        raise SeedError(f"{path}: unsupported MCP seed type '{kind}'")
+
+    transport = frontmatter.get("transport", "streamable_http")
+    if transport != "streamable_http":
+        raise SeedError(
+            f"{path}: unsupported MCP transport '{transport}' "
+            "(v0 supports streamable_http only)"
+        )
+
+    url = frontmatter.get("url")
+    if not url:
+        raise SeedError(f"{path}: MCP server missing 'url'")
+    headers = frontmatter.get("headers", {}) or {}
+    if not isinstance(headers, dict):
+        raise SeedError(f"{path}: MCP 'headers' must be a mapping")
+    try:
+        timeout = int(frontmatter.get("timeout", 60) or 60)
+    except (TypeError, ValueError) as e:
+        raise SeedError(f"{path}: MCP 'timeout' must be an integer") from e
+    if timeout < 1:
+        raise SeedError(f"{path}: MCP 'timeout' must be >= 1")
+
+    default_permission = frontmatter.get("default_permission", "confirm")
+    if default_permission not in _VALID_PERMISSIONS:
+        raise SeedError(
+            f"{path}: invalid default_permission '{default_permission}' "
+            "(expected auto|confirm)"
+        )
+
+    assert_secret_refs_allowed(url)
+    assert_secret_refs_allowed(headers)
+
+    description = frontmatter.get("description", "")
+    if body:
+        description = f"{description}\n\n{body}" if description else body
+
+    provider_config = {
+        "transport": "streamable_http",
+        "url": url,
+        "headers": headers,
+        "timeout": timeout,
+        "default_permission": default_permission,
+    }
+    return _finalize_unit(ToolUnitSeed(
+        name=unit_name,
+        kind="mcp",
+        description=description,
+        visibility=_read_visibility(frontmatter, path),
+        defer=bool(frontmatter.get("defer", True)),
+        provider="mcp",
+        members=[],
+        provider_config=provider_config,
+    ))
 
 
 def _parse_singleton_tool(path: str) -> ToolUnitSeed:
@@ -318,7 +402,7 @@ def _read_visibility(frontmatter: dict, source: str) -> str:
     return vis
 
 
-def _check_tool_collisions(seeds: List[ToolUnitSeed]) -> None:
+def check_tool_collisions(seeds: List[ToolUnitSeed], *, label: str = "config/tools") -> None:
     """命名不变量(单点强制):unit 名与 full_name 在 `builtin ∪ reserved ∪ external`
     扁平命名空间里全局唯一。
 
@@ -334,7 +418,7 @@ def _check_tool_collisions(seeds: List[ToolUnitSeed]) -> None:
                 f"tool unit name '{s.name}' collides with a builtin/reserved tool name"
             )
         if s.name in unit_names:
-            raise SeedError(f"duplicate tool unit name '{s.name}' in config/tools")
+            raise SeedError(f"duplicate tool unit name '{s.name}' in {label}")
         unit_names.add(s.name)
         for m in s.members:
             if is_builtin_name(m.full_name):

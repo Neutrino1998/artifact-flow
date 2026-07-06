@@ -105,7 +105,7 @@ class ToolRegistryManager:
                         cred_map: Dict[str, str]) -> dict:
         members = sorted(u.members, key=lambda m: m.full_name)
         # 定义引用的 {{NAME}} ∪ 已配置的占位符 → 掩码列表(永不含密文/明文)
-        referenced = self._referenced_placeholders(members)
+        referenced = self._referenced_placeholders(u, members)
         creds = [
             {"placeholder": ph, "configured": ph in cred_map, "source": cred_map.get(ph)}
             for ph in sorted(referenced | set(cred_map))
@@ -117,6 +117,7 @@ class ToolRegistryManager:
             "visibility": u.visibility,
             "defer": u.defer,
             "provider": u.provider,
+            "provider_config": u.provider_config,
             "source": u.source,
             "members": [self._serialize_member(m) for m in members],
             "mounted_agents": [
@@ -153,6 +154,7 @@ class ToolRegistryManager:
             visibility=self._check_visibility(spec.get("visibility", "public")),
             defer=bool(spec.get("defer", False)),
             provider="http",        # B-4 CRUD 只建 http;mcp 走 F
+            provider_config=None,
             source="dynamic",
             seed_hash=None,
         )
@@ -189,7 +191,7 @@ class ToolRegistryManager:
         await self._registry.replace_members(name, members)
         # 新定义不再引用的 dynamic 凭证 → prune(与 reconciler 对 seeded 的 prune 对称,
         # 否则失引用密文残留、GET 仍显示 configured,误导 + secret 卫生 cruft,reviewer #9)
-        await self._creds.prune_unreferenced(name, self._referenced_placeholders(members))
+        await self._creds.prune_unreferenced(name, self._referenced_placeholders(u, members))
         await self._commit("update unit")
         return await self.get_unit(name)
 
@@ -262,7 +264,7 @@ class ToolRegistryManager:
             raise InvalidUnitError("credential value must be non-empty")
         # 占位符必须被某成员的 endpoint/headers 引用 —— 否则是配不上的孤儿密文(GET 会显示
         # configured 却无对应 {{NAME}},误导 + secret cruft,reviewer #9)。
-        if placeholder not in self._referenced_placeholders(u.members):
+        if placeholder not in self._referenced_placeholders(u, u.members):
             raise InvalidUnitError(
                 f"placeholder '{placeholder}' is not referenced by any endpoint/header in "
                 f"unit '{unit_name}'; add the {{{{{placeholder}}}}} reference first"
@@ -400,13 +402,16 @@ class ToolRegistryManager:
             "timeout": int(rm.get("timeout", 60) or 60),
         }
 
-    def _referenced_placeholders(self, members) -> set:
-        """成员 endpoint/headers 引用的 {{NAME}} 占位符全集(凭证掩码 / 引用校验 / prune 共用)。"""
+    def _referenced_placeholders(self, unit: ToolUnit, members) -> set:
+        """unit/member 配置引用的 {{NAME}} 占位符全集(凭证掩码 / 引用校验 / prune 共用)。"""
         refs: set = set()
         for m in members:
             d = m.definition or {}
             refs |= extract_placeholders(d.get("endpoint", ""))
             refs |= extract_placeholders(d.get("headers", {}) or {})
+        cfg = unit.provider_config or {}
+        refs |= extract_placeholders(cfg.get("url", ""))
+        refs |= extract_placeholders(cfg.get("headers", {}) or {})
         return refs
 
     async def _validate_names(self, name: str, members: List[ToolMember],

@@ -35,6 +35,22 @@ def _tool_with_secret_md(name="ragflow", host_ph="TOOL_SECRET_RAGFLOW_HOST",
     )
 
 
+def _mcp_with_secret_md(name="inventory", host_ph="TOOL_SECRET_MCP_HOST",
+                        key_ph="TOOL_SECRET_MCP_KEY"):
+    return (
+        "---\n"
+        f"name: {name}\n"
+        'description: "Inventory MCP"\n'
+        "transport: streamable_http\n"
+        f'url: "https://{{{{{host_ph}}}}}/mcp"\n'
+        "headers:\n"
+        f'  Authorization: "Bearer {{{{{key_ph}}}}}"\n'
+        "default_permission: confirm\n"
+        "---\n"
+        "Body.\n"
+    )
+
+
 def _write(path, content):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(textwrap.dedent(content).lstrip(), encoding="utf-8")
@@ -60,6 +76,15 @@ async def _run(session, cfg):
     tools, agents = cfg
     return await reconcile_config_to_db(
         session, tools_dir=str(tools), agents_dir=str(agents),
+        mcp_dir=str(tools.parent / "mcp"),
+        skills_dir=str(tools.parent / "skills"),
+    )
+
+
+async def _run_with_mcp(session, cfg, mcp_dir):
+    tools, agents = cfg
+    return await reconcile_config_to_db(
+        session, tools_dir=str(tools), mcp_dir=str(mcp_dir), agents_dir=str(agents),
         skills_dir=str(tools.parent / "skills"),
     )
 
@@ -85,6 +110,20 @@ async def test_seeds_credentials_from_env_encrypted(db_session, cfg, key, monkey
     assert rows["TOOL_SECRET_RAGFLOW_KEY"].encrypted_value != "k-123"      # 密文非明文
     assert cipher.decrypt(rows["TOOL_SECRET_RAGFLOW_KEY"].encrypted_value) == "k-123"
     assert all(r.source == "seeded" for r in rows.values())
+
+
+async def test_mcp_seed_credentials_from_env_encrypted(db_session, cfg, key, monkeypatch, tmp_path):
+    monkeypatch.setenv("TOOL_SECRET_MCP_HOST", "inventory.local")
+    monkeypatch.setenv("TOOL_SECRET_MCP_KEY", "mcp-key")
+    mcp = tmp_path / "mcp"
+    _write(mcp / "inventory.md", _mcp_with_secret_md())
+    await _run_with_mcp(db_session, cfg, mcp)
+
+    rows = await _creds(db_session, "inventory")
+    assert set(rows) == {"TOOL_SECRET_MCP_HOST", "TOOL_SECRET_MCP_KEY"}
+    cipher = CredentialCipher(key)
+    assert cipher.decrypt(rows["TOOL_SECRET_MCP_HOST"].encrypted_value) == "inventory.local"
+    assert cipher.decrypt(rows["TOOL_SECRET_MCP_KEY"].encrypted_value) == "mcp-key"
 
 
 async def test_idempotent_rerun_no_credential_change(db_session, cfg, key, monkeypatch):

@@ -735,6 +735,10 @@ class ToolUnit(Base):
         String(16), nullable=False, default="http", server_default="http"
     )
 
+    # provider 专属配置。http 由 tool_members.definition 存 endpoint 级配置;
+    # mcp 由 unit 级配置描述 server 连接(transport/url/headers/timeout/permission)。
+    provider_config: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+
     # seeded(config 种子,UI 不可改)/ dynamic(UI 新建)
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="seeded")
 

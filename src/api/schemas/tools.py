@@ -100,6 +100,7 @@ class ToolUnitResponse(BaseModel):
     visibility: str
     defer: bool
     provider: str
+    provider_config: Optional[Dict[str, Any]] = None
     source: str
     members: List[ToolMemberResponse]
     mounted_agents: List[MountedAgentResponse]

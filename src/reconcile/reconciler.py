@@ -31,7 +31,9 @@ from reconcile.seeds import (
     SeedError,
     SkillSeed,
     ToolUnitSeed,
+    check_tool_collisions,
     parse_agent_seeds,
+    parse_mcp_seeds,
     parse_skill_seeds,
     parse_tool_seeds,
 )
@@ -53,6 +55,7 @@ async def reconcile_config_to_db(
     session: AsyncSession,
     *,
     tools_dir: Optional[str] = None,
+    mcp_dir: Optional[str] = None,
     agents_dir: Optional[str] = None,
     skills_dir: Optional[str] = None,
     commit: bool = True,
@@ -60,11 +63,13 @@ async def reconcile_config_to_db(
     """把 config/tools + config/agents + config/skills 物化进 DB。tools 先(agent 分流 +
     skill allowed-tools 校验都需已知 unit)。"""
     tools_dir = tools_dir or _default_config_dir("tools")
+    mcp_dir = mcp_dir or _default_config_dir("mcp")
     agents_dir = agents_dir or _default_config_dir("agents")
     skills_dir = skills_dir or _default_config_dir("skills")
     report = ReconcileReport()
 
-    tool_seeds = parse_tool_seeds(tools_dir)
+    tool_seeds = parse_tool_seeds(tools_dir) + parse_mcp_seeds(mcp_dir)
+    check_tool_collisions(tool_seeds, label="config/tools + config/mcp")
     await _reconcile_tool_units(session, tool_seeds, report)
 
     # session 配 autoflush=False → 先 flush 让刚写的 unit/member 对下面的 SELECT 可见
@@ -167,6 +172,7 @@ def _new_unit(seed: ToolUnitSeed) -> ToolUnit:
         visibility=seed.visibility,
         defer=seed.defer,
         provider=seed.provider,
+        provider_config=seed.provider_config,
         source="seeded",
         seed_hash=seed.seed_hash,
     )
@@ -178,6 +184,7 @@ def _apply_unit_cols(row: ToolUnit, seed: ToolUnitSeed) -> None:
     row.visibility = seed.visibility
     row.defer = seed.defer
     row.provider = seed.provider
+    row.provider_config = seed.provider_config
     row.seed_hash = seed.seed_hash
 
 
@@ -229,11 +236,7 @@ async def _reconcile_credentials(
 
     for seed in seeds:
         unit = seed.name
-        wanted: set = set()
-        for m in seed.members:
-            d = m.definition or {}
-            wanted |= extract_placeholders(d.get("endpoint", ""))
-            wanted |= extract_placeholders(d.get("headers", {}) or {})
+        wanted = _credential_placeholders_for_seed(seed)
 
         existing = {
             r.placeholder_name: r
@@ -311,6 +314,18 @@ async def _reconcile_credentials(
                     encrypted_value=cipher.encrypt(env_val),
                     source="seeded",
                 ))
+
+
+def _credential_placeholders_for_seed(seed: ToolUnitSeed) -> set:
+    wanted: set = set()
+    for m in seed.members:
+        d = m.definition or {}
+        wanted |= extract_placeholders(d.get("endpoint", ""))
+        wanted |= extract_placeholders(d.get("headers", {}) or {})
+    cfg = seed.provider_config or {}
+    wanted |= extract_placeholders(cfg.get("url", ""))
+    wanted |= extract_placeholders(cfg.get("headers", {}) or {})
+    return wanted
 
 
 # --------------------------------------------------------------------------

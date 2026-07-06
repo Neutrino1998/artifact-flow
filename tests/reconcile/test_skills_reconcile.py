@@ -80,7 +80,8 @@ def cfg(tmp_path):
 async def _run(session, cfg):
     tools, agents, skills = cfg
     return await reconcile_config_to_db(
-        session, tools_dir=str(tools), agents_dir=str(agents), skills_dir=str(skills)
+        session, tools_dir=str(tools), mcp_dir=str(tools.parent / "mcp"),
+        agents_dir=str(agents), skills_dir=str(skills)
     )
 
 

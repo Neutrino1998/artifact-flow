@@ -43,6 +43,22 @@ def _singleton_tool_md(name="weather", permission="confirm", desc="Get weather")
     )
 
 
+def _mcp_server_md(name="inventory", desc="Inventory MCP"):
+    return (
+        "---\n"
+        f"name: {name}\n"
+        f'description: "{desc}"\n'
+        "transport: streamable_http\n"
+        f'url: "https://mcp.example.com/{name}"\n'
+        "headers:\n"
+        "  X-Tenant: ops\n"
+        "timeout: 15\n"
+        "default_permission: confirm\n"
+        "---\n"
+        f"Server guidance for {name}.\n"
+    )
+
+
 def _agent_md(name="lead_agent", tools_block="  web_search: enabled\n  read_artifact: enabled",
               model="qwen3.7-plus"):
     return (
@@ -73,6 +89,15 @@ async def _run(session, cfg):
     # 显式指向空 skills 目录(不存在 → parse 返回 []),隔离真实 config/skills
     return await reconcile_config_to_db(
         session, tools_dir=str(tools), agents_dir=str(agents),
+        mcp_dir=str(tools.parent / "mcp"),
+        skills_dir=str(tools.parent / "skills"),
+    )
+
+
+async def _run_with_mcp(session, cfg, mcp_dir):
+    tools, agents = cfg
+    return await reconcile_config_to_db(
+        session, tools_dir=str(tools), mcp_dir=str(mcp_dir), agents_dir=str(agents),
         skills_dir=str(tools.parent / "skills"),
     )
 
@@ -131,6 +156,49 @@ async def test_toolset_dir_seed(db_session, cfg):
         (await db_session.execute(select(ToolMember.full_name).where(ToolMember.unit_name == "github"))).scalars().all()
     )
     assert full_names == ["github__create_issue", "github__search_repos"]
+
+
+async def test_mcp_server_seed(db_session, cfg, tmp_path):
+    mcp = tmp_path / "mcp"
+    _write(mcp / "inventory.md", _mcp_server_md())
+
+    report = await _run_with_mcp(db_session, cfg, mcp)
+    assert "tool_unit:inventory" in report.created
+
+    unit = (await db_session.execute(
+        select(ToolUnit).where(ToolUnit.name == "inventory")
+    )).scalar_one()
+    assert unit.kind == "mcp"
+    assert unit.provider == "mcp"
+    assert unit.defer is True
+    assert unit.provider_config == {
+        "transport": "streamable_http",
+        "url": "https://mcp.example.com/inventory",
+        "headers": {"X-Tenant": "ops"},
+        "timeout": 15,
+        "default_permission": "confirm",
+    }
+
+    members = (await db_session.execute(
+        select(ToolMember).where(ToolMember.unit_name == "inventory")
+    )).scalars().all()
+    assert members == []
+
+
+async def test_agent_references_mcp_unit(db_session, cfg, tmp_path):
+    _, agents = cfg
+    mcp = tmp_path / "mcp"
+    _write(mcp / "inventory.md", _mcp_server_md())
+    _write(agents / "lead_agent.md",
+           _agent_md(tools_block="  web_search: enabled\n  inventory: enabled"))
+    await _run_with_mcp(db_session, cfg, mcp)
+
+    units = (await db_session.execute(
+        select(AgentUnit).where(AgentUnit.agent_name == "lead_agent")
+    )).scalars().all()
+    assert len(units) == 1
+    assert units[0].unit_name == "inventory"
+    assert units[0].member_state == "enabled"
 
 
 async def test_idempotent_rerun_skips(db_session, cfg):
@@ -354,6 +422,21 @@ async def test_snapshot_reconstructs_http_tool(db_session, cfg):
     assert agent.model == "qwen3.7-plus"
     assert agent.builtin_tools == {"web_search": "enabled"}
     assert agent.units == {"weather": "enabled"}
+
+
+async def test_snapshot_keeps_mcp_unit_without_external_tool(db_session, cfg, tmp_path):
+    mcp = tmp_path / "mcp"
+    _write(mcp / "inventory.md", _mcp_server_md())
+    await _run_with_mcp(db_session, cfg, mcp)
+
+    snap = await load_registry_snapshot(db_session)
+
+    assert "inventory" in snap.units
+    assert snap.units["inventory"].kind == "mcp"
+    assert snap.units["inventory"].provider == "mcp"
+    assert snap.units["inventory"].member_full_names == []
+    assert snap.units["inventory"].provider_config["url"] == "https://mcp.example.com/inventory"
+    assert "inventory" not in snap.external_tools
 
 
 async def test_snapshot_skips_member_shadowing_builtin(db_session, cfg):

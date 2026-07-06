@@ -182,6 +182,7 @@ def upgrade() -> None:
         sa.Column('visibility', sa.String(length=16), nullable=False, server_default='public'),
         sa.Column('defer', sa.Boolean(), nullable=False, server_default=sa.text('false')),
         sa.Column('provider', sa.String(length=16), nullable=False, server_default='http'),
+        sa.Column('provider_config', sa.JSON(), nullable=True),
         sa.Column('source', sa.String(length=16), nullable=False),
         sa.Column('seed_hash', sa.String(length=64), nullable=True),
         sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),

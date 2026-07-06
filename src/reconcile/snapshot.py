@@ -30,6 +30,7 @@ class UnitInfo:
     defer: bool
     provider: str
     source: str
+    provider_config: Optional[dict] = None
     member_full_names: List[str] = field(default_factory=list)
 
 
@@ -162,6 +163,7 @@ async def load_registry_snapshot(
             defer=u.defer,
             provider=u.provider,
             source=u.source,
+            provider_config=dict(u.provider_config or {}) or None,
         )
 
     external_tools: Dict[str, BaseTool] = {}
