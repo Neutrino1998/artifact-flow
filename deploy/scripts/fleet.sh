@@ -137,6 +137,28 @@ copy_to() {  # copy_to <host> <local-src> <dst-path>
   fi
 }
 
+env_file_value() {
+  local env_file="$1" key="$2" line value
+  [[ -f "$env_file" ]] || return 1
+  line="$(grep -E "^${key}=" "$env_file" | tail -1 || true)"
+  [[ -n "$line" ]] || return 1
+  value="${line#*=}"
+  value="${value%$'\r'}"
+  printf '%s\n' "$value"
+}
+
+sandbox_scratch_root_local() {
+  local root=""
+  root="$(env_file_value "$DEPLOY_DIR/.env" ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT || true)"
+  root="${root:-${ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT:-/var/lib/artifactflow/sandbox-scratch}}"
+  printf '%s\n' "$root"
+}
+
+sandbox_scratch_check_cmd() {
+  local dir="$1"
+  printf '%s' "env_file='$dir/deploy/.env'; root=\$(awk -F= '/^ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT=/{v=\$2} END{print v}' \"\$env_file\" 2>/dev/null); root=\${root:-/var/lib/artifactflow/sandbox-scratch}; findmnt -rn \"\$root\" >/dev/null"
+}
+
 # compose on a host: cd into its deploy dir, export AF_VERSION, run given args.
 compose_flags_for_dir() {
   local dir="$1"
@@ -154,6 +176,12 @@ compose_on() {  # compose_on <host> <version> <compose-args...>
 
 # ── bundle introspection (manifest is source of truth) ──────────────
 BUNDLE=""; BUNDLE_VER=""; BUNDLE_PLATFORM=""; APP_TAR=""
+is_release_manifest() {
+  local header
+  header="$(head -n 1 "$1" 2>/dev/null || true)"
+  [[ "$header" == ArtifactFlow\ Release\ * ]]
+}
+
 load_bundle_meta() {
   BUNDLE="$1"
   [[ -d "$BUNDLE" ]] || die "bundle dir not found: $BUNDLE"
@@ -161,10 +189,14 @@ load_bundle_meta() {
   if [[ -n "$selected" ]]; then
     mf="$BUNDLE/artifactflow-${selected}.manifest.txt"
     [[ -f "$mf" ]] || die "AF_BUNDLE_VERSION=$selected but manifest not found: $mf"
+    is_release_manifest "$mf" || die "manifest is not an ArtifactFlow release manifest: $mf"
   else
     local manifests=()
-    while IFS= read -r line; do manifests+=("$line"); done < <(find "$BUNDLE" -maxdepth 1 -type f -name 'artifactflow-*.manifest.txt' -print | sort)
-    [[ ${#manifests[@]} -gt 0 ]] || die "no artifactflow-*.manifest.txt in $BUNDLE"
+    local line
+    while IFS= read -r line; do
+      is_release_manifest "$line" && manifests+=("$line")
+    done < <(find "$BUNDLE" -maxdepth 1 -type f -name 'artifactflow-*.manifest.txt' ! -name 'artifactflow-sandbox-*.manifest.txt' -print | sort)
+    [[ ${#manifests[@]} -gt 0 ]] || die "no artifactflow release manifest in $BUNDLE"
     if [[ ${#manifests[@]} -gt 1 ]]; then
       die "multiple manifests in $BUNDLE; set AF_BUNDLE_VERSION=<version> or deploy from a clean bundle directory"
     fi
@@ -279,7 +311,8 @@ cmd_preflight() {
           || { bad "docker runtime runsc not registered but AF_ENABLE_SANDBOX=1"; fail=1; }
         run_on "$host" 'docker image inspect artifactflow-sandbox:latest >/dev/null 2>&1' && ok "artifactflow-sandbox:latest loaded" \
           || { bad "artifactflow-sandbox:latest missing but AF_ENABLE_SANDBOX=1"; fail=1; }
-        run_on "$host" 'root="${ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT:-/var/lib/artifactflow/sandbox-scratch}"; findmnt -rn "$root" >/dev/null' \
+        local scratch_cmd; scratch_cmd="$(sandbox_scratch_check_cmd "$(target_dir "$host")")"
+        run_on "$host" "$scratch_cmd" \
           && ok "sandbox scratch root mounted" \
           || { bad "sandbox scratch root not mounted but AF_ENABLE_SANDBOX=1"; fail=1; }
       else
@@ -384,11 +417,7 @@ deploy_single_local() {
       command -v runsc >/dev/null 2>&1 || die "AF_ENABLE_SANDBOX=1 but runsc is missing; run deploy/scripts/prepare-host.sh sandbox"
       docker info 2>/dev/null | grep -q runsc || die "AF_ENABLE_SANDBOX=1 but Docker runtime 'runsc' is not registered"
       docker image inspect artifactflow-sandbox:latest >/dev/null 2>&1 || die "AF_ENABLE_SANDBOX=1 but artifactflow-sandbox:latest is not loaded"
-      local scratch="${ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT:-/var/lib/artifactflow/sandbox-scratch}"
-      if [[ -f "$DEPLOY_DIR/.env" ]]; then
-        scratch="$(awk -F= '/^ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT=/{v=$2} END{print v}' "$DEPLOY_DIR/.env")"
-        scratch="${scratch:-/var/lib/artifactflow/sandbox-scratch}"
-      fi
+      local scratch; scratch="$(sandbox_scratch_root_local)"
       findmnt -rn "$scratch" >/dev/null || die "AF_ENABLE_SANDBOX=1 but scratch root is not mounted: $scratch"
     fi
   fi

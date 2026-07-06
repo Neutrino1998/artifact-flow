@@ -45,6 +45,23 @@ newest_sandbox_image() {
     | sort | tail -1
 }
 
+deploy_env_value() {
+  local key="$1" env_file="$ROOT/deploy/.env" line value
+  [[ -f "$env_file" ]] || return 1
+  line="$(grep -E "^${key}=" "$env_file" | tail -1 || true)"
+  [[ -n "$line" ]] || return 1
+  value="${line#*=}"
+  value="${value%$'\r'}"
+  printf '%s\n' "$value"
+}
+
+sandbox_scratch_root() {
+  local root=""
+  root="$(deploy_env_value ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT || true)"
+  root="${root:-${AF_SANDBOX_SCRATCH_ROOT:-/var/lib/artifactflow/sandbox-scratch}}"
+  printf '%s\n' "$root"
+}
+
 compose_files() {
   printf '%s\n' -f "$ROOT/deploy/docker-compose.intranet.yml"
   if [[ "${AF_ENABLE_SANDBOX:-0}" == 1 ]]; then
@@ -96,9 +113,39 @@ cmd_check() {
   [[ -f "$ROOT/deploy/.env" ]] && ok "deploy/.env present" || bad "deploy/.env missing"
 
   if [[ -f "$ROOT/deploy/.env" ]]; then
-    local blanks
-    blanks="$(grep -n '^[A-Z0-9_]*=$' "$ROOT/deploy/.env" || true)"
-    [[ -z "$blanks" ]] && ok "deploy/.env has no empty KEY= lines" || { bad "deploy/.env still has empty values:"; printf '%s\n' "$blanks" | sed 's/^/      /'; }
+    local key value missing=0
+    local required_keys=(
+      ARTIFACTFLOW_JWT_SECRET
+      ARTIFACTFLOW_CREDENTIAL_KEY
+      ARTIFACTFLOW_REDIS_URL
+      ARTIFACTFLOW_REDIS_KEY_PREFIX
+      POSTGRES_DB
+      POSTGRES_USER
+      POSTGRES_PASSWORD
+      ARTIFACTFLOW_DATABASE_URL
+    )
+    for key in "${required_keys[@]}"; do
+      value="$(deploy_env_value "$key" || true)"
+      if [[ -z "$value" ]]; then
+        bad "deploy/.env required value missing or empty: $key"
+        missing=1
+      elif [[ "$value" == *CHANGE_ME* ]]; then
+        bad "deploy/.env required value still contains CHANGE_ME: $key"
+        missing=1
+      fi
+    done
+    (( missing == 0 )) && ok "deploy/.env required values are set"
+
+    local optional_blanks
+    optional_blanks="$(
+      grep -n '^[A-Z0-9_][A-Z0-9_]*=$' "$ROOT/deploy/.env" \
+        | grep -Ev '^[0-9]+:(ARTIFACTFLOW_JWT_SECRET|ARTIFACTFLOW_CREDENTIAL_KEY|ARTIFACTFLOW_REDIS_URL|ARTIFACTFLOW_REDIS_KEY_PREFIX|POSTGRES_DB|POSTGRES_USER|POSTGRES_PASSWORD|ARTIFACTFLOW_DATABASE_URL)=$' \
+        || true
+    )"
+    if [[ -n "$optional_blanks" ]]; then
+      info "optional empty KEY= lines present (OK if unused):"
+      printf '%s\n' "$optional_blanks" | sed 's/^/      /'
+    fi
   fi
 
   step "TLS placeholder"
@@ -119,8 +166,10 @@ cmd_check() {
     step "sandbox preflight"
     command -v runsc >/dev/null 2>&1 && ok "runsc present" || bad "runsc missing; run: deploy/scripts/prepare-host.sh sandbox"
     docker info 2>/dev/null | grep -q runsc && ok "docker runtime runsc registered" || bad "docker runtime runsc not registered"
-    findmnt -rn "${AF_SANDBOX_SCRATCH_ROOT:-/var/lib/artifactflow/sandbox-scratch}" >/dev/null \
-      && ok "sandbox scratch root mounted" || bad "sandbox scratch root not mounted"
+    local scratch
+    scratch="$(sandbox_scratch_root)"
+    findmnt -rn "$scratch" >/dev/null \
+      && ok "sandbox scratch root mounted: $scratch" || bad "sandbox scratch root not mounted: $scratch"
     docker image inspect artifactflow-sandbox:latest >/dev/null 2>&1 && ok "artifactflow-sandbox:latest loaded" || bad "artifactflow-sandbox:latest not loaded"
   fi
 
