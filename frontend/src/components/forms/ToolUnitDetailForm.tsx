@@ -84,6 +84,11 @@ export default function ToolUnitDetailForm({
     setConfirmDelete(false);
   }, [load]);
 
+  useEffect(() => {
+    if (!initialShowMountReminder) return;
+    setRightView({ type: 'edit-unit', unitName });
+  }, [initialShowMountReminder, setRightView, unitName]);
+
   // 挂载/凭证是即时生效的独立端点 — 操作后只刷新 unit 的挂载/凭证展示,
   // 不动编辑器 draft/baseline(避免冲掉未保存的核心/成员编辑)。
   const refreshLiveState = useCallback(async () => {
