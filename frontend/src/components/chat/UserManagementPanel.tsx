@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 import Checkbox from '@/components/forms/Checkbox';
+import { PillBadge } from '@/components/ui/PillBadge';
 import PanelSearchBar from './PanelSearchBar';
 import Pagination from './Pagination';
 
@@ -357,21 +358,16 @@ function UserRow({
       {/* "当前" badge — placed before role/status so the eye lands on
           identity first, then runs through the right-aligned status cluster */}
       {isSelf && (
-        <span className="flex-shrink-0 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-          当前
-        </span>
+        <PillBadge>当前</PillBadge>
       )}
 
       {/* Role badge */}
-      <span
-        className={`flex-shrink-0 inline-block px-2 py-0.5 text-xs rounded-full ${
-          user.role === 'admin'
-            ? 'bg-accent/10 text-accent'
-            : 'bg-bg dark:bg-bg-dark text-text-secondary dark:text-text-secondary-dark'
-        }`}
+      <PillBadge
+        tone={user.role === 'admin' ? 'accent' : 'neutral'}
+        size="regular"
       >
         {user.role}
-      </span>
+      </PillBadge>
 
       {/* Status */}
       <span className="flex-shrink-0 inline-flex items-center gap-1.5">

@@ -1,6 +1,7 @@
 'use client';
 
 import { memo } from 'react';
+import { PillBadge } from '@/components/ui/PillBadge';
 
 interface AgentBadgeProps {
   agent: string;
@@ -10,18 +11,16 @@ interface AgentBadgeProps {
 function AgentBadge({ agent, status }: AgentBadgeProps) {
   return (
     <div className="flex items-center gap-2">
-      <span
-        className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
-          status === 'running'
-            ? 'bg-accent/10 text-accent'
-            : 'bg-bg dark:bg-bg-dark text-text-secondary dark:text-text-secondary-dark'
-        }`}
+      <PillBadge
+        tone={status === 'running' ? 'accent' : 'neutral'}
+        size="regular"
+        className="gap-1.5"
       >
         {status === 'running' && (
           <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
         )}
         {agent}
-      </span>
+      </PillBadge>
     </div>
   );
 }

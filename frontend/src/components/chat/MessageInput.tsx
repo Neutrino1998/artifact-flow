@@ -12,6 +12,7 @@ import StagedFileChip from './StagedFileChip';
 import { injectMessage, cancelExecution, getSkills } from '@/lib/api';
 import type { UploadEvent } from '@/lib/api';
 import type { SkillItem } from '@/types';
+import { PillBadge } from '@/components/ui/PillBadge';
 import { formatTokens } from '@/lib/formatTokens';
 import { formatBytes } from '@/lib/formatBytes';
 import { MAX_MESSAGE_CHARS, MAX_CHAT_ATTACHMENTS } from '@/lib/constants';
@@ -697,12 +698,12 @@ export default function MessageInput() {
                                   {skill.name}
                                 </span>
                                 {alreadyActiveSkills.has(skill.slug) && (
-                                  <span
-                                    className="flex-shrink-0 text-[10px] px-1 py-0.5 rounded text-accent bg-accent/10 border border-accent/30"
+                                  <PillBadge
+                                    tone="accent"
                                     title="该技能已在本对话激活；重新勾选会再次注入其正文（用于压缩后重提醒）"
                                   >
                                     已激活
-                                  </span>
+                                  </PillBadge>
                                 )}
                               </span>
                             </button>

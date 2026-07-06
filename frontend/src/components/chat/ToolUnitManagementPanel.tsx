@@ -7,6 +7,7 @@ import type { ToolUnitResponse } from '@/types';
 import { useUIStore } from '@/stores/uiStore';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 import { SourceBadge } from '@/components/forms/ToolUnitBadges';
+import { PillBadge } from '@/components/ui/PillBadge';
 import PanelSearchBar from './PanelSearchBar';
 
 export default function ToolUnitManagementPanel() {
@@ -139,9 +140,7 @@ function UnitRow({
           </span>
           <SourceBadge source={unit.source} />
           {unit.defer && (
-            <span className="flex-shrink-0 inline-block px-1.5 py-0.5 text-xs rounded bg-bg dark:bg-bg-dark text-text-tertiary dark:text-text-tertiary-dark">
-              defer
-            </span>
+            <PillBadge>defer</PillBadge>
           )}
         </div>
         <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark truncate">

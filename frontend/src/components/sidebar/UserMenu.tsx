@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import ChangePasswordDialog from '@/components/layout/ChangePasswordDialog';
 import EditDisplayNameDialog from '@/components/layout/EditDisplayNameDialog';
+import { PillBadge } from '@/components/ui/PillBadge';
 import { MENU_ROW_HOVER, MENU_ROW_DANGER_HOVER } from '@/lib/styles';
 import StorageBar from './StorageBar';
 
@@ -122,9 +123,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
               <div className="font-medium text-text-primary dark:text-text-primary-dark truncate flex items-center gap-1.5">
                 <span className="truncate">{user.display_name || user.username}</span>
                 {isAdmin && (
-                  <span className="inline-block px-1.5 py-px text-[10px] rounded-full bg-accent/10 text-accent shrink-0">
-                    admin
-                  </span>
+                  <PillBadge tone="accent">admin</PillBadge>
                 )}
               </div>
               <div className="text-xs text-text-secondary dark:text-text-secondary-dark truncate">

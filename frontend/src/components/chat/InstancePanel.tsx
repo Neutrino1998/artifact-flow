@@ -6,6 +6,7 @@ import type { InstanceHeartbeat, AdminInstancesResponse } from '@/lib/api';
 import { parseUtcIso } from '@/lib/time';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 import { useUIStore } from '@/stores/uiStore';
+import { PillBadge } from '@/components/ui/PillBadge';
 
 // 实例监控面板轮询周期。心跳 sample 周期是 30s,面板 10s 轮询让状态色(尤其
 // 陈旧→红)在心跳停更后一个 sample 周期内可见,又不过度打后端。
@@ -86,7 +87,7 @@ function InstanceCard({ inst, nowMs, isSelf }: { inst: InstanceHeartbeat; nowMs:
           {inst.instance_id}
         </span>
         {isSelf && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent/10 text-accent shrink-0">本机</span>
+          <PillBadge tone="accent">本机</PillBadge>
         )}
         <span className={`text-xs ml-auto shrink-0 ${meta.text}`}>{meta.label}</span>
       </div>

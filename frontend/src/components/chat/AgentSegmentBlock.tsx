@@ -4,6 +4,7 @@ import { memo, useState } from 'react';
 import type { ExecutionSegment } from '@/stores/streamStore';
 import { PROSE_CLASSES, MENU_ROW_HOVER } from '@/lib/styles';
 import MarkdownBlock from '@/components/markdown/MarkdownBlock';
+import { PillBadge } from '@/components/ui/PillBadge';
 import ThinkingBlock from './ThinkingBlock';
 import AgentOutputBlock from './AgentOutputBlock';
 import ToolCallCard from './ToolCallCard';
@@ -106,12 +107,10 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
         )}
 
         {/* Agent badge inline */}
-        <span
-          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-medium ${
-            segment.status === 'running'
-              ? 'bg-accent/10 text-accent'
-              : 'bg-transparent text-text-secondary dark:text-text-secondary-dark'
-          }`}
+        <PillBadge
+          tone={segment.status === 'running' ? 'accent' : 'neutral'}
+          size="regular"
+          className="gap-1.5"
         >
           {segment.status === 'running' && (
             <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
@@ -122,7 +121,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
             </svg>
           )}
           {segment.agent}
-        </span>
+        </PillBadge>
 
         {/* Compact metadata — only shown when segment is done */}
         {segment.status === 'complete' && (segment.model || segment.tokenUsage || segment.llmDurationMs) && (

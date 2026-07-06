@@ -3,13 +3,14 @@
 import { memo } from 'react';
 import FlowBlock from './FlowBlock';
 import MarkdownBlock from '@/components/markdown/MarkdownBlock';
+import { PillBadge } from '@/components/ui/PillBadge';
 
 interface InjectFlowBlockProps {
   content?: string;
 }
 
 const InjectBadge = () => (
-  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-medium bg-accent/10 text-accent">
+  <PillBadge tone="accent" size="regular" className="gap-1.5">
     <svg
       width="10"
       height="10"
@@ -23,7 +24,7 @@ const InjectBadge = () => (
       <path d="M12 5v14M5 12h14" />
     </svg>
     inject
-  </span>
+  </PillBadge>
 );
 
 function InjectFlowBlock({ content }: InjectFlowBlockProps) {

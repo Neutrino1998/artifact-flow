@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { CopyIcon } from '@/components/ui/CopyIcon';
+import { PillBadge } from '@/components/ui/PillBadge';
 import { SELECT_COMPACT, MENU_ROW_HOVER } from '@/lib/styles';
 import { SELECT_CHEVRON_COMPACT } from '@/components/ui/SelectChevron';
 import * as api from '@/lib/api';
@@ -723,9 +724,7 @@ function MessageGroupView({
                 {formatTime(event.created_at)}
               </span>
               {event.agent_name != null ? (
-                <span className="flex-shrink-0 px-1.5 py-px rounded-full bg-accent/10 text-accent text-[10px]">
-                  {event.agent_name.replace('_agent', '')}
-                </span>
+                <PillBadge tone="accent">{event.agent_name.replace('_agent', '')}</PillBadge>
               ) : null}
               <span className={`flex-shrink-0 font-mono ${eventColor(event.event_type)}`}>
                 {event.event_type}

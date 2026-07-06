@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { fetchNotifications, dismissNotification, type Notification, type Severity } from '@/lib/siteConfig';
 import { MENU_ROW_HOVER } from '@/lib/styles';
 import MarkdownBlock from '@/components/markdown/MarkdownBlock';
+import { PillBadge } from '@/components/ui/PillBadge';
 
 interface Props {
   collapsed?: boolean;
@@ -113,9 +114,7 @@ export default function NotificationCenter({ collapsed }: Props) {
           <div className="font-medium text-text-primary dark:text-text-primary-dark truncate flex items-center gap-1.5">
             <span className="truncate">{top.title}</span>
             {extra > 0 && (
-              <span className="inline-block px-1 py-px text-[10px] rounded bg-accent/10 text-accent shrink-0">
-                +{extra}
-              </span>
+              <PillBadge tone="accent">+{extra}</PillBadge>
             )}
           </div>
           <div className="text-xs text-text-secondary dark:text-text-secondary-dark truncate">

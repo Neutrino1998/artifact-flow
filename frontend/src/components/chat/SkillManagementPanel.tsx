@@ -14,6 +14,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
 import { triggerBlobDownload } from '@/lib/download';
+import { PillBadge } from '@/components/ui/PillBadge';
 import PanelSearchBar from './PanelSearchBar';
 import type { SkillItem, SkillFindingItem, SkillImportResponse } from '@/types';
 
@@ -211,8 +212,8 @@ export default function SkillManagementPanel() {
                       {skill.name}
                     </span>
                     {skill.source === 'dynamic' && (
-                      <span
-                        className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded text-accent bg-accent/10 border border-accent/30"
+                      <PillBadge
+                        tone="accent"
                         title={
                           skill.visibility === 'private'
                             ? '你导入的私有技能，仅自己可见'
@@ -220,7 +221,7 @@ export default function SkillManagementPanel() {
                         }
                       >
                         {skill.visibility === 'private' ? '私有导入' : '导入'}
-                      </span>
+                      </PillBadge>
                     )}
                   </div>
                   {skill.description && (
@@ -549,15 +550,12 @@ function FindingList({ findings }: { findings: SkillFindingItem[] }) {
     <div className="rounded-lg border border-border dark:border-border-dark divide-y divide-border dark:divide-border-dark max-h-48 overflow-y-auto">
       {findings.map((f, i) => (
         <div key={i} className="px-3 py-2 text-xs flex items-start gap-2">
-          <span
-            className={`flex-shrink-0 mt-px text-[10px] px-1.5 py-0.5 rounded font-medium ${
-              f.severity === 'error'
-                ? 'text-status-error bg-status-error/10 border border-status-error/30'
-                : 'text-status-warning bg-status-warning/10 border border-status-warning/30'
-            }`}
+          <PillBadge
+            tone={f.severity === 'error' ? 'error' : 'warning'}
+            className="mt-px"
           >
             {f.severity === 'error' ? '错误' : '提示'}
-          </span>
+          </PillBadge>
           <div className="min-w-0">
             <span className="font-mono text-text-tertiary dark:text-text-tertiary-dark">
               {f.rule}

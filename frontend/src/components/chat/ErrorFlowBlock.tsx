@@ -3,6 +3,7 @@
 import { memo } from 'react';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { CopyIcon } from '@/components/ui/CopyIcon';
+import { PillBadge } from '@/components/ui/PillBadge';
 
 interface ErrorFlowBlockProps {
   message?: string;
@@ -18,14 +19,14 @@ function ErrorFlowBlock({ message, requestId }: ErrorFlowBlockProps) {
   return (
     <div className="bg-chat dark:bg-chat-dark border border-status-error/40 rounded-card overflow-hidden">
       <div className="flex items-center justify-between gap-2 px-3 py-2 text-xs">
-        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-medium bg-status-error/10 text-status-error">
+        <PillBadge tone="error" size="regular" className="gap-1.5">
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="10" />
             <line x1="15" y1="9" x2="9" y2="15" />
             <line x1="9" y1="9" x2="15" y2="15" />
           </svg>
           error
-        </span>
+        </PillBadge>
         <div className="flex items-center gap-2 min-w-0">
           {requestId && (
             <code className="shrink-0 font-mono text-[11px] text-status-error/80 truncate" title={requestId}>
