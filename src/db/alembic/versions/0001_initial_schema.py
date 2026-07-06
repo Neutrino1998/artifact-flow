@@ -109,7 +109,7 @@ def upgrade() -> None:
     op.create_table('artifacts',
         sa.Column('id', sa.String(length=64), nullable=False),
         sa.Column('session_id', sa.String(length=64), nullable=False),
-        sa.Column('content_type', sa.String(length=64), nullable=False),
+        sa.Column('content_type', sa.String(length=128), nullable=False),
         sa.Column('source', sa.String(length=32), nullable=False),
         sa.Column('title', sa.String(length=256), nullable=False),
         sa.Column('content', sa.Text(), nullable=False),

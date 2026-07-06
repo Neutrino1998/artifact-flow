@@ -202,6 +202,13 @@ docker compose -f docker-compose.prod.yml up -d
 # 额外产出：
 #   artifactflow-infra-caddy2.10-pg16-redis7.tar.gz  (~130MB)
 # 文件名按 base image 版本内容寻址 —— 目标机已有同名 tar 就跳过 scp
+
+# 首次部署且要启用 bash/mount/persist 沙盒工具 —— 再加 sandbox 宿主前置包
+./scripts/release.sh 1.0.0 --with-infra --with-sandbox
+# 额外产出：
+#   artifactflow-sandbox-1.0.0-amd64.tar.gz       sandbox 运行镜像
+#   artifactflow-sandbox-verify-1.0.0.tar.gz      gVisor 验证探针
+#   sandbox-gvisor-<date>-x86_64.tar.gz           runsc 离线安装包
 ```
 
 > **拆 4 tar 按变更频率分层：**
@@ -209,7 +216,7 @@ docker compose -f docker-compose.prod.yml up -d
 > - `app` 是 backend + frontend,几乎每次发版都改。
 > - `infra` 是 caddy / postgres / redis 三个 base image,版本动得极少（半年一次量级）,默认**不打**,显式 `--with-infra` 才生成。命名带 base image 版本号方便目标机一眼看出"我已经有这个 infra tar 了"。
 
-> **目标平台默认 `linux/amd64`。** Apple Silicon 上跑 `release.sh` 会自动通过 buildx + QEMU 交叉编译，省得装到 x86_64 服务器后撞 `exec format error`。要构建别的平台传 `PLATFORM=linux/arm64 ./scripts/release.sh ...`。
+> **目标平台默认 `linux/amd64`。** Apple Silicon 上跑 `release.sh` 会自动通过 buildx + QEMU 交叉编译，省得装到 x86_64 服务器后撞 `exec format error`。要构建 arm64 目标，用 `./scripts/release.sh 1.0.0 --platform linux/arm64`（或继续传 `PLATFORM=linux/arm64`）。一次 release 只产出一个目标架构的 bundle。
 
 ### 首次部署（在目标内网机器上）
 
@@ -236,10 +243,10 @@ cp deploy/.env.intranet.example deploy/.env
 
 # 4. 内网 LLM（如需）：编辑 config/models/models.yaml，把 base_url 指向内部推理端点
 
-# 5. TLS 证书：真证书就位放 deploy/certs/{server.crt,server.key}（完整链，见该目录 README）。
-#    还没签发下来？先自签一张占位证书让 Caddy 能起来（幂等，绝不覆盖真证书）：
-deploy/scripts/ensure-cert.sh
-#    真证书到位后覆盖两个 pem 再 caddy reload（零停机，见「运行时配置变更」表）。
+# 5. 目标机基础检查 + TLS 占位证书（幂等，绝不覆盖真证书）
+#    这一步会检查 Docker/Compose/磁盘/.env/镜像/证书；证书缺失时自动生成
+#    自签占位证书让 Caddy 能启动。真证书之后覆盖两个 pem 再 caddy reload。
+AF_VERSION=1.0.0 AF_CERT_HOSTS=<ip-or-hostname> deploy/scripts/prepare-host.sh check
 
 # 6. 启动（3A: 自建基础设施）
 AF_VERSION=1.0.0 docker compose -f deploy/docker-compose.intranet.yml --profile infra up -d
@@ -251,8 +258,8 @@ docker compose -f deploy/docker-compose.intranet.yml exec backend \
 
 ### 扩缩容与多机发布（fleet.sh）
 
-`deploy/scripts/fleet.sh` 是从「一台机器」到「多台机器」的统一发布入口，把上面「首次部署」
-的校验 + 加载 + 启动 + 探活收成一条命令，并原生支持 `--scale`：
+`deploy/scripts/fleet.sh` 是从「一台机器」到「多台机器」的统一发布入口，把上面「校验 + 加载 + 启动 + 探活」
+收成一条命令，并原生支持 `--scale`：
 
 ```bash
 deploy/scripts/fleet.sh preflight            # 单机/每台机器就绪检查
@@ -272,8 +279,12 @@ deploy/scripts/fleet.sh rollback             # 回退到上一个成功版本
 > 详见 FLEET.md「Multi-host: unexercised seams」。多机到位前，扩容仍只能在单机上
 > `--scale`；跨机负载均衡 / 多机数据库 URL 等留在文档里作为**已设计未验证**的路径。
 >
-> `fleet.sh` 目前只包装 `deploy/docker-compose.intranet.yml`（Mode 3）；Mode 2（公网）
-> 扩缩容仍用上面 Mode 2A「扩缩容」小节里的裸 `--scale` + `deploy-prod.sh`。
+> `fleet.sh` 默认只包装 `deploy/docker-compose.intranet.yml`（Mode 3 基础栈）。
+> 如果本机已经完成沙盒宿主前置并要启用 `bash` / `mount` / `persist`，设置
+> `AF_ENABLE_SANDBOX=1`，它会自动追加 `deploy/docker-compose.sandbox.yml` overlay，
+> 并把 runsc / sandbox 镜像 / scratch root 缺失视为 preflight blocker。
+> Mode 2（公网）扩缩容仍用上面 Mode 2A「扩缩容」小节里的裸 `--scale` +
+> `deploy-prod.sh`。
 >
 > `fleet.sh deploy` 是直接 `up`（数秒 blip，无维护页）；要维护页包住整个升级窗口，
 > 仍走下面「滚动更新已有部署」的 `pause.sh`/`resume.sh`。
@@ -382,7 +393,18 @@ ssh target 'cd /opt/artifactflow && \
 
 随发布包额外携带三个传输单元（与应用包同一构建机产出）：**沙盒镜像** tar（`scripts/build-sandbox-image.sh`，注意按目标机选 `PLATFORM`）、**verify 探针** tar（同脚本产出，arch 无关）、**gVisor 包** tar（`sandbox/gvisor-pkg/fetch-and-package.sh`）。
 
-### 宿主前置（一次性，按顺序）
+### 宿主前置（一次性）
+
+一条命令完成宿主前置（安装 gVisor、加载 sandbox 镜像、创建 scratch loop、跑
+smoke/verify，并把 `ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT` /
+`ARTIFACTFLOW_SANDBOX_RUNTIME` 写入 `deploy/.env`）：
+
+```bash
+# 默认 scratch pool 为 8G；可按并发 × ARTIFACTFLOW_SANDBOX_WORKSPACE_QUOTA_MB 调大。
+AF_SANDBOX_POOL_SIZE=8G deploy/scripts/prepare-host.sh sandbox
+```
+
+它等价于以下手工步骤，保留在这里便于排障：
 
 1. **gVisor（runsc）**：解开 gVisor 包，`sudo ./install.sh && sudo systemctl reload docker && sudo ./smoke-test.sh`（内含 `unshare -U` 预检）。arm / 鲲鹏注意：Kylin V10 arm 默认 64K 页内核，gVisor 拒启——先用 `sandbox/kernel-4k-pkg/` 换 4K 内核再装（x86 跳过）。
 2. **沙盒镜像**：`gunzip -c artifactflow-sandbox-<ver>-<arch>.tar.gz | docker load`。
@@ -411,8 +433,13 @@ ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT=/var/lib/artifactflow/sandbox-scratch
 ```
 
 ```bash
-docker compose -f deploy/docker-compose.intranet.yml \
-               -f deploy/docker-compose.sandbox.yml [--profile infra] up -d
+AF_VERSION=1.0.0 docker compose -f deploy/docker-compose.intranet.yml \
+                              -f deploy/docker-compose.sandbox.yml \
+                              --profile infra up -d
+
+# 或使用 fleet 单机入口:
+AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh preflight
+AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy .
 ```
 
 > **安全提醒**：overlay 把 `/var/run/docker.sock` 挂进 backend 容器（等同宿主 root）。这是 DooD 架构的固有前提，防线是代码侧纪律——容器创建参数全为 backend 常量、绝不被模型内容污染（见架构文档「隔离边界」）。不要把这个 overlay 用在不需要沙盒的部署上。

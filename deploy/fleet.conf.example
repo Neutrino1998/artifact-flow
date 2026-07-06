@@ -2,6 +2,11 @@
 #
 # Copy to `deploy/fleet.conf` (gitignored — may carry host IPs) and edit.
 # fleet.sh reads it to know which role runs on which host.
+# To enable sandbox tools on the single host, first run:
+#   deploy/scripts/prepare-host.sh sandbox
+# Then run fleet with:
+#   AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh preflight
+#   AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy .
 #
 # ── Format ──
 # One row per (role, host). Blank lines and `#` comments ignored.
@@ -11,9 +16,8 @@
 #          (= run right here, no ssh — the single-box degenerate case)
 #   arch   target CPU arch; fleet.sh VALIDATES it against the bundle's
 #          manifest Platform + the host's `uname -m` (loud-fail on mismatch).
-#          It does NOT pick among multi-arch tars — release.sh emits one arch
-#          per build. Homogeneous fleet is the assumption; mixed-arch needs
-#          release.sh to grow arch-suffixed tars first (see deploy/FLEET.md).
+#          release.sh emits one arch per build. Homogeneous fleet is the
+#          assumption; build either x86 or arm with release.sh --platform.
 #   scale  app rows only: number of backend replicas (frontend stays 1 —
 #          only backend is the multi-replica, Redis-coordinated tier).
 #

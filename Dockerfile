@@ -58,8 +58,9 @@ COPY --from=builder /root/.local /root/.local
 # Source code
 COPY . .
 
-# Register the local package (no deps — already installed via builder)
-RUN pip install --user -e . --no-deps
+# Register the local package (no deps — already installed via builder). Disable
+# build isolation so this local setup.py install does not fetch build deps.
+RUN pip install --user -e . --no-deps --no-build-isolation
 
 # Data directory + entrypoint exec bit
 RUN mkdir -p /app/data && chmod +x /app/deploy/entrypoint.sh

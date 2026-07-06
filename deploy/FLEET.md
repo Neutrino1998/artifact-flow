@@ -13,6 +13,12 @@ deploy/scripts/fleet.sh status               # per-host `compose ps` + LB health
 deploy/scripts/fleet.sh rollback             # re-up the previous version
 ```
 
+Sandbox is opt-in. After running `deploy/scripts/prepare-host.sh sandbox` on the
+single host, set `AF_ENABLE_SANDBOX=1` for `preflight` / `deploy` / `status` /
+`rollback`; fleet then appends `deploy/docker-compose.sandbox.yml` and makes
+runsc, `artifactflow-sandbox:latest`, and the mounted scratch root hard
+preflight requirements.
+
 ## Topology: `deploy/fleet.conf`
 
 Copy `fleet.conf.example` → `fleet.conf` (gitignored — it may carry host IPs).
@@ -59,7 +65,10 @@ default `/opt/artifactflow`).
 
 `deploy <bundle-dir>` consumes a `scripts/release.sh` bundle (the `dist/`
 tars + `artifactflow-*.manifest.txt`). Version and Platform are read from the
-manifest — the manifest is the source of truth, nothing is untarred to learn them.
+manifest — the manifest is the source of truth, nothing is untarred to learn
+them. Keep the bundle directory to a single release; if it contains multiple
+historical manifests, set `AF_BUNDLE_VERSION=<version>` so fleet cannot pick the
+wrong tar.
 
 1. **verify** — `verify-bundle.sh` checks every tar's sha256.
 2. **arch check** — host `uname -m` must match the bundle Platform (loud-fail;
@@ -125,17 +134,20 @@ are in place and a 2-machine `deploy` has run green.
 
 ## Arch
 
-`release.sh` builds **one architecture per run** and the tar filenames do **not**
-encode it (only the manifest's `Platform:` line does). So `fleet.sh` uses the
-`arch` column to **validate** (host `uname -m` vs bundle Platform), not to pick
-among multiple tars. `arm64`/`aarch64` and `amd64`/`x86_64` are normalized, so a
-`linux/arm64` bundle matches both a Kylin `aarch64` and a Darwin `arm64`.
+`release.sh` builds **one architecture per run**. The target defaults to
+`linux/amd64`; pass `--platform linux/arm64` (or `PLATFORM=linux/arm64`) for
+arm64:
 
-The current fleet is homogeneous (two Kylin arm64), so one bundle serves all.
-**True mixed-arch** (some x86 hosts) would need `release.sh` to emit
-arch-suffixed tars (`artifactflow-app-<V>-arm64.tar.gz` / `-amd64`) and
-`fleet.sh` to select by the host's `arch` — a change to make only when a mixed
-fleet actually exists.
+```
+./scripts/release.sh 1.2.3 --with-infra --platform linux/amd64
+./scripts/release.sh 1.2.3 --with-infra --platform linux/arm64
+```
+
+The tar filenames stay the same; the manifest's `Platform:` line is the source
+of truth. `fleet.sh` uses the `arch` column to **validate** host `uname -m` vs
+the bundle Platform, not to choose between multiple architecture bundles.
+`arm64`/`aarch64` and `amd64`/`x86_64` are normalized. The tested fleet shape is
+homogeneous: build either an x86 bundle or an arm bundle for that deployment.
 
 ## Infra
 

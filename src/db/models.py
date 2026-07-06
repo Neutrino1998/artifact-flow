@@ -473,8 +473,8 @@ class Artifact(Base):
         primary_key=True
     )
     
-    # 内容类型 (MIME type, e.g. text/markdown, text/x-python)
-    content_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    # 内容类型 (MIME type, e.g. Office 文档的标准 MIME 可超过 64 字符)
+    content_type: Mapped[str] = mapped_column(String(128), nullable=False)
 
     # 来源 (agent, user_upload)
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="agent")

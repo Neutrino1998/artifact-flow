@@ -1,10 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 # Build, tag, and package ArtifactFlow images for air-gapped deployment.
 #
 # Usage:
-#   ./scripts/release.sh [VERSION] [--with-infra | --app-only] [--with-analyst-tools]
+#   ./scripts/release.sh [VERSION] [--with-infra | --app-only]
+#                        [--with-sandbox] [--with-analyst-tools]
+#                        [--platform linux/amd64|linux/arm64]
 #
 # Defaults:
 #   VERSION:     $(date +%Y%m%d)
@@ -18,6 +22,9 @@ set -euo pipefail
 #   *.sha256                                       per-tar checksums
 #   artifactflow-infra-<infra-slug>.tar.gz        ONLY if --with-infra (content-
 #                                                  addressed by base image tags).
+#   artifactflow-sandbox-<VERSION>-<arch>.tar.gz  ONLY if --with-sandbox
+#   artifactflow-sandbox-verify-<VERSION>.tar.gz  ONLY if --with-sandbox
+#   sandbox-gvisor-<date>-<arch>.tar.gz           ONLY if --with-sandbox
 #   artifactflow-analyst-tools-<slug>.tar.gz      ONLY if --with-analyst-tools
 #                                                  (slug encodes pandas + numpy +
 #                                                  python versions, NECESSARY for
@@ -40,17 +47,27 @@ set -euo pipefail
 #   resolves offline.
 
 show_help() {
-  sed -n '1,38p' "$0"
+  sed -n '5,42p' "$0"
 }
 
 VERSION=""
 WITH_INFRA=0
+WITH_SANDBOX=0
 WITH_ANALYST_TOOLS=0
-for arg in "$@"; do
+PLATFORM_ARG=""
+while [[ $# -gt 0 ]]; do
+  arg="$1"
   case "$arg" in
     --with-infra)         WITH_INFRA=1 ;;
     --app-only)           WITH_INFRA=0 ;;
+    --with-sandbox)       WITH_SANDBOX=1 ;;
     --with-analyst-tools) WITH_ANALYST_TOOLS=1 ;;
+    --platform)
+      shift
+      [[ $# -gt 0 ]] || { echo "--platform requires a value (e.g. linux/amd64)" >&2; exit 2; }
+      PLATFORM_ARG="$1"
+      ;;
+    --platform=*)         PLATFORM_ARG="${arg#--platform=}" ;;
     -h|--help)            show_help; exit 0 ;;
     -*)                   echo "Unknown flag: $arg (use -h for usage)" >&2; exit 2 ;;
     *)
@@ -60,8 +77,20 @@ for arg in "$@"; do
       VERSION="$arg"
       ;;
   esac
+  shift
 done
 VERSION="${VERSION:-$(date +%Y%m%d)}"
+
+# Build platform — default linux/amd64 because the intranet target is x86_64.
+# Apple Silicon Macs default to linux/arm64 without --platform, producing
+# images that fail at startup on the server with "exec format error".
+# See docs/_archive/intranet部署运维笔记.md → "macOS arm64 → Linux amd64".
+PLATFORM="${PLATFORM_ARG:-${PLATFORM:-linux/amd64}}"
+case "$PLATFORM" in
+  linux/amd64) ARCH_TAG=amd64; GVISOR_ARCH=x86_64 ;;
+  linux/arm64|linux/aarch64) ARCH_TAG=arm64; GVISOR_ARCH=aarch64 ;;
+  *) echo "Unsupported platform '$PLATFORM' (expected linux/amd64 or linux/arm64)" >&2; exit 2 ;;
+esac
 
 OUTDIR="dist"
 APP_ARCHIVE="$OUTDIR/artifactflow-app-${VERSION}.tar.gz"
@@ -107,16 +136,14 @@ ANALYST_PLATFORM="manylinux2014_x86_64"
 # written into the bundle below.
 ANALYST_SLUG="pandas${PANDAS_VERSION}-numpy${NUMPY_VERSION}-py${ANALYST_PYTHON}"
 ANALYST_ARCHIVE="$OUTDIR/artifactflow-analyst-tools-${ANALYST_SLUG}.tar.gz"
-
-# Build platform — default linux/amd64 because the intranet target is x86_64.
-# Apple Silicon Macs default to linux/arm64 without --platform, producing
-# images that fail at startup on the server with "exec format error".
-# See docs/_archive/intranet部署运维笔记.md → "macOS arm64 → Linux amd64".
-PLATFORM="${PLATFORM:-linux/amd64}"
+SANDBOX_ARCHIVE="$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.tar.gz"
+SANDBOX_VERIFY_ARCHIVE="$OUTDIR/artifactflow-sandbox-verify-${VERSION}.tar.gz"
+SANDBOX_GVISOR_ARCHIVE=""
 
 INFRA_DESC=$([[ $WITH_INFRA == 1 ]] && echo "included" || echo "skipped (--app-only)")
+SANDBOX_DESC=$([[ $WITH_SANDBOX == 1 ]] && echo "included" || echo "skipped")
 ANALYST_DESC=$([[ $WITH_ANALYST_TOOLS == 1 ]] && echo "included" || echo "skipped")
-echo "=== ArtifactFlow Release: ${VERSION} (platform: ${PLATFORM}, infra: ${INFRA_DESC}, analyst-tools: ${ANALYST_DESC}) ==="
+echo "=== ArtifactFlow Release: ${VERSION} (platform: ${PLATFORM}, infra: ${INFRA_DESC}, sandbox: ${SANDBOX_DESC}, analyst-tools: ${ANALYST_DESC}) ==="
 
 mkdir -p "$OUTDIR"
 
@@ -152,7 +179,7 @@ if [[ $WITH_INFRA == 1 ]]; then
   # `docker pull` left an arm64 cache).
   for img in "${INFRA_IMAGES[@]}"; do
     current_arch=$(docker image inspect "$img" --format '{{.Architecture}}' 2>/dev/null || echo "missing")
-    expected_arch="${PLATFORM##*/}"
+    expected_arch="${ARCH_TAG}"
     if [[ "$current_arch" != "$expected_arch" ]]; then
       echo "Pulling $img for $PLATFORM (was: $current_arch)..."
       docker pull --platform "$PLATFORM" "$img"
@@ -160,6 +187,21 @@ if [[ $WITH_INFRA == 1 ]]; then
   done
   echo "Saving infra images to ${INFRA_ARCHIVE}..."
   docker save "${INFRA_IMAGES[@]}" | gzip > "$INFRA_ARCHIVE"
+fi
+
+if [[ $WITH_SANDBOX == 1 ]]; then
+  echo "Building sandbox image + verify probes..."
+  PLATFORM="$PLATFORM" "$ROOT/scripts/build-sandbox-image.sh" "$VERSION"
+  [[ -f "$SANDBOX_ARCHIVE" ]] || { echo "Expected sandbox archive missing: $SANDBOX_ARCHIVE" >&2; exit 1; }
+  [[ -f "$SANDBOX_VERIFY_ARCHIVE" ]] || { echo "Expected sandbox verify archive missing: $SANDBOX_VERIFY_ARCHIVE" >&2; exit 1; }
+
+  echo "Packaging gVisor offline installer (${GVISOR_ARCH})..."
+  ARCH="$GVISOR_ARCH" "$ROOT/sandbox/gvisor-pkg/fetch-and-package.sh"
+  SANDBOX_GVISOR_ARCHIVE="$(find "$OUTDIR" -maxdepth 1 -type f -name "sandbox-gvisor-*-${GVISOR_ARCH}.tar.gz" -print | sort | tail -1)"
+  [[ -n "$SANDBOX_GVISOR_ARCHIVE" && -f "$SANDBOX_GVISOR_ARCHIVE" ]] || {
+    echo "Expected gVisor archive missing for arch ${GVISOR_ARCH}" >&2
+    exit 1
+  }
 fi
 
 # Package config/ separately so operators can ship prompt / model changes
@@ -312,6 +354,13 @@ fi
     f=$(basename "$INFRA_ARCHIVE")
     sha256sum "$f" > "$f.sha256"
   fi
+  if [[ $WITH_SANDBOX == 1 ]]; then
+    for f in "$(basename "$SANDBOX_ARCHIVE")" \
+             "$(basename "$SANDBOX_VERIFY_ARCHIVE")" \
+             "$(basename "$SANDBOX_GVISOR_ARCHIVE")"; do
+      sha256sum "$f" > "$f.sha256"
+    done
+  fi
   if [[ $WITH_ANALYST_TOOLS == 1 ]]; then
     f=$(basename "$ANALYST_ARCHIVE")
     sha256sum "$f" > "$f.sha256"
@@ -328,6 +377,7 @@ fi
   echo "Platform:     ${PLATFORM}"
   LAYOUT_DESC="app + config + deploy"
   [[ $WITH_INFRA == 1 ]] && LAYOUT_DESC+=" + infra"
+  [[ $WITH_SANDBOX == 1 ]] && LAYOUT_DESC+=" + sandbox"
   [[ $WITH_ANALYST_TOOLS == 1 ]] && LAYOUT_DESC+=" + analyst-tools"
   echo "Layout:       $LAYOUT_DESC"
   echo ""
@@ -351,6 +401,22 @@ fi
     echo "  postgres:${POSTGRES_TAG}"
     echo "  redis:${REDIS_TAG}"
     echo "  (run release with --with-infra to ship them)"
+  fi
+  echo ""
+  if [[ $WITH_SANDBOX == 1 ]]; then
+    echo "Sandbox bundle:"
+    echo "  image:   $(basename "$SANDBOX_ARCHIVE")"
+    echo "  verify:  $(basename "$SANDBOX_VERIFY_ARCHIVE")"
+    echo "  gVisor:  $(basename "$SANDBOX_GVISOR_ARCHIVE")"
+    echo "  target:  deploy/scripts/prepare-host.sh sandbox"
+    if [[ -f "$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt" ]]; then
+      image_id=$(awk -F': *' '/^Image id:/{print $2}' "$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt")
+      [[ -n "$image_id" ]] && echo "  image id: $image_id"
+    fi
+  else
+    echo "Sandbox bundle: skipped — target must already have runsc +"
+    echo "  artifactflow-sandbox:latest + scratch root, or re-run release with"
+    echo "  --with-sandbox to ship offline sandbox prerequisites."
   fi
   echo ""
   echo "Config tar highlights:"
@@ -392,6 +458,11 @@ ls -lh "$OUTDIR"/artifactflow-{app,config,deploy}-"${VERSION}".tar.gz{,.sha256} 
 if [[ $WITH_INFRA == 1 ]]; then
   ls -lh "$INFRA_ARCHIVE" "$INFRA_ARCHIVE.sha256"
 fi
+if [[ $WITH_SANDBOX == 1 ]]; then
+  ls -lh "$SANDBOX_ARCHIVE" "$SANDBOX_ARCHIVE.sha256" \
+         "$SANDBOX_VERIFY_ARCHIVE" "$SANDBOX_VERIFY_ARCHIVE.sha256" \
+         "$SANDBOX_GVISOR_ARCHIVE" "$SANDBOX_GVISOR_ARCHIVE.sha256"
+fi
 if [[ $WITH_ANALYST_TOOLS == 1 ]]; then
   ls -lh "$ANALYST_ARCHIVE" "$ANALYST_ARCHIVE.sha256"
 fi
@@ -413,6 +484,17 @@ else
   INFRA_LOAD_LN=""
   INFRA_FOOTER="  # (infra tar omitted — re-run release with --with-infra to ship caddy/postgres/redis images)"
 fi
+if [[ $WITH_SANDBOX == 1 ]]; then
+  SANDBOX_SCP_LN=$'\n      dist/artifactflow-sandbox-'"${VERSION}-${ARCH_TAG}"$'.tar.gz{,.sha256}              \\\n      dist/artifactflow-sandbox-verify-'"${VERSION}"$'.tar.gz{,.sha256}                 \\\n      dist/'"$(basename "$SANDBOX_GVISOR_ARCHIVE")"$'{,.sha256}                         \\'
+  SANDBOX_RECIPE=$'\n    # Sandbox host prerequisites: install runsc, load sandbox image, create scratch loop,\n    # then verify under gVisor. Idempotent for an already-prepared host.\n    AF_SANDBOX_POOL_SIZE=8G deploy/scripts/prepare-host.sh sandbox'
+  SANDBOX_UP_PREFIX="AF_ENABLE_SANDBOX=1 "
+  SANDBOX_FOOTER=""
+else
+  SANDBOX_SCP_LN=""
+  SANDBOX_RECIPE=""
+  SANDBOX_UP_PREFIX=""
+  SANDBOX_FOOTER="  # (sandbox bundle omitted — re-run release with --with-sandbox to ship runsc + sandbox image + verify probes)"
+fi
 if [[ $WITH_ANALYST_TOOLS == 1 ]]; then
   ANALYST_SCP_LN=$'\n      dist/artifactflow-analyst-tools-'"${ANALYST_SLUG}"$'.tar.gz{,.sha256}           \\'
   ANALYST_RECIPE=$'\n    tar xzf artifactflow-analyst-tools-'"${ANALYST_SLUG}"$'.tar.gz   # → ./analyst-tools/\n    # Offline wheels: install on the machine running observability_report.py.\n    pip install --no-index --find-links analyst-tools/wheels pandas'
@@ -428,8 +510,9 @@ To deploy on air-gapped host:
 
   # ---- First-time deployment ----
 $INFRA_FOOTER
+$SANDBOX_FOOTER
 $ANALYST_FOOTER
-  scp dist/artifactflow-{app,config,deploy}-${VERSION}.tar.gz{,.sha256}         \\${INFRA_SCP_LN}${ANALYST_SCP_LN}
+  scp dist/artifactflow-{app,config,deploy}-${VERSION}.tar.gz{,.sha256}         \\${INFRA_SCP_LN}${SANDBOX_SCP_LN}${ANALYST_SCP_LN}
       dist/artifactflow-${VERSION}.manifest.txt                                   \\
       target:/opt/artifactflow/
   ssh target
@@ -441,11 +524,10 @@ $ANALYST_FOOTER
     tar xzf artifactflow-deploy-${VERSION}.tar.gz
     tar xzf artifactflow-config-${VERSION}.tar.gz${INFRA_LOAD_LN}
     docker load -i artifactflow-app-${VERSION}.tar.gz${ANALYST_RECIPE}
-    # Preflight pass 1 — before \`up\`, only analyst-tools wheels can be verified.
-    # The py-spy check ℹ-skips because backend isn't running yet.
-    ./deploy/scripts/preflight.sh
     cp deploy/.env.intranet.example deploy/.env && vi deploy/.env
-    AF_VERSION=${VERSION} docker compose -f deploy/docker-compose.intranet.yml --profile infra up -d
+    AF_VERSION=${VERSION} deploy/scripts/prepare-host.sh check${SANDBOX_RECIPE}
+    ${SANDBOX_UP_PREFIX}AF_BUNDLE_VERSION=${VERSION} deploy/scripts/fleet.sh preflight
+    ${SANDBOX_UP_PREFIX}AF_BUNDLE_VERSION=${VERSION} deploy/scripts/fleet.sh deploy .
     # No pause/resume here — there's nothing running to pause.
     # Preflight pass 2 — after \`up\`, now verifies py-spy lives in the image.
     ./deploy/scripts/preflight.sh

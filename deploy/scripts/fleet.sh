@@ -27,6 +27,8 @@
 #   AF_REMOTE_DIR     install dir on remote hosts (default /opt/artifactflow)
 #   AF_READY_TIMEOUT  seconds to wait for /health/ready green (default 120)
 #   AF_HTTPS_PORT     LB HTTPS port for smoke (default 443)
+#   AF_ENABLE_SANDBOX add docker-compose.sandbox.yml overlay when set to 1
+#   AF_BUNDLE_VERSION select a version when bundle dir contains many manifests
 #
 # Exit: 0 = success; non-zero = a step failed (message on stderr, sequence stops).
 #
@@ -46,6 +48,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DEPLOY_DIR="$ROOT/deploy"
 COMPOSE_FILE="$DEPLOY_DIR/docker-compose.intranet.yml"
+SANDBOX_COMPOSE_FILE="$DEPLOY_DIR/docker-compose.sandbox.yml"
+ENABLE_SANDBOX="${AF_ENABLE_SANDBOX:-0}"
 
 FLEET_CONF="${AF_FLEET_CONF:-$DEPLOY_DIR/fleet.conf}"
 STATE_FILE="${AF_FLEET_STATE:-$DEPLOY_DIR/.fleet-state}"
@@ -134,10 +138,18 @@ copy_to() {  # copy_to <host> <local-src> <dst-path>
 }
 
 # compose on a host: cd into its deploy dir, export AF_VERSION, run given args.
+compose_flags_for_dir() {
+  local dir="$1"
+  printf -- "-f '%s/deploy/docker-compose.intranet.yml'" "$dir"
+  if [[ "$ENABLE_SANDBOX" == 1 ]]; then
+    printf -- " -f '%s/deploy/docker-compose.sandbox.yml'" "$dir"
+  fi
+}
+
 compose_on() {  # compose_on <host> <version> <compose-args...>
   local host="$1" ver="$2"; shift 2
-  local dir; dir="$(target_dir "$host")"
-  run_on "$host" "cd '$dir/deploy' && AF_VERSION='$ver' docker compose -f '$dir/deploy/docker-compose.intranet.yml' $*"
+  local dir flags; dir="$(target_dir "$host")"; flags="$(compose_flags_for_dir "$dir")"
+  run_on "$host" "cd '$dir/deploy' && AF_VERSION='$ver' docker compose $flags $*"
 }
 
 # ── bundle introspection (manifest is source of truth) ──────────────
@@ -145,8 +157,19 @@ BUNDLE=""; BUNDLE_VER=""; BUNDLE_PLATFORM=""; APP_TAR=""
 load_bundle_meta() {
   BUNDLE="$1"
   [[ -d "$BUNDLE" ]] || die "bundle dir not found: $BUNDLE"
-  local mf; mf="$(ls "$BUNDLE"/artifactflow-*.manifest.txt 2>/dev/null | head -1)"
-  [[ -n "$mf" ]] || die "no artifactflow-*.manifest.txt in $BUNDLE"
+  local mf="" selected="${AF_BUNDLE_VERSION:-}"
+  if [[ -n "$selected" ]]; then
+    mf="$BUNDLE/artifactflow-${selected}.manifest.txt"
+    [[ -f "$mf" ]] || die "AF_BUNDLE_VERSION=$selected but manifest not found: $mf"
+  else
+    local manifests=()
+    while IFS= read -r line; do manifests+=("$line"); done < <(find "$BUNDLE" -maxdepth 1 -type f -name 'artifactflow-*.manifest.txt' -print | sort)
+    [[ ${#manifests[@]} -gt 0 ]] || die "no artifactflow-*.manifest.txt in $BUNDLE"
+    if [[ ${#manifests[@]} -gt 1 ]]; then
+      die "multiple manifests in $BUNDLE; set AF_BUNDLE_VERSION=<version> or deploy from a clean bundle directory"
+    fi
+    mf="${manifests[0]}"
+  fi
   BUNDLE_VER="$(awk 'NR==1{print $NF}' "$mf")"
   BUNDLE_PLATFORM="$(awk -F': *' '/^Platform:/{print $2}' "$mf")"
   [[ -n "$BUNDLE_VER" ]] || die "cannot read version from manifest $mf"
@@ -249,8 +272,20 @@ cmd_preflight() {
     # runsc only needed where app (sandbox) runs
     local i is_app=0; for i in $(app_indices); do [[ "${HOST[$i]}" == "$host" ]] && is_app=1; done
     if (( is_app )); then
-      run_on "$host" 'command -v runsc >/dev/null 2>&1' && ok "runsc present" \
-        || info "runsc not found (sandbox tools will fall back to runc)"
+      if [[ "$ENABLE_SANDBOX" == 1 ]]; then
+        run_on "$host" 'command -v runsc >/dev/null 2>&1' && ok "runsc present" \
+          || { bad "runsc missing but AF_ENABLE_SANDBOX=1"; fail=1; }
+        run_on "$host" 'docker info 2>/dev/null | grep -q runsc' && ok "docker runtime runsc registered" \
+          || { bad "docker runtime runsc not registered but AF_ENABLE_SANDBOX=1"; fail=1; }
+        run_on "$host" 'docker image inspect artifactflow-sandbox:latest >/dev/null 2>&1' && ok "artifactflow-sandbox:latest loaded" \
+          || { bad "artifactflow-sandbox:latest missing but AF_ENABLE_SANDBOX=1"; fail=1; }
+        run_on "$host" 'root="${ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT:-/var/lib/artifactflow/sandbox-scratch}"; findmnt -rn "$root" >/dev/null' \
+          && ok "sandbox scratch root mounted" \
+          || { bad "sandbox scratch root not mounted but AF_ENABLE_SANDBOX=1"; fail=1; }
+      else
+        run_on "$host" 'command -v runsc >/dev/null 2>&1' && ok "runsc present" \
+          || info "runsc not found (OK unless AF_ENABLE_SANDBOX=1)"
+      fi
     fi
   done < <(all_hosts)
   echo
@@ -341,14 +376,34 @@ deploy_single_local() {
     "$SCRIPT_DIR/ensure-cert.sh" || die "cert bootstrap failed — see message above"
   fi
 
-  step "compose up (profile='${profile:-none}' ${scale_arg:-scale=1})"
+  if [[ "$ENABLE_SANDBOX" == 1 ]]; then
+    [[ -f "$SANDBOX_COMPOSE_FILE" ]] || die "AF_ENABLE_SANDBOX=1 but $SANDBOX_COMPOSE_FILE is missing"
+    if (( DRY )); then
+      info "would require: runsc registered, artifactflow-sandbox:latest loaded, scratch root mounted"
+    else
+      command -v runsc >/dev/null 2>&1 || die "AF_ENABLE_SANDBOX=1 but runsc is missing; run deploy/scripts/prepare-host.sh sandbox"
+      docker info 2>/dev/null | grep -q runsc || die "AF_ENABLE_SANDBOX=1 but Docker runtime 'runsc' is not registered"
+      docker image inspect artifactflow-sandbox:latest >/dev/null 2>&1 || die "AF_ENABLE_SANDBOX=1 but artifactflow-sandbox:latest is not loaded"
+      local scratch="${ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT:-/var/lib/artifactflow/sandbox-scratch}"
+      if [[ -f "$DEPLOY_DIR/.env" ]]; then
+        scratch="$(awk -F= '/^ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT=/{v=$2} END{print v}' "$DEPLOY_DIR/.env")"
+        scratch="${scratch:-/var/lib/artifactflow/sandbox-scratch}"
+      fi
+      findmnt -rn "$scratch" >/dev/null || die "AF_ENABLE_SANDBOX=1 but scratch root is not mounted: $scratch"
+    fi
+  fi
+
+  local compose_args=(-f "$COMPOSE_FILE")
+  [[ "$ENABLE_SANDBOX" == 1 ]] && compose_args+=(-f "$SANDBOX_COMPOSE_FILE")
+
+  step "compose up (profile='${profile:-none}' ${scale_arg:-scale=1} sandbox=${ENABLE_SANDBOX})"
   if (( DRY )); then
-    info "would: AF_VERSION=$BUNDLE_VER docker compose -f $COMPOSE_FILE $profile up -d --remove-orphans $scale_arg"
+    info "would: AF_VERSION=$BUNDLE_VER docker compose ${compose_args[*]} $profile up -d --remove-orphans $scale_arg"
     info "would: wait for /health/ready, then smoke"
     return 0
   fi
   # shellcheck disable=SC2086
-  env AF_VERSION="$BUNDLE_VER" docker compose -f "$COMPOSE_FILE" $profile up -d --remove-orphans $scale_arg \
+  env AF_VERSION="$BUNDLE_VER" docker compose "${compose_args[@]}" $profile up -d --remove-orphans $scale_arg \
     || die "compose up failed (release gate may have aborted — check 'docker compose logs release')"
   ok "stack up"
   wait_ready local
@@ -429,11 +484,13 @@ cmd_rollback() {
   has_infra && profile="--profile infra"
   [[ -n "$n" ]] && scale_arg="--scale backend=$n"
   if (( DRY )); then
-    info "would: AF_VERSION=$prev docker compose -f $COMPOSE_FILE $profile up -d --remove-orphans $scale_arg"
+    info "would: AF_VERSION=$prev docker compose -f $COMPOSE_FILE $([[ "$ENABLE_SANDBOX" == 1 ]] && printf '%s' "-f $SANDBOX_COMPOSE_FILE") $profile up -d --remove-orphans $scale_arg"
     return 0
   fi
+  local compose_args=(-f "$COMPOSE_FILE")
+  [[ "$ENABLE_SANDBOX" == 1 ]] && compose_args+=(-f "$SANDBOX_COMPOSE_FILE")
   # shellcheck disable=SC2086
-  env AF_VERSION="$prev" docker compose -f "$COMPOSE_FILE" $profile up -d --remove-orphans $scale_arg \
+  env AF_VERSION="$prev" docker compose "${compose_args[@]}" $profile up -d --remove-orphans $scale_arg \
     || die "rollback compose up failed"
   wait_ready local
   smoke local
