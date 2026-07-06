@@ -12,6 +12,20 @@
 | `server.crt` | **完整链** PEM:服务器叶子证书在前,中间 CA 依次拼接在后 |
 | `server.key` | 对应私钥(PEM,无口令) |
 
+**证书还没到位?先自签一张顶着** —— Caddy 硬引用这两个文件,缺文件配置加载就失败、
+容器起不来。新机首发时公司测试中心的证书往往还没签发下来,用 `ensure-cert.sh` 生成一张
+自签占位证书让整个栈先起来:
+
+```bash
+deploy/scripts/ensure-cert.sh                              # 占位证书,SAN=localhost
+AF_CERT_HOSTS=af.corp.local,10.0.0.7 deploy/scripts/ensure-cert.sh   # 追加 SAN
+```
+
+**幂等且不覆盖**:两个 pem 已存在(非空)就整个跳过,永远不会盖掉真证书;`fleet.sh` 起
+caddy 前已自动调它,手工 `docker compose up` 时自己先跑一次即可。真证书到位后覆盖两个 pem
+再 `caddy reload`(见下方「换证」),零停机。占位证书是自签的,客户端会显示不受信任 —— 它
+只负责「让 Caddy 能启动」,不是长期方案。
+
 注意事项:
 
 - **叶子证书单独一张不够**:部分浏览器/客户端不会自己补中间链,握手直接失败。

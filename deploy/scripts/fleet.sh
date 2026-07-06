@@ -330,6 +330,17 @@ deploy_single_local() {
   has_infra && profile="--profile infra"
   local scale_arg=""; [[ -n "$n" ]] && scale_arg="--scale backend=$n"
 
+  # Intranet Caddy hard-references deploy/certs/{server.crt,server.key}; a
+  # missing pem makes it fail config load and never start. Ensure a cert exists
+  # (self-signed placeholder if none) before `up`. Idempotent — never clobbers a
+  # real cert. See deploy/scripts/ensure-cert.sh.
+  step "ensure intranet TLS cert present"
+  if (( DRY )); then
+    info "would: deploy/scripts/ensure-cert.sh (generate self-signed placeholder if certs/ empty)"
+  else
+    "$SCRIPT_DIR/ensure-cert.sh" || die "cert bootstrap failed — see message above"
+  fi
+
   step "compose up (profile='${profile:-none}' ${scale_arg:-scale=1})"
   if (( DRY )); then
     info "would: AF_VERSION=$BUNDLE_VER docker compose -f $COMPOSE_FILE $profile up -d --remove-orphans $scale_arg"
@@ -363,7 +374,7 @@ deploy_multi_host() {
     info "  [$h] compose up -d --no-deps --scale backend=$n backend frontend → wait /health/ready → next"
   done
   # 5. regenerate static Caddy upstream from app hosts + reload
-  info "  [$(role_host lb)] render static upstream ($(for i in $(app_indices); do printf '%s:8000 ' "${HOST[$i]}"; done)) → caddy reload"
+  info "  [$(role_host lb)] ensure-cert.sh (self-signed placeholder if certs/ empty) → render static upstream ($(for i in $(app_indices); do printf '%s:8000 ' "${HOST[$i]}"; done)) → caddy reload"
   # 6. smoke through LB
   info "  smoke via LB ($(role_host lb))"
   echo

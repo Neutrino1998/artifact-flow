@@ -32,6 +32,12 @@ graph TD
 - **代理配置的组织：** 两个模式共用 `deploy/caddy/common.caddy`（路由顺序 / 维护页 gate / SSE flush / 上传总量闸 / X-Real-IP / 多副本轮询 + wedge 副本被动摘除，全部模式无关机制只写一遍），入口文件各留薄壳——`deploy/caddy/Caddyfile`（Mode 2：ACME + AF_DOMAIN）/ `deploy/caddy/Caddyfile.intranet`（Mode 3：静态 tls + HTTP→HTTPS 跳转）。`deploy/caddy/` 整目录挂载进容器（单文件挂载 pin inode，编辑/tar 覆盖后 reload 会断）。维护页 flag 机制（`deploy/maintenance/`）同一套。
 - **2A/3A vs 2B/3B：** `--profile infra` 控制是否启动 PG/Redis 容器
 
+**`deploy/` 下的独立文档**（本文档覆盖不到的细节，按需展开）：
+
+- [`deploy/FLEET.md`](https://github.com/Neutrino1998/artifact-flow/blob/main/deploy/FLEET.md) — `fleet.sh` 单机→多机统一发布入口（见下方「扩缩容与多机发布」）
+- [`deploy/MULTI-REPLICA.md`](https://github.com/Neutrino1998/artifact-flow/blob/main/deploy/MULTI-REPLICA.md) — release-vs-serve 多副本拆分的完整设计 + 真机验收记录/清单
+- [`deploy/MIGRATION-project-name.md`](https://github.com/Neutrino1998/artifact-flow/blob/main/deploy/MIGRATION-project-name.md) — 一次性 `deploy_*` → `artifactflow_*` volume 改名迁移（仅升级自 pre-pin 版本的老部署需要，新部署跳过）
+
 ---
 
 ## Mode 1: Quick Trial
@@ -137,8 +143,9 @@ open https://$AF_DOMAIN
 # 水平扩展 backend（Caddy 自动负载均衡）
 docker compose -f docker-compose.prod.yml --profile infra up -d --scale backend=2
 
-# 注意：首次启动多副本时，Alembic 迁移通过 PG advisory lock 串行化
-# 只有一个副本执行迁移，其他副本等待并验证后再启动
+# 注意：一次性 release 服务先跑迁移 + reconcile 并退出，backend 靠 compose
+# depends_on 等它完成后再起来 serve（release-vs-serve 拆分，非各副本抢锁）
+# 详见「运维参考 → 数据库迁移」与 deploy/MULTI-REPLICA.md
 ```
 
 ---
@@ -229,13 +236,47 @@ cp deploy/.env.intranet.example deploy/.env
 
 # 4. 内网 LLM（如需）：编辑 config/models/models.yaml，把 base_url 指向内部推理端点
 
-# 5. 启动（3A: 自建基础设施）
+# 5. TLS 证书：真证书就位放 deploy/certs/{server.crt,server.key}（完整链，见该目录 README）。
+#    还没签发下来？先自签一张占位证书让 Caddy 能起来（幂等，绝不覆盖真证书）：
+deploy/scripts/ensure-cert.sh
+#    真证书到位后覆盖两个 pem 再 caddy reload（零停机，见「运行时配置变更」表）。
+
+# 6. 启动（3A: 自建基础设施）
 AF_VERSION=1.0.0 docker compose -f deploy/docker-compose.intranet.yml --profile infra up -d
 
-# 6. 创建管理员
+# 7. 创建管理员
 docker compose -f deploy/docker-compose.intranet.yml exec backend \
   python scripts/create_admin.py admin --password <your-password>
 ```
+
+### 扩缩容与多机发布（fleet.sh）
+
+`deploy/scripts/fleet.sh` 是从「一台机器」到「多台机器」的统一发布入口，把上面「首次部署」
+的校验 + 加载 + 启动 + 探活收成一条命令，并原生支持 `--scale`：
+
+```bash
+deploy/scripts/fleet.sh preflight            # 单机/每台机器就绪检查
+deploy/scripts/fleet.sh deploy <bundle-dir>  # 校验 → arch 检查 → load → release 门 → up → 探活
+deploy/scripts/fleet.sh deploy --dry-run <d> # 只打印计划，不改动任何东西
+deploy/scripts/fleet.sh status               # 各机器 compose ps + LB 健康
+deploy/scripts/fleet.sh rollback             # 回退到上一个成功版本
+```
+
+拓扑写在 `deploy/fleet.conf`（从 `fleet.conf.example` 复制，gitignored），单机场景下四个角色
+（`infra`/`release`/`app`/`lb`）都填 `local`；`app` 行的 `scale=N` 就是 `--scale backend=N`
+的等价物。完整命令、多机时序、以及 TLS 证书自动兜底（`up` 前自动跑
+`ensure-cert.sh`），见 [`deploy/FLEET.md`](https://github.com/Neutrino1998/artifact-flow/blob/main/deploy/FLEET.md)。
+
+> **现状：** 单机路径（含 `--scale`）已跑通并推荐日常使用；**多机路径目前 gated off**
+> （`fleet.sh` 里显式 `die`，只有 `--dry-run` 能打印计划），要等第二台机器上跑通验收后才解封——
+> 详见 FLEET.md「Multi-host: unexercised seams」。多机到位前，扩容仍只能在单机上
+> `--scale`；跨机负载均衡 / 多机数据库 URL 等留在文档里作为**已设计未验证**的路径。
+>
+> `fleet.sh` 目前只包装 `deploy/docker-compose.intranet.yml`（Mode 3）；Mode 2（公网）
+> 扩缩容仍用上面 Mode 2A「扩缩容」小节里的裸 `--scale` + `deploy-prod.sh`。
+>
+> `fleet.sh deploy` 是直接 `up`（数秒 blip，无维护页）；要维护页包住整个升级窗口，
+> 仍走下面「滚动更新已有部署」的 `pause.sh`/`resume.sh`。
 
 ### 滚动更新已有部署
 
@@ -565,7 +606,10 @@ Mode A 的 compose 把 Redis `--maxmemory` 从默认 `256mb` 提到 **`512mb`**�
 
 ### 数据库迁移
 
-容器启动时 `deploy/entrypoint.sh` 自动处理迁移：
+**两条路径，`docker-compose.prod.yml` / `deploy/docker-compose.intranet.yml` 默认走前者：**
+
+- **Release-vs-serve 拆分（Mode 2/3 默认）：** 一次性 `release` 服务（`entrypoint.sh release`）单独跑迁移 + reconcile 后退出；backend 带 `AF_SKIP_RELEASE=1`，靠 compose `depends_on: { release: { condition: service_completed_successfully } }` 等它退出，**不再自己抢锁**——多副本时所有 backend 走同一条"等 release 退出"的依赖关系，下面 Leader/Follower 抢锁的分支在这条路径下根本不会进入（backend 直接跳到"继续启动"）。详见 [`deploy/MULTI-REPLICA.md`](https://github.com/Neutrino1998/artifact-flow/blob/main/deploy/MULTI-REPLICA.md)。
+- **Inline 自迁移（Mode 1 / 向后兼容 fallback）：** 不设 `AF_SKIP_RELEASE` 时的默认行为——容器启动时自己判断数据库类型、按下面这套逻辑决出 leader/follower。SQLite 单副本走这条（`release` 拆分只对 PG/MySQL 有意义）。
 
 ```mermaid
 flowchart TD
@@ -588,7 +632,8 @@ flowchart TD
     Continue --> Server[启动服务]
 ```
 
-- **多副本安全：** 通过 `pg_advisory_lock(hashtext('alembic_migrate'))` 保证只有一个副本执行迁移
+> 上图是 `run_release()` 的迁移执行逻辑本身（`entrypoint.sh` 内的共享函数）——Release-vs-serve 路径下，一次性 `release` 服务只会走到 Leader 分支（没有其他副本在抢同一把锁）；Follower 分支只在 inline fallback 下、多个 backend 同时自迁移时才会触发。
+
 - **失败处理：** Leader 迁移失败后不释放 lock（连接关闭自动释放），Follower 检测到 schema 未到 head 后退出，容器 restart policy 会重试
 - **Fallback：** 如果 advisory lock 不可用（如 MySQL），直接执行 `alembic upgrade head`
 
@@ -599,7 +644,7 @@ flowchart TD
 | 维度 | **Mode 2（公网）** | **Mode 3（内网）** |
 |---|---|---|
 | 入口文件 | `deploy/caddy/Caddyfile` | `deploy/caddy/Caddyfile.intranet` |
-| TLS | **自动 HTTPS**（Let's Encrypt / ACME，端口 80+443；证书状态在 `caddy_data` 卷） | **静态证书**（`tls /etc/caddy/certs/server.crt server.key`，全局 `auto_https off` 防 ACME 拨号；证书在 bind-mount 目录，无状态卷） |
+| TLS | **自动 HTTPS**（Let's Encrypt / ACME，端口 80+443；证书状态在 `caddy_data` 卷） | **静态证书**（`tls /etc/caddy/certs/server.crt server.key`，全局 `auto_https off` 防 ACME 拨号；证书在 bind-mount 目录，无状态卷）。证书缺文件时 Caddy 起不来——真证书没到位可用 `deploy/scripts/ensure-cert.sh` 生成自签占位证书先顶着（幂等、不覆盖真证书） |
 | HTTP :80 | ACME 验证 + 自动跳 https（Caddy 内建） | 显式 `redir` 到 `https://{host}:{$AF_HTTPS_PORT}`（`auto_https off` 关掉了内建跳转） |
 | 端口 | 80/443 固定（协议要求） | `AF_HTTP_PORT`（默认 80）/ `AF_HTTPS_PORT`（默认 443）可改 |
 
