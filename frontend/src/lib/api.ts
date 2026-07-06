@@ -249,7 +249,7 @@ export async function importSkill(
   return res.json() as Promise<SkillImportResponse>;
 }
 
-/** 导出原始 zip 字节（无损）。调用方拿 Blob 自己走 objectURL 下载。 */
+/** 导出后端保存的 skill zip。 */
 export async function downloadSkillBundle(slug: string): Promise<Blob> {
   const res = await fetch(
     `${BASE_URL}/api/v1/skills/${encodeURIComponent(slug)}/export`,

@@ -116,7 +116,10 @@ async def test_skill_seed_created_and_columns(db_session, cfg):
     assert row.skill_md == "Detailed guidance body."
     # license/metadata → meta JSON 杂项列(系统不单独消费)
     assert row.meta == {"license": "MIT", "metadata": {"version": "1.2"}}
-    assert row.bundle is None                 # 单 SKILL.md 无 bundle
+    assert row.bundle is not None             # 单 SKILL.md 也写入可下载 zip
+    assert row.has_extra_files is False
+    with zipfile.ZipFile(io.BytesIO(row.bundle)) as zf:
+        assert zf.namelist() == ["SKILL.md"]
 
 
 async def test_skill_idempotent_then_update(db_session, cfg):
@@ -205,7 +208,8 @@ async def test_skill_visibility_change_clears_dept_rules_keeps_user(db_session, 
 
 async def test_seed_collides_with_dynamic_skill(db_session, cfg):
     _, _, skills = cfg
-    db_session.add(Skill(slug="dup", name="dup", source="dynamic", skill_md="x"))
+    db_session.add(Skill(slug="dup", name="dup", source="dynamic", skill_md="x",
+                         bundle=b"skill-zip"))
     await db_session.flush()
 
     _write(skills / "dup" / "SKILL.md", _skill_md(name="dup"))
@@ -351,8 +355,9 @@ async def test_bundle_zip_stored_verbatim(db_session, cfg):
     row = (await db_session.execute(select(Skill).where(Skill.slug == "pack"))).scalar_one()
     assert row.bundle == blob                 # 原始字节无损存(决策 3)
     assert row.skill_md == "Mount me."         # 从 zip 内 SKILL.md 解出正文
+    assert row.has_extra_files is True
     snap = await load_skill_snapshot(db_session)
-    assert snap["pack"].has_bundle is True
+    assert snap["pack"].has_extra_files is True
 
 
 @pytest.mark.parametrize("wrapper", [None, "pack", "repo-main/skills/pack"])
@@ -414,15 +419,16 @@ async def test_prose_dir_with_extras_loud_fails(db_session, cfg):
         await _run(db_session, cfg)
 
 
-async def test_single_file_skill_has_no_bundle(db_session, cfg):
+async def test_single_file_skill_has_no_extra_files(db_session, cfg):
     _, _, skills = cfg
     _write(skills / "solo" / "SKILL.md", _skill_md(name="solo", allowed_tools=None))
     await _run(db_session, cfg)
 
     row = (await db_session.execute(select(Skill).where(Skill.slug == "solo"))).scalar_one()
-    assert row.bundle is None
+    assert row.bundle is not None
+    assert row.has_extra_files is False
     snap = await load_skill_snapshot(db_session)
-    assert snap["solo"].has_bundle is False
+    assert snap["solo"].has_extra_files is False
 
 
 async def test_bundle_idempotent_then_updated(db_session, cfg):
@@ -445,8 +451,11 @@ async def test_get_bundle_roundtrip(db_session, cfg):
 
     repo = SkillRepository(db_session)
     assert await repo.get_bundle("pack") == blob
-    # 单文件 skill / 不存在的 slug → None
-    assert await repo.get_bundle("solo") is None
+    solo_bundle = await repo.get_bundle("solo")
+    assert solo_bundle is not None
+    with zipfile.ZipFile(io.BytesIO(solo_bundle)) as zf:
+        assert zf.namelist() == ["SKILL.md"]
+    # 不存在的 slug → None
     assert await repo.get_bundle("nope") is None
 
 

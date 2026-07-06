@@ -46,15 +46,15 @@ from utils.skill_zip import SkillZipError, locate_skill_md, strip_prefix
 
 logger = get_logger("ArtifactFlow")
 
-# 有 bundle:read_skill 只返回 SKILL.md,其余文件要 mount 进沙盒才读得到。
-_MOUNT_HINT_BUNDLE = (
+# 有附属文件:read_skill 只返回 SKILL.md,其余文件要 mount 进沙盒才读得到。
+_MOUNT_HINT_EXTRA_FILES = (
     "\n\n---\n"
     "Above is this skill's guidance (SKILL.md). It bundles more files "
     "(references/, scripts/, assets/) that are NOT shown here — call mount_skill "
     "to unpack them into the sandbox, then read or run them with bash."
 )
-# 无 bundle:SKILL.md 就是完整技能,别去 mount(会得到「无 bundle 可挂」)。
-_MOUNT_HINT_NO_BUNDLE = (
+# 无附属文件:SKILL.md 就是完整技能,别去 mount。
+_MOUNT_HINT_NO_EXTRA_FILES = (
     "\n\n---\n"
     "Above is this skill's complete guidance (SKILL.md); it has no bundled files."
 )
@@ -112,8 +112,8 @@ class ReadSkillTool(BaseTool):
         body = await self._service.get_skill_md(slug)
         if body is None:
             return ToolResult(success=False, error=f"Skill '{slug}' has no content.")
-        # 提示按 has_bundle 条件化(D-2):有 bundle 才指向 mount_skill,无则说这是完整技能。
-        hint = _MOUNT_HINT_BUNDLE if info.has_bundle else _MOUNT_HINT_NO_BUNDLE
+        # 提示按 has_extra_files 条件化:有附属文件才指向 mount_skill。
+        hint = _MOUNT_HINT_EXTRA_FILES if info.has_extra_files else _MOUNT_HINT_NO_EXTRA_FILES
         return ToolResult(
             success=True,
             data=body + hint,
@@ -124,8 +124,8 @@ class ReadSkillTool(BaseTool):
 class MountSkillTool(BaseTool):
     """把一个 skill 的 bundle 解进沙盒 `/workspace/.skills/<slug>/`(L3,D-2)。
 
-    可见性闸同 read_skill(EffectiveSkillSet、404 不漏);`bundle=NULL`(单 SKILL.md)→
-    明确报「无 bundle 可挂」。解压走**沙盒内工具驱动**:后端只做有界字节拷贝(bundle→
+    可见性闸同 read_skill(EffectiveSkillSet、404 不漏);无附属文件的单 SKILL.md 技能
+    不需要 mount。解压走**沙盒内工具驱动**:后端只做有界字节拷贝(bundle→
     容器 /tmp、无解压放大),`session.exec` 在 `--network=none`+quota 容器里
     `python -m zipfile -e` → zip bomb 只炸本轮沙盒(合原则 2)。剥壳前缀 runtime 重算。
     """
@@ -143,8 +143,8 @@ class MountSkillTool(BaseTool):
                 f"{WORKSPACE_MOUNT}/{SKILLS_SUBDIR}/<slug>/, so bash can read its references "
                 "and run its scripts. Call this after read_skill tells you the skill has "
                 "bundled files. The sandbox has no network; if a script needs Python packages, "
-                "install them offline from any bundled wheels. Skills with no bundle need no "
-                "mounting — their SKILL.md is the whole skill."
+                "install them offline from any bundled wheels. Skills with no extra files need "
+                "no mounting — their SKILL.md is the whole skill."
             ),
             permission=ToolPermission.AUTO,
         )
@@ -170,16 +170,24 @@ class MountSkillTool(BaseTool):
         info = self._skillset.visible.get(slug)
         if info is None:
             return ToolResult(success=False, error=f"Skill '{slug}' not found.")
-
-        bundle = await self._service.get_bundle(slug)
-        if bundle is None:
-            # 单文件 skill:无附属可挂。指回 read_skill,别让模型空撞。
+        if not info.has_extra_files:
             return ToolResult(
                 success=False,
                 error=(
-                    f"Skill '{slug}' has no bundle to mount — its full guidance is already "
-                    "in read_skill and there are no extra files."
+                    f"Skill '{slug}' has no extra bundled files to mount — its full guidance "
+                    "is already in read_skill."
                 ),
+            )
+
+        bundle = await self._service.get_bundle(slug)
+        if bundle is None:
+            # 可见快照说可 mount,但包取不到:写入/删除竞态或坏数据,ops 要看。
+            logger.error(
+                f"mount_skill: visible skill '{slug}' has extra files but no bundle "
+                f"(msg={self._session.message_id})"
+            )
+            return ToolResult(
+                success=False, error=f"Skill '{slug}' bundle could not be loaded."
             )
 
         # 剥壳前缀 = bundle 里唯一 SKILL.md 的父目录(namelist 读中央目录、不解压)。
@@ -301,14 +309,14 @@ def create_skill_tools(
     sandbox_session: Optional[SandboxSession] = None,
 ) -> List[BaseTool]:
     """请求级 skill 工具工厂(同 create_artifact_tools)。skillset 缺省(无 skill)→ 空集。
-    有沙盒 session 时并建 mount_skill(bundle 走沙盒消费)。"""
+    有沙盒 session 且存在附属文件时并建 mount_skill(bundle 走沙盒消费)。"""
     if skillset is None or not skillset.visible:
         return []
     tools: List[BaseTool] = [ReadSkillTool(service, skillset)]
-    # mount_skill 只在(有沙盒 + 至少一个可见 skill 带 bundle)时才建 —— 全是 prose skill
-    # 时它没东西可挂,建了只是给每个 bash agent 加一条死工具行(按需注入,镜像 search_tools)。
+    # mount_skill 只在(有沙盒 + 至少一个可见 skill 有附属文件)时才建 —— 全是
+    # SKILL.md-only 时它没东西可挂,建了只是给每个 bash agent 加一条死工具行。
     if sandbox_session is not None and any(
-        info.has_bundle for info in skillset.visible.values()
+        info.has_extra_files for info in skillset.visible.values()
     ):
         tools.append(MountSkillTool(sandbox_session, service, skillset))
     return tools

@@ -32,9 +32,12 @@ class SkillItem(BaseModel):
             "UI; deletable by its owner or an admin)."
         ),
     )
-    has_bundle: bool = Field(
+    has_extra_files: bool = Field(
         ...,
-        description="Whether an original zip bundle exists (enables lossless export).",
+        description=(
+            "Whether the skill bundle contains files beyond SKILL.md. Controls whether "
+            "read_skill points to mount_skill."
+        ),
     )
     visibility: str = Field(
         ..., description="private (owner-only) | public (shared) | department"

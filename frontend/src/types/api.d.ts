@@ -1134,7 +1134,7 @@ export interface paths {
         };
         /**
          * Export Skill
-         * @description 导出原始 zip 字节(无损 by construction)。不可见 → 404;无 bundle → 400。
+         * @description 导出 DB 中保存的 skill zip。不可见 → 404。
          */
         get: operations["export_skill_api_v1_skills__slug__export_get"];
         put?: never;
@@ -2423,10 +2423,10 @@ export interface components {
              */
             source: string;
             /**
-             * Has Bundle
-             * @description Whether an original zip bundle exists (enables lossless export).
+             * Has Extra Files
+             * @description Whether the skill bundle contains files beyond SKILL.md. Controls whether read_skill points to mount_skill.
              */
-            has_bundle: boolean;
+            has_extra_files: boolean;
             /**
              * Visibility
              * @description private (owner-only) | public (shared) | department

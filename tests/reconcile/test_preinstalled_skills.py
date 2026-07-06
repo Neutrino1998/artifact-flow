@@ -7,7 +7,8 @@
 2. **过自家硬门**:每个预装 zip 过 E-1 validator 必须零 error 零 warning
    (预装集是"真语料验证",warning 也不许 —— 用户导入才允许 warning 放行)。
 3. **seed 解析干净**:parse_skill_seeds 吃下 config/skills/ 全量不抛 SeedError,
-   且五个预装 slug 都在、public + default_enabled(用户开箱即在 L1)。
+   且预装 slug 都在、public + default_enabled(用户开箱即在 L1),单文件 skill 也有
+   可下载 bundle,但 has_extra_files=False。
 """
 
 import importlib.util
@@ -24,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = ROOT / "config" / "skills-src"
 ZIP_DIR = ROOT / "config" / "skills"
 PREINSTALLED = ["docx", "pdf", "pptx", "skill-creator", "xlsx"]
-# 纯散文预装(SKILL.md-only 目录形态,bundle=NULL,无 zip/构建链)
+# 纯散文预装(SKILL.md-only 目录源码;入库时也会生成单文件 zip bundle)
 PREINSTALLED_PROSE = ["html-artifact-design"]
 
 
@@ -81,7 +82,7 @@ def test_seed_parse_clean_and_defaults():
         assert seed.visibility == "public"
         assert seed.default_enabled is True
         is_prose = slug in PREINSTALLED_PROSE
-        assert (seed.bundle is None) == is_prose, (
-            f"{slug}: bundle 形态与预期不符(带脚本的走 zip,纯散文走目录)"
-        )
+        assert seed.bundle is not None
+        assert seed.has_extra_files is (not is_prose)
+        assert _zip_manifest(seed.bundle)
         assert seed.skill_md.strip()

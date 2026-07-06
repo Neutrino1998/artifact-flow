@@ -2931,7 +2931,7 @@
           "skills"
         ],
         "summary": "Export Skill",
-        "description": "\u5bfc\u51fa\u539f\u59cb zip \u5b57\u8282(\u65e0\u635f by construction)\u3002\u4e0d\u53ef\u89c1 \u2192 404;\u65e0 bundle \u2192 400\u3002",
+        "description": "\u5bfc\u51fa DB \u4e2d\u4fdd\u5b58\u7684 skill zip\u3002\u4e0d\u53ef\u89c1 \u2192 404\u3002",
         "operationId": "export_skill_api_v1_skills__slug__export_get",
         "security": [
           {
@@ -5204,10 +5204,10 @@
             "title": "Source",
             "description": "'seeded' (config-owned, read-only in the UI) or 'dynamic' (imported via the UI; deletable by its owner or an admin)."
           },
-          "has_bundle": {
+          "has_extra_files": {
             "type": "boolean",
-            "title": "Has Bundle",
-            "description": "Whether an original zip bundle exists (enables lossless export)."
+            "title": "Has Extra Files",
+            "description": "Whether the skill bundle contains files beyond SKILL.md. Controls whether read_skill points to mount_skill."
           },
           "visibility": {
             "type": "string",
@@ -5229,7 +5229,7 @@
           "default_enabled",
           "is_overridden",
           "source",
-          "has_bundle",
+          "has_extra_files",
           "visibility",
           "is_owner"
         ],

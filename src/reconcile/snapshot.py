@@ -69,7 +69,7 @@ class SkillInfo:
     default_enabled: bool
     owner_user_id: Optional[str]
     allowed_tools: List[str] = field(default_factory=list)
-    has_bundle: bool = False           # 有附属文件可 mount(read_skill 条件化提示,D-1;不载 blob)
+    has_extra_files: bool = False      # bundle 内有 SKILL.md 外文件,需要 mount_skill 才能读/运行
     compatibility: Optional[dict] = None  # frontmatter `compatibility` 声明(mount_skill 依赖提示原样透出,D-2;小 JSON、随快照)
     source: str = "seeded"             # seeded(config 只读)/ dynamic(UI 导入,可删;E-2)
 
@@ -267,7 +267,8 @@ async def load_skill_snapshot(session: AsyncSession) -> Dict[str, SkillInfo]:
     每 turn 一次快照(同 load_registry_snapshot,controller_factory 调用,C-2 接入);
     per-user 解析(user_skill 覆盖 + dept 规则)另在 `EffectiveSkillSet` 做(C-2)。
     slug 定序保 L1 渲染顺序稳定(APC / prompt 快照)。skill_md / bundle 字节**不入快照**(大,
-    L2/L3 按需读)—— 只投影 `bundle IS NOT NULL` 成 has_bundle 布尔(read_skill 据此条件化提示)。
+    L2/L3 按需读)—— `bundle` 对正常行恒存在,快照只投影 `has_extra_files` 来决定
+    read_skill 是否提示 / 创建 mount_skill。
     ORM 不外逃:直接投影列、物化成 SkillInfo dataclass。"""
     rows = (
         await session.execute(
@@ -279,7 +280,7 @@ async def load_skill_snapshot(session: AsyncSession) -> Dict[str, SkillInfo]:
                 Skill.default_enabled,
                 Skill.owner_user_id,
                 Skill.allowed_tools,
-                Skill.bundle.isnot(None).label("has_bundle"),
+                Skill.has_extra_files,
                 Skill.compatibility,
                 Skill.source,
             ).order_by(Skill.slug)
@@ -294,7 +295,7 @@ async def load_skill_snapshot(session: AsyncSession) -> Dict[str, SkillInfo]:
             default_enabled=r.default_enabled,
             owner_user_id=r.owner_user_id,
             allowed_tools=list(r.allowed_tools or []),
-            has_bundle=bool(r.has_bundle),
+            has_extra_files=bool(r.has_extra_files),
             compatibility=r.compatibility,
             source=r.source,
         )

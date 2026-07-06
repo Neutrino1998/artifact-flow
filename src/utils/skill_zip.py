@@ -41,3 +41,14 @@ def strip_prefix(member: str) -> str:
     `repo/skills/x`,mv 叶子目录即可。
     """
     return member.rsplit("/", 1)[0] if "/" in member else ""
+
+
+def has_extra_files(names: List[str], md_member: str) -> bool:
+    """bundle 是否含 SKILL.md 之外的文件。
+
+    `bundle` 代表可下载包;是否需要 mount_skill 取决于这个派生事实。调用方传入
+    validator 已过滤过的 file-only `names`,所以目录项不参与判断。
+    """
+    prefix = strip_prefix(md_member)
+    root = f"{prefix}/" if prefix else ""
+    return any(n != md_member and (not root or n.startswith(root)) for n in names)

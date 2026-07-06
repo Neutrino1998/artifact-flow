@@ -22,7 +22,7 @@ class SkillService:
         )
 
     async def get_bundle(self, slug: str) -> Optional[bytes]:
-        """取 skill bundle(L3,完整原始 zip 字节)。无 db_manager(测试)/ 无 bundle → None。"""
+        """取 skill bundle(L3,完整 zip 字节)。无 db_manager(测试)/不存在 → None。"""
         if self._db_manager is None:
             return None
         return await self._db_manager.with_retry(

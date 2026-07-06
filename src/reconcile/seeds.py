@@ -13,8 +13,10 @@ config 种子解析 —— 把 `config/tools/` / `config/mcp/` / `config/agents/
 """
 
 import hashlib
+import io
 import json
 import os
+import zipfile
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -26,6 +28,7 @@ from tools.custom.secrets import assert_secret_refs_allowed
 from utils.frontmatter import FrontmatterError, normalize_allowed_tools, parse_frontmatter_text
 from utils.logger import get_logger
 from utils.skill_validator import validate_skill_zip
+from utils.skill_zip import has_extra_files
 from utils.validators import is_config_entry
 
 logger = get_logger("ArtifactFlow")
@@ -34,6 +37,8 @@ _VALID_PARAM_TYPES = {"string", "integer", "number", "boolean"}
 _VALID_PERMISSIONS = {"auto", "confirm"}
 _VALID_VISIBILITY = {"public", "department"}  # unit 无 private(决策 1)
 _VALID_SKILL_VISIBILITY = {"private", "public", "department"}  # skill 独有 private(决策 1)
+_ZIP_FIXED_DATE = (1980, 1, 1, 0, 0, 0)
+_ZIP_FIXED_MODE = 0o644
 # skill frontmatter 里系统单独消费的 key(其余 → meta JSON 杂项列,决策 3)
 _SKILL_CONSUMED_FM_KEYS = {
     "name", "description", "allowed-tools", "compatibility", "visibility", "default_enabled",
@@ -100,7 +105,8 @@ class SkillSeed:
     compatibility: Optional[dict]      # 气隙依赖声明(C 存,D/E 消费)
     meta: Optional[dict]               # license/version/未知扩展(系统不单独消费)
     skill_md: str                      # SKILL.md 正文(frontmatter 已剥离)
-    bundle: Optional[bytes] = None     # 完整原始 zip(目录有 SKILL.md 以外文件才非 NULL,D-1)
+    bundle: bytes                      # 完整 zip 包(单文件 skill 也写入仅含 SKILL.md 的 zip)
+    has_extra_files: bool = False      # bundle 里是否含 SKILL.md 之外的文件(决定 mount 提示)
     seed_hash: str = ""
 
 
@@ -124,6 +130,18 @@ def _split_frontmatter(path: str) -> Tuple[dict, str]:
         return parse_frontmatter_text(content, path)
     except FrontmatterError as e:
         raise SeedError(str(e))
+
+
+def _single_file_skill_zip(skill_md_bytes: bytes) -> bytes:
+    """单 SKILL.md → deterministic zip。用于 prose seed 的可下载包存储。"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+        zi = zipfile.ZipInfo("SKILL.md", date_time=_ZIP_FIXED_DATE)
+        zi.compress_type = zipfile.ZIP_DEFLATED
+        zi.create_system = 3
+        zi.external_attr = _ZIP_FIXED_MODE << 16
+        zf.writestr(zi, skill_md_bytes, compresslevel=9)
+    return buf.getvalue()
 
 
 def _validate_unit_name(name: str, source: str) -> None:
@@ -566,7 +584,8 @@ def parse_skill_seeds(
 ) -> List["SkillSeed"]:
     """解析 config/skills/ → SkillSeed 列表。两种形态(D-1):
 
-    - **prose skill = `config/skills/<slug>/` 目录**,仅一个 SKILL.md → `bundle=NULL`。
+    - **prose skill = `config/skills/<slug>/` 目录**,仅一个 SKILL.md → 入库时也
+      存一个只含 SKILL.md 的 deterministic zip,`has_extra_files=False`。
       目录里出现 SKILL.md 以外的真实文件(references/scripts)→ **loud-fail 指向 zip**
       (防"以为打了 bundle、附属文件却被静默丢")。
     - **bundle skill = `config/skills/<slug>.zip`**,slug = 文件名去 `.zip`。存**原始 zip
@@ -621,14 +640,14 @@ def _skill_seed_from_md(
     frontmatter: dict,
     body: str,
     *,
-    bundle: Optional[bytes],
+    bundle: bytes,
+    has_extra: bool,
     where: str,
     known_unit_names: set,
     known_full_names: Dict[str, str],
 ) -> "SkillSeed":
-    """共享:frontmatter + body(+ 可选 bundle 字节)→ 校验 + 组装 SkillSeed。
-    prose(bundle=None):seed_hash 走归一化列 payload;bundle:seed_hash=sha256(字节)
-    —— 提交的 zip 是稳定字节(任何 OS 同 checkout 同哈希),无跨环境 churn。"""
+    """共享:frontmatter + body + bundle 字节 → 校验 + 组装 SkillSeed。
+    seed_hash=sha256(bundle):目录 prose 先打 deterministic 单文件 zip,与 zip seed 统一。"""
     if not body.strip():
         # 空正文 = 激活会「授能力、永不注正文」(07-02 联审):写侧拒。zip 路径已被
         # validator 的 md.body_empty 拦,此检查兜 prose 目录路径(不走 validator)。
@@ -666,20 +685,9 @@ def _skill_seed_from_md(
         meta=meta,
         skill_md=body,
         bundle=bundle,
+        has_extra_files=has_extra,
     )
-    if bundle is None:
-        seed.seed_hash = _content_hash({
-            "name": seed.name,
-            "description": seed.description,
-            "visibility": seed.visibility,
-            "default_enabled": seed.default_enabled,
-            "allowed_tools": sorted(seed.allowed_tools),
-            "compatibility": seed.compatibility,
-            "meta": seed.meta,
-            "skill_md": seed.skill_md,
-        })
-    else:
-        seed.seed_hash = hashlib.sha256(bundle).hexdigest()
+    seed.seed_hash = hashlib.sha256(bundle).hexdigest()
     return seed
 
 
@@ -689,7 +697,7 @@ def _parse_skill_dir(
     known_unit_names: set,
     known_full_names: Dict[str, str],
 ) -> "SkillSeed":
-    """prose skill(单 SKILL.md 目录,bundle=NULL)。附属文件 → loud-fail 指向 zip。"""
+    """prose skill(单 SKILL.md 目录)。附属文件 → loud-fail 指向 zip。"""
     skill_md_path = os.path.join(dir_path, "SKILL.md")
     if not os.path.isfile(skill_md_path):
         raise SeedError(f"skill dir '{slug}/' missing SKILL.md")
@@ -700,9 +708,14 @@ def _parse_skill_dir(
             f"skill dir '{slug}/' has files besides SKILL.md ({sorted(extras)}); "
             f"bundle skills must be provided as '{slug}.zip', not an unzipped directory"
         )
+    with open(skill_md_path, "rb") as f:
+        skill_md_bytes = f.read()
     frontmatter, body = _split_frontmatter(skill_md_path)
     return _skill_seed_from_md(
-        slug, frontmatter, body, bundle=None, where=skill_md_path,
+        slug, frontmatter, body,
+        bundle=_single_file_skill_zip(skill_md_bytes),
+        has_extra=False,
+        where=skill_md_path,
         known_unit_names=known_unit_names, known_full_names=known_full_names,
     )
 
@@ -727,6 +740,9 @@ def _parse_skill_zip(
         raise SeedError(f"skill '{slug}.zip' failed validation: {detail}")
     parsed = result.parsed
     return _skill_seed_from_md(
-        slug, parsed.frontmatter, parsed.body, bundle=blob, where=f"{slug}.zip",
+        slug, parsed.frontmatter, parsed.body,
+        bundle=blob,
+        has_extra=has_extra_files(parsed.names, parsed.md_member),
+        where=f"{slug}.zip",
         known_unit_names=known_unit_names, known_full_names=known_full_names,
     )

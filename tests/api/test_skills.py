@@ -11,14 +11,20 @@ from sqlalchemy import select
 from api.services.auth import hash_password
 from config import config
 from db.models import Skill, User, UserSkill
+from utils.skill_validator import validate_skill_zip
 
 
 async def _seed_skill(db_session, slug, visibility="public", default_enabled=True,
-                      source="seeded", owner_user_id=None, bundle=None):
+                      source="seeded", owner_user_id=None, bundle=None,
+                      has_extra_files=False):
+    if bundle is None:
+        bundle = _zip(
+            f"---\nname: {slug.title()}\ndescription: d\n---\nbody\n"
+        )
     db_session.add(Skill(
         slug=slug, name=slug.title(), description="d", visibility=visibility,
         default_enabled=default_enabled, source=source, skill_md="body",
-        owner_user_id=owner_user_id, bundle=bundle,
+        owner_user_id=owner_user_id, bundle=bundle, has_extra_files=has_extra_files,
     ))
     await db_session.commit()
 
@@ -113,7 +119,7 @@ class TestImportSkill:
         sk = body["skill"]
         assert sk["slug"] == "my-skill"
         assert sk["visibility"] == "private" and sk["is_owner"] is True
-        assert sk["source"] == "dynamic" and sk["has_bundle"] is True
+        assert sk["source"] == "dynamic" and sk["has_extra_files"] is False
         assert sk["enabled"] is True and sk["default_enabled"] is True  # 私有即刻进 L1
 
         # bundle = 原始字节(导出无损前提);行字段镜像通道语义
@@ -252,10 +258,20 @@ class TestExportSkill:
         assert r.headers["content-type"] == "application/zip"
         assert r.content == blob  # 无损:原始字节原样返还
 
-    async def test_export_prose_skill_400(self, client: AsyncClient, db_session):
-        await _seed_skill(db_session, "prose")  # bundle NULL
+    async def test_export_single_file_skill_returns_stored_zip(
+        self, client: AsyncClient, db_session
+    ):
+        await _seed_skill(db_session, "prose")
         r = await client.get("/api/v1/skills/prose/export")
-        assert r.status_code == 400
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "application/zip"
+        result = validate_skill_zip(r.content, where="prose.zip")
+        assert result.ok, [f"{f.rule}: {f.message}" for f in result.errors]
+        assert result.parsed is not None
+        assert result.parsed.names == ["SKILL.md"]
+        assert result.parsed.frontmatter["name"] == "Prose"
+        assert result.parsed.frontmatter["description"] == "d"
+        assert result.parsed.body == "body"
 
     async def test_export_invisible_404(self, client: AsyncClient, db_session):
         other = await _add_user(db_session, "exp-owner")

@@ -36,6 +36,7 @@ from utils.skill_validator import (
     validate_skill_zip,
     validate_slug,
 )
+from utils.skill_zip import has_extra_files
 
 logger = get_logger("ArtifactFlow")
 
@@ -104,7 +105,7 @@ class SkillManager:
             "default_enabled": info.default_enabled,  # 系统默认(区分是否被个人改过)
             "is_overridden": is_overridden,
             "source": info.source,                    # dynamic = UI 导入(前端标 badge/可删)
-            "has_bundle": info.has_bundle,            # 有原始 zip 可导出
+            "has_extra_files": info.has_extra_files,  # 是否有 SKILL.md 外文件需 mount
             "visibility": info.visibility,
             "is_owner": info.owner_user_id == user_id,
         }
@@ -247,7 +248,7 @@ class SkillManager:
             default_enabled=True,
             owner_user_id=user_id if is_private else None,
             allowed_tools=allowed_tools,
-            has_bundle=True,
+            has_extra_files=has_extra_files(parsed.names, parsed.md_member),
             compatibility=frontmatter.get("compatibility"),
             source="dynamic",
         )
@@ -263,6 +264,7 @@ class SkillManager:
             meta=meta,
             skill_md=parsed.body,       # 剥 frontmatter 正文,永不改写(原则 3)
             bundle=blob,                # 原始上传字节无条件存 → 导出无损 by construction
+            has_extra_files=info.has_extra_files,
             source=info.source,
             seed_hash=None,
         )
@@ -289,22 +291,13 @@ class SkillManager:
         }
 
     async def export_bundle(self, user_id: str, slug: str) -> bytes:
-        """原始 zip 字节导出(无损 by construction,决策 3)。不可见 → 404;
-        seeded prose(bundle NULL)→ 400。"""
+        """导出 skill zip。写入侧保证单文件 skill 也有 bundle;这里不重新打包。"""
         eff, _ = await self._resolve(user_id)
         if slug not in eff.visible:
             raise SkillNotFoundError(f"skill '{slug}' not found")
         bundle = await self._repo.get_bundle(slug)
         if bundle is None:
-            # 导出按钮只在 has_bundle 时渲染 —— 走到这 = 前端陈旧态或直接 API 敲,
-            # 非自明 4xx,落原因(req-id ↔ 拒因)
-            logger.warning(
-                "Skill export rejected (400): slug=%s has no bundle, user=%s",
-                slug, user_id,
-            )
-            raise SkillManagerError(
-                f"skill '{slug}' has no bundle to export (single-file skill)"
-            )
+            raise SkillNotFoundError(f"skill '{slug}' not found")
         return bundle
 
     async def delete_skill(self, user_id: str, slug: str, *, as_admin: bool = False) -> None:

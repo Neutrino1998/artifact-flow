@@ -58,9 +58,7 @@ class SkillRepository:
         ).scalar_one_or_none()
 
     async def get_bundle(self, slug: str) -> Optional[bytes]:
-        """L3 mount_skill 的 bundle 取数(完整原始 zip 字节,标量,不外逃 ORM)。
-        无此 skill 或单文件 skill(bundle NULL)均返回 None —— 调用方(mount_skill)据此
-        分别报「不可见」/「无 bundle 可挂」。"""
+        """skill zip 包取数(标量,不外逃 ORM)。无此 skill → None。"""
         return (
             await self._session.execute(
                 select(Skill.bundle).where(Skill.slug == slug)

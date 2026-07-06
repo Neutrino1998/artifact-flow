@@ -471,7 +471,8 @@ def _new_skill(seed: SkillSeed) -> Skill:
         compatibility=seed.compatibility,
         meta=seed.meta,
         skill_md=seed.skill_md,
-        bundle=seed.bundle,            # 目录含 SKILL.md 以外文件 → 确定性 zip;单文件 → NULL(D-1)
+        bundle=seed.bundle,            # 单文件也是 zip;has_extra_files 决定是否可 mount
+        has_extra_files=seed.has_extra_files,
         source="seeded",
         seed_hash=seed.seed_hash,
     )
@@ -487,6 +488,7 @@ def _apply_skill_cols(row: Skill, seed: SkillSeed) -> None:
     row.meta = seed.meta
     row.skill_md = seed.skill_md
     row.bundle = seed.bundle
+    row.has_extra_files = seed.has_extra_files
     row.seed_hash = seed.seed_hash
 
 

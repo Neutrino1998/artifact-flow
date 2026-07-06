@@ -12,7 +12,8 @@ from db.models import Department, DepartmentSkillRule, Skill, User, UserSkill
 
 def _skill(slug, visibility="public", default_enabled=True):
     return Skill(slug=slug, name=slug, description="d", visibility=visibility,
-                 default_enabled=default_enabled, source="seeded", skill_md="body")
+                 default_enabled=default_enabled, source="seeded", skill_md="body",
+                 bundle=b"skill-zip")
 
 
 async def _user(session, uid="u1", dept=None):

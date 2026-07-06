@@ -232,19 +232,17 @@ export default function SkillManagementPanel() {
 
                 {/* Row actions */}
                 <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
-                  {skill.has_bundle && (
-                    <button
-                      onClick={() => handleExport(skill.slug)}
-                      disabled={busy}
-                      className="h-6 w-6 flex items-center justify-center rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors disabled:opacity-40"
-                      aria-label={`导出技能 ${skill.name}`}
-                      title="导出原始 zip"
-                    >
-                      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 13h11" />
-                      </svg>
-                    </button>
-                  )}
+                  <button
+                    onClick={() => handleExport(skill.slug)}
+                    disabled={busy}
+                    className="h-6 w-6 flex items-center justify-center rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors disabled:opacity-40"
+                    aria-label={`导出技能 ${skill.name}`}
+                    title={skill.has_extra_files ? '导出技能包' : '导出单文件技能'}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 13h11" />
+                    </svg>
+                  </button>
                   {deletable && (
                     <button
                       onClick={() => handleDelete(skill)}

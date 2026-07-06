@@ -43,7 +43,7 @@ async def test_core_delete_cascades_on_fresh_pool_connection(file_db):
         session.add(Skill(
             slug="fk-probe", name="fk-probe", description="d", visibility="private",
             default_enabled=True, source="dynamic", owner_user_id=user_id,
-            skill_md="body",
+            skill_md="body", bundle=b"skill-zip",
         ))
         await session.flush()
         session.add(UserSkill(user_id=user_id, skill_slug="fk-probe", enabled=False))

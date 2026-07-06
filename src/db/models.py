@@ -963,9 +963,10 @@ class Skill(Base):
     public 全员 / department 按 dept rule)+ `default_enabled`(shared skill 默认是否
     进 L1)。per-user 覆盖在 user_skills 稀疏表;部门可见走 department_skill_rules。
 
-    存储四处(决策 3):①消费列(下列)②`metadata` JSON(系统不单独消费的 license/
+    存储五处(决策 3):①消费列(下列)②`metadata` JSON(系统不单独消费的 license/
     version/未知扩展)③`skill_md` 正文(去 frontmatter,L2 read_skill 直返)④`bundle`
-    完整原始 zip(L3 mount + 无损导出;单 SKILL.md 无附属文件时为 NULL)。
+    完整 zip 包(单 SKILL.md 无附属文件时也是只含 SKILL.md 的 zip)⑤`has_extra_files`
+    轻量判别是否需要 L3 mount。
     """
     __tablename__ = "skills"
 
@@ -1005,10 +1006,16 @@ class Skill(Base):
 
     # SKILL.md 正文(frontmatter 已剥离),L2 read_skill 直返
     skill_md: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    # 完整原始 zip(含 SKILL.md + references + scripts + assets);单文件 skill 无附属 → NULL。
+    # 完整 zip 包(含 SKILL.md + 可选 references/scripts/assets);单文件 skill 也写入
+    # 只含 SKILL.md 的 zip。下载语义永远走这一列。
     # length hint 同 ArtifactBlob(只影响 MySQL LONGBLOB tier,PG/SQLite 忽略)。
-    bundle: Mapped[Optional[bytes]] = mapped_column(
-        LargeBinary(length=_BLOB_TYPE_TIER_HINT), nullable=True
+    bundle: Mapped[bytes] = mapped_column(
+        LargeBinary(length=_BLOB_TYPE_TIER_HINT), nullable=False
+    )
+    # bundle 是否含 SKILL.md 之外的文件。read_skill/mount_skill 用它判断是否提示/创建
+    # mount_skill,不要把"能下载 bundle"和"需要 mount"再混在一起。
+    has_extra_files: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
     )
 
     # seeded(config/skills 种子,reconciler 拥有,UI 不可改)/ dynamic(UI 上传)

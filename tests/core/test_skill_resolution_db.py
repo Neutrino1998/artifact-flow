@@ -27,7 +27,8 @@ async def _tree(session):
 
 def _skill(slug, visibility="public", default_enabled=True):
     return Skill(slug=slug, name=slug, description="", visibility=visibility,
-                 default_enabled=default_enabled, source="seeded", skill_md="body")
+                 default_enabled=default_enabled, source="seeded", skill_md="body",
+                 bundle=b"skill-zip")
 
 
 async def test_ancestor_chain_parent_covers_subtree(db_session):

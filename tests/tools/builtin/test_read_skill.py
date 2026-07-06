@@ -2,7 +2,7 @@
 
 read_skill 覆盖:可见 slug → 正文 + 条件化 mount 提示 + activated_skill metadata;
 不可见 → 404 风格;无正文 → 错误;空 slug → 错误;契约镜像 read_artifact。
-mount_skill 覆盖:可见性闸;无 bundle 报错;剥壳前缀(wrapper / 裸根)进 exec 命令;
+mount_skill 覆盖:可见性闸;无附属文件报错;剥壳前缀(wrapper / 裸根)进 exec 命令;
 坏 bundle;解压失败 / 超额 sticky;成功文案含路径/清单/compatibility/wheel 提示。
 真容器解压归 tests/manual/ 矩阵(此处 fake session,exec 打桩)。
 """
@@ -38,11 +38,11 @@ class _FakeService:
         return self._bundles.get(slug)
 
 
-def _skillset(*slugs, has_bundle=False, compatibility=None):
+def _skillset(*slugs, has_extra_files=False, compatibility=None):
     visible = {
         s: SkillInfo(slug=s, name=s, description="", visibility="public",
                      default_enabled=True, owner_user_id=None, allowed_tools=[],
-                     has_bundle=has_bundle, compatibility=compatibility)
+                     has_extra_files=has_extra_files, compatibility=compatibility)
         for s in slugs
     }
     return EffectiveSkillSet(visible=visible, enabled=set(slugs))
@@ -74,21 +74,21 @@ def test_contract_mirrors_read_artifact():
 
 
 async def test_visible_no_bundle_says_complete():
-    t = _tool({"a": "GUIDANCE BODY"}, "a")   # 默认 has_bundle=False
+    t = _tool({"a": "GUIDANCE BODY"}, "a")   # 默认 has_extra_files=False
     res = await t.execute(slug="a")
     assert res.success
     assert "GUIDANCE BODY" in res.data
     assert "complete" in res.data.lower()       # 「这就是完整技能」
-    assert "mount_skill" not in res.data        # 无 bundle 不指向 mount
+    assert "mount_skill" not in res.data        # 无附属文件不指向 mount
     assert res.metadata["activated_skill"] == "a"
 
 
-async def test_visible_with_bundle_points_to_mount():
+async def test_visible_with_extra_files_points_to_mount():
     svc = _FakeService({"a": "GUIDANCE BODY"})
-    t = ReadSkillTool(svc, _skillset("a", has_bundle=True))
+    t = ReadSkillTool(svc, _skillset("a", has_extra_files=True))
     res = await t.execute(slug="a")
     assert res.success
-    assert "mount_skill" in res.data            # 有 bundle → 指向 mount_skill
+    assert "mount_skill" in res.data            # 有附属文件 → 指向 mount_skill
     assert res.metadata["activated_skill"] == "a"
 
 
@@ -120,21 +120,21 @@ def test_create_skill_tools_empty_when_no_visible():
 
 
 def test_create_skill_tools_read_only_without_session():
-    tools = create_skill_tools(_FakeService(), _skillset("a", has_bundle=True))
+    tools = create_skill_tools(_FakeService(), _skillset("a", has_extra_files=True))
     assert [t.name for t in tools] == ["read_skill"]
 
 
 def test_create_skill_tools_no_mount_when_no_bundled_skill():
-    # 有沙盒但全是 prose skill(无 bundle)→ mount_skill 没东西可挂,不建。
+    # 有沙盒但全是 SKILL.md-only skill → mount_skill 没东西可挂,不建。
     tools = create_skill_tools(
-        _FakeService(), _skillset("a", has_bundle=False), sandbox_session=_FakeSandbox()
+        _FakeService(), _skillset("a", has_extra_files=False), sandbox_session=_FakeSandbox()
     )
     assert [t.name for t in tools] == ["read_skill"]
 
 
 def test_create_skill_tools_builds_mount_with_session_and_bundle():
     tools = create_skill_tools(
-        _FakeService(), _skillset("a", has_bundle=True), sandbox_session=_FakeSandbox()
+        _FakeService(), _skillset("a", has_extra_files=True), sandbox_session=_FakeSandbox()
     )
     assert [t.name for t in tools] == ["read_skill", "mount_skill"]
 
@@ -182,7 +182,7 @@ def _mount_tool(tmp_path, slug="doc", bundle=None, **sandbox_kw):
     bundles = {slug: bundle} if bundle is not None else {}
     svc = _FakeService(bundles=bundles)
     sandbox = _FakeSandbox(tmp_dir=str(tmp_path / "tmp"), **sandbox_kw)
-    skillset = _skillset(slug, has_bundle=bundle is not None)
+    skillset = _skillset(slug, has_extra_files=bundle is not None)
     return MountSkillTool(sandbox, svc, skillset), sandbox
 
 
@@ -205,14 +205,30 @@ async def test_mount_invisible_not_found(tmp_path):
     assert not res.success and "not found" in res.error.lower()
 
 
-async def test_mount_no_bundle_errors(tmp_path):
-    # 可见但 get_bundle 返回 None(单文件 skill)
+async def test_mount_no_extra_files_errors(tmp_path):
+    # 正常工厂不会为这种 skill 创建 mount_skill;直接调用也要指回 read_skill。
     svc = _FakeService(bundles={})
-    tool = MountSkillTool(_FakeSandbox(tmp_dir=str(tmp_path / "tmp")), svc, _skillset("doc"))
+    tool = MountSkillTool(
+        _FakeSandbox(tmp_dir=str(tmp_path / "tmp")),
+        svc,
+        _skillset("doc", has_extra_files=False),
+    )
     res = await tool.execute(slug="doc")
     assert not res.success
-    assert "no bundle" in res.error.lower()
+    assert "no extra" in res.error.lower()
     assert "read_skill" in res.error
+
+
+async def test_mount_missing_bundle_reports_unloaded(tmp_path):
+    svc = _FakeService(bundles={})
+    tool = MountSkillTool(
+        _FakeSandbox(tmp_dir=str(tmp_path / "tmp")),
+        svc,
+        _skillset("doc", has_extra_files=True),
+    )
+    res = await tool.execute(slug="doc")
+    assert not res.success
+    assert "could not be loaded" in res.error.lower()
 
 
 async def test_mount_bad_bundle_reports_unreadable(tmp_path):
@@ -254,7 +270,7 @@ async def test_mount_success_message_has_path_listing_and_hints(tmp_path):
             0, "WARNING: noise from extraction\n___MOUNT_SKILL_LISTING___\nSKILL.md\nwheels/\n"
         ),
     )
-    skillset = _skillset("doc", has_bundle=True, compatibility={"python": ">=3.11"})
+    skillset = _skillset("doc", has_extra_files=True, compatibility={"python": ">=3.11"})
     tool = MountSkillTool(sandbox, svc, skillset)
     res = await tool.execute(slug="doc")
     assert res.success
@@ -274,7 +290,7 @@ async def test_mount_extraction_failure_loud(tmp_path):
         tmp_dir=str(tmp_path / "tmp"),
         exec_result=_ExecResult(1, "boom: bad zip"),
     )
-    tool = MountSkillTool(sandbox, svc, _skillset("doc", has_bundle=True))
+    tool = MountSkillTool(sandbox, svc, _skillset("doc", has_extra_files=True))
     res = await tool.execute(slug="doc")
     assert not res.success
     assert "failed to unpack" in res.error.lower()
@@ -288,7 +304,7 @@ async def test_mount_over_quota_reports_sticky(tmp_path):
         exec_result=_ExecResult(137, ""),
         sticky="Sandbox workspace exceeded the disk quota and was terminated.",
     )
-    tool = MountSkillTool(sandbox, svc, _skillset("doc", has_bundle=True))
+    tool = MountSkillTool(sandbox, svc, _skillset("doc", has_extra_files=True))
     res = await tool.execute(slug="doc")
     assert not res.success
     assert "quota" in res.error.lower()               # 归因 sticky 而非裸 137
@@ -301,7 +317,7 @@ async def test_mount_ensure_container_failure(tmp_path):
         tmp_dir=str(tmp_path / "tmp"),
         ensure_error=SandboxError("sandbox unavailable this turn"),
     )
-    tool = MountSkillTool(sandbox, svc, _skillset("doc", has_bundle=True))
+    tool = MountSkillTool(sandbox, svc, _skillset("doc", has_extra_files=True))
     res = await tool.execute(slug="doc")
     assert not res.success
     assert "unavailable" in res.error.lower()

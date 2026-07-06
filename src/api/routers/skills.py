@@ -70,7 +70,7 @@ async def export_skill(
     user=Depends(get_current_user),
     mgr: SkillManager = Depends(get_skill_manager),
 ) -> Response:
-    """导出原始 zip 字节(无损 by construction)。不可见 → 404;无 bundle → 400。"""
+    """导出 DB 中保存的 skill zip。不可见 → 404。"""
     try:
         blob = await mgr.export_bundle(user.user_id, slug)
     except SkillManagerError as e:
