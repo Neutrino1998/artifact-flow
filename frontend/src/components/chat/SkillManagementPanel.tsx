@@ -14,6 +14,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
 import { triggerBlobDownload } from '@/lib/download';
+import Checkbox from '@/components/forms/Checkbox';
 import PanelSearchBar from './PanelSearchBar';
 import type { SkillItem, SkillFindingItem, SkillImportResponse } from '@/types';
 
@@ -450,11 +451,10 @@ function SkillImportCard({
 
           {isAdmin && (
             <label className="flex items-center gap-2 text-xs text-text-secondary dark:text-text-secondary-dark cursor-pointer select-none">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={marketplace}
-                onChange={(e) => setMarketplace(e.target.checked)}
-                className="accent-accent"
+                onChange={setMarketplace}
+                ariaLabel="导入为共享技能"
               />
               导入为共享技能（全员可见，默认关闭，各自选择开启）
             </label>
