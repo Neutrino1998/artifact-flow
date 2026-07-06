@@ -45,18 +45,41 @@ mkdir -p "$CERTS_DIR"
 # local smoke hit it); append any AF_CERT_HOSTS, routing bare IPs to IP: and
 # everything else to DNS:. A self-signed cert is untrusted regardless of SAN, so
 # this is about not tripping hostname-mismatch on top of the trust warning.
+#
+# "${extra[@]:-}" (not "${extra[@]}"): under `set -u`, bash < 4.4 treats an
+# EMPTY array subscripted with [@] as an unbound-variable reference and exits —
+# hits the default no-AF_CERT_HOSTS case on both plain macOS bash (3.2) and the
+# CentOS 7 intranet target (4.2), i.e. exactly this script's own fresh-box
+# scenario. The `:-` default (falls back to a single empty element, already
+# absorbed by the `-z` check below) is set-u-safe on all bash versions.
 san="DNS:localhost,IP:127.0.0.1"
 IFS=',' read -ra extra <<<"${AF_CERT_HOSTS:-}"
-for h in "${extra[@]}"; do
+for h in "${extra[@]:-}"; do
   h="${h// /}"; [[ -z "$h" ]] && continue
   if [[ "$h" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then san+=",IP:$h"; else san+=",DNS:$h"; fi
 done
 
 echo "  ⚠ no cert at $CERTS_DIR — generating a SELF-SIGNED PLACEHOLDER (SAN: $san)"
-if ! openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
-      -keyout "$KEY" -out "$CRT" \
-      -subj "/CN=artifactflow-selfsigned" \
-      -addext "subjectAltName=$san" 2>/dev/null; then
+# `-addext` needs OpenSSL 1.1.1+ (missing on CentOS 7's stock 1.0.2k); a
+# generated -config file with an x509_extensions section is the portable way
+# to set SAN that works unchanged from OpenSSL 1.0.2 through 3.x / LibreSSL.
+san_conf="$(mktemp)"
+cat > "$san_conf" <<EOF
+[req]
+distinguished_name = req_distinguished_name
+x509_extensions = v3_req
+prompt = no
+[req_distinguished_name]
+CN = artifactflow-selfsigned
+[v3_req]
+subjectAltName = $san
+EOF
+gen_ok=1
+openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+    -keyout "$KEY" -out "$CRT" \
+    -config "$san_conf" >/dev/null 2>&1 || gen_ok=0
+rm -f "$san_conf"
+if (( ! gen_ok )); then
   echo "  ✗ openssl failed to generate the placeholder cert" >&2
   rm -f "$CRT" "$KEY"   # don't leave a half-written pair Caddy would choke on
   exit 1
