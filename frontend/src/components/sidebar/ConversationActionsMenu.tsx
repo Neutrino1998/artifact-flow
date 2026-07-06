@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import ConfirmModal from '@/components/layout/ConfirmModal';
@@ -11,9 +11,12 @@ import { BUTTON_GHOST_ICON, MENU_ROW_DANGER_HOVER } from '@/lib/styles';
 // 这里收成单一实现(改一次两处都变,如之前 font-medium 要改两遍的坑)。
 //
 // 挂载方式(约束共同决定):
-//   1) 触发器/下拉靠 hover 显露、并需 absolute+translate 定位在行内 → kebab 必须是行的
+//   1) 触发器靠 hover 显露、并需 absolute+translate 定位在行内 → kebab 必须是行的
 //      后代(相对行定位);
-//   2) 删除确认弹窗(ConfirmModal → DialogShell 的 `fixed inset-0`)若落在行内会被 kebab
+//   2) 下拉菜单必须脱离行内 DOM:侧栏列表和「搜索对话」列表都是 overflow-y-auto,
+//      行内 absolute 会在列表底部被裁剪。菜单 createPortal 到 document.body,用触发器的
+//      viewport 坐标 fixed 定位,并在底部空间不足时向上翻。
+//   3) 删除确认弹窗(ConfirmModal → DialogShell 的 `fixed inset-0`)若落在行内会被 kebab
 //      wrapper 的 transform 祖先改掉定位基准(全屏遮罩错位)→ **createPortal 到 document.body**
 //      脱离 DOM 子树修掉定位(fixed 按 DOM 祖先算)。
 //      ⚠ portal 只搬 DOM,**不改 React 合成事件冒泡**(合成事件走 fiber 树,本组件仍是行
@@ -41,6 +44,11 @@ interface Props {
   triggerClassName?: string;
 }
 
+const MENU_WIDTH = 160;
+const MENU_GAP = 4;
+const VIEWPORT_MARGIN = 8;
+const FALLBACK_MENU_HEIGHT = 76;
+
 export default function ConversationActionsMenu({
   conversationId,
   title,
@@ -52,20 +60,69 @@ export default function ConversationActionsMenu({
   triggerClassName = `${BUTTON_GHOST_ICON} p-1.5`,
 }: Props) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const { copy } = useCopyFeedback();
-  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const updateMenuPosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger || typeof window === 'undefined') return;
+
+    const triggerRect = trigger.getBoundingClientRect();
+    const menuHeight = dropdownRef.current?.offsetHeight || FALLBACK_MENU_HEIGHT;
+    const maxLeft = Math.max(VIEWPORT_MARGIN, window.innerWidth - MENU_WIDTH - VIEWPORT_MARGIN);
+    const left = Math.min(
+      Math.max(triggerRect.right - MENU_WIDTH, VIEWPORT_MARGIN),
+      maxLeft,
+    );
+
+    const belowTop = triggerRect.bottom + MENU_GAP;
+    const aboveTop = triggerRect.top - menuHeight - MENU_GAP;
+    const spaceBelow = window.innerHeight - triggerRect.bottom;
+    const spaceAbove = triggerRect.top;
+    const shouldFlipUp = spaceBelow < menuHeight + MENU_GAP && spaceAbove > spaceBelow;
+    const rawTop = shouldFlipUp ? aboveTop : belowTop;
+    const maxTop = Math.max(VIEWPORT_MARGIN, window.innerHeight - menuHeight - VIEWPORT_MARGIN);
+    const top = Math.min(
+      Math.max(rawTop, VIEWPORT_MARGIN),
+      maxTop,
+    );
+
+    setMenuPosition({ top, left });
+  }, []);
 
   // Close the dropdown on outside click (only armed while open).
   useEffect(() => {
     if (!open) return;
     function handleClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        !triggerRef.current?.contains(target) &&
+        !dropdownRef.current?.contains(target)
+      ) {
         onOpenChange(false);
       }
     }
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, [open, onOpenChange]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuPosition(null);
+      return;
+    }
+
+    updateMenuPosition();
+
+    window.addEventListener('resize', updateMenuPosition);
+    window.addEventListener('scroll', updateMenuPosition, true);
+    return () => {
+      window.removeEventListener('resize', updateMenuPosition);
+      window.removeEventListener('scroll', updateMenuPosition, true);
+    };
+  }, [open, updateMenuPosition]);
 
   const handleCopyId = async () => {
     await copy(conversationId);
@@ -82,7 +139,7 @@ export default function ConversationActionsMenu({
     <>
       {visible && (
         <div className={wrapperClassName}>
-          <div ref={menuRef} className="relative">
+          <div ref={triggerRef} className="relative">
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -97,39 +154,48 @@ export default function ConversationActionsMenu({
                 <circle cx="8" cy="13" r="1.5" />
               </svg>
             </button>
-
-            {open && (
-              <div className="absolute right-0 top-full mt-1 z-50 w-40 bg-surface dark:bg-panel-dark border border-border dark:border-border-dark rounded-lg shadow-modal p-1">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleCopyId();
-                  }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-sm font-medium text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-surface-dark rounded-md transition-colors"
-                >
-                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <rect x="5" y="5" width="9" height="9" rx="1.5" />
-                    <path d="M5 11H3.5A1.5 1.5 0 0 1 2 9.5v-7A1.5 1.5 0 0 1 3.5 1h7A1.5 1.5 0 0 1 12 2.5V5" />
-                  </svg>
-                  复制 ID
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onOpenChange(false);
-                    setConfirmDelete(true);
-                  }}
-                  className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-sm font-medium text-status-error rounded-md ${MENU_ROW_DANGER_HOVER}`}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6" />
-                  </svg>
-                  删除对话
-                </button>
-              </div>
-            )}
           </div>
         </div>
+      )}
+
+      {open && typeof document !== 'undefined' && createPortal(
+        <div
+          ref={dropdownRef}
+          className="fixed z-50 w-40 bg-surface dark:bg-panel-dark border border-border dark:border-border-dark rounded-lg shadow-modal p-1"
+          style={{
+            top: menuPosition?.top ?? -9999,
+            left: menuPosition?.left ?? -9999,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleCopyId();
+            }}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-sm font-medium text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-surface-dark rounded-md transition-colors"
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <rect x="5" y="5" width="9" height="9" rx="1.5" />
+              <path d="M5 11H3.5A1.5 1.5 0 0 1 2 9.5v-7A1.5 1.5 0 0 1 3.5 1h7A1.5 1.5 0 0 1 12 2.5V5" />
+            </svg>
+            复制 ID
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenChange(false);
+              setConfirmDelete(true);
+            }}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-sm font-medium text-status-error rounded-md ${MENU_ROW_DANGER_HOVER}`}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6" />
+            </svg>
+            删除对话
+          </button>
+        </div>,
+        document.body,
       )}
 
       {confirmDelete && typeof document !== 'undefined' && createPortal(

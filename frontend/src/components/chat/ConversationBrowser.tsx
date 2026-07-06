@@ -330,7 +330,7 @@ function BrowserItem({
         }`}
         onClick={handleRowClick}
         onMouseEnter={() => setShowMenu(true)}
-        onMouseLeave={() => { if (!menuOpen) setShowMenu(false); }}
+        onMouseLeave={() => setShowMenu(false)}
       >
         <div className="flex items-center gap-3">
           {selectionMode && (
