@@ -17,6 +17,7 @@ import type { CreateToolUnitRequest, ToolUnitResponse } from '@/types';
 
 export type UnitKind = 'tool' | 'toolset';
 export type ParamType = 'string' | 'integer' | 'number' | 'boolean';
+export type ArtifactOutputMode = 'text' | 'binary';
 
 export interface ParamDraft {
   name: string;
@@ -36,6 +37,13 @@ export interface MemberDraft {
   headers: Array<{ key: string; value: string }>;
   parameters: ParamDraft[];
   response_extract: string; // '' → null
+  artifact_output: {
+    enabled: boolean;
+    mode: ArtifactOutputMode;
+    content_type: string;
+    filename: string;
+    title: string;
+  };
   timeout: number;
 }
 
@@ -50,6 +58,7 @@ export interface UnitDraft {
 
 const PARAM_TYPES: ParamType[] = ['string', 'integer', 'number', 'boolean'];
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+const ARTIFACT_OUTPUT_MODES: ArtifactOutputMode[] = ['text', 'binary'];
 
 function emptyMember(): MemberDraft {
   return {
@@ -61,6 +70,13 @@ function emptyMember(): MemberDraft {
     headers: [],
     parameters: [],
     response_extract: '',
+    artifact_output: {
+      enabled: false,
+      mode: 'text',
+      content_type: '',
+      filename: '',
+      title: '',
+    },
     timeout: 60,
   };
 }
@@ -93,6 +109,7 @@ export function unitResponseToDraft(u: ToolUnitResponse): UnitDraft {
       const def = (m.definition ?? {}) as Record<string, unknown>;
       const headersObj = (def.headers ?? {}) as Record<string, unknown>;
       const params = Array.isArray(def.parameters) ? (def.parameters as Array<Record<string, unknown>>) : [];
+      const artifactOutput = (def.artifact_output ?? {}) as Record<string, unknown>;
       return {
         member_name: m.member_name,
         permission: (m.permission === 'auto' ? 'auto' : 'confirm'),
@@ -109,6 +126,15 @@ export function unitResponseToDraft(u: ToolUnitResponse): UnitDraft {
           enum: Array.isArray(p.enum) ? (p.enum as unknown[]).map(scalarToText).join('\n') : '',
         })),
         response_extract: typeof def.response_extract === 'string' ? def.response_extract : '',
+        artifact_output: {
+          enabled: artifactOutput.enabled === true,
+          mode: ARTIFACT_OUTPUT_MODES.includes(artifactOutput.mode as ArtifactOutputMode)
+            ? (artifactOutput.mode as ArtifactOutputMode)
+            : 'text',
+          content_type: typeof artifactOutput.content_type === 'string' ? artifactOutput.content_type : '',
+          filename: typeof artifactOutput.filename === 'string' ? artifactOutput.filename : '',
+          title: typeof artifactOutput.title === 'string' ? artifactOutput.title : '',
+        },
         timeout: typeof def.timeout === 'number' ? def.timeout : 60,
       };
     }),
@@ -167,6 +193,9 @@ export function draftToRequest(d: UnitDraft): CreateToolUnitRequest {
     if (m.timeout < 1 || m.timeout > 600) {
       throw new Error(`成员「${memberName}」的超时必须在 1~600 秒之间`);
     }
+    if (m.artifact_output.enabled && m.artifact_output.mode === 'binary' && !m.artifact_output.content_type.trim()) {
+      throw new Error(`成员「${memberName}」的二进制 artifact 输出必须填写 content_type`);
+    }
 
     const headers: Record<string, string> = {};
     for (const h of m.headers) {
@@ -197,6 +226,15 @@ export function draftToRequest(d: UnitDraft): CreateToolUnitRequest {
       headers,
       parameters,
       response_extract: m.response_extract.trim() || null,
+      artifact_output: m.artifact_output.enabled
+        ? {
+            enabled: true,
+            mode: m.artifact_output.mode,
+            content_type: m.artifact_output.content_type.trim() || null,
+            filename: m.artifact_output.filename.trim() || null,
+            title: m.artifact_output.title.trim() || null,
+          }
+        : null,
       timeout: m.timeout,
     };
   });
@@ -536,6 +574,96 @@ function MemberCard({
           className={`${INPUT_ON_PANEL} font-mono`}
         />
       </div>
+
+      <ArtifactOutputEditor
+        value={member.artifact_output}
+        readOnly={readOnly}
+        onChange={(artifact_output) => onChange({ artifact_output })}
+      />
+    </div>
+  );
+}
+
+function ArtifactOutputEditor({
+  value,
+  readOnly,
+  onChange,
+}: {
+  value: MemberDraft['artifact_output'];
+  readOnly: boolean;
+  onChange: (next: MemberDraft['artifact_output']) => void;
+}) {
+  const patch = (p: Partial<MemberDraft['artifact_output']>) => onChange({ ...value, ...p });
+  return (
+    <div className="space-y-3 pt-1">
+      <label className="flex items-center gap-3 select-none cursor-pointer">
+        <Checkbox
+          checked={value.enabled}
+          onChange={(enabled) => patch({ enabled })}
+          disabled={readOnly}
+          ariaLabel="保存响应为 artifact"
+        />
+        <span className="text-sm text-text-primary dark:text-text-primary-dark">
+          保存响应为 artifact
+        </span>
+      </label>
+
+      {value.enabled && (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={LABEL_CLASS}>模式</label>
+              <div className="relative">
+                <select
+                  value={value.mode}
+                  onChange={(e) => patch({ mode: e.target.value as ArtifactOutputMode })}
+                  disabled={readOnly}
+                  className={`${INPUT_ON_PANEL} appearance-none pr-9`}
+                >
+                  <option value="text">文本（text）</option>
+                  <option value="binary">二进制（binary）</option>
+                </select>
+                {SELECT_CHEVRON}
+              </div>
+            </div>
+            <div>
+              <label className={LABEL_CLASS}>content_type{value.mode === 'binary' && <span className="text-status-error"> *</span>}</label>
+              <input
+                type="text"
+                value={value.content_type}
+                onChange={(e) => patch({ content_type: e.target.value })}
+                disabled={readOnly}
+                placeholder={value.mode === 'text' ? 'text/csv' : 'application/pdf'}
+                className={`${INPUT_ON_PANEL} font-mono`}
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={LABEL_CLASS}>文件名</label>
+              <input
+                type="text"
+                value={value.filename}
+                onChange={(e) => patch({ filename: e.target.value })}
+                disabled={readOnly}
+                placeholder="report.csv"
+                className={`${INPUT_ON_PANEL} font-mono`}
+              />
+            </div>
+            <div>
+              <label className={LABEL_CLASS}>标题</label>
+              <input
+                type="text"
+                value={value.title}
+                onChange={(e) => patch({ title: e.target.value })}
+                disabled={readOnly}
+                placeholder="报表"
+                className={INPUT_ON_PANEL}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

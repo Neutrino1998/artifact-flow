@@ -25,6 +25,14 @@ class ToolParamSpec(BaseModel):
     enum: Optional[List[Any]] = None
 
 
+class ArtifactOutputSpec(BaseModel):
+    enabled: bool = False
+    mode: Literal["text", "binary"] = "text"
+    content_type: Optional[str] = None
+    filename: Optional[str] = None
+    title: Optional[str] = None
+
+
 class ToolMemberSpec(BaseModel):
     member_name: str = Field(..., max_length=64, description="作者裸名;singleton 会被规整为 unit 名")
     permission: Literal["auto", "confirm"] = "confirm"
@@ -34,6 +42,7 @@ class ToolMemberSpec(BaseModel):
     headers: Dict[str, str] = Field(default_factory=dict)
     parameters: List[ToolParamSpec] = Field(default_factory=list)
     response_extract: Optional[str] = None
+    artifact_output: Optional[ArtifactOutputSpec] = None
     timeout: int = Field(60, ge=1, le=600)
 
 

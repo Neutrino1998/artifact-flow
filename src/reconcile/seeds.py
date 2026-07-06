@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from agents.loader import load_agent
+from tools.artifact_output import normalize_artifact_output_config
 from tools.base import BUILTIN_TOOL_NAMES, is_builtin_name, resolve_allowed_tool_entry
 from tools.custom.http_tool import validate_response_extract
 from tools.custom.secrets import assert_secret_refs_allowed
@@ -201,6 +202,13 @@ def _build_http_member(frontmatter: dict, body: str, *, unit_name: str,
         validate_response_extract(frontmatter.get("response_extract"))
     except ValueError as e:
         raise SeedError(f"{source}: {e}") from e
+    try:
+        artifact_output = normalize_artifact_output_config(
+            frontmatter.get("artifact_output"),
+            response_extract=frontmatter.get("response_extract"),
+        )
+    except ValueError as e:
+        raise SeedError(f"{source}: {e}") from e
 
     # 描述 = frontmatter.description + body(同 loader 的扩展说明拼接)
     description = frontmatter.get("description", "")
@@ -219,6 +227,7 @@ def _build_http_member(frontmatter: dict, body: str, *, unit_name: str,
         "headers": frontmatter.get("headers", {}) or {},
         "parameters": params,
         "response_extract": frontmatter.get("response_extract"),
+        "artifact_output": artifact_output,
         "timeout": _read_timeout(frontmatter, source),
     }
     return MemberSeed(

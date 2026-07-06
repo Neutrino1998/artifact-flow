@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import AgentUnit, ToolMember, ToolUnit
 from repositories.tool_credential_repo import ToolCredentialRepository
 from repositories.tool_registry_repo import ToolRegistryRepository
+from tools.artifact_output import normalize_artifact_output_config
 from tools.base import is_builtin_name
 from tools.custom.credentials import get_cipher
 from tools.custom.http_tool import validate_response_extract
@@ -392,6 +393,13 @@ class ToolRegistryManager:
             validate_response_extract(rm.get("response_extract"))
         except ValueError as e:
             raise InvalidUnitError(str(e)) from e
+        try:
+            artifact_output = normalize_artifact_output_config(
+                rm.get("artifact_output"),
+                response_extract=rm.get("response_extract"),
+            )
+        except ValueError as e:
+            raise InvalidUnitError(str(e)) from e
         return {
             "description": rm.get("description", "") or "",
             "endpoint": endpoint,
@@ -399,6 +407,7 @@ class ToolRegistryManager:
             "headers": headers,
             "parameters": params,
             "response_extract": rm.get("response_extract"),
+            "artifact_output": artifact_output,
             "timeout": int(rm.get("timeout", 60) or 60),
         }
 

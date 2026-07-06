@@ -3535,6 +3535,66 @@
         "title": "ArtifactListResponse",
         "description": "GET /api/v1/artifacts/{session_id} response"
       },
+      "ArtifactOutputSpec": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "text",
+              "binary"
+            ],
+            "title": "Mode",
+            "default": "text"
+          },
+          "content_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Type"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "title": "ArtifactOutputSpec",
+        "required": [
+          "enabled",
+          "mode",
+          "content_type",
+          "filename",
+          "title"
+        ]
+      },
       "ArtifactResponse": {
         "properties": {
           "id": {
@@ -5313,6 +5373,16 @@
             ],
             "title": "Response Extract"
           },
+          "artifact_output": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArtifactOutputSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "timeout": {
             "type": "integer",
             "maximum": 600.0,
@@ -5331,6 +5401,7 @@
           "headers",
           "parameters",
           "response_extract",
+          "artifact_output",
           "timeout"
         ],
         "title": "ToolMemberSpec"

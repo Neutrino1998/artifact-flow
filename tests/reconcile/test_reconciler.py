@@ -130,6 +130,59 @@ async def test_singleton_tool_seed(db_session, cfg):
     assert m.definition["parameters"][0]["name"] == "city"
 
 
+async def test_singleton_tool_seed_artifact_output(db_session, cfg):
+    tools, _ = cfg
+    _write(tools / "export.md", """
+        ---
+        name: export_report
+        description: "Export report"
+        type: http
+        permission: auto
+        endpoint: "https://api.example.com/export"
+        method: GET
+        parameters: []
+        artifact_output:
+          enabled: true
+          mode: binary
+          content_type: application/pdf
+          filename: report.pdf
+          title: Report
+        timeout: 20
+        ---
+    """)
+
+    await _run(db_session, cfg)
+
+    member = (await db_session.execute(
+        select(ToolMember).where(ToolMember.unit_name == "export_report")
+    )).scalar_one()
+    assert member.definition["artifact_output"] == {
+        "enabled": True,
+        "mode": "binary",
+        "content_type": "application/pdf",
+        "filename": "report.pdf",
+        "title": "Report",
+    }
+
+
+async def test_seed_binary_artifact_output_requires_content_type(db_session, cfg):
+    tools, _ = cfg
+    _write(tools / "bad_export.md", """
+        ---
+        name: bad_export
+        description: "Bad export"
+        type: http
+        endpoint: "https://api.example.com/export"
+        artifact_output:
+          enabled: true
+          mode: binary
+        ---
+    """)
+
+    with pytest.raises(SeedError, match="content_type"):
+        await _run(db_session, cfg)
+
+
 async def test_toolset_dir_seed(db_session, cfg):
     tools, _ = cfg
     _write(tools / "github" / "_set.md", """

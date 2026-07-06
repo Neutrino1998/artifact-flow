@@ -17,6 +17,7 @@ import tempfile
 from unittest.mock import patch
 
 from tools.base import BaseTool, ToolParameter, ToolPermission, ToolResult
+from tools.artifact_output import normalize_artifact_output_config
 from tools.custom.loader import load_custom_tool, load_custom_tools
 import jmespath
 from tools.custom.http_tool import HttpTool, HttpToolConfig, validate_response_extract
@@ -657,3 +658,89 @@ class TestHttpToolEndpoint:
         result = await self._tool_extract("data.price").execute()
         assert result.success is True
         assert "matched nothing" in result.data
+
+    async def test_text_artifact_output_uses_extracted_content(self, monkeypatch):
+        monkeypatch.setattr(
+            "tools.custom.http_tool.httpx.AsyncClient",
+            self._client_returning({"data": {"csv": "city,temp\nParis,18"}}),
+        )
+        artifact_output = normalize_artifact_output_config(
+            {
+                "enabled": True,
+                "mode": "text",
+                "content_type": "text/csv",
+                "filename": "weather.csv",
+                "title": "Weather",
+            },
+            response_extract="data.csv",
+        )
+        tool = HttpTool(HttpToolConfig(
+            name="weather",
+            description="weather",
+            permission="auto",
+            endpoint="http://10.0.0.1/weather",
+            method="GET",
+            parameters=[],
+            response_extract="data.csv",
+            artifact_output=artifact_output,
+        ))
+
+        result = await tool.execute()
+
+        assert result.success is True
+        assert result.artifact is not None
+        assert result.artifact.content == "city,temp\nParis,18"
+        assert result.artifact.blob is None
+        assert result.artifact.content_type == "text/csv"
+        assert result.artifact.filename == "weather.csv"
+        assert result.artifact.title == "Weather"
+        assert result.metadata["status_code"] == 200
+
+    async def test_binary_artifact_output_uses_configured_content_type(self, monkeypatch):
+        class _Resp:
+            status_code = 200
+            headers = {"content-type": "text/plain"}
+            text = "not used"
+            content = b"%PDF-1.7"
+
+            def raise_for_status(self):
+                pass
+
+        class _Client:
+            def __init__(self, *a, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def request(self, method, url, **kwargs):
+                return _Resp()
+
+        monkeypatch.setattr("tools.custom.http_tool.httpx.AsyncClient", _Client)
+        artifact_output = normalize_artifact_output_config({
+            "enabled": True,
+            "mode": "binary",
+            "content_type": "application/pdf",
+            "filename": "report.pdf",
+        })
+        tool = HttpTool(HttpToolConfig(
+            name="report",
+            description="report",
+            permission="auto",
+            endpoint="http://10.0.0.1/report",
+            method="GET",
+            parameters=[],
+            artifact_output=artifact_output,
+        ))
+
+        result = await tool.execute()
+
+        assert result.success is True
+        assert result.artifact is not None
+        assert result.artifact.blob == b"%PDF-1.7"
+        assert result.artifact.content == ""
+        assert result.artifact.content_type == "application/pdf"
+        assert result.artifact.filename == "report.pdf"

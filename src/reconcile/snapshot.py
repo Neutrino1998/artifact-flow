@@ -105,6 +105,7 @@ def build_http_tool(
         headers=definition.get("headers", {}) or {},
         parameters=params,
         response_extract=definition.get("response_extract"),
+        artifact_output=definition.get("artifact_output"),
         timeout=definition.get("timeout", 60),
     )
     return HttpTool(config, unit_name=unit_name, credential_resolver=credential_resolver)

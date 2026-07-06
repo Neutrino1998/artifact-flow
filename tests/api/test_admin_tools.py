@@ -185,6 +185,45 @@ class TestUnitCrud:
         resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
         assert resp.status_code == 201
 
+    async def test_create_accepts_text_artifact_output(self, admin_client: AsyncClient):
+        body = _singleton_body()
+        body["members"][0]["artifact_output"] = {
+            "enabled": True,
+            "mode": "text",
+            "content_type": "text/csv",
+            "filename": "weather.csv",
+            "title": "Weather CSV",
+        }
+        resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
+        assert resp.status_code == 201, resp.text
+        definition = resp.json()["members"][0]["definition"]
+        assert definition["artifact_output"] == {
+            "enabled": True,
+            "mode": "text",
+            "content_type": "text/csv",
+            "filename": "weather.csv",
+            "title": "Weather CSV",
+        }
+
+    async def test_create_rejects_binary_artifact_output_without_content_type(self, admin_client: AsyncClient):
+        body = _singleton_body()
+        body["members"][0]["artifact_output"] = {"enabled": True, "mode": "binary"}
+        resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
+        assert resp.status_code == 400
+        assert "content_type" in resp.json()["detail"]
+
+    async def test_create_rejects_binary_artifact_output_with_response_extract(self, admin_client: AsyncClient):
+        body = _singleton_body()
+        body["members"][0]["response_extract"] = "data.file"
+        body["members"][0]["artifact_output"] = {
+            "enabled": True,
+            "mode": "binary",
+            "content_type": "application/pdf",
+        }
+        resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
+        assert resp.status_code == 400
+        assert "response_extract" in resp.json()["detail"]
+
 
 class TestSeededReadOnly:
     async def test_update_seeded_409(self, admin_client: AsyncClient, db_session):

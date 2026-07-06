@@ -1403,6 +1403,26 @@ export interface components {
              */
             artifacts: components["schemas"]["ArtifactSummary"][];
         };
+        /** ArtifactOutputSpec */
+        ArtifactOutputSpec: {
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * Mode
+             * @default text
+             * @enum {string}
+             */
+            mode: "text" | "binary";
+            /** Content Type */
+            content_type: string | null;
+            /** Filename */
+            filename: string | null;
+            /** Title */
+            title: string | null;
+        };
         /**
          * ArtifactResponse
          * @description GET /api/v1/artifacts/{session_id}/{artifact_id} response
@@ -2504,6 +2524,7 @@ export interface components {
             parameters: components["schemas"]["ToolParamSpec"][];
             /** Response Extract */
             response_extract: string | null;
+            artifact_output: components["schemas"]["ArtifactOutputSpec"] | null;
             /**
              * Timeout
              * @default 60

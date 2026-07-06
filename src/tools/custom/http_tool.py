@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 
 from config import config
+from tools.artifact_output import build_artifact_spec
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from tools.custom.secrets import (
     resolve_secrets,
@@ -34,6 +35,7 @@ class HttpToolConfig:
     headers: Dict[str, str] = field(default_factory=dict)
     parameters: List[ToolParameter] = field(default_factory=list)
     response_extract: Optional[str] = None   # JMESPath 提取表达式(无 $. 前缀,如 data.price)
+    artifact_output: Optional[Dict[str, Any]] = None
     timeout: int = 60                        # 请求超时（秒）。per-MD 可调;长任务 endpoint 放心设大 ——
                                              # cancel 延迟不再受此值支配(engine 工具 await 期轮询 cancel,
                                              # core/cancellation.py),本值只决定"等上游多久算失败"。
@@ -60,6 +62,7 @@ class HttpTool(BaseTool):
         self._method = config.method.upper()
         self._headers = config.headers
         self._response_extract = config.response_extract
+        self._artifact_output = config.artifact_output
         self._timeout = config.timeout
         self._param_defs = config.parameters
         # 运行期凭证(B-4;B-5 退回 lazy):snapshot 重建时灌入 unit 名 + resolver。两者齐备
@@ -132,6 +135,27 @@ class HttpTool(BaseTool):
                     )
 
             response.raise_for_status()
+            metadata = {
+                # 刻意不带 endpoint:host 是内网拓扑(允许内网 gateway 后更敏感),且会随
+                # metadata 进 tool_complete SSE → 浏览器 + MessageEvent.data 入库/事件历史。
+                # 调用身份已由 tool_complete 事件的 "tool" 字段标识,host 无额外价值。
+                "status_code": response.status_code,
+            }
+
+            if self._artifact_output and self._artifact_output.get("mode") == "binary":
+                blob = response.content
+                spec = build_artifact_spec(
+                    tool_name=self.name,
+                    config=self._artifact_output,
+                    blob=blob,
+                    metadata=metadata,
+                )
+                content_type = spec.content_type
+                note = (
+                    f'<file content_type="{content_type}" bytes="{len(blob)}">'
+                    "HTTP response stored as artifact.</file>"
+                )
+                return ToolResult(success=True, data=note, metadata=metadata, artifact=spec)
 
             # 解析响应
             content_type = response.headers.get("content-type", "")
@@ -162,6 +186,19 @@ class HttpTool(BaseTool):
             else:
                 result_text = response.text
 
+            if self._artifact_output and self._artifact_output.get("mode") == "text":
+                spec = build_artifact_spec(
+                    tool_name=self.name,
+                    config=self._artifact_output,
+                    text=result_text,
+                    metadata=metadata,
+                )
+                note = (
+                    f'<artifact_output content_type="{spec.content_type}" '
+                    f'chars="{len(result_text)}">HTTP response stored as artifact.</artifact_output>'
+                )
+                return ToolResult(success=True, data=note, metadata=metadata, artifact=spec)
+
             # 限制返回长度(隐藏常量,operator 可调、模型不可见)
             max_len = config.HTTP_TOOL_MAX_RESULT_CHARS
             if len(result_text) > max_len:
@@ -170,12 +207,7 @@ class HttpTool(BaseTool):
             return ToolResult(
                 success=True,
                 data=result_text,
-                metadata={
-                    # 刻意不带 endpoint:host 是内网拓扑(允许内网 gateway 后更敏感),且会随
-                    # metadata 进 tool_complete SSE → 浏览器 + MessageEvent.data 入库/事件历史。
-                    # 调用身份已由 tool_complete 事件的 "tool" 字段标识,host 无额外价值。
-                    "status_code": response.status_code,
-                },
+                metadata=metadata,
             )
 
         except httpx.HTTPStatusError as e:

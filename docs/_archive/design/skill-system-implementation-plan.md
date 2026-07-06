@@ -311,10 +311,11 @@ user_skill ─user_id─> user ;  ─skill_slug─> skill              (真 FK,�
 
 **已敲定**:MCP v0 只做 streamable HTTP,stdio Non-goal;连接 per-replica 各连,不建 gateway;MCP 工具默认权限 = server 级 `default_permission`、默认 `confirm`,v0 不做逐工具 override;MCP 连通性测试只测**已保存** server 配置,不走未保存表单临时验密路径;迁移姿态继续就地写进 squash `0001`(当前无 production 数据);`list_changed` 不维护已发现集状态机,靠常驻索引行 + 模型重 `search_tools` 自纠;凭证走统一加密落库模型,用户级身份透传仍推迟(见 Non-goals)。留待将来:HTTP/MCP 一次调用产多个 artifact、MCP resource_link 主动拉取、MCP 逐工具/参数级授权、HTTP 未保存配置即时测试。
 
-**进展**:F-0/F-1 已落地;F-2A/F-2H/F-2M/F-3 未开工。
+**进展**:F-0/F-1/F-2A/F-2H 已落地;F-2M/F-3 未开工。
 
 - **F-0 落地(2026-07-03)**:注入收成 `EffectiveToolset.apply_injection_invariants()` 单点规则 —— resolve 末尾与 `activate_skill` 变异后跑同一份;`injectable_builtins`(⊆ {search_tools, read_skill, mount_skill} 的 `{name: 等级}`)在 resolve 期从本 turn tools 烤入,**presence 即闸**(read_skill/mount_skill 仅当有可见 (bundle) skill 时被建)。`skill_grants` 值升级 `SkillGrant`(permissions + 授予涉及 defer unit 时随带的 `DeferredUnit`)→ 激活翻开 defer unit 时注册索引行、渐进披露不退化;`controller_factory` 两段手动 setdefault 删除。loud 契约保留:deferred 非空而 search_tools 未注册 → 下标 KeyError 当场炸(resolve 与 activate 两时点同待遇)。测试 `test_injection_invariants.py` 9 例(两条运行时不对称/搬家等价/幂等/loud)+ 全后端回归绿(1674 passed)。MCP 注入(F-2)作规则函数第三个消费方接入。
 - **F-1 落地(2026-07-06)**:`tool_units.provider_config` 写进 squash `0001` + ORM/API 响应;`config/mcp/*.md` 物化为 `kind='mcp'`/`provider='mcp'`/默认 defer 的 server unit,仅存 `transport/url/headers/timeout/default_permission`,不写 `tool_members`、不连 server、引擎不消费。reconciler 合并 `config/tools + config/mcp` 做统一撞名闸,agent/skill 可引用 MCP server unit;凭证继续走现有 env→Fernet 路径(url/headers 占位符也入 `tool_credentials`);snapshot 只保留 unit 元数据和 `provider_config`,不生成 external tool。验证:reconcile/API 局部 64 例 + 全 `tests/reconcile` 71 例通过。
+- **F-2A/F-2H 落地(2026-07-06)**:新增纯 `tools.artifact_output` helper,统一把文本/bytes + filename/title/content_type/metadata 组装成 `ArtifactSpec`,不持 `ArtifactService`、不落库。HTTP dynamic/seeded unit 增 `artifact_output` 配置(`enabled`, `mode=text|binary`, `content_type`, `filename`, `title`),schemas/manager/reconciler/snapshot/legacy loader/UI/OpenAPI/TS 类型同步;`HttpTool.execute` 在 `mode=text` 保存 response_extract 后文本,在 `mode=binary` 直接保存 `response.content` 为 blob 且只信配置 content_type。无配置路径保持原 inline+截断行为;binary 缺 content_type、binary+response_extract 在写入边界 loud-fail。
 
 ### G — 部门作用域授权 + 管理 UI(横切:skill/tool-set/mcp/tool 四类一套机制)
 
