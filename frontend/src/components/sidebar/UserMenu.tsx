@@ -6,6 +6,7 @@ import { useUIStore } from '@/stores/uiStore';
 import ChangePasswordDialog from '@/components/layout/ChangePasswordDialog';
 import EditDisplayNameDialog from '@/components/layout/EditDisplayNameDialog';
 import { MENU_ROW_HOVER, MENU_ROW_DANGER_HOVER } from '@/lib/styles';
+import StorageBar from './StorageBar';
 
 export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
   const user = useAuthStore((s) => s.user);
@@ -36,7 +37,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
           position: 'fixed',
           bottom: window.innerHeight - rect.top + 4,
           left: rect.left,
-          minWidth: collapsed ? 180 : rect.width,
+          minWidth: Math.max(collapsed ? 220 : rect.width, 220),
         });
       }
       return !prev;
@@ -148,9 +149,13 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
         {/* Popover (opens upward) */}
         {popoverOpen && (
           <div
-            className="z-40 bg-bg dark:bg-panel-accent-dark border-none rounded-card shadow-modal p-1.5"
+            className="z-40 max-h-[calc(100vh-24px)] overflow-y-auto bg-bg dark:bg-panel-accent-dark border-none rounded-card shadow-modal p-1.5"
             style={popoverStyle}
           >
+            <div className="mb-1.5">
+              <StorageBar />
+            </div>
+
             {/* Theme toggle */}
             <button
               onClick={() => {
@@ -252,7 +257,6 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
               </button>
             )}
 
-            {/* Divider */}
             <div className="my-1 border-t border-border dark:border-border-dark" />
 
             {/* Logout */}

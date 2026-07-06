@@ -6,14 +6,15 @@ import { getStorageUsage } from '@/lib/api';
 import { formatBytes } from '@/lib/formatBytes';
 import type { StorageUsageResponse } from '@/types';
 
-// Per-user blob storage indicator in the sidebar footer.
+// Per-user storage indicator shown in the user menu.
 //
 // The displayed used/quota always comes from the authoritative GET /chat/storage
-// (an index-only SUM over the user's blobs) — never from the paginated sidebar
+// (artifact blobs + private skill bundles) — never from the paginated sidebar
 // list, which only holds the first page. We subscribe to the conversation list
-// purely as a *change signal*: deleting a conversation (removeConversation drops
-// total + bytes) and an upload completing (COMPLETE refreshes the list with new
-// upload_bytes) both shift [total, bytesSum], which re-pulls the real total.
+// purely as a *change signal* for artifact changes: deleting a conversation
+// (removeConversation drops total + bytes) and an upload completing (COMPLETE
+// refreshes the list with new upload_bytes) both shift [total, bytesSum], which
+// re-pulls the real total.
 export default function StorageBar() {
   const total = useConversationStore((s) => s.total);
   const bytesSum = useConversationStore((s) =>
@@ -21,51 +22,77 @@ export default function StorageBar() {
   );
 
   const [usage, setUsage] = useState<StorageUsageResponse | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [displayPct, setDisplayPct] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    setLoadFailed(false);
     getStorageUsage()
       .then((u) => {
         if (!cancelled) setUsage(u);
       })
       .catch(() => {
-        // Non-critical chrome — on failure just render nothing this cycle.
-        if (!cancelled) setUsage(null);
+        // Non-critical chrome — keep a stable placeholder instead of shifting
+        // the user menu while the request fails.
+        if (!cancelled) {
+          setUsage(null);
+          setLoadFailed(true);
+        }
       });
     return () => {
       cancelled = true;
     };
   }, [total, bytesSum]);
 
-  if (!usage) return null;
-
-  const { used_bytes, quota_bytes } = usage;
+  const { used_bytes, quota_bytes } = usage || { used_bytes: 0, quota_bytes: 0 };
   const unlimited = quota_bytes <= 0;
   const pct = unlimited
     ? 0
     : Math.min(100, Math.round((used_bytes / quota_bytes) * 100));
   const near = !unlimited && pct >= 90;
+  const valueText = usage
+    ? unlimited
+      ? `${formatBytes(used_bytes)} / 不限额`
+      : `${formatBytes(used_bytes)} / ${formatBytes(quota_bytes)}`
+    : loadFailed
+      ? '暂不可用'
+      : '读取中...';
+  const tooltipText = `存储空间统计上传文件、二进制产物和私有技能包占用的总大小，共用同一个存储配额。当前：${valueText}`;
+
+  useEffect(() => {
+    if (!usage || unlimited) {
+      setDisplayPct(0);
+      return;
+    }
+
+    setDisplayPct(0);
+    const frame = window.requestAnimationFrame(() => {
+      setDisplayPct(pct);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [pct, usage, unlimited]);
 
   return (
-    <div className="px-2 pt-1 pb-0.5">
-      <div className="flex items-center justify-between text-xs text-text-tertiary dark:text-text-tertiary-dark mb-1">
+    <div
+      className="relative h-5 overflow-hidden rounded-lg border border-border/60 dark:border-border-dark/60 bg-bg dark:bg-panel-accent-dark"
+      aria-label={tooltipText}
+      title={tooltipText}
+    >
+      {!unlimited && (
+        <div
+          className={`absolute inset-y-0 left-0 rounded-lg transition-[width] duration-500 ease-out ${
+            near ? 'bg-status-error/20' : 'bg-accent/25 dark:bg-accent/30'
+          }`}
+          style={{ width: `${displayPct}%` }}
+        />
+      )}
+      <div className="relative z-10 flex h-full items-center justify-between gap-2 px-2 text-xs text-text-secondary dark:text-text-secondary-dark">
         <span>存储空间</span>
-        <span className="font-mono tabular-nums">
-          {unlimited
-            ? formatBytes(used_bytes)
-            : `${formatBytes(used_bytes)} / ${formatBytes(quota_bytes)}`}
+        <span className="min-w-0 truncate font-mono tabular-nums">
+          {valueText}
         </span>
       </div>
-      {!unlimited && (
-        <div className="h-1 rounded-full bg-bg dark:bg-bg-dark overflow-hidden">
-          <div
-            className={`h-full transition-[width] duration-200 ease-out ${
-              near ? 'bg-status-error' : 'bg-accent'
-            }`}
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-      )}
     </div>
   );
 }
