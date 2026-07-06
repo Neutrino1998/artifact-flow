@@ -8,7 +8,7 @@ from sqlalchemy import select
 from db.models import Agent, AgentUnit, ToolMember, ToolUnit
 from reconcile.reconciler import reconcile_config_to_db
 from reconcile.seeds import SeedError
-from reconcile.snapshot import load_registry_snapshot
+from reconcile.snapshot import hydrate_mcp_tools, load_registry_snapshot
 from tools.custom.mcp_client import McpClientManager, McpToolDefinition
 
 
@@ -576,7 +576,13 @@ async def test_snapshot_discovers_mcp_tools_when_manager_is_available(db_session
         ]
 
     manager = McpClientManager(list_callable=fake_list)
-    snap = await load_registry_snapshot(db_session, mcp_manager=manager)
+    snap = await load_registry_snapshot(db_session)
+
+    # DB snapshot 阶段不访问外部 MCP;hydrate 阶段在 session 外填充 discovered tools。
+    assert snap.units["inventory"].member_full_names == []
+    assert "inventory__lookup" not in snap.external_tools
+
+    await hydrate_mcp_tools(snap, mcp_manager=manager)
 
     assert snap.units["inventory"].member_full_names == ["inventory__lookup"]
     assert "inventory__lookup" in snap.external_tools

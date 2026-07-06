@@ -72,7 +72,7 @@ async def create_controller(
     from core.effective_skillset import resolve_effective_skillset
     from core.effective_toolset import resolve_all
     from core.engine import EngineHooks
-    from reconcile.snapshot import load_registry_snapshot, load_skill_snapshot
+    from reconcile.snapshot import hydrate_mcp_tools, load_registry_snapshot, load_skill_snapshot
     from repositories.skill_repo import SkillRepository
     from tools.builtin.artifact_service import ArtifactService
     from tools.builtin.artifact_ops import create_artifact_tools
@@ -102,11 +102,7 @@ async def create_controller(
     # 短 session 读完即关;凭证 resolver 拿 db_manager(execute 期再各开短 session lazy
     # 解密),不被快照 session 骑成 turn-long 连接。
     snapshot = await db_manager.with_retry(
-        lambda session: load_registry_snapshot(
-            session,
-            db_manager=db_manager,
-            mcp_manager=get_mcp_client_manager(),
-        )
+        lambda session: load_registry_snapshot(session, db_manager=db_manager)
     )
     if "lead_agent" not in snapshot.agents:
         # DB 注册表为空/缺 lead_agent = reconcile 没跑(或跑挂)。引擎此时无可执行
@@ -115,6 +111,15 @@ async def create_controller(
             "Tool/agent registry is empty or missing 'lead_agent' — run "
             "`python scripts/reconcile_config.py` to materialize config into the DB "
             "(prod: entrypoint does this under the migration lock)."
+        )
+    # MCP discovery 是外部 HTTP,必须在上面的 DB snapshot session 关闭后执行;否则慢/
+    # 不可达 server 会 pin DB 连接直到 timeout,违背 B-5 短 session 纪律。没有 MCP unit
+    # 的普通 turn 不取 MCP manager,保持测试/轻量启动路径零成本。
+    if any(unit.provider == "mcp" for unit in snapshot.units.values()):
+        await hydrate_mcp_tools(
+            snapshot,
+            mcp_manager=get_mcp_client_manager(),
+            db_manager=db_manager,
         )
 
     # skill 解析(C-2):一条短 session 读 user-agnostic skill 快照 + 该用户的 user_skill

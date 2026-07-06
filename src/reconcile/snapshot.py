@@ -114,7 +114,7 @@ def build_http_tool(
 
 
 async def load_registry_snapshot(
-    session: AsyncSession, *, db_manager=None, mcp_manager=None
+    session: AsyncSession, *, db_manager=None
 ) -> RegistrySnapshot:
     """一次性读全部注册表行,重建 external 工具 + unit 元数据 + agent 元数据。
 
@@ -186,7 +186,8 @@ async def load_registry_snapshot(
         # (无需在此再判 / 再 log,unit 级 WARNING 已覆盖)。
         if m.unit_name in units:
             units[m.unit_name].member_full_names.append(m.full_name)
-        # 仅 http provider 从 DB member 重建为 HttpTool;mcp provider 从 tools/list 填。
+        # 仅 http provider 从 DB member 重建为 HttpTool;mcp provider 在 DB session
+        # 关闭后的 hydrate_mcp_tools 阶段从 tools/list 填。
         unit = units.get(m.unit_name)
         if unit is not None and unit.provider == "http":
             external_tools[m.full_name] = build_http_tool(
@@ -194,36 +195,6 @@ async def load_registry_snapshot(
                 unit_name=m.unit_name,
                 credential_resolver=credential_resolver,
             )
-
-    if mcp_manager is not None:
-        for unit in units.values():
-            if unit.provider != "mcp":
-                continue
-            listing = await mcp_manager.list_tools(
-                unit.name,
-                unit.provider_config or {},
-                credential_resolver=credential_resolver,
-            )
-            unit.discovery_error = listing.error
-            for definition in listing.tools:
-                tool = build_mcp_tool(
-                    server_name=unit.name,
-                    provider_config=unit.provider_config or {},
-                    definition=definition,
-                    client_manager=mcp_manager,
-                    credential_resolver=credential_resolver,
-                )
-                if tool is None:
-                    continue
-                if tool.name in external_tools:
-                    logger.warning(
-                        "Skipping MCP tool %r from server %r: full_name already exists",
-                        tool.name,
-                        unit.name,
-                    )
-                    continue
-                unit.member_full_names.append(tool.name)
-                external_tools[tool.name] = tool
 
     agents: Dict[str, AgentSnapshot] = {
         a.name: AgentSnapshot(
@@ -243,6 +214,51 @@ async def load_registry_snapshot(
             agent.units[au.unit_name] = au.member_state
 
     return RegistrySnapshot(external_tools=external_tools, units=units, agents=agents)
+
+
+async def hydrate_mcp_tools(
+    snapshot: RegistrySnapshot,
+    *,
+    mcp_manager,
+    db_manager=None,
+) -> RegistrySnapshot:
+    """Session-free MCP discovery pass.
+
+    `load_registry_snapshot` owns only DB reads. This function runs after that
+    session has closed, so a slow/unreachable MCP server cannot pin a DB
+    connection while waiting for external HTTP. Credential resolution still uses
+    `db_manager`, but only through short lazy sessions inside CredentialResolver.
+    """
+    credential_resolver = CredentialResolver(db_manager) if db_manager is not None else None
+    for unit in snapshot.units.values():
+        if unit.provider != "mcp":
+            continue
+        listing = await mcp_manager.list_tools(
+            unit.name,
+            unit.provider_config or {},
+            credential_resolver=credential_resolver,
+        )
+        unit.discovery_error = listing.error
+        for definition in listing.tools:
+            tool = build_mcp_tool(
+                server_name=unit.name,
+                provider_config=unit.provider_config or {},
+                definition=definition,
+                client_manager=mcp_manager,
+                credential_resolver=credential_resolver,
+            )
+            if tool is None:
+                continue
+            if tool.name in snapshot.external_tools:
+                logger.warning(
+                    "Skipping MCP tool %r from server %r: full_name already exists",
+                    tool.name,
+                    unit.name,
+                )
+                continue
+            unit.member_full_names.append(tool.name)
+            snapshot.external_tools[tool.name] = tool
+    return snapshot
 
 
 async def load_skill_snapshot(session: AsyncSession) -> Dict[str, SkillInfo]:

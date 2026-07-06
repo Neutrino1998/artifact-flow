@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any, Callable, Optional
 
 import httpx
@@ -186,12 +187,14 @@ class McpClientManager:
             result = await session.call_tool(
                 tool_name,
                 arguments,
-                read_timeout_seconds=float(timeout),
+                read_timeout_seconds=timedelta(seconds=timeout),
             )
         return McpToolCallResult(
-            is_error=bool(getattr(result, "is_error", False)),
+            is_error=bool(_get_sdk_attr(result, "isError", "is_error", default=False)),
             content=list(getattr(result, "content", []) or []),
-            structured_content=getattr(result, "structured_content", None),
+            structured_content=_get_sdk_attr(
+                result, "structuredContent", "structured_content", default=None
+            ),
         )
 
     def _sdk_session(self, url: str, headers: dict[str, str], timeout: int):
@@ -224,11 +227,15 @@ class _McpSessionContext:
             trust_env=False,
         )
         await self._stack.enter_async_context(http_client)
-        read_stream, write_stream = await self._stack.enter_async_context(
+        read_stream, write_stream, _get_session_id = await self._stack.enter_async_context(
             self._transport_factory(self._url, http_client=http_client)
         )
         self._session = await self._stack.enter_async_context(
-            self._session_cls(read_stream, write_stream, read_timeout_seconds=float(self._timeout))
+            self._session_cls(
+                read_stream,
+                write_stream,
+                read_timeout_seconds=timedelta(seconds=self._timeout),
+            )
         )
         await self._session.initialize()
         return self._session
@@ -248,6 +255,13 @@ def _coerce_tool_definition(raw: Any) -> McpToolDefinition:
         description=str(data.get("description") or ""),
         input_schema=input_schema,
     )
+
+
+def _get_sdk_attr(value: Any, *names: str, default: Any) -> Any:
+    for name in names:
+        if hasattr(value, name):
+            return getattr(value, name)
+    return default
 
 
 def _to_plain_dict(value: Any) -> dict[str, Any]:
