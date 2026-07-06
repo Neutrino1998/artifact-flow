@@ -787,7 +787,7 @@
           "artifacts"
         ],
         "summary": "Get Artifact Raw",
-        "description": "Serve an artifact's raw binary blob (uploaded image / rich-format source).\n\nDB-only read (request-scoped Service, empty WorkingSet) \u2014 like all GETs here,\nduring execution it serves the last flushed blob. 404 when the artifact has no\nblob (pure-text artifacts) or doesn't exist; not logged (self-evident 404).\n\nImages are served `inline` so a frontend `<img src=.../raw>` renders in place;\neverything else `attachment` (download). Content-Type is the artifact's\n`content_type` \u2014 under the XOR model a blob artifact's content_type is the\noriginal file's true MIME.",
+        "description": "Serve an artifact's raw binary blob (uploaded image / rich-format source).\n\nDB-only read (request-scoped Service, empty WorkingSet) \u2014 like all GETs here,\nduring execution it serves the last flushed blob. 404 when the artifact has no\nblob (pure-text artifacts) or doesn't exist; not logged (self-evident 404).\n\nSafe raster images are served `inline` so a frontend `<img src=.../raw>`\nrenders in place; everything else is `attachment` (download). Do not inline\nevery `image/*`: SVG is XML and must not be treated as a safe image blob.\nContent-Type is the artifact's `content_type` \u2014 under the XOR model a blob\nartifact's content_type is the original file's true MIME.",
         "operationId": "get_artifact_raw_api_v1_artifacts__session_id___artifact_id__raw_get",
         "security": [
           {
@@ -3554,7 +3554,8 @@
           "content_type": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 128
               },
               {
                 "type": "null"
@@ -3565,7 +3566,8 @@
           "filename": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 256
               },
               {
                 "type": "null"
@@ -3576,7 +3578,8 @@
           "title": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 256
               },
               {
                 "type": "null"

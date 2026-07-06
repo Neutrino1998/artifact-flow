@@ -12,6 +12,7 @@ import SourceView from './SourceView';
 import DiffView from './DiffView';
 import ImagePreview from './ImagePreview';
 import BinaryFilePreview from './BinaryFilePreview';
+import { isSafeInlineImageMime } from '@/lib/mime';
 
 export default function ArtifactPanel() {
   const current = useArtifactStore((s) => s.current);
@@ -53,7 +54,7 @@ export default function ArtifactPanel() {
   const content = selectedVersion?.content ?? current.content;
   // blob 类 artifact 无文本内容:图片 preview 走 ImagePreview(authed fetch /raw →
   // objectURL),其它二进制(docx/pdf 上传,C-0 blob-only)走 BinaryFilePreview(下载卡片)。
-  const isImage = (current.content_type ?? '').startsWith('image/');
+  const isImage = isSafeInlineImageMime(current.content_type);
   const isBinary = !!current.has_blob && !isImage;
   // text/html → static sandboxed iframe preview (no JS, no external resources);
   // Source/Diff tabs stay available as a fallback. See HtmlPreview for the model.

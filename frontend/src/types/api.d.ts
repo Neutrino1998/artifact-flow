@@ -328,10 +328,11 @@ export interface paths {
          *     during execution it serves the last flushed blob. 404 when the artifact has no
          *     blob (pure-text artifacts) or doesn't exist; not logged (self-evident 404).
          *
-         *     Images are served `inline` so a frontend `<img src=.../raw>` renders in place;
-         *     everything else `attachment` (download). Content-Type is the artifact's
-         *     `content_type` — under the XOR model a blob artifact's content_type is the
-         *     original file's true MIME.
+         *     Safe raster images are served `inline` so a frontend `<img src=.../raw>`
+         *     renders in place; everything else is `attachment` (download). Do not inline
+         *     every `image/*`: SVG is XML and must not be treated as a safe image blob.
+         *     Content-Type is the artifact's `content_type` — under the XOR model a blob
+         *     artifact's content_type is the original file's true MIME.
          */
         get: operations["get_artifact_raw_api_v1_artifacts__session_id___artifact_id__raw_get"];
         put?: never;

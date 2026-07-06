@@ -224,6 +224,26 @@ class TestUnitCrud:
         assert resp.status_code == 400
         assert "response_extract" in resp.json()["detail"]
 
+    async def test_create_rejects_overlong_artifact_output_content_type(self, admin_client: AsyncClient):
+        body = _singleton_body()
+        body["members"][0]["artifact_output"] = {
+            "enabled": True,
+            "mode": "text",
+            "content_type": "x" * 129,
+        }
+        resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
+        assert resp.status_code == 422
+
+    async def test_create_rejects_overlong_artifact_output_title(self, admin_client: AsyncClient):
+        body = _singleton_body()
+        body["members"][0]["artifact_output"] = {
+            "enabled": True,
+            "mode": "text",
+            "title": "x" * 257,
+        }
+        resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
+        assert resp.status_code == 422
+
 
 class TestSeededReadOnly:
     async def test_update_seeded_409(self, admin_client: AsyncClient, db_session):

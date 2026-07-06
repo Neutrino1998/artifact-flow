@@ -10,6 +10,12 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from tools.artifact_output import (
+    MAX_CONTENT_TYPE_LENGTH,
+    MAX_FILENAME_LENGTH,
+    MAX_TITLE_LENGTH,
+)
+
 
 # --------------------------------------------------------------------------
 # 请求
@@ -28,9 +34,9 @@ class ToolParamSpec(BaseModel):
 class ArtifactOutputSpec(BaseModel):
     enabled: bool = False
     mode: Literal["text", "binary"] = "text"
-    content_type: Optional[str] = None
-    filename: Optional[str] = None
-    title: Optional[str] = None
+    content_type: Optional[str] = Field(None, max_length=MAX_CONTENT_TYPE_LENGTH)
+    filename: Optional[str] = Field(None, max_length=MAX_FILENAME_LENGTH)
+    title: Optional[str] = Field(None, max_length=MAX_TITLE_LENGTH)
 
 
 class ToolMemberSpec(BaseModel):

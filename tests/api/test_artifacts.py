@@ -307,6 +307,61 @@ class TestHasBlobField:
         assert resp.status_code == 200
         assert resp.headers["cache-control"] == "no-cache"
 
+    async def test_raw_svg_image_is_attachment(
+        self, client: AsyncClient, db_manager: DatabaseManager, test_user: User
+    ):
+        """SVG is image/* but not a safe raster preview; raw must download it."""
+        async with db_manager.session() as session:
+            conv_repo = ConversationRepository(session)
+            art_repo = ArtifactRepository(session)
+            conv_id = f"conv-{uuid.uuid4().hex}"
+            await conv_repo.create_conversation(
+                conversation_id=conv_id,
+                title="SVG Artifact Test",
+                user_id=test_user.id,
+            )
+            await art_repo.create_artifact(
+                session_id=conv_id,
+                artifact_id="logo.svg",
+                content_type="image/svg+xml",
+                title="logo",
+                content="",
+                metadata={"original_filename": "logo.svg"},
+                source="tool",
+                blob=b'<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+            )
+
+        resp = await client.get(f"/api/v1/artifacts/{conv_id}/logo.svg/raw")
+        assert resp.status_code == 200
+        assert resp.headers["content-disposition"].startswith("attachment;")
+
+    async def test_raw_safe_raster_image_is_inline(
+        self, client: AsyncClient, db_manager: DatabaseManager, test_user: User
+    ):
+        async with db_manager.session() as session:
+            conv_repo = ConversationRepository(session)
+            art_repo = ArtifactRepository(session)
+            conv_id = f"conv-{uuid.uuid4().hex}"
+            await conv_repo.create_conversation(
+                conversation_id=conv_id,
+                title="PNG Artifact Test",
+                user_id=test_user.id,
+            )
+            await art_repo.create_artifact(
+                session_id=conv_id,
+                artifact_id="plot.png",
+                content_type="image/png",
+                title="plot",
+                content="",
+                metadata={"original_filename": "plot.png"},
+                source="tool",
+                blob=b"\x89PNG\r\n\x1a\n",
+            )
+
+        resp = await client.get(f"/api/v1/artifacts/{conv_id}/plot.png/raw")
+        assert resp.status_code == 200
+        assert resp.headers["content-disposition"].startswith("inline;")
+
     async def test_admin_routes_mark_blob(
         self, admin_client: AsyncClient, seed_blob_artifact: Tuple[str, str]
     ):

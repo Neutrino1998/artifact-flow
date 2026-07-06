@@ -27,6 +27,7 @@ from api.schemas.artifact import (
 from tools.builtin.artifact_service import ArtifactService
 from utils.doc_converter import DocConverter
 from utils.logger import get_logger
+from utils.mime import is_safe_inline_image_mime
 
 logger = get_logger("ArtifactFlow")
 
@@ -196,10 +197,11 @@ async def get_artifact_raw(
     during execution it serves the last flushed blob. 404 when the artifact has no
     blob (pure-text artifacts) or doesn't exist; not logged (self-evident 404).
 
-    Images are served `inline` so a frontend `<img src=.../raw>` renders in place;
-    everything else `attachment` (download). Content-Type is the artifact's
-    `content_type` — under the XOR model a blob artifact's content_type is the
-    original file's true MIME.
+    Safe raster images are served `inline` so a frontend `<img src=.../raw>`
+    renders in place; everything else is `attachment` (download). Do not inline
+    every `image/*`: SVG is XML and must not be treated as a safe image blob.
+    Content-Type is the artifact's `content_type` — under the XOR model a blob
+    artifact's content_type is the original file's true MIME.
     """
     await _verify_session_ownership(session_id, current_user, conversation_manager)
 
@@ -208,7 +210,7 @@ async def get_artifact_raw(
         raise HTTPException(status_code=404, detail=f"Artifact blob '{artifact_id}' not found")
 
     content_type = blob["content_type"] or "application/octet-stream"
-    disposition = "inline" if content_type.startswith("image/") else "attachment"
+    disposition = "inline" if is_safe_inline_image_mime(content_type) else "attachment"
 
     filename = blob["filename"].replace("/", "-").replace("\\", "-")
     # RFC 5987: filename* for non-ASCII, with sanitized ASCII fallback.

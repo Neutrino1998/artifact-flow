@@ -183,6 +183,25 @@ async def test_seed_binary_artifact_output_requires_content_type(db_session, cfg
         await _run(db_session, cfg)
 
 
+async def test_seed_artifact_output_rejects_overlong_title(db_session, cfg):
+    tools, _ = cfg
+    _write(tools / "bad_title.md", f"""
+        ---
+        name: bad_title
+        description: "Bad title"
+        type: http
+        endpoint: "https://api.example.com/export"
+        artifact_output:
+          enabled: true
+          mode: text
+          title: {"x" * 257}
+        ---
+    """)
+
+    with pytest.raises(SeedError, match="title"):
+        await _run(db_session, cfg)
+
+
 async def test_toolset_dir_seed(db_session, cfg):
     tools, _ = cfg
     _write(tools / "github" / "_set.md", """

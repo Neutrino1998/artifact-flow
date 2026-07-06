@@ -11,6 +11,9 @@ from typing import Any, Dict, Optional
 from tools.base import ArtifactSpec
 
 _VALID_MODES = {"text", "binary"}
+MAX_CONTENT_TYPE_LENGTH = 128
+MAX_TITLE_LENGTH = 256
+MAX_FILENAME_LENGTH = 256
 
 
 def normalize_artifact_output_config(
@@ -39,9 +42,9 @@ def normalize_artifact_output_config(
     if mode not in _VALID_MODES:
         raise ValueError("artifact_output.mode must be 'text' or 'binary'")
 
-    content_type = _optional_str(raw, "content_type")
-    filename = _optional_str(raw, "filename")
-    title = _optional_str(raw, "title")
+    content_type = _optional_str(raw, "content_type", max_length=MAX_CONTENT_TYPE_LENGTH)
+    filename = _optional_str(raw, "filename", max_length=MAX_FILENAME_LENGTH)
+    title = _optional_str(raw, "title", max_length=MAX_TITLE_LENGTH)
 
     if mode == "text":
         content_type = content_type or "text/plain"
@@ -75,6 +78,12 @@ def build_artifact_spec(
     )
     filename = config.get("filename") or _default_filename(tool_name, mode, content_type)
     title = config.get("title") or os.path.splitext(filename)[0]
+    if len(content_type) > MAX_CONTENT_TYPE_LENGTH:
+        raise ValueError(f"artifact_output.content_type must be <= {MAX_CONTENT_TYPE_LENGTH} characters")
+    if len(filename) > MAX_FILENAME_LENGTH:
+        raise ValueError(f"artifact_output.filename must be <= {MAX_FILENAME_LENGTH} characters")
+    if len(title) > MAX_TITLE_LENGTH:
+        raise ValueError(f"artifact_output.title must be <= {MAX_TITLE_LENGTH} characters")
     meta = {
         "artifact_output": True,
         "artifact_output_mode": mode,
@@ -105,13 +114,15 @@ def build_artifact_spec(
     )
 
 
-def _optional_str(raw: Dict[str, Any], key: str) -> Optional[str]:
+def _optional_str(raw: Dict[str, Any], key: str, *, max_length: int) -> Optional[str]:
     value = raw.get(key)
     if value is None:
         return None
     if not isinstance(value, str):
         raise ValueError(f"artifact_output.{key} must be a string")
     stripped = value.strip()
+    if len(stripped) > max_length:
+        raise ValueError(f"artifact_output.{key} must be <= {max_length} characters")
     return stripped or None
 
 
