@@ -59,6 +59,44 @@ export interface UnitDraft {
 const PARAM_TYPES: ParamType[] = ['string', 'integer', 'number', 'boolean'];
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 const ARTIFACT_OUTPUT_MODES: ArtifactOutputMode[] = ['text', 'binary'];
+const TEXT_CONTENT_TYPES = [
+  { label: 'Plain text', value: 'text/plain' },
+  { label: 'CSV', value: 'text/csv' },
+  { label: 'JSON', value: 'application/json' },
+  { label: 'Markdown', value: 'text/markdown' },
+  { label: 'HTML', value: 'text/html' },
+];
+const BINARY_CONTENT_TYPES = [
+  { label: 'PDF', value: 'application/pdf' },
+  { label: 'PNG', value: 'image/png' },
+  { label: 'JPEG', value: 'image/jpeg' },
+  { label: 'Excel .xlsx', value: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+  { label: 'Excel .xls', value: 'application/vnd.ms-excel' },
+  { label: 'Word .docx', value: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+  { label: 'Word .doc', value: 'application/msword' },
+  { label: 'PowerPoint .pptx', value: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' },
+  { label: 'ZIP', value: 'application/zip' },
+  { label: 'Binary', value: 'application/octet-stream' },
+];
+const EXTENSION_CONTENT_TYPES: Record<string, string> = {
+  '.txt': 'text/plain',
+  '.csv': 'text/csv',
+  '.json': 'application/json',
+  '.md': 'text/markdown',
+  '.markdown': 'text/markdown',
+  '.html': 'text/html',
+  '.htm': 'text/html',
+  '.pdf': 'application/pdf',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.xls': 'application/vnd.ms-excel',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.doc': 'application/msword',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.zip': 'application/zip',
+};
 
 function emptyMember(): MemberDraft {
   return {
@@ -594,6 +632,35 @@ function ArtifactOutputEditor({
   onChange: (next: MemberDraft['artifact_output']) => void;
 }) {
   const patch = (p: Partial<MemberDraft['artifact_output']>) => onChange({ ...value, ...p });
+  const contentTypeOptions = value.mode === 'text' ? TEXT_CONTENT_TYPES : BINARY_CONTENT_TYPES;
+  const selectedPreset = contentTypeOptions.some((o) => o.value === value.content_type)
+    ? value.content_type
+    : '';
+
+  const inferContentType = (filename: string) => {
+    const lower = filename.trim().toLowerCase();
+    const dot = lower.lastIndexOf('.');
+    if (dot < 0) return null;
+    return EXTENSION_CONTENT_TYPES[lower.slice(dot)] ?? null;
+  };
+
+  const handleModeChange = (mode: ArtifactOutputMode) => {
+    const nextOptions = mode === 'text' ? TEXT_CONTENT_TYPES : BINARY_CONTENT_TYPES;
+    const current = value.content_type.trim();
+    const currentFitsNextMode = nextOptions.some((o) => o.value === current);
+    const nextContentType = currentFitsNextMode ? current : mode === 'text' ? 'text/plain' : '';
+    patch({ mode, content_type: nextContentType });
+  };
+
+  const handleFilenameChange = (filename: string) => {
+    if (value.content_type.trim()) {
+      patch({ filename });
+      return;
+    }
+    const inferred = inferContentType(filename);
+    patch({ filename, ...(inferred ? { content_type: inferred } : {}) });
+  };
+
   return (
     <div className="space-y-3 pt-1">
       <label className="flex items-center gap-3 select-none cursor-pointer">
@@ -616,7 +683,7 @@ function ArtifactOutputEditor({
               <div className="relative">
                 <select
                   value={value.mode}
-                  onChange={(e) => patch({ mode: e.target.value as ArtifactOutputMode })}
+                  onChange={(e) => handleModeChange(e.target.value as ArtifactOutputMode)}
                   disabled={readOnly}
                   className={`${INPUT_ON_PANEL} appearance-none pr-9`}
                 >
@@ -627,16 +694,33 @@ function ArtifactOutputEditor({
               </div>
             </div>
             <div>
-              <label className={LABEL_CLASS}>content_type{value.mode === 'binary' && <span className="text-status-error"> *</span>}</label>
-              <input
-                type="text"
-                value={value.content_type}
-                onChange={(e) => patch({ content_type: e.target.value })}
-                disabled={readOnly}
-                placeholder={value.mode === 'text' ? 'text/csv' : 'application/pdf'}
-                className={`${INPUT_ON_PANEL} font-mono`}
-              />
+              <label className={LABEL_CLASS}>常用类型</label>
+              <div className="relative">
+                <select
+                  value={selectedPreset}
+                  onChange={(e) => patch({ content_type: e.target.value })}
+                  disabled={readOnly}
+                  className={`${INPUT_ON_PANEL} appearance-none pr-9`}
+                >
+                  <option value="">自定义</option>
+                  {contentTypeOptions.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+                {SELECT_CHEVRON}
+              </div>
             </div>
+          </div>
+          <div>
+            <label className={LABEL_CLASS}>content_type{value.mode === 'binary' && <span className="text-status-error"> *</span>}</label>
+            <input
+              type="text"
+              value={value.content_type}
+              onChange={(e) => patch({ content_type: e.target.value })}
+              disabled={readOnly}
+              placeholder={value.mode === 'text' ? 'text/csv' : 'application/pdf'}
+              className={`${INPUT_ON_PANEL} font-mono`}
+            />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -644,7 +728,7 @@ function ArtifactOutputEditor({
               <input
                 type="text"
                 value={value.filename}
-                onChange={(e) => patch({ filename: e.target.value })}
+                onChange={(e) => handleFilenameChange(e.target.value)}
                 disabled={readOnly}
                 placeholder="report.csv"
                 className={`${INPUT_ON_PANEL} font-mono`}
