@@ -392,6 +392,20 @@ async def test_duplicate_full_name_across_units_fails(db_session, cfg):
         await _run(db_session, cfg)
 
 
+async def test_http_timeout_zero_fails(db_session, cfg):
+    tools, _ = cfg
+    _write(tools / "weather.md", _singleton_tool_md().replace("timeout: 20\n", "timeout: 0\n"))
+    with pytest.raises(SeedError, match="timeout.*>= 1"):
+        await _run(db_session, cfg)
+
+
+async def test_mcp_timeout_zero_fails(db_session, cfg, tmp_path):
+    mcp = tmp_path / "mcp"
+    _write(mcp / "inventory.md", _mcp_server_md().replace("timeout: 15\n", "timeout: 0\n"))
+    with pytest.raises(SeedError, match="timeout.*>= 1"):
+        await _run_with_mcp(db_session, cfg, mcp)
+
+
 # --------------------------------------------------------------------------
 # snapshot 重建
 # --------------------------------------------------------------------------

@@ -2554,6 +2554,10 @@ export interface components {
             defer: boolean;
             /** Provider */
             provider: string;
+            /** Provider Config */
+            provider_config: {
+                [key: string]: unknown;
+            } | null;
             /** Source */
             source: string;
             /** Members */

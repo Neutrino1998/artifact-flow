@@ -133,6 +133,19 @@ def _validate_unit_name(name: str, source: str) -> None:
         raise SeedError(f"{source}: unit name '{name}' must not contain '__'")
 
 
+def _read_timeout(frontmatter: dict, source: str, *, label: str = "timeout") -> int:
+    raw = frontmatter.get(label, 60)
+    if raw is None:
+        raw = 60
+    try:
+        timeout = int(raw)
+    except (TypeError, ValueError) as e:
+        raise SeedError(f"{source}: '{label}' must be an integer") from e
+    if timeout < 1:
+        raise SeedError(f"{source}: '{label}' must be >= 1")
+    return timeout
+
+
 def _build_http_member(frontmatter: dict, body: str, *, unit_name: str,
                        is_singleton: bool, source: str) -> MemberSeed:
     """从一个工具/endpoint 的 frontmatter+body 构建 MemberSeed(http provider)。"""
@@ -198,7 +211,7 @@ def _build_http_member(frontmatter: dict, body: str, *, unit_name: str,
         "headers": frontmatter.get("headers", {}) or {},
         "parameters": params,
         "response_extract": frontmatter.get("response_extract"),
-        "timeout": int(frontmatter.get("timeout", 60) or 60),
+        "timeout": _read_timeout(frontmatter, source),
     }
     return MemberSeed(
         member_name=member_name,
@@ -292,12 +305,7 @@ def _parse_mcp_server(path: str) -> ToolUnitSeed:
     headers = frontmatter.get("headers", {}) or {}
     if not isinstance(headers, dict):
         raise SeedError(f"{path}: MCP 'headers' must be a mapping")
-    try:
-        timeout = int(frontmatter.get("timeout", 60) or 60)
-    except (TypeError, ValueError) as e:
-        raise SeedError(f"{path}: MCP 'timeout' must be an integer") from e
-    if timeout < 1:
-        raise SeedError(f"{path}: MCP 'timeout' must be >= 1")
+    timeout = _read_timeout(frontmatter, path)
 
     default_permission = frontmatter.get("default_permission", "confirm")
     if default_permission not in _VALID_PERMISSIONS:
