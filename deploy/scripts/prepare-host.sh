@@ -12,6 +12,7 @@
 # Env:
 #   AF_VERSION                 expected app version tag (optional, for image check)
 #   AF_CERT_HOSTS              comma-separated SANs for self-signed placeholder cert
+#   AF_WITH_INFRA              set 1 when this host will run bundled Postgres/Redis
 #   AF_SANDBOX_POOL_SIZE       fixed scratch pool size, default 8G
 #   AF_SANDBOX_SCRATCH_ROOT    default /var/lib/artifactflow/sandbox-scratch
 #   AF_SANDBOX_POOL            default /var/lib/artifactflow/sandbox-pool.img
@@ -53,6 +54,92 @@ deploy_env_value() {
   value="${line#*=}"
   value="${value%$'\r'}"
   printf '%s\n' "$value"
+}
+
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s\n' "$value"
+}
+
+db_url_driver() {
+  case "$1" in
+    postgresql+asyncpg://*) echo "postgres" ;;
+    mysql+aiomysql://*) echo "mysql" ;;
+    sqlite+aiosqlite://*) echo "sqlite" ;;
+    *) echo "" ;;
+  esac
+}
+
+db_url_uses_bundled_postgres() {
+  local urls="$1" raw url
+  local -a raw_urls=()
+  IFS=',' read -ra raw_urls <<< "$urls"
+  for raw in "${raw_urls[@]}"; do
+    url="$(trim "$raw")"
+    [[ "$url" == *@postgres:* || "$url" == *@postgres/* ]] && return 0
+  done
+  return 1
+}
+
+check_db_urls() {
+  local urls="$1" source="$2" raw url driver first_driver="" count=0
+  local -a raw_urls=()
+  IFS=',' read -ra raw_urls <<< "$urls"
+  for raw in "${raw_urls[@]}"; do
+    url="$(trim "$raw")"
+    [[ -z "$url" ]] && continue
+    count=$((count + 1))
+    if [[ "$url" == *CHANGE_ME* ]]; then
+      bad "deploy/.env $source still contains CHANGE_ME"
+      continue
+    fi
+    driver="$(db_url_driver "$url")"
+    case "$driver" in
+      postgres|mysql)
+        if [[ -z "$first_driver" ]]; then
+          first_driver="$driver"
+        elif [[ "$driver" != "$first_driver" ]]; then
+          bad "deploy/.env $source mixes database drivers; keep all URLs PostgreSQL or all MySQL/TDSQL"
+        fi
+        ;;
+      sqlite)
+        info "deploy/.env $source uses SQLite; OK for dev/test, not recommended for intranet deployment"
+        ;;
+      *)
+        bad "deploy/.env $source has unsupported database URL driver: $url"
+        ;;
+    esac
+  done
+  (( count > 0 )) || bad "deploy/.env $source is empty"
+}
+
+check_postgres_infra_keys() {
+  local key value missing=0
+  for key in POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD; do
+    value="$(deploy_env_value "$key" || true)"
+    if [[ -z "$value" ]]; then
+      bad "deploy/.env bundled Postgres value missing or empty: $key"
+      missing=1
+    elif [[ "$value" == *CHANGE_ME* ]]; then
+      bad "deploy/.env bundled Postgres value still contains CHANGE_ME: $key"
+      missing=1
+    fi
+  done
+  (( missing == 0 )) && ok "deploy/.env bundled Postgres values are set"
+}
+
+warn_unused_postgres_placeholders() {
+  local key value
+  for key in POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD; do
+    value="$(deploy_env_value "$key" || true)"
+    if [[ -z "$value" ]]; then
+      continue
+    elif [[ "$value" == *CHANGE_ME* ]]; then
+      info "$key still contains CHANGE_ME; ignored unless you deploy with --profile infra"
+    fi
+  done
 }
 
 sandbox_scratch_root() {
@@ -119,10 +206,6 @@ cmd_check() {
       ARTIFACTFLOW_CREDENTIAL_KEY
       ARTIFACTFLOW_REDIS_URL
       ARTIFACTFLOW_REDIS_KEY_PREFIX
-      POSTGRES_DB
-      POSTGRES_USER
-      POSTGRES_PASSWORD
-      ARTIFACTFLOW_DATABASE_URL
     )
     for key in "${required_keys[@]}"; do
       value="$(deploy_env_value "$key" || true)"
@@ -134,12 +217,28 @@ cmd_check() {
         missing=1
       fi
     done
-    (( missing == 0 )) && ok "deploy/.env required values are set"
+    (( missing == 0 )) && ok "deploy/.env common required values are set"
+
+    local db_urls db_url effective_db_urls
+    db_urls="$(deploy_env_value ARTIFACTFLOW_DATABASE_URLS || true)"
+    db_url="$(deploy_env_value ARTIFACTFLOW_DATABASE_URL || true)"
+    effective_db_urls="${db_urls:-$db_url}"
+    if [[ -z "$effective_db_urls" ]]; then
+      bad "deploy/.env requires ARTIFACTFLOW_DATABASE_URL or ARTIFACTFLOW_DATABASE_URLS"
+    else
+      check_db_urls "$effective_db_urls" "$([[ -n "$db_urls" ]] && printf ARTIFACTFLOW_DATABASE_URLS || printf ARTIFACTFLOW_DATABASE_URL)"
+    fi
+
+    if [[ "${AF_WITH_INFRA:-0}" == 1 ]] || db_url_uses_bundled_postgres "$effective_db_urls"; then
+      check_postgres_infra_keys
+    else
+      warn_unused_postgres_placeholders
+    fi
 
     local optional_blanks
     optional_blanks="$(
       grep -n '^[A-Z0-9_][A-Z0-9_]*=$' "$ROOT/deploy/.env" \
-        | grep -Ev '^[0-9]+:(ARTIFACTFLOW_JWT_SECRET|ARTIFACTFLOW_CREDENTIAL_KEY|ARTIFACTFLOW_REDIS_URL|ARTIFACTFLOW_REDIS_KEY_PREFIX|POSTGRES_DB|POSTGRES_USER|POSTGRES_PASSWORD|ARTIFACTFLOW_DATABASE_URL)=$' \
+        | grep -Ev '^[0-9]+:(ARTIFACTFLOW_JWT_SECRET|ARTIFACTFLOW_CREDENTIAL_KEY|ARTIFACTFLOW_REDIS_URL|ARTIFACTFLOW_REDIS_KEY_PREFIX)=$' \
         || true
     )"
     if [[ -n "$optional_blanks" ]]; then
@@ -206,11 +305,19 @@ cmd_sandbox() {
   "$gvisor_dir/install.sh" || die "gVisor install failed"
   systemctl reload docker || die "docker reload failed"
 
-  docker load -i "$image" || die "sandbox docker load failed"
-  local tag
-  tag="$(docker image ls --format '{{.Repository}}:{{.Tag}}' | awk '/^artifactflow-sandbox:/ && $0 !~ /:latest$/ {print; exit}')"
-  [[ -n "$tag" ]] || die "loaded sandbox image tag not found"
-  docker tag "$tag" artifactflow-sandbox:latest || die "failed to tag artifactflow-sandbox:latest"
+  local load_output loaded_tag loaded_latest
+  load_output="$(docker load -i "$image")" || die "sandbox docker load failed"
+  printf '%s\n' "$load_output" | sed 's/^/  /'
+  loaded_latest="$(printf '%s\n' "$load_output" | awk '$0 == "Loaded image: artifactflow-sandbox:latest" {print; exit}')"
+  loaded_tag="$(printf '%s\n' "$load_output" | awk -F': ' '/^Loaded image: artifactflow-sandbox:/ && $2 !~ /:latest$/ {print $2; exit}')"
+  if [[ -n "$loaded_latest" ]]; then
+    ok "artifactflow-sandbox:latest loaded from $(basename "$image")"
+  elif [[ -n "$loaded_tag" ]]; then
+    docker tag "$loaded_tag" artifactflow-sandbox:latest || die "failed to tag $loaded_tag as artifactflow-sandbox:latest"
+    ok "tagged $loaded_tag as artifactflow-sandbox:latest"
+  else
+    die "loaded sandbox image tag not found in docker load output"
+  fi
 
   "$gvisor_dir/smoke-test.sh" artifactflow-sandbox:latest || die "gVisor smoke failed"
 
