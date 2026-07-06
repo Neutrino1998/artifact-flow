@@ -15,7 +15,8 @@ import { BUTTON_GHOST_ICON, MENU_ROW_DANGER_HOVER } from '@/lib/styles';
 //      后代(相对行定位);
 //   2) 下拉菜单必须脱离行内 DOM:侧栏列表和「搜索对话」列表都是 overflow-y-auto,
 //      行内 absolute 会在列表底部被裁剪。菜单 createPortal 到 document.body,用触发器的
-//      viewport 坐标 fixed 定位,并在底部空间不足时向上翻。
+//      viewport 坐标 fixed 定位,并在底部空间不足时向上翻;列表滚动时直接关闭,避免
+//      菜单滞后跟随或停留在已滚出视图的会话上。
 //   3) 删除确认弹窗(ConfirmModal → DialogShell 的 `fixed inset-0`)若落在行内会被 kebab
 //      wrapper 的 transform 祖先改掉定位基准(全屏遮罩错位)→ **createPortal 到 document.body**
 //      脱离 DOM 子树修掉定位(fixed 按 DOM 祖先算)。
@@ -108,21 +109,29 @@ export default function ConversationActionsMenu({
     return () => document.removeEventListener('mousedown', handleClick);
   }, [open, onOpenChange]);
 
+  useEffect(() => {
+    if (open && !visible) {
+      onOpenChange(false);
+    }
+  }, [open, visible, onOpenChange]);
+
   useLayoutEffect(() => {
-    if (!open) {
+    if (!open || !visible) {
       setMenuPosition(null);
       return;
     }
 
     updateMenuPosition();
 
+    const handleScroll = () => onOpenChange(false);
+
     window.addEventListener('resize', updateMenuPosition);
-    window.addEventListener('scroll', updateMenuPosition, true);
+    window.addEventListener('scroll', handleScroll, true);
     return () => {
       window.removeEventListener('resize', updateMenuPosition);
-      window.removeEventListener('scroll', updateMenuPosition, true);
+      window.removeEventListener('scroll', handleScroll, true);
     };
-  }, [open, updateMenuPosition]);
+  }, [open, visible, onOpenChange, updateMenuPosition]);
 
   const handleCopyId = async () => {
     await copy(conversationId);
@@ -158,7 +167,7 @@ export default function ConversationActionsMenu({
         </div>
       )}
 
-      {open && typeof document !== 'undefined' && createPortal(
+      {open && visible && typeof document !== 'undefined' && createPortal(
         <div
           ref={dropdownRef}
           className="fixed z-50 w-40 bg-surface dark:bg-panel-dark border border-border dark:border-border-dark rounded-lg shadow-modal p-1"
