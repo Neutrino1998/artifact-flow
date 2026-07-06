@@ -188,7 +188,7 @@ export default function DepartmentCascader({
   };
 
   if (loading) {
-    return <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">加载部门...</div>;
+    return <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">加载部门…</div>;
   }
   if (loadError) {
     return (
@@ -220,7 +220,7 @@ export default function DepartmentCascader({
                   <option key={o.id} value={o.id}>{o.name}</option>
                 ))}
                 {allowCreate && (
-                  <option value={CREATE_TOKEN}>+ 在此层级新建...</option>
+                  <option value={CREATE_TOKEN}>+ 在此层级新建…</option>
                 )}
               </select>
               {SELECT_CHEVRON}
@@ -256,7 +256,7 @@ export default function DepartmentCascader({
             disabled={creating || !createName.trim()}
             className={`${BUTTON_PRIMARY} px-3 py-1.5 rounded-lg text-sm`}
           >
-            {creating ? '创建中...' : '创建'}
+            {creating ? '创建中…' : '创建'}
           </button>
           <button
             type="button"

@@ -87,7 +87,7 @@ export default function CreateDepartmentForm({
             disabled={!canSubmit}
             className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
           >
-            {submitting ? '创建中...' : '创建'}
+            {submitting ? '创建中…' : '创建'}
           </button>
         </>
       }

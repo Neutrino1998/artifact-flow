@@ -94,7 +94,7 @@ export default function DangerConfirmModal({
             disabled={blocked}
             className={`${BUTTON_DANGER} rounded-lg px-8 py-2`}
           >
-            {submitting ? '处理中...' : confirmLabel}
+            {submitting ? '处理中…' : confirmLabel}
           </button>
         </>
       }

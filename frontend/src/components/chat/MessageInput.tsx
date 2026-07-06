@@ -559,10 +559,10 @@ export default function MessageInput() {
             maxLength={MAX_MESSAGE_CHARS}
             placeholder={
               isStreaming
-                ? '输入追加指令，按 Enter 发送...'
+                ? '输入追加指令，按 Enter 发送…'
                 : isNewConversation
-                  ? '开始新的对话...'
-                  : '输入消息...'
+                  ? '开始新的对话…'
+                  : '输入消息…'
             }
             rows={1}
             className="w-full resize-none bg-transparent leading-5 text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none"
@@ -654,7 +654,7 @@ export default function MessageInput() {
                             type="text"
                             value={skillFilter}
                             onChange={(e) => setSkillFilter(e.target.value)}
-                            placeholder="过滤技能..."
+                            placeholder="过滤技能…"
                             className="w-full px-2.5 py-1 rounded-lg bg-bg dark:bg-bg-dark text-xs text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none border border-transparent focus:border-accent"
                           />
                         )}
@@ -702,7 +702,7 @@ export default function MessageInput() {
                         </div>
                       ) : skillsError ? (
                         <div className="px-3 py-3 text-xs text-status-error">
-                          技能加载失败,请稍后重试。
+                          技能加载失败，请稍后重试。
                         </div>
                       ) : enabledSkills.length > 0 ? (
                         <div className="px-3 py-3 text-xs text-text-tertiary dark:text-text-tertiary-dark">

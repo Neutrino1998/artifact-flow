@@ -151,9 +151,9 @@ function InstanceCard({ inst, nowMs, isSelf }: { inst: InstanceHeartbeat; nowMs:
           <span>FDs: {proc.open_fds ?? '—'}</span>
           <span>DB pool: {inst.db_pool ? `${inst.db_pool.in_use ?? 0}/${inst.db_pool.size ?? 0}${inst.db_pool.overflow ? ` +${inst.db_pool.overflow}` : ''}` : '—'}</span>
           <span>Redis: {inst.redis?.used_mb != null ? `${inst.redis.used_mb}M` : '—'}</span>
-          <span>长跑任务: {inst.tasks_long_running ?? 0}</span>
+          <span>长跑任务：{inst.tasks_long_running ?? 0}</span>
           <span>data/: {inst.data_dir_mb != null ? `${inst.data_dir_mb}M` : '—'}</span>
-          <span>最近 ERROR: {ago(inst.last_error_ts, nowMs)}</span>
+          <span>最近 ERROR：{ago(inst.last_error_ts, nowMs)}</span>
           <span>started_at: {inst.started_at ?? '—'}</span>
         </div>
       )}

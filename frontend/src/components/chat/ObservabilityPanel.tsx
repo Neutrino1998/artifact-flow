@@ -594,7 +594,7 @@ function AdminConversationBrowser({
       <PanelSearchBar
         value={query}
         onChange={handleQueryChange}
-        placeholder="搜索对话标题或 ID..."
+        placeholder="搜索对话标题或 ID…"
         countLabel={`${total} 对话`}
         onClose={onClose}
       />
@@ -947,7 +947,7 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
       {/* List */}
       <div className="w-[280px] flex-shrink-0 border-r border-border dark:border-border-dark overflow-y-auto">
         {listLoading ? (
-          <div className="p-4 text-xs text-text-tertiary dark:text-text-tertiary-dark">加载中...</div>
+          <div className="p-4 text-xs text-text-tertiary dark:text-text-tertiary-dark">加载中…</div>
         ) : list == null || list.length === 0 ? (
           <div className="p-4 text-xs text-text-tertiary dark:text-text-tertiary-dark">该会话暂无 artifacts</div>
         ) : (
@@ -987,7 +987,7 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
           </div>
         ) : detailLoading ? (
           <div className="flex-1 flex items-center justify-center text-xs text-text-tertiary dark:text-text-tertiary-dark">
-            加载中...
+            加载中…
           </div>
         ) : detail == null ? (
           <div className="flex-1 flex items-center justify-center text-xs text-text-tertiary dark:text-text-tertiary-dark">
@@ -1023,7 +1023,7 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
                       </select>
                       {SELECT_CHEVRON_COMPACT}
                     </span>
-                    {versionLoading ? <span>加载...</span> : null}
+                    {versionLoading ? <span>加载…</span> : null}
                   </>
                 ) : null}
               </div>
@@ -1037,7 +1037,7 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
                 </pre>
               ) : (
                 <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                  加载版本内容中...
+                  加载版本内容中…
                 </div>
               )}
             </div>
@@ -1096,7 +1096,7 @@ function PromptReconstructSection({
           disabled={!canReconstruct || loading}
           className="px-2 py-1 rounded-md text-xs bg-accent/10 text-accent hover:bg-accent/20 disabled:opacity-50 transition-colors"
         >
-          {loading ? '重建中...' : '重建 Prompt'}
+          {loading ? '重建中…' : '重建 Prompt'}
         </button>
         {result ? (
           <button onClick={handleDownload} className="text-xs text-accent">

@@ -180,7 +180,7 @@ export default function ConversationBrowser() {
       <PanelSearchBar
         value={query}
         onChange={handleQueryChange}
-        placeholder="搜索对话标题..."
+        placeholder="搜索对话标题…"
         disabled={selectionMode}
         countLabel={selectionMode ? null : `${total} 对话`}
         rightSlot={

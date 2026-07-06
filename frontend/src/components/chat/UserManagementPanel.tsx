@@ -192,7 +192,7 @@ export default function UserManagementPanel() {
       <PanelSearchBar
         value={query}
         onChange={handleQueryChange}
-        placeholder="搜索用户名 / 显示名 / 部门..."
+        placeholder="搜索用户名 / 显示名 / 部门…"
         countLabel={`${total} 用户`}
         onClose={handleClose}
       />

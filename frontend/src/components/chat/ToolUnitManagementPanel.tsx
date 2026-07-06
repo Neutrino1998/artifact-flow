@@ -59,7 +59,7 @@ export default function ToolUnitManagementPanel() {
       <PanelSearchBar
         value={query}
         onChange={setQuery}
-        placeholder="搜索 unit 名 / 描述 / 工具全名..."
+        placeholder="搜索 unit 名 / 描述 / 工具全名…"
         countLabel={`${units.length} unit`}
         onClose={() => setActiveMode('none')}
       />

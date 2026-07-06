@@ -57,7 +57,7 @@ export default function StorageBar() {
       : `${formatBytes(used_bytes)} / ${formatBytes(quota_bytes)}`
     : loadFailed
       ? '暂不可用'
-      : '读取中...';
+      : '读取中…';
   const tooltipText = `存储空间统计上传文件、二进制产物和私有技能包占用的总大小，共用同一个存储配额。当前：${valueText}`;
 
   useEffect(() => {

@@ -98,7 +98,7 @@ export default function ImagePreview({
   if (!url) {
     return (
       <div className="h-full flex items-center justify-center text-text-tertiary dark:text-text-tertiary-dark">
-        {pendingFlush ? '图片加载中，完成后显示…' : '加载图片中...'}
+        {pendingFlush ? '图片加载中，完成后显示…' : '加载图片中…'}
       </div>
     );
   }

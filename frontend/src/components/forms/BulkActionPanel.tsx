@@ -215,7 +215,7 @@ export default function BulkActionPanel() {
                 disabled={submitting}
                 className={`${BUTTON_PRIMARY} flex-1 rounded-lg px-4 py-2`}
               >
-                {submitting ? '处理中...' : pendingDeptId === null ? '清空部门' : '应用'}
+                {submitting ? '处理中…' : pendingDeptId === null ? '清空部门' : '应用'}
               </button>
             </div>
           </div>
@@ -227,7 +227,7 @@ export default function BulkActionPanel() {
           title="批量删除用户"
           message={
             impactLoading
-              ? '正在加载影响数据...'
+              ? '正在加载影响数据…'
               : impact
                 ? `将删除 ${selection.length} 个用户、共 ${impact.conversation_count} 条会话。\n此操作不可恢复，关联的消息 / 事件 / artifacts 也会被级联删除。`
                 : `将删除 ${selection.length} 个用户及其所有会话。\n此操作不可恢复。`

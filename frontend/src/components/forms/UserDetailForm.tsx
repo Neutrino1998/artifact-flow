@@ -171,7 +171,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center bg-chat dark:bg-chat-dark p-6">
-        <div className="text-sm text-text-tertiary dark:text-text-tertiary-dark">加载中...</div>
+        <div className="text-sm text-text-tertiary dark:text-text-tertiary-dark">加载中…</div>
       </div>
     );
   }
@@ -234,7 +234,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
               disabled={!dirty || saving}
               className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
             >
-              {saving ? '保存中...' : '保存'}
+              {saving ? '保存中…' : '保存'}
             </button>
           </>
         )

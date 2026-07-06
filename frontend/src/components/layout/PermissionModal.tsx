@@ -79,7 +79,7 @@ export default function PermissionModal() {
             disabled={loading}
             className={`${BUTTON_PRIMARY} rounded-lg px-8 py-2`}
           >
-            {loading ? '允许中...' : '允许一次'}
+            {loading ? '允许中…' : '允许一次'}
           </button>
         </>
       }

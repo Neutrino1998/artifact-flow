@@ -352,7 +352,7 @@ export default function ToolUnitEditor({
                 className={`${INPUT_ON_PANEL} font-mono`}
               />
               <p className="text-text-tertiary dark:text-text-tertiary-dark text-xs mt-1">
-                全局唯一,禁含 &apos;__&apos;(工具全名前缀分隔符)
+                全局唯一，禁含 &apos;__&apos;（工具全名前缀分隔符）
               </p>
             </>
           )}
@@ -421,7 +421,7 @@ export default function ToolUnitEditor({
             渐进式披露（defer）
           </span>
           <span className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-            默认不进目录,经 search_tools 检索后才暴露
+            默认不进目录，经 search_tools 检索后才暴露
           </span>
         </label>
       </div>
@@ -508,7 +508,7 @@ function MemberCard({
             value={member.member_name}
             onChange={(e) => onChange({ member_name: e.target.value })}
             disabled={readOnly}
-            placeholder="裸名;全名 = unit名__成员名"
+            placeholder="裸名；全名 = unit名__成员名"
             className={`${INPUT_ON_PANEL} font-mono`}
           />
         </div>
@@ -586,7 +586,7 @@ function MemberCard({
         </div>
       </div>
       <p className="text-text-tertiary dark:text-text-tertiary-dark text-xs -mt-2">
-        endpoint / 请求头可用 <code className="font-mono">{'{{TOOL_SECRET_*}}'}</code> 占位符引用凭证,运行期替换
+        endpoint / 请求头可用 <code className="font-mono">{'{{TOOL_SECRET_*}}'}</code> 占位符引用凭证，运行期替换
       </p>
 
       <HeaderEditor
@@ -608,7 +608,7 @@ function MemberCard({
           value={member.response_extract}
           onChange={(e) => onChange({ response_extract: e.target.value })}
           disabled={readOnly}
-          placeholder="JMESPath 表达式(如 data.price),留空返回原始响应"
+          placeholder="JMESPath 表达式（如 data.price），留空返回原始响应"
           className={`${INPUT_ON_PANEL} font-mono`}
         />
       </div>
@@ -913,7 +913,7 @@ function ParamEditor({
                 onChange={(e) => update(idx, { enum: e.target.value })}
                 disabled={readOnly}
                 rows={2}
-                placeholder="枚举值,每行一个（可选）"
+                placeholder="枚举值，每行一个（可选）"
                 className={`${INPUT_ON_PANEL} font-mono resize-y`}
               />
               <label className="flex items-center gap-2 select-none cursor-pointer">

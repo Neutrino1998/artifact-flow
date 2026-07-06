@@ -133,7 +133,7 @@ export default function SkillManagementPanel() {
       <PanelSearchBar
         value={query}
         onChange={setQuery}
-        placeholder="搜索技能名 / 描述..."
+        placeholder="搜索技能名 / 描述…"
         countLabel={`${skills.length} 技能`}
         onClose={() => setActiveMode('none')}
       />
@@ -141,7 +141,7 @@ export default function SkillManagementPanel() {
       <div className="flex-1 overflow-y-auto px-4 pb-4">
         <div className="max-w-3xl mx-auto space-y-2">
           <p className="px-1 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-            关闭的技能不会自动进入对话,也不会出现在输入框的激活选择器里;随时可以重新开启。
+            关闭的技能不会自动进入对话，也不会出现在输入框的激活选择器里；随时可以重新开启。
           </p>
 
           {/* 导入入口 + 内联导入卡片(中间面板接管,不动右面板) */}
@@ -259,7 +259,7 @@ export default function SkillManagementPanel() {
                       title={confirming ? '再次点击确认删除' : '删除该技能'}
                     >
                       {confirming ? (
-                        '确认删除?'
+                        '确认删除？'
                       ) : (
                         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                           <path d="M2.5 4h11M6.5 4V2.5h3V4M4 4l.8 9.5h6.4L12 4M6.5 7v4M9.5 7v4" />
@@ -501,7 +501,7 @@ function SkillImportCard({
               type="button"
               className={`${BUTTON_PRIMARY} rounded-lg px-4 py-1.5 text-sm`}
             >
-              {stage.kind === 'submitting' ? '导入中...' : '导入'}
+              {stage.kind === 'submitting' ? '导入中…' : '导入'}
             </button>
           </div>
         </>

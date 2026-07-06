@@ -125,7 +125,7 @@ export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center bg-chat dark:bg-chat-dark p-6">
-        <div className="text-sm text-text-tertiary dark:text-text-tertiary-dark">加载中...</div>
+        <div className="text-sm text-text-tertiary dark:text-text-tertiary-dark">加载中…</div>
       </div>
     );
   }
@@ -187,12 +187,12 @@ export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps
               disabled={!dirty || saving}
               className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
             >
-              {saving ? '保存中...' : '保存定义'}
+              {saving ? '保存中…' : '保存定义'}
             </button>
           </>
         ) : (
           <p className="flex-1 text-center text-sm text-text-secondary dark:text-text-secondary-dark">
-            种子 unit:定义只读。改 config/tools 后重跑 reconcile。挂载可在下方调整。
+            种子 unit：定义只读。改 config/tools 后重跑 reconcile。挂载可在下方调整。
           </p>
         )
       }
@@ -323,7 +323,7 @@ function MountSection({
                 <StateBadge state={m.member_state} />
                 <SourceBadge source={m.source} />
                 {seeded ? (
-                  <span className="text-xs text-text-tertiary dark:text-text-tertiary-dark">MD 绑定,只读</span>
+                  <span className="text-xs text-text-tertiary dark:text-text-tertiary-dark">MD 绑定，只读</span>
                 ) : (
                   <>
                     <button
@@ -367,7 +367,7 @@ function MountSection({
             disabled={available.length === 0 || busy === '__add__'}
             className={`${INPUT_ON_PANEL} appearance-none pr-9`}
           >
-            <option value="">{available.length === 0 ? '无可挂载 agent' : '选择 agent...'}</option>
+            <option value="">{available.length === 0 ? '无可挂载 agent' : '选择 agent…'}</option>
             {available.map((a) => (
               <option key={a.name} value={a.name}>
                 {a.name}
@@ -426,7 +426,7 @@ function CredentialSection({
         占位符取自各成员 endpoint / 请求头里的 <code className="font-mono">{'{{...}}'}</code> 引用。
         {isDynamic
           ? '值加密落库、永不回读 — 留空提交即不改。新增引用请先保存定义。'
-          : '种子 unit 凭证由 reconcile / env 提供,此处只读。'}
+          : '种子 unit 凭证由 reconcile / env 提供，此处只读。'}
       </p>
 
       {credentials.length === 0 ? (

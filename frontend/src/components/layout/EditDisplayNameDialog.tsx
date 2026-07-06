@@ -107,7 +107,7 @@ export default function EditDisplayNameDialog({ onClose }: EditDisplayNameDialog
             disabled={!canSubmit}
             className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
           >
-            {submitting ? '保存中...' : '保存'}
+            {submitting ? '保存中…' : '保存'}
           </button>
         </div>
       </form>

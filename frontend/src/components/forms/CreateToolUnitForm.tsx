@@ -52,7 +52,7 @@ export default function CreateToolUnitForm() {
               新建工具 unit
             </div>
             <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-              动态注册（dynamic）;config 种子的工具请改 config/tools 后重跑 reconcile
+              动态注册（dynamic）；config 种子的工具请改 config/tools 后重跑 reconcile
             </div>
           </div>
           <button
@@ -83,7 +83,7 @@ export default function CreateToolUnitForm() {
             type="button"
             className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
           >
-            {submitting ? '创建中...' : '创建'}
+            {submitting ? '创建中…' : '创建'}
           </button>
         </>
       }

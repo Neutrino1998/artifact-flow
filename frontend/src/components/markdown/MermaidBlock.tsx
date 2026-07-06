@@ -101,7 +101,7 @@ export default function MermaidBlock({ code }: MermaidBlockProps) {
   if (error !== null) {
     return (
       <div className="my-2 space-y-1">
-        <div className="text-xs text-status-error">图表渲染失败,显示源码:</div>
+        <div className="text-xs text-status-error">图表渲染失败，显示源码：</div>
         <pre><code className="language-mermaid">{code}</code></pre>
         <ErrorFlowBlock message={error} />
       </div>
