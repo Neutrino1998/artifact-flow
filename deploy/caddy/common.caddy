@@ -66,8 +66,8 @@
 	# Batched upload ceiling — the AUTHORITATIVE total-bytes cap. POST /api/v1/chat
 	# sends ALL attachments in ONE multipart request, so the body is the SUM of the
 	# batch. Three INDEPENDENT axes: per-file ≤100MB (MAX_UPLOAD_SIZE, app 422),
-	# count ≤10 (MAX_CHAT_ATTACHMENTS, app 422), and total ≤200MiB (THIS cap, 413).
-	# Total is deliberately LESS than per-file×count (100MB×10=1GB): the design
+	# count ≤30 (MAX_CHAT_ATTACHMENTS, app 422), and total ≤200MiB (THIS cap, 413).
+	# Total is deliberately LESS than per-file×count (100MB×30=3GB): the design
 	# intent is "one big file OR many small ones, but a bounded total". So this
 	# DOES fire ahead of the per-file/count checks for a large batch, by design
 	# (a single oversize file still gets the backend's clean 422). 210MiB =

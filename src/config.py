@@ -167,8 +167,8 @@ class Settings(BaseSettings):
 
     # 上传限制。单文件字节上限(API 边界 loud 422)。批量**总**字节由代理层
     # client_max_body_size 独立封顶(200MB,见 deploy/nginx.conf|Caddyfile):
-    # 允许「1 个大文件 or 多个小文件」但控总量——单文件 100MB、数量 10、总量 200MB
-    # 三轴独立,总量刻意 < 100MB×10。前端经 /api/v1/meta 取此值做 UX 预挡(后端权威)。
+    # 允许「1 个大文件 or 多个小文件」但控总量——单文件 100MB、数量 30、总量 200MB
+    # 三轴独立,总量刻意 < 100MB×30。前端经 /api/v1/meta 取此值做 UX 预挡(后端权威)。
     MAX_UPLOAD_SIZE: int = 100 * 1024 * 1024  # 100MB
     # 文本转换路径(DocConverter._convert_text)的独立、更低字节闸。文本是唯一无自身
     # 成本 envelope 的转换路径:charset 检测 + str(best) + split() 会**物化整份解码
@@ -290,7 +290,7 @@ class Settings(BaseSettings):
                                      # 超大粘贴在前端转为暂存附件而非 inline 消息
     MAX_INJECT_QUEUE_SIZE: int = 5   # 单轮执行待处理 inject 队列深度上限（满即 429 背压；
                                      # 最坏单次 drain = MAX_MESSAGE_CHARS × 此值，详见输入挡板设计）
-    MAX_CHAT_ATTACHMENTS: int = 10   # 单条 /chat 消息附件数量上限（超即 422）；上传后逐个
+    MAX_CHAT_ATTACHMENTS: int = 30   # 单条 /chat 消息附件数量上限（超即 422）；上传后逐个
                                      # 串行转换落库，限制总转换时长 / DB 写入 / 归属串膨胀。
                                      # 注：批量**总**字节由代理层 client_max_body_size(200MB)
                                      # 独立封顶——数量轴管「几个」,总量轴管「多大」,两轴独立。

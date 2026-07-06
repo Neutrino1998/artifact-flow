@@ -9,4 +9,4 @@ export const MAX_MESSAGE_CHARS = 20000;
 // Max attachments per message. Mirrors config.MAX_CHAT_ATTACHMENTS (backend
 // enforces with a 422; this is UX only — staging is capped so the 422 is
 // unreachable in normal use).
-export const MAX_CHAT_ATTACHMENTS = 10;
+export const MAX_CHAT_ATTACHMENTS = 30;
