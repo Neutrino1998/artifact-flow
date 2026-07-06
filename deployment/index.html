@@ -644,6 +644,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#扩缩容与多机发布fleetsh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        扩缩容与多机发布（fleet.sh）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#滚动更新已有部署" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1923,6 +1934,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#扩缩容与多机发布fleetsh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        扩缩容与多机发布（fleet.sh）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#滚动更新已有部署" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2404,6 +2426,12 @@
 <li><strong>代理配置的组织：</strong> 两个模式共用 <code>deploy/caddy/common.caddy</code>（路由顺序 / 维护页 gate / SSE flush / 上传总量闸 / X-Real-IP / 多副本轮询 + wedge 副本被动摘除，全部模式无关机制只写一遍），入口文件各留薄壳——<code>deploy/caddy/Caddyfile</code>（Mode 2：ACME + AF_DOMAIN）/ <code>deploy/caddy/Caddyfile.intranet</code>（Mode 3：静态 tls + HTTP→HTTPS 跳转）。<code>deploy/caddy/</code> 整目录挂载进容器（单文件挂载 pin inode，编辑/tar 覆盖后 reload 会断）。维护页 flag 机制（<code>deploy/maintenance/</code>）同一套。</li>
 <li><strong>2A/3A vs 2B/3B：</strong> <code>--profile infra</code> 控制是否启动 PG/Redis 容器</li>
 </ul>
+<p><strong><code>deploy/</code> 下的独立文档</strong>（本文档覆盖不到的细节，按需展开）：</p>
+<ul>
+<li><a href="https://github.com/Neutrino1998/artifact-flow/blob/main/deploy/FLEET.md"><code>deploy/FLEET.md</code></a> — <code>fleet.sh</code> 单机→多机统一发布入口（见下方「扩缩容与多机发布」）</li>
+<li><a href="https://github.com/Neutrino1998/artifact-flow/blob/main/deploy/MULTI-REPLICA.md"><code>deploy/MULTI-REPLICA.md</code></a> — release-vs-serve 多副本拆分的完整设计 + 真机验收记录/清单</li>
+<li><a href="https://github.com/Neutrino1998/artifact-flow/blob/main/deploy/MIGRATION-project-name.md"><code>deploy/MIGRATION-project-name.md</code></a> — 一次性 <code>deploy_*</code> → <code>artifactflow_*</code> volume 改名迁移（仅升级自 pre-pin 版本的老部署需要，新部署跳过）</li>
+</ul>
 <hr />
 <h2 id="mode-1-quick-trial">Mode 1: Quick Trial</h2>
 <p>最简部署，SQLite + InMemory RuntimeStore，适合本地试用和开发。</p>
@@ -2488,8 +2516,9 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># 水平扩展 backend（Caddy 自动负载均衡）</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--scale<span class="w"> </span><span class="nv">backend</span><span class="o">=</span><span class="m">2</span>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># 注意：首次启动多副本时，Alembic 迁移通过 PG advisory lock 串行化</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="c1"># 只有一个副本执行迁移，其他副本等待并验证后再启动</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># 注意：一次性 release 服务先跑迁移 + reconcile 并退出，backend 靠 compose</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="c1"># depends_on 等它完成后再起来 serve（release-vs-serve 拆分，非各副本抢锁）</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="c1"># 详见「运维参考 → 数据库迁移」与 deploy/MULTI-REPLICA.md</span>
 </code></pre></div>
 <hr />
 <h2 id="mode-2b-production云数据库">Mode 2B: Production（云数据库）</h2>
@@ -2563,41 +2592,69 @@
 <a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a>
 <a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a><span class="c1"># 4. 内网 LLM（如需）：编辑 config/models/models.yaml，把 base_url 指向内部推理端点</span>
 <a id="__codelineno-9-22" name="__codelineno-9-22" href="#__codelineno-9-22"></a>
-<a id="__codelineno-9-23" name="__codelineno-9-23" href="#__codelineno-9-23"></a><span class="c1"># 5. 启动（3A: 自建基础设施）</span>
-<a id="__codelineno-9-24" name="__codelineno-9-24" href="#__codelineno-9-24"></a><span class="nv">AF_VERSION</span><span class="o">=</span><span class="m">1</span>.0.0<span class="w"> </span>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>up<span class="w"> </span>-d
-<a id="__codelineno-9-25" name="__codelineno-9-25" href="#__codelineno-9-25"></a>
-<a id="__codelineno-9-26" name="__codelineno-9-26" href="#__codelineno-9-26"></a><span class="c1"># 6. 创建管理员</span>
-<a id="__codelineno-9-27" name="__codelineno-9-27" href="#__codelineno-9-27"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>backend<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-28" name="__codelineno-9-28" href="#__codelineno-9-28"></a><span class="w">  </span>python<span class="w"> </span>scripts/create_admin.py<span class="w"> </span>admin<span class="w"> </span>--password<span class="w"> </span>&lt;your-password&gt;
+<a id="__codelineno-9-23" name="__codelineno-9-23" href="#__codelineno-9-23"></a><span class="c1"># 5. TLS 证书：真证书就位放 deploy/certs/{server.crt,server.key}（完整链，见该目录 README）。</span>
+<a id="__codelineno-9-24" name="__codelineno-9-24" href="#__codelineno-9-24"></a><span class="c1">#    还没签发下来？先自签一张占位证书让 Caddy 能起来（幂等，绝不覆盖真证书）：</span>
+<a id="__codelineno-9-25" name="__codelineno-9-25" href="#__codelineno-9-25"></a>deploy/scripts/ensure-cert.sh
+<a id="__codelineno-9-26" name="__codelineno-9-26" href="#__codelineno-9-26"></a><span class="c1">#    真证书到位后覆盖两个 pem 再 caddy reload（零停机，见「运行时配置变更」表）。</span>
+<a id="__codelineno-9-27" name="__codelineno-9-27" href="#__codelineno-9-27"></a>
+<a id="__codelineno-9-28" name="__codelineno-9-28" href="#__codelineno-9-28"></a><span class="c1"># 6. 启动（3A: 自建基础设施）</span>
+<a id="__codelineno-9-29" name="__codelineno-9-29" href="#__codelineno-9-29"></a><span class="nv">AF_VERSION</span><span class="o">=</span><span class="m">1</span>.0.0<span class="w"> </span>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>up<span class="w"> </span>-d
+<a id="__codelineno-9-30" name="__codelineno-9-30" href="#__codelineno-9-30"></a>
+<a id="__codelineno-9-31" name="__codelineno-9-31" href="#__codelineno-9-31"></a><span class="c1"># 7. 创建管理员</span>
+<a id="__codelineno-9-32" name="__codelineno-9-32" href="#__codelineno-9-32"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>backend<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-33" name="__codelineno-9-33" href="#__codelineno-9-33"></a><span class="w">  </span>python<span class="w"> </span>scripts/create_admin.py<span class="w"> </span>admin<span class="w"> </span>--password<span class="w"> </span>&lt;your-password&gt;
 </code></pre></div>
+<h3 id="扩缩容与多机发布fleetsh">扩缩容与多机发布（fleet.sh）</h3>
+<p><code>deploy/scripts/fleet.sh</code> 是从「一台机器」到「多台机器」的统一发布入口，把上面「首次部署」
+的校验 + 加载 + 启动 + 探活收成一条命令，并原生支持 <code>--scale</code>：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>deploy/scripts/fleet.sh<span class="w"> </span>preflight<span class="w">            </span><span class="c1"># 单机/每台机器就绪检查</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>deploy/scripts/fleet.sh<span class="w"> </span>deploy<span class="w"> </span>&lt;bundle-dir&gt;<span class="w">  </span><span class="c1"># 校验 → arch 检查 → load → release 门 → up → 探活</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>deploy/scripts/fleet.sh<span class="w"> </span>deploy<span class="w"> </span>--dry-run<span class="w"> </span>&lt;d&gt;<span class="w"> </span><span class="c1"># 只打印计划，不改动任何东西</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>deploy/scripts/fleet.sh<span class="w"> </span>status<span class="w">               </span><span class="c1"># 各机器 compose ps + LB 健康</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>deploy/scripts/fleet.sh<span class="w"> </span>rollback<span class="w">             </span><span class="c1"># 回退到上一个成功版本</span>
+</code></pre></div>
+<p>拓扑写在 <code>deploy/fleet.conf</code>（从 <code>fleet.conf.example</code> 复制，gitignored），单机场景下四个角色
+（<code>infra</code>/<code>release</code>/<code>app</code>/<code>lb</code>）都填 <code>local</code>；<code>app</code> 行的 <code>scale=N</code> 就是 <code>--scale backend=N</code>
+的等价物。完整命令、多机时序、以及 TLS 证书自动兜底（<code>up</code> 前自动跑
+<code>ensure-cert.sh</code>），见 <a href="https://github.com/Neutrino1998/artifact-flow/blob/main/deploy/FLEET.md"><code>deploy/FLEET.md</code></a>。</p>
+<blockquote>
+<p><strong>现状：</strong> 单机路径（含 <code>--scale</code>）已跑通并推荐日常使用；<strong>多机路径目前 gated off</strong>
+（<code>fleet.sh</code> 里显式 <code>die</code>，只有 <code>--dry-run</code> 能打印计划），要等第二台机器上跑通验收后才解封——
+详见 FLEET.md「Multi-host: unexercised seams」。多机到位前，扩容仍只能在单机上
+<code>--scale</code>；跨机负载均衡 / 多机数据库 URL 等留在文档里作为<strong>已设计未验证</strong>的路径。</p>
+<p><code>fleet.sh</code> 目前只包装 <code>deploy/docker-compose.intranet.yml</code>（Mode 3）；Mode 2（公网）
+扩缩容仍用上面 Mode 2A「扩缩容」小节里的裸 <code>--scale</code> + <code>deploy-prod.sh</code>。</p>
+<p><code>fleet.sh deploy</code> 是直接 <code>up</code>（数秒 blip，无维护页）；要维护页包住整个升级窗口，
+仍走下面「滚动更新已有部署」的 <code>pause.sh</code>/<code>resume.sh</code>。</p>
+</blockquote>
 <h3 id="滚动更新已有部署">滚动更新已有部署</h3>
 <p>新版本到位后，<code>pause.sh</code> / <code>resume.sh</code> 把维护窗口包成两个动作：起维护页 + 停服务 → 加载新镜像 → 起新版本 + 关维护页。</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># 在内网机（假设新 tar 已 scp 到 ./tmp/ 下，typically 不含 infra）</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="nb">cd</span><span class="w"> </span>/opt/artifactflow
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># 1. 校验 + 解包（不影响在跑容器，可在维护开始前做）</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>./deploy/scripts/verify-bundle.sh<span class="w"> </span>tmp<span class="w">    </span><span class="c1"># 一次性校验 tmp/ 下所有 tar</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>tar<span class="w"> </span>xzf<span class="w"> </span>tmp/artifactflow-deploy-1.0.1.tar.gz
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>tar<span class="w"> </span>xzf<span class="w"> </span>tmp/artifactflow-config-1.0.1.tar.gz
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>docker<span class="w"> </span>load<span class="w"> </span>-i<span class="w"> </span>tmp/artifactflow-app-1.0.1.tar.gz
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>
-<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="c1"># 2. 进维护窗口</span>
-<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>./deploy/scripts/pause.sh<span class="w"> </span><span class="s2">&quot;升级到 v1.0.1&quot;</span>
-<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>
-<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="c1"># 3. 退维护窗口（resume 失败 → 维护页保持开启，运维有时间排查）</span>
-<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>./deploy/scripts/resume.sh<span class="w"> </span><span class="m">1</span>.0.1
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># 在内网机（假设新 tar 已 scp 到 ./tmp/ 下，typically 不含 infra）</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="nb">cd</span><span class="w"> </span>/opt/artifactflow
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="c1"># 1. 校验 + 解包（不影响在跑容器，可在维护开始前做）</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>./deploy/scripts/verify-bundle.sh<span class="w"> </span>tmp<span class="w">    </span><span class="c1"># 一次性校验 tmp/ 下所有 tar</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>tar<span class="w"> </span>xzf<span class="w"> </span>tmp/artifactflow-deploy-1.0.1.tar.gz
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>tar<span class="w"> </span>xzf<span class="w"> </span>tmp/artifactflow-config-1.0.1.tar.gz
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>docker<span class="w"> </span>load<span class="w"> </span>-i<span class="w"> </span>tmp/artifactflow-app-1.0.1.tar.gz
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="c1"># 2. 进维护窗口</span>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>./deploy/scripts/pause.sh<span class="w"> </span><span class="s2">&quot;升级到 v1.0.1&quot;</span>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="c1"># 3. 退维护窗口（resume 失败 → 维护页保持开启，运维有时间排查）</span>
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>./deploy/scripts/resume.sh<span class="w"> </span><span class="m">1</span>.0.1
 </code></pre></div>
 <blockquote>
 <p><strong>nginx→Caddy 一次性切换（既有内网部署首次升到 Caddy 版）：</strong> 新 compose 里反向代理服务从 <code>nginx</code> 换成了 <code>caddy</code>，<code>up -d</code> 不会自动移除旧服务的容器。切换步骤：证书就位（<code>deploy/certs/server.crt</code> + <code>server.key</code>，完整链，见该目录 README）→ 常规 prep（verify-bundle / docker load / tar xzf deploy+config）→ <code>docker compose -f deploy/docker-compose.intranet.yml --profile infra down</code> → <code>AF_VERSION=&lt;版本&gt; ... up -d</code>（infra 服务定义变更走 down/up，不走 pause/resume）。防火墙记得放行 HTTPS 端口（默认 443，<code>AF_HTTPS_PORT</code> 可改）。切换后旧的 <code>nginx:*</code> 镜像可 <code>docker rmi</code> 回收。</p>
 <p><strong>涉及 compose infra config 变更的升级（罕见）：</strong> 多数升级只改 backend / frontend 镜像和它们用到的 <code>ARTIFACTFLOW_*</code> env，<code>pause/resume</code> 已覆盖（resume.sh <code>up backend frontend</code> → compose 自动 diff config-hash → 改了就 recreate）。但若本版本动了 <code>postgres</code> / <code>redis</code> / <code>caddy</code> 服务块的 HostConfig 字段（<code>image</code> / <code>logging</code> / <code>mem_limit</code> / <code>volumes</code> / <code>ports</code> / <code>cap_add</code> / <code>command</code>），<code>deploy/caddy/</code> 下的配置，或 <code>.env</code> 里 <code>AF_HTTP_PORT</code> / <code>AF_HTTPS_PORT</code>（caddy <code>ports:</code> interpolation），resume.sh 不触碰 infra 容器，新配置永远不生效。<strong>前提</strong>：先按上面常规流程完成 <code>verify-bundle.sh</code> + <code>docker load</code> + <code>tar xzf deploy/config</code>，让新 compose + 新 Caddyfile 就位，再进入下面两个时机（否则 recreate 用的是旧 compose / 旧 Caddyfile）：</p>
 <p><strong>(a) caddy 块 / Caddyfile / <code>AF_HTTP(S)_PORT</code> 变了 → 在 <code>pause.sh</code> 之前 recreate</strong>：
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">    </span>up<span class="w"> </span>-d<span class="w"> </span>--force-recreate<span class="w"> </span>--no-deps<span class="w"> </span>caddy
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">    </span>up<span class="w"> </span>-d<span class="w"> </span>--force-recreate<span class="w"> </span>--no-deps<span class="w"> </span>caddy
 </code></pre></div>
 接受 1–2 秒 caddy 重启的连接 RST（可由维护窗口公告吸收）。放 pause 之前只是流程简单（维护页全程可用）；Caddy 按请求时解析 upstream，backend 停止时启动也不会崩，没有旧 nginx 静态 upstream 的顺序硬约束。仅改 <code>deploy/caddy/</code> 配置内容（不动 compose 字段）时也可以用零停机的 <code>docker compose ... exec caddy caddy reload --config /etc/caddy/conf/Caddyfile.intranet --adapter caddyfile</code> 代替 recreate。</p>
 <p><strong>(b) postgres 或 redis 块变了 → 在 <code>pause</code> 与 <code>resume</code> 之间 recreate</strong>：
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">    </span>up<span class="w"> </span>-d<span class="w"> </span>--force-recreate<span class="w"> </span>--no-deps<span class="w"> </span>&lt;postgres<span class="w"> </span>redis<span class="w"> </span>中实际变了的&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">    </span>up<span class="w"> </span>-d<span class="w"> </span>--force-recreate<span class="w"> </span>--no-deps<span class="w"> </span>&lt;postgres<span class="w"> </span>redis<span class="w"> </span>中实际变了的&gt;
 </code></pre></div>
 此时 backend/frontend 已 stop，无活跃应用连接，recreate 干净。</p>
 <p>⚠️ <strong><code>POSTGRES_*</code> 不属于本流程</strong>：<code>POSTGRES_DB</code> / <code>POSTGRES_USER</code> / <code>POSTGRES_PASSWORD</code> 是 init-only —— <code>postgres:16-alpine</code> 的 entrypoint 只在 <code>postgres_data</code> 卷<strong>为空</strong>时用这些 env 跑 <code>initdb</code>，已有卷的情况下完全忽略。改 .env 里这些值然后 recreate postgres，<strong>库内用户/密码不会变</strong>：backend 会用 <code>DATABASE_URL</code> 里的新密码、PG 库内仍是旧密码 → 认证失败 → backend 起不来（<code>pg_isready</code> 不做认证 → PG healthy 但 backend 连不上，故障表现更隐蔽）。旋转密码 / 改用户的正确流程：连进 PG 跑 <code>ALTER USER artifactflow WITH PASSWORD '...';</code>（或 <code>CREATE USER</code> / <code>CREATE DATABASE</code>），改完同步 <code>.env</code> 里 <code>ARTIFACTFLOW_DATABASE_URL</code>（backend 真正用的值）和 <code>POSTGRES_PASSWORD</code>（仅作 .env 文档，给未来 fresh-init 用），然后走 pause/resume（无需 infra recreate）。<code>POSTGRES_*</code> 真正生效的场景只有清空数据卷重新 init（生产几乎不会做）。</p>
@@ -2630,14 +2687,14 @@
 </tbody>
 </table>
 <p><strong>验证 HostConfig 已生效</strong>（recreate 完毕后、resume 之前；容器名按当前 compose project 实际命名，默认 <code>artifactflow-&lt;svc&gt;-1</code>）：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="k">for</span><span class="w"> </span>s<span class="w"> </span><span class="k">in</span><span class="w"> </span>caddy<span class="w"> </span>backend<span class="w"> </span>frontend<span class="w"> </span>postgres<span class="w"> </span>redis<span class="p">;</span><span class="w"> </span><span class="k">do</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;--- </span><span class="nv">$s</span><span class="s2"> ---&quot;</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span>docker<span class="w"> </span>inspect<span class="w"> </span>artifactflow-<span class="si">${</span><span class="nv">s</span><span class="si">}</span>-1<span class="w"> </span>--format<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">    </span><span class="s1">&#39;{{.HostConfig.LogConfig.Type}} {{.HostConfig.LogConfig.Config}} mem={{.HostConfig.Memory}}&#39;</span>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="k">done</span>
-<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="c1"># 期望 LogConfig.Type=json-file，Config 含 max-size:100m / max-file:3；</span>
-<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="c1"># Memory（字节）：caddy=0 / backend=2147483648 / frontend=1073741824 /</span>
-<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="c1"># postgres=2147483648 / redis=805306368</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="k">for</span><span class="w"> </span>s<span class="w"> </span><span class="k">in</span><span class="w"> </span>caddy<span class="w"> </span>backend<span class="w"> </span>frontend<span class="w"> </span>postgres<span class="w"> </span>redis<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;--- </span><span class="nv">$s</span><span class="s2"> ---&quot;</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">  </span>docker<span class="w"> </span>inspect<span class="w"> </span>artifactflow-<span class="si">${</span><span class="nv">s</span><span class="si">}</span>-1<span class="w"> </span>--format<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="w">    </span><span class="s1">&#39;{{.HostConfig.LogConfig.Type}} {{.HostConfig.LogConfig.Config}} mem={{.HostConfig.Memory}}&#39;</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="k">done</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="c1"># 期望 LogConfig.Type=json-file，Config 含 max-size:100m / max-file:3；</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="c1"># Memory（字节）：caddy=0 / backend=2147483648 / frontend=1073741824 /</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="c1"># postgres=2147483648 / redis=805306368</span>
 </code></pre></div>
 </blockquote>
 <h3 id="运行时配置变更无需-rebuild--重新传镜像">运行时配置变更（无需 rebuild / 重新传镜像）</h3>
@@ -2701,14 +2758,14 @@
 <p><strong>关键区别：</strong> 改 <code>config/*</code> 用 <code>restart backend</code>（让进程重读文件），改 <code>.env</code> 用 <code>up -d</code>（让 compose 重建容器注入环境变量）。<code>config/site/</code> 是例外：挂在 frontend 容器，无需重启；其中 <code>notifications.json</code> 前端轮询自动重拉，<code>welcome_tips.json</code> / <code>branding.json</code> 只在页面加载时读取，运维改完需用户刷新。</p>
 </blockquote>
 <h3 id="仅推送-config-更新不动镜像">仅推送 config 更新（不动镜像）</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># 在构建机上重新打包（或手工 tar）</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>tar<span class="w"> </span>czf<span class="w"> </span>artifactflow-config-1.0.1.tar.gz<span class="w"> </span>config/
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="c1"># 推到内网</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>scp<span class="w"> </span>artifactflow-config-1.0.1.tar.gz<span class="w"> </span>target:/opt/artifactflow/
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>ssh<span class="w"> </span>target<span class="w"> </span><span class="s1">&#39;cd /opt/artifactflow &amp;&amp; \</span>
-<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="s1">            tar xzf artifactflow-config-1.0.1.tar.gz &amp;&amp; \</span>
-<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="s1">            docker compose -f deploy/docker-compose.intranet.yml restart backend&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># 在构建机上重新打包（或手工 tar）</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>tar<span class="w"> </span>czf<span class="w"> </span>artifactflow-config-1.0.1.tar.gz<span class="w"> </span>config/
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="c1"># 推到内网</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>scp<span class="w"> </span>artifactflow-config-1.0.1.tar.gz<span class="w"> </span>target:/opt/artifactflow/
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>ssh<span class="w"> </span>target<span class="w"> </span><span class="s1">&#39;cd /opt/artifactflow &amp;&amp; \</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="s1">            tar xzf artifactflow-config-1.0.1.tar.gz &amp;&amp; \</span>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="s1">            docker compose -f deploy/docker-compose.intranet.yml restart backend&#39;</span>
 </code></pre></div>
 <blockquote>
 <p>上面的 <code>restart backend</code> 是给 <code>config/agents/</code>、<code>config/models/</code>、<code>config/tools/</code> 用的。如果<strong>只</strong>改了 <code>config/site/*.json</code>，不需要任何 docker 命令；其中 <code>notifications.json</code> 前端 60s 轮询自己生效，<code>welcome_tips.json</code> / <code>branding.json</code> 只在挂载时拉一次，需要用户刷新页面才看到。</p>
@@ -2723,23 +2780,23 @@
 <li><strong>沙盒镜像</strong>：<code>gunzip -c artifactflow-sandbox-&lt;ver&gt;-&lt;arch&gt;.tar.gz | docker load</code>。</li>
 <li><strong>scratch 根 = 定容 loop 文件系统</strong>（磁盘配额的硬墙层：watchdog race 窗口内写穿也只是池子满，宿主盘无恙；独立 inode 表顺带兜住海量小文件）：</li>
 </ol>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nv">POOL</span><span class="o">=</span>/var/lib/artifactflow/sandbox-pool.img
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="nv">ROOT</span><span class="o">=</span>/var/lib/artifactflow/sandbox-scratch
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>sudo<span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>dirname<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$POOL</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ROOT</span><span class="s2">&quot;</span>
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>sudo<span class="w"> </span>fallocate<span class="w"> </span>-l<span class="w"> </span>20G<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$POOL</span><span class="s2">&quot;</span><span class="w">          </span><span class="c1"># 容量 ≈ 并发 turn 数 × SANDBOX_WORKSPACE_QUOTA_MB(默认2G) + 余量</span>
-<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>sudo<span class="w"> </span>mkfs.ext4<span class="w"> </span>-m<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$POOL</span><span class="s2">&quot;</span>
-<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$POOL</span><span class="s2"> </span><span class="nv">$ROOT</span><span class="s2"> ext4 loop,nosuid,nodev 0 0&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>tee<span class="w"> </span>-a<span class="w"> </span>/etc/fstab
-<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>sudo<span class="w"> </span>mount<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ROOT</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>df<span class="w"> </span>-h<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ROOT</span><span class="s2">&quot;</span><span class="w">    </span><span class="c1"># 期望:定容 ext4 挂载成功</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="nv">POOL</span><span class="o">=</span>/var/lib/artifactflow/sandbox-pool.img
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="nv">ROOT</span><span class="o">=</span>/var/lib/artifactflow/sandbox-scratch
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>sudo<span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>dirname<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$POOL</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ROOT</span><span class="s2">&quot;</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>sudo<span class="w"> </span>fallocate<span class="w"> </span>-l<span class="w"> </span>20G<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$POOL</span><span class="s2">&quot;</span><span class="w">          </span><span class="c1"># 容量 ≈ 并发 turn 数 × SANDBOX_WORKSPACE_QUOTA_MB(默认2G) + 余量</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>sudo<span class="w"> </span>mkfs.ext4<span class="w"> </span>-m<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$POOL</span><span class="s2">&quot;</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$POOL</span><span class="s2"> </span><span class="nv">$ROOT</span><span class="s2"> ext4 loop,nosuid,nodev 0 0&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>tee<span class="w"> </span>-a<span class="w"> </span>/etc/fstab
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>sudo<span class="w"> </span>mount<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ROOT</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>df<span class="w"> </span>-h<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ROOT</span><span class="s2">&quot;</span><span class="w">    </span><span class="c1"># 期望:定容 ext4 挂载成功</span>
 </code></pre></div>
 <p>不加 <code>noexec</code>——模型在工作区 <code>chmod +x</code> 后直接执行脚本是合法用法。
 4. <strong>验证</strong>：<code>tar xzf artifactflow-sandbox-verify-&lt;ver&gt;.tar.gz</code>，<code>IMAGE=artifactflow-sandbox:&lt;ver&gt;-&lt;arch&gt; bash verify/run-all.sh</code>，全绿后记录 manifest 里的 image id 作为本部署的冻结锚点。</p>
 <h3 id="启动_2">启动</h3>
 <p><code>deploy/.env</code> 增加（<strong>路径必须与宿主一致</strong>——overlay 把 scratch 根以同一绝对路径挂进 backend 容器，因为 backend 把工作区路径作为 bind source 传给 daemon、daemon 按宿主路径解析；改路径只改这一处 env，compose 两侧与应用配置同步取值）：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="nv">ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT</span><span class="o">=</span>/var/lib/artifactflow/sandbox-scratch
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="c1"># ARTIFACTFLOW_SANDBOX_RUNTIME 默认 runsc(overlay 内兜底),无需显式写</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="nv">ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT</span><span class="o">=</span>/var/lib/artifactflow/sandbox-scratch
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="c1"># ARTIFACTFLOW_SANDBOX_RUNTIME 默认 runsc(overlay 内兜底),无需显式写</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">               </span>-f<span class="w"> </span>deploy/docker-compose.sandbox.yml<span class="w"> </span><span class="o">[</span>--profile<span class="w"> </span>infra<span class="o">]</span><span class="w"> </span>up<span class="w"> </span>-d
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="w">               </span>-f<span class="w"> </span>deploy/docker-compose.sandbox.yml<span class="w"> </span><span class="o">[</span>--profile<span class="w"> </span>infra<span class="o">]</span><span class="w"> </span>up<span class="w"> </span>-d
 </code></pre></div>
 <blockquote>
 <p><strong>安全提醒</strong>：overlay 把 <code>/var/run/docker.sock</code> 挂进 backend 容器（等同宿主 root）。这是 DooD 架构的固有前提，防线是代码侧纪律——容器创建参数全为 backend 常量、绝不被模型内容污染（见架构文档「隔离边界」）。不要把这个 overlay 用在不需要沙盒的部署上。</p>
@@ -3083,17 +3140,17 @@
 <p><code>src/config.py</code> 的代码默认值（<code>MAX_CONCURRENT_TASKS=10</code>、<code>DATABASE_POOL_SIZE=5+10</code>、<code>REDIS_MAX_CONNECTIONS=50</code>）在没有特定模型 API 并发预算时是安全起点，但<strong>对于 Mode 2/3 的实际生产部署偏保守</strong> —— 单 backend 只允许 10 个引擎并发，模型 API 配额（如 64 路并行）会被严重浪费。</p>
 <p><code>deploy/.env.intranet.example</code> 和 <code>deploy/.env.prod.example</code> 已按 64 路模型并发预设了一组推荐值，下面是这组值的依据，便于按你自己的模型 API 配额线性缩放。</p>
 <h3 id="三个互相绑定的旋钮">三个互相绑定的旋钮</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>模型 API 并发预算 (例 64)
-<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>        │
-<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>        ▼
-<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>ARTIFACTFLOW_MAX_CONCURRENT_TASKS  ← 单 backend 引擎执行 Semaphore (src/api/services/execution_runner.py)
-<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>        │
-<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>        ├─► ARTIFACTFLOW_DATABASE_POOL_SIZE + MAX_OVERFLOW
-<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a>        │     单 backend DB 连接上限，每个执行 post-process 期间短暂占 1–2 连接
-<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a>        │     建议 ≈ MAX_CONCURRENT_TASKS（含 overflow），余量留给后台任务/调试
-<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a>        │
-<a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a>        └─► ARTIFACTFLOW_REDIS_MAX_CONNECTIONS
-<a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a>              建议 ≈ 2× MAX_CONCURRENT_TASKS（runtime store + stream consumer + pub/sub）
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>模型 API 并发预算 (例 64)
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>        │
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>        ▼
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>ARTIFACTFLOW_MAX_CONCURRENT_TASKS  ← 单 backend 引擎执行 Semaphore (src/api/services/execution_runner.py)
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>        │
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>        ├─► ARTIFACTFLOW_DATABASE_POOL_SIZE + MAX_OVERFLOW
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a>        │     单 backend DB 连接上限，每个执行 post-process 期间短暂占 1–2 连接
+<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a>        │     建议 ≈ MAX_CONCURRENT_TASKS（含 overflow），余量留给后台任务/调试
+<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a>        │
+<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a>        └─► ARTIFACTFLOW_REDIS_MAX_CONNECTIONS
+<a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a>              建议 ≈ 2× MAX_CONCURRENT_TASKS（runtime store + stream consumer + pub/sub）
 </code></pre></div>
 <p>如果模型 API 并发不是 64，把以上三个值按比例缩放即可。</p>
 <h3 id="mode-a-vs-mode-bdb-池的安全边界">Mode A vs Mode B：DB 池的安全边界</h3>
@@ -3193,7 +3250,11 @@
 <hr />
 <h2 id="运维参考">运维参考</h2>
 <h3 id="数据库迁移">数据库迁移</h3>
-<p>容器启动时 <code>deploy/entrypoint.sh</code> 自动处理迁移：</p>
+<p><strong>两条路径，<code>docker-compose.prod.yml</code> / <code>deploy/docker-compose.intranet.yml</code> 默认走前者：</strong></p>
+<ul>
+<li><strong>Release-vs-serve 拆分（Mode 2/3 默认）：</strong> 一次性 <code>release</code> 服务（<code>entrypoint.sh release</code>）单独跑迁移 + reconcile 后退出；backend 带 <code>AF_SKIP_RELEASE=1</code>，靠 compose <code>depends_on: { release: { condition: service_completed_successfully } }</code> 等它退出，<strong>不再自己抢锁</strong>——多副本时所有 backend 走同一条"等 release 退出"的依赖关系，下面 Leader/Follower 抢锁的分支在这条路径下根本不会进入（backend 直接跳到"继续启动"）。详见 <a href="https://github.com/Neutrino1998/artifact-flow/blob/main/deploy/MULTI-REPLICA.md"><code>deploy/MULTI-REPLICA.md</code></a>。</li>
+<li><strong>Inline 自迁移（Mode 1 / 向后兼容 fallback）：</strong> 不设 <code>AF_SKIP_RELEASE</code> 时的默认行为——容器启动时自己判断数据库类型、按下面这套逻辑决出 leader/follower。SQLite 单副本走这条（<code>release</code> 拆分只对 PG/MySQL 有意义）。</li>
+</ul>
 <pre class="mermaid"><code>flowchart TD
     Start[容器启动] --&gt; Check{数据库类型?}
     Check --&gt;|SQLite / 未配置| Skip[跳过迁移]
@@ -3212,8 +3273,10 @@
     Release --&gt; Continue
     Skip --&gt; Continue
     Continue --&gt; Server[启动服务]</code></pre>
+<blockquote>
+<p>上图是 <code>run_release()</code> 的迁移执行逻辑本身（<code>entrypoint.sh</code> 内的共享函数）——Release-vs-serve 路径下，一次性 <code>release</code> 服务只会走到 Leader 分支（没有其他副本在抢同一把锁）；Follower 分支只在 inline fallback 下、多个 backend 同时自迁移时才会触发。</p>
+</blockquote>
 <ul>
-<li><strong>多副本安全：</strong> 通过 <code>pg_advisory_lock(hashtext('alembic_migrate'))</code> 保证只有一个副本执行迁移</li>
 <li><strong>失败处理：</strong> Leader 迁移失败后不释放 lock（连接关闭自动释放），Follower 检测到 schema 未到 head 后退出，容器 restart policy 会重试</li>
 <li><strong>Fallback：</strong> 如果 advisory lock 不可用（如 MySQL），直接执行 <code>alembic upgrade head</code></li>
 </ul>
@@ -3236,7 +3299,7 @@
 <tr>
 <td>TLS</td>
 <td><strong>自动 HTTPS</strong>（Let's Encrypt / ACME，端口 80+443；证书状态在 <code>caddy_data</code> 卷）</td>
-<td><strong>静态证书</strong>（<code>tls /etc/caddy/certs/server.crt server.key</code>，全局 <code>auto_https off</code> 防 ACME 拨号；证书在 bind-mount 目录，无状态卷）</td>
+<td><strong>静态证书</strong>（<code>tls /etc/caddy/certs/server.crt server.key</code>，全局 <code>auto_https off</code> 防 ACME 拨号；证书在 bind-mount 目录，无状态卷）。证书缺文件时 Caddy 起不来——真证书没到位可用 <code>deploy/scripts/ensure-cert.sh</code> 生成自签占位证书先顶着（幂等、不覆盖真证书）</td>
 </tr>
 <tr>
 <td>HTTP :80</td>
@@ -3301,39 +3364,39 @@
 <li><strong>上游真实 503 原样穿透</strong>：维护页 503 只在 gated 路径内产生，<code>/health/ready</code> 在 DB/Redis 异常时返回的 JSON 503 不会被改写为 HTML（<code>/health</code> 的 handle 在链里排在维护 gate 之前）</li>
 </ul>
 <p><strong>首次启用（仅一次）：</strong> compose 已声明 <code>deploy/maintenance</code> 卷挂载，但既有代理容器需要 force-recreate 一次才会挂上：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1"># Mode 3（内网）</span>
-<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--force-recreate<span class="w"> </span>--no-deps<span class="w"> </span>caddy
-<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="c1"># Mode 2（公网 / Caddy）</span>
-<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--force-recreate<span class="w"> </span>caddy
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="c1"># Mode 3（内网）</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--force-recreate<span class="w"> </span>--no-deps<span class="w"> </span>caddy
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="c1"># Mode 2（公网 / Caddy）</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--force-recreate<span class="w"> </span>caddy
 </code></pre></div>
 <p>之后所有切换不需要碰 docker。</p>
 <p><strong>镜像升级（典型场景）：</strong> 内网用 <code>pause.sh</code> / <code>resume.sh</code>，公网用 <code>pause-prod.sh</code> / <code>resume-prod.sh</code>。下面以内网气隙升级为例（公网无 docker load / tar 步骤，把脚本名换成 <code>-prod</code> 版即可）：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="c1"># 1. 加载新镜像（不影响在跑容器）—— 仅内网气隙需要</span>
-<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>docker<span class="w"> </span>load<span class="w"> </span>-i<span class="w"> </span>tmp/artifactflow-v2.3.0.tar.gz
-<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>tar<span class="w"> </span>xzf<span class="w"> </span>tmp/artifactflow-deploy-v2.3.0.tar.gz<span class="w">   </span><span class="c1"># 如果 deploy 也变了</span>
-<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>tar<span class="w"> </span>xzf<span class="w"> </span>tmp/artifactflow-config-v2.3.0.tar.gz<span class="w">   </span><span class="c1"># 如果 config 也变了</span>
-<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a>
-<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="c1"># 2. 进维护窗口（写 flag → 等 2s → stop backend frontend）</span>
-<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a>./deploy/scripts/pause.sh<span class="w"> </span><span class="s2">&quot;正在更新到 v2.3.0，预计 5 分钟&quot;</span>
-<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a>
-<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a><span class="c1"># 3. 退维护窗口（up -d backend frontend → 等 healthy → 关 flag）</span>
-<a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a><span class="c1">#    backend 或 frontend 60s 内不 healthy → 维护页保持开启，运维有时间排查</span>
-<a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a>./deploy/scripts/resume.sh<span class="w"> </span>v2.3.0
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="c1"># 1. 加载新镜像（不影响在跑容器）—— 仅内网气隙需要</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>docker<span class="w"> </span>load<span class="w"> </span>-i<span class="w"> </span>tmp/artifactflow-v2.3.0.tar.gz
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>tar<span class="w"> </span>xzf<span class="w"> </span>tmp/artifactflow-deploy-v2.3.0.tar.gz<span class="w">   </span><span class="c1"># 如果 deploy 也变了</span>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>tar<span class="w"> </span>xzf<span class="w"> </span>tmp/artifactflow-config-v2.3.0.tar.gz<span class="w">   </span><span class="c1"># 如果 config 也变了</span>
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="c1"># 2. 进维护窗口（写 flag → 等 2s → stop backend frontend）</span>
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>./deploy/scripts/pause.sh<span class="w"> </span><span class="s2">&quot;正在更新到 v2.3.0，预计 5 分钟&quot;</span>
+<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a>
+<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a><span class="c1"># 3. 退维护窗口（up -d backend frontend → 等 healthy → 关 flag）</span>
+<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a><span class="c1">#    backend 或 frontend 60s 内不 healthy → 维护页保持开启，运维有时间排查</span>
+<a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a>./deploy/scripts/resume.sh<span class="w"> </span>v2.3.0
 </code></pre></div>
 <blockquote>
 <p><strong>公网（Mode 2）升级：镜像本地构建，没有 docker load / tar / 版本 tag。</strong> prod compose
 的 backend/frontend 固定是 <code>:latest</code>，所以<strong>升级 = 切代码再重建</strong>，<code>resume-prod.sh</code>
 <strong>不接版本号</strong>（传了也无效——没有版本化镜像可切）：
-<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="c1"># 低流量：直接重建拉起（几秒停机，无维护页）</span>
-<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>git<span class="w"> </span>pull<span class="w"> </span>--ff-only<span class="w">                                  </span><span class="c1"># 或 git checkout &lt;ref&gt;</span>
-<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>./deploy/scripts/deploy-prod.sh<span class="w"> </span>--pull<span class="w"> </span>--build<span class="w">      </span><span class="c1"># 2B 外部 DB 追加 --no-infra</span>
-<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>
-<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="c1"># 要维护页包住整个窗口：</span>
-<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>./deploy/scripts/pause-prod.sh<span class="w"> </span><span class="s2">&quot;升级中，约 5 分钟&quot;</span><span class="w">   </span><span class="c1"># 起维护页 + 停 backend/frontend</span>
-<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>./deploy/scripts/deploy-prod.sh<span class="w"> </span>--build<span class="w"> </span>--no-cert-watch<span class="w">  </span><span class="c1"># 重建并拉起（2B 加 --no-infra）</span>
-<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a><span class="c1">#   ↑ 维护窗口里必须 --no-cert-watch：否则脚本结尾会 tail caddy 日志阻塞，</span>
-<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a><span class="c1">#     后面的 resume 不会自动执行（证书已签发过，无需再盯）</span>
-<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a>./deploy/scripts/resume-prod.sh<span class="w">                     </span><span class="c1"># 等 healthy + 经 Caddy(:2021) 探针 → 关维护页</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="c1"># 低流量：直接重建拉起（几秒停机，无维护页）</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>git<span class="w"> </span>pull<span class="w"> </span>--ff-only<span class="w">                                  </span><span class="c1"># 或 git checkout &lt;ref&gt;</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>./deploy/scripts/deploy-prod.sh<span class="w"> </span>--pull<span class="w"> </span>--build<span class="w">      </span><span class="c1"># 2B 外部 DB 追加 --no-infra</span>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="c1"># 要维护页包住整个窗口：</span>
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a>./deploy/scripts/pause-prod.sh<span class="w"> </span><span class="s2">&quot;升级中，约 5 分钟&quot;</span><span class="w">   </span><span class="c1"># 起维护页 + 停 backend/frontend</span>
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a>./deploy/scripts/deploy-prod.sh<span class="w"> </span>--build<span class="w"> </span>--no-cert-watch<span class="w">  </span><span class="c1"># 重建并拉起（2B 加 --no-infra）</span>
+<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="c1">#   ↑ 维护窗口里必须 --no-cert-watch：否则脚本结尾会 tail caddy 日志阻塞，</span>
+<a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a><span class="c1">#     后面的 resume 不会自动执行（证书已签发过，无需再盯）</span>
+<a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a>./deploy/scripts/resume-prod.sh<span class="w">                     </span><span class="c1"># 等 healthy + 经 Caddy(:2021) 探针 → 关维护页</span>
 </code></pre></div>
 <code>deploy-prod.sh</code> 默认带 <code>--profile infra</code> 拉起捆绑 PG/Redis（Mode 2A）；<strong>Mode 2B
 用外部 DB/Redis，必须加 <code>--no-infra</code></strong>，否则会多起一对没用的本地 PG/Redis（空密码
@@ -3343,16 +3406,16 @@ PG 还会起不来）。<code>pause-prod.sh</code> / <code>resume-prod.sh</code>
 <p><code>resume*.sh</code> 兼容 V1（<code>docker-compose</code>）和 V2（<code>docker compose</code>），自动探测，CentOS 7 老服务器和 Docker Desktop 都能用。</p>
 <blockquote>
 <p><strong>慢盘机器调长超时：</strong> 默认每个服务等 60s healthy；若机器磁盘慢、Next.js / FastAPI 冷启动会超过 60s，超时后看日志没发现真错误，直接重跑并加大超时：
-<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="nv">RESUME_HEALTHY_TIMEOUT</span><span class="o">=</span><span class="m">120</span><span class="w"> </span>./deploy/scripts/resume.sh<span class="w"> </span>v2.3.0
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="nv">RESUME_HEALTHY_TIMEOUT</span><span class="o">=</span><span class="m">120</span><span class="w"> </span>./deploy/scripts/resume.sh<span class="w"> </span>v2.3.0
 </code></pre></div>
 最小允许值 10s（再小就会比容器 healthcheck 的 <code>start_period=15s</code> 还短，必假阴性）。</p>
 </blockquote>
 <p><strong>Config-only 变更 —— 直接 <code>maintenance.sh</code>：</strong></p>
 <p>只调 prompt / <code>models.yaml</code> 这种 <code>restart backend</code> 就能生效的场景，不需要 <code>pause.sh</code> 那种"停服务"操作，开关 flag 的同时 <code>restart backend</code> 就够：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>./deploy/scripts/maintenance.sh<span class="w"> </span>on<span class="w"> </span><span class="s2">&quot;调整 agent 配置，约 1 分钟&quot;</span>
-<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>vim<span class="w"> </span>config/agents/lead_agent.md
-<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>restart<span class="w"> </span>backend
-<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>./deploy/scripts/maintenance.sh<span class="w"> </span>off
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>./deploy/scripts/maintenance.sh<span class="w"> </span>on<span class="w"> </span><span class="s2">&quot;调整 agent 配置，约 1 分钟&quot;</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>vim<span class="w"> </span>config/agents/lead_agent.md
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>restart<span class="w"> </span>backend
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a>./deploy/scripts/maintenance.sh<span class="w"> </span>off
 </code></pre></div>
 <blockquote>
 <p><strong>注意：</strong> <code>.env</code> 变更不能走 <code>restart</code>——<code>docker compose restart</code> 不会重读 <code>.env</code> interpolation，容器还在用旧值。需要改环境变量时，请走 <code>pause.sh → 改 .env → resume.sh</code>（resume 内部 <code>up -d</code> 会重建容器并注入新环境变量），或者短维护窗口下手动 <code>maintenance.sh on → up -d backend → maintenance.sh off</code>。</p>
@@ -3438,32 +3501,32 @@ wedge → ≤90s 变红 → autoheal 重启 → 恢复绿；制造一条 ERROR �
 <blockquote>
 <p><strong><code>--profile infra</code> 必须与启动时一致</strong>，否则 PG/Redis 容器不在 Compose 作用域内，<code>down</code> 会跳过它们。</p>
 </blockquote>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="c1"># Mode 1</span>
-<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>down
-<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>
-<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="c1"># Mode 2A（启动时带了 --profile infra，停止也必须带）</span>
-<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>down
-<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>
-<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a><span class="c1"># Mode 2B（无 --profile）</span>
-<a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>down
-<a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a>
-<a id="__codelineno-24-10" name="__codelineno-24-10" href="#__codelineno-24-10"></a><span class="c1"># Mode 3A</span>
-<a id="__codelineno-24-11" name="__codelineno-24-11" href="#__codelineno-24-11"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>down
-<a id="__codelineno-24-12" name="__codelineno-24-12" href="#__codelineno-24-12"></a>
-<a id="__codelineno-24-13" name="__codelineno-24-13" href="#__codelineno-24-13"></a><span class="c1"># Mode 3B</span>
-<a id="__codelineno-24-14" name="__codelineno-24-14" href="#__codelineno-24-14"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>down
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="c1"># Mode 1</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>down
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a>
+<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="c1"># Mode 2A（启动时带了 --profile infra，停止也必须带）</span>
+<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>down
+<a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a>
+<a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a><span class="c1"># Mode 2B（无 --profile）</span>
+<a id="__codelineno-25-8" name="__codelineno-25-8" href="#__codelineno-25-8"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>down
+<a id="__codelineno-25-9" name="__codelineno-25-9" href="#__codelineno-25-9"></a>
+<a id="__codelineno-25-10" name="__codelineno-25-10" href="#__codelineno-25-10"></a><span class="c1"># Mode 3A</span>
+<a id="__codelineno-25-11" name="__codelineno-25-11" href="#__codelineno-25-11"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>down
+<a id="__codelineno-25-12" name="__codelineno-25-12" href="#__codelineno-25-12"></a>
+<a id="__codelineno-25-13" name="__codelineno-25-13" href="#__codelineno-25-13"></a><span class="c1"># Mode 3B</span>
+<a id="__codelineno-25-14" name="__codelineno-25-14" href="#__codelineno-25-14"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span>down
 </code></pre></div>
 <p>如需同时删除数据卷（<strong>不可逆，会丢失数据库和 Redis 数据</strong>）：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>down<span class="w"> </span>-v
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.prod.yml<span class="w"> </span>--profile<span class="w"> </span>infra<span class="w"> </span>down<span class="w"> </span>-v
 </code></pre></div>
 <h3 id="日志">日志</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="c1"># 查看所有服务日志</span>
-<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>&lt;compose-file&gt;<span class="w"> </span>logs<span class="w"> </span>-f
-<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a>
-<a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="c1"># 单服务日志</span>
-<a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>&lt;compose-file&gt;<span class="w"> </span>logs<span class="w"> </span>-f<span class="w"> </span>backend
-<a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a>
-<a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a><span class="c1"># 开启 debug 日志：.env 中设置 ARTIFACTFLOW_DEBUG=true</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="c1"># 查看所有服务日志</span>
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>&lt;compose-file&gt;<span class="w"> </span>logs<span class="w"> </span>-f
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>
+<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="c1"># 单服务日志</span>
+<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>&lt;compose-file&gt;<span class="w"> </span>logs<span class="w"> </span>-f<span class="w"> </span>backend
+<a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a>
+<a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a><span class="c1"># 开启 debug 日志：.env 中设置 ARTIFACTFLOW_DEBUG=true</span>
 </code></pre></div>
 <p><strong>Docker 日志磁盘上限</strong>：两个 compose 文件给全部 5 个服务都配了 <code>logging: { driver: json-file, options: { max-size: "100m", max-file: "3" } }</code>，单服务最多 300 MB（旧切片滚动丢弃）。默认 json-file driver <strong>无上限</strong>，长跑容器能把 <code>/var/lib/docker/containers/*/&lt;id&gt;-json.log</code> 撑到几十 GB 填满宿主机盘 —— 这套配置是兜底。注意这只覆盖 stdout/stderr 那一层；backend 自己写到 <code>/app/data/observability/*.jsonl</code> 的文件由 Python <code>RotatingFileHandler</code> 单独管（见 <code>OBS_JSONL_MAX_MB</code> × <code>OBS_JSONL_BACKUP_COUNT</code>），两条路径独立。</p>
 
