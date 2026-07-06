@@ -52,7 +52,7 @@ export default function CreateToolUnitForm() {
               新建工具 unit
             </div>
             <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-              动态注册（dynamic）；config 种子的工具请改 config/tools 后重跑 reconcile
+              动态注册（dynamic）；config 种子的工具 / MCP server 请改配置后重跑 reconcile
             </div>
           </div>
           <button

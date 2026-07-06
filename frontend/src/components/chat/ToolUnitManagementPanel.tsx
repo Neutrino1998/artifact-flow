@@ -50,6 +50,7 @@ export default function ToolUnitManagementPanel() {
         (u) =>
           u.name.toLowerCase().includes(q) ||
           (u.description ?? '').toLowerCase().includes(q) ||
+          (u.provider ?? '').toLowerCase().includes(q) ||
           u.members.some((m) => m.full_name.toLowerCase().includes(q)),
       )
     : units;
@@ -107,6 +108,11 @@ function UnitRow({
   onOpen: () => void;
 }) {
   const configuredCreds = unit.credentials.filter((c) => c.configured).length;
+  const kindLabel = unit.kind === 'mcp'
+    ? 'MCP server'
+    : unit.kind === 'tool'
+      ? '单工具'
+      : `工具集 · ${unit.members.length} 工具`;
 
   return (
     <div
@@ -139,7 +145,7 @@ function UnitRow({
           )}
         </div>
         <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark truncate">
-          {unit.kind === 'tool' ? '单工具' : `工具集 · ${unit.members.length} 工具`}
+          {kindLabel}
           {unit.description && <span className="ml-2">{unit.description}</span>}
         </div>
       </div>

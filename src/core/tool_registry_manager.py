@@ -11,7 +11,7 @@ ToolRegistryManager —— external 工具 unit / 成员 / agent 挂载 / 凭证
 的 skip+log 只兜绕过写校验的脏行;DB `uq_tool_members_full_name` 是并发 TOCTOU 的硬底。
 """
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +22,9 @@ from repositories.tool_registry_repo import ToolRegistryRepository
 from tools.artifact_output import normalize_artifact_output_config
 from tools.base import is_builtin_name
 from tools.custom.credentials import get_cipher
+from tools.custom.credentials import CredentialResolver
 from tools.custom.http_tool import validate_response_extract
+from tools.custom.mcp_client import McpListResult
 from tools.custom.secrets import assert_secret_refs_allowed, extract_placeholders, SecretResolutionError
 from utils.logger import get_logger
 
@@ -145,7 +147,7 @@ class ToolRegistryManager:
 
     async def create_unit(self, spec: dict) -> dict:
         name = (spec.get("name") or "").strip()
-        members = self._build_members(name, spec)  # 校验 + 产 ToolMember(未入库)
+        provider, provider_config, members = self._build_unit_payload(name, spec)
         await self._validate_names(name, members, exclude_unit=None)
 
         unit = ToolUnit(
@@ -154,8 +156,8 @@ class ToolRegistryManager:
             description=spec.get("description", "") or "",
             visibility=self._check_visibility(spec.get("visibility", "public")),
             defer=bool(spec.get("defer", False)),
-            provider="http",        # B-4 CRUD 只建 http;mcp 走 F
-            provider_config=None,
+            provider=provider,
+            provider_config=provider_config,
             source="dynamic",
             seed_hash=None,
         )
@@ -174,7 +176,7 @@ class ToolRegistryManager:
                 f"cannot change kind of unit '{name}' ('{u.kind}' → '{spec.get('kind')}') — "
                 f"kind is immutable (it determines the callable tool name); delete and recreate"
             )
-        members = self._build_members(name, spec)
+        provider, provider_config, members = self._build_unit_payload(name, spec)
         await self._validate_names(name, members, exclude_unit=name)
 
         u.description = spec.get("description", "") or ""
@@ -189,6 +191,8 @@ class ToolRegistryManager:
             )
         u.visibility = new_visibility
         u.defer = bool(spec.get("defer", False))
+        u.provider = provider
+        u.provider_config = provider_config
         await self._registry.replace_members(name, members)
         # 新定义不再引用的 dynamic 凭证 → prune(与 reconciler 对 seeded 的 prune 对称,
         # 否则失引用密文残留、GET 仍显示 configured,误导 + secret 卫生 cruft,reviewer #9)
@@ -299,9 +303,10 @@ class ToolRegistryManager:
 
     def _require_dynamic(self, u: ToolUnit, action: str) -> None:
         if u.source != "dynamic":
+            config_dir = "config/mcp" if u.kind == "mcp" else "config/tools"
             raise SeededReadOnlyError(
                 f"tool unit '{u.name}' is seeded from config (read-only); "
-                f"cannot {action} it via UI — edit config/tools and re-run reconcile"
+                f"cannot {action} it via UI — edit {config_dir} and re-run reconcile"
             )
 
     def _check_visibility(self, vis: str) -> str:
@@ -311,11 +316,62 @@ class ToolRegistryManager:
             )
         return vis
 
-    def _build_members(self, unit_name: str, spec: dict) -> List[ToolMember]:
+    def _build_unit_payload(
+        self, unit_name: str, spec: dict
+    ) -> tuple[str, Optional[dict], List[ToolMember]]:
+        kind = spec.get("kind")
+        if kind == "mcp":
+            if spec.get("members"):
+                raise InvalidUnitError("MCP server units do not accept HTTP members")
+            return "mcp", self._build_mcp_provider_config(spec.get("provider_config")), []
+        if kind in ("tool", "toolset"):
+            return "http", None, self._build_http_members(unit_name, spec)
+        raise InvalidUnitError("kind must be 'tool', 'toolset', or 'mcp'")
+
+    def _build_mcp_provider_config(self, raw: Any) -> dict:
+        if raw is None:
+            cfg = {}
+        elif isinstance(raw, dict):
+            cfg = dict(raw)
+        else:
+            raise InvalidUnitError("MCP provider_config must be an object")
+        transport = cfg.get("transport", "streamable_http")
+        if transport != "streamable_http":
+            raise InvalidUnitError("MCP transport must be streamable_http")
+
+        url = (cfg.get("url") or "").strip()
+        if not url:
+            raise InvalidUnitError("MCP server URL is required")
+        headers = cfg.get("headers", {}) or {}
+        if not isinstance(headers, dict):
+            raise InvalidUnitError("MCP headers must be an object")
+        normalized_headers = {str(k): str(v) for k, v in headers.items() if str(k).strip()}
+
+        timeout = cfg.get("timeout", 60)
+        if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout < 1 or timeout > 600:
+            raise InvalidUnitError("MCP timeout must be an integer between 1 and 600")
+
+        default_permission = cfg.get("default_permission", "confirm")
+        if default_permission not in _VALID_PERMISSIONS:
+            raise InvalidUnitError("MCP default_permission must be auto|confirm")
+
+        try:
+            assert_secret_refs_allowed(url)
+            assert_secret_refs_allowed(normalized_headers)
+        except SecretResolutionError as e:
+            raise InvalidUnitError(str(e)) from e
+
+        return {
+            "transport": "streamable_http",
+            "url": url,
+            "headers": normalized_headers,
+            "timeout": timeout,
+            "default_permission": default_permission,
+        }
+
+    def _build_http_members(self, unit_name: str, spec: dict) -> List[ToolMember]:
         """从 spec 产 ToolMember 行(校验 kind/permission/参数;算 full_name)。未入库。"""
         kind = spec.get("kind")
-        if kind not in ("tool", "toolset"):
-            raise InvalidUnitError("kind must be 'tool' or 'toolset'")
         raw_members = spec.get("members") or []
         if not raw_members:
             raise InvalidUnitError("a unit needs at least one member")
@@ -458,3 +514,45 @@ class ToolRegistryManager:
             raise NameCollisionError(
                 f"{what} failed: a unit/tool with that name already exists"
             ) from e
+
+
+async def test_saved_mcp_unit_connection(name: str, db_manager, mcp_manager) -> dict:
+    """Test a saved MCP server unit without holding a request DB session.
+
+    F-3 的连通性测试只针对已保存配置:先用短 session 物化 provider_config,关库后
+    再打外部 MCP endpoint。凭证解析也走 CredentialResolver 的短 session。
+    """
+
+    async def _read_saved(session) -> dict:
+        u = await ToolRegistryRepository(session).get_unit(name)
+        if u is None:
+            raise UnitNotFoundError(f"tool unit '{name}' not found")
+        return {
+            "name": u.name,
+            "kind": u.kind,
+            "provider": u.provider,
+            "provider_config": dict(u.provider_config or {}),
+        }
+
+    saved = await db_manager.with_retry(_read_saved)
+    if saved["kind"] != "mcp" or saved["provider"] != "mcp":
+        raise InvalidUnitError("only MCP server units can be tested with this endpoint")
+
+    await mcp_manager.invalidate(name)
+    result: McpListResult = await mcp_manager.list_tools(
+        name,
+        saved["provider_config"],
+        credential_resolver=CredentialResolver(db_manager),
+    )
+    if result.error:
+        return {
+            "success": False,
+            "message": result.error,
+            "tool_count": 0,
+        }
+    count = len(result.tools)
+    return {
+        "success": True,
+        "message": f"discovered {count} MCP tool{'s' if count != 1 else ''}",
+        "tool_count": count,
+    }

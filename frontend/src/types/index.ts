@@ -58,6 +58,7 @@ export type MountResponse = S['MountResponse'];
 export type CredentialStatusResponse = S['CredentialStatusResponse'];
 export type ToolUnitResponse = S['ToolUnitResponse'];
 export type ToolUnitListResponse = S['ToolUnitListResponse'];
+export type ToolUnitTestResponse = S['ToolUnitTestResponse'];
 export type AgentSummaryResponse = S['AgentSummaryResponse'];
 export type AgentListResponse = S['AgentListResponse'];
 

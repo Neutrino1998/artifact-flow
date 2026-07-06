@@ -17,7 +17,12 @@ router 只做 transport:认证(require_admin)、解析、把 ToolRegistryError �
 
 from fastapi import APIRouter, Depends, HTTPException, Path
 
-from api.dependencies import get_tool_registry_manager, require_admin
+from api.dependencies import (
+    get_db_manager,
+    get_mcp_client_manager,
+    get_tool_registry_manager,
+    require_admin,
+)
 from api.schemas.tools import (
     AgentListResponse,
     CreateToolUnitRequest,
@@ -26,10 +31,15 @@ from api.schemas.tools import (
     SetCredentialRequest,
     ToolUnitListResponse,
     ToolUnitResponse,
+    ToolUnitTestResponse,
     UpdateToolUnitRequest,
 )
 from api.services.auth import TokenPayload
-from core.tool_registry_manager import ToolRegistryError, ToolRegistryManager
+from core.tool_registry_manager import (
+    ToolRegistryError,
+    ToolRegistryManager,
+    test_saved_mcp_unit_connection,
+)
 
 # 凭证占位符路径参数上限 = ToolCredential.placeholder_name 列宽。在边界挡超长值,
 # 否则 >128 字符落到 asyncpg 触发 StringDataRightTruncation(DataError)→ 漏出 500;
@@ -98,6 +108,19 @@ async def delete_unit(
 ):
     try:
         await mgr.delete_unit(name)
+    except ToolRegistryError as e:
+        raise _map(e)
+
+
+@router.post("/tools/units/{name}/test", response_model=ToolUnitTestResponse)
+async def test_unit_connection(
+    name: str,
+    _admin: TokenPayload = Depends(require_admin),
+    db_manager=Depends(get_db_manager),
+    mcp_manager=Depends(get_mcp_client_manager),
+):
+    try:
+        return await test_saved_mcp_unit_connection(name, db_manager, mcp_manager)
     except ToolRegistryError as e:
         raise _map(e)
 

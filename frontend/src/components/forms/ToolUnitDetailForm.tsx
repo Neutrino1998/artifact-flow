@@ -6,6 +6,7 @@ import { useUIStore } from '@/stores/uiStore';
 import {
   BUTTON_DANGER_OUTLINE,
   BUTTON_PRIMARY,
+  BUTTON_SECONDARY,
   INPUT_ON_PANEL,
   LABEL_CLASS,
 } from '@/lib/styles';
@@ -89,6 +90,7 @@ export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps
   const dirty =
     isDynamic && baseline !== null && draft !== null &&
     JSON.stringify(baseline) !== JSON.stringify(draft);
+  const kindLabel = unit?.kind === 'mcp' ? 'MCP server' : unit?.kind === 'tool' ? '单工具' : '工具集';
 
   const handleSave = async () => {
     if (!draft || !dirty || saving) return;
@@ -156,7 +158,7 @@ export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps
               <SourceBadge source={unit.source} />
             </div>
             <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark mt-0.5">
-              {unit.kind === 'tool' ? '单工具' : '工具集'} · {unit.provider} · 可见性 {unit.visibility}
+              {kindLabel} · {unit.provider} · 可见性 {unit.visibility}
             </div>
           </div>
           <button
@@ -192,7 +194,7 @@ export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps
           </>
         ) : (
           <p className="flex-1 text-center text-sm text-text-secondary dark:text-text-secondary-dark">
-            种子 unit：定义只读。改 config/tools 后重跑 reconcile。挂载可在下方调整。
+            种子 unit：定义只读。改 {unit.kind === 'mcp' ? 'config/mcp' : 'config/tools'} 后重跑 reconcile。挂载可在下方调整。
           </p>
         )
       }
@@ -208,6 +210,10 @@ export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps
         />
 
         {saveError && <div className="text-status-error text-sm">{saveError}</div>}
+
+        {unit.kind === 'mcp' && (
+          <McpTestSection unitName={unit.name} disabled={saving || dirty} dirty={dirty} />
+        )}
 
         <div className="border-t border-border dark:border-border-dark" />
 
@@ -252,6 +258,59 @@ export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps
         </DangerConfirmModal>
       )}
     </PanelShell>
+  );
+}
+
+function McpTestSection({
+  unitName,
+  disabled,
+  dirty,
+}: {
+  unitName: string;
+  disabled: boolean;
+  dirty: boolean;
+}) {
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<{ success: boolean; message: string; tool_count: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = async () => {
+    if (testing || disabled) return;
+    setTesting(true);
+    setResult(null);
+    setError(null);
+    try {
+      setResult(await api.testToolUnit(unitName));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '测试失败');
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-semibold text-text-primary dark:text-text-primary-dark">
+          MCP 连接
+        </div>
+        <button
+          type="button"
+          onClick={run}
+          disabled={testing || disabled}
+          title={dirty ? '先保存定义' : '测试已保存配置'}
+          className={`${BUTTON_SECONDARY} rounded-lg px-4 py-1.5 text-sm`}
+        >
+          {testing ? '测试中…' : '测试连接'}
+        </button>
+      </div>
+      {result && (
+        <div className={`text-sm ${result.success ? 'text-status-success' : 'text-status-warning'}`}>
+          {result.success ? `连接成功，发现 ${result.tool_count} 个工具` : result.message}
+        </div>
+      )}
+      {error && <div className="text-status-error text-sm">{error}</div>}
+    </div>
   );
 }
 

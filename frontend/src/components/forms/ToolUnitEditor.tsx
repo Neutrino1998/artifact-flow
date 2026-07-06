@@ -15,9 +15,10 @@ import type { CreateToolUnitRequest, ToolUnitResponse } from '@/types';
 // 否则整数默认值会以字符串落库。
 // ---------------------------------------------------------------------------
 
-export type UnitKind = 'tool' | 'toolset';
+export type UnitKind = 'tool' | 'toolset' | 'mcp';
 export type ParamType = 'string' | 'integer' | 'number' | 'boolean';
 export type ArtifactOutputMode = 'text' | 'binary';
+export type PermissionLevel = 'auto' | 'confirm';
 
 export interface ParamDraft {
   name: string;
@@ -30,7 +31,7 @@ export interface ParamDraft {
 
 export interface MemberDraft {
   member_name: string;
-  permission: 'auto' | 'confirm';
+  permission: PermissionLevel;
   description: string;
   endpoint: string;
   method: string;
@@ -47,6 +48,14 @@ export interface MemberDraft {
   timeout: number;
 }
 
+export interface McpProviderConfigDraft {
+  transport: 'streamable_http';
+  url: string;
+  headers: Array<{ key: string; value: string }>;
+  timeout: number;
+  default_permission: PermissionLevel;
+}
+
 export interface UnitDraft {
   name: string;
   kind: UnitKind;
@@ -54,6 +63,7 @@ export interface UnitDraft {
   visibility: 'public' | 'department';
   defer: boolean;
   members: MemberDraft[];
+  provider_config: McpProviderConfigDraft;
 }
 
 const PARAM_TYPES: ParamType[] = ['string', 'integer', 'number', 'boolean'];
@@ -98,6 +108,16 @@ const EXTENSION_CONTENT_TYPES: Record<string, string> = {
   '.zip': 'application/zip',
 };
 
+function emptyMcpProviderConfig(): McpProviderConfigDraft {
+  return {
+    transport: 'streamable_http',
+    url: '',
+    headers: [],
+    timeout: 60,
+    default_permission: 'confirm',
+  };
+}
+
 function emptyMember(): MemberDraft {
   return {
     member_name: '',
@@ -127,6 +147,7 @@ export function emptyUnitDraft(): UnitDraft {
     visibility: 'public',
     defer: false,
     members: [emptyMember()],
+    provider_config: emptyMcpProviderConfig(),
   };
 }
 
@@ -137,12 +158,24 @@ function scalarToText(v: unknown): string {
 }
 
 export function unitResponseToDraft(u: ToolUnitResponse): UnitDraft {
+  const providerConfig = (u.provider_config ?? {}) as Record<string, unknown>;
+  const providerHeaders = (providerConfig.headers ?? {}) as Record<string, unknown>;
   return {
     name: u.name,
-    kind: (u.kind === 'toolset' ? 'toolset' : 'tool'),
+    kind: (u.kind === 'mcp' ? 'mcp' : u.kind === 'toolset' ? 'toolset' : 'tool'),
     description: u.description ?? '',
     visibility: (u.visibility === 'department' ? 'department' : 'public'),
     defer: u.defer,
+    provider_config: {
+      transport: 'streamable_http',
+      url: typeof providerConfig.url === 'string' ? providerConfig.url : '',
+      headers: Object.entries(providerHeaders).map(([key, value]) => ({
+        key,
+        value: scalarToText(value),
+      })),
+      timeout: typeof providerConfig.timeout === 'number' ? providerConfig.timeout : 60,
+      default_permission: providerConfig.default_permission === 'auto' ? 'auto' : 'confirm',
+    },
     members: u.members.map((m) => {
       const def = (m.definition ?? {}) as Record<string, unknown>;
       const headersObj = (def.headers ?? {}) as Record<string, unknown>;
@@ -216,11 +249,40 @@ export function draftToRequest(d: UnitDraft): CreateToolUnitRequest {
   const name = d.name.trim();
   if (!name) throw new Error('unit 名称不能为空');
   if (name.includes('__')) throw new Error("unit 名称不能包含 '__'(前缀分隔符)");
+
+  if (d.kind === 'mcp') {
+    const url = d.provider_config.url.trim();
+    if (!url) throw new Error('MCP server URL 不能为空');
+    if (d.provider_config.timeout < 1 || d.provider_config.timeout > 600) {
+      throw new Error('MCP server 超时必须在 1~600 秒之间');
+    }
+    const headers: Record<string, string> = {};
+    for (const h of d.provider_config.headers) {
+      const k = h.key.trim();
+      if (!k) continue;
+      headers[k] = h.value;
+    }
+    return {
+      name,
+      kind: 'mcp',
+      description: d.description,
+      visibility: d.visibility,
+      defer: d.defer,
+      members: [],
+      provider_config: {
+        transport: 'streamable_http',
+        url,
+        headers,
+        timeout: d.provider_config.timeout,
+        default_permission: d.provider_config.default_permission,
+      },
+    };
+  }
+
   if (d.members.length === 0) throw new Error('至少需要一个工具成员');
   if (d.kind === 'tool' && d.members.length !== 1) {
     throw new Error('单工具 unit 只能有一个成员');
   }
-
   const seen = new Set<string>();
   const members = d.members.map((m) => {
     const memberName = d.kind === 'tool' ? name : m.member_name.trim();
@@ -284,6 +346,7 @@ export function draftToRequest(d: UnitDraft): CreateToolUnitRequest {
     visibility: d.visibility,
     defer: d.defer,
     members,
+    provider_config: null,
   };
 }
 
@@ -318,10 +381,20 @@ export default function ToolUnitEditor({
       ...value,
       members: value.members.map((m, i) => (i === idx ? { ...m, ...p } : m)),
     });
+  const patchMcpConfig = (p: Partial<McpProviderConfigDraft>) =>
+    onChange({
+      ...value,
+      provider_config: { ...value.provider_config, ...p },
+    });
 
   const handleKindChange = (kind: UnitKind) => {
+    if (kind === 'mcp') {
+      onChange({ ...value, kind, defer: true, members: [] });
+      return;
+    }
     // tool 必须恰好 1 个成员;toolset → tool 时截断到第一个
-    const members = kind === 'tool' ? value.members.slice(0, 1) : value.members;
+    const seedMembers = value.members.length ? value.members : [emptyMember()];
+    const members = kind === 'tool' ? seedMembers.slice(0, 1) : seedMembers;
     onChange({ ...value, kind, members: members.length ? members : [emptyMember()] });
   };
 
@@ -363,7 +436,7 @@ export default function ToolUnitEditor({
             <label className={LABEL_CLASS}>类型</label>
             {lockIdentity ? (
               <div className="text-sm text-text-secondary dark:text-text-secondary-dark py-2">
-                {value.kind === 'tool' ? '单工具' : '工具集'}
+                {value.kind === 'mcp' ? 'MCP server' : value.kind === 'tool' ? '单工具' : '工具集'}
                 <span className="ml-2 text-xs text-text-tertiary dark:text-text-tertiary-dark">建后不可变</span>
               </div>
             ) : (
@@ -376,6 +449,7 @@ export default function ToolUnitEditor({
                 >
                   <option value="tool">单工具（singleton）</option>
                   <option value="toolset">工具集（toolset）</option>
+                  <option value="mcp">MCP server</option>
                 </select>
                 {SELECT_CHEVRON}
               </div>
@@ -426,7 +500,13 @@ export default function ToolUnitEditor({
         </label>
       </div>
 
-      {/* ── 成员 ── */}
+      {value.kind === 'mcp' ? (
+        <McpServerEditor
+          value={value.provider_config}
+          readOnly={ro}
+          onChange={patchMcpConfig}
+        />
+      ) : (
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="text-sm font-semibold text-text-primary dark:text-text-primary-dark">
@@ -456,6 +536,89 @@ export default function ToolUnitEditor({
           />
         ))}
       </div>
+      )}
+    </div>
+  );
+}
+
+function McpServerEditor({
+  value,
+  readOnly,
+  onChange,
+}: {
+  value: McpProviderConfigDraft;
+  readOnly: boolean;
+  onChange: (p: Partial<McpProviderConfigDraft>) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className={LABEL_CLASS}>传输</label>
+          <div className="relative">
+            <select
+              value={value.transport}
+              disabled
+              className={`${INPUT_ON_PANEL} appearance-none pr-9`}
+            >
+              <option value="streamable_http">streamable_http</option>
+            </select>
+            {SELECT_CHEVRON}
+          </div>
+        </div>
+        <div>
+          <label className={LABEL_CLASS}>默认权限</label>
+          <div className="relative">
+            <select
+              value={value.default_permission}
+              onChange={(e) => onChange({ default_permission: e.target.value as PermissionLevel })}
+              disabled={readOnly}
+              className={`${INPUT_ON_PANEL} appearance-none pr-9`}
+            >
+              <option value="confirm">每次执行需授权（confirm）</option>
+              <option value="auto">自动执行（auto）</option>
+            </select>
+            {SELECT_CHEVRON}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-[1fr_8rem] gap-3">
+        <div>
+          <label className={LABEL_CLASS}>
+            Server URL <span className="text-status-error">*</span>
+          </label>
+          <input
+            type="text"
+            value={value.url}
+            onChange={(e) => onChange({ url: e.target.value })}
+            disabled={readOnly}
+            placeholder="https://mcp.example.com/mcp"
+            className={`${INPUT_ON_PANEL} font-mono`}
+          />
+        </div>
+        <div>
+          <label className={LABEL_CLASS}>超时（秒）</label>
+          <input
+            type="number"
+            min={1}
+            max={600}
+            value={value.timeout}
+            onChange={(e) => onChange({ timeout: Number(e.target.value) })}
+            disabled={readOnly}
+            className={INPUT_ON_PANEL}
+          />
+        </div>
+      </div>
+      <p className="text-text-tertiary dark:text-text-tertiary-dark text-xs -mt-2">
+        URL / 请求头可用 <code className="font-mono">{'{{TOOL_SECRET_*}}'}</code> 占位符引用凭证，运行期替换
+      </p>
+
+      <HeaderEditor
+        headers={value.headers}
+        readOnly={readOnly}
+        onChange={(headers) => onChange({ headers })}
+      />
     </div>
   );
 }

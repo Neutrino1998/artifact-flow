@@ -37,6 +37,7 @@ import type {
   ClientConfigResponse,
   ToolUnitListResponse,
   ToolUnitResponse,
+  ToolUnitTestResponse,
   CreateToolUnitRequest,
   UpdateToolUnitRequest,
   MountUnitRequest,
@@ -837,6 +838,13 @@ export function deleteToolUnit(name: string) {
   return request<void>(`/api/v1/admin/tools/units/${encodeURIComponent(name)}`, {
     method: 'DELETE',
   });
+}
+
+export function testToolUnit(name: string) {
+  return request<ToolUnitTestResponse>(
+    `/api/v1/admin/tools/units/${encodeURIComponent(name)}/test`,
+    { method: 'POST' },
+  );
 }
 
 export function listToolAgents() {

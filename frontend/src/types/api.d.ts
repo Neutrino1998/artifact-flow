@@ -838,6 +838,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/tools/units/{name}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Unit Connection */
+        post: operations["test_unit_connection_api_v1_admin_tools_units__name__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/tools/agents": {
         parameters: {
             query?: never;
@@ -1976,7 +1993,7 @@ export interface components {
              * @default tool
              * @enum {string}
              */
-            kind: "tool" | "toolset";
+            kind: "tool" | "toolset" | "mcp";
             /**
              * Description
              * @default
@@ -1994,7 +2011,8 @@ export interface components {
              */
             defer: boolean;
             /** Members */
-            members: components["schemas"]["ToolMemberSpec"][];
+            members?: components["schemas"]["ToolMemberSpec"][];
+            provider_config?: components["schemas"]["McpProviderConfigSpec"] | null;
         };
         /**
          * CreateUserRequest
@@ -2196,6 +2214,35 @@ export interface components {
             expires_in: number;
             /** @description User info */
             user: components["schemas"]["UserInfo"];
+        };
+        /** McpProviderConfigSpec */
+        McpProviderConfigSpec: {
+            /**
+             * Transport
+             * @default streamable_http
+             * @constant
+             */
+            transport: "streamable_http";
+            /**
+             * Url
+             * @default
+             */
+            url: string;
+            /** Headers */
+            headers: {
+                [key: string]: string;
+            };
+            /**
+             * Timeout
+             * @default 60
+             */
+            timeout: number;
+            /**
+             * Default Permission
+             * @default confirm
+             * @enum {string}
+             */
+            default_permission: "auto" | "confirm";
         };
         /**
          * MessageResponse
@@ -2589,6 +2636,18 @@ export interface components {
             /** Credentials */
             credentials: components["schemas"]["CredentialStatusResponse"][];
         };
+        /** ToolUnitTestResponse */
+        ToolUnitTestResponse: {
+            /** Success */
+            success: boolean;
+            /** Message */
+            message: string;
+            /**
+             * Tool Count
+             * @default 0
+             */
+            tool_count: number;
+        };
         /**
          * UpdateDepartmentRequest
          * @description PATCH /api/v1/departments/{id} request body — 仅改名
@@ -2626,7 +2685,7 @@ export interface components {
              * @default tool
              * @enum {string}
              */
-            kind: "tool" | "toolset";
+            kind: "tool" | "toolset" | "mcp";
             /**
              * Description
              * @default
@@ -2644,7 +2703,8 @@ export interface components {
              */
             defer: boolean;
             /** Members */
-            members: components["schemas"]["ToolMemberSpec"][];
+            members?: components["schemas"]["ToolMemberSpec"][];
+            provider_config?: components["schemas"]["McpProviderConfigSpec"] | null;
         };
         /**
          * UpdateUserRequest
@@ -4135,6 +4195,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_unit_connection_api_v1_admin_tools_units__name__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolUnitTestResponse"];
+                };
             };
             /** @description Validation Error */
             422: {

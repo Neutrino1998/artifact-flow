@@ -8,8 +8,10 @@ import pytest
 from cryptography.fernet import Fernet
 from httpx import AsyncClient
 
+from api.dependencies import get_mcp_client_manager
 from config import config
 from db.models import Agent, AgentUnit, ToolMember, ToolUnit
+from tools.custom.mcp_client import McpListResult, McpToolDefinition
 
 pytestmark = pytest.mark.asyncio
 
@@ -45,6 +47,25 @@ def _singleton_body(name="weather", **kw):
             "method": "GET",
             "parameters": [{"name": "city", "type": "string", "required": True}],
         }],
+    }
+    body.update(kw)
+    return body
+
+
+def _mcp_body(name="reports_mcp", **kw):
+    body = {
+        "name": name,
+        "kind": "mcp",
+        "description": "Reports MCP",
+        "defer": True,
+        "members": [],
+        "provider_config": {
+            "transport": "streamable_http",
+            "url": "https://mcp.example.com/mcp",
+            "headers": {},
+            "timeout": 60,
+            "default_permission": "confirm",
+        },
     }
     body.update(kw)
     return body
@@ -244,6 +265,55 @@ class TestUnitCrud:
         resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
         assert resp.status_code == 422
 
+    async def test_create_mcp_unit(self, admin_client: AsyncClient):
+        resp = await admin_client.post("/api/v1/admin/tools/units", json=_mcp_body())
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["kind"] == "mcp"
+        assert body["provider"] == "mcp"
+        assert body["members"] == []
+        assert body["defer"] is True
+        assert body["provider_config"] == {
+            "transport": "streamable_http",
+            "url": "https://mcp.example.com/mcp",
+            "headers": {},
+            "timeout": 60,
+            "default_permission": "confirm",
+        }
+
+    async def test_create_mcp_rejects_missing_url(self, admin_client: AsyncClient):
+        body = _mcp_body()
+        body["provider_config"]["url"] = ""
+        resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
+        assert resp.status_code == 400
+        assert "URL" in resp.json()["detail"]
+
+    async def test_create_mcp_rejects_http_members(self, admin_client: AsyncClient):
+        body = _mcp_body(members=[{"member_name": "x", "endpoint": "https://x/y"}])
+        resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
+        assert resp.status_code == 400
+        assert "members" in resp.json()["detail"]
+
+    async def test_update_mcp_provider_config(self, admin_client: AsyncClient):
+        await admin_client.post("/api/v1/admin/tools/units", json=_mcp_body())
+        body = _mcp_body(description="changed")
+        body["provider_config"]["timeout"] = 15
+        body["provider_config"]["default_permission"] = "auto"
+        resp = await admin_client.put("/api/v1/admin/tools/units/reports_mcp", json=body)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["description"] == "changed"
+        assert resp.json()["provider_config"]["timeout"] == 15
+        assert resp.json()["provider_config"]["default_permission"] == "auto"
+
+    async def test_update_cannot_change_mcp_kind(self, admin_client: AsyncClient):
+        await admin_client.post("/api/v1/admin/tools/units", json=_mcp_body())
+        resp = await admin_client.put(
+            "/api/v1/admin/tools/units/reports_mcp",
+            json=_singleton_body(name="reports_mcp"),
+        )
+        assert resp.status_code == 409
+        assert "kind" in resp.json()["detail"]
+
 
 class TestSeededReadOnly:
     async def test_update_seeded_409(self, admin_client: AsyncClient, db_session):
@@ -368,6 +438,17 @@ class TestCredentials:
         cred = next(c for c in unit["credentials"] if c["placeholder"] == "TOOL_SECRET_K")
         assert cred["configured"] is False
 
+    async def test_mcp_provider_config_references_credentials(self, admin_client: AsyncClient, key):
+        body = _mcp_body()
+        body["provider_config"]["url"] = "https://{{TOOL_SECRET_MCP_HOST}}/mcp"
+        body["provider_config"]["headers"] = {"Authorization": "Bearer {{TOOL_SECRET_MCP_TOKEN}}"}
+        await admin_client.post("/api/v1/admin/tools/units", json=body)
+        unit = (await admin_client.get("/api/v1/admin/tools/units/reports_mcp")).json()
+        assert {c["placeholder"] for c in unit["credentials"]} == {
+            "TOOL_SECRET_MCP_HOST",
+            "TOOL_SECRET_MCP_TOKEN",
+        }
+
     async def test_set_credential_on_seeded_409(self, admin_client: AsyncClient, db_session, key):
         await _seed_seeded_unit(db_session)
         resp = await admin_client.put(
@@ -436,3 +517,93 @@ class TestCredentials:
         await admin_client.put("/api/v1/admin/tools/units/weather", json=_singleton_body())
         unit = (await admin_client.get("/api/v1/admin/tools/units/weather")).json()
         assert all(c["placeholder"] != "TOOL_SECRET_K" for c in unit["credentials"])
+
+    async def test_update_prunes_dereferenced_mcp_credential(self, admin_client: AsyncClient, key):
+        body = _mcp_body()
+        body["provider_config"]["headers"] = {"Authorization": "Bearer {{TOOL_SECRET_MCP_TOKEN}}"}
+        await admin_client.post("/api/v1/admin/tools/units", json=body)
+        await admin_client.put(
+            "/api/v1/admin/tools/units/reports_mcp/credentials/TOOL_SECRET_MCP_TOKEN",
+            json={"value": "v"},
+        )
+        await admin_client.put("/api/v1/admin/tools/units/reports_mcp", json=_mcp_body())
+        unit = (await admin_client.get("/api/v1/admin/tools/units/reports_mcp")).json()
+        assert all(c["placeholder"] != "TOOL_SECRET_MCP_TOKEN" for c in unit["credentials"])
+
+
+# --------------------------------------------------------------------------
+# MCP 保存态连通性测试
+# --------------------------------------------------------------------------
+
+
+class FakeMcpManager:
+    def __init__(self, *, error=None):
+        self.error = error
+        self.invalidated = []
+        self.calls = []
+        self.resolved = None
+
+    async def invalidate(self, unit_name):
+        self.invalidated.append(unit_name)
+
+    async def list_tools(self, unit_name, provider_config, *, credential_resolver=None):
+        if credential_resolver is not None:
+            self.resolved = await credential_resolver.resolve(unit_name)
+        self.calls.append((unit_name, provider_config))
+        if self.error:
+            return McpListResult(tools=[], error=self.error)
+        return McpListResult(
+            tools=[
+                McpToolDefinition(name="report", description="r", input_schema={}),
+                McpToolDefinition(name="chart", description="c", input_schema={}),
+            ]
+        )
+
+
+class TestMcpConnectionTest:
+    async def test_test_mcp_unit_uses_saved_config_and_credentials(
+        self, app, admin_client: AsyncClient, monkeypatch
+    ):
+        monkeypatch.setattr(config, "CREDENTIAL_KEY", Fernet.generate_key().decode())
+        fake = FakeMcpManager()
+        app.dependency_overrides[get_mcp_client_manager] = lambda: fake
+
+        body = _mcp_body()
+        body["provider_config"]["headers"] = {"Authorization": "Bearer {{TOOL_SECRET_MCP_TOKEN}}"}
+        await admin_client.post("/api/v1/admin/tools/units", json=body)
+        await admin_client.put(
+            "/api/v1/admin/tools/units/reports_mcp/credentials/TOOL_SECRET_MCP_TOKEN",
+            json={"value": "live-token"},
+        )
+
+        resp = await admin_client.post("/api/v1/admin/tools/units/reports_mcp/test")
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {
+            "success": True,
+            "message": "discovered 2 MCP tools",
+            "tool_count": 2,
+        }
+        assert fake.invalidated == ["reports_mcp"]
+        assert fake.calls[0][0] == "reports_mcp"
+        assert fake.calls[0][1]["url"] == "https://mcp.example.com/mcp"
+        assert fake.resolved == {"TOOL_SECRET_MCP_TOKEN": "live-token"}
+
+    async def test_test_mcp_unit_returns_failure_payload(self, app, admin_client: AsyncClient):
+        fake = FakeMcpManager(error="MCP server is unavailable")
+        app.dependency_overrides[get_mcp_client_manager] = lambda: fake
+        await admin_client.post("/api/v1/admin/tools/units", json=_mcp_body())
+
+        resp = await admin_client.post("/api/v1/admin/tools/units/reports_mcp/test")
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "success": False,
+            "message": "MCP server is unavailable",
+            "tool_count": 0,
+        }
+
+    async def test_test_non_mcp_unit_rejected(self, app, admin_client: AsyncClient):
+        app.dependency_overrides[get_mcp_client_manager] = lambda: FakeMcpManager()
+        await admin_client.post("/api/v1/admin/tools/units", json=_singleton_body())
+        resp = await admin_client.post("/api/v1/admin/tools/units/weather/test")
+        assert resp.status_code == 400
+        assert "MCP" in resp.json()["detail"]

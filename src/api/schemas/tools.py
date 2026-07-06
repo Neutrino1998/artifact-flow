@@ -39,6 +39,14 @@ class ArtifactOutputSpec(BaseModel):
     title: Optional[str] = Field(None, max_length=MAX_TITLE_LENGTH)
 
 
+class McpProviderConfigSpec(BaseModel):
+    transport: Literal["streamable_http"] = "streamable_http"
+    url: str = ""
+    headers: Dict[str, str] = Field(default_factory=dict)
+    timeout: int = Field(60, ge=1, le=600)
+    default_permission: Literal["auto", "confirm"] = "confirm"
+
+
 class ToolMemberSpec(BaseModel):
     member_name: str = Field(..., max_length=64, description="作者裸名;singleton 会被规整为 unit 名")
     permission: Literal["auto", "confirm"] = "confirm"
@@ -55,11 +63,12 @@ class ToolMemberSpec(BaseModel):
 class CreateToolUnitRequest(BaseModel):
     """POST /api/v1/admin/tools/units —— 新建 dynamic unit。"""
     name: str = Field(..., max_length=64, description="unit 名,全局唯一,禁含 '__'")
-    kind: Literal["tool", "toolset"] = "tool"
+    kind: Literal["tool", "toolset", "mcp"] = "tool"
     description: str = ""
     visibility: Literal["public", "department"] = "public"
     defer: bool = False
-    members: List[ToolMemberSpec] = Field(..., min_length=1)
+    members: List[ToolMemberSpec] = Field(default_factory=list)
+    provider_config: Optional[McpProviderConfigSpec] = None
 
 
 class UpdateToolUnitRequest(CreateToolUnitRequest):
@@ -124,6 +133,12 @@ class ToolUnitResponse(BaseModel):
 
 class ToolUnitListResponse(BaseModel):
     units: List[ToolUnitResponse]
+
+
+class ToolUnitTestResponse(BaseModel):
+    success: bool
+    message: str
+    tool_count: int = 0
 
 
 class AgentSummaryResponse(BaseModel):
