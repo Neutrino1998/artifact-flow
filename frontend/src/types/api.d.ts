@@ -902,7 +902,7 @@ export interface paths {
         put?: never;
         /**
          * Admin Import Skill
-         * @description 导入共享 skill(visibility=public、default_enabled=False、owner=null)。
+         * @description 导入共享 skill(visibility=public、default_enabled=True、owner=null)。
          */
         post: operations["admin_import_skill_api_v1_admin_skills_import_post"];
         delete?: never;

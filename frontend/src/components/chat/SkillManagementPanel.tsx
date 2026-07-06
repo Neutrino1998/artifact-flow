@@ -14,14 +14,13 @@ import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
 import { triggerBlobDownload } from '@/lib/download';
-import Checkbox from '@/components/forms/Checkbox';
 import PanelSearchBar from './PanelSearchBar';
 import type { SkillItem, SkillFindingItem, SkillImportResponse } from '@/types';
 
 // 用户侧技能管理(C-3 列举/toggle + E-2 导入/导出/删除)。中间面板接管(同
 // ConversationBrowser),全用户可见。个人开关写 user_skill 覆盖,控 `enabled`
 // (进不进模型 L1 索引 + 对话内激活选择器),不碰 `visible`(系统定)。
-// 导入:user 私有(仅自己可见、立即启用)/ admin 可选共享(public、默认关);
+// 导入:user 私有(仅自己可见、立即启用)/ admin 可选共享(public、默认开);
 // 硬门拒收 → 422 结构化 findings 逐条渲染。seeded skill 归 config 只读。
 export default function SkillManagementPanel() {
   const [skills, setSkills] = useState<SkillItem[]>([]);
@@ -193,7 +192,6 @@ export default function SkillManagementPanel() {
           )}
 
           {!loading && !error && filtered.map((skill) => {
-            const overridden = skill.is_overridden && skill.enabled !== skill.default_enabled;
             const busy = pending.has(skill.slug);
             const deletable =
               skill.source === 'dynamic' && (skill.is_owner || isAdmin);
@@ -201,7 +199,11 @@ export default function SkillManagementPanel() {
             return (
               <div
                 key={skill.slug}
-                className="flex items-start gap-3 px-4 py-3 rounded-xl bg-surface dark:bg-surface-dark border border-border dark:border-border-dark"
+                className={`flex items-start gap-3 px-4 py-3 rounded-xl bg-surface dark:bg-surface-dark border transition-colors ${
+                  skill.enabled
+                    ? 'border-accent/60'
+                    : 'border-border dark:border-border-dark'
+                }`}
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
@@ -218,11 +220,6 @@ export default function SkillManagementPanel() {
                         }
                       >
                         {skill.visibility === 'private' ? '私有导入' : '导入'}
-                      </span>
-                    )}
-                    {overridden && (
-                      <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded text-text-tertiary dark:text-text-tertiary-dark bg-bg dark:bg-bg-dark border border-border dark:border-border-dark">
-                        {skill.enabled ? '已开启' : '已关闭'}
                       </span>
                     )}
                   </div>
@@ -274,20 +271,15 @@ export default function SkillManagementPanel() {
 
                 {/* Enable switch */}
                 <button
+                  type="button"
                   role="switch"
                   aria-checked={skill.enabled}
                   aria-label={`${skill.enabled ? '关闭' : '开启'}技能 ${skill.name}`}
                   disabled={busy}
                   onClick={() => handleToggle(skill.slug, !skill.enabled)}
-                  className={`relative flex-shrink-0 mt-0.5 h-5 w-9 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                    skill.enabled ? 'bg-accent' : 'bg-border dark:bg-border-dark'
-                  }`}
+                  className="flex-shrink-0 mt-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <span
-                    className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
-                      skill.enabled ? 'translate-x-4' : 'translate-x-0'
-                    }`}
-                  />
+                  <SwitchTrack checked={skill.enabled} />
                 </button>
               </div>
             );
@@ -306,6 +298,23 @@ type ImportStage =
   | { kind: 'pick' }
   | { kind: 'submitting' }
   | { kind: 'result'; data: SkillImportResponse };
+
+function SwitchTrack({ checked }: { checked: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`relative block h-5 w-9 rounded-full transition-colors ${
+        checked ? 'bg-accent' : 'bg-border dark:bg-border-dark'
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+          checked ? 'translate-x-4' : 'translate-x-0'
+        }`}
+      />
+    </span>
+  );
+}
 
 function SkillImportCard({
   isAdmin,
@@ -450,14 +459,28 @@ function SkillImportCard({
           </div>
 
           {isAdmin && (
-            <label className="flex items-center gap-2 text-xs text-text-secondary dark:text-text-secondary-dark cursor-pointer select-none">
-              <Checkbox
-                checked={marketplace}
-                onChange={setMarketplace}
-                ariaLabel="导入为共享技能"
-              />
-              导入为共享技能（全员可见，默认关闭，各自选择开启）
-            </label>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={marketplace}
+              aria-label="导入为共享技能"
+              onClick={() => setMarketplace((v) => !v)}
+              className={`flex w-full items-center justify-between gap-3 rounded-lg border bg-chat dark:bg-chat-dark px-3 py-2 text-left transition-colors ${
+                marketplace
+                  ? 'border-accent/60'
+                  : 'border-border dark:border-border-dark hover:border-accent/40 dark:hover:border-accent/50'
+              }`}
+            >
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-text-primary dark:text-text-primary-dark">
+                  导入为共享技能
+                </span>
+                <span className="block text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                  全员可见，默认开启，各自选择关闭
+                </span>
+              </span>
+              <SwitchTrack checked={marketplace} />
+            </button>
           )}
 
           {error && <div className="text-status-error text-xs">{error}</div>}
@@ -491,7 +514,7 @@ function SkillImportCard({
             <span className="font-medium">{stage.data.skill.name}</span>
             {stage.data.skill.visibility === 'private'
               ? '（私有，已启用）'
-              : '（共享，默认关闭）'}
+              : '（共享，默认开启）'}
           </div>
           {stage.data.findings.length > 0 && (
             <>

@@ -1,6 +1,6 @@
 """Admin Skills Router —— 共享 skill 管理(admin-only)。挂 /api/v1/admin,故路径:
 - POST   /api/v1/admin/skills/import   导入为共享 skill(marketplace:public、owner=null、
-                                       默认不进 L1,用户自选;配额豁免,结构上限照查)
+                                       默认进 L1,用户可关闭;配额豁免,结构上限照查)
 - DELETE /api/v1/admin/skills/{slug}   删任意 dynamic skill(seeded → 400,config 所有)
 
 router 只做 transport:认证(require_admin)、解析、SkillManagerError → HTTP 映射。
@@ -25,7 +25,7 @@ async def admin_import_skill(
     admin: TokenPayload = Depends(require_admin),
     mgr: SkillManager = Depends(get_skill_manager),
 ) -> SkillImportResponse:
-    """导入共享 skill(visibility=public、default_enabled=False、owner=null)。"""
+    """导入共享 skill(visibility=public、default_enabled=True、owner=null)。"""
     blob = await file.read()
     try:
         result = await mgr.import_zip(

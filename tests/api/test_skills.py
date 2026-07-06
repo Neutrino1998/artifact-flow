@@ -215,13 +215,21 @@ class TestAdminImportSkill:
         assert r.status_code == 200
         sk = r.json()["skill"]
         assert sk["visibility"] == "public"
-        assert sk["default_enabled"] is False and sk["enabled"] is False
+        assert sk["default_enabled"] is True and sk["enabled"] is True
         assert sk["is_owner"] is False  # owner=null(marketplace 语义)
 
-        # 第二用户(普通 client)可见,默认不进 L1
+        # 第二用户(普通 client)可见,默认进 L1,仍可个人关闭
         items = {s["slug"]: s for s in (await client.get("/api/v1/skills")).json()["skills"]}
         assert "my-skill" in items
-        assert items["my-skill"]["enabled"] is False
+        assert items["my-skill"]["enabled"] is True
+        closed = await client.put("/api/v1/skills/my-skill/enabled", json={"enabled": False})
+        assert closed.status_code == 200
+        assert closed.json()["enabled"] is False
+        after_close = {
+            s["slug"]: s for s in (await client.get("/api/v1/skills")).json()["skills"]
+        }
+        assert after_close["my-skill"]["enabled"] is False
+        assert after_close["my-skill"]["is_overridden"] is True
 
     async def test_admin_import_quota_exempt(self, admin_client: AsyncClient, monkeypatch):
         monkeypatch.setattr(config, "ARTIFACT_USER_QUOTA_BYTES", 10)

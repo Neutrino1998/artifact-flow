@@ -2365,7 +2365,7 @@
           "admin"
         ],
         "summary": "Admin Import Skill",
-        "description": "\u5bfc\u5165\u5171\u4eab skill(visibility=public\u3001default_enabled=False\u3001owner=null)\u3002",
+        "description": "\u5bfc\u5165\u5171\u4eab skill(visibility=public\u3001default_enabled=True\u3001owner=null)\u3002",
         "operationId": "admin_import_skill_api_v1_admin_skills_import_post",
         "requestBody": {
           "content": {

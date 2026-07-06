@@ -212,8 +212,8 @@ export function setSkillEnabled(slug: string, enabled: boolean) {
 }
 
 /**
- * 导入 skill zip（E-2）。marketplace=true 走 admin 共享通道（public、默认关、
- * 全员可见）；否则私有导入（仅自己可见、立即启用）。
+ * 导入 skill zip（E-2）。marketplace=true 走 admin 共享通道（public、默认开、
+ * 全员可见、个人可关闭）；否则私有导入（仅自己可见、立即启用）。
  *
  * 错误（detail 由 SkillManager 结构化产出）：
  * - 422 + dict detail（`{message, findings[]}`）→ 硬门拒收，ApiError.body 给 UI

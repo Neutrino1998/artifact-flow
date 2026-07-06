@@ -5,7 +5,7 @@
 
 导入是 `source="dynamic"` 的**第一个写入者**:user 私有(audience="private",owner=本人、
 default_enabled=True 即刻进自己 L1)与 admin 共享(audience="marketplace",public、owner=null、
-default_enabled=False 用户自选)双通道同走 import_zip —— 零漂移。硬门 = E-1 validator
+default_enabled=True 默认进全员 L1、个人可关闭)双通道同走 import_zip —— 零漂移。硬门 = E-1 validator
 (与 seed 同一道门);「能不能跑」归会话期 checker skill(E-4),导入无 verify/force 交互。
 
 seeded skill 归 config 只读(删除/覆盖一律 400 指回 config);dept 授权 UI 归 G。
@@ -243,8 +243,8 @@ class SkillManager:
             description=frontmatter.get("description", ""),
             visibility="private" if is_private else "public",
             # private:owner-only 可见 ⇒ 直接进自己 L1,免 user_skill 行;
-            # marketplace:默认不进 L1,用户自选(镜像 seed 的 marketplace 语义)
-            default_enabled=is_private,
+            # marketplace:共享发布后默认进 L1,用户可用 user_skill 覆盖关闭。
+            default_enabled=True,
             owner_user_id=user_id if is_private else None,
             allowed_tools=allowed_tools,
             has_bundle=True,
@@ -283,7 +283,7 @@ class SkillManager:
         return {
             "status": "imported",
             "skill": self._serialize(
-                info, enabled=is_private, is_overridden=False, user_id=user_id
+                info, enabled=info.default_enabled, is_overridden=False, user_id=user_id
             ),
             "findings": [asdict(f) for f in findings],
         }

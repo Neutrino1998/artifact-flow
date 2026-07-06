@@ -981,7 +981,7 @@ class Skill(Base):
     visibility: Mapped[str] = mapped_column(
         String(16), nullable=False, default="public", server_default="public"
     )
-    # shared skill 默认是否注入 L1(决策 1:preinstalled=true、marketplace=false)
+    # shared skill 默认是否注入 L1(preinstalled / admin-imported shared 默认 true)
     default_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
     )
@@ -1030,8 +1030,8 @@ class UserSkill(Base):
     """
     用户对 skill 的个人开关(稀疏覆盖,决策 1)。
 
-    无行 = 走 visibility/default_enabled;有行 = 用户显式开/关。marketplace 选用 =
-    enabled 行、关掉预装 = disabled 行(link 与 toggle 同一机制)。两端真 FK + CASCADE。
+    无行 = 走 visibility/default_enabled;有行 = 用户显式开/关。关掉默认开启的 shared
+    skill = disabled 行(link 与 toggle 同一机制)。两端真 FK + CASCADE。
     """
     __tablename__ = "user_skills"
 
