@@ -19,7 +19,8 @@ import ToolUnitEditor, {
   type UnitDraft,
 } from '@/components/forms/ToolUnitEditor';
 import { SELECT_CHEVRON } from '@/components/ui/SelectChevron';
-import { SourceBadge, StateBadge } from '@/components/forms/ToolUnitBadges';
+import { SourceBadge } from '@/components/forms/ToolUnitBadges';
+import { SwitchTrack } from '@/components/ui/SwitchTrack';
 import type {
   AgentSummaryResponse,
   CredentialStatusResponse,
@@ -445,34 +446,49 @@ function MountSection({
         <div className="space-y-2">
           {mounted.map((m) => {
             const seeded = m.source === 'seeded';
+            const enabled = m.member_state === 'enabled';
             const rowBusy = busy === m.agent_name;
             return (
               <div
                 key={m.agent_name}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border dark:border-border-dark"
+                className={`flex items-center gap-3 px-3 py-2 rounded-lg bg-surface dark:bg-surface-dark border transition-colors ${
+                  enabled
+                    ? 'border-accent/60'
+                    : 'border-border dark:border-border-dark'
+                }`}
               >
-                <span className="font-mono text-sm text-text-primary dark:text-text-primary-dark truncate flex-1">
-                  {m.agent_name}
-                </span>
-                <StateBadge state={m.member_state} />
-                <SourceBadge source={m.source} />
-                {seeded ? (
-                  <span className="text-xs text-text-tertiary dark:text-text-tertiary-dark">MD 绑定，只读</span>
-                ) : (
-                  <>
-                    <button
-                      onClick={() =>
-                        run(m.agent_name, () =>
-                          api.mountToolUnit(unitName, m.agent_name, {
-                            member_state: m.member_state === 'enabled' ? 'disabled' : 'enabled',
-                          }),
-                        )
-                      }
-                      disabled={rowBusy}
-                      className="px-2 py-1 text-xs rounded-md border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
-                    >
-                      {m.member_state === 'enabled' ? '停用' : '启用'}
-                    </button>
+                <div className="min-w-0 flex-1">
+                  <div className="font-mono text-sm text-text-primary dark:text-text-primary-dark truncate">
+                    {m.agent_name}
+                  </div>
+                  {seeded && (
+                    <div className="mt-0.5 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                      MD 绑定，只读
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={enabled}
+                    aria-label={`${enabled ? '停用' : '启用'} agent ${m.agent_name} 的工具挂载`}
+                    title={seeded ? 'MD 绑定只读，请修改 agent 配置' : enabled ? '停用挂载' : '启用挂载'}
+                    disabled={seeded || rowBusy}
+                    onClick={() =>
+                      run(m.agent_name, () =>
+                        api.mountToolUnit(unitName, m.agent_name, {
+                          member_state: enabled ? 'disabled' : 'enabled',
+                        }),
+                      )
+                    }
+                    className="disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <SwitchTrack checked={enabled} />
+                  </button>
+
+                  {!seeded && (
                     <button
                       onClick={() => run(m.agent_name, () => api.unmountToolUnit(unitName, m.agent_name))}
                       disabled={rowBusy}
@@ -484,8 +500,8 @@ function MountSection({
                         <path d="M3 3l8 8M11 3l-8 8" />
                       </svg>
                     </button>
-                  </>
-                )}
+                  )}
+                </div>
               </div>
             );
           })}

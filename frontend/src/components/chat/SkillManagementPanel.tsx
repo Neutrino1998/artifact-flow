@@ -15,6 +15,7 @@ import { useUIStore } from '@/stores/uiStore';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
 import { triggerBlobDownload } from '@/lib/download';
 import { PillBadge } from '@/components/ui/PillBadge';
+import { SwitchTrack } from '@/components/ui/SwitchTrack';
 import PanelSearchBar from './PanelSearchBar';
 import type { SkillItem, SkillFindingItem, SkillImportResponse } from '@/types';
 
@@ -297,23 +298,6 @@ type ImportStage =
   | { kind: 'pick' }
   | { kind: 'submitting' }
   | { kind: 'result'; data: SkillImportResponse };
-
-function SwitchTrack({ checked }: { checked: boolean }) {
-  return (
-    <span
-      aria-hidden="true"
-      className={`relative block h-5 w-9 rounded-full transition-colors ${
-        checked ? 'bg-accent' : 'bg-border dark:bg-border-dark'
-      }`}
-    >
-      <span
-        className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
-          checked ? 'translate-x-4' : 'translate-x-0'
-        }`}
-      />
-    </span>
-  );
-}
 
 function SkillImportCard({
   isAdmin,

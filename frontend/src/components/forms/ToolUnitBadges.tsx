@@ -12,12 +12,3 @@ export function SourceBadge({ source }: { source: string }) {
     </PillBadge>
   );
 }
-
-export function StateBadge({ state }: { state: string }) {
-  const enabled = state === 'enabled';
-  return (
-    <PillBadge tone={enabled ? 'success' : 'neutral'}>
-      {enabled ? '启用' : '停用'}
-    </PillBadge>
-  );
-}
