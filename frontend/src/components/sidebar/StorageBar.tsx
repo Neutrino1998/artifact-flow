@@ -75,7 +75,7 @@ export default function StorageBar() {
 
   return (
     <div
-      className="relative h-5 overflow-hidden rounded-lg border border-border/60 dark:border-border-dark/60 bg-bg dark:bg-panel-accent-dark"
+      className="relative h-5 overflow-hidden rounded-lg bg-white/50 dark:bg-black/25"
       aria-label={tooltipText}
       title={tooltipText}
     >
