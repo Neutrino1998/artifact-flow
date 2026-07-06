@@ -79,6 +79,9 @@ export default function MessageInput() {
   // doesn't silently no-op during the wait.
   const queuedInfo = useStreamStore((s) => s.queuedInfo);
   const toggleArtifactPanel = useUIStore((s) => s.toggleArtifactPanel);
+  const composerFocusRequestId = useUIStore((s) => s.composerFocusRequestId);
+  const composerFocusConsumedId = useUIStore((s) => s.composerFocusConsumedId);
+  const consumeComposerFocusRequest = useUIStore((s) => s.consumeComposerFocusRequest);
 
   const stagedFiles = useStagedFilesStore((s) => s.drafts[s.activeKey]?.files ?? EMPTY_FILES);
   const addFiles = useStagedFilesStore((s) => s.addFiles);
@@ -92,6 +95,15 @@ export default function MessageInput() {
   // ride the POST) at send start, so it stays correct even if the user navigates
   // mid-send. A failed send is a best-effort loss — there is no restore.
   const { sending, submit, inject } = useComposerSend(activeKey, content, stagedFiles);
+
+  useEffect(() => {
+    if (composerFocusRequestId <= composerFocusConsumedId) return;
+    const raf = requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      consumeComposerFocusRequest(composerFocusRequestId);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [composerFocusRequestId, composerFocusConsumedId, consumeComposerFocusRequest]);
 
   // Auto-resize textarea
   useEffect(() => {

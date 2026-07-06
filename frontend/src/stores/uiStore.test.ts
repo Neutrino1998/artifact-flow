@@ -155,6 +155,25 @@ describe('uiStore list versions', () => {
   });
 });
 
+describe('uiStore composer focus request', () => {
+  beforeEach(() => reset());
+
+  test('requestComposerFocus creates a pending one-shot focus request', () => {
+    const st = useUIStore.getState();
+    st.requestComposerFocus();
+    st.requestComposerFocus();
+
+    expect(useUIStore.getState().composerFocusRequestId).toBe(2);
+    expect(useUIStore.getState().composerFocusConsumedId).toBe(0);
+
+    useUIStore.getState().consumeComposerFocusRequest(2);
+    expect(useUIStore.getState().composerFocusConsumedId).toBe(2);
+
+    useUIStore.getState().consumeComposerFocusRequest(1);
+    expect(useUIStore.getState().composerFocusConsumedId).toBe(2);
+  });
+});
+
 describe('uiStore observability sub-state', () => {
   beforeEach(() => reset());
 

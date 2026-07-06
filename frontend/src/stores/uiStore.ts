@@ -79,6 +79,11 @@ interface UIState {
   // 实例监控刷新版本号 —— 侧栏「刷新」按钮 bump,InstancePanel 订阅触发 reload
   // (与 observabilityRefreshTick 同构:刷新动作上移到侧栏,面板不再自带按钮)。
   instancesRefreshTick: number;
+  // One-shot focus request for the chat composer. It is stored outside
+  // MessageInput because new-chat can be clicked while a center takeover panel
+  // is mounted; the composer should focus after it remounts.
+  composerFocusRequestId: number;
+  composerFocusConsumedId: number;
   theme: 'light' | 'dark';
 
   toggleSidebar: () => void;
@@ -100,6 +105,8 @@ interface UIState {
   setObservabilityBrowseVisible: (visible: boolean) => void;
   triggerObservabilityRefresh: () => void;
   triggerInstancesRefresh: () => void;
+  requestComposerFocus: () => void;
+  consumeComposerFocusRequest: (id: number) => void;
   setTheme: (theme: 'light' | 'dark') => void;
   toggleTheme: () => void;
 }
@@ -112,7 +119,8 @@ type UIData = Omit<UIState,
   | 'setToolUnitRightView' | 'bumpToolUnitListVersion' | 'enterSelectionMode' | 'exitSelectionMode'
   | 'toggleUserSelection' | 'setUserManagementSelection' | 'clearUserSelection'
   | 'setObservabilitySelectedConvId' | 'setObservabilityBrowseVisible' | 'triggerObservabilityRefresh'
-  | 'triggerInstancesRefresh' | 'setTheme' | 'toggleTheme'
+  | 'triggerInstancesRefresh' | 'requestComposerFocus' | 'consumeComposerFocusRequest'
+  | 'setTheme' | 'toggleTheme'
 >;
 
 export const INITIAL_UI_STATE: UIData = {
@@ -130,6 +138,8 @@ export const INITIAL_UI_STATE: UIData = {
   observabilityBrowseVisible: false,
   observabilityRefreshTick: 0,
   instancesRefreshTick: 0,
+  composerFocusRequestId: 0,
+  composerFocusConsumedId: 0,
   theme: 'dark',
 };
 
@@ -210,6 +220,14 @@ export const useUIStore = create<UIState>((set) => ({
   triggerInstancesRefresh: () => set((s) => ({
     instancesRefreshTick: s.instancesRefreshTick + 1,
   })),
+  requestComposerFocus: () => set((s) => ({
+    composerFocusRequestId: s.composerFocusRequestId + 1,
+  })),
+  consumeComposerFocusRequest: (id) => set((s) => (
+    id > s.composerFocusConsumedId
+      ? { composerFocusConsumedId: id }
+      : {}
+  )),
 
   setTheme: (theme) => {
     applyTheme(theme);

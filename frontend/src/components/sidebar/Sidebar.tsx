@@ -96,6 +96,7 @@ export default function Sidebar() {
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const toggleArtifactPanel = useUIStore((s) => s.toggleArtifactPanel);
   const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
+  const requestComposerFocus = useUIStore((s) => s.requestComposerFocus);
 
   const activeMode = useUIStore((s) => s.activeMode);
   const setActiveMode = useUIStore((s) => s.setActiveMode);
@@ -117,6 +118,7 @@ export default function Sidebar() {
     startNewChat();
     setArtifactPanelVisible(false);
     setActiveMode('none'); // 单一动作关掉任何接管面板(取代旧的 4 次 set*Visible(false))
+    requestComposerFocus();
   };
 
   const [refreshSpinning, setRefreshSpinning] = useState(false);
