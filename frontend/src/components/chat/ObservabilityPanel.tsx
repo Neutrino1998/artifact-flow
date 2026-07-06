@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { CopyIcon } from '@/components/ui/CopyIcon';
-import { SELECT_COMPACT } from '@/lib/styles';
+import { SELECT_COMPACT, MENU_ROW_HOVER } from '@/lib/styles';
 import { SELECT_CHEVRON_COMPACT } from '@/components/ui/SelectChevron';
 import * as api from '@/lib/api';
 import { parseUtcIso } from '@/lib/time';
@@ -605,7 +605,7 @@ function AdminConversationBrowser({
           {conversations.map((conv) => (
             <div
               key={conv.id}
-              className="group relative cursor-pointer transition-colors rounded-lg mb-1 hover:bg-panel/60 dark:hover:bg-panel-accent-dark/60 px-4 py-3"
+              className={`group relative cursor-pointer transition-colors rounded-lg mb-1 px-4 py-3 ${MENU_ROW_HOVER}`}
               onClick={() => onSelect(conv.id)}
             >
               <div className="flex items-center gap-2">

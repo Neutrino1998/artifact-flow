@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import ConfirmModal from '@/components/layout/ConfirmModal';
-import { BUTTON_GHOST_ICON } from '@/lib/styles';
+import { BUTTON_GHOST_ICON, MENU_ROW_DANGER_HOVER } from '@/lib/styles';
 
 // 会话行的 ⋮ 操作菜单(复制 ID / 删除对话)+ 删除确认弹窗。
 // 侧栏 ConversationItem 与「搜索对话」ConversationBrowser 两处行内菜单原为复制粘贴,
@@ -119,7 +119,7 @@ export default function ConversationActionsMenu({
                     onOpenChange(false);
                     setConfirmDelete(true);
                   }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-sm font-medium text-status-error hover:bg-status-error/10 rounded-md transition-colors"
+                  className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-sm font-medium text-status-error rounded-md ${MENU_ROW_DANGER_HOVER}`}
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6" />

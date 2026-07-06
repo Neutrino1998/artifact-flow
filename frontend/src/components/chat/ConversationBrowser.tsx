@@ -9,7 +9,7 @@ import { listConversations, deleteConversation, bulkDeleteConversations } from '
 import { parseUtcIso } from '@/lib/time';
 import { formatBytes } from '@/lib/formatBytes';
 import type { ConversationSummary } from '@/types';
-import { BUTTON_DANGER } from '@/lib/styles';
+import { BUTTON_DANGER, MENU_ROW_HOVER } from '@/lib/styles';
 import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
 import ConversationActionsMenu from '@/components/sidebar/ConversationActionsMenu';
 import Checkbox from '@/components/forms/Checkbox';
@@ -326,7 +326,7 @@ function BrowserItem({
             ? 'bg-accent/10 dark:bg-accent/15 px-4 py-3'
             : isActive
             ? 'bg-panel dark:bg-panel-accent-dark px-4 py-3'
-            : 'hover:bg-panel/60 dark:hover:bg-panel-accent-dark/60 px-4 py-3'
+            : `${MENU_ROW_HOVER} px-4 py-3`
         }`}
         onClick={handleRowClick}
         onMouseEnter={() => setShowMenu(true)}

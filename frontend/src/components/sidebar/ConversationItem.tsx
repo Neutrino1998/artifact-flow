@@ -5,6 +5,7 @@ import type { ConversationSummary } from '@/types';
 import { deleteConversation } from '@/lib/api';
 import { useConversationStore } from '@/stores/conversationStore';
 import { parseUtcIso } from '@/lib/time';
+import { MENU_ROW_HOVER } from '@/lib/styles';
 import ConversationActionsMenu from './ConversationActionsMenu';
 
 interface ConversationItemProps {
@@ -38,7 +39,7 @@ function ConversationItem({ conversation, isActive, onSelect }: ConversationItem
       } ${
         isActive
           ? 'bg-chat dark:bg-panel-accent-dark px-3 py-2.5'
-          : 'hover:bg-chat/60 dark:hover:bg-panel-accent-dark/60 px-3 py-2.5'
+          : `${MENU_ROW_HOVER} px-3 py-2.5`
       }`}
       onClick={() => onSelect(conversation.id)}
       onMouseEnter={() => setShowMenu(true)}

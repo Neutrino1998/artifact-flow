@@ -5,6 +5,7 @@ import { useConversationStore } from '@/stores/conversationStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useChat } from '@/hooks/useChat';
 import { listConversations } from '@/lib/api';
+import { MENU_ROW_HOVER } from '@/lib/styles';
 import ConversationItem from './ConversationItem';
 
 export default function ConversationList() {
@@ -89,7 +90,7 @@ export default function ConversationList() {
         <div className="mx-2 mb-1">
           <button
             onClick={() => setActiveMode('conversationBrowser')}
-            className="w-full px-3 py-2 text-xs text-text-secondary dark:text-text-secondary-dark rounded-lg hover:bg-chat/60 dark:hover:bg-panel-accent-dark/60 transition-colors"
+            className={`w-full px-3 py-2 text-xs text-text-secondary dark:text-text-secondary-dark rounded-lg ${MENU_ROW_HOVER}`}
           >
             显示所有对话
           </button>

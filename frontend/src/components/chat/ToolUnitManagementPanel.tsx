@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { MENU_ROW_HOVER } from '@/lib/styles';
 import * as api from '@/lib/api';
 import type { ToolUnitResponse } from '@/types';
 import { useUIStore } from '@/stores/uiStore';
@@ -122,7 +123,7 @@ function UnitRow({
       className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors mb-1 cursor-pointer ${
         isSelected
           ? 'bg-panel dark:bg-panel-accent-dark'
-          : 'hover:bg-panel/60 dark:hover:bg-panel-accent-dark/60'
+          : MENU_ROW_HOVER
       }`}
     >
       <div className="flex-1 min-w-0">

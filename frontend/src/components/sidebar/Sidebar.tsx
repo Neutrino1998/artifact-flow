@@ -11,7 +11,7 @@ import StorageBar from './StorageBar';
 import NotificationCenter from './NotificationCenter';
 import BrandingFooter from '@/components/BrandingFooter';
 import { APP_NAME, APP_TAGLINE } from '@/lib/branding';
-import { BUTTON_GHOST_ICON } from '@/lib/styles';
+import { MENU_ROW_HOVER, MENU_ROW_DANGER_HOVER } from '@/lib/styles';
 
 function IconButton({
   onClick,
@@ -25,7 +25,7 @@ function IconButton({
   return (
     <button
       onClick={onClick}
-      className={`${BUTTON_GHOST_ICON} w-10 h-10 flex items-center justify-center`}
+      className={`w-10 h-10 flex items-center justify-center rounded-md text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent ${MENU_ROW_HOVER}`}
       aria-label={label}
       title={label}
     >
@@ -36,10 +36,10 @@ function IconButton({
 
 // Plain text-row nav buttons (no border/fill) — icon + label with a subtle hover highlight.
 const navRowClass =
-  'w-full flex items-center gap-2.5 px-2 py-1.5 font-medium text-text-primary dark:text-text-primary-dark hover:bg-chat/70 dark:hover:bg-panel-accent-dark/60 rounded-lg transition-colors';
+  `w-full flex items-center gap-2.5 px-2 py-1.5 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`;
 
 const navRowDangerClass =
-  'w-full flex items-center gap-2.5 px-2 py-1.5 font-medium text-status-error hover:bg-status-error/10 rounded-lg transition-colors';
+  `w-full flex items-center gap-2.5 px-2 py-1.5 font-medium text-status-error rounded-lg ${MENU_ROW_DANGER_HOVER}`;
 
 const RefreshIcon = ({ size = 16, spinning = false }: { size?: number; spinning?: boolean }) => (
   <svg

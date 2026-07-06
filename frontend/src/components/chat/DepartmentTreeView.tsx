@@ -1,6 +1,7 @@
 'use client';
 
 import type { DepartmentTreeNode } from '@/types';
+import { MENU_ROW_HOVER } from '@/lib/styles';
 
 interface DepartmentTreeViewProps {
   nodes: DepartmentTreeNode[];
@@ -86,7 +87,7 @@ function TreeNodeItem({
         className={`group flex items-center gap-2 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${
           isSelected
             ? 'bg-panel dark:bg-panel-accent-dark'
-            : 'hover:bg-panel/60 dark:hover:bg-panel-accent-dark/60'
+            : MENU_ROW_HOVER
         }`}
       >
         {hasChildren ? (

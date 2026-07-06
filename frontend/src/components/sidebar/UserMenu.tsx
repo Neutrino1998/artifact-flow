@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import ChangePasswordDialog from '@/components/layout/ChangePasswordDialog';
 import EditDisplayNameDialog from '@/components/layout/EditDisplayNameDialog';
+import { MENU_ROW_HOVER, MENU_ROW_DANGER_HOVER } from '@/lib/styles';
 
 export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
   const user = useAuthStore((s) => s.user);
@@ -100,7 +101,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
           <button
             ref={triggerRef}
             onClick={togglePopover}
-            className="w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-chat/60 dark:hover:bg-panel-accent-dark/60 transition-colors"
+            className={`w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark ${MENU_ROW_HOVER}`}
             title={user.display_name || user.username}
           >
             <div className="w-7 h-7 rounded-lg bg-panel-accent dark:bg-surface-dark text-text-primary dark:text-text-primary-dark ring-1 ring-border/60 dark:ring-border-dark/60 flex items-center justify-center text-xs font-medium">
@@ -111,7 +112,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
           <button
             ref={triggerRef}
             onClick={togglePopover}
-            className="w-full flex items-center gap-3 px-3 py-2.5 bg-chat dark:bg-panel-accent-dark rounded-card hover:bg-surface dark:hover:bg-panel-accent-dark transition-colors text-left"
+            className={`w-full flex items-center gap-3 px-3 py-2.5 bg-chat dark:bg-panel-accent-dark rounded-card text-left ${MENU_ROW_HOVER}`}
           >
             <div className="w-8 h-8 rounded-lg bg-panel-accent dark:bg-surface-dark text-text-primary dark:text-text-primary-dark ring-1 ring-border/60 dark:ring-border-dark/60 flex items-center justify-center font-medium shrink-0">
               {initial}
@@ -156,7 +157,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
                 toggleTheme();
                 setPopoverOpen(false);
               }}
-              className="w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-panel-accent-dark rounded-lg transition-colors"
+              className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
             >
               {theme === 'light' ? (
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -173,7 +174,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             {/* Edit display name (all users) */}
             <button
               onClick={handleEditProfile}
-              className="w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-panel-accent-dark rounded-lg transition-colors"
+              className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M11 2l3 3-9 9H2v-3z" />
@@ -184,7 +185,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             {/* Change password (all users) */}
             <button
               onClick={handleChangePassword}
-              className="w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-panel-accent-dark rounded-lg transition-colors"
+              className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <rect x="3" y="7" width="10" height="7" rx="1" />
@@ -197,7 +198,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             {isAdmin && (
               <button
                 onClick={handleManageUsers}
-                className="w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-panel-accent-dark rounded-lg transition-colors"
+                className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <circle cx="8" cy="5" r="3" />
@@ -211,7 +212,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             {isAdmin && (
               <button
                 onClick={handleManageTools}
-                className="w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-panel-accent-dark rounded-lg transition-colors"
+                className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M9.8 4.2a.67.67 0 0 0 0 .93l1.07 1.07a.67.67 0 0 0 .93 0l2.51-2.51a4 4 0 0 1-5.29 5.29l-4.61 4.61a1.41 1.41 0 0 1-2-2l4.61-4.61a4 4 0 0 1 5.29-5.29l-2.51 2.51z" />
@@ -224,7 +225,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             {isAdmin && (
               <button
                 onClick={handleObservability}
-                className="w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-panel-accent-dark rounded-lg transition-colors"
+                className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M2 12a6 6 0 1 1 12 0" />
@@ -239,7 +240,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             {isAdmin && (
               <button
                 onClick={handleInstances}
-                className="w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-panel-accent-dark rounded-lg transition-colors"
+                className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="2" y="2.5" width="12" height="4" rx="1" />
@@ -257,7 +258,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             {/* Logout */}
             <button
               onClick={handleLogout}
-              className="w-full flex items-center gap-2 px-2.5 py-2 font-medium text-status-error hover:bg-surface dark:hover:bg-panel-accent-dark rounded-lg transition-colors"
+              className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-status-error rounded-lg ${MENU_ROW_DANGER_HOVER}`}
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3M11 11l3-3-3-3M6 8h8" />

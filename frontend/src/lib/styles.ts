@@ -58,6 +58,33 @@ export const BUTTON_DANGER_OUTLINE =
 export const BUTTON_GHOST_ICON =
   'rounded-md text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark hover:bg-text-primary/5 dark:hover:bg-text-primary-dark/10 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors';
 
+// ---------------------------------------------------------------------------
+// Interactive rows (menu items, nav rows, list rows, disclosure headers)
+//
+// The single canonical hover wash for any transparent-backed clickable row.
+// White-in-light / black-in-dark makes it parent-INDEPENDENT: it lightens on
+// any light surface and darkens on any dark one. That's the whole point — a
+// fixed token (e.g. hover:bg-chat/60) silently goes invisible whenever it lands
+// on a parent of its own color (chat==bg on the user-menu popover, panel-accent-
+// dark==panel-accent-dark in dark mode), which is how four hand-rolled wash
+// recipes drifted apart and the dark-mode user menu lost its hover entirely.
+// Direction is house-standard: light lightens, dark darkens.
+//
+// Compose at the call site with the row's own text color, rounded-*, padding.
+// transition-colors is baked in (every prior recipe carried it).
+// Do NOT use for filled cards (they have a base bg — lighten within their own
+// color) or accent/selected states (those want the brand hue, not a neutral wash).
+// ---------------------------------------------------------------------------
+
+export const MENU_ROW_HOVER =
+  'hover:bg-white/50 dark:hover:bg-black/25 transition-colors';
+
+// Danger row (logout, delete). The red tint is already parent-independent, so
+// it stays a status-error wash — no white/black. For destructive rows only;
+// solid red buttons (bg-status-error base) are a different pattern.
+export const MENU_ROW_DANGER_HOVER =
+  'hover:bg-status-error/10 transition-colors';
+
 // Compact <select> for dense toolbars (artifact toolbar, pagination,
 // observability). Full-size selects compose INPUT_ON_PANEL/_ON_SURFACE with
 // ' appearance-none pr-9' + <SelectChevron /> instead.

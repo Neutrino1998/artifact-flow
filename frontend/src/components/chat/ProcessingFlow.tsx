@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useState, useEffect } from 'react';
+import { MENU_ROW_HOVER } from '@/lib/styles';
 import CyclingDots from './CyclingDots';
 import { formatTokens } from '@/lib/formatTokens';
 
@@ -46,7 +47,7 @@ function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, hasError, t
           In queued state the button is non-interactive (no body to reveal). */}
       <button
         onClick={() => !isQueued && setExpanded(!expanded)}
-        className={`w-full flex items-center gap-2 py-1.5 px-2 text-xs transition-colors rounded-md ${isQueued ? 'cursor-default' : 'hover:bg-surface/60 dark:hover:bg-panel-accent-dark/60 cursor-pointer'}`}
+        className={`w-full flex items-center gap-2 py-1.5 px-2 text-xs transition-colors rounded-md ${isQueued ? 'cursor-default' : `${MENU_ROW_HOVER} cursor-pointer`}`}
       >
         {/* Chevron — hidden in queued state since there's nothing to expand */}
         {!isQueued && (

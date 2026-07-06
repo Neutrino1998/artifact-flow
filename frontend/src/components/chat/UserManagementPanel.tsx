@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { MENU_ROW_HOVER } from '@/lib/styles';
 import * as api from '@/lib/api';
 import type { UserResponse, DepartmentTreeNode } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
@@ -320,7 +321,7 @@ function UserRow({
     ? 'bg-accent/10 dark:bg-accent/15'
     : isSelected
     ? 'bg-panel dark:bg-panel-accent-dark'
-    : 'hover:bg-panel/60 dark:hover:bg-panel-accent-dark/60';
+    : MENU_ROW_HOVER;
   const rowCursor = selectionMode && isSelf ? 'cursor-not-allowed opacity-60' : 'cursor-pointer';
 
   return (

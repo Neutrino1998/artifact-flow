@@ -5,7 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import type { ExecutionSegment } from '@/stores/streamStore';
-import { PROSE_CLASSES } from '@/lib/styles';
+import { PROSE_CLASSES, MENU_ROW_HOVER } from '@/lib/styles';
 import { markdownComponents, markdownUrlTransform } from '@/components/markdown';
 import ThinkingBlock from './ThinkingBlock';
 import AgentOutputBlock from './AgentOutputBlock';
@@ -90,7 +90,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
       <button
         onClick={() => { if (!isActive) setExpanded(!expanded); }}
         className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${
-          isActive ? 'cursor-default' : 'hover:bg-surface/60 dark:hover:bg-panel-accent-dark/60 cursor-pointer'
+          isActive ? 'cursor-default' : `${MENU_ROW_HOVER} cursor-pointer`
         }`}
       >
         {/* Chevron */}
