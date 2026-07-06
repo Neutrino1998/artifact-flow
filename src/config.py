@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     READ_ARTIFACT_MAX_CHARS: int = 50000    # read_artifact 默认字符上限（隐藏，模型不可见）
     HTTP_TOOL_MAX_RESULT_CHARS: int = 50000  # external http 工具响应文本上限（隐藏）；超限尾部截断并显式标记
     MCP_TOOL_MAX_RESULT_CHARS: int = 50000   # external mcp 工具 text/structured 响应上限（隐藏）；超限尾部截断并显式标记
+    MCP_TOOL_LIST_CACHE_SECONDS: int = 60    # MCP tools/list 进程内缓存 TTL；0=每次重新发现
     TOOL_PERSIST_PREVIEW_LENGTH: int = 1000  # 工具结果落盘后回填给模型的预览长度
     SEARCH_TOOLS_MAX_RESULTS: int = 15      # search_tools 单次渲染完整 doc 的工具数上限（隐藏）；
                                             # 超出只列名，防把整集 schema 灌爆下一次 call（压缩不兜底 tool-result overflow）

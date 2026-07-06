@@ -1,9 +1,11 @@
-"""MCP tool adapter tests(F-2M-a)."""
+"""MCP tool adapter tests(F-2M)."""
 
+import base64
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from types import SimpleNamespace
 
+from config import config
 from tools.custom.mcp_client import McpClientManager, McpToolCallResult
 from tools.custom.mcp_client import _McpSessionContext
 from tools.custom.mcp_tool import McpTool, McpToolConfig, parameters_from_json_schema
@@ -33,6 +35,21 @@ def _schema():
         },
         "required": ["sku"],
     }
+
+
+def _tool(manager):
+    return McpTool(
+        McpToolConfig(
+            full_name="inventory__lookup",
+            server_name="inventory",
+            tool_name="lookup",
+            description="Lookup inventory",
+            permission="confirm",
+            input_schema={"type": "object", "properties": {}},
+            provider_config=_provider_config(),
+        ),
+        client_manager=manager,
+    )
 
 
 def test_parameters_from_json_schema_maps_object_params_to_json_string():
@@ -146,6 +163,149 @@ async def test_mcp_tool_renders_structured_content_as_json():
 
     assert result.success is True
     assert result.data == '{"ok": true, "items": [1, 2]}'
+
+
+async def test_mcp_tool_converts_single_image_content_block_to_artifact():
+    png = b"\x89PNG\r\n\x1a\n"
+
+    async def fake_call(url, headers, timeout, tool_name, arguments):
+        return McpToolCallResult(
+            is_error=False,
+            content=[
+                {
+                    "type": "image",
+                    "mimeType": "image/png",
+                    "data": base64.b64encode(png).decode("ascii"),
+                }
+            ],
+        )
+
+    result = await _tool(McpClientManager(call_callable=fake_call))()
+
+    assert result.success is True
+    assert result.artifact is not None
+    assert result.artifact.content_type == "image/png"
+    assert result.artifact.blob == png
+    assert result.artifact.content == ""
+    assert result.artifact.metadata == {
+        "artifact_output": True,
+        "artifact_output_mode": "binary",
+        "mcp_server": "inventory",
+        "mcp_tool": "lookup",
+        "mcp_content_block_type": "image",
+    }
+
+
+async def test_mcp_tool_converts_embedded_blob_resource_to_artifact():
+    payload = b"sheet,data\n1,2\n"
+
+    async def fake_call(url, headers, timeout, tool_name, arguments):
+        return McpToolCallResult(
+            is_error=False,
+            content=[
+                {
+                    "type": "resource",
+                    "resource": {
+                        "uri": "file:///report.csv",
+                        "mimeType": "text/csv",
+                        "blob": base64.b64encode(payload).decode("ascii"),
+                    },
+                }
+            ],
+        )
+
+    result = await _tool(McpClientManager(call_callable=fake_call))()
+
+    assert result.success is True
+    assert result.artifact is not None
+    assert result.artifact.content_type == "text/csv"
+    assert result.artifact.blob == payload
+    assert result.artifact.metadata["mcp_content_block_type"] == "resource"
+    assert result.artifact.metadata["mcp_resource_uri"] == "file:///report.csv"
+
+
+async def test_mcp_tool_rejects_multiple_non_text_artifact_blocks():
+    payload = base64.b64encode(b"x").decode("ascii")
+
+    async def fake_call(url, headers, timeout, tool_name, arguments):
+        return McpToolCallResult(
+            is_error=False,
+            content=[
+                {"type": "image", "mimeType": "image/png", "data": payload},
+                {"type": "audio", "mimeType": "audio/wav", "data": payload},
+            ],
+        )
+
+    result = await _tool(McpClientManager(call_callable=fake_call))()
+
+    assert result.success is False
+    assert result.artifact is None
+    assert "multiple artifacts are not supported" in result.error
+
+
+async def test_mcp_tool_rejects_invalid_base64_content_block():
+    async def fake_call(url, headers, timeout, tool_name, arguments):
+        return McpToolCallResult(
+            is_error=False,
+            content=[{"type": "image", "mimeType": "image/png", "data": "not-base64"}],
+        )
+
+    result = await _tool(McpClientManager(call_callable=fake_call))()
+
+    assert result.success is False
+    assert result.artifact is None
+    assert "invalid base64" in result.error
+
+
+async def test_mcp_list_cache_uses_ttl(monkeypatch):
+    monkeypatch.setattr(config, "MCP_TOOL_LIST_CACHE_SECONDS", 60)
+    calls = 0
+
+    async def fake_list(url, headers, timeout):
+        nonlocal calls
+        calls += 1
+        return [{"name": f"lookup_{calls}", "description": "", "inputSchema": {}}]
+
+    manager = McpClientManager(list_callable=fake_list)
+
+    first = await manager.list_tools("inventory", _provider_config())
+    second = await manager.list_tools("inventory", _provider_config())
+
+    assert [tool.name for tool in first.tools] == ["lookup_1"]
+    assert [tool.name for tool in second.tools] == ["lookup_1"]
+    assert calls == 1
+
+    monkeypatch.setattr(config, "MCP_TOOL_LIST_CACHE_SECONDS", 0)
+    third = await manager.list_tools("inventory", _provider_config())
+
+    assert [tool.name for tool in third.tools] == ["lookup_2"]
+    assert calls == 2
+
+
+async def test_mcp_call_error_invalidates_list_cache(monkeypatch):
+    monkeypatch.setattr(config, "MCP_TOOL_LIST_CACHE_SECONDS", 60)
+    list_calls = 0
+
+    async def fake_list(url, headers, timeout):
+        nonlocal list_calls
+        list_calls += 1
+        return [{"name": f"lookup_{list_calls}", "description": "", "inputSchema": {}}]
+
+    async def fake_call(url, headers, timeout, tool_name, arguments):
+        return McpToolCallResult(
+            is_error=True,
+            content=[{"type": "text", "text": "unknown tool"}],
+        )
+
+    manager = McpClientManager(list_callable=fake_list, call_callable=fake_call)
+
+    first = await manager.list_tools("inventory", _provider_config())
+    await manager.call_tool("inventory", _provider_config(), "lookup", {})
+    second = await manager.list_tools("inventory", _provider_config())
+
+    assert [tool.name for tool in first.tools] == ["lookup_1"]
+    assert [tool.name for tool in second.tools] == ["lookup_2"]
+    assert list_calls == 2
 
 
 async def test_sdk_session_accepts_streamable_http_triple_and_uses_timedelta_timeout():

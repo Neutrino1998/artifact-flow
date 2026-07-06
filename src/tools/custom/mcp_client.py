@@ -12,10 +12,12 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import timedelta
+from time import monotonic
 from typing import Any, Callable, Optional
 
 import httpx
 
+from config import config
 from tools.custom.secrets import (
     SecretResolutionError,
     resolve_secrets,
@@ -70,7 +72,7 @@ class McpClientManager:
     ) -> None:
         self._list_callable = list_callable or self._list_tools_via_sdk
         self._call_callable = call_callable or self._call_tool_via_sdk
-        self._cache: dict[str, tuple[str, list[McpToolDefinition]]] = {}
+        self._cache: dict[str, tuple[str, float, list[McpToolDefinition]]] = {}
         self._lock = asyncio.Lock()
 
     async def list_tools(
@@ -90,8 +92,9 @@ class McpClientManager:
 
         async with self._lock:
             cached = self._cache.get(unit_name)
-            if cached is not None and cached[0] == fingerprint:
-                return McpListResult(tools=list(cached[1]))
+            ttl = max(0, int(config.MCP_TOOL_LIST_CACHE_SECONDS))
+            if cached is not None and cached[0] == fingerprint and ttl > 0 and cached[1] > monotonic():
+                return McpListResult(tools=list(cached[2]))
 
         try:
             raw_tools = await self._list_callable(url, headers, timeout)
@@ -101,7 +104,11 @@ class McpClientManager:
             return McpListResult(tools=[], error="MCP server is unavailable")
 
         async with self._lock:
-            self._cache[unit_name] = (fingerprint, list(tools))
+            ttl = max(0, int(config.MCP_TOOL_LIST_CACHE_SECONDS))
+            if ttl > 0:
+                self._cache[unit_name] = (fingerprint, monotonic() + ttl, list(tools))
+            else:
+                self._cache.pop(unit_name, None)
         return McpListResult(tools=tools)
 
     async def call_tool(
@@ -117,10 +124,15 @@ class McpClientManager:
             unit_name, provider_config, credential_resolver=credential_resolver
         )
         try:
-            return await self._call_callable(url, headers, timeout, tool_name, arguments)
+            result = await self._call_callable(url, headers, timeout, tool_name, arguments)
+            if result.is_error:
+                await self.invalidate(unit_name)
+            return result
         except McpClientError:
+            await self.invalidate(unit_name)
             raise
         except Exception as exc:
+            await self.invalidate(unit_name)
             logger.warning(
                 "MCP server %r tools/call %r failed: %s",
                 unit_name,
@@ -128,6 +140,10 @@ class McpClientManager:
                 exc,
             )
             raise McpClientError("MCP request failed: could not reach the server") from exc
+
+    async def invalidate(self, unit_name: str) -> None:
+        async with self._lock:
+            self._cache.pop(unit_name, None)
 
     async def _resolve_config(
         self,
