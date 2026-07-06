@@ -1,10 +1,9 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { fetchNotifications, dismissNotification, type Notification, type Severity } from '@/lib/siteConfig';
 import { MENU_ROW_HOVER } from '@/lib/styles';
+import MarkdownBlock from '@/components/markdown/MarkdownBlock';
 
 interface Props {
   collapsed?: boolean;
@@ -179,9 +178,9 @@ function NotificationModal({ items, onClose, onDismiss }: ModalProps) {
                   </button>
                 )}
               </div>
-              <div className="prose prose-sm dark:prose-invert max-w-none text-text-secondary dark:text-text-secondary-dark">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{n.body}</ReactMarkdown>
-              </div>
+              <MarkdownBlock className="prose prose-sm dark:prose-invert max-w-none text-text-secondary dark:text-text-secondary-dark">
+                {n.body}
+              </MarkdownBlock>
             </div>
           ))}
         </div>

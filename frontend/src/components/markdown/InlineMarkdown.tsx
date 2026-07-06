@@ -2,8 +2,12 @@
 
 import { memo } from 'react';
 import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { markdownComponents, markdownUrlTransform } from './index';
+import {
+  markdownComponents,
+  markdownRehypePlugins,
+  markdownRemarkPlugins,
+  markdownUrlTransform,
+} from './index';
 
 /**
  * Compact inline markdown — for short one-liners like a tool-call `reason`.
@@ -24,7 +28,8 @@ function InlineMarkdown({
       className={`prose prose-sm dark:prose-invert max-w-none prose-p:my-0 prose-p:leading-snug prose-p:text-text-secondary dark:prose-p:text-text-secondary-dark text-text-secondary dark:text-text-secondary-dark ${className}`}
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={markdownRemarkPlugins}
+        rehypePlugins={markdownRehypePlugins}
         components={markdownComponents}
         urlTransform={markdownUrlTransform}
       >

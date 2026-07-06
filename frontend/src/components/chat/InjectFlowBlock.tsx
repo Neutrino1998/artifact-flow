@@ -1,12 +1,8 @@
 'use client';
 
 import { memo } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeHighlight from 'rehype-highlight';
 import FlowBlock from './FlowBlock';
-import { PROSE_CLASSES } from '@/lib/styles';
-import { markdownComponents, markdownUrlTransform } from '@/components/markdown';
+import MarkdownBlock from '@/components/markdown/MarkdownBlock';
 
 interface InjectFlowBlockProps {
   content?: string;
@@ -32,16 +28,7 @@ const InjectBadge = () => (
 
 function InjectFlowBlock({ content }: InjectFlowBlockProps) {
   const body = content ? (
-    <div className={PROSE_CLASSES}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight]}
-        components={markdownComponents}
-        urlTransform={markdownUrlTransform}
-      >
-        {content}
-      </ReactMarkdown>
-    </div>
+    <MarkdownBlock>{content}</MarkdownBlock>
   ) : undefined;
 
   return <FlowBlock badge={<InjectBadge />} body={body} defaultExpanded />;

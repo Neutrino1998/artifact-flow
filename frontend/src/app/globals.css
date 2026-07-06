@@ -1,4 +1,5 @@
 @import 'highlight.js/styles/github.css';
+@import 'katex/dist/katex.min.css';
 
 @tailwind base;
 @tailwind components;
@@ -112,6 +113,13 @@ pre code {
   background: transparent !important;
   padding: 0 !important;
   border-radius: 0 !important;
+}
+
+/* Keep display math readable in narrow chat/artifact columns. */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
 }
 
 /* 无障碍:降低动态偏好时,欢迎页 hint 切换退化为纯淡入(去掉位移 / 模糊,

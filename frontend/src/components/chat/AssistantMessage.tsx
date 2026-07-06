@@ -1,14 +1,10 @@
 'use client';
 
 import { memo, useEffect } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeHighlight from 'rehype-highlight';
 import { useStreamStore, interleaveFlowItems } from '@/stores/streamStore';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
-import { PROSE_CLASSES } from '@/lib/styles';
-import { markdownComponentsWithDiagrams, markdownUrlTransform } from '@/components/markdown';
+import MarkdownBlock from '@/components/markdown/MarkdownBlock';
 import { CopyIcon } from '@/components/ui/CopyIcon';
 import { getMessageEvents } from '@/lib/api';
 import { reconstructSegments, reconstructNonAgentBlocks } from '@/lib/reconstructSegments';
@@ -116,11 +112,7 @@ function AssistantMessage({ content, messageId, executionMetrics }: AssistantMes
         </div>
       )}
 
-      <div className={PROSE_CLASSES}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={markdownComponentsWithDiagrams} urlTransform={markdownUrlTransform}>
-          {content}
-        </ReactMarkdown>
-      </div>
+      <MarkdownBlock diagrams>{content}</MarkdownBlock>
       {/* Action bar on hover */}
       <div className="absolute -bottom-7 left-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <button

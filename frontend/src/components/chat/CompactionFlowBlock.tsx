@@ -1,12 +1,8 @@
 'use client';
 
 import { memo } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeHighlight from 'rehype-highlight';
 import FlowBlock from './FlowBlock';
-import { PROSE_CLASSES } from '@/lib/styles';
-import { markdownComponents, markdownUrlTransform } from '@/components/markdown';
+import MarkdownBlock from '@/components/markdown/MarkdownBlock';
 import type { CompactionBlock } from '@/stores/streamStore';
 
 interface CompactionFlowBlockProps {
@@ -118,16 +114,7 @@ function Body({ block }: { block: CompactionBlock }) {
   // done
   if (!block.summary) return null;
   return (
-    <div className={PROSE_CLASSES}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight]}
-        components={markdownComponents}
-        urlTransform={markdownUrlTransform}
-      >
-        {block.summary}
-      </ReactMarkdown>
-    </div>
+    <MarkdownBlock>{block.summary}</MarkdownBlock>
   );
 }
 

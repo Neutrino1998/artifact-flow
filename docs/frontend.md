@@ -10,7 +10,7 @@
 | 语言 | TypeScript 5.7（strict） | 类型从 OpenAPI 自动生成 |
 | 样式 | Tailwind 3.4 + `@tailwindcss/typography` | class-based 暗色模式 |
 | 状态 | Zustand 5 | 分 7 个 store，selector 精细订阅 |
-| Markdown | `react-markdown` + `remark-gfm` + `rehype-highlight` | 代码高亮 |
+| Markdown | `react-markdown` + `remark-gfm` + `remark-math` + `rehype-katex` + `rehype-highlight` | GFM、KaTeX 公式、代码高亮 |
 | Diff | `diff` 8 | Artifact 版本对比 |
 | 类型工具 | `openapi-typescript` | `npm run generate-types` |
 
@@ -31,7 +31,7 @@ frontend/src/
 │   ├── artifact/               # 面板、Tabs、预览 / Source / Diff
 │   ├── layout/                 # ThreeColumnLayout、Modals、ChangePasswordDialog
 │   ├── sidebar/                # 对话列表、用户菜单
-│   └── markdown/CodeBlock.tsx
+│   └── markdown/                # MarkdownBlock / InlineMarkdown + code, diagram, link renderers
 ├── stores/                     # 7 个 Zustand store
 ├── hooks/                      # useSSE / useChat / useArtifacts / useMediaQuery
 ├── lib/                        # sse.ts / api.ts / messageTree.ts / csp.ts / passwordPolicy.ts …

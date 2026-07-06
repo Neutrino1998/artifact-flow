@@ -1,12 +1,9 @@
 'use client';
 
 import { memo, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeHighlight from 'rehype-highlight';
 import type { ExecutionSegment } from '@/stores/streamStore';
 import { PROSE_CLASSES, MENU_ROW_HOVER } from '@/lib/styles';
-import { markdownComponents, markdownUrlTransform } from '@/components/markdown';
+import MarkdownBlock from '@/components/markdown/MarkdownBlock';
 import ThinkingBlock from './ThinkingBlock';
 import AgentOutputBlock from './AgentOutputBlock';
 import ToolCallCard from './ToolCallCard';
@@ -159,11 +156,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
               Appears in the same DOM slot whether sourced from streaming content or llmOutput,
               so new elements (AgentOutput, ToolCards) appear BELOW without layout shift. */}
           {preToolText && (
-            <div className={PROSE_CLASSES}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={markdownComponents} urlTransform={markdownUrlTransform}>
-                {preToolText}
-              </ReactMarkdown>
-            </div>
+            <MarkdownBlock>{preToolText}</MarkdownBlock>
           )}
 
           {/* Agent Output — only XML tool_call blocks */}
@@ -178,11 +171,9 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
 
           {/* Main content — normal streaming text or post-tool text from new LLM round */}
           {mainContent && (
-            <div className={`${PROSE_CLASSES} ${isActive ? 'streaming-cursor' : ''}`}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={markdownComponents} urlTransform={markdownUrlTransform}>
-                {mainContent}
-              </ReactMarkdown>
-            </div>
+            <MarkdownBlock className={`${PROSE_CLASSES} ${isActive ? 'streaming-cursor' : ''}`}>
+              {mainContent}
+            </MarkdownBlock>
           )}
         </div>
       )}
