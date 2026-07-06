@@ -137,10 +137,18 @@ def _read_timeout(frontmatter: dict, source: str, *, label: str = "timeout") -> 
     raw = frontmatter.get(label, 60)
     if raw is None:
         raw = 60
-    try:
+    if isinstance(raw, bool):
+        raise SeedError(f"{source}: '{label}' must be an integer")
+    if isinstance(raw, int):
+        timeout = raw
+    elif isinstance(raw, str):
+        stripped = raw.strip()
+        digits = stripped.lstrip("+-")
+        if not digits or not digits.isdigit():
+            raise SeedError(f"{source}: '{label}' must be an integer")
         timeout = int(raw)
-    except (TypeError, ValueError) as e:
-        raise SeedError(f"{source}: '{label}' must be an integer") from e
+    else:
+        raise SeedError(f"{source}: '{label}' must be an integer")
     if timeout < 1:
         raise SeedError(f"{source}: '{label}' must be >= 1")
     return timeout
