@@ -14,6 +14,10 @@
 | Diff | `diff` 8 | Artifact 版本对比 |
 | 类型工具 | `openapi-typescript` | `npm run generate-types` |
 
+Markdown math intentionally disables single-dollar inline formulas: `$5`-style
+currency text is common in chat/tool surfaces, so formulas use `$$...$$` inline
+or standalone `$$` blocks.
+
 **不使用** `@tanstack/react-virtual`——对话树长度实测不触发虚拟化收益，暂保持常规渲染；将来长会话场景可再引入。
 
 ## 目录结构

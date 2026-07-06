@@ -9,7 +9,10 @@ import CodeBlock from './CodeBlock';
 import DiagramPre from './DiagramPre';
 import ArtifactLink from './ArtifactLink';
 
-export const markdownRemarkPlugins: PluggableList = [remarkGfm, remarkMath];
+export const markdownRemarkPlugins: PluggableList = [
+  remarkGfm,
+  [remarkMath, { singleDollarTextMath: false }],
+];
 export const markdownRehypePlugins: PluggableList = [rehypeKatex, rehypeHighlight];
 
 export const markdownComponents: Partial<Components> = {
