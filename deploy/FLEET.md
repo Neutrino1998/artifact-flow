@@ -6,7 +6,7 @@ multi-host sequence, not a separate flow** — running it daily keeps the
 multi-host path continuously rehearsed, so the two never drift apart.
 
 ```
-deploy/scripts/fleet.sh preflight            # per-host readiness checks
+deploy/scripts/fleet.sh preflight            # per-host readiness + deploy/.env checks
 deploy/scripts/fleet.sh deploy <bundle-dir>  # load → release gate → up → LB → smoke
 deploy/scripts/fleet.sh deploy --dry-run <d> # print the plan, touch nothing
 deploy/scripts/fleet.sh status               # per-host `compose ps` + LB health
@@ -18,6 +18,12 @@ single host, set `AF_ENABLE_SANDBOX=1` for `preflight` / `deploy` / `status` /
 `rollback`; fleet then appends `deploy/docker-compose.sandbox.yml` and makes
 runsc, `artifactflow-sandbox:latest`, and the mounted scratch root hard
 preflight requirements.
+
+`preflight` delegates to `deploy/scripts/prepare-host.sh check` when `deploy/`
+is already present on a host, so the same single entry point catches missing
+JWT/credential keys, DB/Redis URLs, bundled Postgres values, TLS placeholder
+setup, and optional sandbox prerequisites. `deploy` repeats that check after
+loading images, before `compose up`, to protect operators who skip preflight.
 
 ## Topology: `deploy/fleet.conf`
 
@@ -75,10 +81,12 @@ wrong tar.
    informational under `--dry-run`).
 3. **load** — `docker load` the app tar (backend + frontend images live in it),
    plus the infra tar if present and an `infra` role is declared.
-4. **up** — see single vs multi below.
-5. **wait** — poll `/health/ready` through the LB until green (`AF_READY_TIMEOUT`,
+4. **host check** — run `prepare-host.sh check` with the selected version and
+   infra/sandbox flags.
+5. **up** — see single vs multi below.
+6. **wait** — poll `/health/ready` through the LB until green (`AF_READY_TIMEOUT`,
    default 120s).
-6. **smoke** — one authed-free `/health/ready` hit through the LB.
+7. **smoke** — one authed-free `/health/ready` hit through the LB.
 
 On success the deployed version is recorded in `deploy/.fleet-state` (gitignored)
 as `current`, and the prior `current` becomes `previous` — that's what `rollback`

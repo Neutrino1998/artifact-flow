@@ -12,7 +12,7 @@
 # + frontend) / lb (caddy).
 #
 # Subcommands:
-#   fleet.sh preflight                 per-host docker/compose/disk/port/clock checks
+#   fleet.sh preflight                 per-host docker/compose/disk/clock + deploy/.env checks
 #   fleet.sh deploy <bundle-dir>       load bundle → release gate → (rolling) up → LB → smoke
 #   fleet.sh deploy --dry-run <dir>    print the plan, touch nothing
 #   fleet.sh status                    per-host `compose ps` + /health/ready probe
@@ -105,6 +105,13 @@ role_host() {  # echo the (first) host for a role; empty if absent
 }
 app_indices() { local i; for i in "${!ROLE[@]}"; do [[ "${ROLE[$i]}" == app ]] && echo "$i"; done; }
 has_infra()   { role_host infra >/dev/null; }
+host_has_role() {  # host_has_role <host> <role>
+  local host="$1" want="$2" i
+  for i in "${!ROLE[@]}"; do
+    [[ "${HOST[$i]}" == "$host" && "${ROLE[$i]}" == "$want" ]] && return 0
+  done
+  return 1
+}
 
 # distinct host list across all roles (order-preserving)
 all_hosts() {
@@ -135,6 +142,15 @@ copy_to() {  # copy_to <host> <local-src> <dst-path>
     # shellcheck disable=SC2086
     scp $SSH_OPTS -q "$src" "$SSH_USER@$host:$dst"
   fi
+}
+
+run_prepare_host_check() {  # run_prepare_host_check <host>
+  local host="$1" dir with_infra=0 version_env=""
+  dir="$(target_dir "$host")"
+  host_has_role "$host" infra && with_infra=1
+  [[ -n "${BUNDLE_VER:-}" ]] && version_env="AF_VERSION='$BUNDLE_VER' "
+
+  run_on "$host" "if [ -d '$dir' ]; then cd '$dir'; else echo '  ℹ prepare-host check skipped ($dir not created yet)'; exit 0; fi; if [ -x deploy/scripts/prepare-host.sh ]; then AF_WITH_INFRA='$with_infra' AF_ENABLE_SANDBOX='$ENABLE_SANDBOX' ${version_env}deploy/scripts/prepare-host.sh check; else echo '  ℹ prepare-host check skipped (deploy/scripts/prepare-host.sh not found yet)'; fi"
 }
 
 env_file_value() {
@@ -320,6 +336,9 @@ cmd_preflight() {
           || info "runsc not found (OK unless AF_ENABLE_SANDBOX=1)"
       fi
     fi
+    step "deployment config check ($host)"
+    run_prepare_host_check "$host" && ok "prepare-host check passed" \
+      || { bad "prepare-host check failed"; fail=1; }
   done < <(all_hosts)
   echo
   (( fail == 0 )) && ok "preflight OK" || die "preflight found blockers"
@@ -390,6 +409,13 @@ deploy_single_local() {
     else
       info "no infra tar in bundle — assuming caddy/pg/redis images already loaded"
     fi
+  fi
+
+  step "deployment config check"
+  if (( DRY )); then
+    info "would: AF_VERSION=$BUNDLE_VER AF_WITH_INFRA=$(has_infra && printf 1 || printf 0) AF_ENABLE_SANDBOX=$ENABLE_SANDBOX deploy/scripts/prepare-host.sh check"
+  else
+    run_prepare_host_check local || die "prepare-host check failed"
   fi
 
   # scale for the (single) app row

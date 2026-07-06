@@ -223,28 +223,21 @@ export COPYFILE_DISABLE=1
 tar --no-xattrs --no-fflags --exclude='.DS_Store' --exclude='._*' -czf "$CONFIG_ARCHIVE" config/
 
 # Package deploy/ (compose file, Caddyfiles, scripts, maintenance assets).
-# Exclusions:
-#   - .env / .env.local: secrets, never shipped from build host
-#   - certs/ contents (README stays): TLS cert + private key are target-host
-#     material, same treatment as .env — never shipped from build host
-#   - maintenance/MAINTENANCE_ON, maintenance/note.txt: runtime state files
-#     written by maintenance.sh — shipping a "maintenance ON" flag would put
-#     a freshly-deployed host into maintenance mode on first boot.
+#
+# Use git's visible-file set instead of "tar deploy/". That ships tracked files
+# plus untracked, non-ignored additions from the working tree, while keeping
+# target-local files out by construction: deploy/.env, fleet.conf, .fleet-state,
+# cert private material, maintenance flags, and per-host .env overrides are all
+# ignored and must never be copied from the build machine into a release bundle.
 echo "Packaging deploy/ to ${DEPLOY_ARCHIVE}..."
-# --no-xattrs / --no-fflags / --exclude='.DS_Store': see config tar above —
-# silence the GNU-tar "unknown extended header keyword" warnings on the target
-# by not emitting macOS metadata + not shipping .DS_Store.
-tar --no-xattrs --no-fflags \
-    --exclude='.DS_Store' \
-    --exclude='._*' \
-    --exclude='deploy/.env' \
-    --exclude='deploy/.env.local' \
-    --exclude='deploy/certs/*.crt' \
-    --exclude='deploy/certs/*.key' \
-    --exclude='deploy/certs/*.pem' \
-    --exclude='deploy/maintenance/MAINTENANCE_ON' \
-    --exclude='deploy/maintenance/note.txt' \
-    -czf "$DEPLOY_ARCHIVE" deploy/
+# --no-xattrs / --no-fflags: see config tar above — silence the GNU-tar
+# "unknown extended header keyword" warnings on the target by not emitting
+# macOS metadata.
+(
+  cd "$ROOT"
+  git ls-files --cached --others --exclude-standard -z deploy \
+    | tar --no-xattrs --no-fflags --null -T - -czf "$DEPLOY_ARCHIVE"
+)
 
 # Analyst-tools bundle — pandas/numpy offline wheels for the analyst machine
 # that runs scripts/observability_report.py. Everything is fetched on the
@@ -525,7 +518,7 @@ $ANALYST_FOOTER
     tar xzf artifactflow-config-${VERSION}.tar.gz${INFRA_LOAD_LN}
     docker load -i artifactflow-app-${VERSION}.tar.gz${ANALYST_RECIPE}
     cp deploy/.env.intranet.example deploy/.env && vi deploy/.env
-    AF_VERSION=${VERSION} deploy/scripts/prepare-host.sh check${SANDBOX_RECIPE}
+    cp deploy/fleet.conf.example deploy/fleet.conf && vi deploy/fleet.conf${SANDBOX_RECIPE}
     ${SANDBOX_UP_PREFIX}AF_BUNDLE_VERSION=${VERSION} deploy/scripts/fleet.sh preflight
     ${SANDBOX_UP_PREFIX}AF_BUNDLE_VERSION=${VERSION} deploy/scripts/fleet.sh deploy .
     # No pause/resume here — there's nothing running to pause.
