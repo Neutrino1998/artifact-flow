@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import * as api from '@/lib/api';
 import { useUIStore } from '@/stores/uiStore';
 import {
@@ -46,6 +46,7 @@ export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [mcpTestEpoch, setMcpTestEpoch] = useState(0);
 
   const isDynamic = unit?.source === 'dynamic';
 
@@ -62,6 +63,7 @@ export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps
       setBaseline(d);
       setDraft(d);
       setAgents(agentsRes.agents);
+      setMcpTestEpoch((n) => n + 1);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : '加载工具 unit 失败');
     } finally {
@@ -109,6 +111,9 @@ export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps
       const d = unitResponseToDraft(updated);
       setBaseline(d);
       setDraft(d);
+      if (updated.kind === 'mcp') {
+        setMcpTestEpoch((n) => n + 1);
+      }
       bumpListVersion();
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : '保存失败');
@@ -123,6 +128,13 @@ export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps
     setConfirmDelete(false);
     setRightView({ type: 'empty' });
   };
+
+  const handleCredentialChanged = useCallback(async () => {
+    await refreshLiveState();
+    if (unit?.kind === 'mcp') {
+      setMcpTestEpoch((n) => n + 1);
+    }
+  }, [refreshLiveState, unit?.kind]);
 
   if (loading) {
     return (
@@ -212,7 +224,12 @@ export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps
         {saveError && <div className="text-status-error text-sm">{saveError}</div>}
 
         {unit.kind === 'mcp' && (
-          <McpTestSection unitName={unit.name} disabled={saving || dirty} dirty={dirty} />
+          <McpTestSection
+            unitName={unit.name}
+            disabled={saving || dirty}
+            dirty={dirty}
+            resetKey={`${unit.name}:${mcpTestEpoch}:${dirty ? 'dirty' : 'saved'}`}
+          />
         )}
 
         <div className="border-t border-border dark:border-border-dark" />
@@ -232,7 +249,7 @@ export default function ToolUnitDetailForm({ unitName }: ToolUnitDetailFormProps
           unitName={unit.name}
           credentials={unit.credentials}
           isDynamic={isDynamic}
-          onChanged={refreshLiveState}
+          onChanged={handleCredentialChanged}
         />
       </div>
 
@@ -265,26 +282,45 @@ function McpTestSection({
   unitName,
   disabled,
   dirty,
+  resetKey,
 }: {
   unitName: string;
   disabled: boolean;
   dirty: boolean;
+  resetKey: string;
 }) {
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string; tool_count: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const requestSeq = useRef(0);
+
+  useEffect(() => {
+    requestSeq.current += 1;
+    setTesting(false);
+    setResult(null);
+    setError(null);
+  }, [resetKey]);
 
   const run = async () => {
     if (testing || disabled) return;
+    const seq = requestSeq.current + 1;
+    requestSeq.current = seq;
     setTesting(true);
     setResult(null);
     setError(null);
     try {
-      setResult(await api.testToolUnit(unitName));
+      const next = await api.testToolUnit(unitName);
+      if (requestSeq.current === seq) {
+        setResult(next);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '测试失败');
+      if (requestSeq.current === seq) {
+        setError(err instanceof Error ? err.message : '测试失败');
+      }
     } finally {
-      setTesting(false);
+      if (requestSeq.current === seq) {
+        setTesting(false);
+      }
     }
   };
 
