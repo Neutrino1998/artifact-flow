@@ -145,10 +145,11 @@ copy_to() {  # copy_to <host> <local-src> <dst-path>
 }
 
 run_prepare_host_check() {  # run_prepare_host_check <host>
-  local host="$1" dir with_infra=0 version_env=""
+  local host="$1" dir with_infra=0 version_env="" expected_version=""
   dir="$(target_dir "$host")"
   host_has_role "$host" infra && with_infra=1
-  [[ -n "${BUNDLE_VER:-}" ]] && version_env="AF_VERSION='$BUNDLE_VER' "
+  expected_version="${BUNDLE_VER:-${AF_BUNDLE_VERSION:-}}"
+  [[ -n "$expected_version" ]] && version_env="AF_VERSION='$expected_version' "
 
   run_on "$host" "if [ -d '$dir' ]; then cd '$dir'; else echo '  ℹ prepare-host check skipped ($dir not created yet)'; exit 0; fi; if [ -x deploy/scripts/prepare-host.sh ]; then AF_WITH_INFRA='$with_infra' AF_ENABLE_SANDBOX='$ENABLE_SANDBOX' ${version_env}deploy/scripts/prepare-host.sh check; else echo '  ℹ prepare-host check skipped (deploy/scripts/prepare-host.sh not found yet)'; fi"
 }
