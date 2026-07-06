@@ -4,6 +4,7 @@ docker / DB)。staging 的宿主直写直读、realpath 圈地、文本/二进�
 真容器路径归 tests/manual/ 矩阵。
 """
 
+import logging
 import os
 from types import SimpleNamespace
 
@@ -368,13 +369,25 @@ class TestPersistTool:
         assert not result.success
         assert "zip" in result.error
 
-    async def test_persist_oversize_rejected_before_read(self, session, service, monkeypatch):
+    async def test_persist_oversize_rejected_before_read(
+        self, session, service, monkeypatch, caplog
+    ):
         monkeypatch.setattr(config, "ARTIFACT_BLOB_MAX_BYTES", 4)
         await session.ensure_container()
         _write_ws(session, "big.bin", b"x" * 100)
-        result = await PersistFileTool(session, service)(path="big.bin")
+        with caplog.at_level(logging.WARNING, logger="ArtifactFlow"):
+            result = await PersistFileTool(session, service)(path="big.bin")
         assert not result.success
         assert "too large" in result.error
+        assert any(
+            "Sandbox persist rejected oversized file" in r.message
+            and "big.bin" in r.message
+            and "size=100 bytes" in r.message
+            and "max=4 bytes" in r.message
+            and "msg=msg-stage" in r.message
+            and "session=sess-1" in r.message
+            for r in caplog.records
+        )
 
     async def test_persist_large_utf8_falls_back_to_blob(self, session, service, monkeypatch):
         """可解码但超文本上限 → 按 blob 存(文本物化成本守门)。"""

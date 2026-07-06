@@ -400,6 +400,12 @@ class PersistFileTool(BaseTool):
             )
         except sandbox_fs.FileTooLarge as e:
             max_mb = config.ARTIFACT_BLOB_MAX_BYTES / 1024 / 1024
+            logger.warning(
+                f"Sandbox persist rejected oversized file: path='{raw_path}', "
+                f"size={e.size} bytes, max={config.ARTIFACT_BLOB_MAX_BYTES} bytes "
+                f"(msg={self._session.message_id}, session={session_id}, "
+                f"target={target_id or '<new>'})"
+            )
             return ToolResult(
                 success=False,
                 error=(
