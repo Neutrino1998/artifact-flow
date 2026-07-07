@@ -88,11 +88,23 @@ tools:
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `name` | string | 是 | 参数名，也是 HTTP 请求中的字段名 |
-| `type` | string | 是 | `string` / `integer` / `number` / `boolean` |
+| `type` | string | 是 | `string` / `integer` / `number` / `boolean` / `json` |
 | `description` | string | 否 | 参数说明（供 LLM 理解用途） |
 | `required` | bool | 否 | 默认 `true` |
 | `default` | any | 否 | 默认值，LLM 未提供时填入 |
 | `enum` | list | 否 | 枚举可选值；LLM 给出非 enum 值会被拒绝 |
+
+`json` 用于数组或对象字段。模型在 XML 参数里传 JSON 字符串，运行时会解析成真正的 JSON
+array/object 后再放进 HTTP body；默认值也可以直接写 YAML 数组/对象：
+
+```yaml
+parameters:
+  - name: dataset_ids
+    type: json
+    description: "RAGFlow dataset id list"
+    required: true
+    default: ["c750d2f6752411f191e693d1a844b0ba"]
+```
 
 ### 密钥模板 `{{VAR}}`
 

@@ -85,7 +85,7 @@ def _build_http_tool(frontmatter: dict, body: str) -> HttpTool:
     """从 frontmatter + body 构建 HttpTool"""
 
     # 解析参数定义
-    _VALID_PARAM_TYPES = {"string", "integer", "number", "boolean"}
+    _VALID_PARAM_TYPES = {"string", "integer", "number", "boolean", "json"}
 
     param_defs = []
     for p in frontmatter.get("parameters", []):

@@ -4,6 +4,7 @@ XML 格式化器
 与 xml_parser.py 互为 formatter / parser 对
 """
 
+import json
 from typing import List, Dict, Any
 
 from config import config
@@ -99,9 +100,17 @@ def _format_tool_doc(tool: BaseTool) -> str:
             required = " (required)" if param.required else " (optional)"
             doc += f"  - {param.name}: {param.type}{required} - {param.description}\n"
             if param.enum:
-                doc += f"    Values: {', '.join(param.enum)}\n"
+                values = [
+                    json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else str(v)
+                    for v in param.enum
+                ]
+                doc += f"    Values: {', '.join(values)}\n"
             if param.default is not None:
-                doc += f"    Default: {param.default}\n"
+                if isinstance(param.default, (dict, list)):
+                    default = json.dumps(param.default, ensure_ascii=False)
+                else:
+                    default = str(param.default)
+                doc += f"    Default: {default}\n"
     else:
         doc += "Parameters: None\n"
 

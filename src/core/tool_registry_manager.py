@@ -30,7 +30,7 @@ from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
 
-_VALID_PARAM_TYPES = {"string", "integer", "number", "boolean"}
+_VALID_PARAM_TYPES = {"string", "integer", "number", "boolean", "json"}
 _VALID_PERMISSIONS = {"auto", "confirm"}
 _VALID_VISIBILITY = {"public", "department"}
 _VALID_MEMBER_STATE = {"enabled", "disabled"}

@@ -24,7 +24,7 @@ from tools.artifact_output import (
 
 class ToolParamSpec(BaseModel):
     name: str = Field(..., max_length=64)
-    type: Literal["string", "integer", "number", "boolean"] = "string"
+    type: Literal["string", "integer", "number", "boolean", "json"] = "string"
     description: str = ""
     required: bool = True
     default: Optional[Any] = None

@@ -206,6 +206,24 @@ class TestUnitCrud:
         resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
         assert resp.status_code == 201
 
+    async def test_create_accepts_json_parameter_default(self, admin_client: AsyncClient):
+        body = _singleton_body(name="ragflow_retrieval")
+        body["members"][0]["method"] = "POST"
+        body["members"][0]["parameters"] = [
+            {"name": "question", "type": "string", "required": True},
+            {
+                "name": "dataset_ids",
+                "type": "json",
+                "required": True,
+                "default": ["c750d2f6752411f191e693d1a844b0ba"],
+            },
+        ]
+        resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
+        assert resp.status_code == 201, resp.text
+        params = resp.json()["members"][0]["definition"]["parameters"]
+        assert params[1]["type"] == "json"
+        assert params[1]["default"] == ["c750d2f6752411f191e693d1a844b0ba"]
+
     async def test_create_accepts_text_artifact_output(self, admin_client: AsyncClient):
         body = _singleton_body()
         body["members"][0]["artifact_output"] = {

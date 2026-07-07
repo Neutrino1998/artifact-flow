@@ -191,6 +191,36 @@ parameters:
             assert params[0].enum == ["US", "HK", "SH"]
             assert params[0].default == "US"
 
+    def test_json_parameter_default(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            md = """---
+name: ragflow_retrieval
+description: "RAGFlow retrieval"
+type: http
+endpoint: "https://ragflow.example.com/api/v1/retrieval"
+method: POST
+parameters:
+  - name: question
+    type: string
+    description: "Question"
+    required: true
+  - name: dataset_ids
+    type: json
+    description: "Dataset id list"
+    required: true
+    default: ["c750d2f6752411f191e693d1a844b0ba"]
+---
+"""
+            path = self._write_md(tmpdir, "ragflow.md", md)
+            tool = load_custom_tool(path)
+
+            params = tool.get_parameters()
+            assert [(p.name, p.type) for p in params] == [
+                ("question", "string"),
+                ("dataset_ids", "json"),
+            ]
+            assert params[1].default == ["c750d2f6752411f191e693d1a844b0ba"]
+
     def test_permission_override(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             md = """---
@@ -391,6 +421,7 @@ class TestCoerceParams:
                 ToolParameter(name="count", type="integer", description=""),
                 ToolParameter(name="rate", type="number", description=""),
                 ToolParameter(name="flag", type="boolean", description=""),
+                ToolParameter(name="payload", type="json", description=""),
             ]
 
         async def execute(self, **params):
@@ -449,6 +480,21 @@ class TestCoerceParams:
         tool = self.DummyTool(name="t", description="t")
         result = tool._coerce_params({"unknown_field": "123"})
         assert result["unknown_field"] == "123"
+
+    def test_json_object_conversion(self):
+        tool = self.DummyTool(name="t", description="t")
+        result = tool._coerce_params({"payload": '{"filters":{"warehouse":"east"}}'})
+        assert result["payload"] == {"filters": {"warehouse": "east"}}
+
+    def test_json_array_conversion(self):
+        tool = self.DummyTool(name="t", description="t")
+        result = tool._coerce_params({"payload": '["c750d2f6752411f191e693d1a844b0ba"]'})
+        assert result["payload"] == ["c750d2f6752411f191e693d1a844b0ba"]
+
+    def test_invalid_json_stays_string(self):
+        tool = self.DummyTool(name="t", description="t")
+        result = tool._coerce_params({"payload": "not json"})
+        assert result["payload"] == "not json"
 
 
 # ============================================================
@@ -534,6 +580,32 @@ class TestValidateParams:
         assert coerced["n"] == 42
         assert coerced["f"] is True
 
+    def test_invalid_json_rejected(self):
+        class JsonTool(BaseTool):
+            def get_parameters(self):
+                return [ToolParameter(name="payload", type="json", description="")]
+            async def execute(self, **params):
+                return ToolResult(success=True, data="ok")
+
+        tool = JsonTool(name="t", description="t")
+        coerced = tool._coerce_params({"payload": "not json"})
+        error = tool.validate_params(coerced)
+        assert error is not None
+        assert "JSON" in error
+
+    def test_json_scalar_rejected(self):
+        class JsonTool(BaseTool):
+            def get_parameters(self):
+                return [ToolParameter(name="payload", type="json", description="")]
+            async def execute(self, **params):
+                return ToolResult(success=True, data="ok")
+
+        tool = JsonTool(name="t", description="t")
+        coerced = tool._coerce_params({"payload": '"scalar"'})
+        error = tool.validate_params(coerced)
+        assert error is not None
+        assert "JSON" in error
+
 
 # ============================================================
 # HttpTool endpoint —— 运维配置面（刻意不做公网校验）+ metadata 脱敏
@@ -601,6 +673,48 @@ class TestHttpToolEndpoint:
         meta_str = str(result.metadata)
         assert "93.184.216.34" not in meta_str   # host(拓扑)不外泄
         assert "SUPERSECRET" not in meta_str      # query 密钥不外泄
+
+    async def test_json_param_is_sent_as_json_array_in_post_body(self, monkeypatch):
+        seen = {}
+
+        class _Client:
+            def __init__(self, *a, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def request(self, method, url, **kwargs):
+                seen.update(method=method, url=url, json=kwargs.get("json"))
+                return _FakeHttpxResponse()
+
+        monkeypatch.setattr("tools.custom.http_tool.httpx.AsyncClient", _Client)
+        tool = HttpTool(HttpToolConfig(
+            name="ragflow_retrieval",
+            description="RAGFlow retrieval",
+            permission="auto",
+            endpoint="http://10.0.0.1/api/v1/retrieval",
+            method="POST",
+            parameters=[
+                ToolParameter(name="question", type="string", description=""),
+                ToolParameter(name="dataset_ids", type="json", description=""),
+            ],
+        ))
+
+        result = await tool(
+            question="告诉我账户信息监测模型分类有哪些",
+            dataset_ids='["c750d2f6752411f191e693d1a844b0ba"]',
+        )
+
+        assert result.success is True
+        assert seen["method"] == "POST"
+        assert seen["json"] == {
+            "question": "告诉我账户信息监测模型分类有哪些",
+            "dataset_ids": ["c750d2f6752411f191e693d1a844b0ba"],
+        }
 
     @staticmethod
     def _client_returning(payload):

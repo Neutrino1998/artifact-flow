@@ -5525,7 +5525,8 @@
               "string",
               "integer",
               "number",
-              "boolean"
+              "boolean",
+              "json"
             ],
             "title": "Type",
             "default": "string"

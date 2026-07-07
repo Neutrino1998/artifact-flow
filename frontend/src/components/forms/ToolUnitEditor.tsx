@@ -16,7 +16,7 @@ import type { CreateToolUnitRequest, ToolUnitResponse } from '@/types';
 // ---------------------------------------------------------------------------
 
 export type UnitKind = 'tool' | 'toolset' | 'mcp';
-export type ParamType = 'string' | 'integer' | 'number' | 'boolean';
+export type ParamType = 'string' | 'integer' | 'number' | 'boolean' | 'json';
 export type ArtifactOutputMode = 'text' | 'binary';
 export type PermissionLevel = 'auto' | 'confirm';
 
@@ -66,7 +66,14 @@ export interface UnitDraft {
   provider_config: McpProviderConfigDraft;
 }
 
-const PARAM_TYPES: ParamType[] = ['string', 'integer', 'number', 'boolean'];
+const PARAM_TYPES: ParamType[] = ['string', 'integer', 'number', 'boolean', 'json'];
+const PARAM_TYPE_LABELS: Record<ParamType, string> = {
+  string: 'string',
+  integer: 'integer',
+  number: 'number',
+  boolean: 'boolean',
+  json: 'json（数组/对象）',
+};
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 const ARTIFACT_OUTPUT_MODES: ArtifactOutputMode[] = ['text', 'binary'];
 const TEXT_CONTENT_TYPES = [
@@ -154,6 +161,13 @@ export function emptyUnitDraft(): UnitDraft {
 function scalarToText(v: unknown): string {
   if (v === null || v === undefined) return '';
   if (typeof v === 'boolean') return v ? 'true' : 'false';
+  if (typeof v === 'object') {
+    try {
+      return JSON.stringify(v, null, 2);
+    } catch {
+      return String(v);
+    }
+  }
   return String(v);
 }
 
@@ -233,6 +247,18 @@ function coerceScalar(type: ParamType, raw: string): unknown {
     if (t === 'true') return true;
     if (t === 'false') return false;
     throw new Error(`布尔参数的值「${t}」必须是 true 或 false`);
+  }
+  if (type === 'json') {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(t);
+    } catch {
+      throw new Error(`JSON 参数的值必须是合法 JSON 数组或对象`);
+    }
+    if (parsed === null || typeof parsed !== 'object') {
+      throw new Error(`JSON 参数的值必须是数组或对象`);
+    }
+    return parsed;
   }
   return raw;
 }
@@ -1029,7 +1055,7 @@ function ParamEditor({
                   placeholder="参数名"
                   className={`${INPUT_ON_PANEL} font-mono flex-1`}
                 />
-                <div className="relative w-32 flex-shrink-0">
+                <div className="relative w-44 flex-shrink-0">
                   <select
                     value={p.type}
                     onChange={(e) => update(idx, { type: e.target.value as ParamType })}
@@ -1037,7 +1063,7 @@ function ParamEditor({
                     className={`${INPUT_ON_PANEL} appearance-none pr-9`}
                   >
                     {PARAM_TYPES.map((t) => (
-                      <option key={t} value={t}>{t}</option>
+                      <option key={t} value={t}>{PARAM_TYPE_LABELS[t]}</option>
                     ))}
                   </select>
                   {SELECT_CHEVRON}
@@ -1063,20 +1089,31 @@ function ParamEditor({
                 placeholder="参数说明"
                 className={INPUT_ON_PANEL}
               />
-              <input
-                type="text"
-                value={p.default}
-                onChange={(e) => update(idx, { default: e.target.value })}
-                disabled={readOnly}
-                placeholder="默认值（可选）"
-                className={`${INPUT_ON_PANEL} font-mono`}
-              />
+              {p.type === 'json' ? (
+                <textarea
+                  value={p.default}
+                  onChange={(e) => update(idx, { default: e.target.value })}
+                  disabled={readOnly}
+                  rows={3}
+                  placeholder='默认 JSON，如 ["id"] 或 {"k":"v"}（可选）'
+                  className={`${INPUT_ON_PANEL} font-mono resize-y`}
+                />
+              ) : (
+                <input
+                  type="text"
+                  value={p.default}
+                  onChange={(e) => update(idx, { default: e.target.value })}
+                  disabled={readOnly}
+                  placeholder="默认值（可选）"
+                  className={`${INPUT_ON_PANEL} font-mono`}
+                />
+              )}
               <textarea
                 value={p.enum}
                 onChange={(e) => update(idx, { enum: e.target.value })}
                 disabled={readOnly}
                 rows={2}
-                placeholder="枚举值，每行一个（可选）"
+                placeholder={p.type === 'json' ? '枚举 JSON，每行一个（可选）' : '枚举值，每行一个（可选）'}
                 className={`${INPUT_ON_PANEL} font-mono resize-y`}
               />
               <label className="flex items-center gap-2 select-none cursor-pointer">

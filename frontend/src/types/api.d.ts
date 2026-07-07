@@ -2588,7 +2588,7 @@ export interface components {
              * @default string
              * @enum {string}
              */
-            type: "string" | "integer" | "number" | "boolean";
+            type: "string" | "integer" | "number" | "boolean" | "json";
             /**
              * Description
              * @default

@@ -3,6 +3,7 @@
 提供所有工具的基础接口和通用功能
 """
 
+import json
 import math
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
@@ -81,7 +82,7 @@ class ToolExecutionContext:
 class ToolParameter:
     """工具参数定义"""
     name: str
-    type: str  # "string", "integer", "boolean", "number"
+    type: str  # "string", "integer", "boolean", "number", "json"
     description: str
     required: bool = True
     default: Any = None
@@ -176,7 +177,9 @@ class BaseTool(ABC):
         # 检查 enum 约束
         for name, value in params.items():
             param_def = param_defs.get(name)
-            if param_def and param_def.enum and isinstance(value, str):
+            if param_def and param_def.enum and (
+                isinstance(value, str) or param_def.type.lower() == "json"
+            ):
                 if value not in param_def.enum:
                     return f"Invalid value for '{name}': '{value}'. Must be one of: {param_def.enum}"
 
@@ -192,6 +195,8 @@ class BaseTool(ABC):
                 return f"Invalid value for '{name}': '{value}' is not a valid number"
             if target == "boolean" and not isinstance(value, bool):
                 return f"Invalid value for '{name}': '{value}' is not a valid boolean (use true/false/yes/no/1/0)"
+            if target == "json" and not isinstance(value, (dict, list)):
+                return f"Invalid value for '{name}': must be a valid JSON object or array"
 
         return None
     
@@ -228,8 +233,10 @@ class BaseTool(ABC):
                     # 其他值保持原始字符串，由 validate_params 报错
                 elif target_type == "number":
                     result[name] = float(value)
+                elif target_type == "json":
+                    result[name] = json.loads(value)
                 # "string" stays as-is
-            except (ValueError, TypeError) as e:
+            except (json.JSONDecodeError, ValueError, TypeError) as e:
                 # 转换失败保持原值，由 validate_params 报错
                 logger.warning(f"Type coercion failed for param '{name}': {value!r} -> {target_type}: {e}")
 
@@ -299,13 +306,18 @@ class BaseTool(ABC):
             param_type = param.type.lower()
 
             if param.default is not None:
-                value = str(param.default)
+                if isinstance(param.default, (dict, list)):
+                    value = json.dumps(param.default, ensure_ascii=False)
+                else:
+                    value = str(param.default)
             elif param_type == "string":
                 value = f"your_{param.name}_here"
             elif param_type == "integer":
                 value = "123"
             elif param_type == "boolean":
                 value = "true"
+            elif param_type == "json":
+                value = '{"key":"value"}'
             else:
                 value = "..."
 
