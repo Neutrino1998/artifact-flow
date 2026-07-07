@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react';
 import { ApiError } from '@/lib/api';
 import { BUTTON_DANGER, BUTTON_SECONDARY } from '@/lib/styles';
 import Checkbox from '@/components/forms/Checkbox';
+import InlineMarkdown from '@/components/markdown/InlineMarkdown';
 import DialogShell from './DialogShell';
 
 const IRREVERSIBLE_MESSAGE = '操作不可恢复。';
@@ -35,6 +36,27 @@ interface DangerConfirmModalProps {
    */
   onConfirm: () => void | Promise<void>;
   onCancel: () => void;
+}
+
+export function DangerConfirmTarget({
+  name,
+  description,
+}: {
+  name: string;
+  description?: string | null;
+}) {
+  return (
+    <div className="rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-3">
+      <div className="break-words text-sm font-semibold text-text-primary dark:text-text-primary-dark">
+        {name}
+      </div>
+      {description && (
+        <InlineMarkdown className="mt-1.5 text-sm leading-relaxed prose-p:leading-relaxed">
+          {description}
+        </InlineMarkdown>
+      )}
+    </div>
+  );
 }
 
 function formatDangerMessage(message: string) {
@@ -105,16 +127,6 @@ export default function DangerConfirmModal({
   return (
     <DialogShell
       title={title}
-      description={
-        <div className="space-y-2 leading-relaxed">
-          {lines.map((line, index) => (
-            <p key={`${line}-${index}`}>{line}</p>
-          ))}
-          {hasIrreversibleMessage && (
-            <p className="font-medium text-status-error">{IRREVERSIBLE_MESSAGE}</p>
-          )}
-        </div>
-      }
       size="md"
       onClose={onCancel}
       closeOnBackdrop={!submitting}
@@ -139,7 +151,18 @@ export default function DangerConfirmModal({
         </>
       }
     >
-      {children}
+      <div className="mt-4 mb-5 space-y-4">
+        {children}
+
+        <div className="space-y-2 text-sm leading-relaxed text-text-secondary dark:text-text-secondary-dark">
+          {lines.map((line, index) => (
+            <p key={`${line}-${index}`}>{line}</p>
+          ))}
+          {hasIrreversibleMessage && (
+            <p className="font-medium text-status-error">{IRREVERSIBLE_MESSAGE}</p>
+          )}
+        </div>
+      </div>
 
       {requireAcknowledge && (
         <label className="flex items-start gap-3 mb-4 cursor-pointer select-none group">

@@ -12,7 +12,7 @@ import {
   LABEL_CLASS,
 } from '@/lib/styles';
 import type { UserResponse } from '@/types';
-import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
+import DangerConfirmModal, { DangerConfirmTarget } from '@/components/layout/DangerConfirmModal';
 import { parseUtcIso } from '@/lib/time';
 import PanelShell from '@/components/layout/PanelShell';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
@@ -359,14 +359,18 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
         <DangerConfirmModal
           title="删除用户"
           message={
-            `用户：${user.display_name || user.username} (@${user.username})\n` +
             `将级联删除该用户的 ${deleteImpact ?? 0} 条会话及相关消息、事件、artifact。\n` +
             `操作不可恢复。`
           }
           confirmLabel="确认删除"
           onCancel={() => setConfirmDelete(false)}
           onConfirm={handleDelete}
-        />
+        >
+          <DangerConfirmTarget
+            name={user.display_name || user.username}
+            description={`@${user.username} · ${user.role}`}
+          />
+        </DangerConfirmModal>
       )}
     </PanelShell>
   );

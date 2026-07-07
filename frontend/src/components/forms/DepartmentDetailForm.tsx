@@ -11,7 +11,7 @@ import {
   LABEL_CLASS,
 } from '@/lib/styles';
 import type { DepartmentResponse } from '@/types';
-import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
+import DangerConfirmModal, { DangerConfirmTarget } from '@/components/layout/DangerConfirmModal';
 import PanelShell from '@/components/layout/PanelShell';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
 
@@ -206,11 +206,16 @@ export default function DepartmentDetailForm({
       {confirmDelete && (
         <DangerConfirmModal
           title="删除部门"
-          message={`部门："${dept.name}"\n操作不可恢复。`}
+          message="操作不可恢复。"
           confirmLabel="确认删除"
           onCancel={() => setConfirmDelete(false)}
           onConfirm={handleDelete}
-        />
+        >
+          <DangerConfirmTarget
+            name={dept.name}
+            description={`直接用户 ${dept.user_count} · 子部门 ${dept.child_count}`}
+          />
+        </DangerConfirmModal>
       )}
     </PanelShell>
   );

@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
-import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
+import DangerConfirmModal, { DangerConfirmTarget } from '@/components/layout/DangerConfirmModal';
 import { BUTTON_GHOST_ICON, MENU_ROW_DANGER_HOVER } from '@/lib/styles';
 
 // 会话行的 ⋮ 操作菜单(复制 ID / 删除对话)+ 删除确认弹窗。
@@ -214,11 +214,13 @@ export default function ConversationActionsMenu({
         <div onClick={(e) => e.stopPropagation()}>
           <DangerConfirmModal
             title="删除对话"
-            message={`将删除对话「${title}」。\n操作不可恢复。`}
+            message="操作不可恢复。"
             confirmLabel="确认删除"
             onConfirm={handleConfirmDelete}
             onCancel={() => setConfirmDelete(false)}
-          />
+          >
+            <DangerConfirmTarget name={title} />
+          </DangerConfirmModal>
         </div>,
         document.body,
       )}

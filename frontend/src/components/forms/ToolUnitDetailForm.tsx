@@ -12,7 +12,7 @@ import {
 } from '@/lib/styles';
 import PanelShell from '@/components/layout/PanelShell';
 import ConfirmModal from '@/components/layout/ConfirmModal';
-import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
+import DangerConfirmModal, { DangerConfirmTarget } from '@/components/layout/DangerConfirmModal';
 import ToolUnitEditor, {
   draftToRequest,
   unitResponseToDraft,
@@ -290,16 +290,7 @@ export default function ToolUnitDetailForm({
           onCancel={() => setConfirmDelete(false)}
           onConfirm={handleDelete}
         >
-          <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-lg p-3 mb-4">
-            <div className="text-xs font-semibold font-mono text-text-primary dark:text-text-primary-dark">
-              {unit.name}
-            </div>
-            {unit.description && (
-              <div className="text-xs mt-1.5 text-text-secondary dark:text-text-secondary-dark">
-                {unit.description}
-              </div>
-            )}
-          </div>
+          <DangerConfirmTarget name={unit.name} description={unit.description} />
         </DangerConfirmModal>
       )}
 
@@ -611,6 +602,7 @@ function CredentialRow({
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDeleteCredential, setConfirmDeleteCredential] = useState(false);
 
   const run = async (fn: () => Promise<unknown>, clear: boolean) => {
     setBusy(true);
@@ -621,6 +613,23 @@ function CredentialRow({
       await onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : '操作失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDeleteCredential = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deleteToolCredential(unitName, cred.placeholder);
+      await onChanged();
+      setConfirmDeleteCredential(false);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '删除凭证失败';
+      setError(message);
+      if (err instanceof Error) throw err;
+      throw new Error(message);
     } finally {
       setBusy(false);
     }
@@ -662,7 +671,7 @@ function CredentialRow({
           </button>
           {cred.configured && (
             <button
-              onClick={() => run(() => api.deleteToolCredential(unitName, cred.placeholder), false)}
+              onClick={() => setConfirmDeleteCredential(true)}
               disabled={busy}
               className="flex-shrink-0 p-2 text-text-tertiary dark:text-text-tertiary-dark hover:text-status-error disabled:opacity-40 transition-colors"
               aria-label="删除凭证"
@@ -677,6 +686,21 @@ function CredentialRow({
       )}
 
       {error && <div className="text-status-error text-xs">{error}</div>}
+
+      {confirmDeleteCredential && (
+        <DangerConfirmModal
+          title="删除凭证"
+          message="删除后该凭证不会再用于工具调用；原值不可回读，需要重新配置新值。\n操作不可恢复。"
+          confirmLabel="确认删除"
+          onCancel={() => setConfirmDeleteCredential(false)}
+          onConfirm={handleDeleteCredential}
+        >
+          <DangerConfirmTarget
+            name={`{{${cred.placeholder}}}`}
+            description={cred.source ? `当前来源：${cred.source}` : null}
+          />
+        </DangerConfirmModal>
+      )}
     </div>
   );
 }

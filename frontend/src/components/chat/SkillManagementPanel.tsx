@@ -19,6 +19,7 @@ import { triggerBlobDownload } from '@/lib/download';
 import { PillBadge } from '@/components/ui/PillBadge';
 import { SwitchTrack } from '@/components/ui/SwitchTrack';
 import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
+import DangerConfirmModal, { DangerConfirmTarget } from '@/components/layout/DangerConfirmModal';
 import PanelSearchBar from './PanelSearchBar';
 import type {
   AdminSkillItem,
@@ -84,8 +85,7 @@ export default function SkillManagementPanel() {
   const [importOpen, setImportOpen] = useState(false);
   // 正在写覆盖/删除的 slug 集(禁用其控件防抖动)。
   const [pending, setPending] = useState<Set<string>>(new Set());
-  // 两段式删除确认:第一次点进入确认态,再点执行。
-  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SkillRow | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
 
   const user = useAuthStore((s) => s.user);
@@ -170,13 +170,10 @@ export default function SkillManagementPanel() {
     [fetchSkills],
   );
 
-  const handleDelete = useCallback(
-    async (skill: SkillItem) => {
-      if (confirmingDelete !== skill.slug) {
-        setConfirmingDelete(skill.slug);
-        return;
-      }
-      setConfirmingDelete(null);
+  const handleConfirmDelete = useCallback(
+    async () => {
+      const skill = deleteTarget;
+      if (!skill) return;
       setRowError(null);
       setPending((p) => new Set(p).add(skill.slug));
       try {
@@ -187,8 +184,12 @@ export default function SkillManagementPanel() {
           await adminDeleteSkill(skill.slug);
         }
         setSkills((list) => list.filter((s) => s.slug !== skill.slug));
+        setDeleteTarget(null);
       } catch (err) {
-        setRowError(err instanceof Error ? err.message : '删除失败');
+        const message = err instanceof Error ? err.message : '删除失败';
+        setRowError(message);
+        if (err instanceof Error) throw err;
+        throw new Error(message);
       } finally {
         setPending((p) => {
           const n = new Set(p);
@@ -197,7 +198,7 @@ export default function SkillManagementPanel() {
         });
       }
     },
-    [confirmingDelete],
+    [deleteTarget],
   );
 
   const q = query.trim().toLowerCase();
@@ -277,7 +278,6 @@ export default function SkillManagementPanel() {
             const busy = pending.has(skill.slug);
             const deletable =
               skill.source === 'dynamic' && (skill.is_owner || isAdmin);
-            const confirming = confirmingDelete === skill.slug;
             const adminShared = skill.adminShared;
             const canAdminEdit = Boolean(adminShared?.can_edit);
             const canUsePersonalToggle = !skill.adminOnly;
@@ -393,24 +393,15 @@ export default function SkillManagementPanel() {
                   )}
                   {deletable && (
                     <button
-                      onClick={() => handleDelete(skill)}
-                      onBlur={() => confirming && setConfirmingDelete(null)}
+                      onClick={() => setDeleteTarget(skill)}
                       disabled={busy}
-                      className={`h-6 flex items-center justify-center rounded transition-colors disabled:opacity-40 ${
-                        confirming
-                          ? 'px-1.5 text-[10px] font-medium text-white bg-status-error hover:bg-status-error/90'
-                          : 'w-6 text-text-tertiary dark:text-text-tertiary-dark hover:text-status-error hover:bg-status-error/10'
-                      }`}
+                      className="h-6 w-6 flex items-center justify-center rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-status-error hover:bg-status-error/10 transition-colors disabled:opacity-40"
                       aria-label={`删除技能 ${skill.name}`}
-                      title={confirming ? '再次点击确认删除' : '删除该技能'}
+                      title="删除该技能"
                     >
-                      {confirming ? (
-                        '确认删除？'
-                      ) : (
-                        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                          <path d="M2.5 4h11M6.5 4V2.5h3V4M4 4l.8 9.5h6.4L12 4M6.5 7v4M9.5 7v4" />
-                        </svg>
-                      )}
+                      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                        <path d="M2.5 4h11M6.5 4V2.5h3V4M4 4l.8 9.5h6.4L12 4M6.5 7v4M9.5 7v4" />
+                      </svg>
                     </button>
                   )}
                 </div>
@@ -441,6 +432,21 @@ export default function SkillManagementPanel() {
           })}
         </div>
       </div>
+
+      {deleteTarget && (
+        <DangerConfirmModal
+          title="删除技能"
+          message="将删除该动态技能，并清理关联的个人启用状态与部门规则。\n操作不可恢复。"
+          confirmLabel="确认删除"
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={handleConfirmDelete}
+        >
+          <DangerConfirmTarget
+            name={deleteTarget.name}
+            description={deleteTarget.description}
+          />
+        </DangerConfirmModal>
+      )}
     </div>
   );
 }
