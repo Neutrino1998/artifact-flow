@@ -277,8 +277,8 @@ export default function ConversationBrowser() {
       {confirmBulkDelete && (
         <DangerConfirmModal
           title="批量删除对话"
-          message={`将删除 ${selectedCount} 条会话，此操作不可恢复。`}
-          confirmLabel="删除"
+          message={`将删除 ${selectedCount} 条会话。\n操作不可恢复。`}
+          confirmLabel="确认删除"
           onConfirm={handleBulkDeleteConfirm}
           onCancel={() => setConfirmBulkDelete(false)}
         />

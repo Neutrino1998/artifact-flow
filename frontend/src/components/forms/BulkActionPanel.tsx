@@ -229,10 +229,11 @@ export default function BulkActionPanel() {
             impactLoading
               ? '正在加载影响数据…'
               : impact
-                ? `将删除 ${selection.length} 个用户、共 ${impact.conversation_count} 条会话。\n此操作不可恢复，关联的消息 / 事件 / artifacts 也会被级联删除。`
-                : `将删除 ${selection.length} 个用户及其所有会话。\n此操作不可恢复。`
+                ? `将删除 ${selection.length} 个用户、共 ${impact.conversation_count} 条会话。\n关联的消息、事件、artifacts 也会被级联删除。\n操作不可恢复。`
+                : `将删除 ${selection.length} 个用户及其所有会话。\n操作不可恢复。`
           }
-          confirmLabel="删除"
+          confirmLabel="确认删除"
+          confirmDisabled={impactLoading}
           onConfirm={handleConfirmDelete}
           onCancel={() => { setMode('idle'); setImpact(null); }}
         />

@@ -286,7 +286,6 @@ export default function ToolUnitDetailForm({
         <DangerConfirmModal
           title="删除工具 unit"
           message={'将删除该 unit 的定义、动态 agent 挂载与已配置凭证。\n操作不可恢复。'}
-          requireAcknowledge={false}
           confirmLabel="确认删除"
           onCancel={() => setConfirmDelete(false)}
           onConfirm={handleDelete}

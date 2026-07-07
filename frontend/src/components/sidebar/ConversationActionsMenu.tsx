@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
-import ConfirmModal from '@/components/layout/ConfirmModal';
+import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
 import { BUTTON_GHOST_ICON, MENU_ROW_DANGER_HOVER } from '@/lib/styles';
 
 // 会话行的 ⋮ 操作菜单(复制 ID / 删除对话)+ 删除确认弹窗。
@@ -17,7 +17,7 @@ import { BUTTON_GHOST_ICON, MENU_ROW_DANGER_HOVER } from '@/lib/styles';
 //      行内 absolute 会在列表底部被裁剪。菜单 createPortal 到 document.body,用触发器的
 //      viewport 坐标 fixed 定位,并在底部空间不足时向上翻;列表滚动时直接关闭,避免
 //      菜单滞后跟随或停留在已滚出视图的会话上。
-//   3) 删除确认弹窗(ConfirmModal → DialogShell 的 `fixed inset-0`)若落在行内会被 kebab
+//   3) 删除确认弹窗(DangerConfirmModal → DialogShell 的 `fixed inset-0`)若落在行内会被 kebab
 //      wrapper 的 transform 祖先改掉定位基准(全屏遮罩错位)→ **createPortal 到 document.body**
 //      脱离 DOM 子树修掉定位(fixed 按 DOM 祖先算)。
 //      ⚠ portal 只搬 DOM,**不改 React 合成事件冒泡**(合成事件走 fiber 树,本组件仍是行
@@ -212,11 +212,10 @@ export default function ConversationActionsMenu({
         // onClick(遮罩 onClose 不 stopPropagation),不拦会误触 onSelect/切会话。div 布局
         // 中性(DialogShell 根为 fixed inset-0,不占流)。
         <div onClick={(e) => e.stopPropagation()}>
-          <ConfirmModal
+          <DangerConfirmModal
             title="删除对话"
-            message={`确定要删除对话「${title}」吗？此操作无法撤销。`}
-            confirmLabel="删除"
-            destructive
+            message={`将删除对话「${title}」。\n操作不可恢复。`}
+            confirmLabel="确认删除"
             onConfirm={handleConfirmDelete}
             onCancel={() => setConfirmDelete(false)}
           />

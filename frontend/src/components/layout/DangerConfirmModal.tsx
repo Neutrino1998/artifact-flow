@@ -6,14 +6,15 @@ import { BUTTON_DANGER, BUTTON_SECONDARY } from '@/lib/styles';
 import Checkbox from '@/components/forms/Checkbox';
 import DialogShell from './DialogShell';
 
+const IRREVERSIBLE_MESSAGE = '操作不可恢复。';
+
 interface DangerConfirmModalProps {
   title: string;
-  /** 主体说明（可包含影响数据，如 "将级联删除该用户的 N 条会话"） */
+  /** 主体说明；包含“操作不可恢复。”时会统一渲染为独立警示行。 */
   message: string;
   /**
-   * 是否需要勾选确认闸（默认 true）。级联删用户数据用它防误触;删配置类
-   * 实体（如工具 unit，影响可恢复）传 false → 退化成普通确认弹窗（对齐
-   * 权限确认弹窗:同 DialogShell、无额外勾选,直接确认/取消）。
+   * 是否需要额外勾选确认闸。默认 false：危险操作已经有一次明确弹窗确认，
+   * 只在确实需要强摩擦的场景 opt in。
    */
   requireAcknowledge?: boolean;
   /**
@@ -25,6 +26,8 @@ interface DangerConfirmModalProps {
   acknowledgeLabel?: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  /** 由调用方控制的确认禁用态，例如影响数据还在加载。 */
+  confirmDisabled?: boolean;
   /**
    * 确认时的 async handler；执行期间按钮显示 loading。
    * 抛错时由本 modal 接住并 inline 显示，modal 保持打开供用户重试或取消，
@@ -34,14 +37,41 @@ interface DangerConfirmModalProps {
   onCancel: () => void;
 }
 
+function formatDangerMessage(message: string) {
+  const lines: string[] = [];
+  let hasIrreversibleMessage = false;
+
+  for (const rawLine of message.split('\n')) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const markerRegex = /(?:此操作不可恢复。|操作不可恢复。)/g;
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = markerRegex.exec(line)) !== null) {
+      const before = line.slice(lastIndex, match.index).replace(/[，,；;\s]+$/, '').trim();
+      if (before) lines.push(before);
+      hasIrreversibleMessage = true;
+      lastIndex = match.index + match[0].length;
+    }
+
+    const after = line.slice(lastIndex).replace(/^[，,；;\s]+/, '').trim();
+    if (after) lines.push(after);
+  }
+
+  return { lines, hasIrreversibleMessage };
+}
+
 export default function DangerConfirmModal({
   title,
   message,
-  requireAcknowledge = true,
+  requireAcknowledge = false,
   children,
   acknowledgeLabel = '我已了解此操作不可恢复',
   confirmLabel = '确认删除',
   cancelLabel = '取消',
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }: DangerConfirmModalProps) {
@@ -49,7 +79,8 @@ export default function DangerConfirmModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const blocked = (requireAcknowledge && !acknowledged) || submitting;
+  const blocked = confirmDisabled || (requireAcknowledge && !acknowledged) || submitting;
+  const { lines, hasIrreversibleMessage } = formatDangerMessage(message);
 
   const handleConfirm = async () => {
     if (blocked) return;
@@ -74,7 +105,16 @@ export default function DangerConfirmModal({
   return (
     <DialogShell
       title={title}
-      description={<span className="whitespace-pre-line">{message}</span>}
+      description={
+        <div className="space-y-2 leading-relaxed">
+          {lines.map((line, index) => (
+            <p key={`${line}-${index}`}>{line}</p>
+          ))}
+          {hasIrreversibleMessage && (
+            <p className="font-medium text-status-error">{IRREVERSIBLE_MESSAGE}</p>
+          )}
+        </div>
+      }
       size="md"
       onClose={onCancel}
       closeOnBackdrop={!submitting}
