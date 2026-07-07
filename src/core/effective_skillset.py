@@ -43,7 +43,7 @@ def resolve_effective_skillset(
     """从 user-agnostic 快照 + 该用户的覆盖/部门命中,解析出 EffectiveSkillSet。
 
     dept_matched = 用户祖先链中任一部门对其有 department_skill_rule 的 slug 集
-    (由 SkillRepository.dept_matched_slugs + department_resolver 在调用方算好)。
+    (由 snapshot SQL 投影 + department_resolver 在调用方算好)。
     """
     visible: Dict[str, SkillInfo] = {}
     enabled: Set[str] = set()

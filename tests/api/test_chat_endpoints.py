@@ -8,6 +8,7 @@ Uses API fixtures with simulated active tasks.
 import asyncio
 import json
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Tuple, List
 from unittest.mock import patch
@@ -363,11 +364,12 @@ class _FakeAgentConfig:
     internal: bool = False
 
 
+@contextmanager
 def _patch_snapshot(fake_agents):
     """Patch the per-turn registry snapshot the flipped controller_factory loads.
 
     Post-B-2 `create_controller` no longer reads `deps._agents`/`get_agents()` —
-    it builds agents + external tools from `load_registry_snapshot(session)` (DB).
+    it builds agents + external tools from registry snapshot loaders (DB).
     These E2E tests mock only the LLM and don't reconcile config into the test DB,
     so we synthesize a snapshot from the fake agent configs instead. builtin_tools
     / units are empty: the happy-path LLM returns plain text (no tool calls), and
@@ -386,7 +388,15 @@ def _patch_snapshot(fake_agents):
     async def _load(session, *, db_manager=None):
         return RegistrySnapshot(external_tools={}, units={}, agents=agents)
 
-    return patch("reconcile.snapshot.load_registry_snapshot", _load)
+    async def _load_with_unit_matches(session, dept_ids, *, db_manager=None):
+        return await _load(session, db_manager=db_manager), set()
+
+    with patch("reconcile.snapshot.load_registry_snapshot", _load), \
+         patch(
+             "reconcile.snapshot.load_registry_snapshot_with_unit_matches",
+             _load_with_unit_matches,
+         ):
+        yield
 
 
 def _make_fake_llm_stream(text: str):

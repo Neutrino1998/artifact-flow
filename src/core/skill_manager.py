@@ -24,7 +24,7 @@ from config import config
 from core.department_resolver import load_ancestor_ids
 from core.effective_skillset import EffectiveSkillSet, resolve_effective_skillset
 from reconcile.seeds import _SKILL_CONSUMED_FM_KEYS  # 与 seed 同一份「已消费键」口径
-from reconcile.snapshot import SkillInfo, load_skill_snapshot
+from reconcile.snapshot import SkillInfo, load_skill_snapshot_with_matches
 from repositories.skill_repo import SkillRepository
 from repositories.tool_registry_repo import ToolRegistryRepository
 from tools.base import resolve_allowed_tool_entry
@@ -87,11 +87,12 @@ class SkillManager:
     async def _resolve(self, user_id: str) -> Tuple[EffectiveSkillSet, Dict[str, bool]]:
         """解析该用户的 EffectiveSkillSet + user_overrides(列举/toggle 复用,同
         controller_factory._load_skills 的口径 —— 单点可见性,杜绝注入有闸/管理没闸漂移)。"""
-        snapshot = await load_skill_snapshot(self._session)
         dept_id = await self._repo.user_department_id(user_id)
         ancestors = await load_ancestor_ids(self._session, dept_id)
+        snapshot, dept_matched = await load_skill_snapshot_with_matches(
+            self._session, ancestors
+        )
         overrides = await self._repo.user_overrides(user_id)
-        dept_matched = await self._repo.dept_matched_slugs(ancestors)
         eff = resolve_effective_skillset(user_id, snapshot, overrides, dept_matched)
         return eff, overrides
 

@@ -8,10 +8,18 @@ ORM 实例不外逃(CLAUDE.md):本模块在 session 内读行、就地重建出 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
-from sqlalchemy import select
+from sqlalchemy import exists, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Agent, AgentUnit, Skill, ToolMember, ToolUnit
+from db.models import (
+    Agent,
+    AgentUnit,
+    DepartmentSkillRule,
+    DepartmentUnitRule,
+    Skill,
+    ToolMember,
+    ToolUnit,
+)
 from tools.base import BaseTool, ToolParameter, is_builtin_name
 from tools.custom.credentials import CredentialResolver
 from tools.custom.http_tool import HttpTool, HttpToolConfig
@@ -116,6 +124,31 @@ def build_http_tool(
 async def load_registry_snapshot(
     session: AsyncSession, *, db_manager=None
 ) -> RegistrySnapshot:
+    snapshot, _ = await _load_registry_snapshot_and_unit_matches(
+        session, db_manager=db_manager, dept_ids=None
+    )
+    return snapshot
+
+
+async def load_registry_snapshot_with_unit_matches(
+    session: AsyncSession, dept_ids: List[str], *, db_manager=None
+) -> tuple[RegistrySnapshot, Set[str]]:
+    """Load registry snapshot and department-unit rule matches in one unit projection.
+
+    The unit visibility column and "does this user's ancestor chain match a
+    department_unit_rule for this unit?" must come from the same SQL statement.
+    PostgreSQL READ COMMITTED gives each SELECT its own snapshot, so a separate
+    visibility read + rule read can mix states across a concurrent visibility
+    change that clears rules. This helper returns both facts from one projection.
+    """
+    return await _load_registry_snapshot_and_unit_matches(
+        session, db_manager=db_manager, dept_ids=dept_ids
+    )
+
+
+async def _load_registry_snapshot_and_unit_matches(
+    session: AsyncSession, *, db_manager=None, dept_ids: Optional[List[str]]
+) -> tuple[RegistrySnapshot, Set[str]]:
     """一次性读全部注册表行,重建 external 工具 + unit 元数据 + agent 元数据。
 
     显式 order_by 定序的是 **external/unit 轴**(member/agent_unit 行序)—— 这一轴喂
@@ -134,9 +167,27 @@ async def load_registry_snapshot(
     # db_manager 缺省(测试 / 进程级重建脚本不带)→ resolver=None,HttpTool 回落 env。
     credential_resolver = CredentialResolver(db_manager) if db_manager is not None else None
 
+    dept_match_expr = (
+        exists().where(
+            DepartmentUnitRule.unit_name == ToolUnit.name,
+            DepartmentUnitRule.department_id.in_(dept_ids),
+        )
+        if dept_ids
+        else literal(False)
+    ).label("dept_matched")
     units_rows = (await session.execute(
-        select(ToolUnit).order_by(ToolUnit.name)
-    )).scalars().all()
+        select(
+            ToolUnit.name.label("name"),
+            ToolUnit.kind.label("kind"),
+            ToolUnit.description.label("description"),
+            ToolUnit.visibility.label("visibility"),
+            ToolUnit.defer.label("defer"),
+            ToolUnit.provider.label("provider"),
+            ToolUnit.source.label("source"),
+            ToolUnit.provider_config.label("provider_config"),
+            dept_match_expr,
+        ).order_by(ToolUnit.name)
+    )).mappings().all()
     member_rows = (await session.execute(
         select(ToolMember).order_by(ToolMember.full_name)
     )).scalars().all()
@@ -148,25 +199,29 @@ async def load_registry_snapshot(
     )).scalars().all()
 
     units: Dict[str, UnitInfo] = {}
+    dept_matched_units: Set[str] = set()
     for u in units_rows:
-        if is_builtin_name(u.name):
+        name = u["name"]
+        if is_builtin_name(name):
             # unit 名撞 builtin/reserved → 不 surface(其成员随之不重建,见下),
             # 防 B-3/B-4/C 精确匹配路径的命名空间歧义。
             logger.warning(
                 "Skipping external tool unit %r: name collides with a builtin/reserved "
                 "tool name (row bypassed write-time validation — fix the DB row)",
-                u.name,
+                name,
             )
             continue
-        units[u.name] = UnitInfo(
-            name=u.name,
-            kind=u.kind,
-            description=u.description,
-            visibility=u.visibility,
-            defer=u.defer,
-            provider=u.provider,
-            source=u.source,
-            provider_config=dict(u.provider_config or {}) or None,
+        if u["dept_matched"]:
+            dept_matched_units.add(name)
+        units[name] = UnitInfo(
+            name=name,
+            kind=u["kind"],
+            description=u["description"],
+            visibility=u["visibility"],
+            defer=u["defer"],
+            provider=u["provider"],
+            source=u["source"],
+            provider_config=dict(u["provider_config"] or {}) or None,
         )
 
     external_tools: Dict[str, BaseTool] = {}
@@ -213,7 +268,10 @@ async def load_registry_snapshot(
         if agent is not None:
             agent.units[au.unit_name] = au.member_state
 
-    return RegistrySnapshot(external_tools=external_tools, units=units, agents=agents)
+    return (
+        RegistrySnapshot(external_tools=external_tools, units=units, agents=agents),
+        dept_matched_units,
+    )
 
 
 async def hydrate_mcp_tools(
@@ -268,6 +326,24 @@ async def hydrate_mcp_tools(
 
 
 async def load_skill_snapshot(session: AsyncSession) -> Dict[str, SkillInfo]:
+    snapshot, _ = await _load_skill_snapshot_and_matches(session, dept_ids=None)
+    return snapshot
+
+
+async def load_skill_snapshot_with_matches(
+    session: AsyncSession, dept_ids: List[str]
+) -> tuple[Dict[str, SkillInfo], Set[str]]:
+    """Load skill metadata and department-skill rule matches in one projection.
+
+    Mirrors `load_registry_snapshot_with_unit_matches`: visibility and matching
+    dept-rule state need to come from the same SELECT under READ COMMITTED.
+    """
+    return await _load_skill_snapshot_and_matches(session, dept_ids=dept_ids)
+
+
+async def _load_skill_snapshot_and_matches(
+    session: AsyncSession, *, dept_ids: Optional[List[str]]
+) -> tuple[Dict[str, SkillInfo], Set[str]]:
     """读全部 skill 行,重建轻量 user-agnostic 元数据(`{slug: SkillInfo}`)。
 
     每 turn 一次快照(同 load_registry_snapshot,controller_factory 调用,C-2 接入);
@@ -276,6 +352,14 @@ async def load_skill_snapshot(session: AsyncSession) -> Dict[str, SkillInfo]:
     L2/L3 按需读)—— `bundle` 对正常行恒存在,快照只投影 `has_extra_files` 来决定
     read_skill 是否提示 / 创建 mount_skill。
     ORM 不外逃:直接投影列、物化成 SkillInfo dataclass。"""
+    dept_match_expr = (
+        exists().where(
+            DepartmentSkillRule.skill_slug == Skill.slug,
+            DepartmentSkillRule.department_id.in_(dept_ids),
+        )
+        if dept_ids
+        else literal(False)
+    ).label("dept_matched")
     rows = (
         await session.execute(
             select(
@@ -289,11 +373,16 @@ async def load_skill_snapshot(session: AsyncSession) -> Dict[str, SkillInfo]:
                 Skill.has_extra_files,
                 Skill.compatibility,
                 Skill.source,
+                dept_match_expr,
             ).order_by(Skill.slug)
         )
     ).all()
-    return {
-        r.slug: SkillInfo(
+    snapshot: Dict[str, SkillInfo] = {}
+    dept_matched: Set[str] = set()
+    for r in rows:
+        if r.dept_matched:
+            dept_matched.add(r.slug)
+        snapshot[r.slug] = SkillInfo(
             slug=r.slug,
             name=r.name,
             description=r.description,
@@ -305,5 +394,4 @@ async def load_skill_snapshot(session: AsyncSession) -> Dict[str, SkillInfo]:
             compatibility=r.compatibility,
             source=r.source,
         )
-        for r in rows
-    }
+    return snapshot, dept_matched

@@ -6,7 +6,7 @@ ToolRegistry Repository(写侧)—— tool_units / tool_members / agent_units �
 ORM 实例不外逃:Manager 在同 session 内读其列做序列化,不把对象交给 router。
 """
 
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,23 +44,6 @@ class ToolRegistryRepository(BaseRepository[ToolUnit]):
 
     async def existing_unit_names(self) -> set:
         return set((await self._session.execute(select(ToolUnit.name))).scalars().all())
-
-    async def dept_matched_unit_names(self, dept_ids: List[str]) -> Set[str]:
-        """祖先链中任一部门有 department_unit_rule 例外的 unit name 集(G-0)。
-
-        行方向由 ToolUnit.visibility 派生:public=deny,department=grant。这里仅取
-        命中集合,不解释方向;解释归 EffectiveToolset 单点 resolver。
-        """
-        if not dept_ids:
-            return set()
-        rows = (
-            await self._session.execute(
-                select(DepartmentUnitRule.unit_name).where(
-                    DepartmentUnitRule.department_id.in_(dept_ids)
-                )
-            )
-        ).scalars().all()
-        return set(rows)
 
     async def list_agents(self) -> List[Agent]:
         return list((await self._session.execute(

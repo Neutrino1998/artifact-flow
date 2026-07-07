@@ -17,9 +17,11 @@ from db.models import (
     User,
     UserSkill,
 )
-from reconcile.snapshot import load_skill_snapshot
+from reconcile.snapshot import (
+    load_registry_snapshot_with_unit_matches,
+    load_skill_snapshot_with_matches,
+)
 from repositories.skill_repo import SkillRepository
-from repositories.tool_registry_repo import ToolRegistryRepository
 
 
 async def _tree(session):
@@ -52,11 +54,10 @@ async def test_no_department_empty_chain(db_session):
 
 async def _resolve(db_session, user_id="u1"):
     repo = SkillRepository(db_session)
-    snap = await load_skill_snapshot(db_session)
     dept_id = await repo.user_department_id(user_id)
     ancestors = await load_ancestor_ids(db_session, dept_id)
+    snap, dept_matched = await load_skill_snapshot_with_matches(db_session, ancestors)
     overrides = await repo.user_overrides(user_id)
-    dept_matched = await repo.dept_matched_slugs(ancestors)
     return resolve_effective_skillset(user_id, snap, overrides, dept_matched)
 
 
@@ -113,8 +114,11 @@ async def test_department_unit_match_via_ancestor_rule(db_session):
     await db_session.flush()
 
     repo = SkillRepository(db_session)
-    registry = ToolRegistryRepository(db_session)
     dept_id = await repo.user_department_id("u1")
     ancestors = await load_ancestor_ids(db_session, dept_id)
+    snap, matched_units = await load_registry_snapshot_with_unit_matches(
+        db_session, ancestors
+    )
 
-    assert await registry.dept_matched_unit_names(ancestors) == {"reports"}
+    assert snap.units["reports"].visibility == "public"
+    assert matched_units == {"reports"}

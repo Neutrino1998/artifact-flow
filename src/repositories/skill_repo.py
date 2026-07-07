@@ -4,13 +4,13 @@
 plain dict / set)。可见性解析(EffectiveSkillSet)、CRUD 编排在上层 Manager。
 """
 
-from typing import Dict, List, Optional, Set
+from typing import Dict, Optional
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import DepartmentSkillRule, Skill, User, UserSkill
+from db.models import Skill, User, UserSkill
 
 
 class SkillRepository:
@@ -35,19 +35,6 @@ class SkillRepository:
             )
         ).all()
         return {slug: enabled for slug, enabled in rows}
-
-    async def dept_matched_slugs(self, dept_ids: List[str]) -> Set[str]:
-        """祖先链中任一部门有 department_skill_rule 例外的 skill slug 集(方向由 visibility 派生)。"""
-        if not dept_ids:
-            return set()
-        rows = (
-            await self._session.execute(
-                select(DepartmentSkillRule.skill_slug).where(
-                    DepartmentSkillRule.department_id.in_(dept_ids)
-                )
-            )
-        ).scalars().all()
-        return set(rows)
 
     async def get_skill_md(self, slug: str) -> Optional[str]:
         """L2 read_skill 的正文取数(标量,不外逃 ORM)。"""

@@ -72,9 +72,12 @@ async def create_controller(
     from core.effective_skillset import resolve_effective_skillset
     from core.effective_toolset import resolve_all, unit_visible_by_department
     from core.engine import EngineHooks
-    from reconcile.snapshot import hydrate_mcp_tools, load_registry_snapshot, load_skill_snapshot
+    from reconcile.snapshot import (
+        hydrate_mcp_tools,
+        load_registry_snapshot_with_unit_matches,
+        load_skill_snapshot_with_matches,
+    )
     from repositories.skill_repo import SkillRepository
-    from repositories.tool_registry_repo import ToolRegistryRepository
     from tools.builtin.artifact_service import ArtifactService
     from tools.builtin.artifact_ops import create_artifact_tools
     from tools.builtin.read_skill import create_skill_tools
@@ -97,21 +100,22 @@ async def create_controller(
     # 短 retrying session 读完即关(B-5),WorkingSet 留实例做 turn-live 缓存。
     artifact_service = ArtifactService(db_manager=db_manager)
 
-    # per-turn scope snapshot:agent/tool registry + skill snapshot + user dept rule matches
-    # in ONE short session. Unit visibility lives in the registry snapshot, while unit
-    # dept-rule matches live in department_unit_rules; reading them separately can create
-    # a mixed view across an admin visibility-change+clear-rules transaction. Keep those
-    # facts in the same construction, then close the DB session before MCP hydration.
+    # per-turn scope snapshot:agent/tool registry + skill snapshot + user dept rule matches.
+    # Resource visibility and dept-rule matches are loaded by same-row SQL projections;
+    # a shared AsyncSession alone is not enough under PostgreSQL READ COMMITTED because
+    # each SELECT gets its own snapshot.
+    # Close the DB session before MCP hydration so external HTTP never pins a DB conn.
     async def _load_turn_scope(session):
         repo = SkillRepository(session)
-        registry = ToolRegistryRepository(session)
-        registry_snapshot = await load_registry_snapshot(session, db_manager=db_manager)
-        skill_snap = await load_skill_snapshot(session)
         dept_id = await repo.user_department_id(user_id)
         ancestors = await load_ancestor_ids(session, dept_id)
+        registry_snapshot, dept_matched_units = await load_registry_snapshot_with_unit_matches(
+            session, ancestors, db_manager=db_manager
+        )
+        skill_snap, dept_matched = await load_skill_snapshot_with_matches(
+            session, ancestors
+        )
         overrides = await repo.user_overrides(user_id)
-        dept_matched = await repo.dept_matched_slugs(ancestors)
-        dept_matched_units = await registry.dept_matched_unit_names(ancestors)
         return registry_snapshot, skill_snap, overrides, dept_matched, dept_matched_units
 
     (
