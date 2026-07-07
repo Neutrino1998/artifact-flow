@@ -13,6 +13,7 @@ import { useUIStore } from '@/stores/uiStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useMediaQuery, BREAKPOINTS } from '@/hooks/useMediaQuery';
 import PermissionModal from '@/components/layout/PermissionModal';
+import { artifactVisibilityOverride } from '@/lib/panelMode';
 
 export default function Home() {
   const permissionRequest = useStreamStore((s) => s.permissionRequest);
@@ -28,8 +29,9 @@ export default function Home() {
   //                              so opening admin management while the artifact drawer
   //                              was open does not bury the master list under an empty
   //                              detail panel — admin work isn't a mobile use case)
+  //   full-screen takeover → false (SSE artifact events must not reopen the right panel)
   //   neither → undefined (defer to user-controlled artifactPanelVisible)
-  const forceArtifactVisible = (userMgmtMode || toolUnitMode) ? isMd : undefined;
+  const forceArtifactVisible = artifactVisibilityOverride(activeMode, isAdmin, isMd);
 
   const rightContent = userMgmtMode ? (
     <ErrorBoundary fallbackLabel="用户管理详情面板出错了">

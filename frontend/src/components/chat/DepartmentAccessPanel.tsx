@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { BUTTON_DANGER_OUTLINE, BUTTON_PRIMARY, BUTTON_SECONDARY, INPUT_ON_PANEL } from '@/lib/styles';
+import { useLatestOnly } from '@/hooks/useLatestOnly';
 import type {
   DepartmentAccessResponse,
   DepartmentSkillAccessItem,
@@ -71,8 +72,10 @@ function matchesQuery(tab: AccessTab, item: AccessItem, query: string): boolean 
 
 export default function DepartmentAccessPanel() {
   const setActiveMode = useUIStore((s) => s.setActiveMode);
+  const claimAccess = useLatestOnly();
   const [tree, setTree] = useState<DepartmentTreeNode[]>([]);
   const [selectedDeptId, setSelectedDeptId] = useState<string | null>(null);
+  const selectedDeptIdRef = useRef<string | null>(null);
   const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [treeLoading, setTreeLoading] = useState(true);
   const [treeError, setTreeError] = useState<string | null>(null);
@@ -83,6 +86,7 @@ export default function DepartmentAccessPanel() {
   const [tab, setTab] = useState<AccessTab>('skills');
   const [query, setQuery] = useState('');
   const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set());
+  selectedDeptIdRef.current = selectedDeptId;
 
   const reloadTree = useCallback(async () => {
     setTreeLoading(true);
@@ -101,19 +105,25 @@ export default function DepartmentAccessPanel() {
     }
   }, []);
 
-  const reloadAccess = useCallback(async (deptId: string) => {
+  const reloadAccess = useCallback(async (
+    deptId: string,
+    errorMessage = '加载部门授权失败',
+  ) => {
+    const isLatest = claimAccess();
     setAccessLoading(true);
     setAccessError(null);
     try {
       const res = await api.getDepartmentAccess(deptId);
+      if (!isLatest()) return;
       setAccess(res);
     } catch (err) {
-      setAccessError(err instanceof ApiError ? err.message : '加载部门授权失败');
+      if (!isLatest()) return;
+      setAccessError(err instanceof ApiError ? err.message : errorMessage);
       setAccess(null);
     } finally {
-      setAccessLoading(false);
+      if (isLatest()) setAccessLoading(false);
     }
-  }, []);
+  }, [claimAccess]);
 
   useEffect(() => {
     void reloadTree();
@@ -121,27 +131,14 @@ export default function DepartmentAccessPanel() {
 
   useEffect(() => {
     if (!selectedDeptId) {
+      claimAccess();
       setAccess(null);
+      setAccessError(null);
+      setAccessLoading(false);
       return;
     }
-    let cancelled = false;
-    setAccessLoading(true);
-    setAccessError(null);
-    api.getDepartmentAccess(selectedDeptId)
-      .then((res) => {
-        if (!cancelled) setAccess(res);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setAccessError(err instanceof ApiError ? err.message : '加载部门授权失败');
-          setAccess(null);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setAccessLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [selectedDeptId]);
+    void reloadAccess(selectedDeptId);
+  }, [claimAccess, reloadAccess, selectedDeptId]);
 
   const expandAll = useCallback(() => setCollapsedIds(new Set()), []);
   const collapseAll = useCallback(() => {
@@ -163,25 +160,30 @@ export default function DepartmentAccessPanel() {
   }, [access, query, tab]);
 
   const mutateRule = useCallback(async (item: AccessItem) => {
-    if (!selectedDeptId) return;
+    const deptId = selectedDeptId;
+    if (!deptId) return;
     if (item.inherited_rule && !item.direct_rule) return;
 
     const id = itemId(tab, item);
-    const key = `${tab}:${id}`;
+    const key = `${deptId}:${tab}:${id}`;
     setPending((prev) => new Set(prev).add(key));
     setAccessError(null);
     try {
       if (tab === 'skills') {
-        if (item.direct_rule) await api.deleteDepartmentSkillRule(selectedDeptId, id);
-        else await api.putDepartmentSkillRule(selectedDeptId, id);
+        if (item.direct_rule) await api.deleteDepartmentSkillRule(deptId, id);
+        else await api.putDepartmentSkillRule(deptId, id);
       } else if (item.direct_rule) {
-        await api.deleteDepartmentUnitRule(selectedDeptId, id);
+        await api.deleteDepartmentUnitRule(deptId, id);
       } else {
-        await api.putDepartmentUnitRule(selectedDeptId, id);
+        await api.putDepartmentUnitRule(deptId, id);
       }
-      await reloadAccess(selectedDeptId);
+      if (selectedDeptIdRef.current === deptId) {
+        await reloadAccess(deptId, '更新部门规则失败');
+      }
     } catch (err) {
-      setAccessError(err instanceof ApiError ? err.message : '更新部门规则失败');
+      if (selectedDeptIdRef.current === deptId) {
+        setAccessError(err instanceof ApiError ? err.message : '更新部门规则失败');
+      }
     } finally {
       setPending((prev) => {
         const next = new Set(prev);
@@ -293,12 +295,13 @@ export default function DepartmentAccessPanel() {
                 {activeItems.map((item) => {
                   const id = itemId(tab, item);
                   const key = `${tab}:${id}`;
+                  const pendingKey = `${selectedDeptId}:${tab}:${id}`;
                   return (
                     <ResourceRow
                       key={key}
                       tab={tab}
                       item={item}
-                      pending={pending.has(key)}
+                      pending={pending.has(pendingKey)}
                       onMutate={() => mutateRule(item)}
                     />
                   );
