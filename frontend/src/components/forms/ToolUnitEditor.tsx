@@ -946,8 +946,9 @@ function ArtifactOutputEditor({
               type="text"
               value={value.content_type}
               onChange={(e) => {
-                setForceCustomContentType(true);
-                patch({ content_type: e.target.value });
+                const contentType = e.target.value;
+                setForceCustomContentType(!(value.mode === 'binary' && contentType.trim() === ''));
+                patch({ content_type: contentType });
               }}
               disabled={readOnly}
               placeholder={value.mode === 'text' ? 'text/csv' : '自动读取响应 Content-Type'}
