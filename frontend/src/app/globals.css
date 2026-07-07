@@ -83,6 +83,10 @@
     @apply bg-transparent;
   }
 
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
   ::-webkit-scrollbar-thumb {
     @apply bg-border rounded-full;
   }
