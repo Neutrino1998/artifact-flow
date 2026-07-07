@@ -97,14 +97,31 @@ async def create_controller(
     # 短 retrying session 读完即关(B-5),WorkingSet 留实例做 turn-live 缓存。
     artifact_service = ArtifactService(db_manager=db_manager)
 
-    # per-turn 注册表快照:agent 元数据 + external 工具(HttpTool)从 DB 重建。
-    # 进程级 reconcile(entrypoint / 手动脚本)把 config 物化进库,这里每 turn 读一
-    # 次快照 —— 避跨 worker 缓存失效,与引擎每 turn 重建 MessageEvent 历史同源(原则 5)。
-    # 短 session 读完即关;凭证 resolver 拿 db_manager(execute 期再各开短 session lazy
-    # 解密),不被快照 session 骑成 turn-long 连接。
-    snapshot = await db_manager.with_retry(
-        lambda session: load_registry_snapshot(session, db_manager=db_manager)
-    )
+    # per-turn scope snapshot:agent/tool registry + skill snapshot + user dept rule matches
+    # in ONE short session. Unit visibility lives in the registry snapshot, while unit
+    # dept-rule matches live in department_unit_rules; reading them separately can create
+    # a mixed view across an admin visibility-change+clear-rules transaction. Keep those
+    # facts in the same construction, then close the DB session before MCP hydration.
+    async def _load_turn_scope(session):
+        repo = SkillRepository(session)
+        registry = ToolRegistryRepository(session)
+        registry_snapshot = await load_registry_snapshot(session, db_manager=db_manager)
+        skill_snap = await load_skill_snapshot(session)
+        dept_id = await repo.user_department_id(user_id)
+        ancestors = await load_ancestor_ids(session, dept_id)
+        overrides = await repo.user_overrides(user_id)
+        dept_matched = await repo.dept_matched_slugs(ancestors)
+        dept_matched_units = await registry.dept_matched_unit_names(ancestors)
+        return registry_snapshot, skill_snap, overrides, dept_matched, dept_matched_units
+
+    (
+        snapshot,
+        skill_snapshot,
+        skill_overrides,
+        dept_matched,
+        dept_matched_units,
+    ) = await db_manager.with_retry(_load_turn_scope)
+
     if "lead_agent" not in snapshot.agents:
         # DB 注册表为空/缺 lead_agent = reconcile 没跑(或跑挂)。引擎此时无可执行
         # agent,与其在 turn 中途撞 KeyError,不如在装配处 loud-fail 给出可操作指引。
@@ -113,28 +130,6 @@ async def create_controller(
             "`python scripts/reconcile_config.py` to materialize config into the DB "
             "(prod: entrypoint does this under the migration lock)."
         )
-    # 用户作用域(G-0/C-2):一条短 session 读 user-agnostic skill 快照 + 该用户的
-    # user_skill 覆盖 + 部门祖先链命中(决策 10:父覆盖子树)。department_id 从 DB 取
-    # (不信 JWT —— dept 授权是 correctness)。unit 命中也在这里取,供 MCP discovery
-    # 预过滤 + EffectiveToolset dept 收窄。读完即关(B-5);read_skill 正文另由
-    # SkillService lazy。
-    async def _load_user_scope(session):
-        repo = SkillRepository(session)
-        registry = ToolRegistryRepository(session)
-        skill_snap = await load_skill_snapshot(session)
-        dept_id = await repo.user_department_id(user_id)
-        ancestors = await load_ancestor_ids(session, dept_id)
-        overrides = await repo.user_overrides(user_id)
-        dept_matched = await repo.dept_matched_slugs(ancestors)
-        dept_matched_units = await registry.dept_matched_unit_names(ancestors)
-        return skill_snap, overrides, dept_matched, dept_matched_units
-
-    (
-        skill_snapshot,
-        skill_overrides,
-        dept_matched,
-        dept_matched_units,
-    ) = await db_manager.with_retry(_load_user_scope)
     effective_skillset = resolve_effective_skillset(
         user_id, skill_snapshot, skill_overrides, dept_matched
     )

@@ -339,7 +339,7 @@ user_skill ─user_id─> user ;  ─skill_slug─> skill              (真 FK,�
 
 **留待将来**:引擎"组合有效集"缓存(先每 turn 读,资源变更少、不提前造失效机器);参数级粒度(工具名+参数模式、CC allow-rules 式,需调用时 arg 匹配);子部门反向覆盖/最具体规则胜出(若要支持,需新增 per-row `effect` 列,当前派生单方向模型表达不了)。
 
-**进展**:**G-0 runtime 地基已落地(2026-07-07)**:规则语义与切片已按用户确认写回本节;`EffectiveToolset` 新增 dept unit 过滤输入,unit 侧 `public` 命中=deny / `department` 命中=grant,且 dept 收窄先于 skill grant → skill 不能重新 enable dept-denied unit;controller 在 MCP discovery 前按当前用户部门过滤 server unit,dept-denied MCP server 不被联系。新增 resolver / DB 命中 / MCP 过滤回归测试;`artifact-flow` conda 环境目标测试 59 passed。下一步 = G-1 授权 API。
+**进展**:**G-0 runtime 地基已落地(2026-07-07)**:规则语义与切片已按用户确认写回本节;`EffectiveToolset` 新增 dept unit 过滤输入,unit 侧 `public` 命中=deny / `department` 命中=grant,且 dept 收窄先于 skill grant → skill 不能重新 enable dept-denied unit;controller 在 MCP discovery 前按当前用户部门过滤 server unit,dept-denied MCP server 不被联系。reviewer 收口:registry snapshot(`ToolUnit.visibility`) 与当前用户 `department_unit_rule` 命中改为同一短 session 读取,避免 G-1 后 visibility 变更清规则时拼出混合视图。新增 resolver / DB 命中 / MCP 过滤回归测试;`artifact-flow` conda 环境相关测试 118 passed。下一步 = G-1 授权 API。
 
 ## 关键风险
 
