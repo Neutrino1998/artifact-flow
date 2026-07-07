@@ -7,36 +7,71 @@ import BinaryFilePreview from './BinaryFilePreview';
 
 const MAX_PREVIEW_BYTES = 15 * 1024 * 1024;
 const FRAME_SRC_DOC = '<!doctype html><html><head><base target="_blank"></head><body></body></html>';
+const FRAME_STYLE_ID = 'artifact-docx-preview-style';
+
+function installFrameStyles(doc: Document) {
+  doc.getElementById(FRAME_STYLE_ID)?.remove();
+  const style = doc.createElement('style');
+  style.id = FRAME_STYLE_ID;
+  style.textContent = `
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: #f3f4f6;
+      color: #111827;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body {
+      box-sizing: border-box;
+    }
+    a {
+      color: inherit;
+      text-decoration: underline;
+    }
+    .docx-wrapper {
+      background: transparent !important;
+      box-sizing: border-box !important;
+      display: block !important;
+      min-height: 100% !important;
+      padding: 16px !important;
+    }
+    .docx-wrapper > section.docx {
+      background: #fff !important;
+      box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16) !important;
+      height: auto !important;
+      margin: 0 auto 16px auto !important;
+      min-height: 0 !important;
+      max-width: 820px !important;
+      overflow: visible !important;
+      width: 100% !important;
+    }
+    .docx-wrapper > section.docx > article {
+      margin-bottom: 0 !important;
+    }
+    .docx-wrapper header,
+    .docx-wrapper footer {
+      display: none !important;
+    }
+    .docx {
+      overflow-wrap: break-word;
+    }
+    .docx img,
+    .docx svg {
+      height: auto;
+      max-width: 100%;
+    }
+    .docx table {
+      max-width: 100%;
+    }
+  `;
+  doc.head.appendChild(style);
+}
 
 function resetFrame(doc: Document) {
   doc.head.innerHTML = `
     <base target="_blank">
-    <style>
-      html, body {
-        margin: 0;
-        min-height: 100%;
-        background: #f3f4f6;
-        color: #111827;
-        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      }
-      body {
-        padding: 18px;
-        box-sizing: border-box;
-      }
-      a {
-        color: inherit;
-        text-decoration: underline;
-      }
-      .docx-wrapper {
-        background: transparent !important;
-        padding: 0 !important;
-      }
-      .docx-wrapper > section.docx {
-        margin: 0 auto 18px auto !important;
-        box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16);
-      }
-    </style>
   `;
+  installFrameStyles(doc);
   doc.body.innerHTML = '';
 }
 
@@ -75,8 +110,15 @@ export default function DocxPreview({
 
         const { renderAsync } = await import('docx-preview');
         await renderAsync(blob, doc.body, doc.head, {
-          breakPages: true,
-          ignoreLastRenderedPageBreak: false,
+          // docx-preview does not calculate Word-style natural page breaks. Use
+          // a continuous flow so long documents remain readable instead of
+          // showing misleading page shells or stale page numbers.
+          breakPages: false,
+          ignoreHeight: true,
+          ignoreLastRenderedPageBreak: true,
+          ignoreWidth: true,
+          renderHeaders: false,
+          renderFooters: false,
           renderComments: true,
           renderChanges: true,
           renderAltChunks: false,
@@ -84,6 +126,7 @@ export default function DocxPreview({
           renderEndnotes: true,
           useBase64URL: true,
         });
+        installFrameStyles(doc);
       })
       .catch((err) => {
         if (!cancelled) {
