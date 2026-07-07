@@ -475,16 +475,10 @@ function RuleState({
 }) {
   const action = item.rule_action === 'deny' ? '排除' : '允许';
   const tone = item.rule_action === 'deny' ? 'error' : 'success';
-  if (item.direct_rule) {
+  if (item.direct_rule || item.inherited_rule) {
     return (
-      <div className="flex items-center gap-1.5 min-w-0">
-        <PillBadge tone={tone} size="regular">本部门{action}</PillBadge>
-        {item.inherited_rule && (
-          <span className="text-xs text-text-tertiary dark:text-text-tertiary-dark whitespace-nowrap">
-            父级也生效
-          </span>
-        )}
-        {item.inherited_rule && (
+      <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+        {item.direct_rule && item.inherited_rule && (
           <button
             type="button"
             onClick={onClearDirectRule}
@@ -495,14 +489,15 @@ function RuleState({
             {pending ? '移除中...' : '移除本部门规则'}
           </button>
         )}
+        {item.direct_rule && (
+          <PillBadge tone={tone} size="regular">本部门{action}</PillBadge>
+        )}
+        {item.inherited_rule && (
+          <PillBadge tone={tone} size="regular" title={`由 ${item.inherited_rule.department_name} 继承生效`}>
+            父级{action} · {item.inherited_rule.department_name}
+          </PillBadge>
+        )}
       </div>
-    );
-  }
-  if (item.inherited_rule) {
-    return (
-      <PillBadge tone={tone} size="regular" title={`由 ${item.inherited_rule.department_name} 继承生效`}>
-        父级{action} · {item.inherited_rule.department_name}
-      </PillBadge>
     );
   }
   return null;
