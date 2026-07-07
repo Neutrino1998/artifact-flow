@@ -7,7 +7,9 @@ mutation, private skill rejection, and missing department/resource mapping.
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
+from core.department_access_manager import DepartmentAccessManager
 from db.models import (
     Department,
     DepartmentSkillRule,
@@ -220,3 +222,54 @@ class TestDepartmentAccessMutation:
             "/api/v1/admin/department-access/dept-leaf/units/nope"
         )
         assert resp.status_code == 404
+
+    async def test_concurrent_duplicate_skill_put_integrity_is_success(
+        self, db_session, monkeypatch
+    ):
+        await _seed_departments(db_session)
+        db_session.add(_skill("public-skill", "public"))
+        await db_session.commit()
+        mgr = DepartmentAccessManager(db_session)
+
+        async def fake_duplicate_commit():
+            # Simulate the other transaction winning the same natural-key insert
+            # after this request's SELECT but before its flush/commit.
+            await db_session.rollback()
+            db_session.add(
+                DepartmentSkillRule(
+                    department_id="dept-leaf", skill_slug="public-skill"
+                )
+            )
+            await db_session.commit()
+            raise IntegrityError("duplicate", None, Exception())
+
+        monkeypatch.setattr(mgr._repo, "commit", fake_duplicate_commit)
+
+        await mgr.put_skill_rule("dept-leaf", "public-skill")
+
+        rows = (
+            await db_session.execute(
+                select(DepartmentSkillRule).where(
+                    DepartmentSkillRule.department_id == "dept-leaf",
+                    DepartmentSkillRule.skill_slug == "public-skill",
+                )
+            )
+        ).scalars().all()
+        assert len(rows) == 1
+
+    async def test_non_duplicate_integrity_error_is_not_swallowed(
+        self, db_session, monkeypatch
+    ):
+        await _seed_departments(db_session)
+        db_session.add(_unit("dept_mcp", "department", kind="mcp"))
+        await db_session.commit()
+        mgr = DepartmentAccessManager(db_session)
+
+        async def fake_unrelated_integrity_error():
+            await db_session.rollback()
+            raise IntegrityError("not duplicate", None, Exception())
+
+        monkeypatch.setattr(mgr._repo, "commit", fake_unrelated_integrity_error)
+
+        with pytest.raises(IntegrityError):
+            await mgr.put_unit_rule("dept-leaf", "dept_mcp")
