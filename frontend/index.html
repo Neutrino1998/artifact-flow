@@ -1836,8 +1836,8 @@
 </tr>
 <tr>
 <td>Markdown</td>
-<td><code>react-markdown</code> + <code>remark-gfm</code> + <code>rehype-highlight</code></td>
-<td>代码高亮</td>
+<td><code>react-markdown</code> + <code>remark-gfm</code> + <code>remark-math</code> + <code>rehype-katex</code> + <code>rehype-highlight</code></td>
+<td>GFM、KaTeX 公式、代码高亮</td>
 </tr>
 <tr>
 <td>Diff</td>
@@ -1851,6 +1851,9 @@
 </tr>
 </tbody>
 </table>
+<p>Markdown math intentionally disables single-dollar inline formulas: <code>$5</code>-style
+currency text is common in chat/tool surfaces, so formulas use <code>$$...$$</code> inline
+or standalone <code>$$</code> blocks.</p>
 <p><strong>不使用</strong> <code>@tanstack/react-virtual</code>——对话树长度实测不触发虚拟化收益，暂保持常规渲染；将来长会话场景可再引入。</p>
 <h2 id="目录结构">目录结构</h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>frontend/src/
@@ -1865,7 +1868,7 @@
 <a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│   ├── artifact/               # 面板、Tabs、预览 / Source / Diff
 <a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│   ├── layout/                 # ThreeColumnLayout、Modals、ChangePasswordDialog
 <a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>│   ├── sidebar/                # 对话列表、用户菜单
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>│   └── markdown/CodeBlock.tsx
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>│   └── markdown/                # MarkdownBlock / InlineMarkdown + code, diagram, link renderers
 <a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>├── stores/                     # 7 个 Zustand store
 <a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>├── hooks/                      # useSSE / useChat / useArtifacts / useMediaQuery
 <a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>├── lib/                        # sse.ts / api.ts / messageTree.ts / csp.ts / passwordPolicy.ts …
