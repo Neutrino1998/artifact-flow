@@ -91,7 +91,7 @@ function TreeNodeItem({
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
         className={`group flex items-center gap-2 pr-2 py-1.5 rounded-lg transition-colors cursor-pointer ${
           isSelected
-            ? 'bg-panel dark:bg-panel-accent-dark'
+            ? 'bg-panel dark:bg-panel-accent-dark ring-1 ring-inset ring-accent/60'
             : MENU_ROW_HOVER
         }`}
       >

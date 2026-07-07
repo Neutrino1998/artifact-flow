@@ -72,7 +72,6 @@ function matchesQuery(tab: AccessTab, item: AccessItem, query: string): boolean 
 }
 
 export default function DepartmentAccessPanel() {
-  const setActiveMode = useUIStore((s) => s.setActiveMode);
   const claimAccess = useLatestOnly();
   const [tree, setTree] = useState<DepartmentTreeNode[]>([]);
   const [selectedDeptId, setSelectedDeptId] = useState<string | null>(null);
@@ -194,33 +193,16 @@ export default function DepartmentAccessPanel() {
     }
   }, [reloadAccess, selectedDeptId, tab]);
 
-  const totalCount = (access?.skills.length ?? 0) + (access?.units.length ?? 0);
+  const resourceLabel = tab === 'skills' ? '技能' : '工具 unit';
+  const resourceCount = tab === 'skills' ? access?.skills.length ?? 0 : access?.units.length ?? 0;
+  const selectedDepartmentTitle = access
+    ? access.department.name
+    : selectedDeptId
+      ? '加载部门中...'
+      : '选择部门';
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
-      <header className="px-6 py-4 border-b border-border dark:border-border-dark">
-        <div className="flex items-center justify-between gap-4">
-          <div className="min-w-0">
-            <h1 className="text-base font-semibold text-text-primary dark:text-text-primary-dark">
-              部门授权
-            </h1>
-            <div className="mt-0.5 text-xs text-text-tertiary dark:text-text-tertiary-dark truncate">
-              {access ? `${access.department.name} · ${totalCount} 项资源` : '选择部门'}
-            </div>
-          </div>
-          <button
-            onClick={() => setActiveMode('none')}
-            className="flex-shrink-0 p-1.5 rounded-md text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-text-primary/5 dark:hover:bg-text-primary-dark/10 transition-colors"
-            aria-label="退出部门授权"
-            title="退出"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-              <path d="M4 4l8 8M12 4l-8 8" />
-            </svg>
-          </button>
-        </div>
-      </header>
-
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
         <aside className="max-h-[min(42vh,24rem)] lg:max-h-none lg:w-80 lg:flex-shrink-0 border-b lg:border-b-0 lg:border-r border-border dark:border-border-dark flex flex-col min-h-0 overflow-hidden">
           <div className="px-4 py-3 flex items-center justify-between gap-3">
@@ -264,15 +246,20 @@ export default function DepartmentAccessPanel() {
         <main className="flex-1 min-w-0 min-h-0 flex flex-col">
           <div className="px-4 py-3 border-b border-border dark:border-border-dark">
             <div className="flex flex-col md:flex-row md:items-center gap-3">
-              <SegmentedTabs
-                ariaLabel="部门授权资源类型"
-                value={tab}
-                options={[
-                  { value: 'skills', label: '技能' },
-                  { value: 'units', label: '工具 unit' },
-                ]}
-                onChange={setTab}
-              />
+              <div className="min-w-0 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                <div className="min-w-0 text-sm font-semibold text-text-primary dark:text-text-primary-dark truncate">
+                  {selectedDepartmentTitle}
+                </div>
+                <SegmentedTabs
+                  ariaLabel="部门授权资源类型"
+                  value={tab}
+                  options={[
+                    { value: 'skills', label: '技能' },
+                    { value: 'units', label: '工具 unit' },
+                  ]}
+                  onChange={setTab}
+                />
+              </div>
               <div className="flex-1" />
               <div className="w-full md:max-w-sm bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-lg px-3 py-2 flex items-center gap-2">
                 <svg
@@ -289,6 +276,9 @@ export default function DepartmentAccessPanel() {
                   placeholder="搜索资源名 / 描述 / 类型..."
                   className="min-w-0 flex-1 bg-transparent text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none"
                 />
+                <span className="flex-shrink-0 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                  {access ? `${resourceCount} ${resourceLabel}` : selectedDeptId ? '加载中' : '未选择'}
+                </span>
               </div>
             </div>
           </div>
