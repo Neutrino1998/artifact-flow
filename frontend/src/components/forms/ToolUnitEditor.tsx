@@ -265,11 +265,23 @@ function coerceScalar(type: ParamType, raw: string): unknown {
   return raw;
 }
 
-function parseEnum(type: ParamType, raw: string): unknown[] | null {
+function coerceScalarForField(type: ParamType, raw: string, fieldLabel: string): unknown {
+  try {
+    return coerceScalar(type, raw);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    throw new Error(`${fieldLabel}：${message}`);
+  }
+}
+
+function parseEnum(type: ParamType, raw: string, fieldLabel: string): unknown[] | null {
   // 只按换行分隔(与 unitResponseToDraft 的 \n join 对齐)→ 往返无损,枚举值本身可含逗号(reviewer #3)
-  const parts = raw.split('\n').map((s) => s.trim()).filter((s) => s.length > 0);
+  const parts = raw
+    .split('\n')
+    .map((s, idx) => ({ value: s.trim(), lineNumber: idx + 1 }))
+    .filter((s) => s.value.length > 0);
   if (parts.length === 0) return null;
-  return parts.map((p) => coerceScalar(type, p));
+  return parts.map((p) => coerceScalarForField(type, p.value, `${fieldLabel}枚举第 ${p.lineNumber} 行无效`));
 }
 
 /** draft → 请求体;校验失败抛 Error(中文),由调用方 catch 显示。后端仍是权威校验。 */
@@ -335,13 +347,14 @@ export function draftToRequest(d: UnitDraft): CreateToolUnitRequest {
     const parameters = m.parameters.map((p) => {
       const pname = p.name.trim();
       if (!pname) throw new Error(`成员「${memberName}」有参数缺少名称`);
+      const fieldLabel = `成员「${memberName}」参数「${pname}」`;
       return {
         name: pname,
         type: p.type,
         description: p.description,
         required: p.required,
-        default: coerceScalar(p.type, p.default),
-        enum: parseEnum(p.type, p.enum),
+        default: coerceScalarForField(p.type, p.default, `${fieldLabel}默认值无效`),
+        enum: parseEnum(p.type, p.enum, fieldLabel),
       };
     });
 
@@ -1115,9 +1128,14 @@ function ParamEditor({
                 onChange={(e) => update(idx, { enum: e.target.value })}
                 disabled={readOnly}
                 rows={2}
-                placeholder={p.type === 'json' ? '枚举 JSON，每行一个（可选）' : '枚举值，每行一个（可选）'}
+                placeholder={p.type === 'json' ? '高级：每行一个 JSON 对象或数组（可选）' : '枚举值，每行一个（可选）'}
                 className={`${INPUT_ON_PANEL} font-mono resize-y`}
               />
+              {p.type === 'json' && (
+                <p className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                  JSON 枚举会原样展示给模型；复杂结构建议改用 mode / preset 这类字符串参数。
+                </p>
+              )}
               <label className="flex items-center gap-2 select-none cursor-pointer">
                 <Checkbox
                   checked={p.required}
