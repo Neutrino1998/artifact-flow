@@ -12,13 +12,18 @@ from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 
 from config import config
-from tools.artifact_output import build_artifact_spec
+from tools.artifact_output import (
+    build_artifact_spec,
+    content_type_from_headers,
+    filename_from_headers,
+)
 from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
 from tools.custom.secrets import (
     resolve_secrets,
     substitute_templates,
     SecretResolutionError,
 )
+from tools.custom.url_template import UrlTemplateError, render_url_path_template
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -88,6 +93,14 @@ class HttpTool(BaseTool):
         if not self._endpoint:
             return ToolResult(success=False, error="Tool endpoint not configured")
 
+        try:
+            endpoint_template, request_params = render_url_path_template(
+                self._endpoint, params
+            )
+        except UrlTemplateError as e:
+            logger.warning(f"HttpTool '{self.name}' URL template error: {e}")
+            return ToolResult(success=False, error=str(e))
+
         # 注入 secrets(缺失 / 非白名单前缀 / 解密失败 → 拒绝,不外发占位符原文)。
         # DB 路径(B-4;B-5 lazy):resolver + unit 名齐备 → execute 期开短 session 按 unit
         # 解密凭证表填 {{NAME}}(只解被调工具、不驻留整轮);回落路径:无注入(legacy loader /
@@ -96,10 +109,10 @@ class HttpTool(BaseTool):
             if self._credential_resolver is not None and self._unit_name is not None:
                 values = await self._credential_resolver.resolve(self._unit_name)
                 headers = substitute_templates(self._headers, values)
-                endpoint = substitute_templates(self._endpoint, values)
+                endpoint = substitute_templates(endpoint_template, values)
             else:
                 headers = resolve_secrets(self._headers)
-                endpoint = resolve_secrets(self._endpoint)
+                endpoint = resolve_secrets(endpoint_template)
         except SecretResolutionError as e:
             logger.error(f"HttpTool '{self.name}' secret resolution failed: {e}")
             return ToolResult(
@@ -123,14 +136,14 @@ class HttpTool(BaseTool):
                     response = await client.request(
                         self._method,
                         endpoint,
-                        json=params,
+                        json=request_params,
                         headers=headers,
                     )
                 else:
                     response = await client.request(
                         self._method,
                         endpoint,
-                        params=params,
+                        params=request_params,
                         headers=headers,
                     )
 
@@ -149,6 +162,8 @@ class HttpTool(BaseTool):
                     config=self._artifact_output,
                     blob=blob,
                     metadata=metadata,
+                    content_type_override=content_type_from_headers(response.headers),
+                    filename_override=filename_from_headers(response.headers),
                 )
                 content_type = spec.content_type
                 note = (

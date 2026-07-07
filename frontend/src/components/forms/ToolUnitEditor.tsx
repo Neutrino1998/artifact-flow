@@ -95,6 +95,8 @@ const BINARY_CONTENT_TYPES = [
   { label: 'ZIP', value: 'application/zip' },
   { label: 'Binary', value: 'application/octet-stream' },
 ];
+const CUSTOM_CONTENT_TYPE_OPTION = '__custom__';
+const AUTO_CONTENT_TYPE_OPTION = '__auto__';
 const EXTENSION_CONTENT_TYPES: Record<string, string> = {
   '.txt': 'text/plain',
   '.csv': 'text/csv',
@@ -333,10 +335,6 @@ export function draftToRequest(d: UnitDraft): CreateToolUnitRequest {
     if (m.timeout < 1 || m.timeout > 600) {
       throw new Error(`成员「${memberName}」的超时必须在 1~600 秒之间`);
     }
-    if (m.artifact_output.enabled && m.artifact_output.mode === 'binary' && !m.artifact_output.content_type.trim()) {
-      throw new Error(`成员「${memberName}」的二进制 artifact 输出必须填写 content_type`);
-    }
-
     const headers: Record<string, string> = {};
     for (const h of m.headers) {
       const k = h.key.trim();
@@ -790,7 +788,7 @@ function MemberCard({
         </div>
       </div>
       <p className="text-text-tertiary dark:text-text-tertiary-dark text-xs -mt-2">
-        endpoint / 请求头可用 <code className="font-mono">{'{{TOOL_SECRET_*}}'}</code> 占位符引用凭证，运行期替换
+        endpoint path 可用 <code className="font-mono">{'{param_name}'}</code> 引用参数；endpoint / 请求头可用 <code className="font-mono">{'{{TOOL_SECRET_*}}'}</code> 引用凭证
       </p>
 
       <HeaderEditor
@@ -837,9 +835,13 @@ function ArtifactOutputEditor({
 }) {
   const patch = (p: Partial<MemberDraft['artifact_output']>) => onChange({ ...value, ...p });
   const contentTypeOptions = value.mode === 'text' ? TEXT_CONTENT_TYPES : BINARY_CONTENT_TYPES;
-  const selectedPreset = contentTypeOptions.some((o) => o.value === value.content_type)
-    ? value.content_type
-    : '';
+  const selectedPreset = value.content_type.trim()
+    ? contentTypeOptions.some((o) => o.value === value.content_type)
+      ? value.content_type
+      : CUSTOM_CONTENT_TYPE_OPTION
+    : value.mode === 'binary'
+      ? AUTO_CONTENT_TYPE_OPTION
+      : CUSTOM_CONTENT_TYPE_OPTION;
 
   const inferContentType = (filename: string) => {
     const lower = filename.trim().toLowerCase();
@@ -857,6 +859,10 @@ function ArtifactOutputEditor({
   };
 
   const handleFilenameChange = (filename: string) => {
+    if (value.mode === 'binary') {
+      patch({ filename });
+      return;
+    }
     if (value.content_type.trim()) {
       patch({ filename });
       return;
@@ -902,11 +908,21 @@ function ArtifactOutputEditor({
               <div className="relative">
                 <select
                   value={selectedPreset}
-                  onChange={(e) => patch({ content_type: e.target.value })}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    if (next === AUTO_CONTENT_TYPE_OPTION) {
+                      patch({ content_type: '' });
+                    } else if (next !== CUSTOM_CONTENT_TYPE_OPTION) {
+                      patch({ content_type: next });
+                    }
+                  }}
                   disabled={readOnly}
                   className={`${INPUT_ON_PANEL} appearance-none pr-9`}
                 >
-                  <option value="">自定义</option>
+                  {value.mode === 'binary' && (
+                    <option value={AUTO_CONTENT_TYPE_OPTION}>自动读取响应头</option>
+                  )}
+                  <option value={CUSTOM_CONTENT_TYPE_OPTION}>自定义</option>
                   {contentTypeOptions.map((o) => (
                     <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
@@ -916,13 +932,13 @@ function ArtifactOutputEditor({
             </div>
           </div>
           <div>
-            <label className={LABEL_CLASS}>content_type{value.mode === 'binary' && <span className="text-status-error"> *</span>}</label>
+            <label className={LABEL_CLASS}>content_type</label>
             <input
               type="text"
               value={value.content_type}
               onChange={(e) => patch({ content_type: e.target.value })}
               disabled={readOnly}
-              placeholder={value.mode === 'text' ? 'text/csv' : 'application/pdf'}
+              placeholder={value.mode === 'text' ? 'text/csv' : '自动读取响应 Content-Type'}
               className={`${INPUT_ON_PANEL} font-mono`}
             />
           </div>

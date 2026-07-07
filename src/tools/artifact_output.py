@@ -6,7 +6,10 @@ builds ``ArtifactSpec`` objects, but never imports or touches ArtifactService.
 
 import mimetypes
 import os
-from typing import Any, Dict, Optional
+import re
+from email.message import Message
+from email.utils import collapse_rfc2231_value
+from typing import Any, Dict, Mapping, Optional
 
 from tools.base import ArtifactSpec
 
@@ -14,6 +17,9 @@ _VALID_MODES = {"text", "binary"}
 MAX_CONTENT_TYPE_LENGTH = 128
 MAX_TITLE_LENGTH = 256
 MAX_FILENAME_LENGTH = 256
+_MIME_TYPE_PATTERN = re.compile(
+    r"^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$"
+)
 
 
 def normalize_artifact_output_config(
@@ -51,8 +57,6 @@ def normalize_artifact_output_config(
     else:
         if response_extract:
             raise ValueError("artifact_output.mode='binary' cannot be combined with response_extract")
-        if not content_type:
-            raise ValueError("artifact_output.content_type is required for binary mode")
 
     return {
         "enabled": True,
@@ -70,13 +74,15 @@ def build_artifact_spec(
     text: Optional[str] = None,
     blob: Optional[bytes] = None,
     metadata: Optional[Dict[str, Any]] = None,
+    content_type_override: Optional[str] = None,
+    filename_override: Optional[str] = None,
 ) -> ArtifactSpec:
     """Build an ``ArtifactSpec`` from normalized artifact-output config."""
     mode = config.get("mode", "text")
-    content_type = config.get("content_type") or (
+    content_type = config.get("content_type") or content_type_override or (
         "text/plain" if mode == "text" else "application/octet-stream"
     )
-    filename = config.get("filename") or _default_filename(tool_name, mode, content_type)
+    filename = config.get("filename") or filename_override or _default_filename(tool_name, mode, content_type)
     title = config.get("title") or os.path.splitext(filename)[0]
     if len(content_type) > MAX_CONTENT_TYPE_LENGTH:
         raise ValueError(f"artifact_output.content_type must be <= {MAX_CONTENT_TYPE_LENGTH} characters")
@@ -114,6 +120,37 @@ def build_artifact_spec(
     )
 
 
+def content_type_from_headers(headers: Mapping[str, str]) -> Optional[str]:
+    """Return a safe MIME type from response headers, or ``None``."""
+    raw = _header_value(headers, "content-type")
+    if not raw:
+        return None
+    candidate = raw.split(";", 1)[0].strip().lower()
+    if len(candidate) > MAX_CONTENT_TYPE_LENGTH:
+        return None
+    if not _MIME_TYPE_PATTERN.fullmatch(candidate):
+        return None
+    return candidate
+
+
+def filename_from_headers(headers: Mapping[str, str]) -> Optional[str]:
+    """Return a safe filename from Content-Disposition, or ``None``."""
+    raw = _header_value(headers, "content-disposition")
+    if not raw:
+        return None
+
+    message = Message()
+    message["content-disposition"] = raw
+    filename = message.get_param("filename", header="content-disposition")
+    if filename is None:
+        filename = message.get_param("filename*", header="content-disposition")
+    if filename is None:
+        return None
+    if isinstance(filename, tuple):
+        filename = collapse_rfc2231_value(filename)
+    return _safe_filename(str(filename))
+
+
 def _optional_str(raw: Dict[str, Any], key: str, *, max_length: int) -> Optional[str]:
     value = raw.get(key)
     if value is None:
@@ -124,6 +161,28 @@ def _optional_str(raw: Dict[str, Any], key: str, *, max_length: int) -> Optional
     if len(stripped) > max_length:
         raise ValueError(f"artifact_output.{key} must be <= {max_length} characters")
     return stripped or None
+
+
+def _header_value(headers: Mapping[str, str], name: str) -> Optional[str]:
+    value = headers.get(name)
+    if value is None:
+        value = headers.get(name.lower())
+    if value is None:
+        value = headers.get(name.title())
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _safe_filename(filename: str) -> Optional[str]:
+    cleaned = "".join(ch for ch in filename.strip() if ch >= " " and ch != "\x7f")
+    cleaned = os.path.basename(cleaned.replace("\\", "/"))
+    if not cleaned or cleaned in {".", ".."}:
+        return None
+    if len(cleaned) > MAX_FILENAME_LENGTH:
+        return None
+    return cleaned
 
 
 def _default_filename(tool_name: str, mode: str, content_type: str) -> str:

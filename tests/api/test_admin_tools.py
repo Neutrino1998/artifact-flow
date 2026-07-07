@@ -313,12 +313,61 @@ class TestUnitCrud:
             "title": "Weather CSV",
         }
 
-    async def test_create_rejects_binary_artifact_output_without_content_type(self, admin_client: AsyncClient):
+    async def test_create_accepts_binary_artifact_output_without_content_type(self, admin_client: AsyncClient):
         body = _singleton_body()
         body["members"][0]["artifact_output"] = {"enabled": True, "mode": "binary"}
         resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["members"][0]["definition"]["artifact_output"] == {
+            "enabled": True,
+            "mode": "binary",
+            "content_type": None,
+            "filename": None,
+            "title": None,
+        }
+
+    async def test_create_accepts_url_path_parameters(self, admin_client: AsyncClient):
+        body = _singleton_body(name="ragflow_download")
+        body["members"][0]["endpoint"] = (
+            "https://ragflow.example.com/api/v1/datasets/{dataset_id}/documents/{document_id}"
+        )
+        body["members"][0]["parameters"] = [
+            {"name": "dataset_id", "type": "string", "required": True},
+            {"name": "document_id", "type": "string", "required": True},
+        ]
+        body["members"][0]["artifact_output"] = {"enabled": True, "mode": "binary"}
+
+        resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
+
+        assert resp.status_code == 201, resp.text
+        definition = resp.json()["members"][0]["definition"]
+        assert definition["endpoint"].endswith(
+            "/datasets/{dataset_id}/documents/{document_id}"
+        )
+
+    async def test_create_rejects_undeclared_url_path_parameter(self, admin_client: AsyncClient):
+        body = _singleton_body()
+        body["members"][0]["endpoint"] = (
+            "https://api.example.com/datasets/{dataset_id}/documents/{document_id}"
+        )
+        body["members"][0]["parameters"] = [
+            {"name": "dataset_id", "type": "string", "required": True},
+        ]
+        resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
         assert resp.status_code == 400
-        assert "content_type" in resp.json()["detail"]
+        assert "document_id" in resp.json()["detail"]
+        assert "declared parameter" in resp.json()["detail"]
+
+    async def test_create_rejects_url_path_parameter_in_host(self, admin_client: AsyncClient):
+        body = _singleton_body()
+        body["members"][0]["endpoint"] = "https://{host}/api/v1/documents/{document_id}"
+        body["members"][0]["parameters"] = [
+            {"name": "host", "type": "string", "required": True},
+            {"name": "document_id", "type": "string", "required": True},
+        ]
+        resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
+        assert resp.status_code == 400
+        assert "only allowed in the path" in resp.json()["detail"]
 
     async def test_create_rejects_binary_artifact_output_with_response_extract(self, admin_client: AsyncClient):
         body = _singleton_body()

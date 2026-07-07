@@ -42,6 +42,7 @@ from tools.artifact_output import normalize_artifact_output_config
 from tools.base import BaseTool
 from tools.custom.http_tool import HttpTool, HttpToolConfig
 from tools.custom.secrets import assert_secret_refs_allowed
+from tools.custom.url_template import validate_url_path_template
 from tools.param_specs import normalize_parameter_specs, parameter_specs_to_tool_parameters
 from utils.logger import get_logger
 
@@ -86,14 +87,14 @@ def _build_http_tool(frontmatter: dict, body: str) -> HttpTool:
     """从 frontmatter + body 构建 HttpTool"""
 
     # 解析参数定义
-    param_defs = parameter_specs_to_tool_parameters(
-        normalize_parameter_specs(frontmatter.get("parameters", []))
-    )
+    param_specs = normalize_parameter_specs(frontmatter.get("parameters", []))
+    param_defs = parameter_specs_to_tool_parameters(param_specs)
 
     # SSRF-02 load-time 闸门：endpoint / headers 里的 {{VAR}} 必须用白名单前缀，
     # 否则整个工具拒绝加载（不把任意 env 变量暴露给自定义工具的注入面）。
     assert_secret_refs_allowed(frontmatter.get("endpoint", ""))
     assert_secret_refs_allowed(frontmatter.get("headers", {}))
+    validate_url_path_template(frontmatter.get("endpoint", ""), param_specs)
     artifact_output = normalize_artifact_output_config(
         frontmatter.get("artifact_output"),
         response_extract=frontmatter.get("response_extract"),

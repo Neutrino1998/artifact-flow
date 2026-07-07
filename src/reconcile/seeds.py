@@ -25,6 +25,7 @@ from tools.artifact_output import normalize_artifact_output_config
 from tools.base import BUILTIN_TOOL_NAMES, is_builtin_name, resolve_allowed_tool_entry
 from tools.custom.http_tool import validate_response_extract
 from tools.custom.secrets import assert_secret_refs_allowed
+from tools.custom.url_template import validate_url_path_template
 from tools.param_specs import normalize_parameter_specs
 from utils.frontmatter import FrontmatterError, normalize_allowed_tools, parse_frontmatter_text
 from utils.logger import get_logger
@@ -202,6 +203,10 @@ def _build_http_member(frontmatter: dict, body: str, *, unit_name: str,
     # SSRF-02 load-time 闸门:endpoint/headers 的 {{VAR}} 必须白名单前缀
     assert_secret_refs_allowed(frontmatter.get("endpoint", ""))
     assert_secret_refs_allowed(frontmatter.get("headers", {}) or {})
+    try:
+        validate_url_path_template(frontmatter.get("endpoint", ""), params)
+    except ValueError as e:
+        raise SeedError(f"{source}: {e}") from e
 
     # response_extract(JMESPath)语法在 reconcile 期 loud-fail —— typo 不留到首次调用
     try:

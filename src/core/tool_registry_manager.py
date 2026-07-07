@@ -26,6 +26,7 @@ from tools.custom.credentials import CredentialResolver
 from tools.custom.http_tool import validate_response_extract
 from tools.custom.mcp_client import McpListResult
 from tools.custom.secrets import assert_secret_refs_allowed, extract_placeholders, SecretResolutionError
+from tools.custom.url_template import validate_url_path_template
 from tools.param_specs import normalize_parameter_specs
 from utils.logger import get_logger
 
@@ -438,6 +439,10 @@ class ToolRegistryManager:
             assert_secret_refs_allowed(endpoint)
             assert_secret_refs_allowed(headers)
         except SecretResolutionError as e:
+            raise InvalidUnitError(str(e)) from e
+        try:
+            validate_url_path_template(endpoint, params)
+        except ValueError as e:
             raise InvalidUnitError(str(e)) from e
         # response_extract(JMESPath)语法在保存期 loud-fail(→400),与 seeds 同口径
         try:

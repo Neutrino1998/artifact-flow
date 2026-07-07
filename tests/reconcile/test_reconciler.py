@@ -245,12 +245,12 @@ async def test_singleton_tool_seed_artifact_output(db_session, cfg):
     }
 
 
-async def test_seed_binary_artifact_output_requires_content_type(db_session, cfg):
+async def test_seed_binary_artifact_output_allows_auto_content_type(db_session, cfg):
     tools, _ = cfg
-    _write(tools / "bad_export.md", """
+    _write(tools / "auto_export.md", """
         ---
-        name: bad_export
-        description: "Bad export"
+        name: auto_export
+        description: "Auto export"
         type: http
         endpoint: "https://api.example.com/export"
         artifact_output:
@@ -259,7 +259,89 @@ async def test_seed_binary_artifact_output_requires_content_type(db_session, cfg
         ---
     """)
 
-    with pytest.raises(SeedError, match="content_type"):
+    await _run(db_session, cfg)
+
+    member = (await db_session.execute(
+        select(ToolMember).where(ToolMember.unit_name == "auto_export")
+    )).scalar_one()
+    assert member.definition["artifact_output"] == {
+        "enabled": True,
+        "mode": "binary",
+        "content_type": None,
+        "filename": None,
+        "title": None,
+    }
+
+
+async def test_singleton_tool_seed_accepts_url_path_parameters(db_session, cfg):
+    tools, _ = cfg
+    _write(tools / "ragflow_download.md", """
+        ---
+        name: ragflow_download
+        description: "RAGFlow download"
+        type: http
+        endpoint: "https://ragflow.example.com/api/v1/datasets/{dataset_id}/documents/{document_id}"
+        parameters:
+          - name: dataset_id
+            type: string
+            required: true
+          - name: document_id
+            type: string
+            required: true
+        artifact_output:
+          enabled: true
+          mode: binary
+        ---
+    """)
+
+    await _run(db_session, cfg)
+
+    member = (await db_session.execute(
+        select(ToolMember).where(ToolMember.unit_name == "ragflow_download")
+    )).scalar_one()
+    assert member.definition["endpoint"].endswith(
+        "/datasets/{dataset_id}/documents/{document_id}"
+    )
+
+
+async def test_singleton_tool_seed_rejects_url_path_parameter_in_host(db_session, cfg):
+    tools, _ = cfg
+    _write(tools / "bad_host.md", """
+        ---
+        name: bad_host
+        description: "Bad host"
+        type: http
+        endpoint: "https://{host}/api/v1/documents/{document_id}"
+        parameters:
+          - name: host
+            type: string
+            required: true
+          - name: document_id
+            type: string
+            required: true
+        ---
+    """)
+
+    with pytest.raises(SeedError, match="only allowed in the path"):
+        await _run(db_session, cfg)
+
+
+async def test_singleton_tool_seed_rejects_undeclared_url_path_parameter(db_session, cfg):
+    tools, _ = cfg
+    _write(tools / "bad_path_param.md", """
+        ---
+        name: bad_path_param
+        description: "Bad path param"
+        type: http
+        endpoint: "https://api.example.com/datasets/{dataset_id}/documents/{document_id}"
+        parameters:
+          - name: dataset_id
+            type: string
+            required: true
+        ---
+    """)
+
+    with pytest.raises(SeedError, match="document_id.*declared parameter"):
         await _run(db_session, cfg)
 
 

@@ -22,6 +22,7 @@ from tools.custom.loader import load_custom_tool, load_custom_tools
 import jmespath
 from tools.custom.http_tool import HttpTool, HttpToolConfig, validate_response_extract
 from tools.custom.secrets import resolve_secrets, SecretResolutionError
+from tools.custom.url_template import validate_url_path_template
 
 
 # ============================================================
@@ -237,6 +238,52 @@ parameters:
             path = self._write_md(tmpdir, "bad_json.md", md)
 
             with pytest.raises(ValueError, match="payload.*default.*JSON object or array"):
+                load_custom_tool(path)
+
+    def test_path_parameter_endpoint_loads(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            md = """---
+name: ragflow_download
+description: "Download RAGFlow document"
+type: http
+endpoint: "https://ragflow.example.com/api/v1/datasets/{dataset_id}/documents/{document_id}"
+method: GET
+parameters:
+  - name: dataset_id
+    type: string
+    required: true
+  - name: document_id
+    type: string
+    required: true
+artifact_output:
+  enabled: true
+  mode: binary
+---
+"""
+            path = self._write_md(tmpdir, "ragflow_download.md", md)
+            tool = load_custom_tool(path)
+
+            assert isinstance(tool, HttpTool)
+            assert [p.name for p in tool.get_parameters()] == ["dataset_id", "document_id"]
+            assert tool._artifact_output["content_type"] is None
+
+    def test_path_parameter_endpoint_rejects_undeclared_param(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            md = """---
+name: ragflow_download
+description: "Download RAGFlow document"
+type: http
+endpoint: "https://ragflow.example.com/api/v1/datasets/{dataset_id}/documents/{document_id}"
+method: GET
+parameters:
+  - name: dataset_id
+    type: string
+    required: true
+---
+"""
+            path = self._write_md(tmpdir, "ragflow_download.md", md)
+
+            with pytest.raises(ValueError, match="document_id.*declared parameter"):
                 load_custom_tool(path)
 
     def test_permission_override(self):
@@ -734,6 +781,80 @@ class TestHttpToolEndpoint:
             "dataset_ids": ["c750d2f6752411f191e693d1a844b0ba"],
         }
 
+    async def test_path_params_substitute_and_are_not_sent_as_query(self, monkeypatch):
+        seen = {}
+
+        class _Client:
+            def __init__(self, *a, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def request(self, method, url, **kwargs):
+                seen.update(method=method, url=url, params=kwargs.get("params"))
+                return _FakeHttpxResponse()
+
+        monkeypatch.setattr("tools.custom.http_tool.httpx.AsyncClient", _Client)
+        tool = HttpTool(HttpToolConfig(
+            name="ragflow_download",
+            description="RAGFlow download",
+            permission="auto",
+            endpoint="http://10.0.0.1/api/v1/datasets/{dataset_id}/documents/{document_id}",
+            method="GET",
+            parameters=[
+                ToolParameter(name="dataset_id", type="string", description=""),
+                ToolParameter(name="document_id", type="string", description=""),
+                ToolParameter(name="view", type="string", description="", required=False),
+            ],
+        ))
+
+        result = await tool(
+            dataset_id="c750",
+            document_id="doc/1?raw=true",
+            view="metadata",
+        )
+
+        assert result.success is True
+        assert seen["url"] == (
+            "http://10.0.0.1/api/v1/datasets/c750/documents/doc%2F1%3Fraw%3Dtrue"
+        )
+        assert seen["params"] == {"view": "metadata"}
+
+    def test_url_path_template_rejects_host_placeholder(self):
+        with pytest.raises(ValueError, match="only allowed in the path"):
+            validate_url_path_template(
+                "https://{host}/api/v1/documents/{document_id}",
+                [
+                    {"name": "host", "type": "string", "required": True},
+                    {"name": "document_id", "type": "string", "required": True},
+                ],
+            )
+
+    def test_url_path_template_rejects_json_param(self):
+        with pytest.raises(ValueError, match="cannot use json"):
+            validate_url_path_template(
+                "https://ragflow.example.com/api/v1/datasets/{dataset_ids}",
+                [{"name": "dataset_ids", "type": "json", "required": True}],
+            )
+
+    def test_url_path_template_rejects_optional_param_without_default(self):
+        with pytest.raises(ValueError, match="required or have a default"):
+            validate_url_path_template(
+                "https://ragflow.example.com/api/v1/datasets/{dataset_id}",
+                [{"name": "dataset_id", "type": "string", "required": False}],
+            )
+
+    def test_url_path_template_rejects_empty_default(self):
+        with pytest.raises(ValueError, match="non-empty scalar"):
+            validate_url_path_template(
+                "https://ragflow.example.com/api/v1/datasets/{dataset_id}",
+                [{"name": "dataset_id", "type": "string", "required": True, "default": ""}],
+            )
+
     @staticmethod
     def _client_returning(payload):
         """返回一个固定吐 payload(JSON)的 httpx.AsyncClient 替身类。"""
@@ -876,3 +997,55 @@ class TestHttpToolEndpoint:
         assert result.artifact.content == ""
         assert result.artifact.content_type == "application/pdf"
         assert result.artifact.filename == "report.pdf"
+
+    async def test_binary_artifact_output_uses_response_headers_for_auto_fields(self, monkeypatch):
+        class _Resp:
+            status_code = 200
+            headers = {
+                "content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "content-disposition": 'attachment; filename="3.3 账户信息监测功能（含附录）.docx"',
+            }
+            text = "not used"
+            content = b"PK\x03\x04docx"
+
+            def raise_for_status(self):
+                pass
+
+        class _Client:
+            def __init__(self, *a, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def request(self, method, url, **kwargs):
+                return _Resp()
+
+        monkeypatch.setattr("tools.custom.http_tool.httpx.AsyncClient", _Client)
+        artifact_output = normalize_artifact_output_config({
+            "enabled": True,
+            "mode": "binary",
+        })
+        tool = HttpTool(HttpToolConfig(
+            name="ragflow_download",
+            description="RAGFlow download",
+            permission="auto",
+            endpoint="http://10.0.0.1/report",
+            method="GET",
+            parameters=[],
+            artifact_output=artifact_output,
+        ))
+
+        result = await tool.execute()
+
+        assert result.success is True
+        assert result.artifact is not None
+        assert result.artifact.blob == b"PK\x03\x04docx"
+        assert result.artifact.content_type == (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        assert result.artifact.filename == "3.3 账户信息监测功能（含附录）.docx"
+        assert result.artifact.title == "3.3 账户信息监测功能（含附录）"
