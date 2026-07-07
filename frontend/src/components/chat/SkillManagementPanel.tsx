@@ -119,7 +119,9 @@ export default function SkillManagementPanel() {
     );
     try {
       const updated = await setSkillEnabled(slug, next);
-      setSkills((list) => list.map((s) => (s.slug === slug ? updated : s)));
+      setSkills((list) =>
+        list.map((s) => (s.slug === slug ? { ...s, ...updated } : s)),
+      );
     } catch (err) {
       // 回滚
       setSkills((list) =>
