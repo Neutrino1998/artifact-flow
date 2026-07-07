@@ -238,6 +238,26 @@ class TestAdminImportSkill:
         assert after_close["my-skill"]["enabled"] is False
         assert after_close["my-skill"]["is_overridden"] is True
 
+    async def test_admin_import_shared_department_default_off(
+        self, admin_client: AsyncClient, db_session
+    ):
+        r = await admin_client.post(
+            "/api/v1/admin/skills/import",
+            data={"visibility": "department", "default_enabled": "false"},
+            files=_upload(_zip()),
+        )
+
+        assert r.status_code == 200, r.text
+        sk = r.json()["skill"]
+        assert sk["visibility"] == "department"
+        assert sk["default_enabled"] is False
+        assert sk["enabled"] is False
+        row = (await db_session.execute(
+            select(Skill).where(Skill.slug == "my-skill")
+        )).scalar_one()
+        assert row.visibility == "department"
+        assert row.default_enabled is False
+
     async def test_admin_import_quota_exempt(self, admin_client: AsyncClient, monkeypatch):
         monkeypatch.setattr(config, "ARTIFACT_USER_QUOTA_BYTES", 10)
         r = await admin_client.post("/api/v1/admin/skills/import", files=_upload(_zip()))
@@ -432,6 +452,43 @@ class TestExportSkill:
                           source="dynamic", owner_user_id=other.id, bundle=_zip())
         assert (await client.get("/api/v1/skills/theirs/export")).status_code == 404
         assert (await client.get("/api/v1/skills/ghost/export")).status_code == 404
+
+    async def test_admin_export_shared_department_bypasses_admin_visibility(
+        self, admin_client: AsyncClient, db_session
+    ):
+        blob = _zip(
+            "---\nname: dept-skill\ndescription: d\n---\nbody\n"
+        )
+        await _seed_skill(
+            db_session,
+            "dept-skill",
+            visibility="department",
+            source="dynamic",
+            bundle=blob,
+        )
+
+        assert (
+            await admin_client.get("/api/v1/skills/dept-skill/export")
+        ).status_code == 404
+        r = await admin_client.get("/api/v1/admin/skills/dept-skill/export")
+        assert r.status_code == 200, r.text
+        assert r.headers["content-type"] == "application/zip"
+        assert r.content == blob
+
+    async def test_admin_export_user_private_stays_out_of_shared_catalog(
+        self, admin_client: AsyncClient, db_session
+    ):
+        owner = await _add_user(db_session, "private-export-owner")
+        await _seed_skill(
+            db_session,
+            "private-skill",
+            visibility="private",
+            source="dynamic",
+            owner_user_id=owner.id,
+        )
+
+        r = await admin_client.get("/api/v1/admin/skills/private-skill/export")
+        assert r.status_code == 404
 
 
 class TestDeleteSkill:

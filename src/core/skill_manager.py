@@ -241,10 +241,17 @@ class SkillManager:
     # ------------------------------------------------------------------
 
     async def import_zip(
-        self, user_id: str, blob: bytes, filename: str, *, audience: str
+        self,
+        user_id: str,
+        blob: bytes,
+        filename: str,
+        *,
+        audience: str,
+        visibility: str | None = None,
+        default_enabled: bool | None = None,
     ) -> dict:
         """导入一个 skill zip。audience:"private"(user 通道,owner=本人、计配额)/
-        "marketplace"(admin 通道,public 共享、配额豁免)。
+        "marketplace"(admin 通道,共享、配额豁免)。
 
         管线:单 zip 字节上限(仅 private —— 信任分层,同 SKILL_BUNDLE_MAX_BYTES 注释)
         → 配额闸(仅 private)→ E-1 硬门 → slug 派生+校验 → allowed-tools 存在性 warn
@@ -252,6 +259,22 @@ class SkillManager:
         否则 grep 只见一条 4xx)。
         """
         where = filename or "upload.zip"
+        is_private = audience == "private"
+        shared_visibility = visibility or "public"
+        if not is_private and shared_visibility not in _ADMIN_SHARED_VISIBILITIES:
+            f = Finding(
+                "visibility.invalid",
+                "error",
+                f"visibility must be one of {sorted(_ADMIN_SHARED_VISIBILITIES)}",
+            )
+            logger.warning(
+                "Skill import rejected (422): user=%s %s", user_id, f.message
+            )
+            raise SkillValidationError(f.message, [f])
+        resolved_visibility = "private" if is_private else shared_visibility
+        resolved_default_enabled = (
+            True if is_private or default_enabled is None else default_enabled
+        )
 
         if audience == "private" and len(blob) > config.SKILL_BUNDLE_MAX_BYTES:
             f = Finding(
@@ -342,15 +365,14 @@ class SkillManager:
         # GET/list_for_user 不可能各算各的(reviewer:两处派生必漂移)。
         frontmatter = parsed.frontmatter
         meta = {k: v for k, v in frontmatter.items() if k not in _SKILL_CONSUMED_FM_KEYS} or None
-        is_private = audience == "private"
         info = SkillInfo(
             slug=slug,
             name=(frontmatter.get("name") or slug),
             description=frontmatter.get("description", ""),
-            visibility="private" if is_private else "public",
+            visibility=resolved_visibility,
             # private:owner-only 可见 ⇒ 直接进自己 L1,免 user_skill 行;
-            # marketplace:共享发布后默认进 L1,用户可用 user_skill 覆盖关闭。
-            default_enabled=True,
+            # marketplace:共享发布时由 admin 决定默认是否进 L1,用户可用 user_skill 覆盖。
+            default_enabled=resolved_default_enabled,
             owner_user_id=user_id if is_private else None,
             allowed_tools=allowed_tools,
             has_extra_files=has_extra_files(parsed.names, parsed.md_member),
@@ -403,6 +425,13 @@ class SkillManager:
         bundle = await self._repo.get_bundle(slug)
         if bundle is None:
             raise SkillNotFoundError(f"skill '{slug}' not found")
+        return bundle
+
+    async def export_admin_shared_bundle(self, slug: str) -> bytes:
+        """Admin export for the shared catalog, bypassing the admin user's dept scope."""
+        bundle = await self._repo.get_shared_bundle(slug)
+        if bundle is None:
+            raise SkillNotFoundError(f"shared skill '{slug}' not found")
         return bundle
 
     async def delete_skill(self, user_id: str, slug: str, *, as_admin: bool = False) -> None:

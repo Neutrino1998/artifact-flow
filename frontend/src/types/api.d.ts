@@ -789,7 +789,10 @@ export interface paths {
          *             "ts": ISO8601,
          *             "instance_id": str,        # 本次应答实例
          *             "shared": bool,            # True=Redis 舰队视图;False=单机本地视图
-         *             "instances": [ {<心跳 payload>, "status": "green|yellow|red"}, ... ],
+         *             "instances": [
+         *               {<心跳 payload>, "status": "green|yellow|red",
+         *                "status_reasons": [{"code": str, "label": str}, ...]}, ...
+         *             ],
          *         }
          */
         get: operations["list_instances_api_v1_admin_instances_get"];
@@ -939,9 +942,29 @@ export interface paths {
         put?: never;
         /**
          * Admin Import Skill
-         * @description 导入共享 skill(visibility=public、default_enabled=True、owner=null)。
+         * @description 导入共享 skill(owner=null),可指定 visibility/default_enabled 初始值。
          */
         post: operations["admin_import_skill_api_v1_admin_skills_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/skills/{slug}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin Export Skill
+         * @description 导出 shared catalog skill,不按当前 admin 的部门可见性过滤。
+         */
+        get: operations["admin_export_skill_api_v1_admin_skills__slug__export_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1723,6 +1746,17 @@ export interface components {
              * Format: binary
              */
             file: string;
+            /**
+             * Visibility
+             * @default public
+             * @enum {string}
+             */
+            visibility: "public" | "department";
+            /**
+             * Default Enabled
+             * @default true
+             */
+            default_enabled: boolean;
         };
         /** Body_bulk_import_users_api_v1_admin_users_bulk_import_post */
         Body_bulk_import_users_api_v1_admin_users_bulk_import_post: {
@@ -4672,6 +4706,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SkillImportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_export_skill_api_v1_admin_skills__slug__export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

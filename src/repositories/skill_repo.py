@@ -52,6 +52,18 @@ class SkillRepository:
             )
         ).scalar_one_or_none()
 
+    async def get_shared_bundle(self, slug: str) -> Optional[bytes]:
+        """Admin shared-catalog export: shared public/department skill bundle only."""
+        return (
+            await self._session.execute(
+                select(Skill.bundle).where(
+                    Skill.slug == slug,
+                    Skill.owner_user_id.is_(None),
+                    Skill.visibility.in_(["public", "department"]),
+                )
+            )
+        ).scalar_one_or_none()
+
     async def get_user_bundle_bytes(self, user_id: str) -> int:
         """该用户私有 skill bundle 的总字节(导入配额记账,E-2)。与 artifact blob 共用
         一个池(config.ARTIFACT_USER_QUOTA_BYTES),聚合口径在 ConversationManager.

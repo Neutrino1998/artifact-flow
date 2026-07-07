@@ -8,6 +8,8 @@ import {
   downloadSkillBundle,
   deleteSkill,
   adminDeleteSkill,
+  adminListSkills,
+  adminUpdateSkill,
   ApiError,
 } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
@@ -16,16 +18,66 @@ import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
 import { triggerBlobDownload } from '@/lib/download';
 import { PillBadge } from '@/components/ui/PillBadge';
 import { SwitchTrack } from '@/components/ui/SwitchTrack';
+import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
 import PanelSearchBar from './PanelSearchBar';
-import type { SkillItem, SkillFindingItem, SkillImportResponse } from '@/types';
+import type {
+  AdminSkillItem,
+  AdminSkillUpdateRequest,
+  SkillItem,
+  SkillFindingItem,
+  SkillImportResponse,
+} from '@/types';
+
+type SharedVisibility = 'public' | 'department';
+type SkillRow = SkillItem & {
+  adminShared?: AdminSkillItem;
+  adminOnly?: boolean;
+};
+
+const VISIBILITY_OPTIONS = [
+  { value: 'public', label: '公开' },
+  { value: 'department', label: '部门' },
+] as const;
+
+function mergeSkillRows(
+  visibleSkills: SkillItem[],
+  adminSharedSkills: AdminSkillItem[] = [],
+): SkillRow[] {
+  const adminBySlug = new Map(adminSharedSkills.map((s) => [s.slug, s]));
+  const visibleSlugs = new Set(visibleSkills.map((s) => s.slug));
+  const rows: SkillRow[] = visibleSkills.map((skill) => ({
+    ...skill,
+    adminShared: adminBySlug.get(skill.slug),
+  }));
+
+  for (const adminSkill of adminSharedSkills) {
+    if (visibleSlugs.has(adminSkill.slug)) continue;
+    rows.push({
+      slug: adminSkill.slug,
+      name: adminSkill.name,
+      description: adminSkill.description,
+      enabled: adminSkill.default_enabled,
+      default_enabled: adminSkill.default_enabled,
+      is_overridden: false,
+      source: adminSkill.source,
+      has_extra_files: adminSkill.has_extra_files,
+      visibility: adminSkill.visibility,
+      is_owner: false,
+      adminShared: adminSkill,
+      adminOnly: true,
+    });
+  }
+
+  return rows;
+}
 
 // 用户侧技能管理(C-3 列举/toggle + E-2 导入/导出/删除)。中间面板接管(同
 // ConversationBrowser),全用户可见。个人开关写 user_skill 覆盖,控 `enabled`
 // (进不进模型 L1 索引 + 对话内激活选择器),不碰 `visible`(系统定)。
-// 导入:user 私有(仅自己可见、立即启用)/ admin 可选共享(public、默认开);
+// 导入:user 私有(仅自己可见、立即启用)/ admin 可选共享(public/department、默认开关);
 // 硬门拒收 → 422 结构化 findings 逐条渲染。seeded skill 归 config 只读。
 export default function SkillManagementPanel() {
-  const [skills, setSkills] = useState<SkillItem[]>([]);
+  const [skills, setSkills] = useState<SkillRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -42,15 +94,18 @@ export default function SkillManagementPanel() {
 
   const fetchSkills = useCallback(async () => {
     try {
-      const data = await getSkills();
-      setSkills(data.skills);
+      const [visibleData, adminData] = await Promise.all([
+        getSkills(),
+        isAdmin ? adminListSkills() : Promise.resolve(null),
+      ]);
+      setSkills(mergeSkillRows(visibleData.skills, adminData?.skills ?? []));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载技能失败');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     fetchSkills();
@@ -80,15 +135,38 @@ export default function SkillManagementPanel() {
     }
   }, []);
 
-  const handleExport = useCallback(async (slug: string) => {
+  const handleExport = useCallback(async (skill: SkillRow) => {
     setRowError(null);
     try {
-      const blob = await downloadSkillBundle(slug);
-      triggerBlobDownload(`${slug}.zip`, blob);
+      const blob = await downloadSkillBundle(skill.slug, {
+        admin: Boolean(skill.adminShared),
+      });
+      triggerBlobDownload(`${skill.slug}.zip`, blob);
     } catch (err) {
       setRowError(err instanceof Error ? err.message : '导出失败');
     }
   }, []);
+
+  const handleAdminUpdate = useCallback(
+    async (skill: SkillRow, patch: AdminSkillUpdateRequest) => {
+      if (!skill.adminShared?.can_edit) return;
+      setRowError(null);
+      setPending((p) => new Set(p).add(skill.slug));
+      try {
+        await adminUpdateSkill(skill.slug, patch);
+        await fetchSkills();
+      } catch (err) {
+        setRowError(err instanceof Error ? err.message : '更新共享技能失败');
+      } finally {
+        setPending((p) => {
+          const n = new Set(p);
+          n.delete(skill.slug);
+          return n;
+        });
+      }
+    },
+    [fetchSkills],
+  );
 
   const handleDelete = useCallback(
     async (skill: SkillItem) => {
@@ -198,6 +276,10 @@ export default function SkillManagementPanel() {
             const deletable =
               skill.source === 'dynamic' && (skill.is_owner || isAdmin);
             const confirming = confirmingDelete === skill.slug;
+            const adminShared = skill.adminShared;
+            const canAdminEdit = Boolean(adminShared?.can_edit);
+            const canUsePersonalToggle = !skill.adminOnly;
+            const exportable = !skill.adminOnly || Boolean(adminShared);
             return (
               <div
                 key={skill.slug}
@@ -212,6 +294,14 @@ export default function SkillManagementPanel() {
                     <span className="text-sm font-medium text-text-primary dark:text-text-primary-dark truncate">
                       {skill.name}
                     </span>
+                    {skill.adminOnly && (
+                      <PillBadge
+                        tone="warning"
+                        title="当前账号不可见，但管理员仍可在共享目录中管理它"
+                      >
+                        管理项
+                      </PillBadge>
+                    )}
                     {skill.source === 'dynamic' && (
                       <PillBadge
                         tone="accent"
@@ -224,27 +314,81 @@ export default function SkillManagementPanel() {
                         {skill.visibility === 'private' ? '私有导入' : '导入'}
                       </PillBadge>
                     )}
+                    {skill.visibility !== 'private' && (
+                      <PillBadge
+                        tone={skill.visibility === 'department' ? 'warning' : 'neutral'}
+                        title={
+                          skill.visibility === 'department'
+                            ? '部门可见：默认不可用，需要部门授权'
+                            : '公开可见：默认全员可用，可被部门排除'
+                        }
+                      >
+                        {skill.visibility === 'department' ? '部门' : '公开'}
+                      </PillBadge>
+                    )}
                   </div>
                   {skill.description && (
                     <p className="mt-0.5 text-xs text-text-secondary dark:text-text-secondary-dark line-clamp-2">
                       {skill.description}
                     </p>
                   )}
+                  {adminShared && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <SegmentedTabs<SharedVisibility>
+                        value={adminShared.visibility}
+                        options={VISIBILITY_OPTIONS.map((option) => ({
+                          ...option,
+                          disabled: busy || !canAdminEdit,
+                          title: canAdminEdit
+                            ? undefined
+                            : 'seeded skill 由 config 管理，不能在界面编辑',
+                        }))}
+                        onChange={(visibility) =>
+                          handleAdminUpdate(skill, { visibility })
+                        }
+                        ariaLabel={`设置共享技能 ${skill.name} 的可见度`}
+                        className="shrink-0"
+                      />
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={adminShared.default_enabled}
+                        aria-label={`${adminShared.default_enabled ? '关闭' : '开启'}共享技能 ${skill.name} 的默认启用`}
+                        disabled={busy || !canAdminEdit}
+                        onClick={() =>
+                          handleAdminUpdate(skill, {
+                            default_enabled: !adminShared.default_enabled,
+                          })
+                        }
+                        title={
+                          canAdminEdit
+                            ? '控制该共享技能是否默认进入用户的可激活技能列表'
+                            : 'seeded skill 由 config 管理，不能在界面编辑'
+                        }
+                        className="inline-flex items-center gap-2 rounded-lg bg-panel-accent dark:bg-surface-dark px-2 py-1 text-xs text-text-secondary dark:text-text-secondary-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <span>{adminShared.default_enabled ? '默认开' : '默认关'}</span>
+                        <SwitchTrack checked={adminShared.default_enabled} />
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Row actions */}
                 <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
-                  <button
-                    onClick={() => handleExport(skill.slug)}
-                    disabled={busy}
-                    className="h-6 w-6 flex items-center justify-center rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors disabled:opacity-40"
-                    aria-label={`导出技能 ${skill.name}`}
-                    title={skill.has_extra_files ? '导出技能包' : '导出单文件技能'}
-                  >
-                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 13h11" />
-                    </svg>
-                  </button>
+                  {exportable && (
+                    <button
+                      onClick={() => handleExport(skill)}
+                      disabled={busy}
+                      className="h-6 w-6 flex items-center justify-center rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors disabled:opacity-40"
+                      aria-label={`导出技能 ${skill.name}`}
+                      title={skill.has_extra_files ? '导出技能包' : '导出单文件技能'}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 13h11" />
+                      </svg>
+                    </button>
+                  )}
                   {deletable && (
                     <button
                       onClick={() => handleDelete(skill)}
@@ -270,17 +414,26 @@ export default function SkillManagementPanel() {
                 </div>
 
                 {/* Enable switch */}
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={skill.enabled}
-                  aria-label={`${skill.enabled ? '关闭' : '开启'}技能 ${skill.name}`}
-                  disabled={busy}
-                  onClick={() => handleToggle(skill.slug, !skill.enabled)}
-                  className="flex-shrink-0 mt-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <SwitchTrack checked={skill.enabled} />
-                </button>
+                {canUsePersonalToggle ? (
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={skill.enabled}
+                    aria-label={`${skill.enabled ? '关闭' : '开启'}技能 ${skill.name}`}
+                    disabled={busy}
+                    onClick={() => handleToggle(skill.slug, !skill.enabled)}
+                    className="flex-shrink-0 mt-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <SwitchTrack checked={skill.enabled} />
+                  </button>
+                ) : (
+                  <span
+                    className="mt-1 flex-shrink-0 text-[11px] text-text-tertiary dark:text-text-tertiary-dark"
+                    title="当前账号不在该 skill 的可见范围内"
+                  >
+                    不可见
+                  </span>
+                )}
               </div>
             );
           })}
@@ -311,6 +464,8 @@ function SkillImportCard({
   const [stage, setStage] = useState<ImportStage>({ kind: 'pick' });
   const [file, setFile] = useState<File | null>(null);
   const [marketplace, setMarketplace] = useState(false);
+  const [sharedVisibility, setSharedVisibility] = useState<SharedVisibility>('public');
+  const [sharedDefaultEnabled, setSharedDefaultEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
   /** 硬门拒收的结构化 findings(422 detail),按 severity 渲染 */
   const [rejectFindings, setRejectFindings] = useState<SkillFindingItem[] | null>(null);
@@ -344,7 +499,15 @@ function SkillImportCard({
     setError(null);
     setRejectFindings(null);
     try {
-      const data = await importSkill(file, { marketplace });
+      const data = await importSkill(file, {
+        marketplace,
+        ...(marketplace
+          ? {
+              visibility: sharedVisibility,
+              defaultEnabled: sharedDefaultEnabled,
+            }
+          : {}),
+      });
       setStage({ kind: 'result', data });
       onImported();
     } catch (err) {
@@ -368,7 +531,14 @@ function SkillImportCard({
       }
       setError(err instanceof Error ? err.message : '导入失败');
     }
-  }, [file, marketplace, onImported, clearNativeInput]);
+  }, [
+    file,
+    marketplace,
+    sharedDefaultEnabled,
+    sharedVisibility,
+    onImported,
+    clearNativeInput,
+  ]);
 
   const reset = useCallback(() => {
     setStage({ kind: 'pick' });
@@ -442,28 +612,51 @@ function SkillImportCard({
           </div>
 
           {isAdmin && (
-            <button
-              type="button"
-              role="switch"
-              aria-checked={marketplace}
-              aria-label="导入为共享技能"
-              onClick={() => setMarketplace((v) => !v)}
-              className={`flex w-full items-center justify-between gap-3 rounded-lg border bg-chat dark:bg-chat-dark px-3 py-2 text-left transition-colors ${
-                marketplace
-                  ? 'border-accent/60'
-                  : 'border-border dark:border-border-dark hover:border-accent/40 dark:hover:border-accent/50'
-              }`}
-            >
-              <span className="min-w-0">
-                <span className="block text-sm font-medium text-text-primary dark:text-text-primary-dark">
-                  导入为共享技能
+            <div className="space-y-2">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={marketplace}
+                aria-label="导入为共享技能"
+                onClick={() => setMarketplace((v) => !v)}
+                className={`flex w-full items-center justify-between gap-3 rounded-lg border bg-chat dark:bg-chat-dark px-3 py-2 text-left transition-colors ${
+                  marketplace
+                    ? 'border-accent/60'
+                    : 'border-border dark:border-border-dark hover:border-accent/40 dark:hover:border-accent/50'
+                }`}
+              >
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-text-primary dark:text-text-primary-dark">
+                    导入为共享技能
+                  </span>
+                  <span className="block text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                    管理员可配置公开或部门可见
+                  </span>
                 </span>
-                <span className="block text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                  全员可见，默认开启，各自选择关闭
-                </span>
-              </span>
-              <SwitchTrack checked={marketplace} />
-            </button>
+                <SwitchTrack checked={marketplace} />
+              </button>
+              {marketplace && (
+                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border dark:border-border-dark bg-chat dark:bg-chat-dark px-3 py-2">
+                  <SegmentedTabs<SharedVisibility>
+                    value={sharedVisibility}
+                    options={VISIBILITY_OPTIONS}
+                    onChange={setSharedVisibility}
+                    ariaLabel="导入共享技能可见度"
+                  />
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={sharedDefaultEnabled}
+                    aria-label="导入后默认启用"
+                    onClick={() => setSharedDefaultEnabled((v) => !v)}
+                    className="inline-flex items-center gap-2 rounded-lg bg-panel-accent dark:bg-surface-dark px-2 py-1 text-xs text-text-secondary dark:text-text-secondary-dark"
+                  >
+                    <span>{sharedDefaultEnabled ? '默认开' : '默认关'}</span>
+                    <SwitchTrack checked={sharedDefaultEnabled} />
+                  </button>
+                </div>
+              )}
+            </div>
           )}
 
           {error && <div className="text-status-error text-xs">{error}</div>}
@@ -497,7 +690,7 @@ function SkillImportCard({
             <span className="font-medium">{stage.data.skill.name}</span>
             {stage.data.skill.visibility === 'private'
               ? '（私有，已启用）'
-              : '（共享，默认开启）'}
+              : `（共享，${stage.data.skill.visibility === 'department' ? '部门可见' : '公开可见'}，${stage.data.skill.default_enabled ? '默认开启' : '默认关闭'}）`}
           </div>
           {stage.data.findings.length > 0 && (
             <>

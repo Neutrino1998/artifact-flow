@@ -217,8 +217,8 @@ export function setSkillEnabled(slug: string, enabled: boolean) {
 }
 
 /**
- * 导入 skill zip（E-2）。marketplace=true 走 admin 共享通道（public、默认开、
- * 全员可见、个人可关闭）；否则私有导入（仅自己可见、立即启用）。
+ * 导入 skill zip（E-2）。marketplace=true 走 admin 共享通道（可指定
+ * public/department 与默认开关）；否则私有导入（仅自己可见、立即启用）。
  *
  * 错误（detail 由 SkillManager 结构化产出）：
  * - 422 + dict detail（`{message, findings[]}`）→ 硬门拒收，ApiError.body 给 UI
@@ -227,10 +227,20 @@ export function setSkillEnabled(slug: string, enabled: boolean) {
  */
 export async function importSkill(
   file: File,
-  opts?: { marketplace?: boolean },
+  opts?: {
+    marketplace?: boolean;
+    visibility?: 'public' | 'department';
+    defaultEnabled?: boolean;
+  },
 ): Promise<SkillImportResponse> {
   const formData = new FormData();
   formData.append('file', file);
+  if (opts?.marketplace) {
+    if (opts.visibility) formData.append('visibility', opts.visibility);
+    if (opts.defaultEnabled !== undefined) {
+      formData.append('default_enabled', String(opts.defaultEnabled));
+    }
+  }
   const path = opts?.marketplace
     ? '/api/v1/admin/skills/import'
     : '/api/v1/skills/import';
@@ -255,9 +265,15 @@ export async function importSkill(
 }
 
 /** 导出后端保存的 skill zip。 */
-export async function downloadSkillBundle(slug: string): Promise<Blob> {
+export async function downloadSkillBundle(
+  slug: string,
+  opts?: { admin?: boolean },
+): Promise<Blob> {
+  const path = opts?.admin
+    ? `/api/v1/admin/skills/${encodeURIComponent(slug)}/export`
+    : `/api/v1/skills/${encodeURIComponent(slug)}/export`;
   const res = await fetch(
-    `${BASE_URL}/api/v1/skills/${encodeURIComponent(slug)}/export`,
+    `${BASE_URL}${path}`,
     { headers: authHeaders() },
   );
   if (res.status === 401) {

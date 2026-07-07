@@ -1883,7 +1883,7 @@
           "admin"
         ],
         "summary": "List Instances",
-        "description": "\u8230\u961f\u5b9e\u4f8b\u9762\u677f\u6570\u636e\u6e90(Phase C \u51b3\u7b56 4)\u3002\n\n\u591a\u526f\u672c(Redis):scan `{prefix:instance:*}` + pipelined GET fan-out(\u955c\u50cf\nRedisRuntimeStore.list_active_executions,Cluster-safe \u2014\u2014 \u65e0\u8de8 slot \u591a key \u64cd\u4f5c),\n\u6bcf\u6761\u5fc3\u8df3 payload \u8bfb\u4fa7\u9644\u4e00\u4e2a status(green/yellow/red)\u3002\n\u5355\u673a(InMemory,\u65e0 Redis):\u6ca1\u6709\u6ce8\u518c\u8868\u53ef scan,\u7528\u672c\u673a\u6700\u8fd1 snapshot \u9020\u51fa\u552f\u4e00\u4e00\u884c\u3002\n\nResponse:\n    {\n        \"ts\": ISO8601,\n        \"instance_id\": str,        # \u672c\u6b21\u5e94\u7b54\u5b9e\u4f8b\n        \"shared\": bool,            # True=Redis \u8230\u961f\u89c6\u56fe;False=\u5355\u673a\u672c\u5730\u89c6\u56fe\n        \"instances\": [ {<\u5fc3\u8df3 payload>, \"status\": \"green|yellow|red\"}, ... ],\n    }",
+        "description": "\u8230\u961f\u5b9e\u4f8b\u9762\u677f\u6570\u636e\u6e90(Phase C \u51b3\u7b56 4)\u3002\n\n\u591a\u526f\u672c(Redis):scan `{prefix:instance:*}` + pipelined GET fan-out(\u955c\u50cf\nRedisRuntimeStore.list_active_executions,Cluster-safe \u2014\u2014 \u65e0\u8de8 slot \u591a key \u64cd\u4f5c),\n\u6bcf\u6761\u5fc3\u8df3 payload \u8bfb\u4fa7\u9644\u4e00\u4e2a status(green/yellow/red)\u3002\n\u5355\u673a(InMemory,\u65e0 Redis):\u6ca1\u6709\u6ce8\u518c\u8868\u53ef scan,\u7528\u672c\u673a\u6700\u8fd1 snapshot \u9020\u51fa\u552f\u4e00\u4e00\u884c\u3002\n\nResponse:\n    {\n        \"ts\": ISO8601,\n        \"instance_id\": str,        # \u672c\u6b21\u5e94\u7b54\u5b9e\u4f8b\n        \"shared\": bool,            # True=Redis \u8230\u961f\u89c6\u56fe;False=\u5355\u673a\u672c\u5730\u89c6\u56fe\n        \"instances\": [\n          {<\u5fc3\u8df3 payload>, \"status\": \"green|yellow|red\",\n           \"status_reasons\": [{\"code\": str, \"label\": str}, ...]}, ...\n        ],\n    }",
         "operationId": "list_instances_api_v1_admin_instances_get",
         "responses": {
           "200": {
@@ -2439,7 +2439,7 @@
           "admin"
         ],
         "summary": "Admin Import Skill",
-        "description": "\u5bfc\u5165\u5171\u4eab skill(visibility=public\u3001default_enabled=True\u3001owner=null)\u3002",
+        "description": "\u5bfc\u5165\u5171\u4eab skill(owner=null),\u53ef\u6307\u5b9a visibility/default_enabled \u521d\u59cb\u503c\u3002",
         "operationId": "admin_import_skill_api_v1_admin_skills_import_post",
         "requestBody": {
           "content": {
@@ -2478,6 +2478,52 @@
             "HTTPBearer": []
           }
         ]
+      }
+    },
+    "/api/v1/admin/skills/{slug}/export": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Export Skill",
+        "description": "\u5bfc\u51fa shared catalog skill,\u4e0d\u6309\u5f53\u524d admin \u7684\u90e8\u95e8\u53ef\u89c1\u6027\u8fc7\u6ee4\u3002",
+        "operationId": "admin_export_skill_api_v1_admin_skills__slug__export_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/admin/skills/{slug}": {
@@ -4272,11 +4318,27 @@
             "type": "string",
             "format": "binary",
             "title": "File"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "department"
+            ],
+            "title": "Visibility",
+            "default": "public"
+          },
+          "default_enabled": {
+            "type": "boolean",
+            "title": "Default Enabled",
+            "default": true
           }
         },
         "type": "object",
         "required": [
-          "file"
+          "file",
+          "visibility",
+          "default_enabled"
         ],
         "title": "Body_admin_import_skill_api_v1_admin_skills_import_post"
       },
