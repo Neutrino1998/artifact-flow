@@ -10,7 +10,8 @@ from sqlalchemy import select
 
 from api.services.auth import hash_password
 from config import config
-from db.models import Skill, User, UserSkill
+from core.skill_manager import SkillManager
+from db.models import Department, DepartmentSkillRule, Skill, User, UserSkill
 from utils.skill_validator import validate_skill_zip
 
 
@@ -245,6 +246,158 @@ class TestAdminImportSkill:
     async def test_non_admin_403(self, client: AsyncClient):
         r = await client.post("/api/v1/admin/skills/import", files=_upload(_zip()))
         assert r.status_code == 403
+
+
+class TestAdminSharedSkillManagement:
+    async def test_list_shared_skills_only(
+        self, admin_client: AsyncClient, db_session, test_user: User
+    ):
+        await _seed_skill(db_session, "seeded")
+        await _seed_skill(db_session, "dynamic", source="dynamic")
+        await _seed_skill(
+            db_session,
+            "dept-only",
+            visibility="department",
+            source="dynamic",
+            default_enabled=False,
+        )
+        await _seed_skill(
+            db_session,
+            "private",
+            visibility="private",
+            source="dynamic",
+            owner_user_id=test_user.id,
+        )
+
+        r = await admin_client.get("/api/v1/admin/skills")
+
+        assert r.status_code == 200
+        items = {s["slug"]: s for s in r.json()["skills"]}
+        assert set(items) == {"dept-only", "dynamic", "seeded"}
+        assert items["seeded"]["can_edit"] is False
+        assert items["dynamic"]["can_edit"] is True
+        assert items["dept-only"]["visibility"] == "department"
+        assert items["dept-only"]["default_enabled"] is False
+
+    async def test_patch_dynamic_shared_updates_and_clears_dept_rules(
+        self, admin_client: AsyncClient, db_session, test_user: User
+    ):
+        await _seed_skill(db_session, "shared", source="dynamic")
+        db_session.add(Department(id="dept-a", name="Dept A"))
+        db_session.add(DepartmentSkillRule(department_id="dept-a", skill_slug="shared"))
+        db_session.add(UserSkill(
+            user_id=test_user.id, skill_slug="shared", enabled=False
+        ))
+        await db_session.commit()
+
+        r = await admin_client.patch(
+            "/api/v1/admin/skills/shared",
+            json={"visibility": "department", "default_enabled": False},
+        )
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["visibility"] == "department"
+        assert body["default_enabled"] is False
+        row = (await db_session.execute(
+            select(Skill).where(Skill.slug == "shared")
+        )).scalar_one()
+        assert row.visibility == "department"
+        assert row.default_enabled is False
+        assert (await db_session.execute(
+            select(DepartmentSkillRule).where(
+                DepartmentSkillRule.skill_slug == "shared"
+            )
+        )).scalar_one_or_none() is None
+        assert (await db_session.execute(
+            select(UserSkill).where(UserSkill.skill_slug == "shared")
+        )).scalar_one_or_none() is not None
+
+    async def test_patch_default_enabled_only_keeps_dept_rules(
+        self, admin_client: AsyncClient, db_session
+    ):
+        await _seed_skill(
+            db_session, "shared", visibility="department", source="dynamic"
+        )
+        db_session.add(Department(id="dept-a", name="Dept A"))
+        db_session.add(DepartmentSkillRule(department_id="dept-a", skill_slug="shared"))
+        await db_session.commit()
+
+        r = await admin_client.patch(
+            "/api/v1/admin/skills/shared", json={"default_enabled": False}
+        )
+
+        assert r.status_code == 200, r.text
+        assert r.json()["default_enabled"] is False
+        assert (await db_session.execute(
+            select(DepartmentSkillRule).where(
+                DepartmentSkillRule.department_id == "dept-a",
+                DepartmentSkillRule.skill_slug == "shared",
+            )
+        )).scalar_one_or_none() is not None
+
+    async def test_patch_seeded_400(self, admin_client: AsyncClient, db_session):
+        await _seed_skill(db_session, "seeded")
+
+        r = await admin_client.patch(
+            "/api/v1/admin/skills/seeded", json={"default_enabled": False}
+        )
+
+        assert r.status_code == 400
+        assert "config" in r.json()["detail"]
+
+    async def test_patch_private_dynamic_400(
+        self, admin_client: AsyncClient, db_session, test_user: User
+    ):
+        await _seed_skill(
+            db_session,
+            "private",
+            visibility="private",
+            source="dynamic",
+            owner_user_id=test_user.id,
+        )
+
+        r = await admin_client.patch(
+            "/api/v1/admin/skills/private", json={"visibility": "public"}
+        )
+
+        assert r.status_code == 400
+        assert "user-owned" in r.json()["detail"]
+
+    async def test_patch_missing_404(self, admin_client: AsyncClient):
+        r = await admin_client.patch(
+            "/api/v1/admin/skills/ghost", json={"default_enabled": False}
+        )
+
+        assert r.status_code == 404
+
+    async def test_non_admin_blocked(self, client: AsyncClient):
+        assert (await client.get("/api/v1/admin/skills")).status_code == 403
+        r = await client.patch(
+            "/api/v1/admin/skills/x", json={"default_enabled": False}
+        )
+        assert r.status_code == 403
+
+    async def test_update_dynamic_shared_uses_locked_skill_read(
+        self, db_session, monkeypatch
+    ):
+        await _seed_skill(db_session, "shared", source="dynamic")
+        mgr = SkillManager(db_session)
+        original = mgr._repo.get_skill_for_update
+        called = False
+
+        async def tracked(slug: str):
+            nonlocal called
+            called = True
+            return await original(slug)
+
+        monkeypatch.setattr(mgr._repo, "get_skill_for_update", tracked)
+
+        await mgr.update_admin_shared(
+            "admin-user", "shared", default_enabled=False
+        )
+
+        assert called is True
 
 
 class TestExportSkill:

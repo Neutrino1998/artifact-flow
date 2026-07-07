@@ -66,6 +66,13 @@ class DepartmentAccessRepository:
     async def get_skill(self, slug: str) -> Skill | None:
         return await self._session.get(Skill, slug)
 
+    async def get_skill_for_update(self, slug: str) -> Skill | None:
+        return (
+            await self._session.execute(
+                select(Skill).where(Skill.slug == slug).with_for_update()
+            )
+        ).scalar_one_or_none()
+
     async def get_unit(self, name: str) -> ToolUnit | None:
         return await self._session.get(ToolUnit, name)
 

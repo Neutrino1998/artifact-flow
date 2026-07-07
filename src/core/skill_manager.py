@@ -39,6 +39,7 @@ from utils.skill_validator import (
 from utils.skill_zip import has_extra_files
 
 logger = get_logger("ArtifactFlow")
+_ADMIN_SHARED_VISIBILITIES = {"public", "department"}
 
 
 class SkillManagerError(Exception):
@@ -111,6 +112,19 @@ class SkillManager:
             "is_owner": info.owner_user_id == user_id,
         }
 
+    @staticmethod
+    def _serialize_admin_shared(row) -> dict:
+        return {
+            "slug": row.slug,
+            "name": row.name,
+            "description": row.description,
+            "visibility": row.visibility,
+            "default_enabled": row.default_enabled,
+            "source": row.source,
+            "has_extra_files": row.has_extra_files,
+            "can_edit": row.source == "dynamic" and row.owner_user_id is None,
+        }
+
     async def list_for_user(self, user_id: str) -> List[dict]:
         """列出该用户**可见**的 skill + 有效启用态(供设置页;保 snapshot 的 slug 顺序)。"""
         eff, overrides = await self._resolve(user_id)
@@ -121,6 +135,96 @@ class SkillManager:
             )
             for slug, info in eff.visible.items()
         ]
+
+    async def list_admin_shared(self) -> List[dict]:
+        """Admin catalog of shared skills; not filtered by the admin user's department."""
+        return [
+            self._serialize_admin_shared(row)
+            for row in await self._repo.list_shared_skills()
+        ]
+
+    async def update_admin_shared(
+        self,
+        user_id: str,
+        slug: str,
+        *,
+        visibility: str | None = None,
+        default_enabled: bool | None = None,
+    ) -> dict:
+        """Update dynamic shared skill definition fields.
+
+        Only `visibility` and `default_enabled` are mutable here. Seeded skills remain
+        config-owned; private/user-owned skills are outside the shared admin catalog.
+        Changing visibility clears department rules so old exception rows cannot flip
+        direction from deny to grant or back.
+        """
+        if visibility is None and default_enabled is None:
+            logger.warning(
+                "Admin shared skill update rejected (400): slug=%s no mutable fields "
+                "provided by user=%s",
+                slug, user_id,
+            )
+            raise SkillManagerError(
+                "at least one of 'visibility' or 'default_enabled' must be provided"
+            )
+        if visibility is not None and visibility not in _ADMIN_SHARED_VISIBILITIES:
+            logger.warning(
+                "Admin shared skill update rejected (400): slug=%s invalid "
+                "visibility=%r by user=%s",
+                slug, visibility, user_id,
+            )
+            raise SkillManagerError(
+                f"visibility must be one of {sorted(_ADMIN_SHARED_VISIBILITIES)}"
+            )
+
+        row = await self._repo.get_skill_for_update(slug)
+        if row is None:
+            raise SkillNotFoundError(f"skill '{slug}' not found")
+
+        if row.owner_user_id is not None or row.visibility == "private":
+            logger.warning(
+                "Admin shared skill update rejected (400): slug=%s is private/user-owned, "
+                "user=%s",
+                slug, user_id,
+            )
+            raise SkillManagerError(
+                f"skill '{slug}' is user-owned and cannot be edited as a shared skill"
+            )
+        if row.source == "seeded":
+            logger.warning(
+                "Admin shared skill update rejected (400): slug=%s is seeded "
+                "(config-owned), user=%s",
+                slug, user_id,
+            )
+            raise SkillManagerError(
+                f"skill '{slug}' 由 config 种子管理，不能在界面编辑"
+                "（改 config/skills/ 后重启生效）"
+            )
+        if row.source != "dynamic":
+            logger.warning(
+                "Admin shared skill update rejected (400): slug=%s has unsupported "
+                "source=%r, user=%s",
+                slug, row.source, user_id,
+            )
+            raise SkillManagerError(
+                f"skill '{slug}' has unsupported source '{row.source}'"
+            )
+
+        if visibility is not None and row.visibility != visibility:
+            old_visibility = row.visibility
+            await self._repo.clear_dept_rules(slug)
+            row.visibility = visibility
+            logger.info(
+                "Skill '%s' visibility changed ('%s' → '%s'); department rules "
+                "cleared by user=%s",
+                slug, old_visibility, visibility, user_id,
+            )
+        if default_enabled is not None:
+            row.default_enabled = default_enabled
+
+        await self._session.commit()
+        logger.info("Admin shared skill updated: slug=%s by user=%s", slug, user_id)
+        return self._serialize_admin_shared(row)
 
     async def set_enabled(self, user_id: str, slug: str, enabled: bool) -> dict:
         """个人 enable/disable(写 user_skill 覆盖)。不可见 → 404(不泄露存在性)。"""

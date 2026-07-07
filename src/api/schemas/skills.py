@@ -1,6 +1,6 @@
-"""Skill 管理 schemas:列可见 skill + 个人 toggle(C-3),导入/导出/删除(E-2)。"""
+"""Skill 管理 schemas:用户侧 skill 管理 + admin 共享 skill 管理。"""
 
-from typing import List
+from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -73,4 +73,43 @@ class SkillImportResponse(BaseModel):
     skill: SkillItem = Field(..., description="The imported skill as it appears in the list.")
     findings: List[FindingItem] = Field(
         ..., description="Non-blocking warnings surfaced by the validator (may be empty)."
+    )
+
+
+class AdminSkillItem(BaseModel):
+    """Admin shared skill catalog item (not filtered by the admin user's department)."""
+    slug: str = Field(..., description="Skill slug (natural key)")
+    name: str = Field(..., description="Display name")
+    description: str = Field(..., description="One-line description")
+    visibility: Literal["public", "department"] = Field(
+        ..., description="public (default allow) or department (default deny)"
+    )
+    default_enabled: bool = Field(
+        ..., description="Whether this shared skill enters users' L1 index by default"
+    )
+    source: Literal["seeded", "dynamic"] = Field(
+        ..., description="seeded skills are config-owned; dynamic shared skills are editable"
+    )
+    has_extra_files: bool = Field(
+        ..., description="Whether the skill bundle contains files beyond SKILL.md"
+    )
+    can_edit: bool = Field(
+        ..., description="True only for dynamic shared skills"
+    )
+
+
+class AdminSkillListResponse(BaseModel):
+    """GET /api/v1/admin/skills response."""
+    skills: List[AdminSkillItem] = Field(
+        ..., description="All shared skills, including seeded read-only ones"
+    )
+
+
+class AdminSkillUpdateRequest(BaseModel):
+    """PATCH /api/v1/admin/skills/{slug} request body."""
+    visibility: Optional[Literal["public", "department"]] = Field(
+        None, description="New shared visibility. Changing it clears department rules."
+    )
+    default_enabled: Optional[bool] = Field(
+        None, description="New default L1 enabled state for users without an override."
     )

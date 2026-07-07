@@ -1,4 +1,4 @@
-"""Department-scoped access management (Phase G-1).
+"""Department-scoped access management.
 
 Rules are exception rows without an `effect` column:
 - public resources: rule row means deny/exclude this department subtree.
@@ -76,7 +76,7 @@ class DepartmentAccessManager:
 
     async def put_skill_rule(self, dept_id: str, slug: str) -> None:
         await self._require_department(dept_id)
-        skill = await self._require_skill(slug)
+        skill = await self._require_skill(slug, for_update=True)
         self._require_skill_accessible_by_department(skill)
         await self._repo.add_skill_rule(dept_id, slug)
 
@@ -122,8 +122,14 @@ class DepartmentAccessManager:
             raise DepartmentNotFoundError(f"department '{dept_id}' does not exist")
         return chain
 
-    async def _require_skill(self, slug: str) -> Skill:
-        skill = await self._repo.get_skill(slug)
+    async def _require_skill(
+        self, slug: str, *, for_update: bool = False
+    ) -> Skill:
+        skill = (
+            await self._repo.get_skill_for_update(slug)
+            if for_update
+            else await self._repo.get_skill(slug)
+        )
         if skill is None:
             raise ResourceNotFoundError(f"skill '{slug}' does not exist")
         return skill

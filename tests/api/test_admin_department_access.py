@@ -1,4 +1,4 @@
-"""Admin department access API tests (G-1).
+"""Admin department access API tests.
 
 Coverage: auth, effective display, direct/inherited rules, idempotent rule
 mutation, private skill rejection, and missing department/resource mapping.
@@ -205,6 +205,25 @@ class TestDepartmentAccessMutation:
         monkeypatch.setattr(mgr._repo, "get_unit_for_update", tracked)
 
         await mgr.put_unit_rule("dept-leaf", "dept_mcp")
+
+        assert called is True
+
+    async def test_skill_rule_put_uses_locked_skill_read(self, db_session, monkeypatch):
+        await _seed_departments(db_session)
+        db_session.add(_skill("dept-skill", "department"))
+        await db_session.commit()
+        mgr = DepartmentAccessManager(db_session)
+        original = mgr._repo.get_skill_for_update
+        called = False
+
+        async def tracked(slug: str):
+            nonlocal called
+            called = True
+            return await original(slug)
+
+        monkeypatch.setattr(mgr._repo, "get_skill_for_update", tracked)
+
+        await mgr.put_skill_rule("dept-leaf", "dept-skill")
 
         assert called is True
 

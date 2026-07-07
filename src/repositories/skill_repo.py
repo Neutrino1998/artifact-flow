@@ -10,7 +10,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Skill, User, UserSkill
+from db.models import DepartmentSkillRule, Skill, User, UserSkill
 
 
 class SkillRepository:
@@ -79,6 +79,27 @@ class SkillRepository:
             "owner_user_id": row.owner_user_id, "visibility": row.visibility,
         }
 
+    async def list_shared_skills(self) -> list[Skill]:
+        """Admin shared catalog: public/department skills with no owner."""
+        return list((
+            await self._session.execute(
+                select(Skill)
+                .where(
+                    Skill.owner_user_id.is_(None),
+                    Skill.visibility.in_(["public", "department"]),
+                )
+                .order_by(Skill.slug)
+            )
+        ).scalars().all())
+
+    async def get_skill_for_update(self, slug: str) -> Optional[Skill]:
+        """Load and row-lock a skill for writes that interpret or change visibility."""
+        return (
+            await self._session.execute(
+                select(Skill).where(Skill.slug == slug).with_for_update()
+            )
+        ).scalar_one_or_none()
+
     async def slug_exists(self, slug: str) -> bool:
         return (
             await self._session.execute(select(Skill.slug).where(Skill.slug == slug))
@@ -93,6 +114,12 @@ class SkillRepository:
         """stage 删除(commit 归 Manager)。user_skill / dept 规则由 DB FK CASCADE 清,
         零 app-side 清理。"""
         await self._session.execute(delete(Skill).where(Skill.slug == slug))
+
+    async def clear_dept_rules(self, slug: str) -> None:
+        """Clear department rules for one skill when its visibility changes."""
+        await self._session.execute(
+            delete(DepartmentSkillRule).where(DepartmentSkillRule.skill_slug == slug)
+        )
 
     async def set_user_override(self, user_id: str, slug: str, enabled: bool) -> None:
         """Upsert user_skill 稀疏覆盖行(个人 enable/disable)。stage-only,commit 归 Manager
