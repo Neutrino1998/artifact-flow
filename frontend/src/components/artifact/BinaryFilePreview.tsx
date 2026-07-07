@@ -19,11 +19,17 @@ export default function BinaryFilePreview({
   artifactId,
   originalFilename,
   contentType,
+  description,
+  pendingMessage,
+  downloadLabel = '下载原件',
 }: {
   sessionId: string;
   artifactId: string;
   originalFilename?: string | null;
   contentType: string;
+  description?: string;
+  pendingMessage?: string;
+  downloadLabel?: string;
 }) {
   const [error, setError] = useState<string | null>(null);
   // Live this turn, not yet flushed. Cleared at COMPLETE.
@@ -59,18 +65,18 @@ export default function BinaryFilePreview({
           {originalFilename ?? artifactId}
         </div>
         <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark break-all">
-          {contentType} · 二进制文件，无文本预览
+          {description ?? `${contentType} · 二进制文件，无文本预览`}
         </div>
         {pendingFlush ? (
           <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-            本回合完成后可下载原件
+            {pendingMessage ?? '本回合完成后可下载原件'}
           </div>
         ) : (
           <button
             onClick={handleDownload}
             className={`${BUTTON_PRIMARY} px-3 py-1.5 text-xs rounded-lg`}
           >
-            下载原件
+            {downloadLabel}
           </button>
         )}
         {error && (

@@ -3,6 +3,7 @@
 import { useMemo } from 'react';
 import { useArtifactStore, type ArtifactViewMode } from '@/stores/artifactStore';
 import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
+import { isCsvMime } from '@/lib/artifactPreview';
 
 const allTabs: { mode: ArtifactViewMode; label: string }[] = [
   { mode: 'preview', label: 'Preview' },
@@ -17,9 +18,9 @@ export default function ArtifactTabs() {
   const hasBlob = useArtifactStore((s) => s.current?.has_blob);
 
   const tabs = useMemo(() => {
-    // markdown + html get the rich Preview alongside Source/Diff (html via a
-    // static sandboxed iframe). Other text types are Source/Diff only.
-    if (contentType === 'text/markdown' || contentType === 'text/html') return allTabs;
+    // Markdown / HTML / CSV get rich Preview alongside Source/Diff.
+    // Other text types are Source/Diff only.
+    if (contentType === 'text/markdown' || contentType === 'text/html' || isCsvMime(contentType)) return allTabs;
     // blob 类(图片/二进制)只有 preview(无文本 source/diff)
     if (hasBlob || contentType?.startsWith('image/')) {
       return allTabs.filter((t) => t.mode === 'preview');

@@ -508,10 +508,10 @@ export function getVersion(
  *  The blob is DB-only server-side: an image uploaded *this* turn is available only
  *  after the turn flushes (COMPLETE), mirroring the REST-lags-live tradeoff for all
  *  artifacts. Caller MUST URL.revokeObjectURL() the returned URL when done. */
-export async function fetchArtifactRawObjectUrl(
+export async function fetchArtifactRawBlob(
   sessionId: string,
   artifactId: string
-): Promise<string> {
+): Promise<Blob> {
   const res = await fetch(
     `${BASE_URL}/api/v1/artifacts/${sessionId}/${artifactId}/raw`,
     { headers: authHeaders() }
@@ -526,7 +526,14 @@ export async function fetchArtifactRawObjectUrl(
     const requestId = res.headers.get('X-Request-ID') ?? undefined;
     throw new ApiError(res.status, formatApiError(res.status, body, requestId), undefined, requestId);
   }
-  return URL.createObjectURL(await res.blob());
+  return res.blob();
+}
+
+export async function fetchArtifactRawObjectUrl(
+  sessionId: string,
+  artifactId: string
+): Promise<string> {
+  return URL.createObjectURL(await fetchArtifactRawBlob(sessionId, artifactId));
 }
 
 // Message Events (historical replay)

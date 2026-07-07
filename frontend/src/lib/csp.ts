@@ -73,13 +73,10 @@ export function buildContentSecurityPolicy({ nonce, isDev, apiUrl }: CspOptions)
     'img-src': ["'self'", 'data:', 'blob:'],
     'font-src': ["'self'"], // fonts are self-hosted under /public/fonts
     'connect-src': connectSrc,
-    // 'self' permits the static `text/html` artifact preview (sandboxed `srcdoc`
-    // iframe — see components/artifact/HtmlPreview.tsx). srcdoc has no real URL
-    // (about:srcdoc) so 'none' would block it; 'self' maps it to the embedder
-    // origin and lets it load. The iframe runs NO scripts (sandbox="") and is an
-    // opaque origin, so this does not reopen a script/token-exfil surface.
-    // Verified frame-src 'self' permits srcdoc in Chrome + Safari.
-    'frame-src': ["'self'"],
+    // 'self' permits static `srcdoc` previews (HTML + DOCX render iframe).
+    // `blob:` permits authorized PDF blobs fetched by the app and handed to the
+    // browser's native PDF viewer. Remote frames stay closed.
+    'frame-src': ["'self'", 'blob:'],
     'frame-ancestors': ["'none'"],
     'object-src': ["'none'"],
     'base-uri': ["'none'"],

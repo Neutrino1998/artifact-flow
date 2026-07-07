@@ -12,7 +12,12 @@ import SourceView from './SourceView';
 import DiffView from './DiffView';
 import ImagePreview from './ImagePreview';
 import BinaryFilePreview from './BinaryFilePreview';
+import CsvPreview from './CsvPreview';
+import DocxPreview from './DocxPreview';
+import PdfPreview from './PdfPreview';
+import SpreadsheetPreview from './SpreadsheetPreview';
 import { isSafeInlineImageMime } from '@/lib/mime';
+import { isCsvMime, isDocxMime, isPdfMime, isSpreadsheetMime } from '@/lib/artifactPreview';
 
 export default function ArtifactPanel() {
   const current = useArtifactStore((s) => s.current);
@@ -75,6 +80,36 @@ export default function ArtifactPanel() {
               // updated_at: '' while live → real timestamp on the COMPLETE DB re-pull,
               // re-firing the effect so the image resolves from the DB blob.
               refreshKey={current.updated_at || undefined}
+            />
+          : isCsvMime(current.content_type)
+          ? <CsvPreview
+              content={content}
+              sessionId={imgSession}
+              artifactId={current.id}
+              originalFilename={current.original_filename}
+              contentType={current.content_type}
+              hasBlob={!!current.has_blob}
+            />
+          : isBinary && isPdfMime(current.content_type)
+          ? <PdfPreview
+              sessionId={imgSession}
+              artifactId={current.id}
+              originalFilename={current.original_filename}
+              contentType={current.content_type}
+            />
+          : isBinary && isDocxMime(current.content_type)
+          ? <DocxPreview
+              sessionId={imgSession}
+              artifactId={current.id}
+              originalFilename={current.original_filename}
+              contentType={current.content_type}
+            />
+          : isBinary && isSpreadsheetMime(current.content_type)
+          ? <SpreadsheetPreview
+              sessionId={imgSession}
+              artifactId={current.id}
+              originalFilename={current.original_filename}
+              contentType={current.content_type}
             />
           : isBinary
           ? <BinaryFilePreview

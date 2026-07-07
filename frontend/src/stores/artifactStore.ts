@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { ArtifactSummary, ArtifactDetail, VersionSummary, VersionDetail } from '@/types';
 import type { ArtifactCreatedData, ArtifactUpdatedData } from '@/types/events';
+import { isCsvMime } from '@/lib/artifactPreview';
 
 export type ArtifactViewMode = 'preview' | 'source' | 'diff';
 
@@ -135,7 +136,7 @@ interface ArtifactState {
 }
 
 function defaultViewMode(contentType?: string, hasBlob?: boolean): ArtifactViewMode {
-  if (contentType === 'text/markdown' || contentType === 'text/html') return 'preview';
+  if (contentType === 'text/markdown' || contentType === 'text/html' || isCsvMime(contentType)) return 'preview';
   if (hasBlob) return 'preview';  // 图片走 ImagePreview,其它二进制走 BinaryFilePreview
   if (contentType?.startsWith('image/')) return 'preview';
   return 'source';
