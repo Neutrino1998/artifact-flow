@@ -162,7 +162,7 @@ export default function DepartmentAccessPanel() {
   const mutateRule = useCallback(async (item: AccessItem) => {
     const deptId = selectedDeptId;
     if (!deptId) return;
-    if (item.inherited_rule && !item.direct_rule) return;
+    if (item.inherited_rule) return;
 
     const id = itemId(tab, item);
     const key = `${deptId}:${tab}:${id}`;
@@ -358,14 +358,17 @@ function ResourceRow({
 }) {
   const id = itemId(tab, item);
   const label = itemLabel(tab, item);
-  const inheritedOnly = !!item.inherited_rule && !item.direct_rule;
-  const canMutate = !inheritedOnly;
+  const hasInheritedRule = !!item.inherited_rule;
+  const canMutate = !hasInheritedRule;
   const switchChecked = item.effective_allowed;
-  const switchTitle = inheritedOnly
-    ? `由 ${item.inherited_rule?.department_name} 继承生效`
+  const switchTitle = hasInheritedRule
+    ? `由 ${item.inherited_rule?.department_name} 继承生效，当前部门不能单独改变可用性`
     : switchChecked
       ? '点击后该部门不可用'
       : '点击后该部门可用';
+  const switchAriaLabel = hasInheritedRule
+    ? `${label}${switchChecked ? '可用' : '不可用'}，由 ${item.inherited_rule?.department_name} 继承生效`
+    : `${switchChecked ? '设为不可用' : '设为可用'}：${label}`;
 
   return (
     <div className="grid grid-cols-[minmax(340px,1fr)_max-content_48px] items-center gap-3 px-4 py-3 rounded-lg bg-surface dark:bg-surface-dark border border-border/70 dark:border-border-dark/70">
@@ -400,7 +403,7 @@ function ResourceRow({
         type="button"
         role="switch"
         aria-checked={switchChecked}
-        aria-label={`${switchChecked ? '设为不可用' : '设为可用'}：${label}`}
+        aria-label={switchAriaLabel}
         onClick={onMutate}
         disabled={!canMutate || pending}
         title={pending ? '处理中...' : switchTitle}
