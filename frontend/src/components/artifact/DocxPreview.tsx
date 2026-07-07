@@ -10,6 +10,9 @@ const FRAME_SRC_DOC = '<!doctype html><html><head><base target="_blank"></head><
 const FRAME_STYLE_ID = 'artifact-docx-preview-style';
 const PAGE_GUTTER_PX = 32;
 const FALLBACK_PAGE_WIDTH_PX = 794;
+const FALLBACK_PAGE_ASPECT = 1.414;
+const PAGE_OVERFLOW_TOLERANCE_PX = 2;
+const WORDPROCESSINGML_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 
 function installFrameStyles(doc: Document) {
   doc.getElementById(FRAME_STYLE_ID)?.remove();
@@ -54,9 +57,6 @@ function installFrameStyles(doc: Document) {
     }
     .docx-wrapper > section.docx {
       margin: 0 auto 16px auto !important;
-    }
-    .docx-wrapper section.docx > article {
-      margin-bottom: 0 !important;
     }
     .docx-wrapper ins {
       background: rgba(254, 202, 202, 0.35);
@@ -103,6 +103,18 @@ function installFrameStyles(doc: Document) {
       color: #64748b !important;
       font-size: 11px !important;
     }
+    .artifact-docx-page-number {
+      bottom: 18px;
+      color: #111827;
+      font: 12px/1 Georgia, "Times New Roman", serif;
+      left: 0;
+      opacity: 0.75;
+      pointer-events: none;
+      position: absolute;
+      right: 0;
+      text-align: center;
+      z-index: 2;
+    }
   `;
   doc.head.appendChild(style);
 }
@@ -122,6 +134,194 @@ function readElementWidth(win: Window, element: HTMLElement) {
   if (Number.isFinite(computedWidth) && computedWidth > 0) return computedWidth;
 
   return element.offsetWidth || FALLBACK_PAGE_WIDTH_PX;
+}
+
+function readCssLengthPx(value: string | null | undefined) {
+  if (!value || value === 'auto') return null;
+
+  const numeric = Number.parseFloat(value);
+  if (!Number.isFinite(numeric)) return null;
+
+  if (value.endsWith('pt')) return numeric * (96 / 72);
+  if (value.endsWith('in')) return numeric * 96;
+  if (value.endsWith('cm')) return numeric * (96 / 2.54);
+  if (value.endsWith('mm')) return numeric * (96 / 25.4);
+  return numeric;
+}
+
+function readElementHeight(win: Window, element: HTMLElement) {
+  const inlineHeight = readCssLengthPx(element.style.height);
+  if (inlineHeight && inlineHeight > 0) return inlineHeight;
+
+  const inlineMinHeight = readCssLengthPx(element.style.minHeight);
+  if (inlineMinHeight && inlineMinHeight > 0) return inlineMinHeight;
+
+  const computed = win.getComputedStyle(element);
+  const computedMinHeight = readCssLengthPx(computed.minHeight);
+  if (computedMinHeight && computedMinHeight > 0) return computedMinHeight;
+
+  const computedHeight = readCssLengthPx(computed.height);
+  if (computedHeight && computedHeight > 0) return computedHeight;
+
+  return readElementWidth(win, element) * FALLBACK_PAGE_ASPECT;
+}
+
+function directArticle(section: HTMLElement) {
+  return Array.from(section.children).find(
+    (child): child is HTMLElement => child.nodeType === 1 && child.tagName === 'ARTICLE'
+  ) ?? null;
+}
+
+function hasArticleContent(section: HTMLElement) {
+  const article = directArticle(section);
+  if (!article) return false;
+  const text = (article.textContent ?? '').replace(/\s+/g, '');
+  return text.length > 0 || !!article.querySelector('img, svg, table, canvas, object, embed');
+}
+
+function removeGeneratedLeadingEmptyPages(doc: Document) {
+  const sections = Array.from(doc.querySelectorAll('.docx-wrapper > section.docx')) as HTMLElement[];
+  for (const section of sections.slice(0, -1)) {
+    if (hasArticleContent(section)) break;
+    section.remove();
+  }
+}
+
+function fixPageHeight(section: HTMLElement, pageHeight: number) {
+  section.style.height = `${pageHeight}px`;
+  section.style.minHeight = `${pageHeight}px`;
+  section.style.overflow = 'hidden';
+}
+
+function paginateSection(win: Window, section: HTMLElement) {
+  const article = directArticle(section);
+  if (!article) return;
+
+  const nodes = Array.from(article.childNodes);
+  if (nodes.length === 0) return;
+
+  const computedSection = win.getComputedStyle(section);
+  const verticalPadding =
+    (readCssLengthPx(computedSection.paddingTop) ?? 0) +
+    (readCssLengthPx(computedSection.paddingBottom) ?? 0);
+  const pageHeight = readElementHeight(win, section);
+  const pageContentHeight = Math.max(1, pageHeight - verticalPadding);
+  const originalArticle = article.cloneNode(false) as HTMLElement;
+
+  fixPageHeight(section, pageHeight);
+  article.replaceChildren();
+
+  let currentPage = section;
+  let currentArticle = article;
+  let nextNodeNeedsNewPage = false;
+
+  const appendPage = () => {
+    const page = section.cloneNode(false) as HTMLElement;
+    const pageArticle = originalArticle.cloneNode(false) as HTMLElement;
+    fixPageHeight(page, pageHeight);
+    page.appendChild(pageArticle);
+    currentPage.after(page);
+    currentPage = page;
+    currentArticle = pageArticle;
+  };
+
+  const growCurrentPageIfNeeded = () => {
+    const requiredHeight = currentArticle.scrollHeight + verticalPadding;
+    if (requiredHeight > pageHeight + PAGE_OVERFLOW_TOLERANCE_PX) {
+      fixPageHeight(currentPage, requiredHeight);
+    }
+  };
+
+  for (const node of nodes) {
+    if (nextNodeNeedsNewPage) {
+      appendPage();
+      nextNodeNeedsNewPage = false;
+    }
+
+    currentArticle.appendChild(node);
+
+    if (currentArticle.scrollHeight <= pageContentHeight + PAGE_OVERFLOW_TOLERANCE_PX) {
+      continue;
+    }
+
+    if (currentArticle.childNodes.length > 1) {
+      currentArticle.removeChild(node);
+      appendPage();
+      currentArticle.appendChild(node);
+    }
+
+    if (currentArticle.scrollHeight > pageContentHeight + PAGE_OVERFLOW_TOLERANCE_PX) {
+      growCurrentPageIfNeeded();
+      nextNodeNeedsNewPage = true;
+    }
+  }
+}
+
+function paginateRenderedSections(doc: Document) {
+  const win = doc.defaultView;
+  if (!win) return;
+
+  removeGeneratedLeadingEmptyPages(doc);
+
+  const sections = Array.from(doc.querySelectorAll('.docx-wrapper > section.docx')) as HTMLElement[];
+  for (const section of sections) {
+    paginateSection(win, section);
+  }
+}
+
+function addGeneratedPageNumbers(doc: Document) {
+  const pages = Array.from(doc.querySelectorAll('.docx-wrapper > section.docx')) as HTMLElement[];
+  pages.forEach((page, index) => {
+    for (const child of Array.from(page.children)) {
+      if (child.classList.contains('artifact-docx-page-number')) {
+        child.remove();
+      }
+    }
+
+    const pageNumber = doc.createElement('div');
+    pageNumber.className = 'artifact-docx-page-number';
+    pageNumber.setAttribute('aria-hidden', 'true');
+    pageNumber.textContent = String(index + 1);
+    page.appendChild(pageNumber);
+  });
+}
+
+function hasParagraphSectionProperties(paragraph: Element) {
+  return Array.from(paragraph.children).some(
+    (child) =>
+      child.localName === 'pPr' &&
+      Array.from(child.children).some((grandchild) => grandchild.localName === 'sectPr')
+  );
+}
+
+function hasPageBreakMarker(xmlDoc: Document) {
+  const breaks = Array.from(xmlDoc.getElementsByTagNameNS(WORDPROCESSINGML_NS, 'br'));
+  const hasManualBreak = breaks.some(
+    (node) => (node.getAttributeNS(WORDPROCESSINGML_NS, 'type') ?? node.getAttribute('w:type')) === 'page'
+  );
+  if (hasManualBreak) return true;
+
+  if (xmlDoc.getElementsByTagNameNS(WORDPROCESSINGML_NS, 'lastRenderedPageBreak').length > 0) return true;
+  if (xmlDoc.getElementsByTagNameNS(WORDPROCESSINGML_NS, 'pageBreakBefore').length > 0) return true;
+
+  const paragraphs = Array.from(xmlDoc.getElementsByTagNameNS(WORDPROCESSINGML_NS, 'p'));
+  return paragraphs.some(hasParagraphSectionProperties);
+}
+
+async function hasDocumentSuppliedPagination(blob: Blob) {
+  try {
+    const { default: JSZip } = await import('jszip');
+    const zip = await JSZip.loadAsync(blob);
+    const documentXml = await zip.file('word/document.xml')?.async('string');
+    if (!documentXml) return true;
+
+    const xmlDoc = new DOMParser().parseFromString(documentXml, 'application/xml');
+    if (xmlDoc.getElementsByTagName('parsererror').length > 0) return true;
+
+    return hasPageBreakMarker(xmlDoc);
+  } catch {
+    return true;
+  }
 }
 
 function prepareFixedPageLayout(doc: Document) {
@@ -219,17 +419,18 @@ export default function DocxPreview({
         if (!doc) throw new Error('Word 预览容器未就绪');
         resetFrame(doc);
 
+        const hasNativePagination = await hasDocumentSuppliedPagination(blob);
         const { renderAsync } = await import('docx-preview');
         await renderAsync(blob, doc.body, doc.head, {
           // docx-preview cannot calculate Word's natural page breaks. Keep the
           // document's fixed page width and scale the page shell instead of
           // reflowing text when the artifact panel is resized.
-          breakPages: true,
+          breakPages: hasNativePagination,
           ignoreHeight: false,
           ignoreLastRenderedPageBreak: false,
           ignoreWidth: false,
-          renderHeaders: true,
-          renderFooters: true,
+          renderHeaders: hasNativePagination,
+          renderFooters: hasNativePagination,
           renderComments: true,
           renderChanges: true,
           renderAltChunks: false,
@@ -238,6 +439,10 @@ export default function DocxPreview({
           useBase64URL: true,
         });
         if (cancelled) return;
+        if (!hasNativePagination) {
+          paginateRenderedSections(doc);
+          addGeneratedPageNumbers(doc);
+        }
         installFrameStyles(doc);
         cleanupLayout = prepareFixedPageLayout(doc);
       })
