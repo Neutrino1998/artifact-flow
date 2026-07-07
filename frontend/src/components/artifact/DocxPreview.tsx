@@ -13,6 +13,12 @@ const FALLBACK_PAGE_WIDTH_PX = 794;
 const FALLBACK_PAGE_ASPECT = 1.414;
 const PAGE_OVERFLOW_TOLERANCE_PX = 2;
 const WORDPROCESSINGML_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+const OFFICE_DOCUMENT_REL_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+
+type DocxLayoutHints = {
+  hasMeaningfulHeaderFooter: boolean;
+  hasPaginationMarkers: boolean;
+};
 
 function installFrameStyles(doc: Document) {
   doc.getElementById(FRAME_STYLE_ID)?.remove();
@@ -308,19 +314,149 @@ function hasPageBreakMarker(xmlDoc: Document) {
   return paragraphs.some(hasParagraphSectionProperties);
 }
 
-async function hasDocumentSuppliedPagination(blob: Blob) {
+function parseXml(xml: string) {
+  const xmlDoc = new DOMParser().parseFromString(xml, 'application/xml');
+  if (xmlDoc.getElementsByTagName('parsererror').length > 0) {
+    throw new Error('Invalid DOCX XML');
+  }
+  return xmlDoc;
+}
+
+function parseRelationshipTargets(relsDoc: Document) {
+  const targetsById = new Map<string, string>();
+  for (const rel of Array.from(relsDoc.getElementsByTagName('Relationship'))) {
+    const id = rel.getAttribute('Id');
+    const target = rel.getAttribute('Target');
+    const targetMode = rel.getAttribute('TargetMode');
+    if (id && target && targetMode !== 'External') {
+      targetsById.set(id, target);
+    }
+  }
+  return targetsById;
+}
+
+function referencedHeaderFooterRelIds(documentXml: Document) {
+  const refs = [
+    ...Array.from(documentXml.getElementsByTagNameNS(WORDPROCESSINGML_NS, 'headerReference')),
+    ...Array.from(documentXml.getElementsByTagNameNS(WORDPROCESSINGML_NS, 'footerReference')),
+  ];
+
+  return refs
+    .map((ref) => ref.getAttributeNS(OFFICE_DOCUMENT_REL_NS, 'id') ?? ref.getAttribute('r:id'))
+    .filter((id): id is string => !!id);
+}
+
+function resolveWordPartPath(target: string) {
+  const parts = (target.startsWith('/') ? target.slice(1) : `word/${target}`).split('/');
+  const normalized: string[] = [];
+
+  for (const part of parts) {
+    if (!part || part === '.') continue;
+    if (part === '..') {
+      normalized.pop();
+    } else {
+      normalized.push(part);
+    }
+  }
+
+  return normalized.join('/');
+}
+
+function referencedHeaderFooterPartPaths(documentXml: Document, relsDoc: Document | null) {
+  if (!relsDoc) return [];
+
+  const targetsById = parseRelationshipTargets(relsDoc);
+  return referencedHeaderFooterRelIds(documentXml)
+    .map((id) => targetsById.get(id))
+    .filter((target): target is string => !!target)
+    .map(resolveWordPartPath);
+}
+
+function textFromElements(xmlDoc: Document, tagName: string) {
+  return Array.from(xmlDoc.getElementsByTagNameNS(WORDPROCESSINGML_NS, tagName))
+    .map((node) => node.textContent ?? '')
+    .join(' ');
+}
+
+function fieldInstructions(xmlDoc: Document) {
+  const instrText = textFromElements(xmlDoc, 'instrText');
+  const simpleFields = Array.from(xmlDoc.getElementsByTagNameNS(WORDPROCESSINGML_NS, 'fldSimple'))
+    .map((node) => node.getAttributeNS(WORDPROCESSINGML_NS, 'instr') ?? node.getAttribute('w:instr') ?? '')
+    .join(' ');
+  return `${instrText} ${simpleFields}`.trim();
+}
+
+function isPageNumberOnlyHeaderFooter(xmlDoc: Document) {
+  const text = textFromElements(xmlDoc, 't').replace(/\s+/g, ' ').trim();
+  const instructions = fieldInstructions(xmlDoc).toUpperCase();
+  if (!instructions) return false;
+
+  const unsupportedInstructions = instructions
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((token) => !['PAGE', 'NUMPAGES', 'SECTIONPAGES', 'MERGEFORMAT'].includes(token) && !token.startsWith('\\'));
+  if (unsupportedInstructions.length > 0) return false;
+
+  const remainingText = text
+    .replace(/[0-9０-９ivxlcdmIVXLCDM]+/g, '')
+    .replace(/\b(page|pages|of)\b/gi, '')
+    .replace(/[第共页頁\s\-–—_:\/\\().,，。]+/g, '');
+
+  return remainingText.length === 0;
+}
+
+function headerFooterHasMeaningfulContent(xmlDoc: Document) {
+  const hasVisualContent =
+    xmlDoc.getElementsByTagNameNS(WORDPROCESSINGML_NS, 'drawing').length > 0 ||
+    xmlDoc.getElementsByTagNameNS(WORDPROCESSINGML_NS, 'pict').length > 0 ||
+    xmlDoc.getElementsByTagNameNS(WORDPROCESSINGML_NS, 'object').length > 0;
+  if (hasVisualContent) return true;
+
+  const text = textFromElements(xmlDoc, 't').replace(/\s+/g, '').trim();
+  if (!text) return false;
+
+  return !isPageNumberOnlyHeaderFooter(xmlDoc);
+}
+
+async function inspectDocxLayoutHints(blob: Blob): Promise<DocxLayoutHints> {
   try {
     const { default: JSZip } = await import('jszip');
     const zip = await JSZip.loadAsync(blob);
     const documentXml = await zip.file('word/document.xml')?.async('string');
-    if (!documentXml) return true;
+    if (!documentXml) return { hasMeaningfulHeaderFooter: true, hasPaginationMarkers: true };
 
-    const xmlDoc = new DOMParser().parseFromString(documentXml, 'application/xml');
-    if (xmlDoc.getElementsByTagName('parsererror').length > 0) return true;
+    const xmlDoc = parseXml(documentXml);
+    const relsXml = await zip.file('word/_rels/document.xml.rels')?.async('string');
+    const relsDoc = relsXml ? parseXml(relsXml) : null;
+    const headerFooterRelIds = referencedHeaderFooterRelIds(xmlDoc);
+    if (headerFooterRelIds.length > 0 && !relsDoc) {
+      return {
+        hasMeaningfulHeaderFooter: true,
+        hasPaginationMarkers: hasPageBreakMarker(xmlDoc),
+      };
+    }
 
-    return hasPageBreakMarker(xmlDoc);
+    const headerFooterPaths = referencedHeaderFooterPartPaths(xmlDoc, relsDoc);
+    let hasMeaningfulHeaderFooter = false;
+
+    for (const path of headerFooterPaths) {
+      const partXml = await zip.file(path)?.async('string');
+      if (!partXml) {
+        hasMeaningfulHeaderFooter = true;
+        break;
+      }
+      if (headerFooterHasMeaningfulContent(parseXml(partXml))) {
+        hasMeaningfulHeaderFooter = true;
+        break;
+      }
+    }
+
+    return {
+      hasMeaningfulHeaderFooter,
+      hasPaginationMarkers: hasPageBreakMarker(xmlDoc),
+    };
   } catch {
-    return true;
+    return { hasMeaningfulHeaderFooter: true, hasPaginationMarkers: true };
   }
 }
 
@@ -419,18 +555,20 @@ export default function DocxPreview({
         if (!doc) throw new Error('Word 预览容器未就绪');
         resetFrame(doc);
 
-        const hasNativePagination = await hasDocumentSuppliedPagination(blob);
+        const layoutHints = await inspectDocxLayoutHints(blob);
+        const shouldUseFallbackPagination =
+          !layoutHints.hasPaginationMarkers && !layoutHints.hasMeaningfulHeaderFooter;
         const { renderAsync } = await import('docx-preview');
         await renderAsync(blob, doc.body, doc.head, {
           // docx-preview cannot calculate Word's natural page breaks. Keep the
           // document's fixed page width and scale the page shell instead of
           // reflowing text when the artifact panel is resized.
-          breakPages: hasNativePagination,
+          breakPages: !shouldUseFallbackPagination,
           ignoreHeight: false,
           ignoreLastRenderedPageBreak: false,
           ignoreWidth: false,
-          renderHeaders: hasNativePagination,
-          renderFooters: hasNativePagination,
+          renderHeaders: !shouldUseFallbackPagination,
+          renderFooters: !shouldUseFallbackPagination,
           renderComments: true,
           renderChanges: true,
           renderAltChunks: false,
@@ -439,7 +577,7 @@ export default function DocxPreview({
           useBase64URL: true,
         });
         if (cancelled) return;
-        if (!hasNativePagination) {
+        if (shouldUseFallbackPagination) {
           paginateRenderedSections(doc);
           addGeneratedPageNumbers(doc);
         }
