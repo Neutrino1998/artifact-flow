@@ -6,7 +6,7 @@
 # ArtifactFlow sandbox image — gVisor (runsc) functional verification (plan §B).
 #
 # This is the "tier-1 baked environment" (plan 原则 7): interpreter + scientific
-# stack + pandoc + ripgrep. It runs untrusted LLM-generated code under runsc.
+# stack + pandoc + ripgrep + zip. It runs untrusted LLM-generated code under runsc.
 # DECOUPLED from the backend image / requirements.lock — the sandbox is its own
 # runtime, not the app. Python deps are pinned in sandbox/requirements.txt.
 #
@@ -35,6 +35,8 @@ ENV PYTHONUNBUFFERED=1 \
 #             (PDF output needs LaTeX, out-of-scope this phase).
 #   ripgrep — FS-traversal syscall probe (getdents64/statx, distinct from the
 #             numerical C-ext surface) + general search over mounted files.
+#   zip     — archive staged workspaces for persist; tiny generic CLI that
+#             matches model/user expectations better than python -m zipfile.
 #   git     — LOCAL repo operations only (init/log/diff/blame/apply over mounted
 #             or unzipped trees); clone/fetch are dead under --network=none by
 #             design. Tier-1 because it's generic + environment-definition and
@@ -42,6 +44,7 @@ ENV PYTHONUNBUFFERED=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pandoc \
     ripgrep \
+    zip \
     git \
     && rm -rf /var/lib/apt/lists/*
 
