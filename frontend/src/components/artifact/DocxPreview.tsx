@@ -10,6 +10,8 @@ const FRAME_SRC_DOC = '<!doctype html><html><head><base target="_blank"></head><
 const FRAME_STYLE_ID = 'artifact-docx-preview-style';
 const PAGE_GUTTER_PX = 32;
 const FALLBACK_PAGE_WIDTH_PX = 794;
+const FALLBACK_PAGE_ASPECT = 1.414;
+const PAGE_OVERFLOW_TOLERANCE_PX = 2;
 
 function installFrameStyles(doc: Document) {
   doc.getElementById(FRAME_STYLE_ID)?.remove();
@@ -45,10 +47,7 @@ function installFrameStyles(doc: Document) {
     .docx-wrapper > section.docx {
       background: #fff !important;
       box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16) !important;
-      height: auto !important;
-      min-height: 0 !important;
       max-width: none !important;
-      overflow: visible !important;
       transform-origin: top left;
     }
     .artifact-docx-page-frame > section.docx {
@@ -98,11 +97,127 @@ function readElementWidth(win: Window, element: HTMLElement) {
   return element.offsetWidth || FALLBACK_PAGE_WIDTH_PX;
 }
 
+function readCssLengthPx(value: string | null | undefined) {
+  if (!value || value === 'auto') return null;
+
+  const numeric = Number.parseFloat(value);
+  if (!Number.isFinite(numeric)) return null;
+
+  if (value.endsWith('pt')) return numeric * (96 / 72);
+  if (value.endsWith('in')) return numeric * 96;
+  if (value.endsWith('cm')) return numeric * (96 / 2.54);
+  if (value.endsWith('mm')) return numeric * (96 / 25.4);
+  return numeric;
+}
+
+function readElementHeight(win: Window, element: HTMLElement) {
+  const inlineHeight = readCssLengthPx(element.style.height);
+  if (inlineHeight && inlineHeight > 0) return inlineHeight;
+
+  const inlineMinHeight = readCssLengthPx(element.style.minHeight);
+  if (inlineMinHeight && inlineMinHeight > 0) return inlineMinHeight;
+
+  const computed = win.getComputedStyle(element);
+  const computedHeight = readCssLengthPx(computed.height);
+  if (computedHeight && computedHeight > 0) return computedHeight;
+
+  const computedMinHeight = readCssLengthPx(computed.minHeight);
+  if (computedMinHeight && computedMinHeight > 0) return computedMinHeight;
+
+  return readElementWidth(win, element) * FALLBACK_PAGE_ASPECT;
+}
+
+function directArticle(section: HTMLElement) {
+  return Array.from(section.children).find(
+    (child): child is HTMLElement => child.nodeType === 1 && child.tagName === 'ARTICLE'
+  ) ?? null;
+}
+
+function fixPageHeight(section: HTMLElement, pageHeight: number) {
+  section.style.height = `${pageHeight}px`;
+  section.style.minHeight = `${pageHeight}px`;
+  section.style.overflow = 'hidden';
+}
+
+function paginateSection(win: Window, section: HTMLElement) {
+  const article = directArticle(section);
+  if (!article) return;
+
+  const nodes = Array.from(article.childNodes);
+  if (nodes.length === 0) return;
+
+  const computedSection = win.getComputedStyle(section);
+  const verticalPadding =
+    (readCssLengthPx(computedSection.paddingTop) ?? 0) +
+    (readCssLengthPx(computedSection.paddingBottom) ?? 0);
+  const pageHeight = readElementHeight(win, section);
+  const pageContentHeight = Math.max(1, pageHeight - verticalPadding);
+  const originalArticle = article.cloneNode(false) as HTMLElement;
+
+  fixPageHeight(section, pageHeight);
+  article.replaceChildren();
+
+  let currentPage = section;
+  let currentArticle = article;
+  let nextNodeNeedsNewPage = false;
+
+  const appendPage = () => {
+    const page = section.cloneNode(false) as HTMLElement;
+    const pageArticle = originalArticle.cloneNode(false) as HTMLElement;
+    fixPageHeight(page, pageHeight);
+    page.appendChild(pageArticle);
+    currentPage.after(page);
+    currentPage = page;
+    currentArticle = pageArticle;
+  };
+
+  const growCurrentPageIfNeeded = () => {
+    const requiredHeight = currentArticle.scrollHeight + verticalPadding;
+    if (requiredHeight > pageHeight + PAGE_OVERFLOW_TOLERANCE_PX) {
+      fixPageHeight(currentPage, requiredHeight);
+    }
+  };
+
+  for (const node of nodes) {
+    if (nextNodeNeedsNewPage) {
+      appendPage();
+      nextNodeNeedsNewPage = false;
+    }
+
+    currentArticle.appendChild(node);
+
+    if (currentArticle.scrollHeight <= pageContentHeight + PAGE_OVERFLOW_TOLERANCE_PX) {
+      continue;
+    }
+
+    if (currentArticle.childNodes.length > 1) {
+      currentArticle.removeChild(node);
+      appendPage();
+      currentArticle.appendChild(node);
+    }
+
+    if (currentArticle.scrollHeight > pageContentHeight + PAGE_OVERFLOW_TOLERANCE_PX) {
+      growCurrentPageIfNeeded();
+      nextNodeNeedsNewPage = true;
+    }
+  }
+}
+
+function paginateRenderedSections(doc: Document) {
+  const win = doc.defaultView;
+  if (!win) return;
+
+  removeLeadingEmptyPages(doc);
+
+  const sections = Array.from(doc.querySelectorAll('.docx-wrapper > section.docx')) as HTMLElement[];
+  for (const section of sections) {
+    paginateSection(win, section);
+  }
+}
+
 function prepareFixedPageLayout(doc: Document) {
   const win = doc.defaultView;
   if (!win) return () => {};
-
-  removeLeadingEmptyPages(doc);
 
   const pages = Array.from(doc.querySelectorAll('.docx-wrapper > section.docx')) as HTMLElement[];
   const pageFrames = pages.map((page) => {
@@ -125,7 +240,7 @@ function prepareFixedPageLayout(doc: Document) {
 
     for (const { frame, page } of pageFrames) {
       const pageWidth = readElementWidth(win, page);
-      const pageHeight = Math.max(page.scrollHeight, page.offsetHeight);
+      const pageHeight = page.offsetHeight || page.scrollHeight;
       page.style.transform = `scale(${scale})`;
       frame.style.width = `${pageWidth * scale}px`;
       frame.style.height = `${pageHeight * scale}px`;
@@ -199,9 +314,10 @@ export default function DocxPreview({
         await renderAsync(blob, doc.body, doc.head, {
           // docx-preview cannot calculate Word's natural page breaks. Keep the
           // document's fixed page width and scale the page shell instead of
-          // reflowing text when the artifact panel is resized.
-          breakPages: false,
-          ignoreHeight: true,
+          // reflowing text when the artifact panel is resized; then add a
+          // measured best-effort pagination pass for long unbroken sections.
+          breakPages: true,
+          ignoreHeight: false,
           ignoreLastRenderedPageBreak: true,
           ignoreWidth: false,
           renderHeaders: false,
@@ -214,6 +330,7 @@ export default function DocxPreview({
           useBase64URL: true,
         });
         if (cancelled) return;
+        paginateRenderedSections(doc);
         installFrameStyles(doc);
         cleanupLayout = prepareFixedPageLayout(doc);
       })
