@@ -6,10 +6,19 @@ describe('compactMimeType', () => {
     expect(compactMimeType('text/markdown')).toBe('text/markdown');
   });
 
-  test('truncates long MIME types while keeping both ends visible', () => {
-    const docxMime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  test('uses short labels for verbose Office MIME types', () => {
+    expect(
+      compactMimeType('application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    ).toBe('DOCX');
+    expect(
+      compactMimeType('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    ).toBe('XLSX');
+  });
 
-    expect(compactMimeType(docxMime)).toBe('application/vnd.open...ngml.document');
+  test('truncates other long MIME types while keeping both ends visible', () => {
+    const archiveMime = 'application/vnd.some-very-long-custom-package+zip';
+
+    expect(compactMimeType(archiveMime)).toBe('application/v...kage+zip');
   });
 
   test('trims surrounding whitespace before measuring', () => {
