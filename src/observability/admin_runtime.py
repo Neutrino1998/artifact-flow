@@ -109,8 +109,8 @@ def _parse_ts(value: Any) -> Optional[datetime]:
         return None
 
 
-def _compute_status(payload: dict, now: datetime) -> str:
-    """读侧判色(green / yellow / red),不落 Redis —— 阈值可随时调不需回填。
+def _compute_status_reasons(payload: dict, now: datetime) -> list[dict[str, str]]:
+    """读侧判色理由。与 _compute_status 共用这一个判断源,避免 UI 复制阈值。
 
     - red:ts 缺失或陈旧(≥ STALE_SEC)。心跳是 asyncio task,loop wedge → ts 停更
       → 陈旧 → 红(key 仍在册,给 autoheal 留窗口;key 真过期则整条从 scan 消失)。
@@ -120,28 +120,44 @@ def _compute_status(payload: dict, now: datetime) -> str:
     """
     ts = _parse_ts(payload.get("ts"))
     if ts is None or (now - ts).total_seconds() >= config.OBS_HEARTBEAT_STALE_SEC:
-        return "red"
+        return [{"code": "heartbeat_stale", "label": "心跳陈旧"}]
+
+    reasons: list[dict[str, str]] = []
 
     # loop_lag 近一分钟峰值
     loop_lag = payload.get("loop_lag_ms") or {}
     if float(loop_lag.get("max_1m_ms", 0) or 0) >= config.LOOP_LAG_WARN_MS:
-        return "yellow"
+        reasons.append({"code": "loop_lag_warn", "label": "loop lag 过高"})
 
     # 窗口内出过 ERROR
     last_error = _parse_ts(payload.get("last_error_ts"))
     if last_error is not None and (now - last_error).total_seconds() <= config.OBS_ERROR_WINDOW_SEC:
-        return "yellow"
+        reasons.append({"code": "recent_error", "label": "近期 ERROR"})
 
     # watchdog 抓到过 wedge(进程生命周期内曾发生即黄,与 plan「是否抓到过」一致)
     if payload.get("last_wedge"):
-        return "yellow"
+        reasons.append({"code": "wedge_seen", "label": "watchdog wedge"})
 
     # 近期被 autoheal 重启过
     autoheal = payload.get("last_autoheal") or {}
     healed_ts = _parse_ts(autoheal.get("ts"))
     if healed_ts is not None and (now - healed_ts).total_seconds() <= config.OBS_ERROR_WINDOW_SEC:
-        return "yellow"
+        reasons.append({"code": "autoheal_recent", "label": "近期 autoheal"})
 
+    return reasons
+
+
+def _compute_status(payload: dict, now: datetime) -> str:
+    """读侧判色(green / yellow / red),不落 Redis —— 阈值可随时调不需回填。"""
+    reasons = _compute_status_reasons(payload, now)
+    return _status_from_reasons(reasons)
+
+
+def _status_from_reasons(reasons: list[dict[str, str]]) -> str:
+    if any(r.get("code") == "heartbeat_stale" for r in reasons):
+        return "red"
+    if reasons:
+        return "yellow"
     return "green"
 
 
@@ -162,7 +178,10 @@ async def list_instances(
             "ts": ISO8601,
             "instance_id": str,        # 本次应答实例
             "shared": bool,            # True=Redis 舰队视图;False=单机本地视图
-            "instances": [ {<心跳 payload>, "status": "green|yellow|red"}, ... ],
+            "instances": [
+              {<心跳 payload>, "status": "green|yellow|red",
+               "status_reasons": [{"code": str, "label": str}, ...]}, ...
+            ],
         }
     """
     now = utc_now()
@@ -179,7 +198,8 @@ async def list_instances(
             payload = heartbeat.build_local_payload(snapshot)
         else:
             payload = {"instance_id": INSTANCE_ID, "ts": snapshot.get("ts")}
-        payload["status"] = _compute_status(payload, now)
+        payload["status_reasons"] = _compute_status_reasons(payload, now)
+        payload["status"] = _status_from_reasons(payload["status_reasons"])
         instances.append(payload)
         return {
             "ts": now.isoformat(),
@@ -208,7 +228,8 @@ async def list_instances(
                 except (json.JSONDecodeError, TypeError):
                     # 坏行不该拖垮整表:退化成一条只带 id 的红行,便于发现。
                     payload = {"instance_id": HeartbeatWriter.instance_id_from_key(k), "ts": None}
-                payload["status"] = _compute_status(payload, now)
+                payload["status_reasons"] = _compute_status_reasons(payload, now)
+                payload["status"] = _status_from_reasons(payload["status_reasons"])
                 instances.append(payload)
     except Exception as e:
         # scan/pipeline 失败是**已处理的降级**(返空表 200,非 5xx),按 CLAUDE.md 日志

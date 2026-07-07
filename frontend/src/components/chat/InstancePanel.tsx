@@ -19,6 +19,8 @@ const STATUS_META: Record<string, { dot: string; label: string; text: string }> 
   red: { dot: 'bg-status-error', label: '失联', text: 'text-status-error' },
 };
 
+type StatusReason = NonNullable<InstanceHeartbeat['status_reasons']>[number];
+
 // 相对时间:「Xs / Xm / Xh 前」;缺失返回 '—'。
 function ago(iso: string | null | undefined, nowMs: number): string {
   if (!iso) return '—';
@@ -68,15 +70,42 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: s
   );
 }
 
+function reasonTone(code: string): 'warning' | 'error' {
+  return code === 'heartbeat_stale' || code === 'recent_error' || code === 'autoheal_recent'
+    ? 'error'
+    : 'warning';
+}
+
+function reasonText(inst: InstanceHeartbeat, reason: StatusReason, nowMs: number): string {
+  const loop = inst.loop_lag_ms ?? {};
+  if (reason.code === 'heartbeat_stale') return `${reason.label} · ${ago(inst.ts, nowMs)}`;
+  if (reason.code === 'loop_lag_warn') {
+    return loop.max_1m_ms != null ? `${reason.label} · ${Math.round(loop.max_1m_ms)}ms` : reason.label;
+  }
+  if (reason.code === 'recent_error') return `${reason.label} · ${ago(inst.last_error_ts, nowMs)}`;
+  if (reason.code === 'wedge_seen') {
+    const wedge = inst.last_wedge ?? null;
+    return wedge?.lag_ms != null
+      ? `${reason.label} · ${ago(wedge.ts, nowMs)} · ${Math.round(wedge.lag_ms)}ms`
+      : reason.label;
+  }
+  if (reason.code === 'autoheal_recent') {
+    const heal = inst.last_autoheal ?? null;
+    return heal?.count != null
+      ? `${reason.label} ×${heal.count} · ${ago(heal.ts, nowMs)}`
+      : `${reason.label} · ${ago(heal?.ts, nowMs)}`;
+  }
+  return reason.label;
+}
+
 function InstanceCard({ inst, nowMs, isSelf }: { inst: InstanceHeartbeat; nowMs: number; isSelf: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const meta = STATUS_META[inst.status] ?? STATUS_META.red;
 
   const loop = inst.loop_lag_ms ?? {};
   const proc = inst.process ?? {};
-  const wedge = inst.last_wedge ?? null;
-  const heal = inst.last_autoheal ?? null;
   const errCount = inst.error_count ?? 0;
+  const reasons = inst.status_reasons ?? [];
 
   return (
     <div className="rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-3.5">
@@ -123,19 +152,14 @@ function InstanceCard({ inst, nowMs, isSelf }: { inst: InstanceHeartbeat; nowMs:
         </div>
       </div>
 
-      {/* Anomaly badges */}
-      {(wedge || heal) && (
+      {/* Anomaly badges — backend owns the status decision; UI only renders reasons. */}
+      {reasons.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-2">
-          {wedge && (
-            <span className="text-[11px] px-2 py-0.5 rounded bg-status-warning/10 text-status-warning">
-              watchdog 抓到 wedge · {ago(wedge.ts, nowMs)}{wedge.lag_ms != null ? ` · ${Math.round(wedge.lag_ms)}ms` : ''}
-            </span>
-          )}
-          {heal && (
-            <span className="text-[11px] px-2 py-0.5 rounded bg-status-error/10 text-status-error">
-              autoheal 重启 ×{heal.count ?? 1} · {ago(heal.ts, nowMs)}
-            </span>
-          )}
+          {reasons.map((reason) => (
+            <PillBadge key={reason.code} tone={reasonTone(reason.code)} size="regular">
+              {reasonText(inst, reason, nowMs)}
+            </PillBadge>
+          ))}
         </div>
       )}
 

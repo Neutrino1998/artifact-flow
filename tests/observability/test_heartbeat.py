@@ -159,6 +159,13 @@ def _status(**kw):
     return admin_runtime._compute_status(p, now)
 
 
+def _reason_codes(**kw):
+    now = utc_now()
+    p = {"ts": now.isoformat()}
+    p.update(kw)
+    return [r["code"] for r in admin_runtime._compute_status_reasons(p, now)]
+
+
 def test_compute_status_matrix():
     now = utc_now()
     assert _status() == "green"
@@ -169,3 +176,17 @@ def test_compute_status_matrix():
     assert _status(last_error_ts=(now - timedelta(seconds=999)).isoformat()) == "green"
     assert _status(last_wedge={"ts": "x", "lag_ms": 5000}) == "yellow"
     assert _status(last_autoheal={"ts": (now - timedelta(seconds=30)).isoformat()}) == "yellow"
+
+
+def test_compute_status_reasons_match_status_inputs():
+    now = utc_now()
+    assert _reason_codes() == []
+    assert admin_runtime._compute_status_reasons({"ts": None}, now) == [
+        {"code": "heartbeat_stale", "label": "心跳陈旧"}
+    ]
+    assert _reason_codes(
+        loop_lag_ms={"max_1m_ms": 900},
+        last_error_ts=(now - timedelta(seconds=60)).isoformat(),
+        last_wedge={"ts": "x", "lag_ms": 5000},
+        last_autoheal={"ts": (now - timedelta(seconds=30)).isoformat()},
+    ) == ["loop_lag_warn", "recent_error", "wedge_seen", "autoheal_recent"]

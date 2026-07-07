@@ -630,6 +630,7 @@ export interface InstanceHeartbeat {
   last_wedge?: { ts?: string; lag_ms?: number; wedged?: boolean } | null;
   last_autoheal?: { ts?: string; reason?: string; count?: number } | null;
   status: 'green' | 'yellow' | 'red';
+  status_reasons?: { code: string; label: string }[];
 }
 
 export interface AdminInstancesResponse {
