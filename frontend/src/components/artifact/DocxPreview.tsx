@@ -48,6 +48,7 @@ function installFrameStyles(doc: Document) {
       background: #fff !important;
       box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16) !important;
       max-width: none !important;
+      position: relative !important;
       transform-origin: top left;
     }
     .artifact-docx-page-frame > section.docx {
@@ -62,6 +63,18 @@ function installFrameStyles(doc: Document) {
     .docx-wrapper header,
     .docx-wrapper footer {
       display: none !important;
+    }
+    .artifact-docx-page-number {
+      bottom: 18px;
+      color: #111827;
+      font: 12px/1 Georgia, "Times New Roman", serif;
+      left: 0;
+      opacity: 0.75;
+      pointer-events: none;
+      position: absolute;
+      right: 0;
+      text-align: center;
+      z-index: 2;
     }
   `;
   doc.head.appendChild(style);
@@ -215,6 +228,23 @@ function paginateRenderedSections(doc: Document) {
   }
 }
 
+function addGeneratedPageNumbers(doc: Document) {
+  const pages = Array.from(doc.querySelectorAll('.docx-wrapper > section.docx')) as HTMLElement[];
+  pages.forEach((page, index) => {
+    for (const child of Array.from(page.children)) {
+      if (child.classList.contains('artifact-docx-page-number')) {
+        child.remove();
+      }
+    }
+
+    const pageNumber = doc.createElement('div');
+    pageNumber.className = 'artifact-docx-page-number';
+    pageNumber.setAttribute('aria-hidden', 'true');
+    pageNumber.textContent = String(index + 1);
+    page.appendChild(pageNumber);
+  });
+}
+
 function prepareFixedPageLayout(doc: Document) {
   const win = doc.defaultView;
   if (!win) return () => {};
@@ -331,6 +361,7 @@ export default function DocxPreview({
         });
         if (cancelled) return;
         paginateRenderedSections(doc);
+        addGeneratedPageNumbers(doc);
         installFrameStyles(doc);
         cleanupLayout = prepareFixedPageLayout(doc);
       })
