@@ -908,6 +908,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin List Skills
+         * @description 列出所有 shared skill,不按 admin 自己的部门可见性过滤。
+         */
+        get: operations["admin_list_skills_api_v1_admin_skills_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/skills/import": {
         parameters: {
             query?: never;
@@ -943,6 +963,63 @@ export interface paths {
          * @description 删除任意 dynamic skill(绕过可见性;seeded → 400)。级联清 user_skill/dept 规则。
          */
         delete: operations["admin_delete_skill_api_v1_admin_skills__slug__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Admin Update Skill
+         * @description 编辑 dynamic shared skill 的 visibility/default_enabled。seeded 仍 config-owned。
+         */
+        patch: operations["admin_update_skill_api_v1_admin_skills__slug__patch"];
+        trace?: never;
+    };
+    "/api/v1/admin/department-access/{dept_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Department Access */
+        get: operations["get_department_access_api_v1_admin_department_access__dept_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/department-access/{dept_id}/skills/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put Department Skill Rule */
+        put: operations["put_department_skill_rule_api_v1_admin_department_access__dept_id__skills__slug__put"];
+        post?: never;
+        /** Delete Department Skill Rule */
+        delete: operations["delete_department_skill_rule_api_v1_admin_department_access__dept_id__skills__slug__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/department-access/{dept_id}/units/{unit_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put Department Unit Rule */
+        put: operations["put_department_unit_rule_api_v1_admin_department_access__dept_id__units__unit_name__put"];
+        post?: never;
+        /** Delete Department Unit Rule */
+        delete: operations["delete_department_unit_rule_api_v1_admin_department_access__dept_id__units__unit_name__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1392,6 +1469,81 @@ export interface components {
             messages: {
                 [key: string]: unknown;
             }[];
+        };
+        /**
+         * AdminSkillItem
+         * @description Admin shared skill catalog item (not filtered by the admin user's department).
+         */
+        AdminSkillItem: {
+            /**
+             * Slug
+             * @description Skill slug (natural key)
+             */
+            slug: string;
+            /**
+             * Name
+             * @description Display name
+             */
+            name: string;
+            /**
+             * Description
+             * @description One-line description
+             */
+            description: string;
+            /**
+             * Visibility
+             * @description public (default allow) or department (default deny)
+             * @enum {string}
+             */
+            visibility: "public" | "department";
+            /**
+             * Default Enabled
+             * @description Whether this shared skill enters users' L1 index by default
+             */
+            default_enabled: boolean;
+            /**
+             * Source
+             * @description seeded skills are config-owned; dynamic shared skills are editable
+             * @enum {string}
+             */
+            source: "seeded" | "dynamic";
+            /**
+             * Has Extra Files
+             * @description Whether the skill bundle contains files beyond SKILL.md
+             */
+            has_extra_files: boolean;
+            /**
+             * Can Edit
+             * @description True only for dynamic shared skills
+             */
+            can_edit: boolean;
+        };
+        /**
+         * AdminSkillListResponse
+         * @description GET /api/v1/admin/skills response.
+         */
+        AdminSkillListResponse: {
+            /**
+             * Skills
+             * @description All shared skills, including seeded read-only ones
+             */
+            skills: components["schemas"]["AdminSkillItem"][];
+        };
+        /**
+         * AdminSkillUpdateRequest
+         * @description PATCH /api/v1/admin/skills/{slug} request body.
+         */
+        AdminSkillUpdateRequest: {
+            /**
+             * Visibility
+             * @description New shared visibility. Changing it clears department rules.
+             */
+            visibility?: ("public" | "department") | null;
+            /**
+             * Default Enabled
+             * @description New default L1 enabled state for users without an override.
+             */
+            default_enabled?: boolean | null;
         };
         /** AgentListResponse */
         AgentListResponse: {
@@ -2055,6 +2207,36 @@ export interface components {
             /** Source */
             source: string | null;
         };
+        /** DepartmentAccessDepartment */
+        DepartmentAccessDepartment: {
+            /** Id */
+            id: string;
+            /** Parent Id */
+            parent_id: string | null;
+            /** Name */
+            name: string;
+        };
+        /** DepartmentAccessInheritedRule */
+        DepartmentAccessInheritedRule: {
+            /**
+             * Department Id
+             * @description Ancestor department id
+             */
+            department_id: string;
+            /**
+             * Department Name
+             * @description Ancestor department display name
+             */
+            department_name: string;
+        };
+        /** DepartmentAccessResponse */
+        DepartmentAccessResponse: {
+            department: components["schemas"]["DepartmentAccessDepartment"];
+            /** Skills */
+            skills: components["schemas"]["DepartmentSkillAccessItem"][];
+            /** Units */
+            units: components["schemas"]["DepartmentUnitAccessItem"][];
+        };
         /**
          * DepartmentListResponse
          * @description GET /api/v1/departments response — 同级列表
@@ -2095,6 +2277,42 @@ export interface components {
              */
             updated_at: string;
         };
+        /** DepartmentSkillAccessItem */
+        DepartmentSkillAccessItem: {
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /**
+             * Visibility
+             * @enum {string}
+             */
+            visibility: "public" | "department";
+            /** Source */
+            source: string;
+            /** Default Enabled */
+            default_enabled: boolean;
+            /**
+             * Rule Action
+             * @description 'deny' for public resources, 'grant' for department resources.
+             * @enum {string}
+             */
+            rule_action: "grant" | "deny";
+            /**
+             * Direct Rule
+             * @description Whether this exact department has an exception row.
+             */
+            direct_rule: boolean;
+            /** @description Nearest ancestor exception row, if any. */
+            inherited_rule: components["schemas"]["DepartmentAccessInheritedRule"] | null;
+            /**
+             * Effective Allowed
+             * @description Whether users in this department can see/use this resource.
+             */
+            effective_allowed: boolean;
+        };
         /**
          * DepartmentTreeNode
          * @description Tree node — 递归结构，包含 children
@@ -2121,6 +2339,32 @@ export interface components {
         DepartmentTreeResponse: {
             /** Nodes */
             nodes: components["schemas"]["DepartmentTreeNode"][];
+        };
+        /** DepartmentUnitAccessItem */
+        DepartmentUnitAccessItem: {
+            /** Name */
+            name: string;
+            /** Kind */
+            kind: string;
+            /** Description */
+            description: string;
+            /**
+             * Visibility
+             * @enum {string}
+             */
+            visibility: "public" | "department";
+            /** Source */
+            source: string;
+            /**
+             * Rule Action
+             * @enum {string}
+             */
+            rule_action: "grant" | "deny";
+            /** Direct Rule */
+            direct_rule: boolean;
+            inherited_rule: components["schemas"]["DepartmentAccessInheritedRule"] | null;
+            /** Effective Allowed */
+            effective_allowed: boolean;
         };
         /**
          * FindingItem
@@ -4388,6 +4632,26 @@ export interface operations {
             };
         };
     };
+    admin_list_skills_api_v1_admin_skills_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSkillListResponse"];
+                };
+            };
+        };
+    };
     admin_import_skill_api_v1_admin_skills_import_post: {
         parameters: {
             query?: never;
@@ -4427,6 +4691,192 @@ export interface operations {
             header?: never;
             path: {
                 slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_update_skill_api_v1_admin_skills__slug__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminSkillUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSkillItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_department_access_api_v1_admin_department_access__dept_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dept_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartmentAccessResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_department_skill_rule_api_v1_admin_department_access__dept_id__skills__slug__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dept_id: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_department_skill_rule_api_v1_admin_department_access__dept_id__skills__slug__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dept_id: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_department_unit_rule_api_v1_admin_department_access__dept_id__units__unit_name__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dept_id: string;
+                unit_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_department_unit_rule_api_v1_admin_department_access__dept_id__units__unit_name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dept_id: string;
+                unit_name: string;
             };
             cookie?: never;
         };

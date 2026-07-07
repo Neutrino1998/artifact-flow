@@ -2406,6 +2406,33 @@
         }
       }
     },
+    "/api/v1/admin/skills": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin List Skills",
+        "description": "\u5217\u51fa\u6240\u6709 shared skill,\u4e0d\u6309 admin \u81ea\u5df1\u7684\u90e8\u95e8\u53ef\u89c1\u6027\u8fc7\u6ee4\u3002",
+        "operationId": "admin_list_skills_api_v1_admin_skills_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSkillListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/skills/import": {
       "post": {
         "tags": [
@@ -2454,6 +2481,62 @@
       }
     },
     "/api/v1/admin/skills/{slug}": {
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Update Skill",
+        "description": "\u7f16\u8f91 dynamic shared skill \u7684 visibility/default_enabled\u3002seeded \u4ecd config-owned\u3002",
+        "operationId": "admin_update_skill_api_v1_admin_skills__slug__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminSkillUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSkillItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "tags": [
           "admin"
@@ -2474,6 +2557,245 @@
             "schema": {
               "type": "string",
               "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/department-access/{dept_id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Department Access",
+        "operationId": "get_department_access_api_v1_admin_department_access__dept_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dept_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dept Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DepartmentAccessResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/department-access/{dept_id}/skills/{slug}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Put Department Skill Rule",
+        "operationId": "put_department_skill_rule_api_v1_admin_department_access__dept_id__skills__slug__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dept_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dept Id"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete Department Skill Rule",
+        "operationId": "delete_department_skill_rule_api_v1_admin_department_access__dept_id__skills__slug__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dept_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dept Id"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/department-access/{dept_id}/units/{unit_name}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Put Department Unit Rule",
+        "operationId": "put_department_unit_rule_api_v1_admin_department_access__dept_id__units__unit_name__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dept_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dept Id"
+            }
+          },
+          {
+            "name": "unit_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Unit Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete Department Unit Rule",
+        "operationId": "delete_department_unit_rule_api_v1_admin_department_access__dept_id__units__unit_name__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dept_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dept Id"
+            }
+          },
+          {
+            "name": "unit_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Unit Name"
             }
           }
         ],
@@ -3523,6 +3845,124 @@
         ],
         "title": "AdminPromptReconstructResponse",
         "description": "GET .../messages/{message_id}/reconstruct response \u2014 \u91cd\u5efa\u67d0\u53d1 LLM \u8c03\u7528\u7684\u5b8c\u6574 prompt\u3002\n\nhas_reminder=False \u8868\u793a\u8be5 agent_start \u65e9\u4e8e reminder \u6301\u4e45\u5316\uff08\u53ea\u91cd\u5efa\u4e86 system_prompt +\n\u5386\u53f2\uff0c\u65e0\u52a8\u6001 reminder\uff09\u3002messages \u7684 content \u53ef\u80fd\u662f str \u6216\u5757\u5217\u8868\uff08\u8bc6\u56fe\u5757\u964d\u7ea7\u4e3a\u5360\u4f4d\u6587\u672c\uff09\u3002"
+      },
+      "AdminSkillItem": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug",
+            "description": "Skill slug (natural key)"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Display name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "One-line description"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "department"
+            ],
+            "title": "Visibility",
+            "description": "public (default allow) or department (default deny)"
+          },
+          "default_enabled": {
+            "type": "boolean",
+            "title": "Default Enabled",
+            "description": "Whether this shared skill enters users' L1 index by default"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "seeded",
+              "dynamic"
+            ],
+            "title": "Source",
+            "description": "seeded skills are config-owned; dynamic shared skills are editable"
+          },
+          "has_extra_files": {
+            "type": "boolean",
+            "title": "Has Extra Files",
+            "description": "Whether the skill bundle contains files beyond SKILL.md"
+          },
+          "can_edit": {
+            "type": "boolean",
+            "title": "Can Edit",
+            "description": "True only for dynamic shared skills"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "description",
+          "visibility",
+          "default_enabled",
+          "source",
+          "has_extra_files",
+          "can_edit"
+        ],
+        "title": "AdminSkillItem",
+        "description": "Admin shared skill catalog item (not filtered by the admin user's department)."
+      },
+      "AdminSkillListResponse": {
+        "properties": {
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/AdminSkillItem"
+            },
+            "type": "array",
+            "title": "Skills",
+            "description": "All shared skills, including seeded read-only ones"
+          }
+        },
+        "type": "object",
+        "required": [
+          "skills"
+        ],
+        "title": "AdminSkillListResponse",
+        "description": "GET /api/v1/admin/skills response."
+      },
+      "AdminSkillUpdateRequest": {
+        "properties": {
+          "visibility": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "public",
+                  "department"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visibility",
+            "description": "New shared visibility. Changing it clears department rules."
+          },
+          "default_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Enabled",
+            "description": "New default L1 enabled state for users without an override."
+          }
+        },
+        "type": "object",
+        "title": "AdminSkillUpdateRequest",
+        "description": "PATCH /api/v1/admin/skills/{slug} request body."
       },
       "AgentListResponse": {
         "properties": {
@@ -4631,6 +5071,84 @@
         ],
         "title": "CredentialStatusResponse"
       },
+      "DepartmentAccessDepartment": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "parent_id",
+          "name"
+        ],
+        "title": "DepartmentAccessDepartment"
+      },
+      "DepartmentAccessInheritedRule": {
+        "properties": {
+          "department_id": {
+            "type": "string",
+            "title": "Department Id",
+            "description": "Ancestor department id"
+          },
+          "department_name": {
+            "type": "string",
+            "title": "Department Name",
+            "description": "Ancestor department display name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "department_id",
+          "department_name"
+        ],
+        "title": "DepartmentAccessInheritedRule"
+      },
+      "DepartmentAccessResponse": {
+        "properties": {
+          "department": {
+            "$ref": "#/components/schemas/DepartmentAccessDepartment"
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/DepartmentSkillAccessItem"
+            },
+            "type": "array",
+            "title": "Skills"
+          },
+          "units": {
+            "items": {
+              "$ref": "#/components/schemas/DepartmentUnitAccessItem"
+            },
+            "type": "array",
+            "title": "Units"
+          }
+        },
+        "type": "object",
+        "required": [
+          "department",
+          "skills",
+          "units"
+        ],
+        "title": "DepartmentAccessResponse"
+      },
       "DepartmentListResponse": {
         "properties": {
           "departments": {
@@ -4703,6 +5221,82 @@
         "title": "DepartmentResponse",
         "description": "Single department response (\u542b\u76f4\u5c5e\u8ba1\u6570)"
       },
+      "DepartmentSkillAccessItem": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "department"
+            ],
+            "title": "Visibility"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "default_enabled": {
+            "type": "boolean",
+            "title": "Default Enabled"
+          },
+          "rule_action": {
+            "type": "string",
+            "enum": [
+              "grant",
+              "deny"
+            ],
+            "title": "Rule Action",
+            "description": "'deny' for public resources, 'grant' for department resources."
+          },
+          "direct_rule": {
+            "type": "boolean",
+            "title": "Direct Rule",
+            "description": "Whether this exact department has an exception row."
+          },
+          "inherited_rule": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DepartmentAccessInheritedRule"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Nearest ancestor exception row, if any."
+          },
+          "effective_allowed": {
+            "type": "boolean",
+            "title": "Effective Allowed",
+            "description": "Whether users in this department can see/use this resource."
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "description",
+          "visibility",
+          "source",
+          "default_enabled",
+          "rule_action",
+          "direct_rule",
+          "inherited_rule",
+          "effective_allowed"
+        ],
+        "title": "DepartmentSkillAccessItem"
+      },
       "DepartmentTreeNode": {
         "properties": {
           "id": {
@@ -4764,6 +5358,73 @@
         ],
         "title": "DepartmentTreeResponse",
         "description": "GET /api/v1/departments/tree response \u2014 \u9876\u5c42\u8282\u70b9\u5217\u8868"
+      },
+      "DepartmentUnitAccessItem": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "department"
+            ],
+            "title": "Visibility"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "rule_action": {
+            "type": "string",
+            "enum": [
+              "grant",
+              "deny"
+            ],
+            "title": "Rule Action"
+          },
+          "direct_rule": {
+            "type": "boolean",
+            "title": "Direct Rule"
+          },
+          "inherited_rule": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DepartmentAccessInheritedRule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "effective_allowed": {
+            "type": "boolean",
+            "title": "Effective Allowed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "description",
+          "visibility",
+          "source",
+          "rule_action",
+          "direct_rule",
+          "inherited_rule",
+          "effective_allowed"
+        ],
+        "title": "DepartmentUnitAccessItem"
       },
       "FindingItem": {
         "properties": {

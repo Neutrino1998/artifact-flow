@@ -36,6 +36,11 @@ export type DepartmentResponse = S['DepartmentResponse'];
 export type DepartmentListResponse = S['DepartmentListResponse'];
 export type DepartmentTreeNode = S['DepartmentTreeNode'];
 export type DepartmentTreeResponse = S['DepartmentTreeResponse'];
+export type DepartmentAccessDepartment = S['DepartmentAccessDepartment'];
+export type DepartmentAccessInheritedRule = S['DepartmentAccessInheritedRule'];
+export type DepartmentSkillAccessItem = S['DepartmentSkillAccessItem'];
+export type DepartmentUnitAccessItem = S['DepartmentUnitAccessItem'];
+export type DepartmentAccessResponse = S['DepartmentAccessResponse'];
 export type CreateDepartmentRequest = S['CreateDepartmentRequest'];
 export type UpdateDepartmentRequest = S['UpdateDepartmentRequest'];
 export type MoveDepartmentRequest = S['MoveDepartmentRequest'];
@@ -70,6 +75,9 @@ export type SkillItem = S['SkillItem'];
 export type SkillListResponse = S['SkillListResponse'];
 export type SkillFindingItem = S['FindingItem'];
 export type SkillImportResponse = S['SkillImportResponse'];
+export type AdminSkillItem = S['AdminSkillItem'];
+export type AdminSkillListResponse = S['AdminSkillListResponse'];
+export type AdminSkillUpdateRequest = S['AdminSkillUpdateRequest'];
 
 // ============================================================
 // Chat Types

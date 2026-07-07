@@ -175,20 +175,23 @@ export default function Sidebar() {
   const inUserMgmt = activeMode === 'userManagement' && isAdmin;
   // Tool-unit management is the same master-detail shape as user-mgmt.
   const inToolUnitMgmt = activeMode === 'toolUnit' && isAdmin;
+  const inDepartmentAccess = activeMode === 'departmentAccess' && isAdmin;
   // Fleet instances (Phase C) — center takeover, admin-only, like observability
   // but without the conversation search/refresh actions.
   const inInstances = activeMode === 'instances' && isAdmin;
 
-  // 「全接管」admin 模式:实例监控/工具管理/用户管理。这三个把中间/右面板整个接管,
+  // 「全接管」admin 模式:实例监控/工具管理/用户管理/部门授权。这些把中间/右面板整个接管,
   // 与对话无关 → 侧栏隐藏对话列表 + 文件面板/搜索对话/新建对话/技能管理,只留退出
   // (实例监控额外留一个刷新)。会话监控(observability)不算 —— 它本就是看对话的,
   // 保留 admin 对话列表 + 搜索/刷新。
-  const inAdminTakeover = inUserMgmt || inToolUnitMgmt || inInstances;
+  const inAdminTakeover = inUserMgmt || inToolUnitMgmt || inDepartmentAccess || inInstances;
   const takeoverExitLabel = inUserMgmt
     ? '退出用户管理'
     : inToolUnitMgmt
       ? '退出工具管理'
-      : '退出实例监控';
+      : inDepartmentAccess
+        ? '退出部门授权'
+        : '退出实例监控';
 
   // ── Collapsed: 48px icon bar ──
   if (sidebarCollapsed) {
@@ -319,9 +322,9 @@ export default function Sidebar() {
       <div className="flex items-center justify-between px-4 py-3 border-b border-border dark:border-border-dark">
         <div className="min-w-0">
           <h1 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark">
-            {inObservability ? '会话监控' : inUserMgmt ? '用户管理' : inToolUnitMgmt ? '工具管理' : inInstances ? '实例监控' : APP_NAME}
+            {inObservability ? '会话监控' : inUserMgmt ? '用户管理' : inToolUnitMgmt ? '工具管理' : inDepartmentAccess ? '部门授权' : inInstances ? '实例监控' : APP_NAME}
           </h1>
-          {!inObservability && !inUserMgmt && !inToolUnitMgmt && !inInstances && (
+          {!inObservability && !inUserMgmt && !inToolUnitMgmt && !inDepartmentAccess && !inInstances && (
             <p className="text-xs text-text-secondary dark:text-text-secondary-dark">
               {APP_TAGLINE}
             </p>

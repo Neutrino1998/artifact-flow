@@ -29,6 +29,7 @@ import type {
   DepartmentResponse,
   DepartmentListResponse,
   DepartmentTreeResponse,
+  DepartmentAccessResponse,
   CreateDepartmentRequest,
   UpdateDepartmentRequest,
   MoveDepartmentRequest,
@@ -47,6 +48,9 @@ import type {
   SkillItem,
   SkillListResponse,
   SkillImportResponse,
+  AdminSkillListResponse,
+  AdminSkillUpdateRequest,
+  AdminSkillItem,
 } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
 import { API_URL } from './apiBase';
@@ -279,6 +283,17 @@ export function deleteSkill(slug: string) {
 export function adminDeleteSkill(slug: string) {
   return request<void>(`/api/v1/admin/skills/${encodeURIComponent(slug)}`, {
     method: 'DELETE',
+  });
+}
+
+export function adminListSkills() {
+  return request<AdminSkillListResponse>('/api/v1/admin/skills');
+}
+
+export function adminUpdateSkill(slug: string, body: AdminSkillUpdateRequest) {
+  return request<AdminSkillItem>(`/api/v1/admin/skills/${encodeURIComponent(slug)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
   });
 }
 
@@ -807,6 +822,41 @@ export function resolveDepartmentPath(body: ResolveDepartmentRequest) {
     method: 'POST',
     body: JSON.stringify(body),
   });
+}
+
+// Department Access (Admin) — G department-scoped skill/unit rules.
+export function getDepartmentAccess(deptId: string) {
+  return request<DepartmentAccessResponse>(
+    `/api/v1/admin/department-access/${encodeURIComponent(deptId)}`,
+  );
+}
+
+export function putDepartmentSkillRule(deptId: string, slug: string) {
+  return request<void>(
+    `/api/v1/admin/department-access/${encodeURIComponent(deptId)}/skills/${encodeURIComponent(slug)}`,
+    { method: 'PUT' },
+  );
+}
+
+export function deleteDepartmentSkillRule(deptId: string, slug: string) {
+  return request<void>(
+    `/api/v1/admin/department-access/${encodeURIComponent(deptId)}/skills/${encodeURIComponent(slug)}`,
+    { method: 'DELETE' },
+  );
+}
+
+export function putDepartmentUnitRule(deptId: string, unitName: string) {
+  return request<void>(
+    `/api/v1/admin/department-access/${encodeURIComponent(deptId)}/units/${encodeURIComponent(unitName)}`,
+    { method: 'PUT' },
+  );
+}
+
+export function deleteDepartmentUnitRule(deptId: string, unitName: string) {
+  return request<void>(
+    `/api/v1/admin/department-access/${encodeURIComponent(deptId)}/units/${encodeURIComponent(unitName)}`,
+    { method: 'DELETE' },
+  );
 }
 
 // Tool Registry (Admin) — B-4 工具 unit 管理。

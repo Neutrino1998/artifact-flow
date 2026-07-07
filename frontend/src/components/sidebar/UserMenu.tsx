@@ -73,6 +73,11 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
     setActiveMode('toolUnit');
   };
 
+  const handleDepartmentAccess = () => {
+    setPopoverOpen(false);
+    setActiveMode('departmentAccess');
+  };
+
   const handleObservability = () => {
     setPopoverOpen(false);
     setActiveMode('observability');
@@ -222,6 +227,20 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
                   <path d="M9.8 4.2a.67.67 0 0 0 0 .93l1.07 1.07a.67.67 0 0 0 .93 0l2.51-2.51a4 4 0 0 1-5.29 5.29l-4.61 4.61a1.41 1.41 0 0 1-2-2l4.61-4.61a4 4 0 0 1 5.29-5.29l-2.51 2.51z" />
                 </svg>
                 工具管理
+              </button>
+            )}
+
+            {/* Admin: department access */}
+            {isAdmin && (
+              <button
+                onClick={handleDepartmentAccess}
+                className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 4h10M3 8h10M3 12h6" />
+                  <path d="M11.5 11.5l1 1 1.8-2" />
+                </svg>
+                部门授权
               </button>
             )}
 

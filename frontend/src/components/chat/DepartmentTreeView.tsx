@@ -7,7 +7,8 @@ interface DepartmentTreeViewProps {
   nodes: DepartmentTreeNode[];
   selectedId?: string | null;
   onSelect: (deptId: string) => void;
-  onCreateChild: (parentId: string) => void;
+  onCreateChild?: (parentId: string) => void;
+  showCreateChild?: boolean;
   /**
    * Set of node ids that should render collapsed. Default = expanded. Owned by
    * the parent so state survives switching to the edit/create inner view (which
@@ -22,6 +23,7 @@ export default function DepartmentTreeView({
   selectedId,
   onSelect,
   onCreateChild,
+  showCreateChild = true,
   collapsedIds,
   onToggleCollapsed,
 }: DepartmentTreeViewProps) {
@@ -42,6 +44,7 @@ export default function DepartmentTreeView({
           selectedId={selectedId ?? null}
           onSelect={onSelect}
           onCreateChild={onCreateChild}
+          showCreateChild={showCreateChild}
           collapsedIds={collapsedIds}
           onToggleCollapsed={onToggleCollapsed}
         />
@@ -56,6 +59,7 @@ function TreeNodeItem({
   selectedId,
   onSelect,
   onCreateChild,
+  showCreateChild,
   collapsedIds,
   onToggleCollapsed,
 }: {
@@ -63,7 +67,8 @@ function TreeNodeItem({
   depth: number;
   selectedId: string | null;
   onSelect: (deptId: string) => void;
-  onCreateChild: (parentId: string) => void;
+  onCreateChild?: (parentId: string) => void;
+  showCreateChild: boolean;
   collapsedIds: ReadonlySet<string>;
   onToggleCollapsed: (deptId: string) => void;
 }) {
@@ -112,13 +117,15 @@ function TreeNodeItem({
           {node.user_count} 人
         </span>
 
-        <button
-          onClick={(e) => { e.stopPropagation(); onCreateChild(node.id); }}
-          className="flex-shrink-0 opacity-0 group-hover:opacity-100 focus:opacity-100 px-1.5 py-0.5 text-xs rounded text-accent hover:bg-accent/10 transition-opacity"
-          title="在此部门下新建子部门"
-        >
-          + 子
-        </button>
+        {showCreateChild && onCreateChild && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onCreateChild(node.id); }}
+            className="flex-shrink-0 opacity-0 group-hover:opacity-100 focus:opacity-100 px-1.5 py-0.5 text-xs rounded text-accent hover:bg-accent/10 transition-opacity"
+            title="在此部门下新建子部门"
+          >
+            + 子
+          </button>
+        )}
       </div>
 
       {hasChildren && expanded && (
@@ -131,6 +138,7 @@ function TreeNodeItem({
               selectedId={selectedId}
               onSelect={onSelect}
               onCreateChild={onCreateChild}
+              showCreateChild={showCreateChild}
               collapsedIds={collapsedIds}
               onToggleCollapsed={onToggleCollapsed}
             />

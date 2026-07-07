@@ -16,6 +16,7 @@ import ConversationBrowser from './ConversationBrowser';
 import SkillManagementPanel from './SkillManagementPanel';
 import UserManagementPanel from './UserManagementPanel';
 import ToolUnitManagementPanel from './ToolUnitManagementPanel';
+import DepartmentAccessPanel from './DepartmentAccessPanel';
 import ObservabilityPanel from './ObservabilityPanel';
 import InstancePanel from './InstancePanel';
 import { useAuthStore } from '@/stores/authStore';
@@ -77,6 +78,10 @@ export default function ChatPanel() {
 
   if (activeMode === 'toolUnit' && isAdmin) {
     return <ToolUnitManagementPanel />;
+  }
+
+  if (activeMode === 'departmentAccess' && isAdmin) {
+    return <DepartmentAccessPanel />;
   }
 
   if (activeMode === 'conversationBrowser') {
