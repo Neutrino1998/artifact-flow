@@ -17,7 +17,7 @@ import tempfile
 from unittest.mock import patch
 
 from tools.base import BaseTool, ToolParameter, ToolPermission, ToolResult
-from tools.artifact_output import normalize_artifact_output_config
+from tools.artifact_output import filename_from_headers, normalize_artifact_output_config
 from tools.custom.loader import load_custom_tool, load_custom_tools
 import jmespath
 from tools.custom.http_tool import HttpTool, HttpToolConfig, validate_response_extract
@@ -119,6 +119,25 @@ class TestValidateResponseExtract:
         for bad in (123, True, 0, False):
             with pytest.raises(ValueError, match="must be a string"):
                 validate_response_extract(bad)
+
+
+class TestArtifactOutputHeaders:
+    def test_filename_star_wins_over_ascii_fallback(self):
+        filename = filename_from_headers({
+            "content-disposition": (
+                'attachment; filename="report.docx"; '
+                "filename*=UTF-8''%E6%8A%A5%E5%91%8A.docx"
+            )
+        })
+
+        assert filename == "报告.docx"
+
+    def test_filename_falls_back_to_plain_filename(self):
+        filename = filename_from_headers({
+            "content-disposition": 'attachment; filename="report.docx"'
+        })
+
+        assert filename == "report.docx"
 
 
 # ============================================================

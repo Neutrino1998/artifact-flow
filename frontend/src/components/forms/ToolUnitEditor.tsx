@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { INPUT_ON_PANEL, LABEL_CLASS } from '@/lib/styles';
 import { SELECT_CHEVRON } from '@/components/ui/SelectChevron';
 import Checkbox from '@/components/forms/Checkbox';
@@ -833,9 +834,12 @@ function ArtifactOutputEditor({
   readOnly: boolean;
   onChange: (next: MemberDraft['artifact_output']) => void;
 }) {
+  const [forceCustomContentType, setForceCustomContentType] = useState(false);
   const patch = (p: Partial<MemberDraft['artifact_output']>) => onChange({ ...value, ...p });
   const contentTypeOptions = value.mode === 'text' ? TEXT_CONTENT_TYPES : BINARY_CONTENT_TYPES;
-  const selectedPreset = value.content_type.trim()
+  const selectedPreset = forceCustomContentType
+    ? CUSTOM_CONTENT_TYPE_OPTION
+    : value.content_type.trim()
     ? contentTypeOptions.some((o) => o.value === value.content_type)
       ? value.content_type
       : CUSTOM_CONTENT_TYPE_OPTION
@@ -855,6 +859,7 @@ function ArtifactOutputEditor({
     const current = value.content_type.trim();
     const currentFitsNextMode = nextOptions.some((o) => o.value === current);
     const nextContentType = currentFitsNextMode ? current : mode === 'text' ? 'text/plain' : '';
+    setForceCustomContentType(false);
     patch({ mode, content_type: nextContentType });
   };
 
@@ -911,8 +916,12 @@ function ArtifactOutputEditor({
                   onChange={(e) => {
                     const next = e.target.value;
                     if (next === AUTO_CONTENT_TYPE_OPTION) {
+                      setForceCustomContentType(false);
                       patch({ content_type: '' });
+                    } else if (next === CUSTOM_CONTENT_TYPE_OPTION) {
+                      setForceCustomContentType(true);
                     } else if (next !== CUSTOM_CONTENT_TYPE_OPTION) {
+                      setForceCustomContentType(false);
                       patch({ content_type: next });
                     }
                   }}
@@ -936,7 +945,10 @@ function ArtifactOutputEditor({
             <input
               type="text"
               value={value.content_type}
-              onChange={(e) => patch({ content_type: e.target.value })}
+              onChange={(e) => {
+                setForceCustomContentType(true);
+                patch({ content_type: e.target.value });
+              }}
               disabled={readOnly}
               placeholder={value.mode === 'text' ? 'text/csv' : '自动读取响应 Content-Type'}
               className={`${INPUT_ON_PANEL} font-mono`}

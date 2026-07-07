@@ -141,14 +141,17 @@ def filename_from_headers(headers: Mapping[str, str]) -> Optional[str]:
 
     message = Message()
     message["content-disposition"] = raw
-    filename = message.get_param("filename", header="content-disposition")
-    if filename is None:
-        filename = message.get_param("filename*", header="content-disposition")
-    if filename is None:
-        return None
-    if isinstance(filename, tuple):
-        filename = collapse_rfc2231_value(filename)
-    return _safe_filename(str(filename))
+    fallback: Optional[str] = None
+    for name, value in message.get_params(header="content-disposition") or []:
+        if name.lower() != "filename":
+            continue
+        if isinstance(value, tuple):
+            filename = _safe_filename(collapse_rfc2231_value(value))
+            if filename:
+                return filename
+        elif fallback is None:
+            fallback = _safe_filename(str(value))
+    return fallback
 
 
 def _optional_str(raw: Dict[str, Any], key: str, *, max_length: int) -> Optional[str]:
