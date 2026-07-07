@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
+import Image from 'next/image';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useStreamStore } from '@/stores/streamStore';
 import { useUIStore } from '@/stores/uiStore';
@@ -133,15 +134,19 @@ export default function ChatPanel() {
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center gap-2">
           <div className="relative">
-            <img
+            <Image
               src="/cat-sleep-light.svg"
               alt=""
-              className="dark:hidden w-72 translate-y-6"
+              width={578}
+              height={316}
+              className="dark:hidden w-72 h-auto translate-y-6"
             />
-            <img
+            <Image
               src="/cat-sleep-dark.svg"
               alt=""
-              className="hidden dark:block w-72 translate-y-6"
+              width={578}
+              height={316}
+              className="hidden dark:block w-72 h-auto translate-y-6"
             />
           </div>
           <div className="text-text-secondary dark:text-text-secondary-dark text-3xl font-semibold">

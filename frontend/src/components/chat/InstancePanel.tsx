@@ -198,16 +198,6 @@ export default function InstancePanel() {
 
   return (
     <div className="flex-1 flex flex-col bg-chat dark:bg-chat-dark overflow-hidden">
-      {/* Header — 刷新按钮已上移到侧栏(触发 instancesRefreshTick),这里不再自带 */}
-      <div className="flex items-center gap-3 px-5 py-3 border-b border-border dark:border-border-dark">
-        <div className="flex items-baseline gap-2 min-w-0">
-          <h2 className="text-base font-semibold text-text-primary dark:text-text-primary-dark">实例监控</h2>
-          <span className="text-xs text-text-tertiary dark:text-text-tertiary-dark truncate">
-            {data ? (data.shared ? `多实例 · ${instances.length} 个` : '单机本地视图') : ''}
-          </span>
-        </div>
-      </div>
-
       {/* Body */}
       <div className="flex-1 overflow-y-auto p-4">
         {loading && !data && (
