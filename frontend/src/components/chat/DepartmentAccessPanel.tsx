@@ -193,6 +193,36 @@ export default function DepartmentAccessPanel() {
     }
   }, [reloadAccess, selectedDeptId, tab]);
 
+  const removeDirectRule = useCallback(async (item: AccessItem) => {
+    const deptId = selectedDeptId;
+    if (!deptId || !item.direct_rule) return;
+
+    const id = itemId(tab, item);
+    const key = `${deptId}:${tab}:${id}`;
+    setPending((prev) => new Set(prev).add(key));
+    setAccessError(null);
+    try {
+      if (tab === 'skills') {
+        await api.deleteDepartmentSkillRule(deptId, id);
+      } else {
+        await api.deleteDepartmentUnitRule(deptId, id);
+      }
+      if (selectedDeptIdRef.current === deptId) {
+        await reloadAccess(deptId, '移除本部门规则失败');
+      }
+    } catch (err) {
+      if (selectedDeptIdRef.current === deptId) {
+        setAccessError(err instanceof ApiError ? err.message : '移除本部门规则失败');
+      }
+    } finally {
+      setPending((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  }, [reloadAccess, selectedDeptId, tab]);
+
   const resourceLabel = tab === 'skills' ? '技能' : '工具 unit';
   const resourceCount = tab === 'skills' ? access?.skills.length ?? 0 : access?.units.length ?? 0;
   const selectedDepartmentTitle = access
@@ -305,6 +335,7 @@ export default function DepartmentAccessPanel() {
                       item={item}
                       pending={pending.has(pendingKey)}
                       onMutate={() => mutateRule(item)}
+                      onClearDirectRule={() => removeDirectRule(item)}
                     />
                   );
                 })}
@@ -350,11 +381,13 @@ function ResourceRow({
   item,
   pending,
   onMutate,
+  onClearDirectRule,
 }: {
   tab: AccessTab;
   item: AccessItem;
   pending: boolean;
   onMutate: () => void;
+  onClearDirectRule: () => void;
 }) {
   const id = itemId(tab, item);
   const label = itemLabel(tab, item);
@@ -393,7 +426,7 @@ function ResourceRow({
       </div>
 
       <div className="justify-self-start flex items-center gap-1.5 min-w-0">
-        <RuleState item={item} />
+        <RuleState item={item} pending={pending} onClearDirectRule={onClearDirectRule} />
         <PillBadge tone={item.effective_allowed ? 'success' : 'error'} size="regular">
           {item.effective_allowed ? '可用' : '不可用'}
         </PillBadge>
@@ -431,7 +464,15 @@ function VisibilityBadge({ visibility }: { visibility: 'public' | 'department' }
   );
 }
 
-function RuleState({ item }: { item: AccessItem }) {
+function RuleState({
+  item,
+  pending,
+  onClearDirectRule,
+}: {
+  item: AccessItem;
+  pending: boolean;
+  onClearDirectRule: () => void;
+}) {
   const action = item.rule_action === 'deny' ? '排除' : '允许';
   const tone = item.rule_action === 'deny' ? 'error' : 'success';
   if (item.direct_rule) {
@@ -442,6 +483,17 @@ function RuleState({ item }: { item: AccessItem }) {
           <span className="text-xs text-text-tertiary dark:text-text-tertiary-dark whitespace-nowrap">
             父级也生效
           </span>
+        )}
+        {item.inherited_rule && (
+          <button
+            type="button"
+            onClick={onClearDirectRule}
+            disabled={pending}
+            title="移除本部门规则；父级规则仍会生效"
+            className="text-xs whitespace-nowrap text-text-tertiary dark:text-text-tertiary-dark hover:text-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {pending ? '移除中...' : '移除本部门规则'}
+          </button>
         )}
       </div>
     );
