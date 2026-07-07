@@ -38,16 +38,22 @@ def _shape_text(shape):
     return "\n".join(p.text for p in shape.text_frame.paragraphs).strip()
 
 
+def _iter_shapes(shapes):
+    for shape in shapes:
+        yield shape
+        child_shapes = getattr(shape, "shapes", None)
+        if child_shapes is not None:
+            yield from _iter_shapes(child_shapes)
+
+
 def _overlap_area(a, b):
     w = min(a[2], b[2]) - max(a[0], b[0])
     h = min(a[3], b[3]) - max(a[1], b[1])
     return max(w, 0) * max(h, 0)
 
 
-def main():
-    if len(sys.argv) != 2:
-        raise SystemExit(__doc__)
-    prs = Presentation(sys.argv[1])
+def check_geometry(path):
+    prs = Presentation(path)
     page = (0, 0, prs.slide_width, prs.slide_height)
     issues = []
 
@@ -56,7 +62,7 @@ def main():
         total_chars = 0
         any_content = False
 
-        for shape in slide.shapes:
+        for shape in _iter_shapes(slide.shapes):
             box = _box(shape)
             text = _shape_text(shape)
             if text:
@@ -117,9 +123,15 @@ def main():
             seen.add(key)
             uniq.append(it)
 
-    print(json.dumps({"slides": len(list(prs.slides)), "issues": uniq},
-                     ensure_ascii=False, indent=1))
-    sys.exit(1 if uniq else 0)
+    return {"slides": len(list(prs.slides)), "issues": uniq}
+
+
+def main():
+    if len(sys.argv) != 2:
+        raise SystemExit(__doc__)
+    result = check_geometry(sys.argv[1])
+    print(json.dumps(result, ensure_ascii=False, indent=1))
+    sys.exit(1 if result["issues"] else 0)
 
 
 if __name__ == "__main__":

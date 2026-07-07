@@ -171,6 +171,7 @@ def _shape_texts(shape_items):
 def test_pptx_inspect_and_replace_text_smoke(tmp_path):
     pptx = pytest.importorskip("pptx")
     util = pytest.importorskip("pptx.util")
+    check_mod = _load_skill_script("pptx", "scripts/check_geometry.py")
     inspect_mod = _load_skill_script("pptx", "scripts/inspect_deck.py")
     replace_mod = _load_skill_script("pptx", "scripts/replace_text.py")
 
@@ -196,3 +197,6 @@ def test_pptx_inspect_and_replace_text_smoke(tmp_path):
     groups = [shape for shape in top_level_shapes if shape["type"] == "group"]
     assert groups and groups[0]["child_count"] == 1
     assert any("Grouped New title" in text for text in _shape_texts(top_level_shapes))
+
+    geometry = check_mod.check_geometry(str(out))
+    assert geometry["issues"] == []
