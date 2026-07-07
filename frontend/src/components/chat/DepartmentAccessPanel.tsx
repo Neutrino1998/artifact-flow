@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
-import { BUTTON_DANGER_OUTLINE, BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 import type {
   DepartmentAccessResponse,
@@ -15,6 +14,7 @@ import { useUIStore } from '@/stores/uiStore';
 import DepartmentTreeView from '@/components/chat/DepartmentTreeView';
 import { PillBadge } from '@/components/ui/PillBadge';
 import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
+import { SwitchTrack } from '@/components/ui/SwitchTrack';
 
 type AccessTab = 'skills' | 'units';
 type AccessItem = DepartmentSkillAccessItem | DepartmentUnitAccessItem;
@@ -370,15 +370,15 @@ function ResourceRow({
   const label = itemLabel(tab, item);
   const inheritedOnly = !!item.inherited_rule && !item.direct_rule;
   const canMutate = !inheritedOnly;
-  const actionLabel = actionText(item);
-  const actionClass = item.direct_rule
-    ? BUTTON_SECONDARY
-    : item.rule_action === 'deny'
-      ? BUTTON_DANGER_OUTLINE
-      : BUTTON_PRIMARY;
+  const switchChecked = item.effective_allowed;
+  const switchTitle = inheritedOnly
+    ? `由 ${item.inherited_rule?.department_name} 继承生效`
+    : switchChecked
+      ? '点击后该部门不可用'
+      : '点击后该部门可用';
 
   return (
-    <div className="grid grid-cols-[minmax(340px,1fr)_max-content_120px] items-center gap-3 px-4 py-3 rounded-lg bg-surface dark:bg-surface-dark border border-border/70 dark:border-border-dark/70">
+    <div className="grid grid-cols-[minmax(340px,1fr)_max-content_48px] items-center gap-3 px-4 py-3 rounded-lg bg-surface dark:bg-surface-dark border border-border/70 dark:border-border-dark/70">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2 min-w-0">
           <span className="min-w-0 text-sm font-medium text-text-primary dark:text-text-primary-dark truncate">
@@ -408,12 +408,15 @@ function ResourceRow({
 
       <button
         type="button"
+        role="switch"
+        aria-checked={switchChecked}
+        aria-label={`${switchChecked ? '设为不可用' : '设为可用'}：${label}`}
         onClick={onMutate}
         disabled={!canMutate || pending}
-        title={inheritedOnly ? `由 ${item.inherited_rule?.department_name} 继承生效` : actionLabel}
-        className={`min-w-24 px-3 py-1.5 rounded-md text-xs ${inheritedOnly ? BUTTON_SECONDARY : actionClass}`}
+        title={pending ? '处理中...' : switchTitle}
+        className="justify-self-end inline-flex items-center rounded-md p-1 disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {pending ? '处理中...' : inheritedOnly ? '继承生效' : actionLabel}
+        <SwitchTrack checked={switchChecked} />
       </button>
     </div>
   );
@@ -458,13 +461,6 @@ function RuleState({ item }: { item: AccessItem }) {
     );
   }
   return null;
-}
-
-function actionText(item: AccessItem): string {
-  if (item.direct_rule) {
-    return item.rule_action === 'deny' ? '取消排除' : '取消允许';
-  }
-  return item.rule_action === 'deny' ? '排除该部门' : '允许该部门';
 }
 
 function unitKindLabel(kind: string): string {
