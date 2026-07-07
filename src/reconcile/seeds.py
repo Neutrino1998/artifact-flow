@@ -33,7 +33,7 @@ from utils.validators import is_config_entry
 
 logger = get_logger("ArtifactFlow")
 
-_VALID_PARAM_TYPES = {"string", "integer", "number", "boolean"}
+_VALID_PARAM_TYPES = {"string", "integer", "number", "boolean", "json"}
 _VALID_PERMISSIONS = {"auto", "confirm"}
 _VALID_VISIBILITY = {"public", "department"}  # unit 无 private(决策 1)
 _VALID_SKILL_VISIBILITY = {"private", "public", "department"}  # skill 独有 private(决策 1)

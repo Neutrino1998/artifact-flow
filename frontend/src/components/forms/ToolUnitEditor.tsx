@@ -26,7 +26,7 @@ export interface ParamDraft {
   description: string;
   required: boolean;
   default: string; // 原始文本;'' → null,按 type coerce
-  enum: string; // 逗号/换行分隔的原始文本;'' → null
+  enum: string; // 换行分隔的原始文本;'' → null
 }
 
 export interface MemberDraft {
@@ -158,12 +158,12 @@ export function emptyUnitDraft(): UnitDraft {
   };
 }
 
-function scalarToText(v: unknown): string {
+function scalarToText(v: unknown, { prettyObjects = true }: { prettyObjects?: boolean } = {}): string {
   if (v === null || v === undefined) return '';
   if (typeof v === 'boolean') return v ? 'true' : 'false';
   if (typeof v === 'object') {
     try {
-      return JSON.stringify(v, null, 2);
+      return prettyObjects ? JSON.stringify(v, null, 2) : JSON.stringify(v);
     } catch {
       return String(v);
     }
@@ -208,7 +208,9 @@ export function unitResponseToDraft(u: ToolUnitResponse): UnitDraft {
           description: typeof p.description === 'string' ? p.description : '',
           required: p.required !== false,
           default: scalarToText(p.default),
-          enum: Array.isArray(p.enum) ? (p.enum as unknown[]).map(scalarToText).join('\n') : '',
+          enum: Array.isArray(p.enum)
+            ? (p.enum as unknown[]).map((v) => scalarToText(v, { prettyObjects: false })).join('\n')
+            : '',
         })),
         response_extract: typeof def.response_extract === 'string' ? def.response_extract : '',
         artifact_output: {

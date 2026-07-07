@@ -131,6 +131,38 @@ async def test_singleton_tool_seed(db_session, cfg):
     assert m.definition["parameters"][0]["name"] == "city"
 
 
+async def test_singleton_tool_seed_accepts_json_parameter(db_session, cfg):
+    tools, _ = cfg
+    _write(tools / "ragflow_retrieval.md", """
+        ---
+        name: ragflow_retrieval
+        description: "RAGFlow retrieval"
+        type: http
+        permission: auto
+        endpoint: "https://ragflow.example.com/api/v1/retrieval"
+        method: POST
+        parameters:
+          - name: question
+            type: string
+            required: true
+          - name: dataset_ids
+            type: json
+            required: true
+            default:
+              - c750d2f6752411f191e693d1a844b0ba
+        ---
+    """)
+
+    await _run(db_session, cfg)
+
+    member = (await db_session.execute(
+        select(ToolMember).where(ToolMember.unit_name == "ragflow_retrieval")
+    )).scalar_one()
+    params = member.definition["parameters"]
+    assert params[1]["type"] == "json"
+    assert params[1]["default"] == ["c750d2f6752411f191e693d1a844b0ba"]
+
+
 async def test_singleton_tool_seed_artifact_output(db_session, cfg):
     tools, _ = cfg
     _write(tools / "export.md", """

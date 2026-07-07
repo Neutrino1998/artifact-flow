@@ -198,6 +198,9 @@ class ToolRegistryManager:
         # 否则失引用密文残留、GET 仍显示 configured,误导 + secret 卫生 cruft,reviewer #9)
         await self._creds.prune_unreferenced(name, self._referenced_placeholders(u, members))
         await self._commit("update unit")
+        # _require_unit 已 selectin-load 旧 members;replace_members 走 bulk delete/add,
+        # 提交后需让 relationship 失效,否则本次 PUT 响应会回旧成员定义。
+        self._session.expire(u, ["members"])
         return await self.get_unit(name)
 
     async def delete_unit(self, name: str) -> None:

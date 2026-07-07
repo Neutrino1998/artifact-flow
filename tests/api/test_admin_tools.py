@@ -160,6 +160,17 @@ class TestUnitCrud:
         assert resp.status_code == 200
         assert resp.json()["description"] == "changed"
 
+    async def test_update_dynamic_returns_fresh_member_definition(self, admin_client: AsyncClient):
+        body = _singleton_body()
+        body["members"][0]["description"] = "old member description"
+        await admin_client.post("/api/v1/admin/tools/units", json=body)
+
+        body["members"][0]["description"] = "new member description"
+        resp = await admin_client.put("/api/v1/admin/tools/units/weather", json=body)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["members"][0]["definition"]["description"] == "new member description"
+
     async def test_delete_dynamic(self, admin_client: AsyncClient):
         await admin_client.post("/api/v1/admin/tools/units", json=_singleton_body())
         assert (await admin_client.delete("/api/v1/admin/tools/units/weather")).status_code == 204
