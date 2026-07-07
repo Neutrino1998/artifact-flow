@@ -8,6 +8,8 @@ import BinaryFilePreview from './BinaryFilePreview';
 const MAX_PREVIEW_BYTES = 15 * 1024 * 1024;
 const FRAME_SRC_DOC = '<!doctype html><html><head><base target="_blank"></head><body></body></html>';
 const FRAME_STYLE_ID = 'artifact-docx-preview-style';
+const PAGE_GUTTER_PX = 32;
+const FALLBACK_PAGE_WIDTH_PX = 794;
 
 function installFrameStyles(doc: Document) {
   doc.getElementById(FRAME_STYLE_ID)?.remove();
@@ -35,33 +37,32 @@ function installFrameStyles(doc: Document) {
       min-height: 100% !important;
       padding: 16px !important;
     }
+    .artifact-docx-page-frame {
+      margin: 0 auto 16px auto !important;
+      transform-origin: top left;
+    }
+    .artifact-docx-page-frame > section.docx,
     .docx-wrapper > section.docx {
       background: #fff !important;
       box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16) !important;
       height: auto !important;
-      margin: 0 auto 16px auto !important;
       min-height: 0 !important;
-      max-width: 820px !important;
+      max-width: none !important;
       overflow: visible !important;
-      width: 100% !important;
+      transform-origin: top left;
     }
-    .docx-wrapper > section.docx > article {
+    .artifact-docx-page-frame > section.docx {
+      margin: 0 !important;
+    }
+    .docx-wrapper > section.docx {
+      margin: 0 auto 16px auto !important;
+    }
+    .docx-wrapper section.docx > article {
       margin-bottom: 0 !important;
     }
     .docx-wrapper header,
     .docx-wrapper footer {
       display: none !important;
-    }
-    .docx {
-      overflow-wrap: break-word;
-    }
-    .docx img,
-    .docx svg {
-      height: auto;
-      max-width: 100%;
-    }
-    .docx table {
-      max-width: 100%;
     }
   `;
   doc.head.appendChild(style);
@@ -73,6 +74,91 @@ function resetFrame(doc: Document) {
   `;
   installFrameStyles(doc);
   doc.body.innerHTML = '';
+}
+
+function isEmptyPage(section: HTMLElement) {
+  const text = (section.textContent ?? '').replace(/\s+/g, '');
+  return text.length === 0 && !section.querySelector('img, svg, table, canvas, object, embed');
+}
+
+function removeLeadingEmptyPages(doc: Document) {
+  const sections = Array.from(doc.querySelectorAll('.docx-wrapper > section.docx')) as HTMLElement[];
+  for (const section of sections.slice(0, -1)) {
+    if (!isEmptyPage(section)) break;
+    section.remove();
+  }
+}
+
+function readElementWidth(win: Window, element: HTMLElement) {
+  if (element.offsetWidth > 0) return element.offsetWidth;
+
+  const computedWidth = Number.parseFloat(win.getComputedStyle(element).width);
+  if (Number.isFinite(computedWidth) && computedWidth > 0) return computedWidth;
+
+  return element.offsetWidth || FALLBACK_PAGE_WIDTH_PX;
+}
+
+function prepareFixedPageLayout(doc: Document) {
+  const win = doc.defaultView;
+  if (!win) return () => {};
+
+  removeLeadingEmptyPages(doc);
+
+  const pages = Array.from(doc.querySelectorAll('.docx-wrapper > section.docx')) as HTMLElement[];
+  const pageFrames = pages.map((page) => {
+    const frame = doc.createElement('div');
+    frame.className = 'artifact-docx-page-frame';
+    page.before(frame);
+    frame.appendChild(page);
+    return { frame, page };
+  });
+
+  let frameId = 0;
+  const applyScale = () => {
+    frameId = 0;
+    const availableWidth = Math.max(1, doc.documentElement.clientWidth - PAGE_GUTTER_PX);
+    const maxPageWidth = Math.max(
+      FALLBACK_PAGE_WIDTH_PX,
+      ...pageFrames.map(({ page }) => readElementWidth(win, page))
+    );
+    const scale = Math.min(1, availableWidth / maxPageWidth);
+
+    for (const { frame, page } of pageFrames) {
+      const pageWidth = readElementWidth(win, page);
+      const pageHeight = Math.max(page.scrollHeight, page.offsetHeight);
+      page.style.transform = `scale(${scale})`;
+      frame.style.width = `${pageWidth * scale}px`;
+      frame.style.height = `${pageHeight * scale}px`;
+    }
+  };
+  const scheduleApplyScale = () => {
+    if (frameId) win.cancelAnimationFrame(frameId);
+    frameId = win.requestAnimationFrame(applyScale);
+  };
+
+  scheduleApplyScale();
+
+  let resizeObserver: ResizeObserver | null = null;
+  if (win.ResizeObserver) {
+    resizeObserver = new win.ResizeObserver(scheduleApplyScale);
+    resizeObserver.observe(doc.documentElement);
+  } else {
+    win.addEventListener('resize', scheduleApplyScale);
+  }
+
+  const images = Array.from(doc.querySelectorAll('img'));
+  for (const image of images) {
+    image.addEventListener('load', scheduleApplyScale);
+  }
+
+  return () => {
+    if (frameId) win.cancelAnimationFrame(frameId);
+    resizeObserver?.disconnect();
+    win.removeEventListener('resize', scheduleApplyScale);
+    for (const image of images) {
+      image.removeEventListener('load', scheduleApplyScale);
+    }
+  };
 }
 
 export default function DocxPreview({
@@ -95,6 +181,7 @@ export default function DocxPreview({
   useEffect(() => {
     if (pendingFlush || frameReady === 0) return;
     let cancelled = false;
+    let cleanupLayout: (() => void) | null = null;
     setLoading(true);
     setError(null);
 
@@ -110,13 +197,13 @@ export default function DocxPreview({
 
         const { renderAsync } = await import('docx-preview');
         await renderAsync(blob, doc.body, doc.head, {
-          // docx-preview does not calculate Word-style natural page breaks. Use
-          // a continuous flow so long documents remain readable instead of
-          // showing misleading page shells or stale page numbers.
+          // docx-preview cannot calculate Word's natural page breaks. Keep the
+          // document's fixed page width and scale the page shell instead of
+          // reflowing text when the artifact panel is resized.
           breakPages: false,
           ignoreHeight: true,
           ignoreLastRenderedPageBreak: true,
-          ignoreWidth: true,
+          ignoreWidth: false,
           renderHeaders: false,
           renderFooters: false,
           renderComments: true,
@@ -126,7 +213,9 @@ export default function DocxPreview({
           renderEndnotes: true,
           useBase64URL: true,
         });
+        if (cancelled) return;
         installFrameStyles(doc);
+        cleanupLayout = prepareFixedPageLayout(doc);
       })
       .catch((err) => {
         if (!cancelled) {
@@ -139,6 +228,7 @@ export default function DocxPreview({
 
     return () => {
       cancelled = true;
+      cleanupLayout?.();
     };
   }, [artifactId, frameReady, pendingFlush, sessionId]);
 
