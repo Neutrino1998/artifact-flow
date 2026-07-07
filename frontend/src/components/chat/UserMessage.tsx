@@ -137,14 +137,14 @@ function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCo
             {attachments.map((f, i) => (
               <span
                 key={`${f.filename}-${i}`}
-                className="inline-flex items-center gap-1 max-w-[16rem] px-2 py-1 rounded-lg bg-panel-accent dark:bg-surface-dark text-xs text-text-secondary dark:text-text-secondary-dark"
+                className="inline-flex min-w-0 items-center gap-1 max-w-[16rem] px-2 py-1 rounded-lg bg-panel-accent dark:bg-surface-dark text-xs text-text-secondary dark:text-text-secondary-dark"
                 title={f.filename}
               >
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                   <path d="M14 2v6h6" />
                 </svg>
-                <span className="truncate">{f.filename}</span>
+                <span className="min-w-0 truncate">{f.filename}</span>
               </span>
             ))}
           </div>
@@ -153,7 +153,7 @@ function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCo
             bubble. Compact-only (no text, no attachments) keeps its empty bubble —
             pre-chips behavior, unchanged. */}
         {(content || !(attachments && attachments.length > 0)) && (
-          <div className="bg-panel-accent dark:bg-surface-dark rounded-bubble px-4 py-3 text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
+          <div className="ml-auto w-fit max-w-full bg-panel-accent dark:bg-surface-dark rounded-bubble px-4 py-3 text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
             {content}
           </div>
         )}
