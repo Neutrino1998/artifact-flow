@@ -150,6 +150,10 @@ async def test_singleton_tool_seed_accepts_json_parameter(db_session, cfg):
             required: true
             default:
               - c750d2f6752411f191e693d1a844b0ba
+            enum:
+              - [c750d2f6752411f191e693d1a844b0ba]
+              - dataset_ids:
+                  - c750d2f6752411f191e693d1a844b0ba
         ---
     """)
 
@@ -161,6 +165,49 @@ async def test_singleton_tool_seed_accepts_json_parameter(db_session, cfg):
     params = member.definition["parameters"]
     assert params[1]["type"] == "json"
     assert params[1]["default"] == ["c750d2f6752411f191e693d1a844b0ba"]
+    assert params[1]["enum"] == [
+        ["c750d2f6752411f191e693d1a844b0ba"],
+        {"dataset_ids": ["c750d2f6752411f191e693d1a844b0ba"]},
+    ]
+
+
+async def test_singleton_tool_seed_rejects_json_scalar_default(db_session, cfg):
+    tools, _ = cfg
+    _write(tools / "bad_json_default.md", """
+        ---
+        name: bad_json_default
+        description: "Bad JSON default"
+        type: http
+        endpoint: "https://api.example.com/retrieval"
+        parameters:
+          - name: payload
+            type: json
+            default: not-an-object
+        ---
+    """)
+
+    with pytest.raises(SeedError, match="payload.*default.*JSON object or array"):
+        await _run(db_session, cfg)
+
+
+async def test_singleton_tool_seed_rejects_json_scalar_enum_item(db_session, cfg):
+    tools, _ = cfg
+    _write(tools / "bad_json_enum.md", """
+        ---
+        name: bad_json_enum
+        description: "Bad JSON enum"
+        type: http
+        endpoint: "https://api.example.com/retrieval"
+        parameters:
+          - name: payload
+            type: json
+            enum:
+              - not-an-object
+        ---
+    """)
+
+    with pytest.raises(SeedError, match="payload.*enum\\[0\\].*JSON object or array"):
+        await _run(db_session, cfg)
 
 
 async def test_singleton_tool_seed_artifact_output(db_session, cfg):

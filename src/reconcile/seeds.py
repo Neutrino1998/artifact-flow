@@ -25,6 +25,7 @@ from tools.artifact_output import normalize_artifact_output_config
 from tools.base import BUILTIN_TOOL_NAMES, is_builtin_name, resolve_allowed_tool_entry
 from tools.custom.http_tool import validate_response_extract
 from tools.custom.secrets import assert_secret_refs_allowed
+from tools.param_specs import normalize_parameter_specs
 from utils.frontmatter import FrontmatterError, normalize_allowed_tools, parse_frontmatter_text
 from utils.logger import get_logger
 from utils.skill_validator import validate_skill_zip
@@ -33,7 +34,6 @@ from utils.validators import is_config_entry
 
 logger = get_logger("ArtifactFlow")
 
-_VALID_PARAM_TYPES = {"string", "integer", "number", "boolean", "json"}
 _VALID_PERMISSIONS = {"auto", "confirm"}
 _VALID_VISIBILITY = {"public", "department"}  # unit 无 private(决策 1)
 _VALID_SKILL_VISIBILITY = {"private", "public", "department"}  # skill 独有 private(决策 1)
@@ -193,23 +193,11 @@ def _build_http_member(frontmatter: dict, body: str, *, unit_name: str,
             f"{source}: invalid permission '{permission}' (expected auto|confirm)"
         )
 
-    # 参数类型校验(同 loader)
-    params = []
-    for p in frontmatter.get("parameters", []) or []:
-        ptype = p.get("type", "string")
-        if ptype not in _VALID_PARAM_TYPES:
-            raise SeedError(
-                f"{source}: unsupported parameter type '{ptype}' for "
-                f"'{p.get('name')}'. Valid: {sorted(_VALID_PARAM_TYPES)}"
-            )
-        params.append({
-            "name": p["name"],
-            "type": ptype,
-            "description": p.get("description", ""),
-            "required": p.get("required", True),
-            "default": p.get("default"),
-            "enum": p.get("enum"),
-        })
+    # 参数定义校验(同 dynamic CRUD / legacy loader)
+    try:
+        params = normalize_parameter_specs(frontmatter.get("parameters", []) or [])
+    except ValueError as e:
+        raise SeedError(f"{source}: {e}") from e
 
     # SSRF-02 load-time 闸门:endpoint/headers 的 {{VAR}} 必须白名单前缀
     assert_secret_refs_allowed(frontmatter.get("endpoint", ""))

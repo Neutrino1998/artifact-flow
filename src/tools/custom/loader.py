@@ -39,9 +39,10 @@ import yaml
 from typing import List, Optional
 
 from tools.artifact_output import normalize_artifact_output_config
-from tools.base import BaseTool, ToolParameter
+from tools.base import BaseTool
 from tools.custom.http_tool import HttpTool, HttpToolConfig
 from tools.custom.secrets import assert_secret_refs_allowed
+from tools.param_specs import normalize_parameter_specs, parameter_specs_to_tool_parameters
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -85,24 +86,9 @@ def _build_http_tool(frontmatter: dict, body: str) -> HttpTool:
     """从 frontmatter + body 构建 HttpTool"""
 
     # 解析参数定义
-    _VALID_PARAM_TYPES = {"string", "integer", "number", "boolean", "json"}
-
-    param_defs = []
-    for p in frontmatter.get("parameters", []):
-        param_type = p.get("type", "string")
-        if param_type not in _VALID_PARAM_TYPES:
-            raise ValueError(
-                f"Unsupported parameter type '{param_type}' for '{p['name']}'. "
-                f"Valid types: {sorted(_VALID_PARAM_TYPES)}"
-            )
-        param_defs.append(ToolParameter(
-            name=p["name"],
-            type=param_type,
-            description=p.get("description", ""),
-            required=p.get("required", True),
-            default=p.get("default"),
-            enum=p.get("enum"),
-        ))
+    param_defs = parameter_specs_to_tool_parameters(
+        normalize_parameter_specs(frontmatter.get("parameters", []))
+    )
 
     # SSRF-02 load-time 闸门：endpoint / headers 里的 {{VAR}} 必须用白名单前缀，
     # 否则整个工具拒绝加载（不把任意 env 变量暴露给自定义工具的注入面）。

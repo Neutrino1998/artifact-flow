@@ -26,11 +26,11 @@ from tools.custom.credentials import CredentialResolver
 from tools.custom.http_tool import validate_response_extract
 from tools.custom.mcp_client import McpListResult
 from tools.custom.secrets import assert_secret_refs_allowed, extract_placeholders, SecretResolutionError
+from tools.param_specs import normalize_parameter_specs
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
 
-_VALID_PARAM_TYPES = {"string", "integer", "number", "boolean", "json"}
 _VALID_PERMISSIONS = {"auto", "confirm"}
 _VALID_VISIBILITY = {"public", "department"}
 _VALID_MEMBER_STATE = {"enabled", "disabled"}
@@ -412,16 +412,12 @@ class ToolRegistryManager:
         return out
 
     def _build_definition(self, rm: dict) -> dict:
-        params = []
-        for p in rm.get("parameters", []) or []:
-            ptype = p.get("type", "string")
-            if ptype not in _VALID_PARAM_TYPES:
-                raise InvalidUnitError(
-                    f"unsupported parameter type '{ptype}' (valid: "
-                    f"{sorted(_VALID_PARAM_TYPES)})"
-                )
-            if not p.get("name"):
-                raise InvalidUnitError("parameter missing 'name'")
+        try:
+            params = normalize_parameter_specs(rm.get("parameters", []) or [])
+        except ValueError as e:
+            raise InvalidUnitError(str(e)) from e
+
+        for p in params:
             # {{...}} 只在 endpoint/headers 受支持(运行期替换);参数 default 不是 secret
             # 注入点 —— 出现占位符 = 配错(会原样外发,且不被 substitute),build 期拒(sweep)
             if extract_placeholders(p.get("default")):
@@ -429,14 +425,6 @@ class ToolRegistryManager:
                     f"parameter '{p['name']}' default must not contain a {{{{...}}}} placeholder "
                     f"(secret placeholders are only supported in endpoint/headers)"
                 )
-            params.append({
-                "name": p["name"],
-                "type": ptype,
-                "description": p.get("description", ""),
-                "required": p.get("required", True),
-                "default": p.get("default"),
-                "enum": p.get("enum"),
-            })
         endpoint = rm.get("endpoint", "") or ""
         headers = rm.get("headers", {}) or {}
         # SSRF-02 前缀闸:与 seeds/loader 同口径,{{VAR}} 必须白名单前缀(reviewer #15)。

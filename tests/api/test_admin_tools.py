@@ -227,6 +227,10 @@ class TestUnitCrud:
                 "type": "json",
                 "required": True,
                 "default": ["c750d2f6752411f191e693d1a844b0ba"],
+                "enum": [
+                    ["c750d2f6752411f191e693d1a844b0ba"],
+                    {"dataset_ids": ["c750d2f6752411f191e693d1a844b0ba"]},
+                ],
             },
         ]
         resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
@@ -234,6 +238,32 @@ class TestUnitCrud:
         params = resp.json()["members"][0]["definition"]["parameters"]
         assert params[1]["type"] == "json"
         assert params[1]["default"] == ["c750d2f6752411f191e693d1a844b0ba"]
+        assert params[1]["enum"] == [
+            ["c750d2f6752411f191e693d1a844b0ba"],
+            {"dataset_ids": ["c750d2f6752411f191e693d1a844b0ba"]},
+        ]
+
+    async def test_create_rejects_json_parameter_scalar_default(self, admin_client: AsyncClient):
+        body = _singleton_body()
+        body["members"][0]["parameters"] = [
+            {"name": "payload", "type": "json", "default": "not-an-object"},
+        ]
+        resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
+        assert resp.status_code == 400
+        assert "payload" in resp.json()["detail"]
+        assert "default" in resp.json()["detail"]
+        assert "JSON object or array" in resp.json()["detail"]
+
+    async def test_create_rejects_json_parameter_scalar_enum_item(self, admin_client: AsyncClient):
+        body = _singleton_body()
+        body["members"][0]["parameters"] = [
+            {"name": "payload", "type": "json", "enum": ["not-an-object"]},
+        ]
+        resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
+        assert resp.status_code == 400
+        assert "payload" in resp.json()["detail"]
+        assert "enum[0]" in resp.json()["detail"]
+        assert "JSON object or array" in resp.json()["detail"]
 
     async def test_create_accepts_text_artifact_output(self, admin_client: AsyncClient):
         body = _singleton_body()

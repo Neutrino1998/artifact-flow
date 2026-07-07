@@ -221,6 +221,24 @@ parameters:
             ]
             assert params[1].default == ["c750d2f6752411f191e693d1a844b0ba"]
 
+    def test_json_parameter_rejects_scalar_default(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            md = """---
+name: bad_json
+description: "Bad JSON"
+type: http
+endpoint: "https://api.example.com/bad"
+parameters:
+  - name: payload
+    type: json
+    default: not-an-object
+---
+"""
+            path = self._write_md(tmpdir, "bad_json.md", md)
+
+            with pytest.raises(ValueError, match="payload.*default.*JSON object or array"):
+                load_custom_tool(path)
+
     def test_permission_override(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             md = """---

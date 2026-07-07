@@ -86,7 +86,7 @@ class ToolParameter:
     description: str
     required: bool = True
     default: Any = None
-    enum: Optional[List[str]] = None
+    enum: Optional[List[Any]] = None
 
 
 class BaseTool(ABC):
