@@ -19,7 +19,8 @@ metadata:
 
 包内文件:[unpack.py](scripts/unpack.py) · [pack.py](scripts/pack.py) ·
 [accept_changes.py](scripts/accept_changes.py) · [add_comment.py](scripts/add_comment.py) ·
-[check_redlines.py](scripts/check_redlines.py) · [修订手术参考](references/redlines.md)
+[apply_redline.py](scripts/apply_redline.py) · [check_redlines.py](scripts/check_redlines.py) ·
+[修订手术参考](references/redlines.md)
 
 ## 任务 → 路线
 
@@ -29,7 +30,7 @@ metadata:
 | 读审阅稿(要看到修订痕迹) | pandoc `--track-changes=all`(§读取) |
 | 新建文档 | Markdown 写好 → pandoc 转 docx;精细样式用 python-docx(§创建) |
 | 常规修改(不留痕) | 小改 python-docx;结构性改动 unpack→改 XML→pack(§编辑) |
-| 以修订方式修改(留痕) | unpack→按 references/redlines.md 写标记→pack→必跑校验(§修订) |
+| 以修订方式修改(留痕) | 简单同段落替换/插入/删除用 apply_redline.py;复杂结构再手写 XML→必跑校验(§修订) |
 | 接受/拒绝修订、加批注 | 现成脚本,一条命令(§修订) |
 | 文档带图/扫描件 | 提取图片 → persist → 视觉识别(§图片) |
 
@@ -107,9 +108,25 @@ python $SKILL/scripts/accept_changes.py 输入.docx 输出.docx --reject --autho
 末行输出 JSON(处理计数 + 未处理项点名);`skipped` 非空时告知用户哪些改动需要
 在 Word 里手工处置。
 
-**以修订方式修改文档**(用户要"留痕"/"用修订模式改"):unpack 后按
-[references/redlines.md](references/redlines.md) 的标记规则手写 `w:ins`/`w:del`
-(全部修订统一一个作者名),pack 回包后**必须跑完整性校验**:
+**以修订方式修改文档**(用户要"留痕"/"用修订模式改"):
+
+简单同段落替换/删除/插入优先用脚本生成 `w:ins`/`w:del`:
+
+```bash
+python $SKILL/scripts/apply_redline.py 输入.docx 修改后.docx \
+    --replace "旧文本" --with "新文本" --author 审阅
+python $SKILL/scripts/apply_redline.py 输入.docx 修改后.docx \
+    --delete "要删除的文本" --author 审阅
+python $SKILL/scripts/apply_redline.py 输入.docx 修改后.docx \
+    --insert-after "锚点文本" --text "新增文本" --author 审阅
+```
+
+`apply_redline.py` 只处理正文 document.xml 中一个段落内的普通文本 run。遇到跨段落、
+页眉页脚、脚注、文本框、超链接、已有修订里的再修订、整段删除/移动等复杂情况,再
+unpack 后按 [references/redlines.md](references/redlines.md) 的标记规则手写
+`w:ins`/`w:del`(全部修订统一一个作者名)。
+
+无论脚本还是手写,最后都**必须跑完整性校验**:
 
 ```bash
 python $SKILL/scripts/check_redlines.py 原始.docx 修改后.docx --author 审阅

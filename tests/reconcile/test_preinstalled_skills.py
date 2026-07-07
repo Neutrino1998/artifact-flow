@@ -37,6 +37,14 @@ def _build_zip(slug: str) -> bytes:
     return mod.build_zip(slug)
 
 
+def _load_skill_script(slug: str, rel: str):
+    path = SRC_DIR / slug / rel
+    spec = importlib.util.spec_from_file_location(f"{slug}_{path.stem}", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def test_src_dirs_and_zips_in_sync_roster():
     src = sorted(p.name for p in SRC_DIR.iterdir() if p.is_dir())
     assert src == PREINSTALLED, "skills-src 目录清单变了 —— 同步更新本测试与预装集"
@@ -86,3 +94,59 @@ def test_seed_parse_clean_and_defaults():
         assert seed.has_extra_files is (not is_prose)
         assert _zip_manifest(seed.bundle)
         assert seed.skill_md.strip()
+
+
+def test_preinstalled_skill_scripts_are_syntax_valid():
+    scripts = sorted(SRC_DIR.glob("*/scripts/**/*.py"))
+    assert scripts, "预装 skill 应至少包含脚本,否则本 smoke 失效"
+    for path in scripts:
+        compile(path.read_text(encoding="utf-8"), str(path), "exec")
+
+
+def test_docx_apply_redline_smoke(tmp_path):
+    docx = pytest.importorskip("docx")
+    etree = pytest.importorskip("lxml.etree")
+    mod = _load_skill_script("docx", "scripts/apply_redline.py")
+
+    src = tmp_path / "in.docx"
+    out = tmp_path / "out.docx"
+    document = docx.Document()
+    document.add_paragraph("Hello old world")
+    document.save(src)
+
+    summary = mod.apply_redline(
+        src, out, needle="old", mode="replace", new_text="new",
+        author="Review", all_matches=False,
+    )
+    assert summary["changes"] == 1
+    with zipfile.ZipFile(out) as zf:
+        root = etree.fromstring(zf.read("word/document.xml"))
+    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    assert root.xpath(".//w:del//w:delText[text()='old']", namespaces=ns)
+    assert root.xpath(".//w:ins//w:t[text()='new']", namespaces=ns)
+
+
+def test_pptx_inspect_and_replace_text_smoke(tmp_path):
+    pptx = pytest.importorskip("pptx")
+    util = pytest.importorskip("pptx.util")
+    inspect_mod = _load_skill_script("pptx", "scripts/inspect_deck.py")
+    replace_mod = _load_skill_script("pptx", "scripts/replace_text.py")
+
+    src = tmp_path / "in.pptx"
+    out = tmp_path / "out.pptx"
+    prs = pptx.Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    box = slide.shapes.add_textbox(util.Inches(1), util.Inches(1), util.Inches(6), util.Inches(1))
+    box.text_frame.paragraphs[0].text = "Old title"
+    prs.save(src)
+
+    summary = replace_mod.replace_text(
+        src, out, [("Old", "New")], slides=None, allow_missing=False)
+    assert summary["total_hits"] == 1
+    inspected = inspect_mod.inspect(out, max_text=100, include_notes=False)
+    texts = [
+        shape.get("text", "")
+        for slide_info in inspected["slides"]
+        for shape in slide_info["shapes"]
+    ]
+    assert any("New title" in text for text in texts)
