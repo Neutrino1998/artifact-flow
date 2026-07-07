@@ -35,6 +35,12 @@ class ToolRegistryRepository(BaseRepository[ToolUnit]):
             select(ToolUnit).where(ToolUnit.name == name)
         )).scalar_one_or_none()
 
+    async def get_unit_for_update(self, name: str) -> Optional[ToolUnit]:
+        """Load and row-lock a unit for writes that interpret or change visibility."""
+        return (await self._session.execute(
+            select(ToolUnit).where(ToolUnit.name == name).with_for_update()
+        )).scalar_one_or_none()
+
     async def existing_full_names(self, exclude_unit: Optional[str] = None) -> Dict[str, str]:
         """{full_name: unit_name},排除某 unit(update 时排自身)。撞名 by-construction 闸用。"""
         rows = (await self._session.execute(

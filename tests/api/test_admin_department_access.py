@@ -189,6 +189,25 @@ class TestDepartmentAccessMutation:
         assert item["direct_rule"] is False
         assert item["effective_allowed"] is False
 
+    async def test_unit_rule_put_uses_locked_unit_read(self, db_session, monkeypatch):
+        await _seed_departments(db_session)
+        db_session.add(_unit("dept_mcp", "department", kind="mcp"))
+        await db_session.commit()
+        mgr = DepartmentAccessManager(db_session)
+        original = mgr._repo.get_unit_for_update
+        called = False
+
+        async def tracked(unit_name: str):
+            nonlocal called
+            called = True
+            return await original(unit_name)
+
+        monkeypatch.setattr(mgr._repo, "get_unit_for_update", tracked)
+
+        await mgr.put_unit_rule("dept-leaf", "dept_mcp")
+
+        assert called is True
+
     async def test_private_skill_rule_rejected_without_writing_rule(
         self, admin_client: AsyncClient, db_session
     ):

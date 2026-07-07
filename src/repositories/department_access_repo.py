@@ -69,6 +69,13 @@ class DepartmentAccessRepository:
     async def get_unit(self, name: str) -> ToolUnit | None:
         return await self._session.get(ToolUnit, name)
 
+    async def get_unit_for_update(self, name: str) -> ToolUnit | None:
+        return (
+            await self._session.execute(
+                select(ToolUnit).where(ToolUnit.name == name).with_for_update()
+            )
+        ).scalar_one_or_none()
+
     async def list_skill_access(
         self, dept_ids: Sequence[str]
     ) -> List[SkillAccessProjection]:

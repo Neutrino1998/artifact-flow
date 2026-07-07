@@ -94,7 +94,7 @@ class DepartmentAccessManager:
 
     async def put_unit_rule(self, dept_id: str, unit_name: str) -> None:
         await self._require_department(dept_id)
-        unit = await self._require_unit(unit_name)
+        unit = await self._require_unit(unit_name, for_update=True)
         self._require_unit_accessible_by_department(unit)
         await self._repo.add_unit_rule(dept_id, unit_name)
 
@@ -128,8 +128,14 @@ class DepartmentAccessManager:
             raise ResourceNotFoundError(f"skill '{slug}' does not exist")
         return skill
 
-    async def _require_unit(self, unit_name: str) -> ToolUnit:
-        unit = await self._repo.get_unit(unit_name)
+    async def _require_unit(
+        self, unit_name: str, *, for_update: bool = False
+    ) -> ToolUnit:
+        unit = (
+            await self._repo.get_unit_for_update(unit_name)
+            if for_update
+            else await self._repo.get_unit(unit_name)
+        )
         if unit is None:
             raise ResourceNotFoundError(f"unit '{unit_name}' does not exist")
         return unit

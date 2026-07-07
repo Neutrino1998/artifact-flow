@@ -166,7 +166,7 @@ class ToolRegistryManager:
         return await self.get_unit(name)
 
     async def update_unit(self, name: str, spec: dict) -> dict:
-        u = await self._require_unit(name)
+        u = await self._require_unit(name, for_update=True)
         self._require_dynamic(u, "edit")
         # kind 不可变:它决定 full_name 形状(singleton==unit 名 vs set=<unit>__<member>)。
         # 改 kind → replace_members 会静默重命名可调工具名,挂在旧 full_name 上的 always_allow
@@ -298,8 +298,12 @@ class ToolRegistryManager:
     # 校验 + 内部
     # ======================================================================
 
-    async def _require_unit(self, name: str) -> ToolUnit:
-        u = await self._registry.get_unit(name)
+    async def _require_unit(self, name: str, *, for_update: bool = False) -> ToolUnit:
+        u = (
+            await self._registry.get_unit_for_update(name)
+            if for_update
+            else await self._registry.get_unit(name)
+        )
         if u is None:
             raise UnitNotFoundError(f"tool unit '{name}' not found")
         return u

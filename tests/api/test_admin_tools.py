@@ -10,6 +10,7 @@ from httpx import AsyncClient
 
 from api.dependencies import get_mcp_client_manager
 from config import config
+from core.tool_registry_manager import ToolRegistryManager
 from db.models import Agent, AgentUnit, ToolMember, ToolUnit
 from tools.custom.mcp_client import McpListResult, McpToolDefinition
 
@@ -159,6 +160,33 @@ class TestUnitCrud:
         )
         assert resp.status_code == 200
         assert resp.json()["description"] == "changed"
+
+    async def test_update_dynamic_uses_locked_unit_read(self, db_session, monkeypatch):
+        db_session.add(ToolUnit(
+            name="weather", kind="tool", description="Get weather", source="dynamic"
+        ))
+        db_session.add(ToolMember(
+            unit_name="weather",
+            member_name="weather",
+            full_name="weather",
+            permission="auto",
+            definition={"endpoint": "https://api.example.com/weather"},
+        ))
+        await db_session.commit()
+        mgr = ToolRegistryManager(db_session)
+        original = mgr._registry.get_unit_for_update
+        called = False
+
+        async def tracked(name: str):
+            nonlocal called
+            called = True
+            return await original(name)
+
+        monkeypatch.setattr(mgr._registry, "get_unit_for_update", tracked)
+
+        await mgr.update_unit("weather", _singleton_body(description="changed"))
+
+        assert called is True
 
     async def test_update_dynamic_returns_fresh_member_definition(self, admin_client: AsyncClient):
         body = _singleton_body()
