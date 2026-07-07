@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
-import { BUTTON_DANGER_OUTLINE, BUTTON_PRIMARY, BUTTON_SECONDARY, INPUT_ON_PANEL } from '@/lib/styles';
+import { BUTTON_DANGER_OUTLINE, BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 import type {
   DepartmentAccessResponse,
@@ -14,6 +14,7 @@ import type {
 import { useUIStore } from '@/stores/uiStore';
 import DepartmentTreeView from '@/components/chat/DepartmentTreeView';
 import { PillBadge } from '@/components/ui/PillBadge';
+import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
 
 type AccessTab = 'skills' | 'units';
 type AccessItem = DepartmentSkillAccessItem | DepartmentUnitAccessItem;
@@ -221,7 +222,7 @@ export default function DepartmentAccessPanel() {
       </header>
 
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
-        <aside className="lg:w-80 lg:flex-shrink-0 border-b lg:border-b-0 lg:border-r border-border dark:border-border-dark flex flex-col min-h-0">
+        <aside className="max-h-[min(42vh,24rem)] lg:max-h-none lg:w-80 lg:flex-shrink-0 border-b lg:border-b-0 lg:border-r border-border dark:border-border-dark flex flex-col min-h-0 overflow-hidden">
           <div className="px-4 py-3 flex items-center justify-between gap-3">
             <div className="text-sm font-medium text-text-primary dark:text-text-primary-dark">
               部门
@@ -263,21 +264,32 @@ export default function DepartmentAccessPanel() {
         <main className="flex-1 min-w-0 min-h-0 flex flex-col">
           <div className="px-4 py-3 border-b border-border dark:border-border-dark">
             <div className="flex flex-col md:flex-row md:items-center gap-3">
-              <div className="inline-flex rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-0.5 w-fit">
-                <TabButton active={tab === 'skills'} onClick={() => setTab('skills')}>
-                  技能
-                </TabButton>
-                <TabButton active={tab === 'units'} onClick={() => setTab('units')}>
-                  工具 unit
-                </TabButton>
-              </div>
-              <div className="flex-1" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="搜索资源名 / 描述 / 类型..."
-                className={`${INPUT_ON_PANEL} md:max-w-sm`}
+              <SegmentedTabs
+                ariaLabel="部门授权资源类型"
+                value={tab}
+                options={[
+                  { value: 'skills', label: '技能' },
+                  { value: 'units', label: '工具 unit' },
+                ]}
+                onChange={setTab}
               />
+              <div className="flex-1" />
+              <div className="w-full md:max-w-sm bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-lg px-3 py-2 flex items-center gap-2">
+                <svg
+                  className="flex-shrink-0 text-text-tertiary dark:text-text-tertiary-dark"
+                  width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
+                >
+                  <circle cx="7" cy="7" r="5" />
+                  <path d="M11 11l3.5 3.5" />
+                </svg>
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="搜索资源名 / 描述 / 类型..."
+                  className="min-w-0 flex-1 bg-transparent text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none"
+                />
+              </div>
             </div>
           </div>
 
@@ -312,30 +324,6 @@ export default function DepartmentAccessPanel() {
         </main>
       </div>
     </div>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
-        active
-          ? 'bg-bg dark:bg-bg-dark text-text-primary dark:text-text-primary-dark shadow-sm'
-          : 'text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark'
-      }`}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -390,13 +378,20 @@ function ResourceRow({
       : BUTTON_PRIMARY;
 
   return (
-    <div className="grid grid-cols-[minmax(220px,1fr)_170px_190px_110px_120px] items-center gap-3 px-4 py-3 rounded-lg bg-surface dark:bg-surface-dark border border-border/70 dark:border-border-dark/70">
+    <div className="grid grid-cols-[minmax(340px,1fr)_max-content_120px] items-center gap-3 px-4 py-3 rounded-lg bg-surface dark:bg-surface-dark border border-border/70 dark:border-border-dark/70">
       <div className="min-w-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-sm font-medium text-text-primary dark:text-text-primary-dark truncate">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
+          <span className="min-w-0 text-sm font-medium text-text-primary dark:text-text-primary-dark truncate">
             {label}
           </span>
           <SourceBadge source={item.source} />
+          <VisibilityBadge visibility={item.visibility} />
+          {'kind' in item && <PillBadge>{unitKindLabel(item.kind)}</PillBadge>}
+          {'default_enabled' in item && (
+            <PillBadge tone={item.default_enabled ? 'success' : 'neutral'}>
+              {item.default_enabled ? '默认开' : '默认关'}
+            </PillBadge>
+          )}
         </div>
         <div className="mt-0.5 text-xs text-text-tertiary dark:text-text-tertiary-dark truncate">
           <span className="font-mono">{id}</span>
@@ -404,21 +399,12 @@ function ResourceRow({
         </div>
       </div>
 
-      <div className="flex items-center gap-1.5 min-w-0">
-        <VisibilityBadge visibility={item.visibility} />
-        {'kind' in item && <PillBadge>{unitKindLabel(item.kind)}</PillBadge>}
-        {'default_enabled' in item && (
-          <PillBadge tone={item.default_enabled ? 'success' : 'neutral'}>
-            {item.default_enabled ? '默认开' : '默认关'}
-          </PillBadge>
-        )}
+      <div className="justify-self-start flex items-center gap-1.5 min-w-0">
+        <RuleState item={item} />
+        <PillBadge tone={item.effective_allowed ? 'success' : 'error'} size="regular">
+          {item.effective_allowed ? '可用' : '不可用'}
+        </PillBadge>
       </div>
-
-      <RuleState item={item} />
-
-      <PillBadge tone={item.effective_allowed ? 'success' : 'error'} size="regular">
-        {item.effective_allowed ? '可用' : '不可用'}
-      </PillBadge>
 
       <button
         type="button"
@@ -451,12 +437,13 @@ function VisibilityBadge({ visibility }: { visibility: 'public' | 'department' }
 
 function RuleState({ item }: { item: AccessItem }) {
   const action = item.rule_action === 'deny' ? '排除' : '允许';
+  const tone = item.rule_action === 'deny' ? 'error' : 'success';
   if (item.direct_rule) {
     return (
       <div className="flex items-center gap-1.5 min-w-0">
-        <PillBadge tone={item.rule_action === 'deny' ? 'error' : 'success'}>本部门{action}</PillBadge>
+        <PillBadge tone={tone} size="regular">本部门{action}</PillBadge>
         {item.inherited_rule && (
-          <span className="text-xs text-text-tertiary dark:text-text-tertiary-dark truncate">
+          <span className="text-xs text-text-tertiary dark:text-text-tertiary-dark whitespace-nowrap">
             父级也生效
           </span>
         )}
@@ -465,16 +452,12 @@ function RuleState({ item }: { item: AccessItem }) {
   }
   if (item.inherited_rule) {
     return (
-      <div className="min-w-0 text-xs text-text-secondary dark:text-text-secondary-dark truncate">
+      <PillBadge tone={tone} size="regular" title={`由 ${item.inherited_rule.department_name} 继承生效`}>
         父级{action} · {item.inherited_rule.department_name}
-      </div>
+      </PillBadge>
     );
   }
-  return (
-    <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-      无例外
-    </div>
-  );
+  return null;
 }
 
 function actionText(item: AccessItem): string {

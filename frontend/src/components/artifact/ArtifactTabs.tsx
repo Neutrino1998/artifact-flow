@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import { useArtifactStore, type ArtifactViewMode } from '@/stores/artifactStore';
+import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
 
 const allTabs: { mode: ArtifactViewMode; label: string }[] = [
   { mode: 'preview', label: 'Preview' },
@@ -27,20 +28,11 @@ export default function ArtifactTabs() {
   }, [contentType, hasBlob]);
 
   return (
-    <div className="inline-flex p-0.5 rounded-lg bg-panel-accent dark:bg-surface-dark text-xs">
-      {tabs.map(({ mode, label }) => (
-        <button
-          key={mode}
-          onClick={() => setViewMode(mode)}
-          className={`px-3 py-1 rounded-md transition-colors ${
-            viewMode === mode
-              ? 'bg-surface dark:bg-bg-dark text-accent font-medium shadow-sm'
-              : 'text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark'
-          }`}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
+    <SegmentedTabs
+      ariaLabel="Artifact view"
+      value={viewMode}
+      options={tabs.map(({ mode, label }) => ({ value: mode, label }))}
+      onChange={setViewMode}
+    />
   );
 }
