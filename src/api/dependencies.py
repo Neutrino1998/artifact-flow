@@ -359,6 +359,14 @@ async def get_skill_manager(
     return SkillManager(session)
 
 
+async def get_department_access_manager(
+    session: AsyncSession = Depends(get_db_session),
+):
+    """每个请求获得独立的 DepartmentAccessManager(dept 授权规则;G-1)。"""
+    from core.department_access_manager import DepartmentAccessManager
+    return DepartmentAccessManager(session)
+
+
 # ============================================================
 # 用户认证依赖
 # ============================================================

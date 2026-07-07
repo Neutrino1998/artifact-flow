@@ -25,7 +25,20 @@ from api.dependencies import (
     get_execution_runner,
 )
 from api.middleware import RequestContextMiddleware
-from api.routers import admin, admin_skills, admin_tools, admin_users, auth, chat, artifacts, departments, meta, skills, stream
+from api.routers import (
+    admin,
+    admin_department_access,
+    admin_skills,
+    admin_tools,
+    admin_users,
+    artifacts,
+    auth,
+    chat,
+    departments,
+    meta,
+    skills,
+    stream,
+)
 from observability import (
     LoopLagWatchdog, DeadmanSwitch, RuntimeSampler, JsonlSink,
     resolve_mem_limit_bytes, HeartbeatWriter, error_counter,
@@ -377,6 +390,11 @@ def create_app() -> FastAPI:
     )
     app.include_router(
         admin_skills.router,
+        prefix="/api/v1/admin",
+        tags=["admin"]
+    )
+    app.include_router(
+        admin_department_access.router,
         prefix="/api/v1/admin",
         tags=["admin"]
     )

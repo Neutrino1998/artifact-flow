@@ -339,7 +339,7 @@ user_skill ─user_id─> user ;  ─skill_slug─> skill              (真 FK,�
 
 **留待将来**:引擎"组合有效集"缓存(先每 turn 读,资源变更少、不提前造失效机器);参数级粒度(工具名+参数模式、CC allow-rules 式,需调用时 arg 匹配);子部门反向覆盖/最具体规则胜出(若要支持,需新增 per-row `effect` 列,当前派生单方向模型表达不了)。
 
-**进展**:**G-0 runtime 地基已落地(2026-07-07)**:规则语义与切片已按用户确认写回本节;`EffectiveToolset` 新增 dept unit 过滤输入,unit 侧 `public` 命中=deny / `department` 命中=grant,且 dept 收窄先于 skill grant → skill 不能重新 enable dept-denied unit;controller 在 MCP discovery 前按当前用户部门过滤 server unit,dept-denied MCP server 不被联系。reviewer 收口:skill/unit 的 `visibility` 与当前用户 dept rule 命中均改为同一资源 SQL 投影返回,避免 PostgreSQL `READ COMMITTED` 下两次 SELECT 拼出混合视图。新增 resolver / DB 命中 / MCP 过滤回归测试;`artifact-flow` conda 环境相关测试 118 passed。下一步 = G-1 授权 API。
+**进展**:**G-0 runtime 地基已落地(2026-07-07)**:规则语义与切片已按用户确认写回本节;`EffectiveToolset` 新增 dept unit 过滤输入,unit 侧 `public` 命中=deny / `department` 命中=grant,且 dept 收窄先于 skill grant → skill 不能重新 enable dept-denied unit;controller 在 MCP discovery 前按当前用户部门过滤 server unit,dept-denied MCP server 不被联系。reviewer 收口:skill/unit 的 `visibility` 与当前用户 dept rule 命中均改为同一资源 SQL 投影返回,避免 PostgreSQL `READ COMMITTED` 下两次 SELECT 拼出混合视图。新增 resolver / DB 命中 / MCP 过滤回归测试;`artifact-flow` conda 环境相关测试 118 passed。**G-1 授权 API 已落地(2026-07-07)**:`DepartmentAccessManager` + `/api/v1/admin/department-access/{dept_id}` 查询 skill/unit direct/inherited/effective 状态,并提供 skill/unit rule 幂等 PUT/DELETE;private skill 建规则 400 + warning,缺部门/资源 404。后端回归 206 passed。下一步 = G-2 admin shared skill 补口。
 
 ## 关键风险
 
