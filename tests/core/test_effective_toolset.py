@@ -33,9 +33,17 @@ def _agent(name="lead_agent", builtin_tools=None, units=None):
     )
 
 
-def _unit(name, members, kind="tool", defer=False, description="", discovery_error=None):
+def _unit(
+    name,
+    members,
+    kind="tool",
+    defer=False,
+    description="",
+    discovery_error=None,
+    visibility="public",
+):
     return UnitInfo(
-        name=name, kind=kind, description=description, visibility="public",
+        name=name, kind=kind, description=description, visibility=visibility,
         defer=defer, provider="http", source="seeded",
         discovery_error=discovery_error,
         member_full_names=list(members),
@@ -270,3 +278,55 @@ def test_explicit_search_tools_not_double_added():
     }
     eff = resolve_effective_toolset(agent, snap, tools)
     assert "search_tools" in eff
+
+
+# ============================================================
+# G-0 部门规则:unit visibility + department_unit_rule 命中集合
+# ============================================================
+
+
+def test_public_unit_denied_by_department_match():
+    # public 默认 allow;department_unit_rule 命中 = deny 例外。
+    agent = _agent(units={"weather": "enabled"})
+    snap = _snapshot(units=[_unit("weather", ["weather"], visibility="public")])
+    tools = {"weather": _Tool("weather", ToolPermission.AUTO)}
+
+    eff = resolve_effective_toolset(agent, snap, tools, dept_matched_units={"weather"})
+
+    assert "weather" not in eff
+
+
+def test_department_unit_requires_department_match():
+    # department 默认 deny;命中 = grant。
+    agent = _agent(units={"reports": "enabled"})
+    snap = _snapshot(units=[_unit("reports", ["reports"], visibility="department")])
+    tools = {"reports": _Tool("reports", ToolPermission.AUTO)}
+
+    denied = resolve_effective_toolset(agent, snap, tools, dept_matched_units=set())
+    granted = resolve_effective_toolset(agent, snap, tools, dept_matched_units={"reports"})
+
+    assert "reports" not in denied
+    assert "reports" in granted
+
+
+def test_skill_grant_cannot_reopen_dept_denied_unit():
+    # dept 收窄在 skill enable 之前:即使 skill allowed-tools 点名该 disabled unit,
+    # public+dept 命中已把它移出宇宙,skill grant 不得重开。
+    from reconcile.snapshot import SkillInfo
+
+    agent = _agent(units={"weather": "disabled"})
+    snap = _snapshot(units=[_unit("weather", ["weather"], visibility="public")])
+    tools = {"weather": _Tool("weather", ToolPermission.AUTO)}
+    skills = {
+        "s": SkillInfo(
+            slug="s", name="s", description="", visibility="public",
+            default_enabled=True, owner_user_id=None, allowed_tools=["weather"],
+        )
+    }
+
+    eff = resolve_effective_toolset(
+        agent, snap, tools, skill_snapshot=skills, dept_matched_units={"weather"}
+    )
+    eff.activate_skill("s")
+
+    assert "weather" not in eff

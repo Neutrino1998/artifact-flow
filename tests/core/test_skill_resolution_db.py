@@ -8,9 +8,18 @@ from sqlalchemy import select
 
 from core.department_resolver import load_ancestor_ids
 from core.effective_skillset import resolve_effective_skillset
-from db.models import Department, DepartmentSkillRule, Skill, User, UserSkill
+from db.models import (
+    Department,
+    DepartmentSkillRule,
+    DepartmentUnitRule,
+    Skill,
+    ToolUnit,
+    User,
+    UserSkill,
+)
 from reconcile.snapshot import load_skill_snapshot
 from repositories.skill_repo import SkillRepository
+from repositories.tool_registry_repo import ToolRegistryRepository
 
 
 async def _tree(session):
@@ -93,3 +102,19 @@ async def test_user_override_persisted(db_session):
     eff = await _resolve(db_session)
     assert "pub" in eff.visible       # 仍可见(opt-in 合法)
     assert "pub" not in eff.enabled    # 用户关掉 → 不进 L1
+
+
+async def test_department_unit_match_via_ancestor_rule(db_session):
+    await _tree(db_session)
+    db_session.add(ToolUnit(name="reports", kind="tool", description="d"))
+    await db_session.flush()
+    # 规则挂在祖先 root → 覆盖 leaf 用户所在子树(G-0)。
+    db_session.add(DepartmentUnitRule(department_id="root", unit_name="reports"))
+    await db_session.flush()
+
+    repo = SkillRepository(db_session)
+    registry = ToolRegistryRepository(db_session)
+    dept_id = await repo.user_department_id("u1")
+    ancestors = await load_ancestor_ids(db_session, dept_id)
+
+    assert await registry.dept_matched_unit_names(ancestors) == {"reports"}

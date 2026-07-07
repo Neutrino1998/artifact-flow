@@ -591,6 +591,45 @@ async def test_snapshot_discovers_mcp_tools_when_manager_is_available(db_session
     assert [p.name for p in tool.get_parameters()] == ["sku"]
 
 
+async def test_hydrate_mcp_tools_respects_allowed_unit_filter(db_session, cfg):
+    calls = []
+
+    async def fake_list(url, _headers, _timeout):
+        calls.append(url)
+        return [
+            McpToolDefinition(
+                name="lookup",
+                description="Lookup",
+                input_schema={"type": "object", "properties": {}},
+            )
+        ]
+
+    for name in ("allowed", "denied"):
+        db_session.add(ToolUnit(
+            name=name,
+            kind="mcp",
+            description=name,
+            provider="mcp",
+            provider_config={
+                "transport": "streamable_http",
+                "url": f"https://{name}.example/mcp",
+                "headers": {},
+                "timeout": 60,
+                "default_permission": "confirm",
+            },
+            source="dynamic",
+        ))
+    await db_session.commit()
+
+    manager = McpClientManager(list_callable=fake_list)
+    snap = await load_registry_snapshot(db_session)
+    await hydrate_mcp_tools(snap, mcp_manager=manager, allowed_unit_names={"allowed"})
+
+    assert calls == ["https://allowed.example/mcp"]
+    assert "allowed__lookup" in snap.external_tools
+    assert "denied__lookup" not in snap.external_tools
+
+
 async def test_snapshot_skips_member_shadowing_builtin(db_session, cfg):
     # 撞名兜底(skip+log,非 raise):绕过写校验(dynamic 行/手改 DB)塞一个
     # full_name=builtin 的 external 成员 → load_registry_snapshot 跳过它(不进

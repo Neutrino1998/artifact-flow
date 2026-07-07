@@ -70,10 +70,11 @@ async def create_controller(
     from core.controller import ExecutionController
     from core.department_resolver import load_ancestor_ids
     from core.effective_skillset import resolve_effective_skillset
-    from core.effective_toolset import resolve_all
+    from core.effective_toolset import resolve_all, unit_visible_by_department
     from core.engine import EngineHooks
     from reconcile.snapshot import hydrate_mcp_tools, load_registry_snapshot, load_skill_snapshot
     from repositories.skill_repo import SkillRepository
+    from repositories.tool_registry_repo import ToolRegistryRepository
     from tools.builtin.artifact_service import ArtifactService
     from tools.builtin.artifact_ops import create_artifact_tools
     from tools.builtin.read_skill import create_skill_tools
@@ -112,32 +113,47 @@ async def create_controller(
             "`python scripts/reconcile_config.py` to materialize config into the DB "
             "(prod: entrypoint does this under the migration lock)."
         )
-    # MCP discovery 是外部 HTTP,必须在上面的 DB snapshot session 关闭后执行;否则慢/
-    # 不可达 server 会 pin DB 连接直到 timeout,违背 B-5 短 session 纪律。没有 MCP unit
-    # 的普通 turn 不取 MCP manager,保持测试/轻量启动路径零成本。
-    if any(unit.provider == "mcp" for unit in snapshot.units.values()):
-        await hydrate_mcp_tools(
-            snapshot,
-            mcp_manager=get_mcp_client_manager(),
-            db_manager=db_manager,
-        )
-
-    # skill 解析(C-2):一条短 session 读 user-agnostic skill 快照 + 该用户的 user_skill
-    # 覆盖 + 部门祖先链命中(决策 10:父覆盖子树)。department_id 从 DB 取(不信 JWT —— dept
-    # 授权是 correctness)。读完即关(B-5);read_skill 的正文取数另由 SkillService lazy。
-    async def _load_skills(session):
+    # 用户作用域(G-0/C-2):一条短 session 读 user-agnostic skill 快照 + 该用户的
+    # user_skill 覆盖 + 部门祖先链命中(决策 10:父覆盖子树)。department_id 从 DB 取
+    # (不信 JWT —— dept 授权是 correctness)。unit 命中也在这里取,供 MCP discovery
+    # 预过滤 + EffectiveToolset dept 收窄。读完即关(B-5);read_skill 正文另由
+    # SkillService lazy。
+    async def _load_user_scope(session):
         repo = SkillRepository(session)
+        registry = ToolRegistryRepository(session)
         skill_snap = await load_skill_snapshot(session)
         dept_id = await repo.user_department_id(user_id)
         ancestors = await load_ancestor_ids(session, dept_id)
         overrides = await repo.user_overrides(user_id)
         dept_matched = await repo.dept_matched_slugs(ancestors)
-        return skill_snap, overrides, dept_matched
+        dept_matched_units = await registry.dept_matched_unit_names(ancestors)
+        return skill_snap, overrides, dept_matched, dept_matched_units
 
-    skill_snapshot, skill_overrides, dept_matched = await db_manager.with_retry(_load_skills)
+    (
+        skill_snapshot,
+        skill_overrides,
+        dept_matched,
+        dept_matched_units,
+    ) = await db_manager.with_retry(_load_user_scope)
     effective_skillset = resolve_effective_skillset(
         user_id, skill_snapshot, skill_overrides, dept_matched
     )
+
+    # MCP discovery 是外部 HTTP,必须在 DB snapshot session 关闭后执行;否则慢/
+    # 不可达 server 会 pin DB 连接直到 timeout,违背 B-5 短 session 纪律。G-0 先按
+    # 当前用户部门 visibility 过滤 server unit:dept-denied MCP server 不联系。
+    allowed_mcp_units = {
+        unit.name
+        for unit in snapshot.units.values()
+        if unit.provider == "mcp" and unit_visible_by_department(unit, dept_matched_units)
+    }
+    if allowed_mcp_units:
+        await hydrate_mcp_tools(
+            snapshot,
+            mcp_manager=get_mcp_client_manager(),
+            db_manager=db_manager,
+            allowed_unit_names=allowed_mcp_units,
+        )
 
     # 合并工具来源:全局 builtin(进程级) + DB external(快照重建) + 请求级
     # artifact / 沙盒 / skill 工具。external 工具自此唯一来源是 DB —— 不再进程级加载
@@ -170,7 +186,10 @@ async def create_controller(
     # 已收进 resolver 的 apply_injection_invariants(F-0):all_tools 里有哪个、哪个 agent
     # 配 bash/deferred,resolve 期与 activate_skill 变异后跑同一份规则,mid-turn skill
     # 翻开 bash/defer unit 时 mount_skill/search_tools 连动注入。
-    effective_toolsets = resolve_all(snapshot, all_tools, skill_snapshot=visible_skill_snapshot)
+    effective_toolsets = resolve_all(
+        snapshot, all_tools, skill_snapshot=visible_skill_snapshot,
+        dept_matched_units=dept_matched_units,
+    )
 
     hooks = EngineHooks(
         check_cancelled=store.is_cancelled,

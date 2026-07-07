@@ -6,7 +6,7 @@ ORM 实例不外逃(CLAUDE.md):本模块在 session 内读行、就地重建出 
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -221,6 +221,7 @@ async def hydrate_mcp_tools(
     *,
     mcp_manager,
     db_manager=None,
+    allowed_unit_names: Optional[Set[str]] = None,
 ) -> RegistrySnapshot:
     """Session-free MCP discovery pass.
 
@@ -228,10 +229,15 @@ async def hydrate_mcp_tools(
     session has closed, so a slow/unreachable MCP server cannot pin a DB
     connection while waiting for external HTTP. Credential resolution still uses
     `db_manager`, but only through short lazy sessions inside CredentialResolver.
+
+    `allowed_unit_names`(G-0) lets the caller apply department visibility before
+    discovery, so a dept-denied MCP server is not contacted at all.
     """
     credential_resolver = CredentialResolver(db_manager) if db_manager is not None else None
     for unit in snapshot.units.values():
         if unit.provider != "mcp":
+            continue
+        if allowed_unit_names is not None and unit.name not in allowed_unit_names:
             continue
         listing = await mcp_manager.list_tools(
             unit.name,

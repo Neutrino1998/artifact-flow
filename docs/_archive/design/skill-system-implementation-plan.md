@@ -23,7 +23,7 @@
 
 - **当前**:**A / B / C / D 四阶段全落地合 main。** B 全部子片(B-1 存储→B-2 引擎切快照→B-3 deferred+`search_tools`→B-4 后端凭证加密+CRUD 与前端工具 unit 管理页→B-5 退役 turn-long session→B-6 CVE→收尾验收)+ 两轮 reviewer + 乙2 部署门禁均已合(落地见 Phase B「进展」+ `skill-system-phase-b-design.md`);**唯一挂账 = 真机验收**(真 nginx LB 入口[caddy 要 ACME] + 跨副本执行续接[A 发起 / B 经共享 Redis resolve interrupt],dev-Mac `--scale` 已实证轮询/门禁/撞名,留内网真机)。C = C-1/C-2/C-3 + reviewer 两轮 + UX 打磨 + E2E 实测(见 Phase C「进展」)。D = D-1/D-2/D-3 全落地(bundle 物化 → `mount_skill` 沙盒解压 + 依赖透出 → docx 闭环 E2E 通过;见 Phase D「进展」)。架构主分叉已**全部收口** —— 披露归工具层 / 可见性两正交字段 / 依赖三层离线 / 导入硬软双门 / read+mount 零新机制 / external 工具·tool-set·mcp·agent 全 DB 物化(通用 reconciler)/ 部门授权两张 FK 表 / 工具权限两正交轴(等级 + 成员)—— **逐条见「已锁定的决策」+「数据模型总览」,此处不复述**。
 - **E 亦已落地(2026-07-03)**:E-1 validator 硬门 → E-2 双通道导入/导出/删除 + 共池配额 + 前端(含技能搜索/过滤)→ E-4 预装集六 skill(全部原创;五 zip + html-artifact-design 散文)+ 镜像文档栈扩容 + vision_agent;E-3 verify agent 用户定向删除、改向会话期 checker skill(见 Phase E「进展」+ changelog 07-02/07-03)。
-- **下一步 = F/G**:F(MCP client)/ G(部门授权 UI)。**B 残留延后**(非阻塞、归 F):#7-full 抽共享 builder(seeds↔manager)/ #11 `list_units` 冷路径 N+1 / #8 `provider!=http` 成员 advertise-but-build。
+- **当前 = G-0 已落地且目标测试通过**:G 已收口 v0 语义与切片,并接入 runtime dept unit 过滤地基(见 Phase G「进展」)。**B 残留延后**(非阻塞、归 F):#7-full 抽共享 builder(seeds↔manager)/ #11 `list_units` 冷路径 N+1 / #8 `provider!=http` 成员 advertise-but-build。
 - **分支策略(已定:走 main)**:与沙盒 plan 不同 —— 沙盒走 `feat/sandbox` 不增量合 main 是因为有「半迁移态(md→Word 过渡)漏到生产」的风险。本 plan **无此类破坏性中间态**,A/B/C 是纯加法引擎/存储特性,故**逐阶段直接合 main、再按既有策略 overlay intranet**(遵 `feedback-branch-strategy`),不开长命特性分支。
 
 | 阶段 | 内容 | 状态 |
@@ -35,7 +35,7 @@
 | E | 导入门禁与预装(硬门槛 validator + 导入双通道 + 预装集五 skill + vision_agent) | **已完成**(E-1/E-2/E-4 合 main + reviewer 各一轮;E-3 verify agent 改向会话期 checker skill,见该节进展) |
 | E-optional | 前端 office 预览批(pdf/docx/轻档 xlsx 客户端预览;pptx 归服务端转换) | 未开始(**选型已定**,纯前端独立批,不阻塞 F/G,随时可开工,见 Phase E「E-optional」) |
 | F | MCP client(传输/协议客户端 + JSON-Schema→XML 适配 + provider 接入 B 的 deferred 披露) | **已完成**(F-0~F-3 合 main + reviewer 收口 + 本地 MCP stub smoke 通过;G 可消费) |
-| G | 部门作用域授权 + 管理 UI(两张 dept rule 表[skill/unit] + 引擎组合有效集 + skill/toolset/mcp/tool 接入) | 未开始 |
+| G | 部门作用域授权 + 管理 UI(两张 dept rule 表[skill/unit] + 引擎组合有效集 + skill/toolset/mcp/tool 接入) | **进行中**(G-0 runtime 地基已落地,授权 API/UI 待做) |
 
 依赖:D 依赖 **C(skill 存储/激活)+ 沙盒底座**;**A 不是 D 的硬依赖**(reviewer P2,消解与 line 24/132 的矛盾)—— D 的典型闭环(上传 docx→artifact→mount→skill)走上传通路、不经 A,只有"backend tool→artifact→skill"(如 DB→CSV→skill)那类场景才依赖 A。C 依赖 B 吗?**依赖**(reviewer P2,修正旧「任意序」)——披露机制本身与 skill 正交(原则 1),但**通用 reconciler 在 B 落地、skill@C 复用它**(原则 5);C 先做就要么重写 seed→DB、要么缺种子,故 C 依赖 B 的 reconciler 基础(顺带 B 的 tool-set 也是 skill 编排散文的常见消费者)。E 是 skill 线的 last step(用户:存货预装前先改)。**F 依赖 B**(MCP = 又一个 deferred tool-set provider,B 的 provider 缝 + `search_tools` 是 F 的披露地基),与 C/D/E 的 skill 线正交、可并行。**G 横切**:dept rule 表 + 祖先链解析地基随 **C** 落(`department_skill_rule` 先,`department_unit_rule` 随 unit wire-in)(skill 是首个消费者、可见性必需),tool/toolset/mcp 接入随 B/F 各自 wire-in,**管理 UI + 引擎有效集组合 + 四类齐活 = G**;故 G 依赖 C(地基)+ B/F(资源类型存在)。A、B 各自独立可先做。
 
@@ -325,18 +325,21 @@ user_skill ─user_id─> user ;  ─skill_slug─> skill              (真 FK,�
 **做什么**:把"哪个部门能用哪些资源"做成**一套统一的部门作用域授权层**(决策 10),服务 skill/tool-set/mcp/tool 四类;agent MD 不动,引擎运行时组合有效集。这是用户要的"admin 给指定部门配特定工具"——**靠作用域涌现,不克隆 agent**。
 
 **包含**:
-- **两张 dept rule 表 + 解析**(两表 + 解析地基都在 C 建,G 只加 unit 规则的消费):`department_skill_rule` / `department_unit_rule`(决策 10 已论证为何两张 FK 而非一张 polymorphic);判定 = 用户 `department_id` 走 `parent_id` 祖先链 ∩ 规则集(指父覆盖子树;命中 = 例外(方向 = 资源 `visibility` 默认反向),未命中走 `visibility` 默认),解析与已加载资源取交集(DB FK + cascade → 无陈旧规则)。两表共用同一棵祖先链解析(泛型 helper)。
+- **两张 dept rule 表 + 解析**(两表 + 解析地基都在 C 建,G 只加 unit 规则的消费):`department_skill_rule` / `department_unit_rule`(决策 10 已论证为何两张 FK 而非一张 polymorphic);判定 = 用户 `department_id` 走 `parent_id` 祖先链 ∩ 规则集(父部门规则覆盖整子树)。**规则不是可翻转 override**:表无 `effect`,行的含义只由资源 `visibility` 派生 —— `department` 资源的部门规则只能 **enable/grant**,`public` 资源的部门规则只能 **disable/deny**;子部门同资源再建行只是同方向重复,不会翻案。解析与已加载资源取交集(DB FK + cascade → 无陈旧规则)。两表共用同一棵祖先链解析(泛型 helper)。
 - **`EffectiveToolset` resolver:G 只加 dept 规则输入(骨架在 B、决策 11)**:骨架 B 已立、C 加 `active_skills`、F 加 MCP 运行时,G 只追加最后一个输入层 `dept 规则`(dept-on-tools),不重碰读点。
   - **「G 是最后接入的实现阶段输入」≠「运行时应用次序」**(reviewer P1):运行时序固定 = universe 展开 → dept 收窄(移除 user 部门未授权 unit、删 key)→ skill enable,**dept 收窄在 skill enable 之前** → private skill 翻不开 dept-denied。输入集合 `(agent_config, active_skills, registry+MCP, dept 规则)` 是列举非次序。
   - **dept 是 resolver 唯一双向(grant/deny)输入**(C/F 都是 enable/填充),在单元展开后、skill enable 之前应用、方向**派生自资源 `visibility`**(行 = 例外成员、无 effect 列)。
   - **工具侧一律 unit 粒度**:`department_unit_rule.unit_name` = unit 名,`toolset`/`mcp` = `<unit>__*` 整组,`tool` = 裸名;skill 走 `department_skill_rule.skill_slug`、按整 skill 授权。一条「按 unit 名匹配整组」路径,无点名 set 成员 → 永不产生 set-vs-member 冲突/override/检测(删 resolver 的成员名 exact-match 分支)。
 - **四类接入**:skill(C,`visibility=department` 消费规则)、tool-set(B wire-in)、mcp(F wire-in)、**tool(独立 external 工具 = 自成 unit,一等 DB 行、grant/deny 皆可,unit 存在即可消费;**非** tool-set 成员 —— member 粒度已与 MCP 对齐删除,决策 10)**;builtin 不接入(for-everyone,决策 10/11);参数级粒度(工具名+参数模式)留将来(决策 10)。
-- **管理 UI**:admin 按部门分配资源(增删例外成员、方向随资源 `visibility` 派生显示)+ 看每部门有效能力;前端复用 skill 管理页骨架(决策 1 的设置/管理页),按资源类型分 tab(skill / unit)。admin scope 守 `feedback-admin-scope-user-mgmt`(管共享资源/授权,不碰用户数据)。
+- **管理 UI**:单独的 admin-only「部门授权」后台,admin 按部门分配资源(增删例外成员、方向随资源 `visibility` 派生显示)+ 看每部门有效能力;按资源类型分 tab(skill / unit)。文案按方向分开:`public` 资源=「排除部门」,`department` 资源=「授权部门」,继承态只展示「由父部门规则生效」,不提供子部门反向覆盖入口。admin scope 守 `feedback-admin-scope-user-mgmt`(管共享资源/授权,不碰用户数据)。
+- **admin 共享 skill 管理补口**:dynamic shared skill 允许 admin 在 UI/API 中编辑 `visibility` / `default_enabled`(改 visibility 同事务清 `department_skill_rule`,留 `user_skill`);seeded skill 仍 config-owned 只读,改 `config/skills` + reconcile。
 - **无规则体检 check 端点**(原冗余/孤儿审计整条删除):**同向默认冗余结构上不可表达**(无 `effect` 列、行=例外、跟默认同向=不建行);**祖先/子树冗余仍可表达**(父部门已有同资源例外、子部门再建一条 = 冗余,line 93 父覆盖子树)→ 但**非正确性问题**(解析结果一致),由 UI 建规则时拦截或直接接受、不上审计端点。孤儿由 DB FK `ON DELETE CASCADE` 杜绝、visibility 漂移由「改 visibility 清规则」(决策 10,Manager + reconciler 两路)按构造防住。正确性由「派生方向 + clear-on-visibility + DB cascade」三者按构造保住,不需运行时审计。
 
-**到时再敲定**:**grant 删除** = DB `ON DELETE CASCADE`(两张 dept rule 表 + agent_unit/user_skill 均真 FK,删资源 DB 自动级联,无需 app-side cascade;原"config 类系统不碰 m2m + operator 运维契约"已作废);**改 visibility 清规则**是另一回事 = app-side 定向删 dept 规则行(UPDATE 非 DELETE、DB cascade 不触发,留 user_skill,决策 10);引擎"组合有效集"的缓存粒度(部门/用户级,资源变更少、可缓存);UI 是否支持"部门继承"可视化(指父覆盖子的展示);**参数级粒度**(工具名+参数模式、CC allow-rules 式,需调用时 arg 匹配)留将来(**unit 整体** grant/deny 已在 v0(`department_unit_rule` 整 unit 粒度),unit 之下的逐工具/参数粒度才是将来);**树规则 override 优先级**(深层更具体部门能否翻案祖先规则)—— v0 不做、祖先一刀覆盖整子树(决策 10"指父覆盖子树"),将来要"二级禁/某三级特批"再引入"最具体规则胜"(**届时需加回 per-row 方向/`effect` 列** —— 嵌套反向例外、派生单方向表达不了)。
+**增量拆分**:**G-0 决策收口 + runtime 语义地基**(本文档收口上述规则,并接 `EffectiveToolset` 的 dept unit 过滤输入,确保 dept-denied unit 不能被 skill 重新 enable;MCP discovery 只跑当前用户可见 server)。**G-1 授权 API**(`DepartmentAccessManager` + dept skill/unit rule 增删查 + effective 展示,不碰前端)。**G-2 admin skill 补口**(admin list/update dynamic shared skill 的 `visibility`/`default_enabled`,visibility 变更清规则)。**G-3 单独部门授权 UI**(部门树 + skill/unit tabs + 授权/排除文案 + 继承展示)。**G-4 OpenAPI/类型/前端联调**。**G-5 验收/文档收尾**(resolver/API/UI/E2E + plan 进展更新)。
 
-**进展**:未开工。
+**留待将来**:引擎"组合有效集"缓存(先每 turn 读,资源变更少、不提前造失效机器);参数级粒度(工具名+参数模式、CC allow-rules 式,需调用时 arg 匹配);子部门反向覆盖/最具体规则胜出(若要支持,需新增 per-row `effect` 列,当前派生单方向模型表达不了)。
+
+**进展**:**G-0 runtime 地基已落地(2026-07-07)**:规则语义与切片已按用户确认写回本节;`EffectiveToolset` 新增 dept unit 过滤输入,unit 侧 `public` 命中=deny / `department` 命中=grant,且 dept 收窄先于 skill grant → skill 不能重新 enable dept-denied unit;controller 在 MCP discovery 前按当前用户部门过滤 server unit,dept-denied MCP server 不被联系。新增 resolver / DB 命中 / MCP 过滤回归测试;`artifact-flow` conda 环境目标测试 59 passed。下一步 = G-1 授权 API。
 
 ## 关键风险
 

@@ -20,7 +20,7 @@ dept/skill/MCP 是后续阶段各加一个输入层(不再碰这些读点);本�
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Set
 
 from reconcile.snapshot import AgentSnapshot, RegistrySnapshot, SkillInfo, UnitInfo
 from tools.base import (
@@ -155,11 +155,31 @@ class EffectiveToolset:
         return names
 
 
+def unit_visible_by_department(
+    unit: UnitInfo, dept_matched_units: Optional[Set[str]]
+) -> bool:
+    """该 unit 对当前用户部门是否可见(G-0)。
+
+    `department_unit_rule` 没有 effect 列:命中集合只表示「该部门是例外成员」,
+    方向完全由 unit.visibility 派生:
+      - public:默认 allow,命中 = deny
+      - department:默认 deny,命中 = grant
+    未知 visibility fail-closed。builtin 不进 tool_unit,不走这里。
+    """
+    matched = dept_matched_units or set()
+    if unit.visibility == "public":
+        return unit.name not in matched
+    if unit.visibility == "department":
+        return unit.name in matched
+    return False
+
+
 def resolve_effective_toolset(
     agent: AgentSnapshot,
     snapshot: RegistrySnapshot,
     tools: Dict[str, BaseTool],
     skill_snapshot: Optional[Dict[str, SkillInfo]] = None,
+    dept_matched_units: Optional[Set[str]] = None,
 ) -> EffectiveToolset:
     """解析单个 agent 的可调工具集。
 
@@ -170,6 +190,9 @@ def resolve_effective_toolset(
     `skill_snapshot`(C-2):据此预烤 `skill_grants` —— 每个 skill 的 allowed-tools 解析
     到 unit、与本 agent 的 **disabled 池**取交集(skill 只能翻 disabled、不引入 absent、
     不碰等级,决策 11)。激活在引擎按 slug merge,不再回 snapshot。
+
+    `dept_matched_units`(G-0):当前用户部门祖先链命中的 unit 规则集合。dept 收窄在
+    skill enable 之前应用,因此 skill 不能重新打开 dept-denied unit。
     """
     permissions: Dict[str, ToolPermission] = {}
     deferred_units: Dict[str, DeferredUnit] = {}
@@ -188,6 +211,8 @@ def resolve_effective_toolset(
             continue
         unit = snapshot.units.get(unit_name)
         if unit is None:
+            continue
+        if not unit_visible_by_department(unit, dept_matched_units):
             continue
         present_members: List[str] = []
         for full_name in unit.member_full_names:
@@ -212,7 +237,9 @@ def resolve_effective_toolset(
         if tool is not None:
             injectable[name] = tool.permission
 
-    skill_grants = _bake_skill_grants(agent, snapshot, tools, skill_snapshot)
+    skill_grants = _bake_skill_grants(
+        agent, snapshot, tools, skill_snapshot, dept_matched_units
+    )
 
     ets = EffectiveToolset(permissions, deferred_units, skill_grants, injectable)
     ets.apply_injection_invariants()
@@ -224,6 +251,7 @@ def _bake_skill_grants(
     snapshot: RegistrySnapshot,
     tools: Dict[str, BaseTool],
     skill_snapshot: Optional[Dict[str, SkillInfo]],
+    dept_matched_units: Optional[Set[str]],
 ) -> Dict[str, SkillGrant]:
     """预烤 `{slug: SkillGrant}` —— 每个 skill 激活会翻开的工具(只在本 agent 的 disabled
     池里取)。enabled 的 unit 已在 permissions(no-op);absent 不在池(翻不开)。授予涉及
@@ -232,9 +260,13 @@ def _bake_skill_grants(
     if not skill_snapshot:
         return {}
 
-    known_unit_names = set(snapshot.units)
+    visible_units = {
+        name: unit for name, unit in snapshot.units.items()
+        if unit_visible_by_department(unit, dept_matched_units)
+    }
+    known_unit_names = set(visible_units)
     known_full_names: Dict[str, str] = {
-        fn: u.name for u in snapshot.units.values() for fn in u.member_full_names
+        fn: u.name for u in visible_units.values() for fn in u.member_full_names
     }
 
     grants_by_slug: Dict[str, SkillGrant] = {}
@@ -252,7 +284,7 @@ def _bake_skill_grants(
                         grant.permissions[unit] = tool.permission
             elif agent.units.get(unit) == "disabled":
                 # external unit 在本 agent 宇宙里 disabled → 翻开其全部可建成员
-                u = snapshot.units.get(unit)
+                u = visible_units.get(unit)
                 if u is not None:
                     present: List[str] = []
                     for fn in u.member_full_names:
@@ -271,11 +303,15 @@ def resolve_all(
     snapshot: RegistrySnapshot,
     tools: Dict[str, BaseTool],
     skill_snapshot: Optional[Dict[str, SkillInfo]] = None,
+    dept_matched_units: Optional[Set[str]] = None,
 ) -> Dict[str, EffectiveToolset]:
     """一次性解析快照里全部 agent 的可调工具集,供引擎按 agent_name 直接索引。
 
-    `skill_snapshot`(C-2)透传给每 agent 的解析,预烤其 skill_grants(激活在引擎)。"""
+    `skill_snapshot`(C-2)透传给每 agent 的解析,预烤其 skill_grants(激活在引擎)。
+    `dept_matched_units`(G-0)同样透传,先收窄 unit 宇宙再烤 skill grants。"""
     return {
-        name: resolve_effective_toolset(agent, snapshot, tools, skill_snapshot)
+        name: resolve_effective_toolset(
+            agent, snapshot, tools, skill_snapshot, dept_matched_units
+        )
         for name, agent in snapshot.agents.items()
     }
