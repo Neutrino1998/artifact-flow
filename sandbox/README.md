@@ -7,7 +7,7 @@ intranet trip**, then withdraw. Background + decisions:
 
 ```
 sandbox/
-├── Dockerfile              tier-1 sandbox image (py3.11 + sci stack + pandoc + ripgrep + zip + git,
+├── Dockerfile              tier-1 sandbox image (py3.11 + sci/doc stack + pandoc + ripgrep + zip + git,
 │                           non-root uid1000, baked offline-install stub wheel)
 ├── requirements.txt        sandbox python deps — DECOUPLED from backend requirements.lock
 ├── stub-pkg/               trivial pure-Python pkg → baked wheel for the offline-install probe

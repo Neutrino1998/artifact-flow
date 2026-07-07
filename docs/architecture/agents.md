@@ -122,12 +122,14 @@ You can create MULTIPLE result artifacts...
 |-------|------|------|------|---------|------|
 | `lead_agent` | 任务协调、规划、Artifact 管理、subagent 路由 | create/update/rewrite/read/grep_artifact + web_search + web_fetch + call_subagent + [沙盒](sandbox.md) bash/mount/persist | qwen3.7-max | 100 | 否 |
 | `research_agent` | 大型知识探索 / 多源整合，在隔离上下文中执行 | create/update/rewrite/read/grep_artifact + web_search + web_fetch + [沙盒](sandbox.md) bash/mount/persist | qwen3.7-plus | 50 | 否 |
+| `explore_agent` | 大型既有材料分析 / 二进制与计算型处理，在隔离上下文中执行 | create/update/rewrite/read/grep_artifact + [沙盒](sandbox.md) bash/mount/persist | qwen3.7-plus | 50 | 否 |
 | `compact_agent` | 对话摘要生成（Compaction） | 无 | qwen3.7-plus | 0 | 是 |
 
 ### 角色分工
 
 - **lead_agent** 是唯一与用户直接交互的 Agent，也是唯一能创建/修改最终 Artifact 的入口；自身可直接执行 `web_search` / `web_fetch` 处理小规模查询。
 - **research_agent** 是执行型 subagent，由 lead_agent 通过 `call_subagent` 分发任务。和 lead 工具集几乎相同（除 `call_subagent`），其存在意义是**上下文隔离**：把需要 ≥3 来源 / 多步 search→fetch→read 循环的大型探索任务从 lead 的上下文中剥离，避免大量中间 fetch 结果污染主对话。
+- **explore_agent** 是执行型 subagent，面向 session 内既有材料（artifact / 上传文件 / 已有结果）的深读、交叉分析与二进制处理；它不授 web 工具，复杂文件转换和计算走沙盒。
 - **compact_agent** 是内部 Agent，由 `CompactionRunner` 在引擎循环内每次 LLM 调用后同步触发（超阈值时），输出结构化摘要作为 `COMPACTION_SUMMARY` 事件追加到 `state["events"]` 尾部，详见 [engine.md → Compaction 机制](engine.md#compaction-机制)
 
 ## Agent 协作模型

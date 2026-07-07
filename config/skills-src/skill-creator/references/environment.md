@@ -14,7 +14,7 @@
 
 ## 已烤入镜像
 
-**系统工具(apt)**:`pandoc`(3.x,md↔docx/html 转换)、`ripgrep`、`git`(仅本地
+**系统工具(apt)**:`pandoc`(3.x,md↔docx/html 转换)、`ripgrep`、`zip`、`git`(仅本地
 操作)、Noto Sans CJK SC 字体(matplotlib 中文已全局配置,画图直接写中文)。
 
 **Python 包(pip)**:numpy、pandas、matplotlib、Pillow、openpyxl、pypdf、

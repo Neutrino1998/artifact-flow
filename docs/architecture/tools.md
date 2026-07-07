@@ -212,7 +212,7 @@ class ToolParameter:
 **注意：**
 
 - Artifact 工具（create/update/rewrite/read/grep）是请求级创建的（绑定 `ArtifactService` 实例），名称为保留名（`RESERVED_TOOL_NAMES`），自定义工具不可同名
-- **沙盒工具（`bash` / `mount` / `persist`）也是请求级创建的**（`create_sandbox_tools`，绑定一个 per-turn `SandboxSession` + `ArtifactService`），容器 **lazy** 于首个沙盒工具调用。三者是语义不同的动词、共享一个 session；只挂在拥有它们的 agent（当前 `lead` / `research`）的 `tools` 白名单里。机制全貌见 [sandbox.md](sandbox.md)
+- **沙盒工具（`bash` / `mount` / `persist`）也是请求级创建的**（`create_sandbox_tools`，绑定一个 per-turn `SandboxSession` + `ArtifactService`），容器 **lazy** 于首个沙盒工具调用。三者是语义不同的动词、共享一个 session；只挂在拥有它们的 agent（当前 `lead_agent` / `research_agent` / `explore_agent`）的 `tools` 白名单里。机制全貌见 [sandbox.md](sandbox.md)
 - `read_artifact` 不分页 / 无 `limit` 时仍受隐藏字符上限 `READ_ARTIFACT_MAX_CHARS`（默认 50000）保护，超出后 `has_more=true` 并附续读 hint，模型按 hint 调用下一段
 - `call_subagent` 的 `execute()` 仅做路由验证（目标 agent 是否存在、是否非 internal），实际的子 agent 执行由引擎的 `_execute_tools` 原地递归 `_run_agent` 完成
 

@@ -5,8 +5,9 @@
 #
 # ArtifactFlow sandbox image — gVisor (runsc) functional verification (plan §B).
 #
-# This is the "tier-1 baked environment" (plan 原则 7): interpreter + scientific
-# stack + pandoc + ripgrep + zip. It runs untrusted LLM-generated code under runsc.
+# This is the "tier-1 baked environment" (plan 原则 7): interpreter +
+# scientific/document stack + pandoc + ripgrep + zip + git. It runs untrusted
+# LLM-generated code under runsc.
 # DECOUPLED from the backend image / requirements.lock — the sandbox is its own
 # runtime, not the app. Python deps are pinned in sandbox/requirements.txt.
 #
