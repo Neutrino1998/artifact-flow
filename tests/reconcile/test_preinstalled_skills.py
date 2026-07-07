@@ -15,6 +15,7 @@ import importlib.util
 import io
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -125,6 +126,47 @@ def test_docx_apply_redline_smoke(tmp_path):
     assert root.xpath(".//w:del//w:delText[text()='old']", namespaces=ns)
     assert root.xpath(".//w:ins//w:t[text()='new']", namespaces=ns)
 
+    insert_src = tmp_path / "insert-in.docx"
+    insert_out = tmp_path / "insert-out.docx"
+    document = docx.Document()
+    document.add_paragraph("Hello anchor world")
+    document.save(insert_src)
+
+    mod.apply_redline(
+        insert_src, insert_out, needle="anchor", mode="insert-after",
+        new_text=" NEW", author="Review", all_matches=False,
+    )
+    with zipfile.ZipFile(insert_out) as zf:
+        insert_root = etree.fromstring(zf.read("word/document.xml"))
+    paragraph = insert_root.xpath(".//w:body/w:p", namespaces=ns)[0]
+    w = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    tokens = []
+    for child in paragraph:
+        if child.tag == w + "r":
+            tokens.append((
+                "text",
+                "".join(t.text or "" for t in child.findall(w + "t")),
+            ))
+        elif child.tag == w + "ins":
+            tokens.append((
+                "ins",
+                "".join(child.xpath(".//w:t/text()", namespaces=ns)),
+            ))
+    assert tokens[:3] == [
+        ("text", "Hello anchor"),
+        ("ins", " NEW"),
+        ("text", " world"),
+    ]
+
+
+def _shape_texts(shape_items):
+    texts = []
+    for shape in shape_items:
+        if shape.get("text"):
+            texts.append(shape["text"])
+        texts.extend(_shape_texts(shape.get("children", [])))
+    return texts
+
 
 def test_pptx_inspect_and_replace_text_smoke(tmp_path):
     pptx = pytest.importorskip("pptx")
@@ -132,21 +174,25 @@ def test_pptx_inspect_and_replace_text_smoke(tmp_path):
     inspect_mod = _load_skill_script("pptx", "scripts/inspect_deck.py")
     replace_mod = _load_skill_script("pptx", "scripts/replace_text.py")
 
+    with pytest.raises(SystemExit, match="--find requires --replace"):
+        replace_mod._load_replacements(
+            SimpleNamespace(map=None, find="Old", replace=None))
+
     src = tmp_path / "in.pptx"
     out = tmp_path / "out.pptx"
     prs = pptx.Presentation()
     slide = prs.slides.add_slide(prs.slide_layouts[6])
-    box = slide.shapes.add_textbox(util.Inches(1), util.Inches(1), util.Inches(6), util.Inches(1))
-    box.text_frame.paragraphs[0].text = "Old title"
+    group = slide.shapes.add_group_shape()
+    box = group.shapes.add_textbox(
+        util.Inches(1), util.Inches(1), util.Inches(6), util.Inches(1))
+    box.text_frame.paragraphs[0].text = "Grouped Old title"
     prs.save(src)
 
     summary = replace_mod.replace_text(
         src, out, [("Old", "New")], slides=None, allow_missing=False)
     assert summary["total_hits"] == 1
     inspected = inspect_mod.inspect(out, max_text=100, include_notes=False)
-    texts = [
-        shape.get("text", "")
-        for slide_info in inspected["slides"]
-        for shape in slide_info["shapes"]
-    ]
-    assert any("New title" in text for text in texts)
+    top_level_shapes = inspected["slides"][0]["shapes"]
+    groups = [shape for shape in top_level_shapes if shape["type"] == "group"]
+    assert groups and groups[0]["child_count"] == 1
+    assert any("Grouped New title" in text for text in _shape_texts(top_level_shapes))

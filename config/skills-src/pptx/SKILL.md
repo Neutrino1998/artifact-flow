@@ -38,7 +38,7 @@ PPTX 任务先分流,不要一律走固定生成器。
 python $SKILL/scripts/inspect_deck.py 输入.pptx > deck.json
 ```
 
-输出包含每页 layout、文本块、表格样例、图片/图表/placeholder、形状坐标。用它做三件事:
+输出包含每页 layout、文本块、表格样例、图片/图表/placeholder、成组对象子元素、形状坐标。用它做三件事:
 
 - 判断 deck 是“内容可直接抽取”,还是图片/图表占主体;
 - 模板编辑前做 slide mapping:哪页版式适合哪段内容,不要重复同一种重文字页;
@@ -71,7 +71,8 @@ python $SKILL/scripts/replace_text.py 输入.pptx 输出.pptx --map replacements
 ```
 
 `replace_text.py` 找不到锚点会失败;不要用 `--allow-missing` 掩盖目标没命中的问题。若命中跨多个
-run,脚本会重写该段并在 JSON 里报告 `paragraph_rewrites`——这通常仍可接受,但要复查该页。
+run,脚本会重写该段并在 JSON 里报告 `paragraph_rewrites`——这通常仍可接受,但要复查该页。若要删除
+文本,显式传 `--replace ""`,不要省略 `--replace`。
 
 模板适配纪律:
 

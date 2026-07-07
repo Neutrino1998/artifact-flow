@@ -11,7 +11,8 @@ Usage:
 The script first tries run-level replacement, preserving run formatting. If the
 match spans multiple runs inside one paragraph, it rewrites that paragraph into
 the first run and reports a `paragraph_rewrites` count. Missing find strings are
-a failure unless `--allow-missing` is set.
+a failure unless `--allow-missing` is set. `--find` requires `--replace`; pass
+`--replace ""` explicitly to delete matched text.
 """
 
 from __future__ import annotations
@@ -36,13 +37,25 @@ def _load_replacements(args) -> list[tuple[str, str]]:
         else:
             raise SystemExit("error: --map must be a JSON object or list")
     if args.find is not None:
-        pairs.append((args.find, args.replace or ""))
+        if args.replace is None:
+            raise SystemExit("error: --find requires --replace")
+        pairs.append((args.find, args.replace))
+    elif args.replace is not None:
+        raise SystemExit("error: --replace requires --find")
     if not pairs:
         raise SystemExit("error: provide --find/--replace or --map")
     empty = [old for old, _ in pairs if old == ""]
     if empty:
         raise SystemExit("error: find strings must be non-empty")
     return pairs
+
+
+def _iter_shapes(shapes):
+    for shape in shapes:
+        yield shape
+        child_shapes = getattr(shape, "shapes", None)
+        if child_shapes is not None:
+            yield from _iter_shapes(child_shapes)
 
 
 def _parse_slides(expr: str | None) -> set[int] | None:
@@ -117,7 +130,7 @@ def replace_text(
         for slide_idx, slide in enumerate(prs.slides, 1):
             if slides is not None and slide_idx not in slides:
                 continue
-            for shape in slide.shapes:
+            for shape in _iter_shapes(slide.shapes):
                 for tf in _text_frames(shape):
                     for paragraph in tf.paragraphs:
                         h, r = _replace_in_paragraph(paragraph, old, new)

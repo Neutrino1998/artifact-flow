@@ -114,6 +114,32 @@ def _insert_change_before(anchor, wrapper) -> None:
     anchor.addprevious(wrapper)
 
 
+def _insert_at_text_offset(runs, offset: int, wrapper) -> None:
+    for item in runs:
+        if item["start"] <= offset <= item["end"]:
+            run = item["run"]
+            if offset == item["start"]:
+                _insert_change_before(run, wrapper)
+                return
+            if offset == item["end"]:
+                _insert_change_after(run, wrapper)
+                return
+
+            split_at = offset - item["start"]
+            before = _clone_run_with_text(run, item["text"][:split_at])
+            after = _clone_run_with_text(run, item["text"][split_at:])
+            if before is not None:
+                run.addprevious(before)
+            run.addprevious(wrapper)
+            if after is not None:
+                run.addprevious(after)
+            parent = run.getparent()
+            if parent is not None:
+                parent.remove(run)
+            return
+    raise RedlineError("insert position is not in editable direct runs")
+
+
 def _apply_inline_change(
     paragraph,
     runs,
@@ -139,10 +165,8 @@ def _apply_inline_change(
         inserted_run = _clone_run_with_text(base_run, new_text)
         if inserted_run is not None:
             inserted.append(inserted_run)
-        if mode == "insert-after":
-            _insert_change_after(last_run, inserted)
-        else:
-            _insert_change_before(first_run, inserted)
+        insert_at = end if mode == "insert-after" else start
+        _insert_at_text_offset(runs, insert_at, inserted)
         return
 
     left_text = affected[0]["text"][:max(start - affected[0]["start"], 0)]

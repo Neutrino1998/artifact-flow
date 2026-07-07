@@ -5,8 +5,9 @@ Usage:
     python inspect_deck.py input.pptx [--max-text 600] [--include-notes]
 
 The sandbox has no slide renderer. This script gives a structural view instead:
-slide order, layout names, text blocks, placeholders, tables, images, charts, and
-shape boxes in inches. Use it before editing an existing deck or template.
+slide order, layout names, text blocks, placeholders, tables, images, charts,
+group children, and shape boxes in inches. Use it before editing an existing deck
+or template.
 """
 
 from __future__ import annotations
@@ -97,6 +98,12 @@ def _shape_summary(shape, max_text: int) -> dict:
     table = _table(shape, max_text)
     if table is not None:
         item["table"] = table
+    child_shapes = getattr(shape, "shapes", None)
+    if child_shapes is not None:
+        children = [_shape_summary(child, max_text) for child in child_shapes]
+        item["child_count"] = len(children)
+        if children:
+            item["children"] = children
     return item
 
 
