@@ -29,8 +29,12 @@ export default function PdfPreview({
 
     fetchArtifactRawObjectUrl(sessionId, artifactId)
       .then((nextUrl) => {
+        if (cancelled) {
+          URL.revokeObjectURL(nextUrl);
+          return;
+        }
         objectUrl = nextUrl;
-        if (!cancelled) setUrl(nextUrl);
+        setUrl(nextUrl);
       })
       .catch(() => {
         if (!cancelled) setError('PDF 预览失败，可下载原件查看');

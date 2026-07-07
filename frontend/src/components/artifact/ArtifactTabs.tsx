@@ -18,13 +18,14 @@ export default function ArtifactTabs() {
   const hasBlob = useArtifactStore((s) => s.current?.has_blob);
 
   const tabs = useMemo(() => {
-    // Markdown / HTML / CSV get rich Preview alongside Source/Diff.
-    // Other text types are Source/Diff only.
-    if (contentType === 'text/markdown' || contentType === 'text/html' || isCsvMime(contentType)) return allTabs;
-    // blob 类(图片/二进制)只有 preview(无文本 source/diff)
+    // Blob-backed artifacts have no text content by construction, even when
+    // their MIME is text/csv after an oversized/undecodable CSV upload.
     if (hasBlob || contentType?.startsWith('image/')) {
       return allTabs.filter((t) => t.mode === 'preview');
     }
+    // Markdown / HTML / CSV get rich Preview alongside Source/Diff.
+    // Other text types are Source/Diff only.
+    if (contentType === 'text/markdown' || contentType === 'text/html' || isCsvMime(contentType)) return allTabs;
     return allTabs.filter((t) => t.mode !== 'preview');
   }, [contentType, hasBlob]);
 
