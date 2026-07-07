@@ -19,6 +19,7 @@ import { triggerBlobDownload } from '@/lib/download';
 import { PillBadge } from '@/components/ui/PillBadge';
 import { SwitchTrack } from '@/components/ui/SwitchTrack';
 import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
+import { StatusNotice } from '@/components/ui/StatusNotice';
 import DangerConfirmModal, { DangerConfirmTarget } from '@/components/layout/DangerConfirmModal';
 import PanelSearchBar from './PanelSearchBar';
 import type {
@@ -34,6 +35,7 @@ type SkillRow = SkillItem & {
   adminShared?: AdminSkillItem;
   adminOnly?: boolean;
 };
+type SkillImportNoticeData = SkillImportResponse;
 
 const VISIBILITY_OPTIONS = [
   { value: 'public', label: '公开' },
@@ -83,6 +85,7 @@ export default function SkillManagementPanel() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [importOpen, setImportOpen] = useState(false);
+  const [importNotice, setImportNotice] = useState<SkillImportNoticeData | null>(null);
   // 正在写覆盖/删除的 slug 集(禁用其控件防抖动)。
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<SkillRow | null>(null);
@@ -229,7 +232,10 @@ export default function SkillManagementPanel() {
 
           {/* 导入入口 + 内联导入卡片(中间面板接管,不动右面板) */}
           <button
-            onClick={() => setImportOpen((v) => !v)}
+            onClick={() => {
+              setImportNotice(null);
+              setImportOpen((v) => !v);
+            }}
             className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border font-medium transition-colors ${
               importOpen
                 ? 'text-accent border-accent bg-bg dark:bg-bg-dark'
@@ -245,10 +251,19 @@ export default function SkillManagementPanel() {
           {importOpen && (
             <SkillImportCard
               isAdmin={isAdmin}
-              onImported={() => {
+              onImported={(data) => {
+                setImportNotice(data);
+                setImportOpen(false);
                 fetchSkills();
               }}
               onClose={() => setImportOpen(false)}
+            />
+          )}
+
+          {importNotice && (
+            <SkillImportNotice
+              data={importNotice}
+              onDismiss={() => setImportNotice(null)}
             />
           )}
 
@@ -457,8 +472,7 @@ export default function SkillManagementPanel() {
 
 type ImportStage =
   | { kind: 'pick' }
-  | { kind: 'submitting' }
-  | { kind: 'result'; data: SkillImportResponse };
+  | { kind: 'submitting' };
 
 function SkillImportCard({
   isAdmin,
@@ -466,7 +480,7 @@ function SkillImportCard({
   onClose,
 }: {
   isAdmin: boolean;
-  onImported: () => void;
+  onImported: (data: SkillImportResponse) => void;
   onClose: () => void;
 }) {
   const [stage, setStage] = useState<ImportStage>({ kind: 'pick' });
@@ -516,8 +530,7 @@ function SkillImportCard({
             }
           : {}),
       });
-      setStage({ kind: 'result', data });
-      onImported();
+      onImported(data);
     } catch (err) {
       // 错误终态:清 file + native input,强制重挑文件(修包重传流程可预测)
       setStage({ kind: 'pick' });
@@ -548,188 +561,188 @@ function SkillImportCard({
     clearNativeInput,
   ]);
 
-  const reset = useCallback(() => {
-    setStage({ kind: 'pick' });
-    setFile(null);
-    setError(null);
-    setRejectFindings(null);
-    clearNativeInput();
-  }, [clearNativeInput]);
-
   return (
     <div className="rounded-xl bg-surface dark:bg-surface-dark border border-border dark:border-border-dark p-4 space-y-3">
-      {stage.kind !== 'result' && (
-        <>
-          <div
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragActive(true);
-            }}
-            onDragLeave={() => setDragActive(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDragActive(false);
-              handleFile(e.dataTransfer.files?.[0] ?? null);
-            }}
-            className={`rounded-xl border-2 border-dashed p-5 text-center transition-colors ${
-              dragActive
-                ? 'border-accent bg-panel/50 dark:bg-panel-accent-dark/50'
-                : 'border-border dark:border-border-dark'
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragActive(true);
+        }}
+        onDragLeave={() => setDragActive(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragActive(false);
+          handleFile(e.dataTransfer.files?.[0] ?? null);
+        }}
+        className={`rounded-xl border-2 border-dashed p-5 text-center transition-colors ${
+          dragActive
+            ? 'border-accent bg-panel/50 dark:bg-panel-accent-dark/50'
+            : 'border-border dark:border-border-dark'
+        }`}
+      >
+        {file ? (
+          <div className="flex flex-col items-center gap-1">
+            <div className="text-sm text-text-primary dark:text-text-primary-dark font-medium">
+              {file.name}
+            </div>
+            <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
+              {(file.size / 1024).toFixed(1)} KB
+            </div>
+            <button
+              onClick={() => handleFile(null)}
+              type="button"
+              className="mt-1 text-xs text-accent hover:underline"
+            >
+              换一个文件
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-1.5">
+            <div className="text-sm text-text-secondary dark:text-text-secondary-dark">
+              拖拽技能 zip 到此处
+            </div>
+            <button
+              onClick={() => inputRef.current?.click()}
+              type="button"
+              className="px-4 py-1.5 rounded-lg border border-border dark:border-border-dark text-sm font-medium text-text-secondary dark:text-text-secondary-dark bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+            >
+              选择文件
+            </button>
+            <div className="text-[11px] text-text-tertiary dark:text-text-tertiary-dark">
+              zip 内含一个 SKILL.md（可带 scripts / references / assets）
+            </div>
+          </div>
+        )}
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".zip,application/zip"
+          onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
+          className="hidden"
+        />
+      </div>
+
+      {isAdmin && (
+        <div className="space-y-2">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={marketplace}
+            aria-label="导入为共享技能"
+            onClick={() => setMarketplace((v) => !v)}
+            className={`flex w-full items-center justify-between gap-3 rounded-lg border bg-chat dark:bg-chat-dark px-3 py-2 text-left transition-colors ${
+              marketplace
+                ? 'border-accent/60'
+                : 'border-border dark:border-border-dark hover:border-accent/40 dark:hover:border-accent/50'
             }`}
           >
-            {file ? (
-              <div className="flex flex-col items-center gap-1">
-                <div className="text-sm text-text-primary dark:text-text-primary-dark font-medium">
-                  {file.name}
-                </div>
-                <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                  {(file.size / 1024).toFixed(1)} KB
-                </div>
-                <button
-                  onClick={() => handleFile(null)}
-                  type="button"
-                  className="mt-1 text-xs text-accent hover:underline"
-                >
-                  换一个文件
-                </button>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-1.5">
-                <div className="text-sm text-text-secondary dark:text-text-secondary-dark">
-                  拖拽技能 zip 到此处
-                </div>
-                <button
-                  onClick={() => inputRef.current?.click()}
-                  type="button"
-                  className="px-4 py-1.5 rounded-lg border border-border dark:border-border-dark text-sm font-medium text-text-secondary dark:text-text-secondary-dark bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-                >
-                  选择文件
-                </button>
-                <div className="text-[11px] text-text-tertiary dark:text-text-tertiary-dark">
-                  zip 内含一个 SKILL.md（可带 scripts / references / assets）
-                </div>
-              </div>
-            )}
-            <input
-              ref={inputRef}
-              type="file"
-              accept=".zip,application/zip"
-              onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
-              className="hidden"
-            />
-          </div>
-
-          {isAdmin && (
-            <div className="space-y-2">
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-text-primary dark:text-text-primary-dark">
+                导入为共享技能
+              </span>
+              <span className="block text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                管理员可配置公开或部门可见
+              </span>
+            </span>
+            <SwitchTrack checked={marketplace} />
+          </button>
+          {marketplace && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border dark:border-border-dark bg-chat dark:bg-chat-dark px-3 py-2">
+              <SegmentedTabs<SharedVisibility>
+                value={sharedVisibility}
+                options={VISIBILITY_OPTIONS}
+                onChange={setSharedVisibility}
+                ariaLabel="导入共享技能可见度"
+              />
               <button
                 type="button"
                 role="switch"
-                aria-checked={marketplace}
-                aria-label="导入为共享技能"
-                onClick={() => setMarketplace((v) => !v)}
-                className={`flex w-full items-center justify-between gap-3 rounded-lg border bg-chat dark:bg-chat-dark px-3 py-2 text-left transition-colors ${
-                  marketplace
-                    ? 'border-accent/60'
-                    : 'border-border dark:border-border-dark hover:border-accent/40 dark:hover:border-accent/50'
-                }`}
+                aria-checked={sharedDefaultEnabled}
+                aria-label="导入后默认启用"
+                onClick={() => setSharedDefaultEnabled((v) => !v)}
+                className="inline-flex items-center gap-2 rounded-lg bg-panel-accent dark:bg-surface-dark px-2 py-1 text-xs text-text-secondary dark:text-text-secondary-dark"
               >
-                <span className="min-w-0">
-                  <span className="block text-sm font-medium text-text-primary dark:text-text-primary-dark">
-                    导入为共享技能
-                  </span>
-                  <span className="block text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                    管理员可配置公开或部门可见
-                  </span>
-                </span>
-                <SwitchTrack checked={marketplace} />
+                <span>{sharedDefaultEnabled ? '默认开' : '默认关'}</span>
+                <SwitchTrack checked={sharedDefaultEnabled} />
               </button>
-              {marketplace && (
-                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border dark:border-border-dark bg-chat dark:bg-chat-dark px-3 py-2">
-                  <SegmentedTabs<SharedVisibility>
-                    value={sharedVisibility}
-                    options={VISIBILITY_OPTIONS}
-                    onChange={setSharedVisibility}
-                    ariaLabel="导入共享技能可见度"
-                  />
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={sharedDefaultEnabled}
-                    aria-label="导入后默认启用"
-                    onClick={() => setSharedDefaultEnabled((v) => !v)}
-                    className="inline-flex items-center gap-2 rounded-lg bg-panel-accent dark:bg-surface-dark px-2 py-1 text-xs text-text-secondary dark:text-text-secondary-dark"
-                  >
-                    <span>{sharedDefaultEnabled ? '默认开' : '默认关'}</span>
-                    <SwitchTrack checked={sharedDefaultEnabled} />
-                  </button>
-                </div>
-              )}
             </div>
           )}
-
-          {error && <div className="text-status-error text-xs">{error}</div>}
-          {rejectFindings && <FindingList findings={rejectFindings} />}
-
-          <div className="flex justify-end gap-2">
-            <button
-              onClick={onClose}
-              type="button"
-              disabled={stage.kind === 'submitting'}
-              className={`${BUTTON_SECONDARY} rounded-lg px-4 py-1.5 text-sm`}
-            >
-              取消
-            </button>
-            <button
-              onClick={submit}
-              disabled={!file || stage.kind === 'submitting'}
-              type="button"
-              className={`${BUTTON_PRIMARY} rounded-lg px-4 py-1.5 text-sm`}
-            >
-              {stage.kind === 'submitting' ? '导入中…' : '导入'}
-            </button>
-          </div>
-        </>
-      )}
-
-      {stage.kind === 'result' && (
-        <div className="space-y-3">
-          <div className="text-sm text-text-primary dark:text-text-primary-dark">
-            已导入技能{' '}
-            <span className="font-medium">{stage.data.skill.name}</span>
-            {stage.data.skill.visibility === 'private'
-              ? '（私有，已启用）'
-              : `（共享，${stage.data.skill.visibility === 'department' ? '部门可见' : '公开可见'}，${stage.data.skill.default_enabled ? '默认开启' : '默认关闭'}）`}
-          </div>
-          {stage.data.findings.length > 0 && (
-            <>
-              <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                校验提示（不阻断，仅供修包参考）：
-              </div>
-              <FindingList findings={stage.data.findings} />
-            </>
-          )}
-          <div className="flex justify-end gap-2">
-            <button
-              onClick={reset}
-              type="button"
-              className={`${BUTTON_SECONDARY} rounded-lg px-4 py-1.5 text-sm`}
-            >
-              再导入一个
-            </button>
-            <button
-              onClick={onClose}
-              type="button"
-              className={`${BUTTON_PRIMARY} rounded-lg px-4 py-1.5 text-sm`}
-            >
-              完成
-            </button>
-          </div>
         </div>
       )}
+
+      {error && <div className="text-status-error text-xs">{error}</div>}
+      {rejectFindings && <FindingList findings={rejectFindings} />}
+
+      <div className="flex justify-end gap-2">
+        <button
+          onClick={onClose}
+          type="button"
+          disabled={stage.kind === 'submitting'}
+          className={`${BUTTON_SECONDARY} rounded-lg px-4 py-1.5 text-sm`}
+        >
+          取消
+        </button>
+        <button
+          onClick={submit}
+          disabled={!file || stage.kind === 'submitting'}
+          type="button"
+          className={`${BUTTON_PRIMARY} rounded-lg px-4 py-1.5 text-sm`}
+        >
+          {stage.kind === 'submitting' ? '导入中…' : '导入'}
+        </button>
+      </div>
     </div>
   );
 }
 
+function SkillImportNotice({
+  data,
+  onDismiss,
+}: {
+  data: SkillImportNoticeData;
+  onDismiss: () => void;
+}) {
+  const { skill, findings } = data;
+  const isPrivate = skill.visibility === 'private';
+  const visibilityLabel = isPrivate
+    ? '私有'
+    : skill.visibility === 'department'
+      ? '部门'
+      : '公开';
+
+  return (
+    <StatusNotice
+      tone="success"
+      title={
+        <>
+          <span>已导入</span>
+          <span>{skill.name}</span>
+          <PillBadge tone={isPrivate ? 'accent' : 'neutral'}>
+            {visibilityLabel}
+          </PillBadge>
+          {isPrivate ? (
+            <PillBadge tone="success">已启用</PillBadge>
+          ) : (
+            <PillBadge tone={skill.default_enabled ? 'success' : 'neutral'}>
+              {skill.default_enabled ? '默认开' : '默认关'}
+            </PillBadge>
+          )}
+        </>
+      }
+      onDismiss={onDismiss}
+      dismissLabel="关闭导入成功提示"
+    >
+      {findings.length > 0 && (
+        <div className="space-y-2">
+          <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
+            校验提示（不阻断，仅供修包参考）
+          </div>
+          <FindingList findings={findings} />
+        </div>
+      )}
+    </StatusNotice>
+  );
+}
 function FindingList({ findings }: { findings: SkillFindingItem[] }) {
   return (
     <div className="rounded-lg border border-border dark:border-border-dark divide-y divide-border dark:divide-border-dark max-h-48 overflow-y-auto">

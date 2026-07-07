@@ -3,7 +3,7 @@
 import { memo } from 'react';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { CopyIcon } from '@/components/ui/CopyIcon';
-import { PillBadge } from '@/components/ui/PillBadge';
+import { StatusNotice } from '@/components/ui/StatusNotice';
 
 interface ErrorFlowBlockProps {
   message?: string;
@@ -17,40 +17,37 @@ function ErrorFlowBlock({ message, requestId }: ErrorFlowBlockProps) {
   const copyTarget = requestId ?? message;
 
   return (
-    <div className="bg-chat dark:bg-chat-dark border border-status-error/40 rounded-card overflow-hidden">
-      <div className="flex items-center justify-between gap-2 px-3 py-2 text-xs">
-        <PillBadge tone="error" size="regular" className="gap-1.5">
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="15" y1="9" x2="9" y2="15" />
-            <line x1="9" y1="9" x2="15" y2="15" />
-          </svg>
-          error
-        </PillBadge>
-        <div className="flex items-center gap-2 min-w-0">
+    <StatusNotice
+      tone="error"
+      title={
+        <>
+          <span>出错了</span>
           {requestId && (
-            <code className="shrink-0 font-mono text-[11px] text-status-error/80 truncate" title={requestId}>
+            <code className="font-mono text-[11px] text-text-tertiary dark:text-text-tertiary-dark truncate" title={requestId}>
               错误码 {requestId}
             </code>
           )}
-          {copyTarget && (
-            <button
-              onClick={() => copy(copyTarget)}
-              className="shrink-0 p-1 rounded text-status-error/70 hover:text-status-error hover:bg-status-error/10"
-              aria-label={requestId ? 'Copy error code' : 'Copy error'}
-              title={copied ? '已复制' : requestId ? '复制错误码' : '复制'}
-            >
-              <CopyIcon copied={copied} />
-            </button>
-          )}
-        </div>
-      </div>
+        </>
+      }
+      actions={
+        copyTarget && (
+          <button
+            onClick={() => copy(copyTarget)}
+            className="rounded-lg p-1 text-text-tertiary dark:text-text-tertiary-dark hover:bg-status-error/10 hover:text-text-secondary dark:hover:text-text-secondary-dark transition-colors"
+            aria-label={requestId ? 'Copy error code' : 'Copy error'}
+            title={copied ? '已复制' : requestId ? '复制错误码' : '复制'}
+          >
+            <CopyIcon copied={copied} />
+          </button>
+        )
+      }
+    >
       {message && (
-        <div className="px-3 pb-3 text-xs text-status-error whitespace-pre-wrap break-words">
+        <div className="text-xs whitespace-pre-wrap break-words">
           {message}
         </div>
       )}
-    </div>
+    </StatusNotice>
   );
 }
 
