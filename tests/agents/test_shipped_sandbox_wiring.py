@@ -49,6 +49,31 @@ def _sandbox_python_packages() -> set[str]:
     return packages
 
 
+def _dependency_token_present(text: str, dependency: str) -> bool:
+    # Dependencies are exact package/tool tokens, not arbitrary substrings:
+    # `pypdf` must not be satisfied by `pypdfium2`, and `zip` must not be
+    # satisfied by prose like "skill zip".
+    token_chars = r"A-Za-z0-9_.+-"
+    return re.search(
+        rf"(?<![{token_chars}]){re.escape(dependency)}(?![{token_chars}])",
+        text,
+    ) is not None
+
+
+def _paragraph_after(text: str, marker: str) -> str:
+    start = text.find(marker)
+    assert start != -1, f"missing marker {marker!r}"
+    rest = text[start + len(marker):].lstrip()
+    return rest.split("\n\n", 1)[0]
+
+
+def _assert_dependency_tokens(label: str, text: str, dependencies: set[str]) -> None:
+    for dependency in sorted(dependencies):
+        assert _dependency_token_present(text, dependency), (
+            f"{label} missing sandbox dependency '{dependency}'"
+        )
+
+
 @pytest.fixture(scope="module")
 def shipped_agents():
     return load_all_agents(str(_CONFIG_DIR))
@@ -79,25 +104,29 @@ def test_sandbox_dependency_descriptions_track_image_inputs():
     system_tools = _sandbox_apt_packages()
     python_packages = _sandbox_python_packages()
     assert {"pandoc", "ripgrep", "zip", "git"} <= system_tools
+    all_dependencies = system_tools | python_packages
 
-    enumerated_dependency_docs = {
+    exact_dependency_docs = {
         "BashTool.description": BashTool(None).description,
         "docs/architecture/sandbox.md": (
             _REPO_ROOT / "docs" / "architecture" / "sandbox.md"
         ).read_text(),
-        "skill-creator environment.md": (
-            _REPO_ROOT
-            / "config"
-            / "skills-src"
-            / "skill-creator"
-            / "references"
-            / "environment.md"
-        ).read_text(),
     }
-    for label, text in enumerated_dependency_docs.items():
-        for dependency in sorted(system_tools | python_packages):
-            assert dependency in text, f"{label} missing sandbox dependency '{dependency}'"
+    for label, text in exact_dependency_docs.items():
+        _assert_dependency_tokens(label, text, all_dependencies)
+
+    environment = (
+        _REPO_ROOT
+        / "config"
+        / "skills-src"
+        / "skill-creator"
+        / "references"
+        / "environment.md"
+    ).read_text()
+    apt_paragraph = _paragraph_after(environment, "**系统工具(apt)**:")
+    pip_paragraph = _paragraph_after(environment, "**Python 包(pip)**:")
+    _assert_dependency_tokens("skill-creator environment.md apt list", apt_paragraph, system_tools)
+    _assert_dependency_tokens("skill-creator environment.md pip list", pip_paragraph, python_packages)
 
     readme = (_REPO_ROOT / "sandbox" / "README.md").read_text()
-    for dependency in sorted(system_tools):
-        assert dependency in readme, f"sandbox/README.md missing system tool '{dependency}'"
+    _assert_dependency_tokens("sandbox/README.md", readme, system_tools)
