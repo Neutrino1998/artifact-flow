@@ -135,15 +135,22 @@ export default function SpreadsheetPreview({
 
   return (
     <div className="h-full min-h-0 flex flex-col bg-white dark:bg-surface-dark">
-      <div className="flex min-h-0 items-center gap-2 overflow-x-auto border-b border-border dark:border-border-dark px-3 py-2">
+      <div
+        role="tablist"
+        aria-label="工作表"
+        className="flex min-h-0 items-end gap-1 overflow-x-auto border-b border-border bg-bg px-3 pt-2 dark:border-border-dark dark:bg-bg-dark"
+      >
         {sheets.map((item, idx) => (
           <button
-            key={item.name}
+            key={`${item.name}-${idx}`}
+            type="button"
+            role="tab"
+            aria-selected={idx === activeSheet}
             onClick={() => setActiveSheet(idx)}
-            className={`shrink-0 rounded-md px-2.5 py-1 text-xs ${
+            className={`-mb-px shrink-0 rounded-t-md border px-3 py-1.5 text-xs font-medium transition-colors ${
               idx === activeSheet
-                ? 'bg-primary text-white'
-                : 'bg-bg dark:bg-bg-dark text-text-secondary dark:text-text-secondary-dark hover:bg-panel-accent dark:hover:bg-surface-dark'
+                ? 'border-border border-b-white bg-white text-text-primary shadow-sm dark:border-border-dark dark:border-b-surface-dark dark:bg-surface-dark dark:text-text-primary-dark'
+                : 'border-transparent bg-panel-accent text-text-secondary hover:border-border hover:bg-white hover:text-text-primary dark:bg-panel-accent-dark dark:text-text-secondary-dark dark:hover:border-border-dark dark:hover:bg-surface-dark dark:hover:text-text-primary-dark'
             }`}
           >
             {item.name}
