@@ -184,9 +184,10 @@ services:
     image: postgres:16-alpine
     profiles: ["infra"]
     mem_limit: 2g
-    # max_connections sized for backend pool (POOL_SIZE=20 + MAX_OVERFLOW=40 = 60)
-    # plus PG internal workers, alembic, and debug headroom. shared_buffers raised
-    # from 128MB default to fit the larger connection count.
+    # max_connections sized for two default backend pools
+    # (POOL_SIZE=10 + MAX_OVERFLOW=20 = 30 each, 60 total) plus PG internal
+    # workers, alembic, and debug headroom. shared_buffers raised from 128MB
+    # default to fit the larger connection count.
     # timezone=UTC: session TZ must match Python utils.time.utc_now() so
     # server_default=func.now() / onupdate=func.now() write UTC naive. /etc/localtime
     # mount below only affects PG log timestamp rendering, not session timezone.
@@ -230,8 +231,9 @@ services:
     # all carry TTL, so any *keys-lru / volatile-lru policy would evict whole
     # control-state keys at random — silently killing in-flight tasks (consumer
     # treats missing lease as producer-lost; cancel/interrupt signals just vanish).
-    # We prefer loud write failure → operator scales up. 512mb sized for 64-way
-    # concurrent execution (peak ~130MB streams + runtime), ~4× headroom over 256mb.
+    # We prefer loud write failure → operator scales up. 512mb is generous for
+    # the 32-way default and still covers the old 64-way sizing envelope
+    # (peak ~130MB streams + runtime) with ~4× headroom over 256mb.
     # Stream entries are trimmed by XADD MAXLEN, not by eviction policy.
     command: >
       redis-server --appendonly yes --appendfsync everysec

@@ -199,7 +199,7 @@ ab19...    8
 
 - 默认 `OBS_MEM_LIMIT_MB=0` 走自动 resolve:env > cgroup v2 > cgroup v1 > 不告警(`sampler.py:330-362`)
 - 高水位 ratio `_RSS_WARN_RATIO=0.80`(`sampler.py:60`)写死,不是隐藏常量
-- RSS p99 持续 > 80% mem_limit → 容量规划信号,先看 `MAX_CONCURRENT_TASKS`(默认 10);别先加 mem_limit
+- RSS p99 持续 > 80% mem_limit → 容量规划信号,先看 `MAX_CONCURRENT_TASKS`(默认 32);别先加 mem_limit
 - Open FDs 趋势上涨不下降 → connection / file 泄漏,看 `db_pool.size` 是否同涨
 
 ### 4.3 `db_pool`

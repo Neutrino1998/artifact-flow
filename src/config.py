@@ -166,11 +166,11 @@ class Settings(BaseSettings):
     REDIS_URL: str = ""
     REDIS_CLUSTER: bool = False           # 生产 Cluster 模式
     REDIS_KEY_PREFIX: str = ""             # Redis key 命名空间前缀（共用 Cluster 必须配置）
-    REDIS_MAX_CONNECTIONS: int = 50       # 连接池上限
+    REDIS_MAX_CONNECTIONS: int = 64       # 连接池上限;默认约 2× MAX_CONCURRENT_TASKS
     LEASE_TTL: int = 90  # 秒，心跳每 TTL/3 续租
 
     # 并发控制
-    MAX_CONCURRENT_TASKS: int = 10  # 最大并发引擎执行数
+    MAX_CONCURRENT_TASKS: int = 32  # 最大并发引擎执行数
 
     # 上传限制。单文件字节上限(API 边界 loud 422)。批量**总**字节由代理层
     # request_body max_size 独立封顶(约 200MiB 内容 + multipart 开销,见 deploy/caddy):
@@ -314,8 +314,8 @@ class Settings(BaseSettings):
     # 数据库配置
     DATABASE_URL: str = ""
     DATABASE_URLS: str = ""               # 逗号分隔多 PX 地址（优先级高于 DATABASE_URL）
-    DATABASE_POOL_SIZE: int = 5
-    DATABASE_MAX_OVERFLOW: int = 10
+    DATABASE_POOL_SIZE: int = 10
+    DATABASE_MAX_OVERFLOW: int = 20
     DATABASE_POOL_TIMEOUT: int = 30
     DATABASE_POOL_RECYCLE: int = 300       # 缩短回收周期，加速故障检测和恢复回切
     # PG per-语句 wall-clock(秒)。后处理不在引擎超时(EXECUTION_TIMEOUT)内 —— per-query

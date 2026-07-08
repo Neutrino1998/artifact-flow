@@ -13,7 +13,7 @@
 #   AF_VERSION                 expected app version tag (optional, for image check)
 #   AF_CERT_HOSTS              comma-separated SANs for self-signed placeholder cert
 #   AF_WITH_INFRA              set 1 when this host will run bundled Postgres/Redis
-#   AF_SANDBOX_POOL_SIZE       fixed scratch pool size, default 8G
+#   AF_SANDBOX_POOL_SIZE       fixed scratch pool size, default 8G starter
 #   AF_SANDBOX_SCRATCH_ROOT    default /var/lib/artifactflow/sandbox-scratch
 #   AF_SANDBOX_POOL            default /var/lib/artifactflow/sandbox-pool.img
 #   AF_SANDBOX_IMAGE           default: newest artifactflow-sandbox-*.tar.gz in cwd
@@ -365,7 +365,7 @@ cmd_sandbox() {
       printf 'ARTIFACTFLOW_SANDBOX_RUNTIME=runsc\n' >> "$ROOT/deploy/.env"
     fi
     if ! grep -q '^ARTIFACTFLOW_SANDBOX_MEM_LIMIT_MB=' "$ROOT/deploy/.env"; then
-      printf 'ARTIFACTFLOW_SANDBOX_MEM_LIMIT_MB=512\n' >> "$ROOT/deploy/.env"
+      printf 'ARTIFACTFLOW_SANDBOX_MEM_LIMIT_MB=1024\n' >> "$ROOT/deploy/.env"
     fi
     ok "deploy/.env sandbox settings present"
   else
