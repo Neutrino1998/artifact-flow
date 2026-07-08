@@ -108,7 +108,7 @@ function InstanceCard({ inst, nowMs, isSelf }: { inst: InstanceHeartbeat; nowMs:
   const reasons = inst.status_reasons ?? [];
 
   return (
-    <div className="rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-3.5">
+    <div className="rounded-xl border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-3.5 shadow-float">
       {/* Header: status dot + id + version + self marker */}
       <div className="flex items-center gap-2">
         <span className={`inline-block w-2.5 h-2.5 rounded-full ${meta.dot} ${inst.status === 'red' ? '' : 'shadow-sm'}`} />

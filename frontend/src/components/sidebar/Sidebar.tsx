@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useChat } from '@/hooks/useChat';
 import ConversationList from './ConversationList';
 import AdminConversationList from './AdminConversationList';
+import NotificationConfigList from './NotificationConfigList';
 import UserMenu from './UserMenu';
 import NotificationCenter from './NotificationCenter';
 import BrandingFooter from '@/components/BrandingFooter';
@@ -551,9 +552,11 @@ export default function Sidebar() {
         </>
       )}
 
+      {inNotificationConfig && <NotificationConfigList />}
+
       {/* Spacer — the conversation lists carry flex-1; without them the bottom
           section would float up, so pin it down in the takeover modes. */}
-      {inAdminTakeover && <div className="flex-1" />}
+      {inAdminTakeover && !inNotificationConfig && <div className="flex-1" />}
 
       {/* Notifications + user menu at bottom */}
       <div className="px-3 pb-3 pt-2 space-y-2">

@@ -27,7 +27,7 @@ export function SegmentedTabs<T extends string>({
     <div
       role="tablist"
       aria-label={ariaLabel}
-      className={`inline-flex p-0.5 rounded-lg bg-panel-accent dark:bg-surface-dark text-xs ${className}`}
+      className={`inline-flex p-0.5 rounded-lg bg-panel-accent dark:bg-bg-dark text-xs ${className}`}
     >
       {options.map((option) => {
         const active = option.value === value;
@@ -43,7 +43,7 @@ export function SegmentedTabs<T extends string>({
             onClick={() => onChange(option.value)}
             className={`px-3 py-1 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
               active
-                ? 'bg-surface dark:bg-bg-dark text-accent font-medium shadow-sm'
+                ? 'bg-surface dark:bg-surface-dark text-accent font-medium shadow-sm'
                 : 'text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark'
             }`}
           >
