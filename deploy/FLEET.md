@@ -15,13 +15,12 @@ deploy/scripts/fleet.sh status               # per-host `compose ps` + LB health
 deploy/scripts/fleet.sh rollback             # re-up the previous version
 ```
 
-Sandbox is opt-in. When `AF_ENABLE_SANDBOX=1`, single-host `deploy` looks for
-the sandbox image, verify probes, and gVisor package in the bundle and runs the
-same bootstrap as `deploy/scripts/prepare-host.sh sandbox` before `compose up`.
-`preflight` / `status` / `rollback` then append `deploy/docker-compose.sandbox.yml`
-and make runsc, `artifactflow-sandbox:latest`, and the mounted scratch root hard
-requirements. `prepare-sandbox <bundle-dir>` is available when you want to run
-that host-prep step explicitly.
+Sandbox is opt-in. Run `prepare-sandbox <bundle-dir>` explicitly, as root, when
+a bundle includes the sandbox image, verify probes, and gVisor package; it runs
+the same bootstrap as `deploy/scripts/prepare-host.sh sandbox`. When
+`AF_ENABLE_SANDBOX=1`, `deploy` / `preflight` / `status` / `rollback` append
+`deploy/docker-compose.sandbox.yml` and make runsc,
+`artifactflow-sandbox:latest`, and the mounted scratch root hard requirements.
 
 `preflight` delegates to `deploy/scripts/prepare-host.sh check` when `deploy/`
 is already present on a host, so the same single entry point catches missing
@@ -90,9 +89,10 @@ wrong tar.
    state are gitignored and not overwritten by release tars.
 4. **load** — `docker load` the app tar (backend + frontend images live in it),
    plus the infra tar if present and an `infra` role is declared.
-5. **sandbox prep** — when `AF_ENABLE_SANDBOX=1` and sandbox transfer units are
-   present, install/register runsc, load `artifactflow-sandbox:latest`, create
-   the scratch loop filesystem, and run verify probes.
+5. **sandbox check** — when `AF_ENABLE_SANDBOX=1`, require runsc,
+   `artifactflow-sandbox:latest`, and the scratch loop filesystem to already be
+   prepared. Use `prepare-sandbox <bundle-dir>` first when the bundle carries
+   sandbox transfer units.
 6. **host check** — run `prepare-host.sh check` with the selected version and
    infra/sandbox flags.
 7. **up** — see single vs multi below.

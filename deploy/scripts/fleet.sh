@@ -249,7 +249,7 @@ load_bundle_meta() {
 canon_arch() {
   case "$1" in
     */amd64|amd64|x86_64|x64) echo x86_64 ;;
-    */arm64|arm64|aarch64)    echo arm64 ;;
+    */arm64|*/aarch64|arm64|aarch64) echo arm64 ;;
     *) echo "$1" ;;
   esac
 }
@@ -332,6 +332,39 @@ prepare_sandbox_single_local() {
     AF_GVISOR_PACKAGE="$SANDBOX_GVISOR_TAR" \
       "$SCRIPT_DIR/prepare-host.sh" sandbox || die "sandbox preparation failed"
   fi
+}
+
+sandbox_bundle_has_any_unit() {
+  load_bundle_sandbox_meta
+  [[ -n "$SANDBOX_TAR" && -f "$SANDBOX_TAR" ]] && return 0
+  [[ -n "$SANDBOX_VERIFY_TAR" && -f "$SANDBOX_VERIFY_TAR" ]] && return 0
+  [[ -n "$SANDBOX_GVISOR_TAR" && -f "$SANDBOX_GVISOR_TAR" ]] && return 0
+  return 1
+}
+
+sandbox_ready_local() {
+  command -v runsc >/dev/null 2>&1 || return 1
+  docker info 2>/dev/null | grep -q runsc || return 1
+  docker image inspect artifactflow-sandbox:latest >/dev/null 2>&1 || return 1
+  local scratch
+  scratch="$(sandbox_scratch_root_local)"
+  findmnt -rn "$scratch" >/dev/null || return 1
+}
+
+require_sandbox_ready_single_local() {
+  [[ "$ENABLE_SANDBOX" == 1 ]] || return 0
+  if (( DRY )); then
+    info "would require sandbox host prerequisites; run prepare-sandbox first when using a sandbox bundle"
+    return 0
+  fi
+  if sandbox_ready_local; then
+    ok "sandbox host prerequisites already prepared"
+    return 0
+  fi
+  if sandbox_bundle_has_any_unit; then
+    die "AF_ENABLE_SANDBOX=1 but sandbox host prerequisites are not ready; run first as root: sudo env AF_BUNDLE_VERSION='$BUNDLE_VER' deploy/scripts/fleet.sh prepare-sandbox '$BUNDLE'"
+  fi
+  die "AF_ENABLE_SANDBOX=1 but sandbox host prerequisites are not ready and no sandbox transfer units were found in $BUNDLE; rerun release with --with-sandbox or prepare the host manually"
 }
 
 # assert a host's CPU arch matches the bundle Platform + the conf arch column.
@@ -587,7 +620,7 @@ deploy_single_local() {
     fi
   fi
 
-  prepare_sandbox_single_local 0
+  require_sandbox_ready_single_local
 
   step "deployment config check"
   if (( DRY )); then

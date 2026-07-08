@@ -95,11 +95,11 @@ VERSION="${VERSION:-$(date +%Y%m%d)}"
 # Apple Silicon Macs default to linux/arm64 without --platform, producing
 # images that fail at startup on the server with "exec format error".
 # See docs/_archive/intranet部署运维笔记.md → "macOS arm64 → Linux amd64".
-PLATFORM="${PLATFORM_ARG:-${PLATFORM:-linux/amd64}}"
-case "$PLATFORM" in
-  linux/amd64) ARCH_TAG=amd64; GVISOR_ARCH=x86_64 ;;
-  linux/arm64|linux/aarch64) ARCH_TAG=arm64; GVISOR_ARCH=aarch64 ;;
-  *) echo "Unsupported platform '$PLATFORM' (expected linux/amd64 or linux/arm64)" >&2; exit 2 ;;
+PLATFORM_INPUT="${PLATFORM_ARG:-${PLATFORM:-linux/amd64}}"
+case "$PLATFORM_INPUT" in
+  linux/amd64) PLATFORM=linux/amd64; ARCH_TAG=amd64; GVISOR_ARCH=x86_64 ;;
+  linux/arm64|linux/aarch64) PLATFORM=linux/arm64; ARCH_TAG=arm64; GVISOR_ARCH=aarch64 ;;
+  *) echo "Unsupported platform '$PLATFORM_INPUT' (expected linux/amd64 or linux/arm64)" >&2; exit 2 ;;
 esac
 
 OUTDIR="dist"
@@ -567,7 +567,8 @@ if ! phase_done manifest "$manifest_input" "$MANIFEST"; then
     echo "  image:   $(basename "$SANDBOX_ARCHIVE")"
     echo "  verify:  $(basename "$SANDBOX_VERIFY_ARCHIVE")"
     echo "  gVisor:  $(basename "$SANDBOX_GVISOR_ARCHIVE")"
-    echo "  target:  AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy <bundle-dir>"
+    echo "  target:  deploy/scripts/fleet.sh prepare-sandbox <bundle-dir>, then"
+    echo "           AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy <bundle-dir>"
     if [[ -f "$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt" ]]; then
       image_id=$(awk -F': *' '/^Image id:/{print $2}' "$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt")
       [[ -n "$image_id" ]] && echo "  image id: $image_id"
@@ -645,10 +646,14 @@ else
 fi
 if [[ $WITH_SANDBOX == 1 ]]; then
   SANDBOX_SCP_LN=$'\n      dist/artifactflow-sandbox-'"${VERSION}-${ARCH_TAG}"$'.tar.gz{,.sha256}              \\\n      dist/artifactflow-sandbox-verify-'"${VERSION}"$'.tar.gz{,.sha256}                 \\\n      dist/'"$(basename "$SANDBOX_GVISOR_ARCHIVE")"$'{,.sha256}                         \\'
+  SANDBOX_PREP_LOCAL=$'\n    # Requires root: installs/registers runsc and mounts the sandbox scratch loop.\n    sudo env AF_BUNDLE_VERSION='"${VERSION}"$' AF_SANDBOX_POOL_SIZE=8G deploy/scripts/fleet.sh prepare-sandbox .'
+  SANDBOX_PREP_TMP=$'\n    # Requires root: refreshes runsc/sandbox image/scratch prerequisites from this bundle.\n    sudo env AF_BUNDLE_VERSION='"${VERSION}"$' AF_SANDBOX_POOL_SIZE=8G ./deploy/scripts/fleet.sh prepare-sandbox tmp'
   SANDBOX_UP_PREFIX="AF_ENABLE_SANDBOX=1 "
   SANDBOX_FOOTER=""
 else
   SANDBOX_SCP_LN=""
+  SANDBOX_PREP_LOCAL=""
+  SANDBOX_PREP_TMP=""
   SANDBOX_UP_PREFIX=""
   SANDBOX_FOOTER="  # (sandbox bundle omitted — re-run release with --with-sandbox to ship runsc + sandbox image + verify probes)"
 fi
@@ -679,6 +684,7 @@ $ANALYST_FOOTER
     deploy/scripts/fleet.sh init-local --scale 1
     vi deploy/.env
     vi deploy/fleet.conf
+${SANDBOX_PREP_LOCAL}
     ${SANDBOX_UP_PREFIX}AF_BUNDLE_VERSION=${VERSION} deploy/scripts/fleet.sh deploy .
     ${ANALYST_RECIPE}
     # No pause/resume here — there's nothing running to pause.
@@ -692,6 +698,10 @@ $ANALYST_FOOTER
   ssh target
     cd /opt/artifactflow
     ./deploy/scripts/verify-bundle.sh tmp
+    # Self-bootstrap deploy scripts before invoking fleet: older fleet.sh
+    # versions do not know how to extract deploy/config from the bundle.
+    tar xzf tmp/artifactflow-deploy-${VERSION}.tar.gz
+${SANDBOX_PREP_TMP}
     # ─── compose infra changes (rare) ────────────────────────────
     # If this version changed compose \`caddy\` / \`postgres\` / \`redis\` service
     # blocks (image / logging / mem_limit / volumes / ports / command), the

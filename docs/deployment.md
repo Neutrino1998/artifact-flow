@@ -247,7 +247,8 @@ vi deploy/fleet.conf
 
 # 5. 启动（fleet 会校验 bundle、解 config/deploy、load 镜像、跑 release gate、等待健康）
 AF_BUNDLE_VERSION=1.0.0 deploy/scripts/fleet.sh deploy .
-# 启用沙盒时使用：
+# 启用沙盒时，先以 root 准备 runsc / sandbox 镜像 / scratch 根，再 deploy：
+# sudo env AF_BUNDLE_VERSION=1.0.0 AF_SANDBOX_POOL_SIZE=8G deploy/scripts/fleet.sh prepare-sandbox .
 # AF_ENABLE_SANDBOX=1 AF_BUNDLE_VERSION=1.0.0 deploy/scripts/fleet.sh deploy .
 
 # 6. 创建管理员
@@ -282,10 +283,10 @@ deploy/scripts/fleet.sh rollback             # 回退到上一个成功版本
 >
 > `fleet.sh` 默认只包装 `deploy/docker-compose.intranet.yml`（Mode 3 基础栈）。
 > 如果 bundle 带 sandbox 且要启用 `bash` / `mount` / `persist`，设置
-> `AF_ENABLE_SANDBOX=1`；`fleet deploy` 会先从 bundle 运行 sandbox 宿主前置
-> （安装 runsc、加载 sandbox 镜像、创建 scratch root、跑 verify），再追加
-> `deploy/docker-compose.sandbox.yml` overlay。`preflight` 仍把 runsc / sandbox 镜像 /
-> scratch root 缺失视为 blocker。
+> `AF_ENABLE_SANDBOX=1`；但宿主前置是 root 级操作，需先显式运行
+> `sudo env ... deploy/scripts/fleet.sh prepare-sandbox <bundle-dir>`，再 deploy。
+> deploy/preflight 会追加 `deploy/docker-compose.sandbox.yml` overlay，并把 runsc /
+> sandbox 镜像 / scratch root 缺失视为 blocker。
 > Mode 2（公网）扩缩容仍用上面 Mode 2A「扩缩容」小节里的裸 `--scale` +
 > `deploy-prod.sh`。
 >
@@ -302,6 +303,13 @@ cd /opt/artifactflow
 
 # 1. 校验（不影响在跑容器，可在维护开始前做）
 ./deploy/scripts/verify-bundle.sh tmp    # 一次性校验 tmp/ 下所有 tar
+
+# 1b. 自举新版 deploy 脚本。旧版 fleet.sh 不知道如何从 bundle 解 deploy/config，
+#     所以调用 fleet deploy 前，必须先让新版 fleet.sh 落盘。
+tar xzf tmp/artifactflow-deploy-1.0.1.tar.gz
+
+# 如本次 bundle 带 sandbox 且要刷新 sandbox 前置，先以 root 执行：
+# sudo env AF_BUNDLE_VERSION=1.0.1 AF_SANDBOX_POOL_SIZE=8G ./deploy/scripts/fleet.sh prepare-sandbox tmp
 
 # 2. 进维护窗口（可选；fleet deploy 本身是直接 up）
 ./deploy/scripts/maintenance.sh on "升级到 v1.0.1"
@@ -396,16 +404,17 @@ ssh target 'cd /opt/artifactflow && \
 
 ### 宿主前置（一次性）
 
-推荐让 `fleet deploy` 在 `AF_ENABLE_SANDBOX=1` 时从 release bundle 自动完成宿主前置。
-需要提前单独准备或排障时，也可以手动跑同一套动作（安装 gVisor、加载 sandbox 镜像、
+先显式运行 `prepare-sandbox` 从 release bundle 完成宿主前置。这个步骤会安装/注册
+runsc、写 `/etc/fstab` 并挂载 scratch loop，所以需要 root；排障时也可以直接跑
+同一套底层动作（安装 gVisor、加载 sandbox 镜像、
 创建 scratch loop、跑 smoke/verify，并把 `ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT` /
 `ARTIFACTFLOW_SANDBOX_RUNTIME` 写入 `deploy/.env`）：
 
 ```bash
 # 默认 scratch pool 为 8G；可按并发 × ARTIFACTFLOW_SANDBOX_WORKSPACE_QUOTA_MB 调大。
-AF_SANDBOX_POOL_SIZE=8G deploy/scripts/fleet.sh prepare-sandbox .
+sudo env AF_SANDBOX_POOL_SIZE=8G deploy/scripts/fleet.sh prepare-sandbox .
 # 或直接：
-# AF_SANDBOX_POOL_SIZE=8G deploy/scripts/prepare-host.sh sandbox
+# sudo env AF_SANDBOX_POOL_SIZE=8G deploy/scripts/prepare-host.sh sandbox
 ```
 
 它等价于以下手工步骤，保留在这里便于排障：
@@ -441,10 +450,10 @@ AF_VERSION=1.0.0 docker compose -f deploy/docker-compose.intranet.yml \
                               -f deploy/docker-compose.sandbox.yml \
                               --profile infra up -d
 
-# 使用 fleet 单机入口（会在 deploy 阶段自动准备 sandbox 宿主前置）:
+# 使用 fleet 单机入口:
+sudo env AF_SANDBOX_POOL_SIZE=8G deploy/scripts/fleet.sh prepare-sandbox .
 AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy .
 # 如需 deploy 前单独检查，先准备再 preflight：
-# AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh prepare-sandbox .
 # AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh preflight
 ```
 
