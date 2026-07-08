@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { fetchBranding, type Branding } from '@/lib/siteConfig';
 
 /**
- * 版权 / 业务联系页脚 —— 侧栏底部 + 登录页底部共用。
+ * 版权 / 问题反馈页脚 —— 侧栏底部 + 登录页底部共用。
  *
  * 数据来自 public/site/branding.json（fetchBranding 已经做了 fail-closed
  * 校验：404 / 解析失败 / schema 错位 → null）。null 时整个组件渲染 null,
@@ -37,19 +37,22 @@ export default function BrandingFooter({ variant }: { variant: Variant }) {
 
   if (!branding) return null;
 
-  const { developer, contact_email } = branding;
+  const { developer, feedback } = branding;
+  const opensNewTab = /^https?:\/\//i.test(feedback?.href ?? '');
 
   return (
     <div className={WRAPPER_CLASS[variant]}>
       <span>由 {developer} 开发</span>
-      {contact_email && (
+      {feedback && (
         <>
           <span className="mx-1.5 opacity-60">·</span>
           <a
-            href={`mailto:${contact_email}`}
+            href={feedback.href}
+            target={opensNewTab ? '_blank' : undefined}
+            rel={opensNewTab ? 'noopener noreferrer' : undefined}
             className="hover:text-accent hover:underline"
           >
-            {contact_email}
+            {feedback.label}
           </a>
         </>
       )}

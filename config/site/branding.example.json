@@ -1,4 +1,7 @@
 {
   "developer": "【开发方】",
-  "contact_email": "contact@example.com"
+  "feedback": {
+    "label": "问题反馈",
+    "href": "mailto:contact@example.com"
+  }
 }

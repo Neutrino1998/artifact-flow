@@ -7,7 +7,7 @@
  *  - Sidebar / login 的标题是首屏立刻可见的内容，走 fetch 会闪一帧空白。
  *
  * 这两个常量改动 = 改代码 + 重新部署，符合「应用身份不常变」的语义。
- * 而 developer / contact_email（运营信息，可能换客户/换联系人）走
+ * 而 developer / feedback（运营信息，可能换客户/换反馈入口）走
  * public/site/branding.json，运维改文件即生效，不走这里。
  */
 

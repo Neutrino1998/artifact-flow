@@ -144,28 +144,51 @@ export async function fetchNotifications(): Promise<Notification[]> {
 }
 
 // ============================================================
-// Branding（页脚版权 / 业务联系信息）
+// Branding（页脚版权 / 问题反馈入口）
 // ============================================================
 // 与 notifications / welcome_tips 同源：静态 JSON、运维改文件即生效、
 // 出错一律 null 让组件隐藏 —— 默认部署里 branding.json 自带占位符,
 // 删了文件 / 写坏 schema → 页脚消失（fail-closed），而不是回退到代码常量
 // 掩盖运维错误。
 
+export interface FeedbackLink {
+  label: string;
+  href: string;
+}
+
 export interface Branding {
   developer: string;
-  contact_email?: string;
+  feedback?: FeedbackLink;
+}
+
+function validateFeedbackHref(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'mailto:' || url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 
 function validateBranding(x: unknown): Branding | null {
   if (!x || typeof x !== 'object') return null;
   const b = x as Record<string, unknown>;
   if (typeof b.developer !== 'string' || b.developer.trim() === '') return null;
-  let contact_email: string | undefined;
-  if (b.contact_email !== undefined) {
-    if (typeof b.contact_email !== 'string' || b.contact_email.trim() === '') return null;
-    contact_email = b.contact_email;
+  if (b.contact_email !== undefined) return null;
+
+  let feedback: FeedbackLink | undefined;
+  if (b.feedback !== undefined) {
+    if (!b.feedback || typeof b.feedback !== 'object' || Array.isArray(b.feedback)) return null;
+    const f = b.feedback as Record<string, unknown>;
+    if (typeof f.label !== 'string' || f.label.trim() === '') return null;
+    if (typeof f.href !== 'string' || f.href.trim() === '') return null;
+
+    const href = f.href.trim();
+    if (!validateFeedbackHref(href)) return null;
+    feedback = { label: f.label.trim(), href };
   }
-  return { developer: b.developer, contact_email };
+
+  return { developer: b.developer, feedback };
 }
 
 export async function fetchBranding(): Promise<Branding | null> {
