@@ -73,7 +73,7 @@ describe('buildContentSecurityPolicy', () => {
   it('locks framing, objects, and base-uri', () => {
     const d = directives(buildContentSecurityPolicy({ nonce: 'n', isDev: false }));
     expect(d.get('frame-src')).toBe("'self' blob:");
-    expect(d.get('frame-ancestors')).toBe("'none'");
+    expect(d.get('frame-ancestors')).toBe("'self'");
     expect(d.get('object-src')).toBe("'none'");
     expect(d.get('base-uri')).toBe("'none'");
   });

@@ -77,7 +77,10 @@ export function buildContentSecurityPolicy({ nonce, isDev, apiUrl }: CspOptions)
     // `blob:` permits authorized PDF blobs fetched by the app and handed to the
     // browser's native PDF viewer. Remote frames stay closed.
     'frame-src': ["'self'", 'blob:'],
-    'frame-ancestors': ["'none'"],
+    // Safari applies inherited frame-ancestors to blob: PDF documents loaded in
+    // our own iframe; 'self' keeps cross-origin embedding closed while allowing
+    // the app to frame its own authorized blob previews.
+    'frame-ancestors': ["'self'"],
     'object-src': ["'none'"],
     'base-uri': ["'none'"],
     'form-action': ["'self'"],
