@@ -62,6 +62,9 @@ span,含作者与时间,例如 `[新增文字]{.insertion author="张三" date="
 pandoc content.md --reference-doc=$SKILL/references/reference.docx -o 输出.docx
 ```
 
+默认 reference.docx 必须保持为瘦身模板:只放样式、编号、页边距、页眉页脚等
+reference-doc 需要的结构,不要放示例正文、隐藏图片或其他可被复制进输出的媒体资产。
+
 用户有公司模板、品牌样式或明确格式要求时,优先请用户提供自己的 reference docx,
 再用它生成。reference-doc 适合控制正文字体字号、标题样式、页边距、列表与表格基础样式:
 

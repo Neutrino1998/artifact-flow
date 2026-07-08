@@ -11,8 +11,11 @@
    可下载 bundle,但 has_extra_files=False。
 """
 
+import base64
 import importlib.util
 import io
+import shutil
+import subprocess
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -60,6 +63,13 @@ def _zip_manifest(blob: bytes):
              zf.read(i.filename))
             for i in sorted(zf.infolist(), key=lambda i: i.filename)
         ]
+
+
+def _word_media_members(docx_path: Path) -> list[str]:
+    with zipfile.ZipFile(docx_path) as zf:
+        return sorted(
+            name for name in zf.namelist() if name.startswith("word/media/")
+        )
 
 
 @pytest.mark.parametrize("slug", PREINSTALLED)
@@ -157,6 +167,51 @@ def test_docx_apply_redline_smoke(tmp_path):
         ("ins", " NEW"),
         ("text", " world"),
     ]
+
+
+def test_docx_default_reference_does_not_leak_template_media(tmp_path):
+    pandoc = shutil.which("pandoc")
+    if not pandoc:
+        pytest.skip("pandoc not installed")
+
+    reference_doc = SRC_DIR / "docx" / "references" / "reference.docx"
+    assert _word_media_members(reference_doc) == []
+
+    plain_md = tmp_path / "plain.md"
+    plain_md.write_text("# Hello\n\nPlain paragraph.\n", encoding="utf-8")
+    plain_out = tmp_path / "plain.docx"
+    subprocess.run(
+        [
+            pandoc,
+            str(plain_md),
+            f"--reference-doc={reference_doc}",
+            "-o",
+            str(plain_out),
+        ],
+        check=True,
+    )
+    assert _word_media_members(plain_out) == []
+
+    tiny_png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8"
+        "AAwMCAO+/p9sAAAAASUVORK5CYII="
+    )
+    (tmp_path / "dot.png").write_bytes(tiny_png)
+    image_md = tmp_path / "with-image.md"
+    image_md.write_text("# Hello\n\n![dot](dot.png)\n", encoding="utf-8")
+    image_out = tmp_path / "with-image.docx"
+    subprocess.run(
+        [
+            pandoc,
+            str(image_md),
+            f"--reference-doc={reference_doc}",
+            "-o",
+            str(image_out),
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+    assert _word_media_members(image_out)
 
 
 def _shape_texts(shape_items):
