@@ -162,7 +162,7 @@ export default function NotificationConfigPanel() {
       if (!mountedRef.current) return;
       setError(err instanceof ApiError ? err.message : '保存通知配置失败');
     } finally {
-      if (mountedRef.current) setSaving(false);
+      setSaving(false);
     }
   }, [dirty, items, revision, saving, setError, setLoaded, setMessage, setSaving]);
 
