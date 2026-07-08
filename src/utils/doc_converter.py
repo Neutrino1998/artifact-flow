@@ -244,7 +244,7 @@ class DocConverter:
         # The text path is the one conversion route with NO cost envelope of its
         # own: charset detection + str() + word-count materialize the full decoded
         # content AND a word list, which amplifies memory well past the input size.
-        # Blob routes store bytes raw — only raw text scales with the 100MB upload
+        # Blob routes store bytes raw — only raw text scales with the 200MB upload
         # ceiling. So it keeps a tighter, independent cap (MAX_TEXT_CONVERT_BYTES);
         # over the cap → blob(可下载、可 mount 进沙盒 grep/拆分),不再 422。
         # The byte cap is the PRIMARY guard (an input upper bound); to_thread below

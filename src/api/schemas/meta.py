@@ -34,6 +34,6 @@ class ClientConfigResponse(BaseModel):
             "pre-reject an oversize file with instant feedback instead of staging + "
             "POSTing it for a backend 422. Backend stays authoritative; the batch "
             "TOTAL is capped separately at the proxy layer (not surfaced here — it "
-            "lives in nginx/Caddy config, outside src/config.py)."
+            "lives in Caddy config, outside src/config.py)."
         ),
     )

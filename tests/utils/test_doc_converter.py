@@ -200,7 +200,7 @@ class TestDeclarativeRoutingToBlob:
 class TestSizeLimit:
     async def test_oversize_raises(self, monkeypatch):
         # Shrink the limit instead of allocating a real >MAX_FILE_SIZE buffer
-        # (now 100MB — building it in RAM would be wasteful). The constant tracks
+        # (now 200MB — building it in RAM would be wasteful). The constant tracks
         # config.MAX_UPLOAD_SIZE; the check reads the class attr, so patching it
         # exercises the same branch.
         monkeypatch.setattr(DocConverter, "MAX_FILE_SIZE", 8)
