@@ -20,7 +20,7 @@ metadata:
 包内文件:[unpack.py](scripts/unpack.py) · [pack.py](scripts/pack.py) ·
 [accept_changes.py](scripts/accept_changes.py) · [add_comment.py](scripts/add_comment.py) ·
 [apply_redline.py](scripts/apply_redline.py) · [check_redlines.py](scripts/check_redlines.py) ·
-[修订手术参考](references/redlines.md)
+[默认样式参考文档](references/reference.docx) · [修订手术参考](references/redlines.md)
 
 ## 任务 → 路线
 
@@ -28,7 +28,7 @@ metadata:
 |---|---|
 | 读内容/提取文本 | pandoc 转 Markdown(§读取) |
 | 读审阅稿(要看到修订痕迹) | pandoc `--track-changes=all`(§读取) |
-| 新建文档 | Markdown 写好 → pandoc 转 docx;精细样式用 python-docx(§创建) |
+| 新建文档 | Markdown 写好 → pandoc + 默认 reference.docx 转 docx;复杂版式/精细结构用 python-docx(§创建) |
 | 常规修改(不留痕) | 小改 python-docx;结构性改动 unpack→改 XML→pack(§编辑) |
 | 以修订方式修改(留痕) | 简单同段落替换/插入/删除用 apply_redline.py;复杂结构再手写 XML→必跑校验(§修订) |
 | 接受/拒绝修订、加批注 | 现成脚本,一条命令(§修订) |
@@ -55,13 +55,21 @@ span,含作者与时间,例如 `[新增文字]{.insertion author="张三" date="
 
 ## 创建
 
-首选 Markdown → pandoc(标题/列表/表格/图片都支持):
+首选 Markdown → pandoc + 随技能分发的默认参考文档(标题/列表/表格/图片都支持)。不要裸跑
+`pandoc content.md -o 输出.docx`,默认样式以 `$SKILL/references/reference.docx` 为准:
 
 ```bash
-pandoc content.md -o 输出.docx
+pandoc content.md --reference-doc=$SKILL/references/reference.docx -o 输出.docx
 ```
 
-需要控制样式(正文字体字号、标题样式、页边距)时用参考文档:
+用户有公司模板、品牌样式或明确格式要求时,优先请用户提供自己的 reference docx,
+再用它生成。reference-doc 适合控制正文字体字号、标题样式、页边距、列表与表格基础样式:
+
+```bash
+pandoc content.md --reference-doc=用户提供的reference.docx -o 输出.docx
+```
+
+需要从零制作或调整 reference docx 时:
 
 ```bash
 pandoc --print-default-data-file reference.docx > ref.docx
@@ -69,7 +77,9 @@ pandoc --print-default-data-file reference.docx > ref.docx
 pandoc content.md --reference-doc=ref.docx -o 输出.docx
 ```
 
-逐元素精细构建(复杂表格、题注、分节)用 python-docx:
+逐元素精细构建(复杂表格、题注、分节)用 python-docx。只有当 reference-doc 和
+python-docx 都表达不了、或必须保留既有 Word 复杂版式时,才升级到 unpack 后手写
+OOXML;Word 手术是最后手段:
 
 ```python
 from docx import Document
