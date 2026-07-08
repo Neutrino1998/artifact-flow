@@ -128,7 +128,6 @@ export default function Sidebar() {
   // into the sidebar. They just re-target the right master-detail panel.
   const setUserManagementRightView = useUIStore((s) => s.setUserManagementRightView);
   const setToolUnitRightView = useUIStore((s) => s.setToolUnitRightView);
-  const requestToolUnitImport = useUIStore((s) => s.requestToolUnitImport);
   const selectionMode = useUIStore((s) => s.selectionMode);
   const enterSelectionMode = useUIStore((s) => s.enterSelectionMode);
   const exitSelectionMode = useUIStore((s) => s.exitSelectionMode);
@@ -191,7 +190,7 @@ export default function Sidebar() {
   const handleToggleSelection = () =>
     (selectionMode ? exitSelectionMode() : enterSelectionMode());
   const handleCreateUnit = () => setToolUnitRightView({ type: 'create-unit' });
-  const handleImportUnit = () => requestToolUnitImport();
+  const handleImportUnit = () => setToolUnitRightView({ type: 'import-unit' });
 
   const inObservability = activeMode === 'observability' && isAdmin;
   // While a master-detail mode owns the right panel (force-shown on desktop,
