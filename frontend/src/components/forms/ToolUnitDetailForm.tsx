@@ -2,10 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as api from '@/lib/api';
-import { triggerBlobDownload } from '@/lib/download';
 import { useUIStore } from '@/stores/uiStore';
 import {
-  BUTTON_DANGER_OUTLINE,
   BUTTON_PRIMARY,
   BUTTON_SECONDARY,
   INPUT_ON_PANEL,
@@ -53,10 +51,7 @@ export default function ToolUnitDetailForm({
   const [draft, setDraft] = useState<UnitDraft | null>(null);
 
   const [saving, setSaving] = useState(false);
-  const [exporting, setExporting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [exportError, setExportError] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [mcpTestEpoch, setMcpTestEpoch] = useState(0);
   const [showMountReminder, setShowMountReminder] = useState(initialShowMountReminder);
 
@@ -86,8 +81,6 @@ export default function ToolUnitDetailForm({
   useEffect(() => {
     load();
     setSaveError(null);
-    setExportError(null);
-    setConfirmDelete(false);
   }, [load]);
 
   useEffect(() => {
@@ -138,27 +131,6 @@ export default function ToolUnitDetailForm({
       setSaveError(err instanceof Error ? err.message : '保存失败');
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    await api.deleteToolUnit(unitName);
-    bumpListVersion();
-    setConfirmDelete(false);
-    setRightView({ type: 'empty' });
-  };
-
-  const handleExport = async () => {
-    if (!unit || exporting) return;
-    setExportError(null);
-    setExporting(true);
-    try {
-      const blob = await api.downloadToolUnitSeedBundle(unit.name);
-      triggerBlobDownload(`${unit.name}-tool-seed.zip`, blob);
-    } catch (err) {
-      setExportError(err instanceof Error ? err.message : '导出失败');
-    } finally {
-      setExporting(false);
     }
   };
 
@@ -232,45 +204,17 @@ export default function ToolUnitDetailForm({
       }
       footer={
         isDynamic ? (
-          <>
-            <button
-              onClick={handleExport}
-              disabled={saving || exporting}
-              title="导出 seed bundle"
-              className={`${BUTTON_SECONDARY} rounded-lg px-5 py-2`}
-            >
-              {exporting ? '导出中…' : '导出 seed'}
-            </button>
-            <button
-              onClick={() => setConfirmDelete(true)}
-              disabled={saving || exporting}
-              title="删除该动态 unit(连带其动态挂载与凭证)"
-              className={`${BUTTON_DANGER_OUTLINE} rounded-lg px-5 py-2`}
-            >
-              删除
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={!dirty || saving}
-              className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
-            >
-              {saving ? '保存中…' : '保存定义'}
-            </button>
-          </>
+          <button
+            onClick={handleSave}
+            disabled={!dirty || saving}
+            className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
+          >
+            {saving ? '保存中…' : '保存定义'}
+          </button>
         ) : (
-          <>
-            <p className="flex-1 text-center text-sm text-text-secondary dark:text-text-secondary-dark">
-              种子 unit：定义只读。改 {unit.kind === 'mcp' ? 'config/mcp' : 'config/tools'} 后重跑 reconcile。挂载可在下方调整。
-            </p>
-            <button
-              onClick={handleExport}
-              disabled={exporting}
-              title="导出 seed bundle"
-              className={`${BUTTON_SECONDARY} rounded-lg px-5 py-2`}
-            >
-              {exporting ? '导出中…' : '导出 seed'}
-            </button>
-          </>
+          <p className="flex-1 text-center text-sm text-text-secondary dark:text-text-secondary-dark">
+            种子 unit：定义只读。改 {unit.kind === 'mcp' ? 'config/mcp' : 'config/tools'} 后重跑 reconcile。挂载可在下方调整。
+          </p>
         )
       }
     >
@@ -285,7 +229,6 @@ export default function ToolUnitDetailForm({
         />
 
         {saveError && <div className="text-status-error text-sm">{saveError}</div>}
-        {exportError && <div className="text-status-error text-sm">{exportError}</div>}
 
         {unit.kind === 'mcp' && (
           <>
@@ -323,18 +266,6 @@ export default function ToolUnitDetailForm({
           />
         </div>
       </div>
-
-      {confirmDelete && (
-        <DangerConfirmModal
-          title="删除工具 unit"
-          message={'将删除该 unit 的定义、动态 agent 挂载与已配置凭证。\n操作不可恢复。'}
-          confirmLabel="确认删除"
-          onCancel={() => setConfirmDelete(false)}
-          onConfirm={handleDelete}
-        >
-          <DangerConfirmTarget name={unit.name} description={unit.description} />
-        </DangerConfirmModal>
-      )}
 
       {showMountReminder && (
         <ConfirmModal
