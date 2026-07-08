@@ -121,14 +121,23 @@ describe('streamStore actions', () => {
       });
     });
 
-    test('confirmPendingInject clears the oldest pending inject', () => {
+    test('confirmPendingInject clears the matching pending inject', () => {
       const first = useStreamStore.getState().addPendingInject('first');
       const second = useStreamStore.getState().addPendingInject('second');
 
-      useStreamStore.getState().confirmPendingInject();
+      useStreamStore.getState().confirmPendingInject('second');
 
-      expect(useStreamStore.getState().pendingInjects.map((p) => p.id)).toEqual([second]);
-      expect(useStreamStore.getState().pendingInjects.some((p) => p.id === first)).toBe(false);
+      expect(useStreamStore.getState().pendingInjects.map((p) => p.id)).toEqual([first]);
+      expect(useStreamStore.getState().pendingInjects.some((p) => p.id === second)).toBe(false);
+    });
+
+    test('confirmPendingInject leaves pending injects untouched when content does not match', () => {
+      const first = useStreamStore.getState().addPendingInject('first');
+      const second = useStreamStore.getState().addPendingInject('second');
+
+      useStreamStore.getState().confirmPendingInject('from replay or another tab');
+
+      expect(useStreamStore.getState().pendingInjects.map((p) => p.id)).toEqual([first, second]);
     });
 
     test('removePendingInject clears a failed POST without touching later pending injects', () => {

@@ -212,7 +212,7 @@ interface StreamState {
   updateNonAgentBlock: (id: string, patch: Partial<CompactionBlock>) => void;
   addPendingInject: (content: string) => string;
   removePendingInject: (id: string) => void;
-  confirmPendingInject: () => void;
+  confirmPendingInject: (content: string) => void;
   setExecutionMetrics: (metrics: ExecutionMetrics) => void;
 
   // Snapshot segments for completed messages
@@ -462,10 +462,17 @@ export const useStreamStore = create<StreamState>((set, get) => {
       set((s) => ({
         pendingInjects: s.pendingInjects.filter((p) => p.id !== id),
       })),
-    confirmPendingInject: () =>
-      set((s) => ({
-        pendingInjects: s.pendingInjects.slice(1),
-      })),
+    confirmPendingInject: (content) =>
+      set((s) => {
+        const idx = s.pendingInjects.findIndex((p) => p.content === content);
+        if (idx === -1) return {};
+        return {
+          pendingInjects: [
+            ...s.pendingInjects.slice(0, idx),
+            ...s.pendingInjects.slice(idx + 1),
+          ],
+        };
+      }),
     setExecutionMetrics: (metrics) => set({ executionMetrics: metrics }),
 
     snapshotSegments: (messageId) => {

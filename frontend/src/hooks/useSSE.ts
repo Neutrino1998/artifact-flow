@@ -39,6 +39,14 @@ let _toolCallSeq = 0;
 
 const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_BASE_DELAY_MS = 1000;
+const INJECT_EVENT_PREFIX =
+  '[The user has injected a message during execution. Consider this input and adjust your approach as needed.]\n';
+
+function stripInjectEventPrefix(content: string): string {
+  return content.startsWith(INJECT_EVENT_PREFIX)
+    ? content.slice(INJECT_EVENT_PREFIX.length)
+    : content;
+}
 
 export function useSSE() {
 
@@ -423,19 +431,21 @@ export function useSSE() {
           break;
         }
 
-        case StreamEventType.QUEUED_MESSAGE:
-          // A real engine event means the oldest locally pending inject has
-          // entered model context. The backend queue is FIFO, so no protocol id
-          // is needed for the single-tab optimistic mirror.
-          confirmPendingInject();
+        case StreamEventType.QUEUED_MESSAGE: {
+          const content = data?.content as string ?? '';
+          // Best-effort only: confirm the local pending inject that matches
+          // this engine echo, so replay/cross-tab queued messages don't consume
+          // an unrelated waiting pill.
+          confirmPendingInject(stripInjectEventPrefix(content));
           pushNonAgentBlock({
             kind: 'inject',
             id: `inject-${Date.now()}`,
-            content: data?.content as string ?? '',
+            content,
             timestamp: event.timestamp,
             position: useStreamStore.getState().segments.length,
           });
           break;
+        }
 
         case StreamEventType.COMPACTION_START: {
           const d = data as import('@/types/events').CompactionStartData | undefined;
