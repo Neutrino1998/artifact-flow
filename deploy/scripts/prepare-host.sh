@@ -149,6 +149,12 @@ sandbox_scratch_root() {
   printf '%s\n' "$root"
 }
 
+verify_adjacent_sha() {
+  local file="$1" sha="$file.sha256"
+  [[ -f "$sha" ]] || return 0
+  ( cd "$(dirname "$file")" && sha256sum -c "$(basename "$sha")" )
+}
+
 compose_files() {
   printf '%s\n' -f "$ROOT/deploy/docker-compose.intranet.yml"
   if [[ "${AF_ENABLE_SANDBOX:-0}" == 1 ]]; then
@@ -291,7 +297,7 @@ cmd_sandbox() {
 
   if [[ -f "$gvisor.sha256" || -f "$image.sha256" || -f "$verify.sha256" ]]; then
     step "verify sandbox transfer units"
-    ( cd "$ROOT" && sha256sum -c "$(basename "$gvisor").sha256" "$(basename "$image").sha256" "$(basename "$verify").sha256" ) \
+    verify_adjacent_sha "$gvisor" && verify_adjacent_sha "$image" && verify_adjacent_sha "$verify" \
       && ok "sandbox checksums OK" || die "sandbox checksum verification failed"
   fi
 
@@ -323,7 +329,7 @@ cmd_sandbox() {
 
   local pool root size
   pool="${AF_SANDBOX_POOL:-/var/lib/artifactflow/sandbox-pool.img}"
-  root="${AF_SANDBOX_SCRATCH_ROOT:-/var/lib/artifactflow/sandbox-scratch}"
+  root="${AF_SANDBOX_SCRATCH_ROOT:-$(sandbox_scratch_root)}"
   size="${AF_SANDBOX_POOL_SIZE:-8G}"
 
   step "sandbox scratch loop filesystem ($size at $root)"

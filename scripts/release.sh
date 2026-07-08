@@ -9,6 +9,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 #   ./scripts/release.sh [VERSION] [--with-infra | --app-only]
 #                        [--with-sandbox] [--with-analyst-tools]
 #                        [--platform linux/amd64|linux/arm64]
+#                        [--resume] [--force PHASE]
 #
 # Defaults:
 #   VERSION:     $(date +%Y%m%d)
@@ -47,7 +48,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 #   resolves offline.
 
 show_help() {
-  sed -n '5,42p' "$0"
+  sed -n '5,49p' "$0"
 }
 
 VERSION=""
@@ -55,6 +56,8 @@ WITH_INFRA=0
 WITH_SANDBOX=0
 WITH_ANALYST_TOOLS=0
 PLATFORM_ARG=""
+RESUME=0
+FORCE_PHASES=()
 while [[ $# -gt 0 ]]; do
   arg="$1"
   case "$arg" in
@@ -62,6 +65,13 @@ while [[ $# -gt 0 ]]; do
     --app-only)           WITH_INFRA=0 ;;
     --with-sandbox)       WITH_SANDBOX=1 ;;
     --with-analyst-tools) WITH_ANALYST_TOOLS=1 ;;
+    --resume)             RESUME=1 ;;
+    --force)
+      shift
+      [[ $# -gt 0 ]] || { echo "--force requires a phase name" >&2; exit 2; }
+      FORCE_PHASES+=("$1")
+      ;;
+    --force=*)            FORCE_PHASES+=("${arg#--force=}") ;;
     --platform)
       shift
       [[ $# -gt 0 ]] || { echo "--platform requires a value (e.g. linux/amd64)" >&2; exit 2; }
@@ -97,6 +107,7 @@ APP_ARCHIVE="$OUTDIR/artifactflow-app-${VERSION}.tar.gz"
 CONFIG_ARCHIVE="$OUTDIR/artifactflow-config-${VERSION}.tar.gz"
 DEPLOY_ARCHIVE="$OUTDIR/artifactflow-deploy-${VERSION}.tar.gz"
 MANIFEST="$OUTDIR/artifactflow-${VERSION}.manifest.txt"
+STATE_DIR="$OUTDIR/.release-state/${VERSION}-${ARCH_TAG}"
 
 # Infra base image tags — kept in lockstep with deploy/docker-compose.intranet.yml.
 # Content-addressed tar name lets ops see at a glance "do I already have this?"
@@ -139,6 +150,8 @@ ANALYST_ARCHIVE="$OUTDIR/artifactflow-analyst-tools-${ANALYST_SLUG}.tar.gz"
 SANDBOX_ARCHIVE="$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.tar.gz"
 SANDBOX_VERIFY_ARCHIVE="$OUTDIR/artifactflow-sandbox-verify-${VERSION}.tar.gz"
 SANDBOX_GVISOR_ARCHIVE=""
+CHECKSUM_INPUTS=()
+CHECKSUM_OUTPUTS=()
 
 INFRA_DESC=$([[ $WITH_INFRA == 1 ]] && echo "included" || echo "skipped (--app-only)")
 SANDBOX_DESC=$([[ $WITH_SANDBOX == 1 ]] && echo "included" || echo "skipped")
@@ -147,26 +160,150 @@ echo "=== ArtifactFlow Release: ${VERSION} (platform: ${PLATFORM}, infra: ${INFR
 
 mkdir -p "$OUTDIR"
 
-# Build application images via buildx so we can cross-compile to amd64.
-# `--load` writes the result into the local docker daemon (vs `--push` to a registry).
-echo "Building backend image..."
-docker buildx build --platform "${PLATFORM}" \
-  -t "artifactflow:${VERSION}" -t artifactflow:latest \
-  --load .
+if (( RESUME )); then
+  echo "Resume enabled: completed phases with matching inputs/outputs will be skipped."
+fi
 
-echo "Building frontend image..."
-docker buildx build --platform "${PLATFORM}" \
-  -t "artifactflow-frontend:${VERSION}" -t artifactflow-frontend:latest \
-  --build-arg NEXT_PUBLIC_API_URL= \
-  --load ./frontend
+phase_forced() {
+  local phase="$1" forced
+  for forced in "${FORCE_PHASES[@]}"; do
+    [[ "$forced" == "$phase" || "$forced" == "all" ]] && return 0
+  done
+  return 1
+}
+
+file_sha() {
+  shasum -a 256 "$1" | awk '{print $1}'
+}
+
+artifact_inputs_digest() {
+  local file
+  for file in "${CHECKSUM_INPUTS[@]}"; do
+    printf '%s|%s\n' "$(basename "$file")" "$(file_sha "$file")"
+  done | shasum -a 256 | awk '{print $1}'
+}
+
+repo_fingerprint() {
+  (
+    cd "$ROOT"
+    git ls-files --cached --others --exclude-standard -z . \
+      | LC_ALL=C sort -z \
+      | xargs -0 shasum -a 256 2>/dev/null \
+      | shasum -a 256 \
+      | awk '{print $1}'
+  )
+}
+
+phase_input() {
+  local phase="$1"
+  case "$phase" in
+    app|sandbox-image|config|deploy)
+      printf '%s|%s|%s|%s\n' "$phase" "$VERSION" "$PLATFORM" "$REPO_FINGERPRINT"
+      ;;
+    infra)
+      printf '%s|%s|%s|%s|%s|%s\n' "$phase" "$PLATFORM" "$CADDY_TAG" "$POSTGRES_TAG" "$REDIS_TAG" "$INFRA_SLUG"
+      ;;
+    gvisor)
+      printf '%s|download|%s|%s\n' "$phase" "${GVISOR_VERSION:-20260504.0}" "$GVISOR_ARCH"
+      ;;
+    analyst-tools)
+      printf '%s|%s|%s|%s|%s\n' "$phase" "$PANDAS_VERSION" "$NUMPY_VERSION" "$ANALYST_PYTHON" "$ANALYST_PLATFORM"
+      ;;
+    checksums)
+      printf '%s|%s\n' "$phase" "$(artifact_inputs_digest)"
+      ;;
+    manifest)
+      printf '%s|%s|%s|%s|%s|%s|%s|%s\n' "$phase" "$VERSION" "$PLATFORM" "$WITH_INFRA" "$WITH_SANDBOX" "$WITH_ANALYST_TOOLS" "${SANDBOX_GVISOR_ARCHIVE:-}" "$(artifact_inputs_digest)"
+      ;;
+    *)
+      printf '%s|%s|%s\n' "$phase" "$VERSION" "$PLATFORM"
+      ;;
+  esac
+}
+
+phase_done() {
+  local phase="$1" input="$2"; shift 2
+  (( RESUME )) || return 1
+  phase_forced "$phase" && return 1
+  local stamp="$STATE_DIR/$phase.stamp"
+  [[ -f "$stamp" ]] || return 1
+  grep -qx "phase=$phase" "$stamp" || return 1
+  grep -qx "version=$VERSION" "$stamp" || return 1
+  grep -qx "platform=$PLATFORM" "$stamp" || return 1
+  grep -qx "input=$input" "$stamp" || return 1
+  local out rel sha recorded
+  for out in "$@"; do
+    [[ -f "$out" ]] || return 1
+    rel="${out#"$ROOT"/}"
+    sha="$(file_sha "$out")"
+    recorded="$(grep -F "output=$rel|" "$stamp" | tail -1 | cut -d'|' -f2- || true)"
+    [[ "$recorded" == "$sha" ]] || return 1
+  done
+  echo "Skipping $phase (checkpoint valid)"
+  return 0
+}
+
+write_phase_stamp() {
+  local phase="$1" input="$2"; shift 2
+  mkdir -p "$STATE_DIR"
+  local stamp="$STATE_DIR/$phase.stamp" tmp="$stamp.tmp"
+  {
+    printf 'phase=%s\n' "$phase"
+    printf 'version=%s\n' "$VERSION"
+    printf 'platform=%s\n' "$PLATFORM"
+    printf 'input=%s\n' "$input"
+    local out rel
+    for out in "$@"; do
+      rel="${out#"$ROOT"/}"
+      printf 'output=%s|%s\n' "$rel" "$(file_sha "$out")"
+    done
+  } > "$tmp"
+  mv -f "$tmp" "$stamp"
+}
+
+phase_outputs() {
+  local phase="$1" stamp="$STATE_DIR/$phase.stamp" rel
+  [[ -f "$stamp" ]] || return 1
+  while IFS= read -r rel; do
+    [[ -n "$rel" ]] || continue
+    if [[ "$rel" = /* ]]; then
+      printf '%s\n' "$rel"
+    else
+      printf '%s/%s\n' "$ROOT" "$rel"
+    fi
+  done < <(awk -F'[=|]' '/^output=/{print $2}' "$stamp")
+}
+
+first_phase_output() {
+  phase_outputs "$1" | head -1
+}
+
+REPO_FINGERPRINT="$(repo_fingerprint)"
 
 APP_IMAGES=(
   "artifactflow:${VERSION}"
   "artifactflow-frontend:${VERSION}"
 )
 
-echo "Saving app images to ${APP_ARCHIVE}..."
-docker save "${APP_IMAGES[@]}" | gzip > "$APP_ARCHIVE"
+app_input="$(phase_input app)"
+if ! phase_done app "$app_input" "$APP_ARCHIVE"; then
+  # Build application images via buildx so we can cross-compile to amd64.
+  # `--load` writes the result into the local docker daemon (vs `--push` to a registry).
+  echo "Building backend image..."
+  docker buildx build --platform "${PLATFORM}" \
+    -t "artifactflow:${VERSION}" -t artifactflow:latest \
+    --load .
+
+  echo "Building frontend image..."
+  docker buildx build --platform "${PLATFORM}" \
+    -t "artifactflow-frontend:${VERSION}" -t artifactflow-frontend:latest \
+    --build-arg NEXT_PUBLIC_API_URL= \
+    --load ./frontend
+
+  echo "Saving app images to ${APP_ARCHIVE}..."
+  docker save "${APP_IMAGES[@]}" | gzip > "$APP_ARCHIVE"
+  write_phase_stamp app "$app_input" "$APP_ARCHIVE"
+fi
 
 if [[ $WITH_INFRA == 1 ]]; then
   INFRA_IMAGES=(
@@ -174,53 +311,72 @@ if [[ $WITH_INFRA == 1 ]]; then
     "postgres:${POSTGRES_TAG}"
     "redis:${REDIS_TAG}"
   )
-  # Pull infra images for the target platform. We re-pull when the locally
-  # cached image is for a different arch (common on Apple Silicon: previous
-  # `docker pull` left an arm64 cache).
-  for img in "${INFRA_IMAGES[@]}"; do
-    current_arch=$(docker image inspect "$img" --format '{{.Architecture}}' 2>/dev/null || echo "missing")
-    expected_arch="${ARCH_TAG}"
-    if [[ "$current_arch" != "$expected_arch" ]]; then
-      echo "Pulling $img for $PLATFORM (was: $current_arch)..."
-      docker pull --platform "$PLATFORM" "$img"
-    fi
-  done
-  echo "Saving infra images to ${INFRA_ARCHIVE}..."
-  docker save "${INFRA_IMAGES[@]}" | gzip > "$INFRA_ARCHIVE"
+  infra_input="$(phase_input infra)"
+  if ! phase_done infra "$infra_input" "$INFRA_ARCHIVE"; then
+    # Pull infra images for the target platform. We re-pull when the locally
+    # cached image is for a different arch (common on Apple Silicon: previous
+    # `docker pull` left an arm64 cache).
+    for img in "${INFRA_IMAGES[@]}"; do
+      current_arch=$(docker image inspect "$img" --format '{{.Architecture}}' 2>/dev/null || echo "missing")
+      expected_arch="${ARCH_TAG}"
+      if [[ "$current_arch" != "$expected_arch" ]]; then
+        echo "Pulling $img for $PLATFORM (was: $current_arch)..."
+        docker pull --platform "$PLATFORM" "$img"
+      fi
+    done
+    echo "Saving infra images to ${INFRA_ARCHIVE}..."
+    docker save "${INFRA_IMAGES[@]}" | gzip > "$INFRA_ARCHIVE"
+    write_phase_stamp infra "$infra_input" "$INFRA_ARCHIVE"
+  fi
 fi
 
 if [[ $WITH_SANDBOX == 1 ]]; then
-  echo "Building sandbox image + verify probes..."
-  PLATFORM="$PLATFORM" "$ROOT/scripts/build-sandbox-image.sh" "$VERSION"
-  [[ -f "$SANDBOX_ARCHIVE" ]] || { echo "Expected sandbox archive missing: $SANDBOX_ARCHIVE" >&2; exit 1; }
-  [[ -f "$SANDBOX_VERIFY_ARCHIVE" ]] || { echo "Expected sandbox verify archive missing: $SANDBOX_VERIFY_ARCHIVE" >&2; exit 1; }
+  sandbox_input="$(phase_input sandbox-image)"
+  if ! phase_done sandbox-image "$sandbox_input" "$SANDBOX_ARCHIVE" "$SANDBOX_VERIFY_ARCHIVE"; then
+    echo "Building sandbox image + verify probes..."
+    PLATFORM="$PLATFORM" "$ROOT/scripts/build-sandbox-image.sh" "$VERSION"
+    [[ -f "$SANDBOX_ARCHIVE" ]] || { echo "Expected sandbox archive missing: $SANDBOX_ARCHIVE" >&2; exit 1; }
+    [[ -f "$SANDBOX_VERIFY_ARCHIVE" ]] || { echo "Expected sandbox verify archive missing: $SANDBOX_VERIFY_ARCHIVE" >&2; exit 1; }
+    write_phase_stamp sandbox-image "$sandbox_input" "$SANDBOX_ARCHIVE" "$SANDBOX_VERIFY_ARCHIVE"
+  fi
 
-  echo "Packaging gVisor offline installer (${GVISOR_ARCH})..."
-  ARCH="$GVISOR_ARCH" "$ROOT/sandbox/gvisor-pkg/fetch-and-package.sh"
-  SANDBOX_GVISOR_ARCHIVE="$(find "$OUTDIR" -maxdepth 1 -type f -name "sandbox-gvisor-*-${GVISOR_ARCH}.tar.gz" -print | sort | tail -1)"
-  [[ -n "$SANDBOX_GVISOR_ARCHIVE" && -f "$SANDBOX_GVISOR_ARCHIVE" ]] || {
-    echo "Expected gVisor archive missing for arch ${GVISOR_ARCH}" >&2
-    exit 1
-  }
+  gvisor_input="$(phase_input gvisor)"
+  previous_gvisor_output="$(first_phase_output gvisor || true)"
+  if [[ -n "$previous_gvisor_output" ]] && phase_done gvisor "$gvisor_input" "$previous_gvisor_output"; then
+    SANDBOX_GVISOR_ARCHIVE="$previous_gvisor_output"
+  else
+    echo "Packaging gVisor offline installer (${GVISOR_ARCH})..."
+    ARCH="$GVISOR_ARCH" "$ROOT/sandbox/gvisor-pkg/fetch-and-package.sh"
+    SANDBOX_GVISOR_ARCHIVE="$(find "$OUTDIR" -maxdepth 1 -type f -name "sandbox-gvisor-*-${GVISOR_ARCH}.tar.gz" -print | sort | tail -1)"
+    [[ -n "$SANDBOX_GVISOR_ARCHIVE" && -f "$SANDBOX_GVISOR_ARCHIVE" ]] || {
+      echo "Expected gVisor archive missing for arch ${GVISOR_ARCH}" >&2
+      exit 1
+    }
+    write_phase_stamp gvisor "$gvisor_input" "$SANDBOX_GVISOR_ARCHIVE"
+  fi
 fi
 
 # Package config/ separately so operators can ship prompt / model changes
 # without re-transferring the (larger) image tar. The intranet compose
 # bind-mounts ../config:/app/config:ro, so config/ must sit next to deploy/
 # on the target host.
-echo "Packaging config/ to ${CONFIG_ARCHIVE}..."
-# --no-xattrs / --no-fflags: this runs on a macOS build host where /usr/bin/tar
-# is bsdtar, which otherwise records macOS metadata as pax headers (SCHILY.fflags,
-# LIBARCHIVE.xattr.com.apple.*) that GNU tar on the Linux target warns about on
-# extract. --exclude='.DS_Store' drops the Finder turd that carries those xattrs
-# (and which has no business on the target anyway).
-# COPYFILE_DISABLE: --no-xattrs does NOT cover bsdtar's separate --mac-metadata
-# layer, which emits AppleDouble `._<name>` SIBLING ENTRIES for any file carrying
-# xattrs — those land as real binary files on the Linux target and crashed agent
-# loading on 2026-06-12 (`._lead_agent.md` is not utf-8). COPYFILE_DISABLE=1 is
-# the documented kill switch; --exclude='._*' is the belt to the suspenders.
-export COPYFILE_DISABLE=1
-tar --no-xattrs --no-fflags --exclude='.DS_Store' --exclude='._*' -czf "$CONFIG_ARCHIVE" config/
+config_input="$(phase_input config)"
+if ! phase_done config "$config_input" "$CONFIG_ARCHIVE"; then
+  echo "Packaging config/ to ${CONFIG_ARCHIVE}..."
+  # --no-xattrs / --no-fflags: this runs on a macOS build host where /usr/bin/tar
+  # is bsdtar, which otherwise records macOS metadata as pax headers (SCHILY.fflags,
+  # LIBARCHIVE.xattr.com.apple.*) that GNU tar on the Linux target warns about on
+  # extract. --exclude='.DS_Store' drops the Finder turd that carries those xattrs
+  # (and which has no business on the target anyway).
+  # COPYFILE_DISABLE: --no-xattrs does NOT cover bsdtar's separate --mac-metadata
+  # layer, which emits AppleDouble `._<name>` SIBLING ENTRIES for any file carrying
+  # xattrs — those land as real binary files on the Linux target and crashed agent
+  # loading on 2026-06-12 (`._lead_agent.md` is not utf-8). COPYFILE_DISABLE=1 is
+  # the documented kill switch; --exclude='._*' is the belt to the suspenders.
+  export COPYFILE_DISABLE=1
+  tar --no-xattrs --no-fflags --exclude='.DS_Store' --exclude='._*' -czf "$CONFIG_ARCHIVE" config/
+  write_phase_stamp config "$config_input" "$CONFIG_ARCHIVE"
+fi
 
 # Package deploy/ (compose file, Caddyfiles, scripts, maintenance assets).
 #
@@ -229,15 +385,19 @@ tar --no-xattrs --no-fflags --exclude='.DS_Store' --exclude='._*' -czf "$CONFIG_
 # target-local files out by construction: deploy/.env, fleet.conf, .fleet-state,
 # cert private material, maintenance flags, and per-host .env overrides are all
 # ignored and must never be copied from the build machine into a release bundle.
-echo "Packaging deploy/ to ${DEPLOY_ARCHIVE}..."
-# --no-xattrs / --no-fflags: see config tar above — silence the GNU-tar
-# "unknown extended header keyword" warnings on the target by not emitting
-# macOS metadata.
-(
-  cd "$ROOT"
-  git ls-files --cached --others --exclude-standard -z deploy \
-    | tar --no-xattrs --no-fflags --null -T - -czf "$DEPLOY_ARCHIVE"
-)
+deploy_input="$(phase_input deploy)"
+if ! phase_done deploy "$deploy_input" "$DEPLOY_ARCHIVE"; then
+  echo "Packaging deploy/ to ${DEPLOY_ARCHIVE}..."
+  # --no-xattrs / --no-fflags: see config tar above — silence the GNU-tar
+  # "unknown extended header keyword" warnings on the target by not emitting
+  # macOS metadata.
+  (
+    cd "$ROOT"
+    git ls-files --cached --others --exclude-standard -z deploy \
+      | tar --no-xattrs --no-fflags --null -T - -czf "$DEPLOY_ARCHIVE"
+  )
+  write_phase_stamp deploy "$deploy_input" "$DEPLOY_ARCHIVE"
+fi
 
 # Analyst-tools bundle — pandas/numpy offline wheels for the analyst machine
 # that runs scripts/observability_report.py. Everything is fetched on the
@@ -249,44 +409,46 @@ echo "Packaging deploy/ to ${DEPLOY_ARCHIVE}..."
 # (Dockerfile builder stage) + compose cap_add: [SYS_PTRACE]. See
 # fix plan PR-forensics-bundle round 3 for why.
 if [[ $WITH_ANALYST_TOOLS == 1 ]]; then
-  STAGE="$OUTDIR/analyst-tools-stage"
-  rm -rf "$STAGE"
-  mkdir -p "$STAGE/wheels"
+  analyst_input="$(phase_input analyst-tools)"
+  if ! phase_done analyst-tools "$analyst_input" "$ANALYST_ARCHIVE"; then
+    STAGE="$OUTDIR/analyst-tools-stage"
+    rm -rf "$STAGE"
+    mkdir -p "$STAGE/wheels"
 
-  # --platform / --python-version / --only-binary lock the download to wheels
-  # that will install on a manylinux2014 x86_64 CPython 3.11 target. Without
-  # these flags, pip happily downloads wheels matching the BUILD host (macOS
-  # arm64) which then fail at `pip install` on the intranet target.
-  #
-  # Top-level versions are pinned (PANDAS_VERSION / NUMPY_VERSION); transitive
-  # deps flow from pip's resolver. wheels.lock.txt records the actually-
-  # resolved set (basenames, sorted) so ops can diff two bundles built at
-  # different times — the slug encodes pinned versions only (NECESSARY),
-  # wheels.lock is the SUFFICIENT check (catches transitive drift).
-  echo "Downloading pandas==${PANDAS_VERSION} + numpy==${NUMPY_VERSION} wheels (target: ${ANALYST_PLATFORM}, py${ANALYST_PYTHON})..."
-  if ! pip download \
-      --platform "$ANALYST_PLATFORM" \
-      --python-version "$ANALYST_PYTHON" \
-      --only-binary=:all: \
-      --dest "$STAGE/wheels" \
-      "pandas==${PANDAS_VERSION}" "numpy==${NUMPY_VERSION}" >/dev/null; then
-    cat >&2 <<EOF
+    # --platform / --python-version / --only-binary lock the download to wheels
+    # that will install on a manylinux2014 x86_64 CPython 3.11 target. Without
+    # these flags, pip happily downloads wheels matching the BUILD host (macOS
+    # arm64) which then fail at `pip install` on the intranet target.
+    #
+    # Top-level versions are pinned (PANDAS_VERSION / NUMPY_VERSION); transitive
+    # deps flow from pip's resolver. wheels.lock.txt records the actually-
+    # resolved set (basenames, sorted) so ops can diff two bundles built at
+    # different times — the slug encodes pinned versions only (NECESSARY),
+    # wheels.lock is the SUFFICIENT check (catches transitive drift).
+    echo "Downloading pandas==${PANDAS_VERSION} + numpy==${NUMPY_VERSION} wheels (target: ${ANALYST_PLATFORM}, py${ANALYST_PYTHON})..."
+    if ! pip download \
+        --platform "$ANALYST_PLATFORM" \
+        --python-version "$ANALYST_PYTHON" \
+        --only-binary=:all: \
+        --dest "$STAGE/wheels" \
+        "pandas==${PANDAS_VERSION}" "numpy==${NUMPY_VERSION}" >/dev/null; then
+      cat >&2 <<EOF
 
 ERROR: pip download failed. Possible causes:
   - PANDAS_VERSION (${PANDAS_VERSION}) / NUMPY_VERSION (${NUMPY_VERSION}) missing on PyPI
   - Build host has no network / pip < 23.0 / pip can't resolve --platform
 EOF
-    exit 1
-  fi
-  # Lock file: basenames, sorted, one per line. Filename-only — diff-friendly,
-  # and PyPI's immutability policy makes hashing over-engineered.
-  (cd "$STAGE/wheels" && ls *.whl | sort > ../wheels.lock.txt)
-  wheel_total=$(wc -l < "$STAGE/wheels.lock.txt" | tr -d ' ')
-  echo "  ✓ ${wheel_total} wheels resolved (recorded in wheels.lock.txt)"
+      exit 1
+    fi
+    # Lock file: basenames, sorted, one per line. Filename-only — diff-friendly,
+    # and PyPI's immutability policy makes hashing over-engineered.
+    (cd "$STAGE/wheels" && ls *.whl | sort > ../wheels.lock.txt)
+    wheel_total=$(wc -l < "$STAGE/wheels.lock.txt" | tr -d ' ')
+    echo "  ✓ ${wheel_total} wheels resolved (recorded in wheels.lock.txt)"
 
-  # README inside the analyst-tools tar — operator reads this without untarring
-  # the whole bundle. Short on purpose; deployment SOP carries the full flow.
-  cat > "$STAGE/README.md" <<EOF
+    # README inside the analyst-tools tar — operator reads this without untarring
+    # the whole bundle. Short on purpose; deployment SOP carries the full flow.
+    cat > "$STAGE/README.md" <<EOF
 ArtifactFlow analyst-tools bundle (${ANALYST_SLUG})
 
 Built: $(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -324,45 +486,49 @@ See: docs/_archive/ops/deployment-sop.md → "取证就绪"
      docs/runbooks/service-hang.md (after PR-doc-runbook lands)
 EOF
 
-  echo "Packaging analyst-tools bundle to ${ANALYST_ARCHIVE}..."
-  # Rename stage → analyst-tools so the tar lays out as analyst-tools/{wheels,README.md}
-  # on the target host. (Avoid GNU `tar --transform` for macOS build-host compat.)
-  rm -rf "$OUTDIR/analyst-tools"
-  mv "$STAGE" "$OUTDIR/analyst-tools"
-  tar -czf "$ANALYST_ARCHIVE" -C "$OUTDIR" analyst-tools
-  rm -rf "$OUTDIR/analyst-tools"
+    echo "Packaging analyst-tools bundle to ${ANALYST_ARCHIVE}..."
+    # Rename stage → analyst-tools so the tar lays out as analyst-tools/{wheels,README.md}
+    # on the target host. (Avoid GNU `tar --transform` for macOS build-host compat.)
+    rm -rf "$OUTDIR/analyst-tools"
+    mv "$STAGE" "$OUTDIR/analyst-tools"
+    tar -czf "$ANALYST_ARCHIVE" -C "$OUTDIR" analyst-tools
+    rm -rf "$OUTDIR/analyst-tools"
+    write_phase_stamp analyst-tools "$analyst_input" "$ANALYST_ARCHIVE"
+  fi
 fi
+
+CHECKSUM_INPUTS=("$APP_ARCHIVE" "$CONFIG_ARCHIVE" "$DEPLOY_ARCHIVE")
+[[ $WITH_INFRA == 1 ]] && CHECKSUM_INPUTS+=("$INFRA_ARCHIVE")
+if [[ $WITH_SANDBOX == 1 ]]; then
+  CHECKSUM_INPUTS+=("$SANDBOX_ARCHIVE" "$SANDBOX_VERIFY_ARCHIVE" "$SANDBOX_GVISOR_ARCHIVE")
+fi
+[[ $WITH_ANALYST_TOOLS == 1 ]] && CHECKSUM_INPUTS+=("$ANALYST_ARCHIVE")
+
+CHECKSUM_OUTPUTS=()
+for artifact in "${CHECKSUM_INPUTS[@]}"; do
+  CHECKSUM_OUTPUTS+=("$artifact.sha256")
+done
 
 # Checksums — run from inside $OUTDIR so the .sha256 file records the bare
 # filename instead of `dist/...`. Otherwise `sha256sum -c` fails on the
 # target host where the tar was scp'd into a different directory.
-(
-  cd "$OUTDIR"
-  for f in "$(basename "$APP_ARCHIVE")" \
-           "$(basename "$CONFIG_ARCHIVE")" \
-           "$(basename "$DEPLOY_ARCHIVE")"; do
-    sha256sum "$f" > "$f.sha256"
-  done
-  if [[ $WITH_INFRA == 1 ]]; then
-    f=$(basename "$INFRA_ARCHIVE")
-    sha256sum "$f" > "$f.sha256"
-  fi
-  if [[ $WITH_SANDBOX == 1 ]]; then
-    for f in "$(basename "$SANDBOX_ARCHIVE")" \
-             "$(basename "$SANDBOX_VERIFY_ARCHIVE")" \
-             "$(basename "$SANDBOX_GVISOR_ARCHIVE")"; do
+checksums_input="$(phase_input checksums)"
+if ! phase_done checksums "$checksums_input" "${CHECKSUM_OUTPUTS[@]}"; then
+  (
+    cd "$OUTDIR"
+    for artifact in "${CHECKSUM_INPUTS[@]}"; do
+      f="$(basename "$artifact")"
       sha256sum "$f" > "$f.sha256"
     done
-  fi
-  if [[ $WITH_ANALYST_TOOLS == 1 ]]; then
-    f=$(basename "$ANALYST_ARCHIVE")
-    sha256sum "$f" > "$f.sha256"
-  fi
-)
+  )
+  write_phase_stamp checksums "$checksums_input" "${CHECKSUM_OUTPUTS[@]}"
+fi
 
 # Manifest — single text file capturing what's in this release. Ops can scp it
 # alongside the tars to compare against the running deployment without
 # untarring anything.
+manifest_input="$(phase_input manifest)"
+if ! phase_done manifest "$manifest_input" "$MANIFEST"; then
 {
   echo "ArtifactFlow Release ${VERSION}"
   echo "Built:        $(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -401,7 +567,7 @@ fi
     echo "  image:   $(basename "$SANDBOX_ARCHIVE")"
     echo "  verify:  $(basename "$SANDBOX_VERIFY_ARCHIVE")"
     echo "  gVisor:  $(basename "$SANDBOX_GVISOR_ARCHIVE")"
-    echo "  target:  deploy/scripts/prepare-host.sh sandbox"
+    echo "  target:  AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy <bundle-dir>"
     if [[ -f "$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt" ]]; then
       image_id=$(awk -F': *' '/^Image id:/{print $2}' "$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt")
       [[ -n "$image_id" ]] && echo "  image id: $image_id"
@@ -444,6 +610,8 @@ fi
   echo "  docker compose -f deploy/docker-compose.intranet.yml exec backend \\"
   echo "    py-spy dump --pid 1"
 } > "$MANIFEST"
+  write_phase_stamp manifest "$manifest_input" "$MANIFEST"
+fi
 
 echo ""
 echo "=== Release artifacts ==="
@@ -470,21 +638,17 @@ echo ""
 # enclosing scp/etc. continuation stays unbroken when the chunk is empty.
 if [[ $WITH_INFRA == 1 ]]; then
   INFRA_SCP_LN=$'\n      dist/artifactflow-infra-'"${INFRA_SLUG}"$'.tar.gz{,.sha256}                     \\'
-  INFRA_LOAD_LN=$'\n    docker load -i artifactflow-infra-'"${INFRA_SLUG}"$'.tar.gz'
   INFRA_FOOTER=""
 else
   INFRA_SCP_LN=""
-  INFRA_LOAD_LN=""
   INFRA_FOOTER="  # (infra tar omitted — re-run release with --with-infra to ship caddy/postgres/redis images)"
 fi
 if [[ $WITH_SANDBOX == 1 ]]; then
   SANDBOX_SCP_LN=$'\n      dist/artifactflow-sandbox-'"${VERSION}-${ARCH_TAG}"$'.tar.gz{,.sha256}              \\\n      dist/artifactflow-sandbox-verify-'"${VERSION}"$'.tar.gz{,.sha256}                 \\\n      dist/'"$(basename "$SANDBOX_GVISOR_ARCHIVE")"$'{,.sha256}                         \\'
-  SANDBOX_RECIPE=$'\n    # Sandbox host prerequisites: install runsc, load sandbox image, create scratch loop,\n    # then verify under gVisor. Idempotent for an already-prepared host.\n    AF_SANDBOX_POOL_SIZE=8G deploy/scripts/prepare-host.sh sandbox'
   SANDBOX_UP_PREFIX="AF_ENABLE_SANDBOX=1 "
   SANDBOX_FOOTER=""
 else
   SANDBOX_SCP_LN=""
-  SANDBOX_RECIPE=""
   SANDBOX_UP_PREFIX=""
   SANDBOX_FOOTER="  # (sandbox bundle omitted — re-run release with --with-sandbox to ship runsc + sandbox image + verify probes)"
 fi
@@ -510,17 +674,13 @@ $ANALYST_FOOTER
       target:/opt/artifactflow/
   ssh target
     cd /opt/artifactflow
-    # verify-bundle.sh lives inside deploy/, which isn't extracted yet — use
-    # plain sha256sum. Glob is safe in a fresh dir, and CWD matches where
-    # each .sha256 records its filename.
-    sha256sum -c artifactflow-*.tar.gz.sha256
     tar xzf artifactflow-deploy-${VERSION}.tar.gz
-    tar xzf artifactflow-config-${VERSION}.tar.gz${INFRA_LOAD_LN}
-    docker load -i artifactflow-app-${VERSION}.tar.gz${ANALYST_RECIPE}
-    cp deploy/.env.intranet.example deploy/.env && vi deploy/.env
-    cp deploy/fleet.conf.example deploy/fleet.conf && vi deploy/fleet.conf${SANDBOX_RECIPE}
-    ${SANDBOX_UP_PREFIX}AF_BUNDLE_VERSION=${VERSION} deploy/scripts/fleet.sh preflight
+    deploy/scripts/verify-bundle.sh .
+    deploy/scripts/fleet.sh init-local --scale 1
+    vi deploy/.env
+    vi deploy/fleet.conf
     ${SANDBOX_UP_PREFIX}AF_BUNDLE_VERSION=${VERSION} deploy/scripts/fleet.sh deploy .
+    ${ANALYST_RECIPE}
     # No pause/resume here — there's nothing running to pause.
     # Preflight pass 2 — after \`up\`, now verifies py-spy lives in the image.
     ./deploy/scripts/preflight.sh
@@ -532,9 +692,6 @@ $ANALYST_FOOTER
   ssh target
     cd /opt/artifactflow
     ./deploy/scripts/verify-bundle.sh tmp
-    docker load -i tmp/artifactflow-app-${VERSION}.tar.gz
-    tar xzf tmp/artifactflow-deploy-${VERSION}.tar.gz
-    tar xzf tmp/artifactflow-config-${VERSION}.tar.gz
     # ─── compose infra changes (rare) ────────────────────────────
     # If this version changed compose \`caddy\` / \`postgres\` / \`redis\` service
     # blocks (image / logging / mem_limit / volumes / ports / command), the
@@ -550,6 +707,7 @@ $ANALYST_FOOTER
     # cluster needs SQL (\`ALTER USER ...\`), NOT container recreate.
     # Most releases skip this entire block.
     # ─────────────────────────────────────────────────────────────
-    ./deploy/scripts/pause.sh "升级 ${VERSION}"
-    ./deploy/scripts/resume.sh ${VERSION}
+    # Fleet deploy is a direct compose up. For a maintenance-page window instead,
+    # run maintenance.sh on before deploy and maintenance.sh off after it succeeds.
+    ${SANDBOX_UP_PREFIX}AF_BUNDLE_VERSION=${VERSION} ./deploy/scripts/fleet.sh deploy tmp
 EOF

@@ -6,18 +6,22 @@ multi-host sequence, not a separate flow** — running it daily keeps the
 multi-host path continuously rehearsed, so the two never drift apart.
 
 ```
+deploy/scripts/fleet.sh init-local           # seed single-host fleet.conf + deploy/.env
 deploy/scripts/fleet.sh preflight            # per-host readiness + deploy/.env checks
-deploy/scripts/fleet.sh deploy <bundle-dir>  # load → release gate → up → LB → smoke
+deploy/scripts/fleet.sh deploy <bundle-dir>  # verify → extract → load → release gate → up → LB → smoke
 deploy/scripts/fleet.sh deploy --dry-run <d> # print the plan, touch nothing
+deploy/scripts/fleet.sh prepare-sandbox <d>  # install runsc + load sandbox image from bundle
 deploy/scripts/fleet.sh status               # per-host `compose ps` + LB health
 deploy/scripts/fleet.sh rollback             # re-up the previous version
 ```
 
-Sandbox is opt-in. After running `deploy/scripts/prepare-host.sh sandbox` on the
-single host, set `AF_ENABLE_SANDBOX=1` for `preflight` / `deploy` / `status` /
-`rollback`; fleet then appends `deploy/docker-compose.sandbox.yml` and makes
-runsc, `artifactflow-sandbox:latest`, and the mounted scratch root hard
-preflight requirements.
+Sandbox is opt-in. When `AF_ENABLE_SANDBOX=1`, single-host `deploy` looks for
+the sandbox image, verify probes, and gVisor package in the bundle and runs the
+same bootstrap as `deploy/scripts/prepare-host.sh sandbox` before `compose up`.
+`preflight` / `status` / `rollback` then append `deploy/docker-compose.sandbox.yml`
+and make runsc, `artifactflow-sandbox:latest`, and the mounted scratch root hard
+requirements. `prepare-sandbox <bundle-dir>` is available when you want to run
+that host-prep step explicitly.
 
 `preflight` delegates to `deploy/scripts/prepare-host.sh check` when `deploy/`
 is already present on a host, so the same single entry point catches missing
@@ -27,8 +31,10 @@ loading images, before `compose up`, to protect operators who skip preflight.
 
 ## Topology: `deploy/fleet.conf`
 
-Copy `fleet.conf.example` → `fleet.conf` (gitignored — it may carry host IPs).
-One row per `(role, host)`:
+For the common single-host case, run `deploy/scripts/fleet.sh init-local` to
+write `deploy/fleet.conf` and seed `deploy/.env` from the intranet template.
+For custom or multi-host layouts, copy `fleet.conf.example` → `fleet.conf`
+(gitignored — it may carry host IPs). One row per `(role, host)`:
 
 ```
 <role>  <host>  [arch=arm64|amd64]  [scale=N]
@@ -76,17 +82,23 @@ them. Keep the bundle directory to a single release; if it contains multiple
 historical manifests, set `AF_BUNDLE_VERSION=<version>` so fleet cannot pick the
 wrong tar.
 
-1. **verify** — `verify-bundle.sh` checks every tar's sha256.
+1. **verify** — `verify-bundle.sh` checks every release tar's sha256.
 2. **arch check** — host `uname -m` must match the bundle Platform (loud-fail;
    informational under `--dry-run`).
-3. **load** — `docker load` the app tar (backend + frontend images live in it),
+3. **extract** — unpack `deploy/` and `config/` from the bundle into the install
+   root. Target-local files such as `deploy/.env`, `fleet.conf`, certs, and
+   state are gitignored and not overwritten by release tars.
+4. **load** — `docker load` the app tar (backend + frontend images live in it),
    plus the infra tar if present and an `infra` role is declared.
-4. **host check** — run `prepare-host.sh check` with the selected version and
+5. **sandbox prep** — when `AF_ENABLE_SANDBOX=1` and sandbox transfer units are
+   present, install/register runsc, load `artifactflow-sandbox:latest`, create
+   the scratch loop filesystem, and run verify probes.
+6. **host check** — run `prepare-host.sh check` with the selected version and
    infra/sandbox flags.
-5. **up** — see single vs multi below.
-6. **wait** — poll `/health/ready` through the LB until green (`AF_READY_TIMEOUT`,
+7. **up** — see single vs multi below.
+8. **wait** — poll `/health/ready` through the LB until green (`AF_READY_TIMEOUT`,
    default 120s).
-7. **smoke** — one authed-free `/health/ready` hit through the LB.
+9. **smoke** — one authed-free `/health/ready` hit through the LB.
 
 On success the deployed version is recorded in `deploy/.fleet-state` (gitignored)
 as `current`, and the prior `current` becomes `previous` — that's what `rollback`
@@ -98,13 +110,13 @@ re-`up` at the old `AF_VERSION`; nothing is rebuilt or re-fetched.
 All roles are `local`, so **compose owns the ordering** via its own
 `depends_on`: the one-shot `release` service runs under the PG advisory lock and
 must exit 0 before backends start (`service_completed_successfully`), then
-frontend, then caddy gate on health. fleet.sh just loads images and runs one
-`docker compose --profile infra up -d --scale backend=N`.
+frontend, then caddy gate on health. fleet.sh prepares the release units, loads
+images, then runs one `docker compose --profile infra up -d --scale backend=N`.
 
 > Note: single-host `up` recreates changed containers, so there's a brief blip
 > during the swap. For a zero-surprise window (maintenance page during the
-> swap) use `deploy/scripts/maintenance.sh` / `pause.sh` + `resume.sh` around
-> it. True zero-downtime rolling is inherently a multi-host property.
+> swap), wrap `fleet.sh deploy` with `deploy/scripts/maintenance.sh on|off`.
+> True zero-downtime rolling is inherently a multi-host property.
 
 ### Multi-host up
 

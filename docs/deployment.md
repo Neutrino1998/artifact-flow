@@ -209,6 +209,12 @@ docker compose -f docker-compose.prod.yml up -d
 #   artifactflow-sandbox-1.0.0-amd64.tar.gz       sandbox 运行镜像
 #   artifactflow-sandbox-verify-1.0.0.tar.gz      gVisor 验证探针
 #   sandbox-gvisor-<date>-x86_64.tar.gz           runsc 离线安装包
+
+# release 是阶段化的；如果网络在后段下载 gVisor / wheels 时抖掉，
+# 修复网络后用 --resume 重跑，会跳过已完成且输入未变的 app/infra/sandbox-image 等阶段。
+./scripts/release.sh 1.0.0 --with-infra --with-sandbox --resume
+# 如需强制重跑某一阶段：
+./scripts/release.sh 1.0.0 --with-infra --with-sandbox --resume --force gvisor
 ```
 
 > **拆 4 tar 按变更频率分层：**
@@ -221,50 +227,45 @@ docker compose -f docker-compose.prod.yml up -d
 ### 首次部署（在目标内网机器上）
 
 ```bash
-# 1. 传 4 个 tar + sha256 + manifest 到目标机
+# 1. 传 tar + sha256 + manifest 到目标机
 scp dist/artifactflow-{app,config,deploy}-1.0.0.tar.gz{,.sha256} \
     dist/artifactflow-infra-caddy2.10-pg16-redis7.tar.gz{,.sha256} \
     dist/artifactflow-1.0.0.manifest.txt \
     target:/opt/artifactflow/
 
-# 2. 校验 + 解包
+# 2. 先解 deploy/，拿到 fleet/verify 脚本
 cd /opt/artifactflow
-# 首次部署 deploy/ 还没解出来,verify-bundle.sh 用不了 —— 直接 sha256sum -c。
-# CWD 跟 tar 在同一层、不会撞路径坑;glob 在全新目录里也只会匹配本次的 tar。
-sha256sum -c artifactflow-*.tar.gz.sha256
-tar xzf artifactflow-deploy-1.0.0.tar.gz       # 解出 ./deploy/(下次升级起就能用 verify-bundle.sh)
-tar xzf artifactflow-config-1.0.0.tar.gz       # 解出 ./config/
-docker load -i artifactflow-infra-caddy2.10-pg16-redis7.tar.gz
-docker load -i artifactflow-app-1.0.0.tar.gz
+tar xzf artifactflow-deploy-1.0.0.tar.gz
+deploy/scripts/verify-bundle.sh .
 
-# 3. 配置 .env
-cp deploy/.env.intranet.example deploy/.env
-# 编辑 deploy/.env，填写密码和 API Keys
+# 3. 初始化单机拓扑和 .env，然后编辑密码/API Keys
+deploy/scripts/fleet.sh init-local --scale 1
+vi deploy/.env
+vi deploy/fleet.conf
 
 # 4. 内网 LLM（如需）：编辑 config/models/models.yaml，把 base_url 指向内部推理端点
 
-# 5. 目标机基础检查 + TLS 占位证书（幂等，绝不覆盖真证书）
-#    这一步会检查 Docker/Compose/磁盘/.env/镜像/证书；证书缺失时自动生成
-#    自签占位证书让 Caddy 能启动。真证书之后覆盖两个 pem 再 caddy reload。
-AF_VERSION=1.0.0 AF_CERT_HOSTS=<ip-or-hostname> deploy/scripts/prepare-host.sh check
+# 5. 启动（fleet 会校验 bundle、解 config/deploy、load 镜像、跑 release gate、等待健康）
+AF_BUNDLE_VERSION=1.0.0 deploy/scripts/fleet.sh deploy .
+# 启用沙盒时使用：
+# AF_ENABLE_SANDBOX=1 AF_BUNDLE_VERSION=1.0.0 deploy/scripts/fleet.sh deploy .
 
-# 6. 启动（3A: 自建基础设施）
-AF_VERSION=1.0.0 docker compose -f deploy/docker-compose.intranet.yml --profile infra up -d
-
-# 7. 创建管理员
+# 6. 创建管理员
 docker compose -f deploy/docker-compose.intranet.yml exec backend \
   python scripts/create_admin.py admin --password <your-password>
 ```
 
 ### 扩缩容与多机发布（fleet.sh）
 
-`deploy/scripts/fleet.sh` 是从「一台机器」到「多台机器」的统一发布入口，把上面「校验 + 加载 + 启动 + 探活」
+`deploy/scripts/fleet.sh` 是从「一台机器」到「多台机器」的统一发布入口，把上面「校验 + 解包 + 加载 + 启动 + 探活」
 收成一条命令，并原生支持 `--scale`：
 
 ```bash
+deploy/scripts/fleet.sh init-local           # 生成单机 fleet.conf，并从模板种 deploy/.env
 deploy/scripts/fleet.sh preflight            # 单机/每台机器就绪检查
-deploy/scripts/fleet.sh deploy <bundle-dir>  # 校验 → arch 检查 → load → release 门 → up → 探活
+deploy/scripts/fleet.sh deploy <bundle-dir>  # 校验 → 解包 → load → release 门 → up → 探活
 deploy/scripts/fleet.sh deploy --dry-run <d> # 只打印计划，不改动任何东西
+deploy/scripts/fleet.sh prepare-sandbox <d>  # 从 bundle 单独准备 runsc/sandbox/verify
 deploy/scripts/fleet.sh status               # 各机器 compose ps + LB 健康
 deploy/scripts/fleet.sh rollback             # 回退到上一个成功版本
 ```
@@ -280,34 +281,34 @@ deploy/scripts/fleet.sh rollback             # 回退到上一个成功版本
 > `--scale`；跨机负载均衡 / 多机数据库 URL 等留在文档里作为**已设计未验证**的路径。
 >
 > `fleet.sh` 默认只包装 `deploy/docker-compose.intranet.yml`（Mode 3 基础栈）。
-> 如果本机已经完成沙盒宿主前置并要启用 `bash` / `mount` / `persist`，设置
-> `AF_ENABLE_SANDBOX=1`，它会自动追加 `deploy/docker-compose.sandbox.yml` overlay，
-> 并把 runsc / sandbox 镜像 / scratch root 缺失视为 preflight blocker。
+> 如果 bundle 带 sandbox 且要启用 `bash` / `mount` / `persist`，设置
+> `AF_ENABLE_SANDBOX=1`；`fleet deploy` 会先从 bundle 运行 sandbox 宿主前置
+> （安装 runsc、加载 sandbox 镜像、创建 scratch root、跑 verify），再追加
+> `deploy/docker-compose.sandbox.yml` overlay。`preflight` 仍把 runsc / sandbox 镜像 /
+> scratch root 缺失视为 blocker。
 > Mode 2（公网）扩缩容仍用上面 Mode 2A「扩缩容」小节里的裸 `--scale` +
 > `deploy-prod.sh`。
 >
 > `fleet.sh deploy` 是直接 `up`（数秒 blip，无维护页）；要维护页包住整个升级窗口，
-> 仍走下面「滚动更新已有部署」的 `pause.sh`/`resume.sh`。
+> 在 deploy 前后用 `maintenance.sh on|off` 包住即可。
 
 ### 滚动更新已有部署
 
-新版本到位后，`pause.sh` / `resume.sh` 把维护窗口包成两个动作：起维护页 + 停服务 → 加载新镜像 → 起新版本 + 关维护页。
+新版本到位后，`fleet deploy` 接管校验、解包、加载镜像、起服务和探活；需要维护页窗口时，用 `maintenance.sh on|off` 包住它。
 
 ```bash
 # 在内网机（假设新 tar 已 scp 到 ./tmp/ 下，typically 不含 infra）
 cd /opt/artifactflow
 
-# 1. 校验 + 解包（不影响在跑容器，可在维护开始前做）
+# 1. 校验（不影响在跑容器，可在维护开始前做）
 ./deploy/scripts/verify-bundle.sh tmp    # 一次性校验 tmp/ 下所有 tar
-tar xzf tmp/artifactflow-deploy-1.0.1.tar.gz
-tar xzf tmp/artifactflow-config-1.0.1.tar.gz
-docker load -i tmp/artifactflow-app-1.0.1.tar.gz
 
-# 2. 进维护窗口
-./deploy/scripts/pause.sh "升级到 v1.0.1"
+# 2. 进维护窗口（可选；fleet deploy 本身是直接 up）
+./deploy/scripts/maintenance.sh on "升级到 v1.0.1"
 
-# 3. 退维护窗口（resume 失败 → 维护页保持开启，运维有时间排查）
-./deploy/scripts/resume.sh 1.0.1
+# 3. fleet 接管解包 + docker load + compose up + 健康检查；成功后关闭维护页
+AF_BUNDLE_VERSION=1.0.1 ./deploy/scripts/fleet.sh deploy tmp && \
+  ./deploy/scripts/maintenance.sh off
 ```
 
 > **nginx→Caddy 一次性切换（既有内网部署首次升到 Caddy 版）：** 新 compose 里反向代理服务从 `nginx` 换成了 `caddy`，`up -d` 不会自动移除旧服务的容器。切换步骤：证书就位（`deploy/certs/server.crt` + `server.key`，完整链，见该目录 README）→ 常规 prep（verify-bundle / docker load / tar xzf deploy+config）→ `docker compose -f deploy/docker-compose.intranet.yml --profile infra down` → `AF_VERSION=<版本> ... up -d`（infra 服务定义变更走 down/up，不走 pause/resume）。防火墙记得放行 HTTPS 端口（默认 443，`AF_HTTPS_PORT` 可改）。切换后旧的 `nginx:*` 镜像可 `docker rmi` 回收。
@@ -395,13 +396,16 @@ ssh target 'cd /opt/artifactflow && \
 
 ### 宿主前置（一次性）
 
-一条命令完成宿主前置（安装 gVisor、加载 sandbox 镜像、创建 scratch loop、跑
-smoke/verify，并把 `ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT` /
+推荐让 `fleet deploy` 在 `AF_ENABLE_SANDBOX=1` 时从 release bundle 自动完成宿主前置。
+需要提前单独准备或排障时，也可以手动跑同一套动作（安装 gVisor、加载 sandbox 镜像、
+创建 scratch loop、跑 smoke/verify，并把 `ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT` /
 `ARTIFACTFLOW_SANDBOX_RUNTIME` 写入 `deploy/.env`）：
 
 ```bash
 # 默认 scratch pool 为 8G；可按并发 × ARTIFACTFLOW_SANDBOX_WORKSPACE_QUOTA_MB 调大。
-AF_SANDBOX_POOL_SIZE=8G deploy/scripts/prepare-host.sh sandbox
+AF_SANDBOX_POOL_SIZE=8G deploy/scripts/fleet.sh prepare-sandbox .
+# 或直接：
+# AF_SANDBOX_POOL_SIZE=8G deploy/scripts/prepare-host.sh sandbox
 ```
 
 它等价于以下手工步骤，保留在这里便于排障：
@@ -437,9 +441,11 @@ AF_VERSION=1.0.0 docker compose -f deploy/docker-compose.intranet.yml \
                               -f deploy/docker-compose.sandbox.yml \
                               --profile infra up -d
 
-# 或使用 fleet 单机入口:
-AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh preflight
+# 使用 fleet 单机入口（会在 deploy 阶段自动准备 sandbox 宿主前置）:
 AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy .
+# 如需 deploy 前单独检查，先准备再 preflight：
+# AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh prepare-sandbox .
+# AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh preflight
 ```
 
 > **安全提醒**：overlay 把 `/var/run/docker.sock` 挂进 backend 容器（等同宿主 root）。这是 DooD 架构的固有前提，防线是代码侧纪律——容器创建参数全为 backend 常量、绝不被模型内容污染（见架构文档「隔离边界」）。不要把这个 overlay 用在不需要沙盒的部署上。

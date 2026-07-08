@@ -12,9 +12,11 @@
 # + frontend) / lb (caddy).
 #
 # Subcommands:
+#   fleet.sh init-local                write single-host fleet.conf + seed deploy/.env
 #   fleet.sh preflight                 per-host docker/compose/disk/clock + deploy/.env checks
-#   fleet.sh deploy <bundle-dir>       load bundle → release gate → (rolling) up → LB → smoke
+#   fleet.sh deploy <bundle-dir>       verify → extract → load → release gate → (rolling) up → LB → smoke
 #   fleet.sh deploy --dry-run <dir>    print the plan, touch nothing
+#   fleet.sh prepare-sandbox <dir>     install runsc + load sandbox image from bundle
 #   fleet.sh status                    per-host `compose ps` + /health/ready probe
 #   fleet.sh rollback                  re-up the previously-deployed version (images kept)
 #   fleet.sh rollback --dry-run        print the rollback plan
@@ -185,14 +187,25 @@ compose_flags_for_dir() {
   fi
 }
 
+shell_args() {
+  local arg
+  for arg in "$@"; do
+    printf ' %q' "$arg"
+  done
+}
+
 compose_on() {  # compose_on <host> <version> <compose-args...>
   local host="$1" ver="$2"; shift 2
-  local dir flags; dir="$(target_dir "$host")"; flags="$(compose_flags_for_dir "$dir")"
-  run_on "$host" "cd '$dir/deploy' && AF_VERSION='$ver' docker compose $flags $*"
+  local dir flags args
+  dir="$(target_dir "$host")"
+  flags="$(compose_flags_for_dir "$dir")"
+  args="$(shell_args "$@")"
+  run_on "$host" "cd '$dir/deploy' && AF_VERSION='$ver' docker compose $flags$args"
 }
 
 # ── bundle introspection (manifest is source of truth) ──────────────
 BUNDLE=""; BUNDLE_VER=""; BUNDLE_PLATFORM=""; APP_TAR=""
+SANDBOX_TAR=""; SANDBOX_VERIFY_TAR=""; SANDBOX_GVISOR_TAR=""
 is_release_manifest() {
   local header
   header="$(head -n 1 "$1" 2>/dev/null || true)"
@@ -239,6 +252,86 @@ canon_arch() {
     */arm64|arm64|aarch64)    echo arm64 ;;
     *) echo "$1" ;;
   esac
+}
+
+bundle_image_arch() {
+  case "$(canon_arch "$BUNDLE_PLATFORM")" in
+    x86_64) echo amd64 ;;
+    arm64)  echo arm64 ;;
+    *)      echo "" ;;
+  esac
+}
+
+bundle_gvisor_arch() {
+  case "$(canon_arch "$BUNDLE_PLATFORM")" in
+    x86_64) echo x86_64 ;;
+    arm64)  echo aarch64 ;;
+    *)      echo "" ;;
+  esac
+}
+
+load_bundle_sandbox_meta() {
+  local image_arch gvisor_arch
+  image_arch="$(bundle_image_arch)"
+  gvisor_arch="$(bundle_gvisor_arch)"
+  SANDBOX_TAR=""
+  SANDBOX_VERIFY_TAR=""
+  SANDBOX_GVISOR_TAR=""
+  if [[ -n "$image_arch" ]]; then
+    SANDBOX_TAR="$BUNDLE/artifactflow-sandbox-${BUNDLE_VER}-${image_arch}.tar.gz"
+  fi
+  SANDBOX_VERIFY_TAR="$BUNDLE/artifactflow-sandbox-verify-${BUNDLE_VER}.tar.gz"
+  if [[ -n "$gvisor_arch" ]]; then
+    SANDBOX_GVISOR_TAR="$(find "$BUNDLE" -maxdepth 1 -type f -name "sandbox-gvisor-*-${gvisor_arch}.tar.gz" -print | sort | tail -1)"
+  fi
+}
+
+extract_release_units_single_local() {
+  local config_tar deploy_tar
+  config_tar="$BUNDLE/artifactflow-config-${BUNDLE_VER}.tar.gz"
+  deploy_tar="$BUNDLE/artifactflow-deploy-${BUNDLE_VER}.tar.gz"
+  [[ -f "$config_tar" ]] || die "config tar for version $BUNDLE_VER not found: $config_tar"
+  [[ -f "$deploy_tar" ]] || die "deploy tar for version $BUNDLE_VER not found: $deploy_tar"
+
+  step "extract config/deploy units"
+  if (( DRY )); then
+    info "would: tar xzf $deploy_tar -C $ROOT"
+    info "would: tar xzf $config_tar -C $ROOT"
+  else
+    tar xzf "$deploy_tar" -C "$ROOT" || die "deploy tar extract failed"
+    tar xzf "$config_tar" -C "$ROOT" || die "config tar extract failed"
+    ok "config/deploy extracted"
+  fi
+}
+
+prepare_sandbox_single_local() {
+  local explicit="${1:-0}"
+  [[ "$ENABLE_SANDBOX" == 1 || "$explicit" == 1 ]] || return 0
+  load_bundle_sandbox_meta
+
+  local has_image=0 has_verify=0 has_gvisor=0
+  [[ -n "$SANDBOX_TAR" && -f "$SANDBOX_TAR" ]] && has_image=1
+  [[ -n "$SANDBOX_VERIFY_TAR" && -f "$SANDBOX_VERIFY_TAR" ]] && has_verify=1
+  [[ -n "$SANDBOX_GVISOR_TAR" && -f "$SANDBOX_GVISOR_TAR" ]] && has_gvisor=1
+
+  if (( ! has_image && ! has_verify && ! has_gvisor )); then
+    if (( explicit )); then
+      die "sandbox transfer units not found in $BUNDLE"
+    fi
+    info "no sandbox transfer units in bundle — assuming host sandbox prerequisites are already prepared"
+    return 0
+  fi
+  (( has_image && has_verify && has_gvisor )) || die "incomplete sandbox bundle in $BUNDLE (need image + verify + gVisor tars)"
+
+  step "prepare sandbox host prerequisites"
+  if (( DRY )); then
+    info "would: AF_SANDBOX_IMAGE=$SANDBOX_TAR AF_SANDBOX_VERIFY=$SANDBOX_VERIFY_TAR AF_GVISOR_PACKAGE=$SANDBOX_GVISOR_TAR deploy/scripts/prepare-host.sh sandbox"
+  else
+    AF_SANDBOX_IMAGE="$SANDBOX_TAR" \
+    AF_SANDBOX_VERIFY="$SANDBOX_VERIFY_TAR" \
+    AF_GVISOR_PACKAGE="$SANDBOX_GVISOR_TAR" \
+      "$SCRIPT_DIR/prepare-host.sh" sandbox || die "sandbox preparation failed"
+  fi
 }
 
 # assert a host's CPU arch matches the bundle Platform + the conf arch column.
@@ -288,6 +381,70 @@ smoke() {  # smoke <lb-host>
   local host="$1" cmd; cmd="$(lb_ready_cmd)"
   step "smoke: /health/ready through LB ($host)"
   run_on "$host" "$cmd" 2>/dev/null && ok "smoke passed" || die "smoke failed on $host"
+}
+
+# ════════════════════════════════════════════════════════════════════
+# init-local
+# ════════════════════════════════════════════════════════════════════
+local_fleet_arch() {
+  local raw canon
+  raw="$(uname -m 2>/dev/null || true)"
+  canon="$(canon_arch "$raw")"
+  case "$canon" in
+    x86_64) echo amd64 ;;
+    arm64)  echo arm64 ;;
+    *)      echo "${raw:-amd64}" ;;
+  esac
+}
+
+cmd_init_local() {
+  local force=0 scale=1 arch=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force) force=1 ;;
+      --scale)
+        shift
+        [[ $# -gt 0 ]] || die "--scale requires a value"
+        scale="$1"
+        ;;
+      --scale=*) scale="${1#--scale=}" ;;
+      --arch)
+        shift
+        [[ $# -gt 0 ]] || die "--arch requires amd64 or arm64"
+        arch="$1"
+        ;;
+      --arch=*) arch="${1#--arch=}" ;;
+      -*) die "unknown init-local flag: $1" ;;
+      *) die "unexpected init-local argument: $1" ;;
+    esac
+    shift
+  done
+  [[ "$scale" =~ ^[0-9]+$ && "$scale" -ge 1 ]] || die "--scale must be a positive integer"
+  arch="${arch:-$(local_fleet_arch)}"
+  case "$arch" in amd64|arm64) ;; *) die "--arch must be amd64 or arm64 (got: $arch)" ;; esac
+
+  step "initialize local fleet files"
+  if [[ -f "$FLEET_CONF" && $force != 1 ]]; then
+    info "$FLEET_CONF already exists; pass --force to rewrite it"
+  else
+    mkdir -p "$(dirname "$FLEET_CONF")"
+    cat > "$FLEET_CONF" <<EOF
+infra    local
+release  local
+app      local   arch=${arch}  scale=${scale}
+lb       local
+EOF
+    ok "wrote $FLEET_CONF"
+  fi
+
+  if [[ -f "$DEPLOY_DIR/.env" ]]; then
+    info "$DEPLOY_DIR/.env already exists"
+  elif [[ -f "$DEPLOY_DIR/.env.intranet.example" ]]; then
+    cp "$DEPLOY_DIR/.env.intranet.example" "$DEPLOY_DIR/.env" || die "failed to seed deploy/.env"
+    ok "seeded $DEPLOY_DIR/.env from .env.intranet.example"
+  else
+    info "$DEPLOY_DIR/.env.intranet.example not found; create $DEPLOY_DIR/.env manually"
+  fi
 }
 
 # ════════════════════════════════════════════════════════════════════
@@ -395,10 +552,28 @@ cmd_deploy() {
   fi
 }
 
+cmd_prepare_sandbox() {
+  local bundle=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run) DRY=1 ;;
+      -*) die "unknown prepare-sandbox flag: $1" ;;
+      *) bundle="$1" ;;
+    esac
+    shift
+  done
+  [[ -n "$bundle" ]] || die "usage: fleet.sh prepare-sandbox [--dry-run] <bundle-dir>"
+  load_bundle_meta "$bundle"
+  (( DRY )) && info "DRY-RUN — sandbox host will not be touched"
+  prepare_sandbox_single_local 1
+}
+
 # single box: every role local. compose owns ordering (release gate +
 # healthchecks); we just load images and up the whole stack.
 deploy_single_local() {
   assert_arch local ""
+  extract_release_units_single_local
+
   step "load app images ($(basename "$APP_TAR"))"
   if (( DRY )); then info "would: docker load -i $APP_TAR"; else docker load -i "$APP_TAR" || die "docker load failed"; ok "images loaded"; fi
 
@@ -411,6 +586,8 @@ deploy_single_local() {
       info "no infra tar in bundle — assuming caddy/pg/redis images already loaded"
     fi
   fi
+
+  prepare_sandbox_single_local 0
 
   step "deployment config check"
   if (( DRY )); then
@@ -441,7 +618,7 @@ deploy_single_local() {
     if (( DRY )); then
       info "would require: runsc registered, artifactflow-sandbox:latest loaded, scratch root mounted"
     else
-      command -v runsc >/dev/null 2>&1 || die "AF_ENABLE_SANDBOX=1 but runsc is missing; run deploy/scripts/prepare-host.sh sandbox"
+      command -v runsc >/dev/null 2>&1 || die "AF_ENABLE_SANDBOX=1 but runsc is missing; run fleet.sh prepare-sandbox <bundle-dir> or deploy/scripts/prepare-host.sh sandbox"
       docker info 2>/dev/null | grep -q runsc || die "AF_ENABLE_SANDBOX=1 but Docker runtime 'runsc' is not registered"
       docker image inspect artifactflow-sandbox:latest >/dev/null 2>&1 || die "AF_ENABLE_SANDBOX=1 but artifactflow-sandbox:latest is not loaded"
       local scratch; scratch="$(sandbox_scratch_root_local)"
@@ -559,12 +736,14 @@ usage() { sed -n '2,40p' "$0"; }
 main() {
   local sub="${1:-}"; shift || true
   case "$sub" in
+    init-local) cmd_init_local "$@" ;;
     preflight) cmd_preflight "$@" ;;
     deploy)    cmd_deploy "$@" ;;
+    prepare-sandbox) cmd_prepare_sandbox "$@" ;;
     status)    cmd_status "$@" ;;
     rollback)  cmd_rollback "$@" ;;
     ""|-h|--help|help) usage ;;
-    *) die "unknown subcommand: $sub (try: preflight | deploy | status | rollback)" ;;
+    *) die "unknown subcommand: $sub (try: init-local | preflight | deploy | prepare-sandbox | status | rollback)" ;;
   esac
 }
 main "$@"

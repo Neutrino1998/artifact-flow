@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verify sha256 of every artifactflow-*.tar.gz in a directory.
+# Verify sha256 of every release tar in a directory.
 #
 # release.sh writes each .sha256 with a *bare* filename (no path), which
 # requires sha256sum to run from the directory holding the tar — easy to
@@ -24,9 +24,9 @@ if [[ ! -d "$DIR" ]]; then
 fi
 
 shopt -s nullglob
-sha_files=("$DIR"/artifactflow-*.tar.gz.sha256)
+sha_files=("$DIR"/artifactflow-*.tar.gz.sha256 "$DIR"/sandbox-gvisor-*.tar.gz.sha256)
 if (( ${#sha_files[@]} == 0 )); then
-  echo "No artifactflow-*.tar.gz.sha256 files found in $DIR" >&2
+  echo "No release *.tar.gz.sha256 files found in $DIR" >&2
   exit 1
 fi
 

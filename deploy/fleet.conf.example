@@ -1,11 +1,12 @@
 # ArtifactFlow fleet topology — Phase D (决策 7:单机/多机同一连续谱).
 #
-# Copy to `deploy/fleet.conf` (gitignored — may carry host IPs) and edit.
-# fleet.sh reads it to know which role runs on which host.
-# To enable sandbox tools on the single host, first run:
-#   deploy/scripts/prepare-host.sh sandbox
-# Then run fleet with:
-#   AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh preflight
+# For the common single-host case, prefer:
+#   deploy/scripts/fleet.sh init-local
+# It writes deploy/fleet.conf with the local arch and seeds deploy/.env from the
+# intranet template. Copy/edit this file manually for custom or multi-host
+# layouts. fleet.sh reads it to know which role runs on which host.
+#
+# To enable sandbox tools from a bundle that includes --with-sandbox:
 #   AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy .
 #
 # ── Format ──
