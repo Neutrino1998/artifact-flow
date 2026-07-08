@@ -110,6 +110,20 @@ interface UIState {
   setObservabilityBrowseVisible: (visible: boolean) => void;
   triggerObservabilityRefresh: () => void;
   triggerInstancesRefresh: () => void;
+  notificationConfigDirty: boolean;
+  notificationConfigSaving: boolean;
+  notificationConfigLoading: boolean;
+  notificationConfigCreateRequestId: number;
+  notificationConfigRefreshRequestId: number;
+  notificationConfigSaveRequestId: number;
+  setNotificationConfigStatus: (status: {
+    dirty?: boolean;
+    saving?: boolean;
+    loading?: boolean;
+  }) => void;
+  requestNotificationConfigCreate: () => void;
+  requestNotificationConfigRefresh: () => void;
+  requestNotificationConfigSave: () => void;
   requestComposerFocus: () => void;
   consumeComposerFocusRequest: (id: number) => void;
   setTheme: (theme: 'light' | 'dark') => void;
@@ -124,7 +138,9 @@ type UIData = Omit<UIState,
   | 'setToolUnitRightView' | 'bumpToolUnitListVersion' | 'enterSelectionMode' | 'exitSelectionMode'
   | 'toggleUserSelection' | 'setUserManagementSelection' | 'clearUserSelection'
   | 'setObservabilitySelectedConvId' | 'setObservabilityBrowseVisible' | 'triggerObservabilityRefresh'
-  | 'triggerInstancesRefresh' | 'requestComposerFocus' | 'consumeComposerFocusRequest'
+  | 'triggerInstancesRefresh' | 'setNotificationConfigStatus'
+  | 'requestNotificationConfigCreate' | 'requestNotificationConfigRefresh' | 'requestNotificationConfigSave'
+  | 'requestComposerFocus' | 'consumeComposerFocusRequest'
   | 'setTheme' | 'toggleTheme'
 >;
 
@@ -143,6 +159,12 @@ export const INITIAL_UI_STATE: UIData = {
   observabilityBrowseVisible: false,
   observabilityRefreshTick: 0,
   instancesRefreshTick: 0,
+  notificationConfigDirty: false,
+  notificationConfigSaving: false,
+  notificationConfigLoading: false,
+  notificationConfigCreateRequestId: 0,
+  notificationConfigRefreshRequestId: 0,
+  notificationConfigSaveRequestId: 0,
   composerFocusRequestId: 0,
   composerFocusConsumedId: 0,
   theme: 'dark',
@@ -224,6 +246,20 @@ export const useUIStore = create<UIState>((set) => ({
   })),
   triggerInstancesRefresh: () => set((s) => ({
     instancesRefreshTick: s.instancesRefreshTick + 1,
+  })),
+  setNotificationConfigStatus: (status) => set((s) => ({
+    notificationConfigDirty: status.dirty ?? s.notificationConfigDirty,
+    notificationConfigSaving: status.saving ?? s.notificationConfigSaving,
+    notificationConfigLoading: status.loading ?? s.notificationConfigLoading,
+  })),
+  requestNotificationConfigCreate: () => set((s) => ({
+    notificationConfigCreateRequestId: s.notificationConfigCreateRequestId + 1,
+  })),
+  requestNotificationConfigRefresh: () => set((s) => ({
+    notificationConfigRefreshRequestId: s.notificationConfigRefreshRequestId + 1,
+  })),
+  requestNotificationConfigSave: () => set((s) => ({
+    notificationConfigSaveRequestId: s.notificationConfigSaveRequestId + 1,
   })),
   requestComposerFocus: () => set((s) => ({
     composerFocusRequestId: s.composerFocusRequestId + 1,

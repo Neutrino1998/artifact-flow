@@ -9,6 +9,7 @@ import AdminConversationList from './AdminConversationList';
 import UserMenu from './UserMenu';
 import NotificationCenter from './NotificationCenter';
 import BrandingFooter from '@/components/BrandingFooter';
+import { PillBadge } from '@/components/ui/PillBadge';
 import { APP_NAME, APP_TAGLINE } from '@/lib/branding';
 import { MENU_ROW_HOVER, MENU_ROW_DANGER_HOVER } from '@/lib/styles';
 
@@ -16,14 +17,17 @@ function IconButton({
   onClick,
   label,
   children,
+  disabled = false,
 }: {
   onClick: () => void;
   label: string;
   children: React.ReactNode;
+  disabled?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       className={`w-10 h-10 flex items-center justify-center rounded-md text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent ${MENU_ROW_HOVER}`}
       aria-label={label}
       title={label}
@@ -72,6 +76,13 @@ const PlusIcon = () => (
   </svg>
 );
 
+const SaveIcon = () => (
+  <svg {...iconProps} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 2.5h7l2 2V12a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 2 12V3a.5.5 0 0 1 .5-.5H3Z" />
+    <path d="M4 2.5v3h6v-3M4 12.5V9h6v3.5" />
+  </svg>
+);
+
 const BulkImportIcon = () => (
   <svg {...iconProps}>
     <path d="M7 2v8M3 8l4 4 4-4M2 13h10" />
@@ -103,6 +114,12 @@ export default function Sidebar() {
   const setObservabilityBrowseVisible = useUIStore((s) => s.setObservabilityBrowseVisible);
   const triggerObservabilityRefresh = useUIStore((s) => s.triggerObservabilityRefresh);
   const triggerInstancesRefresh = useUIStore((s) => s.triggerInstancesRefresh);
+  const notificationConfigDirty = useUIStore((s) => s.notificationConfigDirty);
+  const notificationConfigSaving = useUIStore((s) => s.notificationConfigSaving);
+  const notificationConfigLoading = useUIStore((s) => s.notificationConfigLoading);
+  const requestNotificationConfigCreate = useUIStore((s) => s.requestNotificationConfigCreate);
+  const requestNotificationConfigRefresh = useUIStore((s) => s.requestNotificationConfigRefresh);
+  const requestNotificationConfigSave = useUIStore((s) => s.requestNotificationConfigSave);
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
   const { startNewChat } = useChat();
 
@@ -134,6 +151,12 @@ export default function Sidebar() {
     setRefreshSpinning(true);
     setTimeout(() => setRefreshSpinning(false), 600);
   }, [triggerInstancesRefresh]);
+
+  const handleRefreshNotifications = useCallback(() => {
+    requestNotificationConfigRefresh();
+    setRefreshSpinning(true);
+    setTimeout(() => setRefreshSpinning(false), 600);
+  }, [requestNotificationConfigRefresh]);
 
   const handleSearchChat = () => {
     setActiveMode('conversationBrowser');
@@ -262,6 +285,25 @@ export default function Sidebar() {
               <IconButton onClick={handleRefreshInstances} label="刷新">
                 <RefreshIcon spinning={refreshSpinning} />
               </IconButton>
+            )}
+
+            {/* Notification config actions */}
+            {inNotificationConfig && (
+              <>
+                <IconButton onClick={requestNotificationConfigCreate} label="新建通知">
+                  <PlusIcon />
+                </IconButton>
+                <IconButton onClick={handleRefreshNotifications} label="刷新通知" disabled={notificationConfigLoading}>
+                  <RefreshIcon spinning={refreshSpinning} />
+                </IconButton>
+                <IconButton
+                  onClick={requestNotificationConfigSave}
+                  label="保存通知"
+                  disabled={!notificationConfigDirty || notificationConfigSaving}
+                >
+                  <SaveIcon />
+                </IconButton>
+              </>
             )}
 
             {/* Exit the active takeover */}
@@ -413,6 +455,35 @@ export default function Sidebar() {
                 <RefreshIcon size={16} spinning={refreshSpinning} />
                 刷新
               </button>
+            )}
+
+            {/* Notification config actions — hoisted from NotificationConfigPanel */}
+            {inNotificationConfig && (
+              <>
+                <button onClick={requestNotificationConfigCreate} className={navRowClass}>
+                  <PlusIcon />
+                  新建通知
+                </button>
+                <button
+                  onClick={handleRefreshNotifications}
+                  disabled={notificationConfigLoading}
+                  className={`${navRowClass} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent`}
+                >
+                  <RefreshIcon size={16} spinning={refreshSpinning} />
+                  刷新
+                </button>
+                <button
+                  onClick={requestNotificationConfigSave}
+                  disabled={!notificationConfigDirty || notificationConfigSaving}
+                  className={`${navRowClass} disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent`}
+                >
+                  <SaveIcon />
+                  <span>{notificationConfigSaving ? '保存中' : '保存'}</span>
+                  {notificationConfigDirty && (
+                    <PillBadge tone="warning">未保存</PillBadge>
+                  )}
+                </button>
+              </>
             )}
             <button
               onClick={handleExit}
