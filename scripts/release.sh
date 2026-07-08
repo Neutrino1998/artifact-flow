@@ -511,7 +511,7 @@ done
 
 # Checksums — run from inside $OUTDIR so the .sha256 file records the bare
 # filename instead of `dist/...`. Otherwise `sha256sum -c` fails on the
-# target host where the tar was scp'd into a different directory.
+# target host where the tar was copied into a different directory.
 checksums_input="$(phase_input checksums)"
 if ! phase_done checksums "$checksums_input" "${CHECKSUM_OUTPUTS[@]}"; then
   (
@@ -524,7 +524,7 @@ if ! phase_done checksums "$checksums_input" "${CHECKSUM_OUTPUTS[@]}"; then
   write_phase_stamp checksums "$checksums_input" "${CHECKSUM_OUTPUTS[@]}"
 fi
 
-# Manifest — single text file capturing what's in this release. Ops can scp it
+# Manifest — single text file capturing what's in this release. Ops can carry it
 # alongside the tars to compare against the running deployment without
 # untarring anything.
 manifest_input="$(phase_input manifest)"
@@ -633,36 +633,35 @@ echo "Manifest preview (first 30 lines):"
 head -30 "$MANIFEST" | sed 's/^/  /'
 echo ""
 
-# Recipe is rendered conditionally on the flags actually used this build, so
-# copy-paste-able lines match what was produced (no "scp a tar you didn't
-# build"). Inline lines carry a leading newline + indent + trailing `\` so the
-# enclosing scp/etc. continuation stays unbroken when the chunk is empty.
+# Recipe is rendered conditionally on the flags actually used this build. It
+# lists the files that must be present in the target bundle directory, but leaves
+# the physical transfer mechanism to the deployment site's approved medium.
 if [[ $WITH_INFRA == 1 ]]; then
-  INFRA_SCP_LN=$'\n      dist/artifactflow-infra-'"${INFRA_SLUG}"$'.tar.gz{,.sha256}                     \\'
+  INFRA_ARTIFACTS=$'\n  #   artifactflow-infra-'"${INFRA_SLUG}"$'.tar.gz{,.sha256}'
   INFRA_FOOTER=""
 else
-  INFRA_SCP_LN=""
+  INFRA_ARTIFACTS=""
   INFRA_FOOTER="  # (infra tar omitted — re-run release with --with-infra to ship caddy/postgres/redis images)"
 fi
 if [[ $WITH_SANDBOX == 1 ]]; then
-  SANDBOX_SCP_LN=$'\n      dist/artifactflow-sandbox-'"${VERSION}-${ARCH_TAG}"$'.tar.gz{,.sha256}              \\\n      dist/artifactflow-sandbox-verify-'"${VERSION}"$'.tar.gz{,.sha256}                 \\\n      dist/'"$(basename "$SANDBOX_GVISOR_ARCHIVE")"$'{,.sha256}                         \\'
+  SANDBOX_ARTIFACTS=$'\n  #   artifactflow-sandbox-'"${VERSION}-${ARCH_TAG}"$'.tar.gz{,.sha256}\n  #   artifactflow-sandbox-verify-'"${VERSION}"$'.tar.gz{,.sha256}\n  #   '"$(basename "$SANDBOX_GVISOR_ARCHIVE")"$'{,.sha256}'
   SANDBOX_PREP_LOCAL=$'\n    # Requires root: installs/registers runsc and mounts the sandbox scratch loop.\n    sudo env AF_BUNDLE_VERSION='"${VERSION}"$' AF_SANDBOX_POOL_SIZE=8G deploy/scripts/fleet.sh prepare-sandbox .'
   SANDBOX_PREP_TMP=$'\n    # Requires root: refreshes runsc/sandbox image/scratch prerequisites from this bundle.\n    sudo env AF_BUNDLE_VERSION='"${VERSION}"$' AF_SANDBOX_POOL_SIZE=8G ./deploy/scripts/fleet.sh prepare-sandbox tmp'
   SANDBOX_UP_PREFIX="AF_ENABLE_SANDBOX=1 "
   SANDBOX_FOOTER=""
 else
-  SANDBOX_SCP_LN=""
+  SANDBOX_ARTIFACTS=""
   SANDBOX_PREP_LOCAL=""
   SANDBOX_PREP_TMP=""
   SANDBOX_UP_PREFIX=""
   SANDBOX_FOOTER="  # (sandbox bundle omitted — re-run release with --with-sandbox to ship runsc + sandbox image + verify probes)"
 fi
 if [[ $WITH_ANALYST_TOOLS == 1 ]]; then
-  ANALYST_SCP_LN=$'\n      dist/artifactflow-analyst-tools-'"${ANALYST_SLUG}"$'.tar.gz{,.sha256}           \\'
+  ANALYST_ARTIFACTS=$'\n  #   artifactflow-analyst-tools-'"${ANALYST_SLUG}"$'.tar.gz{,.sha256}'
   ANALYST_RECIPE=$'\n    tar xzf artifactflow-analyst-tools-'"${ANALYST_SLUG}"$'.tar.gz   # → ./analyst-tools/\n    # Offline wheels: install on the machine running observability_report.py.\n    pip install --no-index --find-links analyst-tools/wheels pandas'
   ANALYST_FOOTER=""
 else
-  ANALYST_SCP_LN=""
+  ANALYST_ARTIFACTS=""
   ANALYST_RECIPE=""
   ANALYST_FOOTER="  # (analyst-tools tar omitted — re-run release with --with-analyst-tools to ship offline pandas/numpy wheels)"
 fi
@@ -670,14 +669,19 @@ fi
 cat <<EOF
 To deploy on air-gapped host:
 
+  # Transfer artifacts with your site's approved medium. The target bundle
+  # directory must contain the listed files before running the target-host steps.
+
   # ---- First-time deployment ----
 $INFRA_FOOTER
 $SANDBOX_FOOTER
 $ANALYST_FOOTER
-  scp dist/artifactflow-{app,config,deploy}-${VERSION}.tar.gz{,.sha256}         \\${INFRA_SCP_LN}${SANDBOX_SCP_LN}${ANALYST_SCP_LN}
-      dist/artifactflow-${VERSION}.manifest.txt                                   \\
-      target:/opt/artifactflow/
-  ssh target
+  # Target bundle directory: /opt/artifactflow/
+  # Required files for this build:
+  #   artifactflow-{app,config,deploy}-${VERSION}.tar.gz{,.sha256}${INFRA_ARTIFACTS}${SANDBOX_ARTIFACTS}${ANALYST_ARTIFACTS}
+  #   artifactflow-${VERSION}.manifest.txt
+
+  # On the target host:
     cd /opt/artifactflow
     tar xzf artifactflow-deploy-${VERSION}.tar.gz
     deploy/scripts/verify-bundle.sh .
@@ -692,10 +696,12 @@ ${SANDBOX_PREP_LOCAL}
     ./deploy/scripts/preflight.sh
 
   # ---- Roll-update (no infra, no analyst-tools re-ship) ----
-  scp dist/artifactflow-{app,config,deploy}-${VERSION}.tar.gz{,.sha256} \\
-      dist/artifactflow-${VERSION}.manifest.txt                          \\
-      target:/opt/artifactflow/tmp/
-  ssh target
+  # Target bundle directory: /opt/artifactflow/tmp/
+  # Required files for this build:
+  #   artifactflow-{app,config,deploy}-${VERSION}.tar.gz{,.sha256}${SANDBOX_ARTIFACTS}
+  #   artifactflow-${VERSION}.manifest.txt
+
+  # On the target host:
     cd /opt/artifactflow
     ./deploy/scripts/verify-bundle.sh tmp
     # Self-bootstrap deploy scripts before invoking fleet: older fleet.sh

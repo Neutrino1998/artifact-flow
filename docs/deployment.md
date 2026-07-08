@@ -201,7 +201,7 @@ docker compose -f docker-compose.prod.yml up -d
 ./scripts/release.sh 1.0.0 --with-infra
 # 额外产出：
 #   artifactflow-infra-caddy2.10-pg16-redis7.tar.gz  (~130MB)
-# 文件名按 base image 版本内容寻址 —— 目标机已有同名 tar 就跳过 scp
+# 文件名按 base image 版本内容寻址 —— 目标机已有同名 tar 就可跳过传输
 
 # 首次部署且要启用 bash/mount/persist 沙盒工具 —— 再加 sandbox 宿主前置包
 ./scripts/release.sh 1.0.0 --with-infra --with-sandbox
@@ -227,11 +227,13 @@ docker compose -f docker-compose.prod.yml up -d
 ### 首次部署（在目标内网机器上）
 
 ```bash
-# 1. 传 tar + sha256 + manifest 到目标机
-scp dist/artifactflow-{app,config,deploy}-1.0.0.tar.gz{,.sha256} \
-    dist/artifactflow-infra-caddy2.10-pg16-redis7.tar.gz{,.sha256} \
-    dist/artifactflow-1.0.0.manifest.txt \
-    target:/opt/artifactflow/
+# 1. 用现场批准的介质/流程把发布文件放到 /opt/artifactflow/
+#    必备：
+#      artifactflow-{app,config,deploy}-1.0.0.tar.gz{,.sha256}
+#      artifactflow-1.0.0.manifest.txt
+#    首次部署 / infra 镜像变更时还需要：
+#      artifactflow-infra-caddy2.10-pg16-redis7.tar.gz{,.sha256}
+#    启用 sandbox 时还需要 sandbox image / verify / gVisor 三件套及其 .sha256。
 
 # 2. 先解 deploy/，拿到 fleet/verify 脚本
 cd /opt/artifactflow
@@ -298,7 +300,7 @@ deploy/scripts/fleet.sh rollback             # 回退到上一个成功版本
 新版本到位后，`fleet deploy` 接管校验、解包、加载镜像、起服务和探活；需要维护页窗口时，用 `maintenance.sh on|off` 包住它。
 
 ```bash
-# 在内网机（假设新 tar 已 scp 到 ./tmp/ 下，typically 不含 infra）
+# 在内网机（假设新 release 文件已通过现场介质放到 ./tmp/ 下，typically 不含 infra）
 cd /opt/artifactflow
 
 # 1. 校验（不影响在跑容器，可在维护开始前做）
@@ -385,11 +387,10 @@ AF_BUNDLE_VERSION=1.0.1 ./deploy/scripts/fleet.sh deploy tmp && \
 # 在构建机上重新打包（或手工 tar）
 tar czf artifactflow-config-1.0.1.tar.gz config/
 
-# 推到内网
-scp artifactflow-config-1.0.1.tar.gz target:/opt/artifactflow/
-ssh target 'cd /opt/artifactflow && \
-            tar xzf artifactflow-config-1.0.1.tar.gz && \
-            docker compose -f deploy/docker-compose.intranet.yml restart backend'
+# 通过现场介质放到目标机 /opt/artifactflow/ 后，在目标机执行：
+cd /opt/artifactflow
+tar xzf artifactflow-config-1.0.1.tar.gz
+docker compose -f deploy/docker-compose.intranet.yml restart backend
 ```
 
 > 上面的 `restart backend` 是给 `config/agents/`、`config/models/`、`config/tools/` 用的。如果**只**改了 `config/site/*.json`，不需要任何 docker 命令；其中 `notifications.json` 前端 60s 轮询自己生效，`welcome_tips.json` / `branding.json` 只在挂载时拉一次，需要用户刷新页面才看到。

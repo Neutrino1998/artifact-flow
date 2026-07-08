@@ -598,6 +598,7 @@ cmd_prepare_sandbox() {
   [[ -n "$bundle" ]] || die "usage: fleet.sh prepare-sandbox [--dry-run] <bundle-dir>"
   load_bundle_meta "$bundle"
   (( DRY )) && info "DRY-RUN — sandbox host will not be touched"
+  assert_arch local ""
   prepare_sandbox_single_local 1
 }
 
