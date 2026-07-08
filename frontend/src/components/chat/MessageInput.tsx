@@ -72,6 +72,8 @@ export default function MessageInput() {
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const cancelling = useStreamStore((s) => s.cancelling);
   const setCancelling = useStreamStore((s) => s.setCancelling);
+  const addPendingInject = useStreamStore((s) => s.addPendingInject);
+  const removePendingInject = useStreamStore((s) => s.removePendingInject);
   // QUEUED marker: set on the execution_queued SSE event, cleared on the first
   // agent_start (turn started RUNNING) / endStream / reset. While set, the turn
   // is parked in a worker-local concurrency semaphore and is neither cancellable
@@ -252,7 +254,15 @@ export default function MessageInput() {
       // in-flight turn). The hook owns the empty-guard / lock / clear-on-send.
       const convId = streamConversationId || conversationId;
       if (!convId) return;
-      await inject((text) => injectMessage(convId, text));
+      await inject(async (text) => {
+        const pendingId = addPendingInject(text);
+        try {
+          await injectMessage(convId, text);
+        } catch (err) {
+          removePendingInject(pendingId);
+          throw err;
+        }
+      });
       return;
     }
 
@@ -298,7 +308,7 @@ export default function MessageInput() {
         setUploadProgress(null);
       }
     }, compact || skillsToActivate.length > 0);
-  }, [content, isStreaming, cancelling, setCancelling, conversationId, streamConversationId, inject, submit, sendMessage, forceCompact, effectiveForceCompact, activeSkills]);
+  }, [content, isStreaming, cancelling, setCancelling, conversationId, streamConversationId, inject, submit, sendMessage, forceCompact, effectiveForceCompact, activeSkills, addPendingInject, removePendingInject]);
 
   const handleCompositionStart = useCallback(() => {
     isComposingRef.current = true;

@@ -55,6 +55,7 @@ export function useSSE() {
   const endStream = useStreamStore((s) => s.endStream);
   const pushNonAgentBlock = useStreamStore((s) => s.pushNonAgentBlock);
   const updateNonAgentBlock = useStreamStore((s) => s.updateNonAgentBlock);
+  const confirmPendingInject = useStreamStore((s) => s.confirmPendingInject);
   const setExecutionMetrics = useStreamStore((s) => s.setExecutionMetrics);
   const setCancelled = useStreamStore((s) => s.setCancelled);
   const setReconnecting = useStreamStore((s) => s.setReconnecting);
@@ -423,6 +424,10 @@ export function useSSE() {
         }
 
         case StreamEventType.QUEUED_MESSAGE:
+          // A real engine event means the oldest locally pending inject has
+          // entered model context. The backend queue is FIFO, so no protocol id
+          // is needed for the single-tab optimistic mirror.
+          confirmPendingInject();
           pushNonAgentBlock({
             kind: 'inject',
             id: `inject-${Date.now()}`,
@@ -550,7 +555,7 @@ export function useSSE() {
       setError, endStream, refreshAfterComplete, setArtifactPanelVisible,
       setArtifactSessionId,
       applyArtifactCreated, applyArtifactUpdated,
-      pushNonAgentBlock, updateNonAgentBlock, setExecutionMetrics, setCancelled,
+      pushNonAgentBlock, updateNonAgentBlock, confirmPendingInject, setExecutionMetrics, setCancelled,
       setQueuedInfo,
     ]
   );

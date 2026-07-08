@@ -11,10 +11,11 @@ export default function StreamingMessage() {
   const segments = useStreamStore((s) => s.segments);
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const nonAgentBlocks = useStreamStore((s) => s.nonAgentBlocks);
+  const pendingInjects = useStreamStore((s) => s.pendingInjects);
   const error = useStreamStore((s) => s.error);
   const queuedInfo = useStreamStore((s) => s.queuedInfo);
 
-  const flowItems = interleaveFlowItems(segments, nonAgentBlocks);
+  const flowItems = interleaveFlowItems(segments, [...nonAgentBlocks, ...pendingInjects]);
 
   // Render while queued even though there are no flow items yet — the header
   // alone serves as the "排队中" indicator.
@@ -46,6 +47,9 @@ export default function StreamingMessage() {
         }
         if (item.kind === 'inject') {
           return <InjectFlowBlock key={item.id} content={item.content} />;
+        }
+        if (item.kind === 'pending_inject') {
+          return <InjectFlowBlock key={item.id} content={item.content} pending />;
         }
         if (item.kind === 'compaction') {
           return <CompactionFlowBlock key={item.id} block={item} />;

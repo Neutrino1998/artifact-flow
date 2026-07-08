@@ -6,6 +6,7 @@ import {
   type NonAgentBlock,
   type CompactionBlock,
   type InjectBlock,
+  type PendingInjectBlock,
   type ToolCallInfo,
 } from './streamStore';
 
@@ -25,6 +26,10 @@ function seg(id: string, overrides: Partial<ExecutionSegment> = {}): ExecutionSe
 
 function inject(id: string, position: number): InjectBlock {
   return { kind: 'inject', id, content: 'msg', timestamp: 't', position };
+}
+
+function pendingInject(id: string, position: number): PendingInjectBlock {
+  return { kind: 'pending_inject', id, content: 'pending', timestamp: 't', position };
 }
 
 function compaction(id: string, position: number, state: 'running' | 'done' | 'error' = 'done'): CompactionBlock {
@@ -77,6 +82,12 @@ describe('interleaveFlowItems', () => {
     expect(kinds.filter(k => k === 'compaction')).toHaveLength(1);
     expect(kinds.filter(k => k === 'agent')).toHaveLength(1);
   });
+
+  test('pending inject blocks interleave with the live flow but remain distinguishable', () => {
+    const out = interleaveFlowItems([seg('s1')], [pendingInject('p1', 1)]);
+    expect(out[0].kind).toBe('agent');
+    expect(out[1].kind).toBe('pending_inject');
+  });
 });
 
 describe('streamStore actions', () => {
@@ -88,8 +99,57 @@ describe('streamStore actions', () => {
     useStreamStore.setState({
       segments: [],
       nonAgentBlocks: [],
+      pendingInjects: [],
       completedSegments: new Map(),
       completedNonAgentBlocks: new Map(),
+    });
+  });
+
+  describe('pending injects', () => {
+    test('addPendingInject snapshots content at the current flow tail', () => {
+      useStreamStore.setState({ segments: [seg('s1'), seg('s2')] });
+
+      const id = useStreamStore.getState().addPendingInject('please adjust');
+
+      const pending = useStreamStore.getState().pendingInjects;
+      expect(pending).toHaveLength(1);
+      expect(pending[0]).toMatchObject({
+        kind: 'pending_inject',
+        id,
+        content: 'please adjust',
+        position: 2,
+      });
+    });
+
+    test('confirmPendingInject clears the oldest pending inject', () => {
+      const first = useStreamStore.getState().addPendingInject('first');
+      const second = useStreamStore.getState().addPendingInject('second');
+
+      useStreamStore.getState().confirmPendingInject();
+
+      expect(useStreamStore.getState().pendingInjects.map((p) => p.id)).toEqual([second]);
+      expect(useStreamStore.getState().pendingInjects.some((p) => p.id === first)).toBe(false);
+    });
+
+    test('removePendingInject clears a failed POST without touching later pending injects', () => {
+      const failed = useStreamStore.getState().addPendingInject('failed');
+      const later = useStreamStore.getState().addPendingInject('later');
+
+      useStreamStore.getState().removePendingInject(failed);
+
+      expect(useStreamStore.getState().pendingInjects.map((p) => p.id)).toEqual([later]);
+    });
+
+    test('snapshotSegments does not persist local-only pending injects', () => {
+      useStreamStore.setState({
+        segments: [seg('s1', { reasoningContent: 'r' })],
+      });
+      useStreamStore.getState().addPendingInject('not persisted yet');
+
+      useStreamStore.getState().snapshotSegments('msg-pending');
+
+      const blockSnap = useStreamStore.getState().completedNonAgentBlocks.get('msg-pending');
+      expect(blockSnap).toBeUndefined();
     });
   });
 
