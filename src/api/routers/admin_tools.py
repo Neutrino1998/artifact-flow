@@ -44,6 +44,8 @@ from core.tool_registry_manager import (
     ToolRegistryManager,
     test_saved_mcp_unit_connection,
 )
+from tools.custom.seed_bundle import MAX_SEED_UPLOAD_BYTES
+from utils.logger import get_logger
 
 # 凭证占位符路径参数上限 = ToolCredential.placeholder_name 列宽。在边界挡超长值,
 # 否则 >128 字符落到 asyncpg 触发 StringDataRightTruncation(DataError)→ 漏出 500;
@@ -51,6 +53,7 @@ from core.tool_registry_manager import (
 _PLACEHOLDER_MAX = 128
 
 router = APIRouter()
+logger = get_logger("ArtifactFlow")
 
 
 def _map(e: ToolRegistryError) -> HTTPException:
@@ -83,7 +86,16 @@ async def import_unit_seed(
     _admin: TokenPayload = Depends(require_admin),
     mgr: ToolRegistryManager = Depends(get_tool_registry_manager),
 ):
+    max_mb = MAX_SEED_UPLOAD_BYTES / 1024 / 1024
+    if file.size is not None and file.size > MAX_SEED_UPLOAD_BYTES:
+        detail = f"Seed bundle too large: {file.size / 1024 / 1024:.1f}MB (max {max_mb:.0f}MB)"
+        logger.warning("Tool seed import rejected (400) for %r: %s", file.filename, detail)
+        raise HTTPException(status_code=400, detail=detail)
     blob = await file.read()
+    if len(blob) > MAX_SEED_UPLOAD_BYTES:
+        detail = f"Seed bundle too large: {len(blob) / 1024 / 1024:.1f}MB (max {max_mb:.0f}MB)"
+        logger.warning("Tool seed import rejected (400) for %r: %s", file.filename, detail)
+        raise HTTPException(status_code=400, detail=detail)
     try:
         unit = await mgr.import_seed_bundle(blob, file.filename or "")
     except ToolRegistryError as e:

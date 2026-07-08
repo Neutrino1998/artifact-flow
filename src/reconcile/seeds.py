@@ -316,11 +316,15 @@ def _parse_mcp_server(path: str) -> ToolUnitSeed:
     unit_name = frontmatter.get("name")
     _validate_unit_name(unit_name, path)
 
-    kind = frontmatter.get("type", "mcp")
+    kind = frontmatter.get("type")
+    if kind is None:
+        raise SeedError(f"{path}: MCP server missing 'type: mcp'")
     if kind != "mcp":
         raise SeedError(f"{path}: unsupported MCP seed type '{kind}'")
 
-    transport = frontmatter.get("transport", "streamable_http")
+    transport = frontmatter.get("transport")
+    if transport is None:
+        raise SeedError(f"{path}: MCP server missing 'transport'")
     if transport != "streamable_http":
         raise SeedError(
             f"{path}: unsupported MCP transport '{transport}' "
@@ -335,7 +339,9 @@ def _parse_mcp_server(path: str) -> ToolUnitSeed:
         raise SeedError(f"{path}: MCP 'headers' must be a mapping")
     timeout = _read_timeout(frontmatter, path)
 
-    default_permission = frontmatter.get("default_permission", "confirm")
+    default_permission = frontmatter.get("default_permission")
+    if default_permission is None:
+        raise SeedError(f"{path}: MCP server missing 'default_permission'")
     if default_permission not in _VALID_PERMISSIONS:
         raise SeedError(
             f"{path}: invalid default_permission '{default_permission}' "

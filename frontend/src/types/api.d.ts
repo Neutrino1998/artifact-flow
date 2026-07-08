@@ -2603,14 +2603,10 @@ export interface components {
         McpProviderConfigSpec: {
             /**
              * Transport
-             * @default streamable_http
              * @constant
              */
             transport: "streamable_http";
-            /**
-             * Url
-             * @default
-             */
+            /** Url */
             url: string;
             /** Headers */
             headers: {
@@ -2623,7 +2619,6 @@ export interface components {
             timeout: number;
             /**
              * Default Permission
-             * @default confirm
              * @enum {string}
              */
             default_permission: "auto" | "confirm";

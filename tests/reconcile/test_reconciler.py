@@ -49,6 +49,7 @@ def _mcp_server_md(name="inventory", desc="Inventory MCP"):
         "---\n"
         f"name: {name}\n"
         f'description: "{desc}"\n'
+        "type: mcp\n"
         "transport: streamable_http\n"
         f'url: "https://mcp.example.com/{name}"\n'
         "headers:\n"
@@ -417,6 +418,30 @@ async def test_mcp_server_seed(db_session, cfg, tmp_path):
         select(ToolMember).where(ToolMember.unit_name == "inventory")
     )).scalars().all()
     assert members == []
+
+
+async def test_mcp_seed_requires_type(db_session, cfg, tmp_path):
+    mcp = tmp_path / "mcp"
+    _write(mcp / "inventory.md", _mcp_server_md().replace("type: mcp\n", ""))
+
+    with pytest.raises(SeedError, match="type: mcp"):
+        await _run_with_mcp(db_session, cfg, mcp)
+
+
+async def test_mcp_seed_requires_transport(db_session, cfg, tmp_path):
+    mcp = tmp_path / "mcp"
+    _write(mcp / "inventory.md", _mcp_server_md().replace("transport: streamable_http\n", ""))
+
+    with pytest.raises(SeedError, match="transport"):
+        await _run_with_mcp(db_session, cfg, mcp)
+
+
+async def test_mcp_seed_requires_default_permission(db_session, cfg, tmp_path):
+    mcp = tmp_path / "mcp"
+    _write(mcp / "inventory.md", _mcp_server_md().replace("default_permission: confirm\n", ""))
+
+    with pytest.raises(SeedError, match="default_permission"):
+        await _run_with_mcp(db_session, cfg, mcp)
 
 
 async def test_agent_references_mcp_unit(db_session, cfg, tmp_path):

@@ -15,6 +15,7 @@ from api.dependencies import get_mcp_client_manager
 from config import config
 from core.tool_registry_manager import ToolRegistryManager
 from db.models import Agent, AgentUnit, ToolMember, ToolUnit
+from tools.custom.seed_bundle import MAX_SEED_UPLOAD_BYTES
 from tools.custom.mcp_client import McpListResult, McpToolDefinition
 
 pytestmark = pytest.mark.asyncio
@@ -473,6 +474,31 @@ class TestSeedImportExport:
     def key(self, monkeypatch):
         monkeypatch.setattr(config, "CREDENTIAL_KEY", Fernet.generate_key().decode())
 
+    @staticmethod
+    def _zip_with(entries):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for name, data in entries.items():
+                zf.writestr(name, data)
+        return buf.getvalue()
+
+    @staticmethod
+    def _corrupt_member_zip():
+        data = bytearray(TestSeedImportExport._zip_with({
+            "tools/weather.md": b"""---
+name: weather
+type: http
+endpoint: https://api.example.com/weather
+---
+""",
+        }))
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            info = zf.getinfo("tools/weather.md")
+            name_len = len(info.filename.encode("utf-8"))
+            data_offset = info.header_offset + 30 + name_len + len(info.extra)
+            data[data_offset] ^= 0xFF
+        return bytes(data)
+
     async def test_export_dynamic_seed_bundle_masks_credentials(
         self, admin_client: AsyncClient, key
     ):
@@ -532,6 +558,7 @@ class TestSeedImportExport:
 name: reports_mcp
 description: Reports MCP
 type: mcp
+transport: streamable_http
 url: https://mcp.example.com/mcp
 headers:
   Authorization: Bearer {{TOOL_SECRET_MCP_TOKEN}}
@@ -552,6 +579,58 @@ default_permission: auto
         assert {c["placeholder"] for c in unit["credentials"]} == {
             "TOOL_SECRET_MCP_TOKEN"
         }
+
+    async def test_import_single_markdown_seed_requires_type(self, admin_client: AsyncClient):
+        md = b"""---
+name: reports_mcp
+url: https://mcp.example.com/mcp
+transport: streamable_http
+default_permission: confirm
+---
+"""
+
+        resp = await admin_client.post(
+            "/api/v1/admin/tools/units/import",
+            files={"file": ("reports_mcp.md", md, "text/markdown")},
+        )
+
+        assert resp.status_code == 400
+        assert "type" in resp.json()["detail"]
+
+    async def test_import_corrupt_zip_member_returns_400(self, admin_client: AsyncClient):
+        resp = await admin_client.post(
+            "/api/v1/admin/tools/units/import",
+            files={"file": ("broken.zip", self._corrupt_member_zip(), "application/zip")},
+        )
+
+        assert resp.status_code == 400
+        assert "extract" in resp.json()["detail"]
+
+    async def test_import_non_utf8_markdown_in_zip_returns_400(self, admin_client: AsyncClient):
+        blob = self._zip_with({"tools/weather.md": b"\xff\xfe\x00"})
+
+        resp = await admin_client.post(
+            "/api/v1/admin/tools/units/import",
+            files={"file": ("bad-encoding.zip", blob, "application/zip")},
+        )
+
+        assert resp.status_code == 400
+        assert "UTF-8" in resp.json()["detail"]
+
+    async def test_import_rejects_oversize_before_parse(self, admin_client: AsyncClient):
+        resp = await admin_client.post(
+            "/api/v1/admin/tools/units/import",
+            files={
+                "file": (
+                    "huge.md",
+                    b"x" * (MAX_SEED_UPLOAD_BYTES + 1),
+                    "text/markdown",
+                )
+            },
+        )
+
+        assert resp.status_code == 400
+        assert "too large" in resp.json()["detail"]
 
     async def test_import_rejects_multiple_units(self, admin_client: AsyncClient):
         buf = io.BytesIO()

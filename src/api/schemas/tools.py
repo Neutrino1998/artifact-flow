@@ -40,11 +40,11 @@ class ArtifactOutputSpec(BaseModel):
 
 
 class McpProviderConfigSpec(BaseModel):
-    transport: Literal["streamable_http"] = "streamable_http"
-    url: str = ""
+    transport: Literal["streamable_http"]
+    url: str
     headers: Dict[str, str] = Field(default_factory=dict)
     timeout: int = Field(60, ge=1, le=600)
-    default_permission: Literal["auto", "confirm"] = "confirm"
+    default_permission: Literal["auto", "confirm"]
 
 
 class ToolMemberSpec(BaseModel):

@@ -5909,13 +5909,11 @@
           "transport": {
             "type": "string",
             "const": "streamable_http",
-            "title": "Transport",
-            "default": "streamable_http"
+            "title": "Transport"
           },
           "url": {
             "type": "string",
-            "title": "Url",
-            "default": ""
+            "title": "Url"
           },
           "headers": {
             "additionalProperties": {
@@ -5937,19 +5935,18 @@
               "auto",
               "confirm"
             ],
-            "title": "Default Permission",
-            "default": "confirm"
+            "title": "Default Permission"
           }
         },
         "type": "object",
-        "title": "McpProviderConfigSpec",
         "required": [
           "transport",
           "url",
           "headers",
           "timeout",
           "default_permission"
-        ]
+        ],
+        "title": "McpProviderConfigSpec"
       },
       "MessageResponse": {
         "properties": {

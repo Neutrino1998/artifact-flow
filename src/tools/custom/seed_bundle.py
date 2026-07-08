@@ -14,6 +14,7 @@ import re
 import shutil
 import tempfile
 import zipfile
+import zlib
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List
 
@@ -104,12 +105,17 @@ def parse_uploaded_seed_bundle(blob: bytes, filename: str) -> ToolUnitSeed:
     lower = filename.lower()
     with tempfile.TemporaryDirectory(prefix="artifactflow-tool-seed-") as tmp:
         root = Path(tmp)
-        if lower.endswith(".md"):
-            _stage_single_md(root, filename or "tool.md", blob)
-        else:
-            _extract_seed_zip(root, blob)
+        try:
+            if lower.endswith(".md"):
+                _stage_single_md(root, filename or "tool.md", blob)
+            else:
+                _extract_seed_zip(root, blob)
 
-        seeds = _parse_staged_seeds(root)
+            seeds = _parse_staged_seeds(root)
+        except UnicodeDecodeError as e:
+            raise ToolSeedBundleError("seed Markdown files must be UTF-8") from e
+        except OSError as e:
+            raise ToolSeedBundleError(f"failed to read seed bundle: {e}") from e
     if len(seeds) != 1:
         raise ToolSeedBundleError(
             f"seed upload must contain exactly one tool unit; found {len(seeds)}"
@@ -129,11 +135,11 @@ def seed_to_create_spec(seed: ToolUnitSeed) -> Dict[str, Any]:
             "defer": seed.defer,
             "members": [],
             "provider_config": {
-                "transport": cfg.get("transport", "streamable_http"),
-                "url": cfg.get("url", ""),
+                "transport": cfg["transport"],
+                "url": cfg["url"],
                 "headers": cfg.get("headers", {}) or {},
                 "timeout": cfg.get("timeout", 60),
-                "default_permission": cfg.get("default_permission", "confirm"),
+                "default_permission": cfg["default_permission"],
             },
         }
 
@@ -251,7 +257,12 @@ def _stage_single_md(root: Path, filename: str, blob: bytes) -> None:
     except FrontmatterError as e:
         raise ToolSeedBundleError(str(e)) from e
 
-    target_dir = root / ("mcp" if frontmatter.get("type") == "mcp" else "tools")
+    tool_type = frontmatter.get("type")
+    if tool_type not in {"http", "mcp"}:
+        raise ToolSeedBundleError(
+            "single-file seed upload must explicitly declare type: http or type: mcp"
+        )
+    target_dir = root / ("mcp" if tool_type == "mcp" else "tools")
     target_dir.mkdir(parents=True, exist_ok=True)
     (target_dir / "upload.md").write_bytes(blob)
 
@@ -262,20 +273,26 @@ def _extract_seed_zip(root: Path, blob: bytes) -> None:
     except zipfile.BadZipFile as e:
         raise ToolSeedBundleError("seed upload must be a .zip bundle or a .md seed file") from e
 
-    infos = [info for info in zf.infolist() if not info.is_dir()]
-    if len(infos) > MAX_SEED_ZIP_FILES:
-        raise ToolSeedBundleError(f"seed bundle contains too many files (max {MAX_SEED_ZIP_FILES})")
-    for info in infos:
-        if info.file_size > MAX_SEED_FILE_BYTES:
-            raise ToolSeedBundleError(
-                f"seed bundle file '{info.filename}' is too large "
-                f"(max {MAX_SEED_FILE_BYTES // 1024}KB)"
-            )
-        rel = _safe_zip_member(info.filename)
-        target = root / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with zf.open(info) as src, open(target, "wb") as dst:
-            shutil.copyfileobj(src, dst, length=64 * 1024)
+    with zf:
+        infos = [info for info in zf.infolist() if not info.is_dir()]
+        if len(infos) > MAX_SEED_ZIP_FILES:
+            raise ToolSeedBundleError(f"seed bundle contains too many files (max {MAX_SEED_ZIP_FILES})")
+        for info in infos:
+            if info.file_size > MAX_SEED_FILE_BYTES:
+                raise ToolSeedBundleError(
+                    f"seed bundle file '{info.filename}' is too large "
+                    f"(max {MAX_SEED_FILE_BYTES // 1024}KB)"
+                )
+            rel = _safe_zip_member(info.filename)
+            target = root / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                with zf.open(info) as src, open(target, "wb") as dst:
+                    shutil.copyfileobj(src, dst, length=64 * 1024)
+            except (zipfile.BadZipFile, zlib.error, RuntimeError, OSError) as e:
+                raise ToolSeedBundleError(
+                    f"failed to extract seed bundle file '{info.filename}'"
+                ) from e
 
 
 def _safe_zip_member(filename: str) -> PurePosixPath:

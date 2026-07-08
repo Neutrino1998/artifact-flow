@@ -372,10 +372,14 @@ class ToolRegistryManager:
             cfg = dict(raw)
         else:
             raise InvalidUnitError("MCP provider_config must be an object")
-        transport = cfg.get("transport", "streamable_http")
+        if "transport" not in cfg:
+            raise InvalidUnitError("MCP transport is required")
+        transport = cfg.get("transport")
         if transport != "streamable_http":
             raise InvalidUnitError("MCP transport must be streamable_http")
 
+        if "url" not in cfg:
+            raise InvalidUnitError("MCP server URL is required")
         url = (cfg.get("url") or "").strip()
         if not url:
             raise InvalidUnitError("MCP server URL is required")
@@ -388,7 +392,9 @@ class ToolRegistryManager:
         if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout < 1 or timeout > 600:
             raise InvalidUnitError("MCP timeout must be an integer between 1 and 600")
 
-        default_permission = cfg.get("default_permission", "confirm")
+        if "default_permission" not in cfg:
+            raise InvalidUnitError("MCP default_permission is required")
+        default_permission = cfg.get("default_permission")
         if default_permission not in _VALID_PERMISSIONS:
             raise InvalidUnitError("MCP default_permission must be auto|confirm")
 

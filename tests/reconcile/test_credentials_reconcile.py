@@ -41,6 +41,7 @@ def _mcp_with_secret_md(name="inventory", host_ph="TOOL_SECRET_MCP_HOST",
         "---\n"
         f"name: {name}\n"
         'description: "Inventory MCP"\n'
+        "type: mcp\n"
         "transport: streamable_http\n"
         f'url: "https://{{{{{host_ph}}}}}/mcp"\n'
         "headers:\n"
