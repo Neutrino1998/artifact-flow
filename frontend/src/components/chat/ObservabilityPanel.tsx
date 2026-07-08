@@ -1129,6 +1129,11 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
     detail != null && detail.has_blob && versionContentReady && !isViewingCurrent;
   const showingRichPreview =
     detail != null && versionContentReady && shouldUseAdminArtifactPreview(detail) && !viewingHistoricalBlob;
+  const contentClassName = showingRichPreview
+    ? detail?.content_type === 'text/markdown'
+      ? 'flex-1 min-h-0 overflow-y-auto'
+      : 'flex-1 min-h-0 overflow-hidden'
+    : 'flex-1 min-h-0 overflow-y-auto px-4 py-3';
 
   return (
     <div className="flex-1 flex min-h-0">
@@ -1218,7 +1223,7 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
             </div>
 
             {/* Content */}
-            <div className={showingRichPreview ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 overflow-y-auto px-4 py-3'}>
+            <div className={contentClassName}>
               {versionContentReady ? (
                 viewingHistoricalBlob ? (
                   <div className="flex h-full items-center justify-center text-center text-xs text-text-tertiary dark:text-text-tertiary-dark">
