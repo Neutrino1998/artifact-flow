@@ -580,7 +580,25 @@ default_permission: auto
             "TOOL_SECRET_MCP_TOKEN"
         }
 
-    async def test_import_single_markdown_seed_requires_type(self, admin_client: AsyncClient):
+    async def test_import_single_http_markdown_seed_defaults_type(self, admin_client: AsyncClient):
+        md = b"""---
+name: weather_md
+endpoint: https://api.example.com/weather
+---
+"""
+
+        resp = await admin_client.post(
+            "/api/v1/admin/tools/units/import",
+            files={"file": ("weather_md.md", md, "text/markdown")},
+        )
+
+        assert resp.status_code == 201, resp.text
+        unit = resp.json()["unit"]
+        assert unit["name"] == "weather_md"
+        assert unit["kind"] == "tool"
+        assert unit["members"][0]["definition"]["endpoint"] == "https://api.example.com/weather"
+
+    async def test_import_single_mcp_like_markdown_seed_requires_type(self, admin_client: AsyncClient):
         md = b"""---
 name: reports_mcp
 url: https://mcp.example.com/mcp

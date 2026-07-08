@@ -258,13 +258,23 @@ def _stage_single_md(root: Path, filename: str, blob: bytes) -> None:
         raise ToolSeedBundleError(str(e)) from e
 
     tool_type = frontmatter.get("type")
+    if tool_type is None:
+        if _looks_like_mcp_seed(frontmatter):
+            raise ToolSeedBundleError(
+                "single-file MCP seed upload must explicitly declare type: mcp"
+            )
+        tool_type = "http"
     if tool_type not in {"http", "mcp"}:
         raise ToolSeedBundleError(
-            "single-file seed upload must explicitly declare type: http or type: mcp"
+            "single-file seed upload type must be http or mcp"
         )
     target_dir = root / ("mcp" if tool_type == "mcp" else "tools")
     target_dir.mkdir(parents=True, exist_ok=True)
     (target_dir / "upload.md").write_bytes(blob)
+
+
+def _looks_like_mcp_seed(frontmatter: Dict[str, Any]) -> bool:
+    return any(key in frontmatter for key in ("url", "transport", "default_permission"))
 
 
 def _extract_seed_zip(root: Path, blob: bytes) -> None:
