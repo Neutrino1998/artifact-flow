@@ -51,6 +51,8 @@ import type {
   AdminSkillListResponse,
   AdminSkillUpdateRequest,
   AdminSkillItem,
+  SiteNotificationsResponse,
+  UpdateSiteNotificationsRequest,
 } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
 import { API_URL } from './apiBase';
@@ -881,6 +883,18 @@ export function deleteDepartmentUnitRule(deptId: string, unitName: string) {
     `/api/v1/admin/department-access/${encodeURIComponent(deptId)}/units/${encodeURIComponent(unitName)}`,
     { method: 'DELETE' },
   );
+}
+
+// Runtime Site Config (Admin)
+export function getSiteNotifications() {
+  return request<SiteNotificationsResponse>('/api/v1/admin/site/notifications');
+}
+
+export function updateSiteNotifications(body: UpdateSiteNotificationsRequest) {
+  return request<SiteNotificationsResponse>('/api/v1/admin/site/notifications', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
 }
 
 // Tool Registry (Admin) — B-4 工具 unit 管理。

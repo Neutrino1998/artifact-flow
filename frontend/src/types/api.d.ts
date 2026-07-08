@@ -1048,6 +1048,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/site/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Site Notifications */
+        get: operations["get_site_notifications_api_v1_admin_site_notifications_get"];
+        /** Update Site Notifications */
+        put: operations["update_site_notifications_api_v1_admin_site_notifications_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/departments": {
         parameters: {
             query?: never;
@@ -2688,6 +2706,36 @@ export interface components {
              */
             value: string;
         };
+        /** SiteNotification */
+        SiteNotification: {
+            /** Id */
+            id: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "info" | "warn" | "critical";
+            /** Title */
+            title: string;
+            /** Body */
+            body: string;
+            /** Starts At */
+            starts_at: string | null;
+            /** Ends At */
+            ends_at: string | null;
+            /**
+             * Dismissible
+             * @default true
+             */
+            dismissible: boolean;
+        };
+        /** SiteNotificationsResponse */
+        SiteNotificationsResponse: {
+            /** Notifications */
+            notifications: components["schemas"]["SiteNotification"][];
+            /** Revision */
+            revision: string;
+        };
         /**
          * SkillImportResponse
          * @description POST /api/v1/skills/import(+ admin 变体)成功响应。硬门拒收走 422,
@@ -2947,6 +2995,13 @@ export interface components {
              * @description Display name; pass empty string to clear
              */
             display_name?: string | null;
+        };
+        /** UpdateSiteNotificationsRequest */
+        UpdateSiteNotificationsRequest: {
+            /** Notifications */
+            notifications?: components["schemas"]["SiteNotification"][];
+            /** Expected Revision */
+            expected_revision?: string | null;
         };
         /**
          * UpdateToolUnitRequest
@@ -4953,6 +5008,59 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_site_notifications_api_v1_admin_site_notifications_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteNotificationsResponse"];
+                };
+            };
+        };
+    };
+    update_site_notifications_api_v1_admin_site_notifications_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSiteNotificationsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteNotificationsResponse"];
+                };
             };
             /** @description Validation Error */
             422: {

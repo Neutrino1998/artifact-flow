@@ -88,6 +88,11 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
     setActiveMode('instances');
   };
 
+  const handleNotificationConfig = () => {
+    setPopoverOpen(false);
+    setActiveMode('notificationConfig');
+  };
+
   const handleChangePassword = () => {
     setPopoverOpen(false);
     setChangePasswordOpen(true);
@@ -272,6 +277,20 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
                   <circle cx="4.5" cy="11.5" r="0.6" fill="currentColor" stroke="none" />
                 </svg>
                 实例监控
+              </button>
+            )}
+
+            {/* Admin: site notifications */}
+            {isAdmin && (
+              <button
+                onClick={handleNotificationConfig}
+                className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M8 2v1M4 6a4 4 0 0 1 8 0v3l1.5 2H2.5L4 9V6z" />
+                  <path d="M6.5 13a1.5 1.5 0 0 0 3 0" />
+                </svg>
+                通知管理
               </button>
             )}
 

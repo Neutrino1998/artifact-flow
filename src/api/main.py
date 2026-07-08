@@ -28,6 +28,7 @@ from api.middleware import RequestContextMiddleware
 from api.routers import (
     admin,
     admin_department_access,
+    admin_site_config,
     admin_skills,
     admin_tools,
     admin_users,
@@ -395,6 +396,11 @@ def create_app() -> FastAPI:
     )
     app.include_router(
         admin_department_access.router,
+        prefix="/api/v1/admin",
+        tags=["admin"]
+    )
+    app.include_router(
+        admin_site_config.router,
         prefix="/api/v1/admin",
         tags=["admin"]
     )

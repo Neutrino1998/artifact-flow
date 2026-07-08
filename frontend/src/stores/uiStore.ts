@@ -37,7 +37,8 @@ export type ActiveMode =
   | 'toolUnit'
   | 'departmentAccess'
   | 'observability'
-  | 'instances';
+  | 'instances'
+  | 'notificationConfig';
 
 // 哪些 mode 接管/影响**右面板**(master-detail 重定向 or 全屏隐藏)。
 // conversationBrowser 只接管中间面板 → 进出它不算右面板意图变更,不 bump epoch。
@@ -47,6 +48,7 @@ const RIGHT_PANEL_MODES: ReadonlySet<ActiveMode> = new Set([
   'departmentAccess',
   'observability',
   'instances',
+  'notificationConfig',
 ]);
 
 interface UIState {

@@ -124,6 +124,14 @@ export type StorageUsageResponse = S['StorageUsageResponse'];
 export type ClientConfigResponse = S['ClientConfigResponse'];
 
 // ============================================================
+// Runtime Site Config Types (Admin)
+// ============================================================
+
+export type SiteNotification = S['SiteNotification'];
+export type SiteNotificationsResponse = S['SiteNotificationsResponse'];
+export type UpdateSiteNotificationsRequest = S['UpdateSiteNotificationsRequest'];
+
+// ============================================================
 // Artifact Types
 // ============================================================
 

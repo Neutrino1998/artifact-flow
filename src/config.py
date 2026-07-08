@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     CORS_ALLOW_METHODS: List[str] = ["*"]
     CORS_ALLOW_HEADERS: List[str] = ["*"]
 
+    # Runtime site config (notifications / welcome tips / branding). The
+    # frontend serves the same host directory as static /site/*.json files; the
+    # admin API writes through this path so notices can be managed from the UI
+    # without moving low-frequency site config into the database.
+    SITE_CONFIG_DIR: str = "config/site"
+
     # SSE 配置
     SSE_PING_INTERVAL: int = 15  # 秒，保持连接活跃
     EXECUTION_TIMEOUT: int = 1800   # 秒，引擎循环执行上限（含 permission 等待）；超时 → TIMED_OUT 终态

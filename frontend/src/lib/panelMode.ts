@@ -10,7 +10,8 @@ export function artifactVisibilityOverride(
   if (
     activeMode === 'departmentAccess' ||
     activeMode === 'observability' ||
-    activeMode === 'instances'
+    activeMode === 'instances' ||
+    activeMode === 'notificationConfig'
   ) {
     return false;
   }

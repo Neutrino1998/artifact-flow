@@ -19,6 +19,7 @@ import ToolUnitManagementPanel from './ToolUnitManagementPanel';
 import DepartmentAccessPanel from './DepartmentAccessPanel';
 import ObservabilityPanel from './ObservabilityPanel';
 import InstancePanel from './InstancePanel';
+import NotificationConfigPanel from './NotificationConfigPanel';
 import { useAuthStore } from '@/stores/authStore';
 
 function getGreeting(): string {
@@ -70,6 +71,10 @@ export default function ChatPanel() {
 
   if (activeMode === 'instances' && isAdmin) {
     return <InstancePanel />;
+  }
+
+  if (activeMode === 'notificationConfig' && isAdmin) {
+    return <NotificationConfigPanel />;
   }
 
   if (activeMode === 'userManagement' && isAdmin) {

@@ -13,11 +13,13 @@ services:
     volumes:
       - artifactflow_data:/app/data
       - ./config:/app/config:ro
+      - ./config/site:/app/site-config:rw
       - /etc/localtime:/etc/localtime:ro
     env_file:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
+      - ARTIFACTFLOW_SITE_CONFIG_DIR=/app/site-config
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
       interval: 30s

@@ -361,14 +361,14 @@ docker load -i tmp/artifactflow-app-1.0.1.tar.gz
 | `config/agents/*.md`（agent prompt） | 直接编辑宿主机文件 | `docker compose -f deploy/docker-compose.intranet.yml restart backend` |
 | `config/models/models.yaml`（模型 / base_url） | 直接编辑宿主机文件 | 同上 — `restart backend` |
 | `config/tools/*.md`（自定义工具） | 直接编辑宿主机文件 | 同上 — `restart backend` |
-| `config/site/notifications.json`（左栏通知） | 直接编辑宿主机文件，schema 见 `config/site/README.md` | **无需 restart** — 挂载在 frontend 容器，前端 60s 轮询自动重拉（标签回前台时立即重拉） |
+| `config/site/notifications.json`（左栏通知） | 管理员菜单「通知管理」或直接编辑宿主机文件，schema 见 `config/site/README.md` | **无需 restart** — backend 只写 `config/site` 挂载目录，frontend 只读服务同一目录；前端 60s 轮询自动重拉（标签回前台时立即重拉） |
 | `config/site/welcome_tips.json` / `branding.json`（欢迎页提示 / 版权页脚） | 直接编辑宿主机文件；`branding.json` 首次启用需 `cp branding.example.json branding.json` 再填值（仓库 `.gitignore` 排除真实文件） | **无需 restart**，但**只在挂载时拉一次、不轮询**——改完需用户刷新页面才看到。文件缺失 / schema 错位 → 对应 UI 自动隐藏或回落默认（fail-closed）。 |
 | `deploy/.env`（任何 `ARTIFACTFLOW_*` 变量） | 直接编辑 | **`up -d backend`**（restart 不会重读 .env，up 会检测 env 变化重建容器） |
 | `deploy/caddy/`（Caddyfile.intranet / common.caddy） | 直接编辑（或 tar 覆盖） | `docker compose -f deploy/docker-compose.intranet.yml exec caddy caddy reload --config /etc/caddy/conf/Caddyfile.intranet --adapter caddyfile`（零停机；`restart caddy` 也行） |
 | `deploy/certs/`（换证书） | 覆盖 `server.crt` / `server.key` | 同上 — `caddy reload` |
 | `deploy/docker-compose.intranet.yml`（端口、profile 等） | 直接编辑 | `up -d` |
 
-> **关键区别：** 改 `config/*` 用 `restart backend`（让进程重读文件），改 `.env` 用 `up -d`（让 compose 重建容器注入环境变量）。`config/site/` 是例外：挂在 frontend 容器，无需重启；其中 `notifications.json` 前端轮询自动重拉，`welcome_tips.json` / `branding.json` 只在页面加载时读取，运维改完需用户刷新。
+> **关键区别：** 改 `config/*` 用 `restart backend`（让进程重读文件），改 `.env` 用 `up -d`（让 compose 重建容器注入环境变量）。`config/site/` 是例外：同一个宿主目录只读挂在 frontend、可写挂在 backend 的通知管理入口，无需重启；其中 `notifications.json` 前端轮询自动重拉，`welcome_tips.json` / `branding.json` 只在页面加载时读取，运维改完需用户刷新。
 
 ### 仅推送 config 更新（不动镜像）
 

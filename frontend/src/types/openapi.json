@@ -2862,6 +2862,76 @@
         }
       }
     },
+    "/api/v1/admin/site/notifications": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Site Notifications",
+        "operationId": "get_site_notifications_api_v1_admin_site_notifications_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiteNotificationsResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update Site Notifications",
+        "operationId": "update_site_notifications_api_v1_admin_site_notifications_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSiteNotificationsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiteNotificationsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/departments": {
       "get": {
         "tags": [
@@ -5964,6 +6034,98 @@
         "title": "SetCredentialRequest",
         "description": "PUT /api/v1/admin/tools/units/{name}/credentials/{placeholder} \u2014\u2014 \u5199-only\u3002"
       },
+      "SiteNotification": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "info",
+              "warn",
+              "critical"
+            ],
+            "title": "Severity"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Body"
+          },
+          "starts_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starts At"
+          },
+          "ends_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ends At"
+          },
+          "dismissible": {
+            "type": "boolean",
+            "title": "Dismissible",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "severity",
+          "title",
+          "body",
+          "starts_at",
+          "ends_at",
+          "dismissible"
+        ],
+        "title": "SiteNotification"
+      },
+      "SiteNotificationsResponse": {
+        "properties": {
+          "notifications": {
+            "items": {
+              "$ref": "#/components/schemas/SiteNotification"
+            },
+            "type": "array",
+            "title": "Notifications"
+          },
+          "revision": {
+            "type": "string",
+            "title": "Revision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "notifications",
+          "revision"
+        ],
+        "title": "SiteNotificationsResponse"
+      },
       "SkillImportResponse": {
         "properties": {
           "status": {
@@ -6453,6 +6615,32 @@
         "type": "object",
         "title": "UpdateMyProfileRequest",
         "description": "PATCH /api/v1/auth/me request body \u2014 \u81ea\u52a9\u4fee\u6539\u81ea\u5df1\u7684\u975e\u654f\u611f\u8d44\u6599\u5b57\u6bb5"
+      },
+      "UpdateSiteNotificationsRequest": {
+        "properties": {
+          "notifications": {
+            "items": {
+              "$ref": "#/components/schemas/SiteNotification"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Notifications"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Revision"
+          }
+        },
+        "type": "object",
+        "title": "UpdateSiteNotificationsRequest"
       },
       "UpdateToolUnitRequest": {
         "properties": {

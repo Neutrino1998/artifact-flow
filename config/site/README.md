@@ -12,10 +12,10 @@
 
 | 环境 | 物理路径 | 由谁服务 |
 |---|---|---|
-| Docker（任一 compose 文件） | host `config/site/*.json` → 容器 `/app/public/site/*.json` | Next.js 容器（standalone 服务 public/ 静态） |
+| Docker（任一 compose 文件） | host `config/site/*.json` → frontend 容器 `/app/public/site/*.json`；backend 容器 `/app/site-config/*.json` | Next.js 容器服务静态文件；admin API 只写通知文件 |
 | 本地 `npm run dev` | `frontend/public/site/*.json` | Next.js dev server |
 
-两端各自独立维护。运维改 prod 时只动 `config/site/`，需要本地调试时手工 `cp` 一份到 `frontend/public/site/`。
+两端各自独立维护。运维改 prod 时可在管理员菜单进入「通知管理」写 `notifications.json`，也可直接编辑宿主机 `config/site/`；需要本地调试时手工 `cp` 一份到 `frontend/public/site/`。
 
 文件缺失或解析失败时，对应 UI 组件自动隐藏（通知）或回落到默认副标题（欢迎页）。**不会阻塞前端启动**。
 
@@ -37,6 +37,7 @@
 
 - 多条同时生效时，左栏卡片显示**最高 severity 那条**的标题 + 一个"+N"角标。
 - `dismissible: true` 的条目，用户点 × 后 ID 进入 `localStorage["af.dismissed_notifications"]`，再不展示（除非 ID 变了）。
+- 管理员 UI 保存时会校验 JSON schema、通知 ID 唯一性和 revision；如果文件在页面加载后被别人改过，会拒绝覆盖并提示刷新。
 
 ## `welcome_tips.json` schema
 
