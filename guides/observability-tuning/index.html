@@ -1882,7 +1882,7 @@
 <ul>
 <li>默认 <code>OBS_MEM_LIMIT_MB=0</code> 走自动 resolve:env &gt; cgroup v2 &gt; cgroup v1 &gt; 不告警(<code>sampler.py:330-362</code>)</li>
 <li>高水位 ratio <code>_RSS_WARN_RATIO=0.80</code>(<code>sampler.py:60</code>)写死,不是隐藏常量</li>
-<li>RSS p99 持续 &gt; 80% mem_limit → 容量规划信号,先看 <code>MAX_CONCURRENT_TASKS</code>(默认 10);别先加 mem_limit</li>
+<li>RSS p99 持续 &gt; 80% mem_limit → 容量规划信号,先看 <code>MAX_CONCURRENT_TASKS</code>(默认 32);别先加 mem_limit</li>
 <li>Open FDs 趋势上涨不下降 → connection / file 泄漏,看 <code>db_pool.size</code> 是否同涨</li>
 </ul>
 <h3 id="43-db_pool">4.3 <code>db_pool</code></h3>

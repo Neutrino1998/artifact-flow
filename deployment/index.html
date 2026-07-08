@@ -936,6 +936,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#沙盒并发预算" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        沙盒并发预算
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2226,6 +2237,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#沙盒并发预算" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        沙盒并发预算
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2606,7 +2628,7 @@
 <a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a><span class="c1"># 5. 启动（fleet 会校验 bundle、解 config/deploy、load 镜像、跑 release gate、等待健康）</span>
 <a id="__codelineno-9-22" name="__codelineno-9-22" href="#__codelineno-9-22"></a><span class="nv">AF_BUNDLE_VERSION</span><span class="o">=</span><span class="m">1</span>.0.0<span class="w"> </span>deploy/scripts/fleet.sh<span class="w"> </span>deploy<span class="w"> </span>.
 <a id="__codelineno-9-23" name="__codelineno-9-23" href="#__codelineno-9-23"></a><span class="c1"># 启用沙盒时，先以 root 准备 runsc / sandbox 镜像 / scratch 根，再 deploy：</span>
-<a id="__codelineno-9-24" name="__codelineno-9-24" href="#__codelineno-9-24"></a><span class="c1"># sudo env AF_BUNDLE_VERSION=1.0.0 AF_SANDBOX_POOL_SIZE=8G deploy/scripts/fleet.sh prepare-sandbox .</span>
+<a id="__codelineno-9-24" name="__codelineno-9-24" href="#__codelineno-9-24"></a><span class="c1"># sudo env AF_BUNDLE_VERSION=1.0.0 AF_SANDBOX_POOL_SIZE=80G deploy/scripts/fleet.sh prepare-sandbox .</span>
 <a id="__codelineno-9-25" name="__codelineno-9-25" href="#__codelineno-9-25"></a><span class="c1"># AF_ENABLE_SANDBOX=1 AF_BUNDLE_VERSION=1.0.0 deploy/scripts/fleet.sh deploy .</span>
 <a id="__codelineno-9-26" name="__codelineno-9-26" href="#__codelineno-9-26"></a>
 <a id="__codelineno-9-27" name="__codelineno-9-27" href="#__codelineno-9-27"></a><span class="c1"># 6. 创建管理员</span>
@@ -2657,14 +2679,15 @@ Mode 2（公网）扩缩容仍用上面 Mode 2A「扩缩容」小节里的裸 <c
 <a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>tar<span class="w"> </span>xzf<span class="w"> </span>tmp/artifactflow-deploy-1.0.1.tar.gz
 <a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>
 <a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="c1"># 如本次 bundle 带 sandbox 且要刷新 sandbox 前置，先以 root 执行：</span>
-<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="c1"># sudo env AF_BUNDLE_VERSION=1.0.1 AF_SANDBOX_POOL_SIZE=8G ./deploy/scripts/fleet.sh prepare-sandbox tmp</span>
-<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>
-<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a><span class="c1"># 2. 进维护窗口（可选；fleet deploy 本身是直接 up）</span>
-<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a>./deploy/scripts/maintenance.sh<span class="w"> </span>on<span class="w"> </span><span class="s2">&quot;升级到 v1.0.1&quot;</span>
-<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>
-<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a><span class="c1"># 3. fleet 接管解包 + docker load + compose up + 健康检查；成功后关闭维护页</span>
-<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a><span class="nv">AF_BUNDLE_VERSION</span><span class="o">=</span><span class="m">1</span>.0.1<span class="w"> </span>./deploy/scripts/fleet.sh<span class="w"> </span>deploy<span class="w"> </span>tmp<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a><span class="w">  </span>./deploy/scripts/maintenance.sh<span class="w"> </span>off
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="c1"># 8G 是 starter；32 路沙盒按默认 2G workspace 估算应准备 80G 级别池子。</span>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="c1"># sudo env AF_BUNDLE_VERSION=1.0.1 AF_SANDBOX_POOL_SIZE=80G ./deploy/scripts/fleet.sh prepare-sandbox tmp</span>
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>
+<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a><span class="c1"># 2. 进维护窗口（可选；fleet deploy 本身是直接 up）</span>
+<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>./deploy/scripts/maintenance.sh<span class="w"> </span>on<span class="w"> </span><span class="s2">&quot;升级到 v1.0.1&quot;</span>
+<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>
+<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a><span class="c1"># 3. fleet 接管解包 + docker load + compose up + 健康检查；成功后关闭维护页</span>
+<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a><span class="nv">AF_BUNDLE_VERSION</span><span class="o">=</span><span class="m">1</span>.0.1<span class="w"> </span>./deploy/scripts/fleet.sh<span class="w"> </span>deploy<span class="w"> </span>tmp<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a><span class="w">  </span>./deploy/scripts/maintenance.sh<span class="w"> </span>off
 </code></pre></div>
 <blockquote>
 <p><strong>nginx→Caddy 一次性切换（既有内网部署首次升到 Caddy 版）：</strong> 新 compose 里反向代理服务从 <code>nginx</code> 换成了 <code>caddy</code>，<code>up -d</code> 不会自动移除旧服务的容器。切换步骤：证书就位（<code>deploy/certs/server.crt</code> + <code>server.key</code>，完整链，见该目录 README）→ 常规 prep（verify-bundle / docker load / tar xzf deploy+config）→ <code>docker compose -f deploy/docker-compose.intranet.yml --profile infra down</code> → <code>AF_VERSION=&lt;版本&gt; ... up -d</code>（infra 服务定义变更走 down/up，不走 pause/resume）。防火墙记得放行 HTTPS 端口（默认 443，<code>AF_HTTPS_PORT</code> 可改）。切换后旧的 <code>nginx:*</code> 镜像可 <code>docker rmi</code> 回收。</p>
@@ -2801,10 +2824,11 @@ runsc、写 <code>/etc/fstab</code> 并挂载 scratch loop，所以需要 root�
 同一套底层动作（安装 gVisor、加载 sandbox 镜像、
 创建 scratch loop、跑 smoke/verify，并把 <code>ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT</code> /
 <code>ARTIFACTFLOW_SANDBOX_RUNTIME</code> 写入 <code>deploy/.env</code>）：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># 默认 scratch pool 为 8G；可按并发 × ARTIFACTFLOW_SANDBOX_WORKSPACE_QUOTA_MB 调大。</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>sudo<span class="w"> </span>env<span class="w"> </span><span class="nv">AF_SANDBOX_POOL_SIZE</span><span class="o">=</span>8G<span class="w"> </span>deploy/scripts/fleet.sh<span class="w"> </span>prepare-sandbox<span class="w"> </span>.
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="c1"># 或直接：</span>
-<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="c1"># sudo env AF_SANDBOX_POOL_SIZE=8G deploy/scripts/prepare-host.sh sandbox</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># 默认 scratch pool 为 8G starter；可按并发 × ARTIFACTFLOW_SANDBOX_WORKSPACE_QUOTA_MB 调大。</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="c1"># 例：32 路都可能跑沙盒且 workspace quota 默认 2G 时，用 80G 级别池子更稳。</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>sudo<span class="w"> </span>env<span class="w"> </span><span class="nv">AF_SANDBOX_POOL_SIZE</span><span class="o">=</span>80G<span class="w"> </span>deploy/scripts/fleet.sh<span class="w"> </span>prepare-sandbox<span class="w"> </span>.
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="c1"># 或直接：</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="c1"># sudo env AF_SANDBOX_POOL_SIZE=80G deploy/scripts/prepare-host.sh sandbox</span>
 </code></pre></div>
 <p>它等价于以下手工步骤，保留在这里便于排障：</p>
 <ol>
@@ -2815,7 +2839,7 @@ runsc、写 <code>/etc/fstab</code> 并挂载 scratch loop，所以需要 root�
 <div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="nv">POOL</span><span class="o">=</span>/var/lib/artifactflow/sandbox-pool.img
 <a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="nv">ROOT</span><span class="o">=</span>/var/lib/artifactflow/sandbox-scratch
 <a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>sudo<span class="w"> </span>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>dirname<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$POOL</span><span class="s2">&quot;</span><span class="k">)</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ROOT</span><span class="s2">&quot;</span>
-<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>sudo<span class="w"> </span>fallocate<span class="w"> </span>-l<span class="w"> </span>20G<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$POOL</span><span class="s2">&quot;</span><span class="w">          </span><span class="c1"># 容量 ≈ 并发 turn 数 × SANDBOX_WORKSPACE_QUOTA_MB(默认2G) + 余量</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>sudo<span class="w"> </span>fallocate<span class="w"> </span>-l<span class="w"> </span>80G<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$POOL</span><span class="s2">&quot;</span><span class="w">          </span><span class="c1"># 容量 ≈ 并发 turn 数 × SANDBOX_WORKSPACE_QUOTA_MB(默认2G) + 余量</span>
 <a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>sudo<span class="w"> </span>mkfs.ext4<span class="w"> </span>-m<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$POOL</span><span class="s2">&quot;</span>
 <a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$POOL</span><span class="s2"> </span><span class="nv">$ROOT</span><span class="s2"> ext4 loop,nosuid,nodev 0 0&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>tee<span class="w"> </span>-a<span class="w"> </span>/etc/fstab
 <a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>sudo<span class="w"> </span>mount<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ROOT</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>df<span class="w"> </span>-h<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ROOT</span><span class="s2">&quot;</span><span class="w">    </span><span class="c1"># 期望:定容 ext4 挂载成功</span>
@@ -2832,7 +2856,7 @@ runsc、写 <code>/etc/fstab</code> 并挂载 scratch loop，所以需要 root�
 <a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="w">                              </span>--profile<span class="w"> </span>infra<span class="w"> </span>up<span class="w"> </span>-d
 <a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>
 <a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="c1"># 使用 fleet 单机入口:</span>
-<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>sudo<span class="w"> </span>env<span class="w"> </span><span class="nv">AF_SANDBOX_POOL_SIZE</span><span class="o">=</span>8G<span class="w"> </span>deploy/scripts/fleet.sh<span class="w"> </span>prepare-sandbox<span class="w"> </span>.
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>sudo<span class="w"> </span>env<span class="w"> </span><span class="nv">AF_SANDBOX_POOL_SIZE</span><span class="o">=</span>80G<span class="w"> </span>deploy/scripts/fleet.sh<span class="w"> </span>prepare-sandbox<span class="w"> </span>.
 <a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="nv">AF_ENABLE_SANDBOX</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>deploy/scripts/fleet.sh<span class="w"> </span>deploy<span class="w"> </span>.
 <a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="c1"># 如需 deploy 前单独检查，先准备再 preflight：</span>
 <a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a><span class="c1"># AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh preflight</span>
@@ -2911,12 +2935,12 @@ runsc、写 <code>/etc/fstab</code> 并挂载 scratch loop，所以需要 root�
 </tr>
 <tr>
 <td><code>ARTIFACTFLOW_DATABASE_POOL_SIZE</code></td>
-<td><code>5</code></td>
+<td><code>10</code></td>
 <td>连接池大小</td>
 </tr>
 <tr>
 <td><code>ARTIFACTFLOW_DATABASE_MAX_OVERFLOW</code></td>
-<td><code>10</code></td>
+<td><code>20</code></td>
 <td>连接池溢出上限</td>
 </tr>
 <tr>
@@ -2958,7 +2982,7 @@ runsc、写 <code>/etc/fstab</code> 并挂载 scratch loop，所以需要 root�
 </tr>
 <tr>
 <td><code>ARTIFACTFLOW_REDIS_MAX_CONNECTIONS</code></td>
-<td><code>50</code></td>
+<td><code>64</code></td>
 <td>连接池上限</td>
 </tr>
 <tr>
@@ -3077,13 +3101,13 @@ runsc、写 <code>/etc/fstab</code> 并挂载 scratch loop，所以需要 root�
 <tbody>
 <tr>
 <td><code>ARTIFACTFLOW_MAX_CONCURRENT_TASKS</code></td>
-<td><code>10</code></td>
+<td><code>32</code></td>
 <td>最大并发引擎执行数</td>
 </tr>
 <tr>
 <td><code>ARTIFACTFLOW_MAX_UPLOAD_SIZE</code></td>
-<td><code>104857600</code></td>
-<td>单文件上传大小限制（字节，默认 100MB）；批量总字节由代理层独立封顶（200MB）。注：文本转换另有更低的独立闸 20MB——超闸<strong>不 422、落为二进制 blob artifact</strong>（可下载、可 mount 进沙盒处理）</td>
+<td><code>209715200</code></td>
+<td>单文件上传大小限制（字节，默认 200MB）；批量总字节由代理层独立封顶（约 200MiB 内容 + multipart 开销）。注：文本转换另有更低的独立闸 20MB——超闸<strong>不 422、落为二进制 blob artifact</strong>（可下载、可 mount 进沙盒处理）</td>
 </tr>
 <tr>
 <td><code>ARTIFACTFLOW_DEFAULT_PAGE_SIZE</code></td>
@@ -3176,10 +3200,10 @@ runsc、写 <code>/etc/fstab</code> 并挂载 scratch loop，所以需要 root�
 </ol>
 <hr />
 <h2 id="容量规划">容量规划</h2>
-<p><code>src/config.py</code> 的代码默认值（<code>MAX_CONCURRENT_TASKS=10</code>、<code>DATABASE_POOL_SIZE=5+10</code>、<code>REDIS_MAX_CONNECTIONS=50</code>）在没有特定模型 API 并发预算时是安全起点，但<strong>对于 Mode 2/3 的实际生产部署偏保守</strong> —— 单 backend 只允许 10 个引擎并发，模型 API 配额（如 64 路并行）会被严重浪费。</p>
-<p><code>deploy/.env.intranet.example</code> 和 <code>deploy/.env.prod.example</code> 已按 64 路模型并发预设了一组推荐值，下面是这组值的依据，便于按你自己的模型 API 配额线性缩放。</p>
+<p><code>src/config.py</code> 的代码默认值已按单 backend 32 路执行做了一组稳妥起点：<code>MAX_CONCURRENT_TASKS=32</code>、<code>DATABASE_POOL_SIZE=10</code>、<code>DATABASE_MAX_OVERFLOW=20</code>、<code>REDIS_MAX_CONNECTIONS=64</code>。这能吃满中等模型 API 配额，同时不会像 64 路默认那样把小型 DB / 内网宿主的资源承诺拉得过猛。</p>
+<p><code>deploy/.env.intranet.example</code> 和 <code>deploy/.env.prod.example</code> 也显式写入这组 32 路默认，下面是这组值的依据，便于按你自己的模型 API 配额线性缩放。</p>
 <h3 id="三个互相绑定的旋钮">三个互相绑定的旋钮</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>模型 API 并发预算 (例 64)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>模型 API 并发预算 (默认 32)
 <a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>        │
 <a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>        ▼
 <a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>ARTIFACTFLOW_MAX_CONCURRENT_TASKS  ← 单 backend 引擎执行 Semaphore (src/api/services/execution_runner.py)
@@ -3191,7 +3215,7 @@ runsc、写 <code>/etc/fstab</code> 并挂载 scratch loop，所以需要 root�
 <a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a>        └─► ARTIFACTFLOW_REDIS_MAX_CONNECTIONS
 <a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a>              建议 ≈ 2× MAX_CONCURRENT_TASKS（runtime store + stream consumer + pub/sub）
 </code></pre></div>
-<p>如果模型 API 并发不是 64，把以上三个值按比例缩放即可。</p>
+<p>如果模型 API 并发不是 32，把以上三个值按比例缩放即可；例如 64 路可用 <code>MAX_CONCURRENT_TASKS=64</code>、<code>REDIS_MAX_CONNECTIONS=128</code>，并在 DB 容量允许时把池上限抬到 60 左右。</p>
 <h3 id="mode-a-vs-mode-bdb-池的安全边界">Mode A vs Mode B：DB 池的安全边界</h3>
 <p>模板里 DB 池两行（<code>POOL_SIZE</code> / <code>MAX_OVERFLOW</code>）<strong>默认是注释掉的</strong>，这是有意的：</p>
 <table>
@@ -3208,13 +3232,13 @@ runsc、写 <code>/etc/fstab</code> 并挂载 scratch loop，所以需要 root�
 <td>Mode 2A / 3A（<code>--profile infra</code>）</td>
 <td>捆绑的 <code>postgres</code> 容器</td>
 <td><code>200</code>（compose <code>command:</code> 显式设置）</td>
-<td><strong>取消注释开启 20+40</strong> —— 60 连接安全</td>
+<td>默认 10+20；64 路时可提高到 20+40</td>
 </tr>
 <tr>
 <td>Mode 2B（云托管 DB）</td>
 <td>外部 RDS / Aurora 等</td>
 <td>由托管层级决定（小规格 ~85–150）</td>
-<td><strong>保持注释或缩小</strong> —— 否则单 backend 60 连接易打满</td>
+<td>按单 backend 池上限 × backend 副本数核算</td>
 </tr>
 <tr>
 <td>Mode 3B（内部企业 DB，无 <code>--profile infra</code>）</td>
@@ -3238,18 +3262,18 @@ runsc、写 <code>/etc/fstab</code> 并挂载 scratch loop，所以需要 root�
 </thead>
 <tbody>
 <tr>
-<td>10（代码默认）</td>
-<td>5–10 MB</td>
-<td>~10 MB</td>
+<td>32（代码默认）</td>
+<td>15–30 MB</td>
+<td>~65 MB</td>
 </tr>
 <tr>
-<td>64（推荐）</td>
+<td>64（高并发配置）</td>
 <td>30–60 MB</td>
 <td>~130 MB</td>
 </tr>
 </tbody>
 </table>
-<p>512 MB 在 64 并发下提供 ~4× 余量。如果你的模型并发 &gt; 64 或自定义工具单条输出可能很大（&gt;100 KB），按比例抬 <code>maxmemory</code>。</p>
+<p>512 MB 对 32 路默认非常宽松，也覆盖 64 路配置的既有估算。如果你的模型并发 &gt; 64 或自定义工具单条输出可能很大（&gt;100 KB），按比例抬 <code>maxmemory</code>。</p>
 <p><strong>为什么是 <code>noeviction</code> 而不是 <code>volatile-lru</code></strong>：所有 Redis key（lease / interrupt / cancel / queue / stream / stream_meta）都带 TTL 但承载在飞任务的关键控制状态。Redis 驱逐策略<strong>以 key 为粒度</strong>，LRU 类策略会随机删整个 lease/interrupt key，让 <code>consume_events</code> 误判 producer 掉线、cancel/interrupt 信号无声丢失 —— 表现为"任务随机被杀"。<code>noeviction</code> 在内存满时<strong>显式写失败</strong>，让运维拿到清晰信号去扩容。Stream 内的 entry 修剪由 <code>XADD MAXLEN ~ 1000</code> 在生产端处理，与 maxmemory 策略无关。</p>
 <h3 id="容器内存上限">容器内存上限</h3>
 <p>两个 compose 文件都加了 <code>mem_limit</code>：</p>
@@ -3286,6 +3310,35 @@ runsc、写 <code>/etc/fstab</code> 并挂载 scratch loop，所以需要 root�
 </table>
 <p><code>mem_limit</code> 在这里<strong>是 tripwire 不是分配额度</strong>（loud-failure 原则，与上一节 Redis <code>noeviction</code> 同一思路）：触上限 → OOM kill → 容器 restart → 运维收到告警，而不是悄无声息吃满 host 把同机服务一起拖死。Postgres <code>2g</code> 的稳态保守估算 <code>256MB shared_buffers + 200 connection × 典型 work_mem + 内核 buffer ≈ 1.2–1.5g</code>，留 ~30% safety margin。若 p99 RSS 长期超过 1.5g，先排查异常（慢查询/连接泄漏）再谈调参，不要直接放宽。</p>
 <p>反向代理（Caddy）不设 <code>mem_limit</code>：长期 &lt; 50 MB，加了纯属冗余。</p>
+<h3 id="沙盒并发预算">沙盒并发预算</h3>
+<p><code>MAX_CONCURRENT_TASKS=32</code> 并不等于 32 个沙盒常驻；只有实际调用 <code>bash</code> / <code>mount</code> / <code>persist</code> 的 turn 才会启动沙盒容器。但如果 workload 里大量任务都会跑沙盒，需要单独按最坏情况做容量预算：</p>
+<table>
+<thead>
+<tr>
+<th>项</th>
+<th>默认</th>
+<th>32 路全跑沙盒的含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SANDBOX_MEM_LIMIT_MB</code></td>
+<td><code>1024</code></td>
+<td>最坏约 32GB 容器内存上限承诺；32GB 宿主应降低并发、降低沙盒内存或避免全量沙盒 workload</td>
+</tr>
+<tr>
+<td><code>SANDBOX_WORKSPACE_QUOTA_MB</code></td>
+<td><code>2048</code></td>
+<td>最坏约 64GB scratch 数据；8G pool 只是 starter，32 路建议 80G 级别</td>
+</tr>
+<tr>
+<td><code>SANDBOX_CPU_LIMIT</code></td>
+<td><code>1.0</code></td>
+<td>最坏 32 vCPU 配额；16 核机器会靠调度分时，适合 I/O/LLM 等待型任务，不适合 32 路纯 CPU 文档转换</td>
+</tr>
+</tbody>
+</table>
+<p>结论：默认 1GB 沙盒内存不建议再加，真正要跟着并发调的是 <code>AF_SANDBOX_POOL_SIZE</code> 和是否允许这么多任务同时使用沙盒。</p>
 <hr />
 <h2 id="运维参考">运维参考</h2>
 <h3 id="数据库迁移">数据库迁移</h3>
@@ -3353,7 +3406,7 @@ runsc、写 <code>/etc/fstab</code> 并挂载 scratch loop，所以需要 root�
 </tbody>
 </table>
 <ul>
-<li><strong>上传上限（代理层是总量权威闸）</strong>：<code>POST /api/v1/chat</code> 把整批附件放进<strong>一个</strong> multipart 请求，body 是整批之和。三轴<strong>独立</strong>：单文件 ≤100MB（<code>MAX_UPLOAD_SIZE</code>，后端 422）、数量 ≤30（<code>MAX_CHAT_ATTACHMENTS</code>，后端 422）、<strong>总量 ≤200MiB（代理层 413）</strong>。总量<strong>刻意小于</strong> per-file×count（100MB×30=3GB）——设计意图是"1 个大文件 or 多个小文件，但控总量"，故大批量时代理层<strong>会按设计抢先</strong> 413（单个超大文件仍由后端给干净 422）。<code>210MiB</code> = 200MiB 内容 + 10MiB multipart 开销。<strong>单位注意</strong>：Caddy 的 <code>MB</code> 是 decimal 10⁶、<code>MiB</code> 才是二进制 2²⁰——写 <code>210MB</code> 会把 200MiB 批次的开销预算从 10MiB 压到 ~285KB，必须写 <code>MiB</code>。另：文本转换路径有更低的独立闸 <code>MAX_TEXT_CONVERT_BYTES</code>（20MB，防解码+词表物化的内存放大），blob 路径（图片/PDF/docx/其它二进制）不受此限；<strong>超文本闸不 422</strong>，文件落为二进制 blob artifact（可下载、可 mount 进沙盒处理）。</li>
+<li><strong>上传上限（代理层是总量权威闸）</strong>：<code>POST /api/v1/chat</code> 把整批附件放进<strong>一个</strong> multipart 请求，body 是整批之和。三轴<strong>独立</strong>：单文件 ≤200MB（<code>MAX_UPLOAD_SIZE</code>，后端 422）、数量 ≤30（<code>MAX_CHAT_ATTACHMENTS</code>，后端 422）、<strong>总量约 200MiB 内容 + multipart 开销（代理层 413）</strong>。总量<strong>刻意小于</strong> per-file×count（200MB×30=6GB）——设计意图是"1 个大文件 or 多个小文件，但控总量"，故大批量时代理层<strong>会按设计抢先</strong> 413（单个超大文件仍由后端给干净 422）。<code>210MiB</code> = 200MiB 内容 + 10MiB multipart 开销，所以单个满额文件可以穿过代理交给后端判定。<strong>单位注意</strong>：Caddy 的 <code>MB</code> 是 decimal 10⁶、<code>MiB</code> 才是二进制 2²⁰——写 <code>210MB</code> 会把 200MiB 批次的开销预算从 10MiB 压到 ~285KB，必须写 <code>MiB</code>。另：文本转换路径有更低的独立闸 <code>MAX_TEXT_CONVERT_BYTES</code>（20MB，防解码+词表物化的内存放大），blob 路径（图片/PDF/docx/其它二进制）不受此限；<strong>超文本闸不 422</strong>，文件落为二进制 blob artifact（可下载、可 mount 进沙盒处理）。</li>
 <li><strong><code>X-Real-IP</code>（登录频控依赖）</strong>：后端 per-IP 登录频控<strong>只读这个头</strong>（刻意不信可被客户端伪造的 <code>X-Forwarded-For</code>）。安全前提是 backend 仅 <code>expose</code>、不发布主机端口，只经反向代理可达，故这个头不可伪造。删掉它 / 换不写该头的代理 → per-IP 限流静默退化成"所有请求共用代理容器一个 IP 桶"（per-username 主防线仍在）。</li>
 <li><strong>Mode 2 灰云（CF DNS only）直连</strong>：<code>{remote_host}</code> 就是真实客户端 IP，直接写进 <code>X-Real-IP</code>，不退化。</li>
 <li><strong>Mode 2 若改用 CF 橙云（proxied）</strong>：真实客户端 IP 移到 <code>X-Forwarded-For</code>、<code>{remote_host}</code> 变成 CF 边缘 IP —— 需在 Caddyfile 加 <code>trusted_proxies</code>（CF IP 段）并改用 <code>{client_ip}</code>，否则 per-IP 限流退化。<code>deploy/caddy/Caddyfile</code> 头部注释了这一点。</li>
