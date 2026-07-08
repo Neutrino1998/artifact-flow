@@ -45,6 +45,12 @@ function ConversationItem({ conversation, isActive, onSelect }: ConversationItem
       onMouseEnter={() => setShowMenu(true)}
       onMouseLeave={() => setShowMenu(false)}
     >
+      {isActive && (
+        <span
+          aria-hidden="true"
+          className="absolute left-0 top-2 bottom-2 w-0.5 rounded-r-full bg-accent"
+        />
+      )}
       <div className={`flex items-center gap-1.5 font-medium text-text-primary dark:text-text-primary-dark ${showMenu || menuOpen ? 'pr-7' : ''}`}>
         {conversation.active_message_id && (
           <span
