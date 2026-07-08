@@ -73,8 +73,14 @@ export function buildContentSecurityPolicy({ nonce, isDev, apiUrl }: CspOptions)
     'img-src': ["'self'", 'data:', 'blob:'],
     'font-src': ["'self'"], // fonts are self-hosted under /public/fonts
     'connect-src': connectSrc,
-    'frame-src': ["'none'"],
-    'frame-ancestors': ["'none'"],
+    // 'self' permits static `srcdoc` previews (HTML + DOCX render iframe).
+    // `blob:` permits authorized PDF blobs fetched by the app and handed to the
+    // browser's native PDF viewer. Remote frames stay closed.
+    'frame-src': ["'self'", 'blob:'],
+    // Safari applies inherited frame-ancestors to blob: PDF documents loaded in
+    // our own iframe; 'self' keeps cross-origin embedding closed while allowing
+    // the app to frame its own authorized blob previews.
+    'frame-ancestors': ["'self'"],
     'object-src': ["'none'"],
     'base-uri': ["'none'"],
     'form-action': ["'self'"],

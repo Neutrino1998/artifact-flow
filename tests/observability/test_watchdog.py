@@ -32,6 +32,26 @@ def test_snapshot_empty_before_start(tmp_path):
         loop.close()
 
 
+def test_last_wedge_only_set_on_hard_wedge(tmp_path):
+    """#1 回归:软告警(wedged=False)不得写 last_wedge —— 否则一次 routine lag 抖动
+    把实例永久钉黄 + 假报「抓到 wedge」。只有硬 wedge(wedged=True)才留摘要。"""
+    loop = asyncio.new_event_loop()
+    sink = JsonlSink(tmp_path / "loop-lag.jsonl", max_mb=1, backups=1, mirror_stdout=False)
+    try:
+        wd = LoopLagWatchdog(loop, sink, warn_ms=500, interval_sec=1.0)
+        assert wd.last_wedge() is None
+        # 软告警:超阈但回调仍来 —— 不留 last_wedge
+        wd._record_wedge(600.0, wedged=False)
+        assert wd.last_wedge() is None
+        # 硬 wedge:留摘要,且带 wedged=True
+        wd._record_wedge(9999.0, wedged=True)
+        lw = wd.last_wedge()
+        assert lw is not None and lw["wedged"] is True and lw["lag_ms"] == 9999.0
+    finally:
+        sink.close()
+        loop.close()
+
+
 def test_records_lag_when_loop_responsive(tmp_path):
     """运行中的 loop,watchdog 应该记到亚 ms 级 lag。"""
 

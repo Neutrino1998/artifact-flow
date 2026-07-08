@@ -12,10 +12,10 @@ function makeStaged(n: number): StagedFile[] {
 // Minimal deps with vi.fn() spies; override per test.
 function deps(over: Partial<Parameters<typeof runComposerOp>[0]> = {}) {
   return {
+    ownerKey: 'conv-1',
     content: 'hello',
     staged: [] as StagedFile[],
-    setContent: vi.fn(),
-    markSent: vi.fn(),
+    clearDraft: vi.fn(),
     lockRef: { current: false },
     setSending: vi.fn(),
     run: vi.fn(async () => true),
@@ -24,10 +24,11 @@ function deps(over: Partial<Parameters<typeof runComposerOp>[0]> = {}) {
 }
 
 describe('runComposerOp', () => {
-  test('bails (no run, no lock, no spinner) when text and files are both empty', async () => {
+  test('bails (no run, no clear, no lock, no spinner) when text and files are both empty', async () => {
     const d = deps({ content: '   ', staged: [] });
     await runComposerOp(d);
     expect(d.run).not.toHaveBeenCalled();
+    expect(d.clearDraft).not.toHaveBeenCalled();
     expect(d.setSending).not.toHaveBeenCalled();
     expect(d.lockRef.current).toBe(false);
   });
@@ -42,33 +43,36 @@ describe('runComposerOp', () => {
     expect(files).toHaveLength(2);
   });
 
-  test('on success, reconciles instead of blind-clearing (the R4 fix)', async () => {
-    const d = deps({ content: 'hello', staged: makeStaged(2), run: vi.fn(async () => true) });
+  test('clears the OWNER draft BEFORE the await (drop text + the sent file ids)', async () => {
+    const clearDraft = vi.fn();
+    let clearedBeforeRun = false;
+    const run = vi.fn(async () => {
+      clearedBeforeRun = clearDraft.mock.calls.length > 0;
+      return true;
+    });
+    const d = deps({ ownerKey: 'conv-9', content: 'hello', staged: makeStaged(2), clearDraft, run });
     await runComposerOp(d);
-    // text reconcile is a functional updater, not a blind setContent('')
-    expect(d.setContent).toHaveBeenCalledTimes(1);
-    const updater = vi.mocked(d.setContent).mock.calls[0][0] as (prev: string) => string;
-    expect(updater('hello')).toBe('');                 // unchanged → cleared
-    expect(updater('hello, more typed since')).toBe('hello, more typed since'); // changed → kept
-    // only the ids this send consumed are removed
-    expect(d.markSent).toHaveBeenCalledWith(['s0', 's1']);
+    expect(clearedBeforeRun).toBe(true);
+    expect(clearDraft).toHaveBeenCalledWith('conv-9', 'hello', ['s0', 's1']);
   });
 
-  test('does not call markSent when nothing was staged', async () => {
-    const d = deps({ content: 'hello', staged: [] });
+  test('on success, clears exactly once — there is no restore counterpart', async () => {
+    const d = deps({ content: 'hello', staged: makeStaged(1), run: vi.fn(async () => true) });
     await runComposerOp(d);
-    expect(d.markSent).not.toHaveBeenCalled();
+    expect(d.clearDraft).toHaveBeenCalledTimes(1);
   });
 
-  test('on failure (run returns false), preserves text and files', async () => {
-    const d = deps({ content: 'hello', staged: makeStaged(1), run: vi.fn(async () => false) });
+  test('on failure (run returns false), does NOT restore — the draft is a best-effort loss', async () => {
+    const d = deps({ ownerKey: 'conv-9', content: 'hello', staged: makeStaged(1), run: vi.fn(async () => false) });
     await runComposerOp(d);
-    expect(d.setContent).not.toHaveBeenCalled();
-    expect(d.markSent).not.toHaveBeenCalled();
+    // cleared once at send start; nothing put back on failure
+    expect(d.clearDraft).toHaveBeenCalledTimes(1);
+    expect(d.clearDraft).toHaveBeenCalledWith('conv-9', 'hello', ['s0']);
   });
 
-  test('on throw, preserves composer and still releases the lock', async () => {
+  test('on throw, does not restore but still releases the lock + spinner', async () => {
     const d = deps({
+      ownerKey: 'conv-9',
       content: 'hello',
       staged: makeStaged(1),
       run: vi.fn(async () => {
@@ -76,8 +80,7 @@ describe('runComposerOp', () => {
       }),
     });
     await runComposerOp(d);
-    expect(d.setContent).not.toHaveBeenCalled();
-    expect(d.markSent).not.toHaveBeenCalled();
+    expect(d.clearDraft).toHaveBeenCalledTimes(1);
     expect(d.lockRef.current).toBe(false);
     expect(d.setSending).toHaveBeenLastCalledWith(false);
   });

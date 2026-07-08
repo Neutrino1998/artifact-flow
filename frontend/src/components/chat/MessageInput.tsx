@@ -7,9 +7,12 @@ import { useStreamStore } from '@/stores/streamStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useConfigStore } from '@/stores/configStore';
-import { useStagedFilesStore } from '@/stores/stagedFilesStore';
-import { injectMessage, cancelExecution } from '@/lib/api';
+import { useStagedFilesStore, type StagedFile } from '@/stores/stagedFilesStore';
+import StagedFileChip from './StagedFileChip';
+import { injectMessage, cancelExecution, getSkills } from '@/lib/api';
 import type { UploadEvent } from '@/lib/api';
+import type { SkillItem } from '@/types';
+import { PillBadge } from '@/components/ui/PillBadge';
 import { formatTokens } from '@/lib/formatTokens';
 import { formatBytes } from '@/lib/formatBytes';
 import { MAX_MESSAGE_CHARS, MAX_CHAT_ATTACHMENTS } from '@/lib/constants';
@@ -24,11 +27,40 @@ type UploadProgress =
   | { phase: 'uploading'; loaded: number; total: number; lengthComputable: boolean }
   | { phase: 'processing' };
 
+// The synthetic name browsers attach to a clipboard image that has no backing
+// file (a screenshot or a "copy image" — Chrome/Edge/Firefox all use
+// "image.<ext>"). We rename only these placeholders, NOT every image/* paste:
+// an actual image file copied from the OS file manager carries its real name
+// (e.g. "vacation.jpg") and must be left untouched.
+const GENERIC_CLIPBOARD_IMAGE = /^image\.(png|jpe?g|gif|webp|bmp)$/i;
+
+// Stable empty ref for the absent-draft case, so the files selector doesn't
+// return a fresh [] each render (which would thrash zustand's equality check).
+const EMPTY_FILES: StagedFile[] = [];
+
 export default function MessageInput() {
-  const [content, setContent] = useState('');
+  // Composer text + files live in the draft store keyed by conversation, not in
+  // local state: switching conversations flips currentLoading, which unmounts
+  // this component (the loading placeholder), so local state can't survive a
+  // switch. The active conversation is `activeKey`; its draft is drafts[activeKey]
+  // (absent ⇒ blank). activeKey is also the send's OWNER key (see useComposerSend).
+  const activeKey = useStagedFilesStore((s) => s.activeKey);
+  const content = useStagedFilesStore((s) => s.drafts[s.activeKey]?.text ?? '');
+  const setText = useStagedFilesStore((s) => s.setText);
   // Armed by the "compact" toggle; rides the next send as force_compact and is
   // cleared on a successful send. A compact-only send (no text) is allowed.
   const [forceCompact, setForceCompact] = useState(false);
+  // Skill activation picker (C-3). `activeSkills` = slugs armed for the next send
+  // (rides as activate_skills, cleared on success). The picker lists only ENABLED
+  // skills (a skill disabled in the management page is hidden here — enabled
+  // governs both the model's L1 index and this picker). Loaded lazily on first open.
+  const [activeSkills, setActiveSkills] = useState<string[]>([]);
+  const [skillPickerOpen, setSkillPickerOpen] = useState(false);
+  const [enabledSkills, setEnabledSkills] = useState<SkillItem[]>([]);
+  const [skillsLoaded, setSkillsLoaded] = useState(false);
+  const [skillsError, setSkillsError] = useState(false);
+  // picker 内的即时过滤(技能多了翻不动;关闭时清空,下次打开从全量开始)
+  const [skillFilter, setSkillFilter] = useState('');
   // null when idle; only set when a send carried files (text-only sends finish
   // too fast for a progress bar to be useful). Lifecycle is owned by handleSend
   // — it sets this in the onUpload callback and clears it in the finally branch.
@@ -40,6 +72,8 @@ export default function MessageInput() {
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const cancelling = useStreamStore((s) => s.cancelling);
   const setCancelling = useStreamStore((s) => s.setCancelling);
+  const addPendingInject = useStreamStore((s) => s.addPendingInject);
+  const removePendingInject = useStreamStore((s) => s.removePendingInject);
   // QUEUED marker: set on the execution_queued SSE event, cleared on the first
   // agent_start (turn started RUNNING) / endStream / reset. While set, the turn
   // is parked in a worker-local concurrency semaphore and is neither cancellable
@@ -48,19 +82,31 @@ export default function MessageInput() {
   // doesn't silently no-op during the wait.
   const queuedInfo = useStreamStore((s) => s.queuedInfo);
   const toggleArtifactPanel = useUIStore((s) => s.toggleArtifactPanel);
+  const composerFocusRequestId = useUIStore((s) => s.composerFocusRequestId);
+  const composerFocusConsumedId = useUIStore((s) => s.composerFocusConsumedId);
+  const consumeComposerFocusRequest = useUIStore((s) => s.consumeComposerFocusRequest);
 
-  const stagedFiles = useStagedFilesStore((s) => s.files);
+  const stagedFiles = useStagedFilesStore((s) => s.drafts[s.activeKey]?.files ?? EMPTY_FILES);
   const addFiles = useStagedFilesStore((s) => s.addFiles);
   const removeFile = useStagedFilesStore((s) => s.removeFile);
-  const markSent = useStagedFilesStore((s) => s.markSent);
   const stageNotice = useStagedFilesStore((s) => s.notice);
   const dismissNotice = useStagedFilesStore((s) => s.dismissNotice);
 
-  // Snapshot → lock → await → reconcile/keep for both send and inject lives in
-  // this hook (single enforcement point); see useComposerSend.ts. On send-ok the
-  // consumed files are marked sent (kept visible until the turn's terminal event:
-  // COMPLETE clears them, cancel/error/timeout reverts — uploads are ephemeral).
-  const { sending, submit, inject } = useComposerSend(content, setContent, stagedFiles, markSent);
+  // The send lifecycle (lock → clear → await) for both send and inject lives in
+  // this hook (single enforcement point); see useComposerSend. It's OWNER-keyed on
+  // activeKey: the send clears THAT conversation's draft (text + the files that
+  // ride the POST) at send start, so it stays correct even if the user navigates
+  // mid-send. A failed send is a best-effort loss — there is no restore.
+  const { sending, submit, inject } = useComposerSend(activeKey, content, stagedFiles);
+
+  useEffect(() => {
+    if (composerFocusRequestId <= composerFocusConsumedId) return;
+    const raf = requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      consumeComposerFocusRequest(composerFocusRequestId);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [composerFocusRequestId, composerFocusConsumedId, consumeComposerFocusRequest]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -92,6 +138,20 @@ export default function MessageInput() {
     fetchConfig();
   }, [fetchConfig]);
   const lastNode = branchPath.length > 0 ? branchPath[branchPath.length - 1] : null;
+  // Slugs already active on this branch (the tail message's persisted sticky list).
+  // The picker marks these "已激活" so re-checking one — which re-injects its full body,
+  // a deliberate "re-remind" (useful after compaction) — is an informed choice, not a
+  // surprise re-send. Doesn't gate arming: the user can still re-check to re-inject.
+  const alreadyActiveSkills = new Set(lastNode?.active_skills ?? []);
+  // picker 过滤视图(name/描述子串,大小写不敏感)。空过滤 = 全量。
+  const skillFilterQ = skillFilter.trim().toLowerCase();
+  const filteredEnabledSkills = skillFilterQ
+    ? enabledSkills.filter(
+        (s) =>
+          s.name.toLowerCase().includes(skillFilterQ) ||
+          (s.description ?? '').toLowerCase().includes(skillFilterQ),
+      )
+    : enabledSkills;
   const lastMetrics = lastNode?.execution_metrics as
     | { last_input_tokens?: number | null; last_output_tokens?: number | null }
     | null
@@ -122,6 +182,54 @@ export default function MessageInput() {
     if (!hasPersistedHistory && forceCompact) setForceCompact(false);
   }, [hasPersistedHistory, forceCompact]);
 
+  // Refresh the enabled-skill list each time the picker opens — still a refetch
+  // (a skill just disabled in 技能管理 must not linger here), but stale-while-
+  // revalidate: keep the previously-loaded list on screen and refetch silently,
+  // so re-opening doesn't flash "加载中" on every open. The spinner shows only on
+  // the first-ever open (no cached list). getSkills returns all visible skills;
+  // the picker shows only enabled ones. On a background-refetch failure we keep
+  // the stale list (render prefers a usable list over the error screen) and only
+  // surface the error when there's nothing cached to show.
+  useEffect(() => {
+    if (!skillPickerOpen) return;
+    let alive = true;
+    setSkillsError(false);
+    (async () => {
+      try {
+        const data = await getSkills();
+        if (alive) setEnabledSkills(data.skills.filter((s) => s.enabled));
+      } catch (err) {
+        console.error('Failed to load skills:', err);
+        // Don't clear the cached list — a failed refresh keeps showing what we
+        // last had (stale, but usable). The error screen only appears when we
+        // have no list at all (render precedence below).
+        if (alive) setSkillsError(true);
+      } finally {
+        if (alive) setSkillsLoaded(true);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [skillPickerOpen]);
+
+  // Armed skills belong to the conversation they were armed in — clear on any
+  // conversation change, 新建对话 included (#2). Switching to an *existing*
+  // conversation remounts this component (currentLoading flips), but 新建对话 keeps
+  // it mounted, so without this the chips would leak onto the new chat's first
+  // message. Mirrors forceCompact's hygiene (which is gated by hasPersistedHistory).
+  useEffect(() => {
+    setActiveSkills([]);
+    setSkillPickerOpen(false);
+    setSkillFilter('');
+  }, [activeKey]);
+
+  const toggleSkill = useCallback((slug: string) => {
+    setActiveSkills((prev) =>
+      prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug],
+    );
+  }, []);
+
   const handleSend = useCallback(async () => {
     if (isStreaming && !content.trim()) {
       // Stop: cancel backend execution. The cancel signal queues into the
@@ -143,10 +251,18 @@ export default function MessageInput() {
 
     if (isStreaming) {
       // Inject mode: text only (attachments ride a new message, not an
-      // in-flight turn). The hook owns the empty-guard / lock / reconcile.
+      // in-flight turn). The hook owns the empty-guard / lock / clear-on-send.
       const convId = streamConversationId || conversationId;
       if (!convId) return;
-      await inject((text) => injectMessage(convId, text));
+      await inject(async (text) => {
+        const pendingId = addPendingInject(text);
+        try {
+          await injectMessage(convId, text);
+        } catch (err) {
+          removePendingInject(pendingId);
+          throw err;
+        }
+      });
       return;
     }
 
@@ -156,6 +272,9 @@ export default function MessageInput() {
     // raw `forceCompact` on any successful armed send, even if it didn't take
     // effect this turn (state hygiene — don't leave stale armed state behind).
     const compact = effectiveForceCompact;
+    // Snapshot armed skills for this send (cleared on success below). An
+    // activation-only send (no text/files) is allowed, same as compact.
+    const skillsToActivate = activeSkills;
     await submit(async (text, files) => {
       // Only show progress for sends that actually carry files — a text-only
       // POST's body is small enough that the bar would flash and vanish.
@@ -174,8 +293,12 @@ export default function MessageInput() {
           }
         : undefined;
       try {
-        const ok = await sendMessage(text, undefined, files, compact, onUpload);
+        const ok = await sendMessage(
+          text, undefined, files, compact, onUpload,
+          skillsToActivate.length ? skillsToActivate : undefined,
+        );
         if (ok && forceCompact) setForceCompact(false);
+        if (ok && skillsToActivate.length) setActiveSkills([]);
         return ok;
       } finally {
         // Single convergence point: success / failure / throw all clear the
@@ -184,8 +307,8 @@ export default function MessageInput() {
         // by useComposerSend's reconcile-on-success rule.
         setUploadProgress(null);
       }
-    }, compact);
-  }, [content, isStreaming, cancelling, setCancelling, conversationId, streamConversationId, inject, submit, sendMessage, forceCompact, effectiveForceCompact]);
+    }, compact || skillsToActivate.length > 0);
+  }, [content, isStreaming, cancelling, setCancelling, conversationId, streamConversationId, inject, submit, sendMessage, forceCompact, effectiveForceCompact, activeSkills, addPendingInject, removePendingInject]);
 
   const handleCompositionStart = useCallback(() => {
     isComposingRef.current = true;
@@ -209,17 +332,60 @@ export default function MessageInput() {
     [handleSend]
   );
 
-  // A paste larger than the message cap is diverted to a staged .txt
-  // attachment instead of being inlined (which would hit the 422 cap and
-  // bloat context). Smaller pastes fall through to normal insertion (capped
-  // by the textarea maxLength).
   const handlePaste = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      if (isStreaming) return;
-      const text = e.clipboardData?.getData('text/plain') ?? '';
-      // Divert a huge paste to a staged file only if there's room; at the
-      // attachment cap, let it paste inline (textarea maxLength caps it)
-      // rather than silently dropping it.
+      // Match the disabled attach button: attachments ride a new turn, not an
+      // in-flight one, so a paste while streaming falls through to plain text.
+      if (isStreaming) {
+        return;
+      }
+      const clip = e.clipboardData;
+      if (!clip) return;
+
+      // Real files on the clipboard → stage them as attachments. Prefer
+      // `clipboardData.files` (modern browsers populate it for both pasted
+      // images/screenshots and files copied from the OS file manager); fall
+      // back to scanning `items` for kind==='file' for sources that only
+      // expose the file there. Reliable case is images/screenshots — copying a
+      // file in the OS file manager only reaches the browser on some
+      // OS/browser combos (notably not macOS Finder), a platform limit we
+      // can't work around. addFiles owns the gate/cap/dedup, so an unsupported
+      // or oversize paste surfaces via `notice` like any other add.
+      let pasted: File[] = Array.from(clip.files ?? []);
+      if (pasted.length === 0 && clip.items) {
+        pasted = Array.from(clip.items)
+          .filter((it) => it.kind === 'file')
+          .map((it) => it.getAsFile())
+          .filter((f): f is File => f != null);
+      }
+      if (pasted.length > 0) {
+        e.preventDefault();
+        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+        // Give a stable, timestamped name to clipboard files that arrive
+        // unnamed OR as a browser-synthetic image placeholder ("image.png" —
+        // see GENERIC_CLIPBOARD_IMAGE). Without this, repeated screenshot
+        // pastes all read "image.png" / "image_1.png" (the store dedups
+        // collisions but the names stay generic) and the upload artifact is
+        // likewise generic. Each paste event has its own `ts`, so successive
+        // pastes get distinct names. Files with a real name (incl. OS-file
+        // copies) pass through unchanged.
+        const named = pasted.map((f) => {
+          const generic =
+            !f.name || (f.type.startsWith('image/') && GENERIC_CLIPBOARD_IMAGE.test(f.name));
+          if (!generic) return f;
+          const ext = f.type.split('/')[1] || 'bin';
+          return new File([f], `pasted-${ts}.${ext}`, { type: f.type });
+        });
+        addFiles(named);
+        return;
+      }
+
+      // A text paste larger than the message cap is diverted to a staged .txt
+      // attachment instead of being inlined (which would hit the 422 cap and
+      // bloat context). Divert only if there's room; at the attachment cap,
+      // let it paste inline (textarea maxLength caps it) rather than silently
+      // dropping it. Smaller pastes fall through to normal insertion.
+      const text = clip.getData('text/plain') ?? '';
       if (text.length > MAX_MESSAGE_CHARS && stagedFiles.length < MAX_CHAT_ATTACHMENTS) {
         e.preventDefault();
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -303,25 +469,7 @@ export default function MessageInput() {
           {hasStaged && (
             <div className="flex flex-wrap gap-1.5 mb-2">
               {stagedFiles.map((sf) => (
-                <span
-                  key={sf.id}
-                  className="inline-flex items-center gap-1 max-w-[200px] pl-2 pr-1 py-1 rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark text-xs text-text-secondary dark:text-text-secondary-dark"
-                  title={sf.file.name}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                  </svg>
-                  <span className="truncate">{sf.file.name}</span>
-                  <button
-                    onClick={() => removeFile(sf.id)}
-                    className="shrink-0 p-0.5 rounded hover:bg-surface dark:hover:bg-surface-dark text-text-tertiary dark:text-text-tertiary-dark"
-                    aria-label={`Remove ${sf.file.name}`}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                      <path d="M18 6L6 18M6 6l12 12" />
-                    </svg>
-                  </button>
-                </span>
+                <StagedFileChip key={sf.id} sf={sf} onRemove={() => removeFile(sf.id)} />
               ))}
               <span className="inline-flex items-center px-1 text-xs tabular-nums text-text-tertiary dark:text-text-tertiary-dark">
                 {stagedFiles.length}/{MAX_CHAT_ATTACHMENTS}
@@ -338,8 +486,10 @@ export default function MessageInput() {
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
                   <polyline points="4 14 10 14 10 20" />
                   <polyline points="20 10 14 10 14 4" />
+                  <line x1="14" y1="10" x2="21" y2="3" />
+                  <line x1="3" y1="21" x2="10" y2="14" />
                 </svg>
-                <span>本轮回答后压缩上下文</span>
+                <span>发送后压缩一次上下文</span>
                 <button
                   onClick={() => setForceCompact(false)}
                   className="shrink-0 p-0.5 rounded hover:bg-accent/20"
@@ -350,6 +500,36 @@ export default function MessageInput() {
                   </svg>
                 </button>
               </span>
+            </div>
+          )}
+
+          {/* Armed-skill chips — the next send will activate these skills. */}
+          {activeSkills.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {activeSkills.map((slug) => {
+                const info = enabledSkills.find((s) => s.slug === slug);
+                return (
+                  <span
+                    key={slug}
+                    className="inline-flex items-center gap-1 pl-2 pr-1 py-1 rounded-lg bg-accent/10 border border-accent/40 text-xs text-accent"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                      <path d="M6.5 2l1 2.7 2.7 1-2.7 1-1 2.7-1-2.7-2.7-1 2.7-1z" />
+                      <path d="M11.5 9.5l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z" />
+                    </svg>
+                    <span>{info?.name ?? slug}</span>
+                    <button
+                      onClick={() => toggleSkill(slug)}
+                      className="shrink-0 p-0.5 rounded hover:bg-accent/20"
+                      aria-label={`取消激活 ${info?.name ?? slug}`}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                        <path d="M18 6L6 18M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </span>
+                );
+              })}
             </div>
           )}
 
@@ -394,7 +574,7 @@ export default function MessageInput() {
           <textarea
             ref={textareaRef}
             value={content}
-            onChange={(e) => setContent(e.target.value)}
+            onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             onCompositionStart={handleCompositionStart}
@@ -402,10 +582,10 @@ export default function MessageInput() {
             maxLength={MAX_MESSAGE_CHARS}
             placeholder={
               isStreaming
-                ? '输入追加指令，按 Enter 发送...'
+                ? '输入追加指令，按 Enter 发送…'
                 : isNewConversation
-                  ? '开始新的对话...'
-                  : '输入消息...'
+                  ? '开始新的对话…'
+                  : '输入消息…'
             }
             rows={1}
             className="w-full resize-none bg-transparent leading-5 text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none"
@@ -443,13 +623,123 @@ export default function MessageInput() {
                 onClick={toggleArtifactPanel}
                 className="h-8 w-8 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
                 aria-label="Toggle artifact panel"
-                title="切换文稿面板"
+                title="切换文件面板"
               >
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <rect x="1.5" y="2" width="13" height="12" rx="1.5" />
                   <path d="M9.5 2v12" />
                 </svg>
               </button>
+
+              {/* Skill activation picker — arms skills for the next send. Disabled
+                  while streaming (activation rides a fresh turn). */}
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    setSkillPickerOpen((v) => !v);
+                    setSkillFilter('');
+                  }}
+                  disabled={isStreaming}
+                  className={`h-8 w-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    activeSkills.length > 0 || skillPickerOpen
+                      ? 'bg-accent/15 text-accent'
+                      : 'text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark'
+                  }`}
+                  aria-label="激活技能"
+                  aria-pressed={skillPickerOpen}
+                  title="激活技能：让本轮应用某个技能的指令"
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M6.5 2l1 2.7 2.7 1-2.7 1-1 2.7-1-2.7-2.7-1 2.7-1z" />
+                    <path d="M11.5 9.5l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z" />
+                  </svg>
+                </button>
+
+                {skillPickerOpen && (
+                  <>
+                    {/* Click-away backdrop */}
+                    <button
+                      className="fixed inset-0 z-10 cursor-default"
+                      aria-hidden="true"
+                      tabIndex={-1}
+                      onClick={() => {
+                        setSkillPickerOpen(false);
+                        setSkillFilter('');
+                      }}
+                    />
+                    <div className="absolute bottom-full left-0 mb-2 z-20 w-64 max-h-72 overflow-y-auto rounded-xl bg-surface dark:bg-surface-dark border border-border dark:border-border-dark shadow-float py-1">
+                      <div className="sticky top-0 px-2 pt-1 pb-1.5 mb-1 bg-surface dark:bg-surface-dark select-none space-y-1">
+                        <span className="flex items-center px-2.5 py-1.5 rounded-lg bg-bg dark:bg-bg-dark text-sm font-medium text-text-secondary dark:text-text-secondary-dark">
+                          选择激活技能
+                        </span>
+                        {enabledSkills.length > 6 && (
+                          <input
+                            type="text"
+                            value={skillFilter}
+                            onChange={(e) => setSkillFilter(e.target.value)}
+                            placeholder="过滤技能…"
+                            className="w-full px-2.5 py-1 rounded-lg bg-bg dark:bg-bg-dark text-xs text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none border border-transparent focus:border-accent"
+                          />
+                        )}
+                      </div>
+                      {filteredEnabledSkills.length > 0 ? (
+                        filteredEnabledSkills.map((skill) => {
+                          const checked = activeSkills.includes(skill.slug);
+                          return (
+                            <button
+                              key={skill.slug}
+                              onClick={() => toggleSkill(skill.slug)}
+                              title={skill.description || undefined}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+                            >
+                              <span className={`flex-shrink-0 h-4 w-4 rounded border flex items-center justify-center ${
+                                checked
+                                  ? 'bg-accent border-accent text-white'
+                                  : 'border-border dark:border-border-dark'
+                              }`}>
+                                {checked && (
+                                  <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M3 8l3.5 3.5L13 5" />
+                                  </svg>
+                                )}
+                              </span>
+                              <span className="min-w-0 flex items-center gap-1.5">
+                                <span className="text-xs font-medium text-text-primary dark:text-text-primary-dark truncate">
+                                  {skill.name}
+                                </span>
+                                {alreadyActiveSkills.has(skill.slug) && (
+                                  <PillBadge
+                                    tone="accent"
+                                    title="该技能已在本对话激活；重新勾选会再次注入其正文（用于压缩后重提醒）"
+                                  >
+                                    已激活
+                                  </PillBadge>
+                                )}
+                              </span>
+                            </button>
+                          );
+                        })
+                      ) : !skillsLoaded ? (
+                        <div className="px-3 py-3 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                          加载中...
+                        </div>
+                      ) : skillsError ? (
+                        <div className="px-3 py-3 text-xs text-status-error">
+                          技能加载失败，请稍后重试。
+                        </div>
+                      ) : enabledSkills.length > 0 ? (
+                        <div className="px-3 py-3 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                          没有匹配的技能。
+                        </div>
+                      ) : (
+                        <div className="px-3 py-3 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                          暂无可激活的技能。可在「技能管理」中开启。
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
 
               {/* Compact context — arms a one-shot compaction on the next send.
                   Disabled while streaming (compaction rides a fresh turn, and the
@@ -462,14 +752,14 @@ export default function MessageInput() {
                     ? 'bg-accent/15 text-accent'
                     : 'text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark'
                 }`}
-                aria-label="Compact context"
+                aria-label="压缩上下文"
                 aria-pressed={effectiveForceCompact}
                 title={
                   !hasPersistedHistory
                     ? '当前会话无历史可压缩'
                     : effectiveForceCompact
-                      ? '已开启压缩：本轮回答后把之前的对话压缩成摘要（点击取消）'
-                      : '压缩上下文：本轮回答后把之前的对话压缩成摘要'
+                      ? '已开启：下次发送后，自动把已有对话整理成摘要（点击取消）'
+                      : '下次发送后，自动把已有对话整理成摘要'
                 }
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -524,7 +814,7 @@ export default function MessageInput() {
                       stroke="currentColor"
                       strokeDasharray={2 * Math.PI * 6.5}
                       strokeDashoffset={2 * Math.PI * 6.5 * (1 - pct / 100)}
-                      className={near ? 'text-amber-500' : 'text-accent'}
+                      className={near ? 'text-status-warning' : 'text-accent'}
                     />
                   </svg>
                   {/* translate-y-[0.5px]: mono digits 的 cap-center 比 line-box
@@ -561,14 +851,14 @@ export default function MessageInput() {
               // a silent no-op. Re-enables when agent_start clears queuedInfo.
               const queued = queuedInfo !== null;
               const sendDisabled =
-                (!isStreaming && !content.trim() && !hasStaged && !effectiveForceCompact) || cancelling || sending || queued;
+                (!isStreaming && !content.trim() && !hasStaged && !effectiveForceCompact && activeSkills.length === 0) || cancelling || sending || queued;
               return (
                 <button
                   onClick={handleSend}
                   disabled={sendDisabled}
                   className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                     isStop || cancelling
-                      ? 'bg-red-500 text-white hover:bg-red-600'
+                      ? 'bg-status-error text-white hover:bg-status-error/80'
                       : 'bg-accent text-white hover:bg-accent-hover'
                   }`}
                   aria-label={

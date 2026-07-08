@@ -52,6 +52,30 @@ describe('reconstructSegments', () => {
     });
   });
 
+  // Replay parity with the live useSSE TOOL_START handler — the model's stated
+  // <reason> intent must survive history reload, not just live SSE. Regression
+  // guard for the live/replay drift where replay dropped `reason`.
+  test('tool_start carries reason → ToolCallInfo.reason', () => {
+    const events = [
+      makeEvent('agent_start', {}, 'lead'),
+      makeEvent('tool_start', { tool: 'bash', params: { command: 'ls' }, reason: 'list the files' }, 'lead'),
+      makeEvent('tool_complete', { tool: 'bash', success: true, result_data: 'ok', duration_ms: 5 }, 'lead'),
+      makeEvent('agent_complete', {}, 'lead'),
+    ];
+    const segs = reconstructSegments(events);
+    expect(segs[0].toolCalls[0].reason).toBe('list the files');
+  });
+
+  test('tool_start without reason → reason undefined', () => {
+    const events = [
+      makeEvent('agent_start', {}, 'lead'),
+      makeEvent('tool_start', { tool: 'search', params: {} }, 'lead'),
+      makeEvent('tool_complete', { tool: 'search', success: true, result_data: '', duration_ms: 1 }, 'lead'),
+    ];
+    const segs = reconstructSegments(events);
+    expect(segs[0].toolCalls[0].reason).toBeUndefined();
+  });
+
   test('tool_complete success=false → status=error, result from data.error', () => {
     const events = [
       makeEvent('agent_start', {}, 'lead'),
@@ -133,6 +157,38 @@ describe('reconstructSegments', () => {
     const lead = segs.find(s => s.agent === 'lead')!;
     expect(lead.toolCalls[0].status).toBe('success');
     expect(lead.toolCalls[0].result).toBe('done');
+  });
+
+  // Nested serial delegation: [tool_a, call_subagent, tool_b] in ONE lead round.
+  // The caller's tool_b arrives AFTER the subagent's segment — it must land on
+  // the lead's lane (matched by agent), not on the most recent (subagent) segment.
+  test('mixed serial delegation → later caller tools lane back to caller segment', () => {
+    const events = [
+      makeEvent('agent_start', {}, 'lead'),
+      makeEvent('llm_complete', { content: '<tool_call>…</tool_call>' }, 'lead'),
+      makeEvent('tool_start', { tool: 'tool_a' }, 'lead'),
+      makeEvent('tool_complete', { tool: 'tool_a', success: true, result_data: 'A-ok' }, 'lead'),
+      makeEvent('tool_start', { tool: 'call_subagent', params: { agent_name: 'sub' } }, 'lead'),
+      makeEvent('agent_start', {}, 'sub'),
+      makeEvent('llm_complete', { content: 'sub answer', reasoning_content: 'sub thinking' }, 'sub'),
+      makeEvent('agent_complete', {}, 'sub'),
+      makeEvent('tool_complete', { tool: 'call_subagent', success: true, result_data: '<subagent_result>…</subagent_result>' }, 'lead'),
+      makeEvent('tool_start', { tool: 'tool_b' }, 'lead'),
+      makeEvent('tool_complete', { tool: 'tool_b', success: true, result_data: 'B-ok' }, 'lead'),
+      makeEvent('agent_start', {}, 'lead'),
+      makeEvent('llm_complete', { content: 'final' }, 'lead'),
+      makeEvent('agent_complete', {}, 'lead'),
+    ];
+    const segs = reconstructSegments(events);
+
+    const leadSeg = segs.find(s => s.agent === 'lead')!;
+    expect(leadSeg.toolCalls.map(t => t.toolName)).toEqual(['tool_a', 'call_subagent', 'tool_b']);
+    expect(leadSeg.toolCalls.every(t => t.status === 'success')).toBe(true);
+
+    // The subagent's segment must NOT have swallowed tool_b, and keeps its content.
+    const subSeg = segs.find(s => s.agent === 'sub')!;
+    expect(subSeg.toolCalls).toHaveLength(0);
+    expect(subSeg.content).toBe('sub answer');
   });
 });
 

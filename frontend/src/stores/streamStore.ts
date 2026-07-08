@@ -9,6 +9,9 @@ export interface ToolCallInfo {
   status: 'running' | 'success' | 'error';
   result?: string;
   durationMs?: number;
+  /** The model's stated intent for this call (<reason> tag); display-only.
+   *  Distinct from `permission.reason` below, which is the decision outcome. */
+  reason?: string;
   /** Set only for CONFIRM-level tools — the user's response (or timeout).
    *  Engine emits permission_request → permission_result immediately before
    *  the tool's own tool_start, so live + replay both pair by time. */
@@ -18,6 +21,8 @@ export interface ToolCallInfo {
 export interface PermissionRequest {
   toolName: string;
   params: Record<string, unknown>;
+  /** The model's stated intent for this call (<reason> tag); display-only. */
+  reason?: string;
 }
 
 /** User message injected during agent execution (QUEUED_MESSAGE event). */
@@ -27,6 +32,15 @@ export interface InjectBlock {
   content: string;
   timestamp: string;
   position: number;   // segments.length at insertion time
+}
+
+/** Local-only mirror for an inject POST that has not appeared as QUEUED_MESSAGE yet. */
+export interface PendingInjectBlock {
+  kind: 'pending_inject';
+  id: string;
+  content: string;
+  timestamp: string;
+  position: number;
 }
 
 /** Context-compaction block. Lifecycle: running → done | error. */
@@ -64,15 +78,16 @@ export interface ErrorBlock {
 }
 
 export type NonAgentBlock = InjectBlock | CompactionBlock | ErrorBlock;
+export type TimelineBlock = NonAgentBlock | PendingInjectBlock;
 
 export type FlowItem =
   | { kind: 'agent'; segment: ExecutionSegment; index: number }
-  | NonAgentBlock;
+  | TimelineBlock;
 
 /** Interleave agent segments with non-agent blocks by insertion position. */
 export function interleaveFlowItems(
   segments: ExecutionSegment[],
-  blocks: NonAgentBlock[],
+  blocks: TimelineBlock[],
 ): FlowItem[] {
   const sorted = [...blocks].sort((a, b) => a.position - b.position);
   const result: FlowItem[] = [];
@@ -118,6 +133,12 @@ interface StreamState {
   // Pending user message (shown before conversation loads)
   pendingUserMessage: string | null;
 
+  // Filenames attached to the pending user message — optimistic mirror of the
+  // persisted MessageResponse.uploaded_files, so the live bubble shows the
+  // attachments without waiting for the turn to flush. Same lifecycle as
+  // pendingUserMessage (set on send, cleared on reset).
+  pendingUserFiles: string[] | null;
+
   // Parent ID for rerun/edit branching (controls branchPath truncation)
   // undefined = normal send, null = root rerun, string = rerun from specific parent
   streamParentId: string | null | undefined;
@@ -127,6 +148,10 @@ interface StreamState {
 
   // Non-agent blocks (inject / compaction) interleaved with segments
   nonAgentBlocks: NonAgentBlock[];
+
+  // Local-only injects accepted by the composer but not yet echoed by the
+  // engine as queued_message. Cleared by FIFO when the real event arrives.
+  pendingInjects: PendingInjectBlock[];
 
   // Completed non-agent blocks cache (session-only, keyed by messageId)
   completedNonAgentBlocks: Map<string, NonAgentBlock[]>;
@@ -170,12 +195,14 @@ interface StreamState {
   // Segment actions
   pushSegment: (agent: string) => void;
   updateCurrentSegment: (update: Partial<ExecutionSegment>) => void;
+  updateAgentSegment: (agent: string, update: Partial<ExecutionSegment>) => void;
   appendCurrentSegmentContent: (content: string) => void;
   addToolCallToSegment: (tc: ToolCallInfo) => void;
   updateToolCallInSegment: (id: string, update: Partial<ToolCallInfo>) => void;
 
   // Pending user message
   setPendingUserMessage: (msg: string | null) => void;
+  setPendingUserFiles: (files: string[] | null) => void;
   setStreamParentId: (id: string | null | undefined) => void;
 
   // Non-agent blocks / metrics
@@ -183,6 +210,9 @@ interface StreamState {
   /** Merge a patch into an existing NonAgentBlock by id. Used to transition a
       CompactionBlock from running→done/error when COMPACTION_SUMMARY arrives. */
   updateNonAgentBlock: (id: string, patch: Partial<CompactionBlock>) => void;
+  addPendingInject: (content: string) => string;
+  removePendingInject: (id: string) => void;
+  confirmPendingInject: (content: string) => void;
   setExecutionMetrics: (metrics: ExecutionMetrics) => void;
 
   // Snapshot segments for completed messages
@@ -206,6 +236,7 @@ interface StreamState {
 let _rafId: number | null = null;
 let _pendingContent: string | null = null;
 let _appendFn: ((content: string) => void) | null = null;
+let _pendingInjectSeq = 0;
 
 function flushContent() {
   if (_pendingContent !== null && _appendFn) {
@@ -247,9 +278,11 @@ export const useStreamStore = create<StreamState>((set, get) => {
     conversationId: null,
     segments: [],
     pendingUserMessage: null,
+    pendingUserFiles: null,
     streamParentId: undefined,
     completedSegments: new Map(),
     nonAgentBlocks: [],
+    pendingInjects: [],
     completedNonAgentBlocks: new Map(),
     executionMetrics: null,
     reconnecting: false,
@@ -269,6 +302,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
         conversationId,
         segments: [],
         nonAgentBlocks: [],
+        pendingInjects: [],
         executionMetrics: null,
         reconnecting: false,
         cancelled: false,
@@ -282,7 +316,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
 
     endStream: () => {
       cancelPendingFlush();
-      set({ isStreaming: false, streamUrl: null, conversationId: null, reconnecting: false, cancelled: false, cancelling: false, permissionRequest: null, streamParentId: undefined, queuedInfo: null });
+      set({ isStreaming: false, streamUrl: null, conversationId: null, reconnecting: false, cancelled: false, cancelling: false, permissionRequest: null, streamParentId: undefined, queuedInfo: null, pendingInjects: [] });
     },
 
     reset: () =>
@@ -293,6 +327,8 @@ export const useStreamStore = create<StreamState>((set, get) => {
         conversationId: null,
         segments: [],
         pendingUserMessage: null,
+        pendingUserFiles: null,
+        pendingInjects: [],
         streamParentId: undefined,
         permissionRequest: null,
         error: null,
@@ -341,17 +377,39 @@ export const useStreamStore = create<StreamState>((set, get) => {
         };
       }),
 
+    updateAgentSegment: (agent, update) =>
+      set((s) => {
+        const segs = s.segments;
+        for (let i = segs.length - 1; i >= 0; i--) {
+          if (segs[i].agent === agent) {
+            const newSegs = [...segs];
+            newSegs[i] = { ...newSegs[i], ...update };
+            return { segments: newSegs };
+          }
+        }
+        return s;
+      }),
+
     addToolCallToSegment: (tc) =>
       set((s) => {
         const segs = s.segments;
         if (segs.length === 0) return s;
-        const last = segs[segs.length - 1];
-        return {
-          segments: [
-            ...segs.slice(0, -1),
-            { ...last, toolCalls: [...last.toolCalls, tc] },
-          ],
-        };
+        // Lane by agent: with in-place subagent recursion (nested serial
+        // delegation) the caller's later tool_starts arrive AFTER the
+        // subagent's segment, so "append to last" would misfile them onto
+        // the subagent's lane. Fall back to the last segment when no lane
+        // matches (agent missing on old replays).
+        let idx = segs.length - 1;
+        for (let i = segs.length - 1; i >= 0; i--) {
+          if (segs[i].agent === tc.agent) {
+            idx = i;
+            break;
+          }
+        }
+        const target = segs[idx];
+        const newSegs = [...segs];
+        newSegs[idx] = { ...target, toolCalls: [...target.toolCalls, tc] };
+        return { segments: newSegs };
       }),
 
     updateToolCallInSegment: (id, update) =>
@@ -370,6 +428,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
       }),
 
     setPendingUserMessage: (msg) => set({ pendingUserMessage: msg }),
+    setPendingUserFiles: (files) => set({ pendingUserFiles: files }),
     setStreamParentId: (id) => set({ streamParentId: id }),
 
     pushNonAgentBlock: (block) =>
@@ -382,6 +441,38 @@ export const useStreamStore = create<StreamState>((set, get) => {
             : b
         ),
       })),
+    addPendingInject: (content) => {
+      _pendingInjectSeq += 1;
+      const id = `pending-inject-${Date.now()}-${_pendingInjectSeq}`;
+      set((s) => ({
+        pendingInjects: [
+          ...s.pendingInjects,
+          {
+            kind: 'pending_inject',
+            id,
+            content,
+            timestamp: new Date().toISOString(),
+            position: s.segments.length,
+          },
+        ],
+      }));
+      return id;
+    },
+    removePendingInject: (id) =>
+      set((s) => ({
+        pendingInjects: s.pendingInjects.filter((p) => p.id !== id),
+      })),
+    confirmPendingInject: (content) =>
+      set((s) => {
+        const idx = s.pendingInjects.findIndex((p) => p.content === content);
+        if (idx === -1) return {};
+        return {
+          pendingInjects: [
+            ...s.pendingInjects.slice(0, idx),
+            ...s.pendingInjects.slice(idx + 1),
+          ],
+        };
+      }),
     setExecutionMetrics: (metrics) => set({ executionMetrics: metrics }),
 
     snapshotSegments: (messageId) => {

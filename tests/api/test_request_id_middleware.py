@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from api.middleware import RequestContextMiddleware
+from utils.instance import INSTANCE_ID
 from utils.logger import get_request_id
 
 
@@ -25,6 +26,12 @@ async def test_normal_request_has_request_id_header(anon_client):
     assert res.status_code == 200
     rid = res.headers.get("X-Request-ID")
     assert rid is not None and rid.startswith("req-"), res.headers
+
+
+async def test_normal_request_has_instance_id_header(anon_client):
+    """多副本定位:每个响应带受理实例的 X-Instance-ID。"""
+    res = await anon_client.get("/health/live")
+    assert res.headers.get("X-Instance-ID") == INSTANCE_ID
 
 
 # ---------- 最小 app:异常 / contextvar 行为 ----------
@@ -71,6 +78,8 @@ async def test_unhandled_exception_returns_sanitized_500_with_request_id(mini_cl
     # 定位码:body 与响应头都带,且一致
     assert body["request_id"].startswith("req-")
     assert body["request_id"] == res.headers.get("X-Request-ID")
+    # 兜底 500 同样带受理实例头
+    assert res.headers.get("X-Instance-ID") == INSTANCE_ID
 
 
 async def test_request_ids_are_unique_per_request(mini_client):

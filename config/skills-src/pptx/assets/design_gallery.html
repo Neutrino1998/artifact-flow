@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>演示文稿风格样单</title>
+<style>
+  :root {
+    --canvas: #15171c;
+    --canvas-2: #1c1f26;
+    --edge: #2b2f39;
+    --ink: #e9eaee;
+    --ink-dim: #969ba7;
+    --ink-faint: #626773;
+    --brass: #c2a878;
+    --ui: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    --mono: "SF Mono", Menlo, Consolas, monospace;
+    --yahei: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+    --kai: KaiTi, STKaiti, "楷体", "Noto Serif CJK SC", serif;
+    --song: SimSun, STSong, "宋体", "Noto Serif CJK SC", serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: radial-gradient(1100px 520px at 50% -180px, #20242d 0%, transparent 70%), var(--canvas);
+    color: var(--ink);
+    font-family: var(--ui);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1020px; margin: 0 auto; padding: clamp(28px,6vw,64px) clamp(18px,4vw,36px) 110px; }
+
+  /* ---------- masthead ---------- */
+  .kicker { font-family: var(--mono); font-size: 12px; letter-spacing: .22em; text-transform: uppercase; color: var(--brass); margin: 0 0 16px; }
+  h1 { font-family: Georgia, "Times New Roman", serif; font-weight: 600; font-size: clamp(28px,5.4vw,46px); line-height: 1.08; margin: 0 0 18px; text-wrap: balance; }
+  h1 em { font-style: italic; color: var(--brass); }
+  .lede { font-size: clamp(14.5px,2vw,17px); color: var(--ink-dim); max-width: 64ch; margin: 0; }
+  .lede strong { color: var(--ink); font-weight: 600; }
+  .howto {
+    margin-top: 26px; display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: start;
+    padding: 16px 18px; background: var(--canvas-2); border: 1px solid var(--edge); border-radius: 10px;
+  }
+  .howto .mark { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px;
+    background: rgba(194,168,120,.14); color: var(--brass); font-family: var(--mono); font-size: 14px; font-weight: 700; }
+  .howto p { margin: 0; font-size: 14px; color: var(--ink-dim); }
+  .howto b { color: var(--ink); }
+
+  /* ---------- theme blocks ---------- */
+  .theme { margin-top: 64px; }
+  .cap { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 13px; }
+  .no { font-family: var(--mono); font-size: 13px; color: var(--brass); letter-spacing: .1em; }
+  .cap h2 { font-family: Georgia, serif; font-size: 22px; font-weight: 600; margin: 0 4px 0 2px; letter-spacing: .01em; }
+  .chip { font-family: var(--mono); font-size: 11px; padding: 3px 9px; border-radius: 20px;
+    border: 1px solid var(--edge); color: var(--ink-dim); background: var(--canvas-2); }
+  .chip b { color: var(--ink); font-weight: 600; }
+
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 720px) { .duo { grid-template-columns: 1fr; } }
+  .shot { display: flex; flex-direction: column; gap: 7px; }
+  .frame {
+    aspect-ratio: 16/9; width: 100%; border-radius: 10px; overflow: hidden;
+    container-type: inline-size; position: relative;
+    box-shadow: 0 18px 42px -22px rgba(0,0,0,.85), 0 0 0 1px rgba(255,255,255,.05);
+  }
+  .tag { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); padding-left: 2px; }
+  .slide { position: absolute; inset: 0; font-family: var(--yahei); }
+
+  /* 版式骨架 —— 几何与 build_deck.py 一致(页边距 6.2cqw ≈ 0.83in/13.33in) */
+  .cover { display: flex; flex-direction: column; justify-content: center; padding: 0 6.2cqw; }
+  .cover .bar { width: 9cqw; height: .9cqw; margin-bottom: 2.6cqw; }
+  .cover .t { font-size: 5.6cqw; font-weight: 700; line-height: 1.15; margin: 0; letter-spacing: .01em; }
+  .cover .s { font-size: 2.5cqw; margin: 1.9cqw 0 0; }
+  .cover .f { position: absolute; left: 6.2cqw; bottom: 5.4cqw; font-size: 1.7cqw; letter-spacing: .05em; }
+
+  .page { padding: 0 6.2cqw; }
+  .page .tick { position: absolute; left: 6.2cqw; top: 8.3cqw; width: 4.1cqw; height: .68cqw; }
+  .page .h { position: absolute; left: 6.2cqw; top: 10.6cqw; font-size: 3.9cqw; font-weight: 700; margin: 0; }
+
+  .bullets li { font-size: 2.5cqw; line-height: 1.5; margin-bottom: 1.9cqw; list-style: none; position: relative; padding-left: 3cqw; }
+  .bullets li::before { content: ""; position: absolute; left: .4cqw; top: 1.45cqw; width: 1cqw; height: 1cqw; border-radius: 50%; background: var(--c, currentColor); }
+  .bullets li.l2 { margin-left: 3.4cqw; font-size: 2.2cqw; }
+  .bullets li.l2::before { width: .8cqw; height: .8cqw; opacity: .55; }
+  .bullets ul { position: absolute; left: 6.2cqw; right: 6.2cqw; top: 21cqw; margin: 0; padding: 0; }
+
+  .twocol .cols { position: absolute; left: 6.2cqw; right: 6.2cqw; top: 20.5cqw; display: flex; gap: 4.4cqw; }
+  .twocol .col { flex: 1; border-top: .3cqw solid; padding-top: 1.8cqw; }
+  .twocol .ct { font-size: 2.35cqw; font-weight: 700; margin: 0 0 1.5cqw; letter-spacing: .04em; }
+  .twocol .col p { font-size: 2.1cqw; line-height: 1.5; margin: 0 0 1.2cqw; }
+
+  .tbl table { position: absolute; left: 6.2cqw; right: 6.2cqw; top: 20.5cqw; width: 87.6cqw; border-collapse: collapse; font-size: 2.1cqw; }
+  .tbl th { font-weight: 700; text-align: left; padding: 1.5cqw 2.2cqw; }
+  .tbl td { padding: 1.4cqw 2.2cqw; }
+
+  .chart .plot { position: absolute; left: 6.2cqw; right: 6.2cqw; top: 20cqw; bottom: 9.5cqw;
+    display: flex; align-items: flex-end; gap: 5.5cqw; padding: 0 7cqw; border-bottom: .3cqw solid; }
+  .chart .b { flex: 1; border-radius: .7cqw .7cqw 0 0; position: relative; }
+  .chart .b i { position: absolute; top: -3.4cqw; left: 0; right: 0; text-align: center; font-style: normal; font-size: 2cqw; font-weight: 700; }
+  .chart .b u { position: absolute; bottom: -3.6cqw; left: 0; right: 0; text-align: center; text-decoration: none; font-size: 1.8cqw; }
+  .chart .cap2 { position: absolute; left: 0; right: 0; bottom: 3.4cqw; text-align: center; font-size: 1.75cqw; }
+
+  .section { display: flex; flex-direction: column; justify-content: center; padding: 0 6.2cqw; }
+  .section .rail { position: absolute; left: 0; top: 0; bottom: 0; width: 1.35cqw; }
+  .section .num { font-size: 9.5cqw; font-weight: 800; line-height: 1; margin: 0 0 1.6cqw; font-family: Georgia, var(--yahei); }
+  .section .st { font-size: 4.6cqw; font-weight: 700; margin: 0; }
+
+  .closing { display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 0 6.2cqw; }
+  .closing .t { font-size: 5.6cqw; font-weight: 700; margin: 0; }
+  .closing .s { font-size: 2.3cqw; margin: 2.2cqw 0 0; }
+
+  /* ---------- palette strip ---------- */
+  .pal { display: flex; height: 44px; border-radius: 8px; overflow: hidden; margin-top: 12px;
+    border: 1px solid rgba(255,255,255,.06); }
+  .pal span { flex: 1; position: relative; }
+  .pal span::after { content: attr(data-hex); position: absolute; left: 7px; bottom: 5px;
+    font-family: var(--mono); font-size: 9.5px; color: var(--_t, #fff); opacity: .85; }
+
+  footer { margin-top: 76px; padding-top: 22px; border-top: 1px solid var(--edge);
+    font-size: 12.5px; color: var(--ink-faint); font-family: var(--mono); line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <p class="kicker">pptx skill · design gallery</p>
+    <h1>先选一套<em>视觉基调</em>,再开始出片</h1>
+    <p class="lede">
+      六套主题,每套 = 固定的配色、字体搭配与版式配方,整份演示文稿按所选主题一致生成。
+      下面每张样张都是<strong>按真实出片几何渲染的 16:9 页面</strong>——所见即所得;
+      六套合起来也把七种版式(封面 / 要点 / 双栏 / 表格 / 图表 / 章节 / 结尾)看了个全。
+    </p>
+    <div class="howto">
+      <span class="mark">→</span>
+      <p><b>回复主题名称或编号</b>(如「用 1 号」「赭墨」)即可开始;也可以指定自己的主色,
+      我会在所选版式配方上替换配色。不确定就说场景,我来配。</p>
+    </div>
+  </header>
+
+  <!-- ================= 01 曜石蓝 ================= -->
+  <section class="theme">
+    <div class="cap">
+      <span class="no">01</span><h2>曜石蓝</h2>
+      <span class="chip">场景 · <b>商务汇报 / 经营分析</b></span>
+      <span class="chip">字体 · <b>微软雅黑</b></span>
+      <span class="chip">深蓝金 · 稳重</span>
+    </div>
+    <div class="duo">
+      <div class="shot">
+        <div class="frame"><div class="slide cover" style="background:#1B2A4A;color:#fff">
+          <div class="bar" style="background:#C9A227"></div>
+          <p class="t">二〇二六年第二季度<br>经营分析报告</p>
+          <p class="s" style="color:#B9C4DA">营收结构 · 区域分化 · 下半年策略</p>
+          <p class="f" style="color:#7A88A8">经营管理部 · 2026.07</p>
+        </div></div>
+        <span class="tag">cover · 封面</span>
+      </div>
+      <div class="shot">
+        <div class="frame"><div class="slide page bullets" style="background:#fff;color:#252A33">
+          <span class="tick" style="background:#C9A227"></span>
+          <p class="h" style="color:#1B2A4A">营收同比增长 23%,华东贡献最大增量</p>
+          <ul>
+            <li style="--c:#C9A227">华东区营收 4.2 亿,同比 +31%,占总盘 42%</li>
+            <li class="l2">新客户占比 41%,复购率保持 87%</li>
+            <li style="--c:#C9A227">成本率下降 1.8pct,毛利改善主要来自供应链整合</li>
+            <li style="--c:#C9A227">华北竞争加剧,增速回落至 9%,需重点关注</li>
+          </ul>
+        </div></div>
+        <span class="tag">bullets · 要点页</span>
+      </div>
+    </div>
+    <div class="pal">
+      <span data-hex="1B2A4A" style="background:#1B2A4A"></span>
+      <span data-hex="C9A227" style="background:#C9A227;--_t:#3a3005"></span>
+      <span data-hex="EEF1F6" style="background:#EEF1F6;--_t:#1B2A4A"></span>
+      <span data-hex="252A33" style="background:#252A33"></span>
+    </div>
+  </section>
+
+  <!-- ================= 02 赭墨 ================= -->
+  <section class="theme">
+    <div class="cap">
+      <span class="no">02</span><h2>赭墨</h2>
+      <span class="chip">场景 · <b>品牌 / 文化 / 提案</b></span>
+      <span class="chip">字体 · <b>楷体标题 + 雅黑正文</b></span>
+      <span class="chip">暖纸赭陶 · 人文</span>
+    </div>
+    <div class="duo">
+      <div class="shot">
+        <div class="frame"><div class="slide cover" style="background:#9C7050;color:#FAF6F0">
+          <div class="bar" style="background:#3E3A36"></div>
+          <p class="t" style="font-family:var(--kai);font-weight:600">品牌年度叙事提案</p>
+          <p class="s" style="color:#EADFD2">从产品语言到空间体验的一条主线</p>
+          <p class="f" style="color:#D9C6B4">品牌部 · 内部评审稿</p>
+        </div></div>
+        <span class="tag">cover · 封面</span>
+      </div>
+      <div class="shot">
+        <div class="frame"><div class="slide page twocol" style="background:#FAF6F0;color:#2B2B2B">
+          <span class="tick" style="background:#9C7050"></span>
+          <p class="h" style="color:#3E3A36;font-family:var(--kai);font-weight:600">两条叙事路线的取舍</p>
+          <div class="cols">
+            <div class="col" style="border-color:#9C7050">
+              <p class="ct" style="color:#9C7050">路线 A · 工艺叙事</p>
+              <p>从原料与手作切入,强调时间感;适合线下空间与长内容。</p>
+              <p>风险:节奏慢,社媒传播需要二次改编。</p>
+            </div>
+            <div class="col" style="border-color:#3E3A36">
+              <p class="ct" style="color:#3E3A36">路线 B · 人物叙事</p>
+              <p>以匠人与用户的双视角展开,天然适配短视频。</p>
+              <p>风险:对拍摄与选角要求高,预算上浮约两成。</p>
+            </div>
+          </div>
+        </div></div>
+        <span class="tag">two_col · 双栏页</span>
+      </div>
+    </div>
+    <div class="pal">
+      <span data-hex="9C7050" style="background:#9C7050"></span>
+      <span data-hex="3E3A36" style="background:#3E3A36"></span>
+      <span data-hex="FAF6F0" style="background:#FAF6F0;--_t:#9C7050"></span>
+      <span data-hex="F0E7DC" style="background:#F0E7DC;--_t:#8A8378"></span>
+    </div>
+  </section>
+
+  <!-- ================= 03 松石 ================= -->
+  <section class="theme">
+    <div class="cap">
+      <span class="no">03</span><h2>松石</h2>
+      <span class="chip">场景 · <b>科技 / 产品 / 可持续</b></span>
+      <span class="chip">字体 · <b>微软雅黑</b></span>
+      <span class="chip">深绿橙点 · 清晰</span>
+    </div>
+    <div class="duo">
+      <div class="shot">
+        <div class="frame"><div class="slide cover" style="background:#0F6B5C;color:#fff">
+          <div class="bar" style="background:#D97706"></div>
+          <p class="t">新一代检索引擎<br>发布方案</p>
+          <p class="s" style="color:#BCD8D1">架构升级 · 灰度节奏 · 指标口径</p>
+          <p class="f" style="color:#7FADA4">平台技术部 · V2 评审</p>
+        </div></div>
+        <span class="tag">cover · 封面</span>
+      </div>
+      <div class="shot">
+        <div class="frame"><div class="slide page chart" style="background:#fff;color:#1F2937">
+          <span class="tick" style="background:#D97706"></span>
+          <p class="h" style="color:#0F6B5C">灰度四周,P95 延迟下降 38%</p>
+          <div class="plot" style="border-color:#E8F2EF">
+            <div class="b" style="height:78%;background:#CFE2DD"><i style="color:#0F6B5C">412</i><u style="color:#6B7280">第一周</u></div>
+            <div class="b" style="height:64%;background:#9CC5BC"><i style="color:#0F6B5C">338</i><u style="color:#6B7280">第二周</u></div>
+            <div class="b" style="height:52%;background:#4E9A8C"><i style="color:#0F6B5C">276</i><u style="color:#6B7280">第三周</u></div>
+            <div class="b" style="height:42%;background:#0F6B5C"><i style="color:#D97706">255</i><u style="color:#6B7280">第四周</u></div>
+          </div>
+          <p class="cap2" style="color:#6B7280">P95 响应延迟(ms) · 数据来源:APM 平台</p>
+        </div></div>
+        <span class="tag">image · 图表页(matplotlib 出图)</span>
+      </div>
+    </div>
+    <div class="pal">
+      <span data-hex="0F6B5C" style="background:#0F6B5C"></span>
+      <span data-hex="D97706" style="background:#D97706"></span>
+      <span data-hex="E8F2EF" style="background:#E8F2EF;--_t:#0F6B5C"></span>
+      <span data-hex="1F2937" style="background:#1F2937"></span>
+    </div>
+  </section>
+
+  <!-- ================= 04 绛红 ================= -->
+  <section class="theme">
+    <div class="cap">
+      <span class="no">04</span><h2>绛红</h2>
+      <span class="chip">场景 · <b>政务 / 正式场合</b></span>
+      <span class="chip">字体 · <b>宋体标题 + 雅黑正文</b></span>
+      <span class="chip">绛红鎏金 · 端正</span>
+    </div>
+    <div class="duo">
+      <div class="shot">
+        <div class="frame"><div class="slide cover" style="background:#8C2F39;color:#fff">
+          <div class="bar" style="background:#B08D57"></div>
+          <p class="t" style="font-family:var(--song)">二〇二六年度<br>重点工作总结与规划</p>
+          <p class="s" style="color:#E3C9CC">围绕三条主线的落实情况</p>
+          <p class="f" style="color:#C9989E">综合办公室 · 年度会议</p>
+        </div></div>
+        <span class="tag">cover · 封面</span>
+      </div>
+      <div class="shot">
+        <div class="frame"><div class="slide page tbl" style="background:#fff;color:#2B2B2B">
+          <span class="tick" style="background:#B08D57"></span>
+          <p class="h" style="color:#8C2F39;font-family:var(--song)">三条主线完成情况一览</p>
+          <table>
+            <tr style="background:#8C2F39;color:#fff"><th>工作主线</th><th>年度目标</th><th>完成</th><th>评价</th></tr>
+            <tr style="background:#F5ECEC"><td>数字化审批改造</td><td>12 个流程</td><td>11 个</td><td>基本达成</td></tr>
+            <tr><td>基层服务下沉</td><td>覆盖 8 个街道</td><td>8 个</td><td>全面达成</td></tr>
+            <tr style="background:#F5ECEC"><td>档案数字化归集</td><td>30 万卷</td><td>19 万卷</td><td>转入明年</td></tr>
+          </table>
+        </div></div>
+        <span class="tag">table · 表格页</span>
+      </div>
+    </div>
+    <div class="pal">
+      <span data-hex="8C2F39" style="background:#8C2F39"></span>
+      <span data-hex="B08D57" style="background:#B08D57;--_t:#3d2f16"></span>
+      <span data-hex="F5ECEC" style="background:#F5ECEC;--_t:#8C2F39"></span>
+      <span data-hex="2B2B2B" style="background:#2B2B2B"></span>
+    </div>
+  </section>
+
+  <!-- ================= 05 极简 ================= -->
+  <section class="theme">
+    <div class="cap">
+      <span class="no">05</span><h2>极简</h2>
+      <span class="chip">场景 · <b>学术 / 技术分享</b></span>
+      <span class="chip">字体 · <b>微软雅黑</b></span>
+      <span class="chip">灰阶蓝点 · 克制</span>
+    </div>
+    <div class="duo">
+      <div class="shot">
+        <div class="frame"><div class="slide cover" style="background:#333333;color:#F5F5F5">
+          <div class="bar" style="background:#2563EB"></div>
+          <p class="t">执行引擎的取舍:<br>嵌套串行,而非图调度</p>
+          <p class="s" style="color:#B9BEC6">一条审计线性不变量换来的简单性</p>
+          <p class="f" style="color:#84898F">内部技术分享 · 45 min</p>
+        </div></div>
+        <span class="tag">cover · 封面</span>
+      </div>
+      <div class="shot">
+        <div class="frame"><div class="slide section" style="background:#F3F4F6;color:#333">
+          <span class="rail" style="background:#333333"></span>
+          <p class="num" style="color:#2563EB">02</p>
+          <p class="st" style="color:#333">为什么不是 DAG:三个反例</p>
+        </div></div>
+        <span class="tag">section · 章节页</span>
+      </div>
+    </div>
+    <div class="pal">
+      <span data-hex="333333" style="background:#333333"></span>
+      <span data-hex="2563EB" style="background:#2563EB"></span>
+      <span data-hex="F3F4F6" style="background:#F3F4F6;--_t:#333"></span>
+      <span data-hex="9CA3AF" style="background:#9CA3AF;--_t:#2b2f36"></span>
+    </div>
+  </section>
+
+  <!-- ================= 06 晨橙 ================= -->
+  <section class="theme">
+    <div class="cap">
+      <span class="no">06</span><h2>晨橙</h2>
+      <span class="chip">场景 · <b>发布会 / 培训 / 活力场</b></span>
+      <span class="chip">字体 · <b>微软雅黑</b></span>
+      <span class="chip">暖橙石板 · 明快</span>
+    </div>
+    <div class="duo">
+      <div class="shot">
+        <div class="frame"><div class="slide cover" style="background:#C2570B;color:#FFFDF9">
+          <div class="bar" style="background:#334155"></div>
+          <p class="t">新人训练营 · 第七期</p>
+          <p class="s" style="color:#F6D9BE">四周,从入门到独立值班</p>
+          <p class="f" style="color:#E3B58C">人才发展中心 · 开营日</p>
+        </div></div>
+        <span class="tag">cover · 封面</span>
+      </div>
+      <div class="shot">
+        <div class="frame"><div class="slide closing" style="background:#C2570B;color:#FFFDF9">
+          <p class="t">谢谢,开练!</p>
+          <p class="s" style="color:#F6D9BE">课程答疑随时找带教导师 · 材料已发学习平台</p>
+        </div></div>
+        <span class="tag">closing · 结尾页</span>
+      </div>
+    </div>
+    <div class="pal">
+      <span data-hex="C2570B" style="background:#C2570B"></span>
+      <span data-hex="334155" style="background:#334155"></span>
+      <span data-hex="FDEBD9" style="background:#FDEBD9;--_t:#C2570B"></span>
+      <span data-hex="292524" style="background:#292524"></span>
+    </div>
+  </section>
+
+  <footer>
+    样张按 build_deck.py 的真实出片几何渲染(16:9 · 页边距 · 题头短条 · 字号比例一致)。
+    本页用浏览器系统字体近似,实际 .pptx 中的字体以你机器上安装的为准。
+    <br>bullet 圆点颜色 = 主题强调色;图表页由 matplotlib 出图(中文已配置),样张中的柱状图为示意。
+  </footer>
+
+</div>
+</body>
+</html>

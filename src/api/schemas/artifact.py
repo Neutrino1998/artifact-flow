@@ -24,6 +24,10 @@ class ArtifactSummary(BaseModel):
         None,
         description="For source=user_upload artifacts: the filename the user uploaded. From metadata['original_filename'].",
     )
+    has_blob: bool = Field(
+        False,
+        description="True for blob-backed artifacts (images / rich-format uploads): no text content; raw bytes via GET …/raw.",
+    )
     created_at: datetime = Field(..., description="Creation time")
     updated_at: datetime = Field(..., description="Last update time")
 
@@ -61,6 +65,10 @@ class ArtifactResponse(BaseModel):
     original_filename: Optional[str] = Field(
         None,
         description="For source=user_upload artifacts: the filename the user uploaded. From metadata['original_filename'].",
+    )
+    has_blob: bool = Field(
+        False,
+        description="True for blob-backed artifacts (images / rich-format uploads): no text content; raw bytes via GET …/raw.",
     )
     created_at: datetime = Field(..., description="Creation time")
     updated_at: datetime = Field(..., description="Last update time")

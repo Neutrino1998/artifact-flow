@@ -1,0 +1,14 @@
+# 每 60s 触发一次 autoheal.service。间隔权衡:比 Caddy 被动摘除(秒级)慢、比心跳
+# TTL(默认 300s)快 —— 面板变红后一个 timer 间隔内就重启,又不至于把宿主 docker
+# API 打太频。改间隔即改 OnUnitActiveSec。
+[Unit]
+Description=Run ArtifactFlow autoheal every 60s
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=60s
+AccuracySec=10s
+Unit=artifactflow-autoheal.service
+
+[Install]
+WantedBy=timers.target

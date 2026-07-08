@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useState, type ReactNode } from 'react';
+import { MENU_ROW_HOVER } from '@/lib/styles';
 
 interface FlowBlockProps {
   /** Badge element shown in the header (colored pill with icon + label) */
@@ -41,7 +42,7 @@ function FlowBlock({
         onClick={() => { if (isExpandable) setExpanded(!expanded); }}
         className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${
           isExpandable
-            ? 'hover:bg-surface/60 dark:hover:bg-bg-dark/60 cursor-pointer'
+            ? `${MENU_ROW_HOVER} cursor-pointer`
             : 'cursor-default'
         }`}
       >

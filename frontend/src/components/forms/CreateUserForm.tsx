@@ -10,6 +10,7 @@ import {
   INPUT_ON_PANEL,
   LABEL_CLASS,
 } from '@/lib/styles';
+import { SELECT_CHEVRON } from '@/components/ui/SelectChevron';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
 import PanelShell from '@/components/layout/PanelShell';
 import {
@@ -108,7 +109,7 @@ export default function CreateUserForm() {
             disabled={!canSubmit}
             className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
           >
-            {submitting ? '创建中...' : '创建'}
+            {submitting ? '创建中…' : '创建'}
           </button>
         </>
       }
@@ -182,12 +183,7 @@ export default function CreateUserForm() {
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
-            <svg
-              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-tertiary dark:text-text-tertiary-dark"
-              width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
-            >
-              <path d="M3 4.5l3 3 3-3" />
-            </svg>
+            {SELECT_CHEVRON}
           </div>
         </div>
 

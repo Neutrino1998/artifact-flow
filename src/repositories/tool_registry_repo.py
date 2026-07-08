@@ -1,0 +1,116 @@
+"""
+ToolRegistry Repository(写侧)—— tool_units / tool_members / agent_units 的数据访问。
+
+纯数据访问、**不 commit**(事务边界归 ToolRegistryManager 的 use-case):staging 写 +
+查询。读侧的运行期快照另在 reconcile/snapshot.py(那里只读、重建运行形状)。
+ORM 实例不外逃:Manager 在同 session 内读其列做序列化,不把对象交给 router。
+"""
+
+from typing import Dict, List, Optional
+
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from db.models import Agent, AgentUnit, DepartmentUnitRule, ToolMember, ToolUnit
+from repositories.base import BaseRepository
+
+
+class ToolRegistryRepository(BaseRepository[ToolUnit]):
+    def __init__(self, session: AsyncSession):
+        super().__init__(session, ToolUnit)
+
+    # ---- 读 ----------------------------------------------------------------
+
+    async def list_units(self) -> List[ToolUnit]:
+        """全部 unit(members 经 selectin 预载)。external 数量级小,全量拉。"""
+        return list((await self._session.execute(
+            select(ToolUnit).order_by(ToolUnit.name)
+        )).scalars().all())
+
+    async def get_unit(self, name: str) -> Optional[ToolUnit]:
+        # 用 select(非 session.get):commit 后 expire_on_commit 让 identity-map 实例过期,
+        # session.get 返回它但 `u.members`(selectin)会在 await 外触发 lazy IO → MissingGreenlet。
+        # select 语句执行时 selectin post-load 在 await 内跑,members 即时加载。
+        return (await self._session.execute(
+            select(ToolUnit).where(ToolUnit.name == name)
+        )).scalar_one_or_none()
+
+    async def get_unit_for_update(self, name: str) -> Optional[ToolUnit]:
+        """Load and row-lock a unit for writes that interpret or change visibility."""
+        return (await self._session.execute(
+            select(ToolUnit).where(ToolUnit.name == name).with_for_update()
+        )).scalar_one_or_none()
+
+    async def existing_full_names(self, exclude_unit: Optional[str] = None) -> Dict[str, str]:
+        """{full_name: unit_name},排除某 unit(update 时排自身)。撞名 by-construction 闸用。"""
+        rows = (await self._session.execute(
+            select(ToolMember.full_name, ToolMember.unit_name)
+        )).all()
+        return {fn: un for fn, un in rows if un != exclude_unit}
+
+    async def existing_unit_names(self) -> set:
+        return set((await self._session.execute(select(ToolUnit.name))).scalars().all())
+
+    async def list_agents(self) -> List[Agent]:
+        return list((await self._session.execute(
+            select(Agent).order_by(Agent.name)
+        )).scalars().all())
+
+    async def get_agent(self, name: str) -> Optional[Agent]:
+        return await self._session.get(Agent, name)
+
+    async def agent_units_for_unit(self, unit_name: str) -> List[AgentUnit]:
+        return list((await self._session.execute(
+            select(AgentUnit).where(AgentUnit.unit_name == unit_name)
+            .order_by(AgentUnit.agent_name)
+        )).scalars().all())
+
+    async def get_agent_unit(self, agent_name: str, unit_name: str) -> Optional[AgentUnit]:
+        return await self._session.get(AgentUnit, (agent_name, unit_name))
+
+    # ---- 写(staging,不 commit)-------------------------------------------
+
+    def add_unit(self, unit: ToolUnit, members: List[ToolMember]) -> None:
+        self._session.add(unit)
+        for m in members:
+            self._session.add(m)
+
+    async def replace_members(self, unit_name: str, members: List[ToolMember]) -> None:
+        await self._session.execute(
+            delete(ToolMember).where(ToolMember.unit_name == unit_name)
+        )
+        for m in members:
+            self._session.add(m)
+
+    async def clear_dept_rules(self, unit_name: str) -> None:
+        """删该 unit 的 dept 规则 —— 决策 10 clear-on-visibility 的**唯一实现**。
+
+        规则行的 grant/deny 方向派生自资源 visibility,行熬过 visibility 变更 / unit
+        删除重建 = 方向静默反转(反授权)。三条路径同调:Manager update_unit(UI 改
+        visibility)、本 Repo delete_unit(删 unit)、reconciler(config 改 visibility /
+        prune)。定向删(非 cascade,留 user/agent 等其它指向)。G 前表恒空,no-op。
+        """
+        await self._session.execute(
+            delete(DepartmentUnitRule).where(DepartmentUnitRule.unit_name == unit_name)
+        )
+
+    async def delete_unit(self, name: str) -> None:
+        """显式删子行(dialect-safe,不赖 per-connection FK pragma);DB FK 是双保险。
+
+        凭证行归 ToolCredentialRepository,由 Manager 的 delete 用例先删。
+        """
+        await self.clear_dept_rules(name)
+        await self._session.execute(delete(AgentUnit).where(AgentUnit.unit_name == name))
+        await self._session.execute(delete(ToolMember).where(ToolMember.unit_name == name))
+        await self._session.execute(delete(ToolUnit).where(ToolUnit.name == name))
+
+    def add_agent_unit(self, agent_unit: AgentUnit) -> None:
+        self._session.add(agent_unit)
+
+    async def delete_agent_unit(self, agent_name: str, unit_name: str) -> None:
+        await self._session.execute(
+            delete(AgentUnit).where(
+                AgentUnit.agent_name == agent_name,
+                AgentUnit.unit_name == unit_name,
+            )
+        )

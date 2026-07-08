@@ -1,12 +1,10 @@
 'use client';
 
 import { memo, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeHighlight from 'rehype-highlight';
 import type { ExecutionSegment } from '@/stores/streamStore';
-import { PROSE_CLASSES } from '@/lib/styles';
-import { markdownComponents, markdownUrlTransform } from '@/components/markdown';
+import { PROSE_CLASSES, MENU_ROW_HOVER } from '@/lib/styles';
+import MarkdownBlock from '@/components/markdown/MarkdownBlock';
+import { PillBadge } from '@/components/ui/PillBadge';
 import ThinkingBlock from './ThinkingBlock';
 import AgentOutputBlock from './AgentOutputBlock';
 import ToolCallCard from './ToolCallCard';
@@ -90,7 +88,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
       <button
         onClick={() => { if (!isActive) setExpanded(!expanded); }}
         className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${
-          isActive ? 'cursor-default' : 'hover:bg-surface/60 dark:hover:bg-panel-accent-dark/60 cursor-pointer'
+          isActive ? 'cursor-default' : `${MENU_ROW_HOVER} cursor-pointer`
         }`}
       >
         {/* Chevron */}
@@ -109,12 +107,10 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
         )}
 
         {/* Agent badge inline */}
-        <span
-          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-medium ${
-            segment.status === 'running'
-              ? 'bg-accent/10 text-accent'
-              : 'bg-transparent text-text-secondary dark:text-text-secondary-dark'
-          }`}
+        <PillBadge
+          tone={segment.status === 'running' ? 'accent' : 'neutral'}
+          size="regular"
+          className="gap-1.5"
         >
           {segment.status === 'running' && (
             <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
@@ -125,7 +121,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
             </svg>
           )}
           {segment.agent}
-        </span>
+        </PillBadge>
 
         {/* Compact metadata — only shown when segment is done */}
         {segment.status === 'complete' && (segment.model || segment.tokenUsage || segment.llmDurationMs) && (
@@ -159,11 +155,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
               Appears in the same DOM slot whether sourced from streaming content or llmOutput,
               so new elements (AgentOutput, ToolCards) appear BELOW without layout shift. */}
           {preToolText && (
-            <div className={PROSE_CLASSES}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={markdownComponents} urlTransform={markdownUrlTransform}>
-                {preToolText}
-              </ReactMarkdown>
-            </div>
+            <MarkdownBlock>{preToolText}</MarkdownBlock>
           )}
 
           {/* Agent Output — only XML tool_call blocks */}
@@ -178,11 +170,9 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
 
           {/* Main content — normal streaming text or post-tool text from new LLM round */}
           {mainContent && (
-            <div className={`${PROSE_CLASSES} ${isActive ? 'streaming-cursor' : ''}`}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={markdownComponents} urlTransform={markdownUrlTransform}>
-                {mainContent}
-              </ReactMarkdown>
-            </div>
+            <MarkdownBlock className={`${PROSE_CLASSES} ${isActive ? 'streaming-cursor' : ''}`}>
+              {mainContent}
+            </MarkdownBlock>
           )}
         </div>
       )}

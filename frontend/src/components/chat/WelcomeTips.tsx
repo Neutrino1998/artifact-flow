@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { fetchWelcomeTips } from '@/lib/siteConfig';
 
 const ROTATE_MS = 8000;
-const ANIM_MS = 500;
+const FADE_MS = 300; // 单侧淡入/淡出时长,须与 tailwind tip-in/tip-out 动画时长一致
 const FALLBACK = '开始对话，探索更多可能';
 
 function LightbulbIcon({ className = '' }: { className?: string }) {
@@ -28,31 +28,46 @@ function LightbulbIcon({ className = '' }: { className?: string }) {
 }
 
 /**
- * 欢迎页副标题：从 /site/welcome_tips.json 读字符串数组，
- * 每 5s 向左滑动切换一条；hover 暂停；空列表 / fetch 失败回落到默认文案。
+ * 欢迎页副标题：从 /site/welcome_tips.json 读字符串数组，每 8s 切换一条；hover 暂停；
+ * 空列表 / fetch 失败回落到默认文案。
+ *
+ * 切换动画：单个节点「先淡出旧的 → 换文案 → 再淡入新的」的顺序过渡，全程只有一条 tip
+ * 在场，故不会出现新旧两条交叉重叠(此前双层 absolute 交叉淡入淡出的问题)。
  */
 export default function WelcomeTips() {
   const [tips, setTips] = useState<string[]>([]);
   const [idx, setIdx] = useState(0);
-  const [prevIdx, setPrevIdx] = useState<number | null>(null);
+  const [phase, setPhase] = useState<'in' | 'out'>('in');
   const [paused, setPaused] = useState(false);
-  const timerRef = useRef<number | null>(null);
+  const rotateRef = useRef<number | null>(null);
+  const swapRef = useRef<number | null>(null);
 
   useEffect(() => {
     void fetchWelcomeTips().then(setTips);
   }, []);
 
   useEffect(() => {
-    if (tips.length <= 1 || paused) return;
-    timerRef.current = window.setTimeout(() => {
-      setPrevIdx(idx);
-      setIdx((current) => (current + 1) % tips.length);
-      // 清除上一条（动画结束后），避免堆叠多个 DOM 节点
-      window.setTimeout(() => setPrevIdx(null), ANIM_MS);
+    if (tips.length <= 1 || paused) {
+      // 暂停(或不足两条)时清掉待执行的换文案定时器,并确保不停在「淡出」中间态
+      // ——否则当前这条会停在 opacity:0 隐身。
+      if (swapRef.current !== null) {
+        window.clearTimeout(swapRef.current);
+        swapRef.current = null;
+      }
+      setPhase('in');
+      return;
+    }
+    rotateRef.current = window.setTimeout(() => {
+      setPhase('out'); // 先淡出当前条
+      swapRef.current = window.setTimeout(() => {
+        setIdx((current) => (current + 1) % tips.length); // 淡出结束后换文案
+        setPhase('in'); // 再淡入新的一条
+      }, FADE_MS);
     }, ROTATE_MS);
 
     return () => {
-      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+      if (rotateRef.current !== null) window.clearTimeout(rotateRef.current);
+      if (swapRef.current !== null) window.clearTimeout(swapRef.current);
     };
   }, [idx, tips.length, paused]);
 
@@ -77,30 +92,19 @@ export default function WelcomeTips() {
 
   return (
     <div
-      className="relative overflow-hidden h-6 w-full max-w-2xl text-text-tertiary dark:text-text-tertiary-dark"
+      className="flex items-center justify-center h-6 w-full max-w-2xl text-text-tertiary dark:text-text-tertiary-dark"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >
-      {prevIdx !== null && (
-        <div
-          key={`out-${prevIdx}`}
-          className="absolute inset-0 flex items-center justify-center animate-slide-out-left px-4"
-        >
-          <span className="relative">
-            <LightbulbIcon className="absolute right-full top-1/2 -translate-y-1/2 mr-2 shrink-0" />
-            {tips[prevIdx]}
-          </span>
-        </div>
-      )}
-      <div
-        key={`in-${idx}`}
-        className="absolute inset-0 flex items-center justify-center animate-slide-in-right px-4"
+      {/* key={idx} 让换文案时节点重挂载、重放 tip-in;仅切 phase 时(同 idx)靠
+          animation-name 变化(tip-in↔tip-out)触发重播。 */}
+      <span
+        key={idx}
+        className={`relative ${phase === 'out' ? 'animate-tip-out' : 'animate-tip-in'}`}
       >
-        <span className="relative">
-          <LightbulbIcon className="absolute right-full top-1/2 -translate-y-1/2 mr-2 shrink-0" />
-          {tips[idx]}
-        </span>
-      </div>
+        <LightbulbIcon className="absolute right-full top-1/2 -translate-y-1/2 mr-2 shrink-0" />
+        {tips[idx]}
+      </span>
     </div>
   );
 }

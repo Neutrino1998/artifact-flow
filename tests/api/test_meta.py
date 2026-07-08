@@ -67,3 +67,8 @@ async def test_meta_returns_full_shape(client: AsyncClient):
     # guaranteed because AgentConfig defaults model to a literal even when the
     # MD omits it, and lead_agent.md sets it explicitly.
     assert len(data["lead_agent_model"]) > 0
+
+    # max_upload_size — composer's per-file size pre-gate (mirrors MAX_UPLOAD_SIZE)
+    assert "max_upload_size" in data
+    assert isinstance(data["max_upload_size"], int)
+    assert data["max_upload_size"] == config.MAX_UPLOAD_SIZE

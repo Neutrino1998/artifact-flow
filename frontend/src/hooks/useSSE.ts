@@ -4,7 +4,6 @@ import { useCallback } from 'react';
 import { useStreamStore, scheduleContentUpdate } from '@/stores/streamStore';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useArtifactStore } from '@/stores/artifactStore';
-import { useStagedFilesStore } from '@/stores/stagedFilesStore';
 import { useUIStore } from '@/stores/uiStore';
 import { connectSSE } from '@/lib/sse';
 import { StreamEventType } from '@/types/events';
@@ -40,24 +39,13 @@ let _toolCallSeq = 0;
 
 const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_BASE_DELAY_MS = 1000;
+const INJECT_EVENT_PREFIX =
+  '[The user has injected a message during execution. Consider this input and adjust your approach as needed.]\n';
 
-// Resolve composer attachments at a turn's terminal, keyed off the backend's
-// `artifacts_flushed` bit. post_processing.decide_terminal is the SINGLE terminal
-// authority and stamps the bit (= "the turn's uploads got persisted") on EVERY
-// terminal it builds — COMPLETE / cancel / timeout / error / flush_error alike,
-// always post-flush. So a real turn terminal always carries it:
-//   - explicit true  → uploads persisted → clearSent() drops the files.
-//   - anything else  → keep them staged (unmarkSent) so the user can retry.
-// The ONLY field-absent terminals are transport-layer errors emitted OUTSIDE
-// decide_terminal with unknown flush state (stream not-found/expired in
-// routers/stream.py, the forwarder exception in controller_factory.py). For those,
-// default-KEEP is the safe direction: clearing could silently drop a user's
-// attachment; keeping at worst re-stages an already-persisted file, and re-send
-// dedups it (a deletable _N), never data loss.
-function resolveStagedAfterTerminal(data: Record<string, unknown> | undefined): void {
-  const store = useStagedFilesStore.getState();
-  if (data?.artifacts_flushed === true) store.clearSent();
-  else store.unmarkSent();
+function stripInjectEventPrefix(content: string): string {
+  return content.startsWith(INJECT_EVENT_PREFIX)
+    ? content.slice(INJECT_EVENT_PREFIX.length)
+    : content;
 }
 
 export function useSSE() {
@@ -65,6 +53,7 @@ export function useSSE() {
   // Stream store actions
   const pushSegment = useStreamStore((s) => s.pushSegment);
   const updateCurrentSegment = useStreamStore((s) => s.updateCurrentSegment);
+  const updateAgentSegment = useStreamStore((s) => s.updateAgentSegment);
   const addToolCallToSegment = useStreamStore((s) => s.addToolCallToSegment);
   const updateToolCallInSegment = useStreamStore((s) => s.updateToolCallInSegment);
   const snapshotSegments = useStreamStore((s) => s.snapshotSegments);
@@ -74,6 +63,7 @@ export function useSSE() {
   const endStream = useStreamStore((s) => s.endStream);
   const pushNonAgentBlock = useStreamStore((s) => s.pushNonAgentBlock);
   const updateNonAgentBlock = useStreamStore((s) => s.updateNonAgentBlock);
+  const confirmPendingInject = useStreamStore((s) => s.confirmPendingInject);
   const setExecutionMetrics = useStreamStore((s) => s.setExecutionMetrics);
   const setCancelled = useStreamStore((s) => s.setCancelled);
   const setReconnecting = useStreamStore((s) => s.setReconnecting);
@@ -212,6 +202,14 @@ export function useSSE() {
     (event: SSEEvent, conversationId: string) => {
       const { type, data } = event;
 
+      // TWIN PATH — keep the per-event field mappings below in sync with
+      // reconstructSegments.ts, which folds the SAME persisted events into the
+      // SAME ExecutionSegment / ToolCallInfo / NonAgentBlock shapes on history
+      // reload. Only the field mapping is duplicated; the orchestration genuinely
+      // differs (streaming + llm_chunk here vs batch fold there) so the two loops
+      // stay separate by design. Add/remove a field on any UI object below →
+      // mirror it there (and vice-versa). The `reason` field silently dropping on
+      // history reload was exactly this twin drifting out of sync.
       switch (type) {
         case StreamEventType.METADATA: {
           // Dev-only consistency check: verify message_id from metadata matches streamStore
@@ -301,15 +299,30 @@ export function useSSE() {
           break;
 
         case StreamEventType.TOOL_START: {
+          // TWIN: ToolCallInfo is also built in reconstructSegments.ts `tool_start`
+          // (history reload) — keep this field set identical to that one.
           const toolName = data?.tool as string ?? '';
           const params = data?.params as Record<string, unknown> ?? {};
+          const reason = data?.reason as string | undefined;
           const agent = event.agent ?? '';
 
-          // Preserve LLM output before clearing content (only on first tool_start)
+          // Lane by agent (TWIN: reconstructSegments.ts `tool_start` mirrors
+          // this): with in-place subagent recursion the caller's later tools
+          // arrive AFTER the subagent's segment — "last segment" would misfile
+          // them onto the subagent's lane and wrongly clear its content.
+          const agentLane = event.agent ?? 'Agent';
           const segs = useStreamStore.getState().segments;
-          const lastSeg = segs[segs.length - 1];
-          const preserveLlmOutput = lastSeg?.content && !lastSeg.llmOutput
-            ? { llmOutput: lastSeg.content }
+          let laneSeg = segs[segs.length - 1];
+          for (let i = segs.length - 1; i >= 0; i--) {
+            if (segs[i].agent === agentLane) {
+              laneSeg = segs[i];
+              break;
+            }
+          }
+
+          // Preserve LLM output before clearing content (only on first tool_start)
+          const preserveLlmOutput = laneSeg?.content && !laneSeg.llmOutput
+            ? { llmOutput: laneSeg.content }
             : {};
 
           // Latch a just-resolved permission_result onto this tool call (the
@@ -324,10 +337,11 @@ export function useSSE() {
             params,
             agent,
             status: 'running',
+            ...(reason ? { reason } : {}),
             ...(permission ? { permission } : {}),
           });
-          // Clear streaming content when entering tool phase
-          updateCurrentSegment({ content: '', ...preserveLlmOutput });
+          // Clear streaming content when entering tool phase (laned segment)
+          updateAgentSegment(laneSeg ? laneSeg.agent : agentLane, { content: '', ...preserveLlmOutput });
           break;
         }
 
@@ -385,9 +399,9 @@ export function useSSE() {
 
         case StreamEventType.ARTIFACT_CREATED: {
           // Live source of truth during a turn (REST GET is pure-DB now and lags).
-          // Reducer upserts the list, auto-opens (unless source='tool' or the user
-          // picked another artifact), and stores live content. DB re-pull on
-          // COMPLETE realigns.
+          // Reducer upserts the list, auto-opens (every source incl. tool, unless
+          // the user actively picked another artifact), and stores live content.
+          // DB re-pull on COMPLETE realigns.
           setArtifactSessionId(conversationId);
           setArtifactPanelVisible(true);
           applyArtifactCreated(data as unknown as ArtifactCreatedData);
@@ -405,6 +419,7 @@ export function useSSE() {
           setPermissionRequest({
             toolName: data?.tool as string ?? '',
             params: data?.params as Record<string, unknown> ?? {},
+            reason: data?.reason as string | undefined,
           });
           break;
 
@@ -416,15 +431,21 @@ export function useSSE() {
           break;
         }
 
-        case StreamEventType.QUEUED_MESSAGE:
+        case StreamEventType.QUEUED_MESSAGE: {
+          const content = data?.content as string ?? '';
+          // Best-effort only: confirm the local pending inject that matches
+          // this engine echo, so replay/cross-tab queued messages don't consume
+          // an unrelated waiting pill.
+          confirmPendingInject(stripInjectEventPrefix(content));
           pushNonAgentBlock({
             kind: 'inject',
             id: `inject-${Date.now()}`,
-            content: data?.content as string ?? '',
+            content,
             timestamp: event.timestamp,
             position: useStreamStore.getState().segments.length,
           });
           break;
+        }
 
         case StreamEventType.COMPACTION_START: {
           const d = data as import('@/types/events').CompactionStartData | undefined;
@@ -475,9 +496,6 @@ export function useSSE() {
           }
           setCancelled(true);
           endStream();
-          // Cooperative cancel flushed uploads, external cancel didn't — the
-          // backend's artifacts_flushed bit disambiguates (see helper).
-          resolveStagedAfterTerminal(data as Record<string, unknown> | undefined);
           refreshAfterComplete(conversationId, messageId);
           break;
         }
@@ -490,8 +508,6 @@ export function useSSE() {
             snapshotSegments(messageId);
           }
           endStream();
-          // Turn succeeded → staged uploads were flushed; drop the in-flight files.
-          resolveStagedAfterTerminal(data as Record<string, unknown> | undefined);
           refreshAfterComplete(conversationId, messageId);
           break;
         }
@@ -507,9 +523,6 @@ export function useSSE() {
             snapshotSegments(messageId);
           }
           endStream();
-          // Timeout runs full post-processing → uploads were flushed; the
-          // artifacts_flushed bit reflects that (clearSent).
-          resolveStagedAfterTerminal(data as Record<string, unknown> | undefined);
           refreshAfterComplete(conversationId, messageId);
           break;
         }
@@ -538,11 +551,6 @@ export function useSSE() {
             snapshotSegments(errMsgId);
           }
           endStream();
-          // ERROR from decide_terminal (engine error / flush_error / staging abort)
-          // carries an explicit artifacts_flushed; transport-layer ERRORs (stream
-          // not-found, forwarder) don't. Only explicit true clears; absent/false
-          // keeps the attachment for retry (safe direction — see helper).
-          resolveStagedAfterTerminal(data as Record<string, unknown> | undefined);
           refreshAfterComplete(conversationId, errMsgId);
           break;
         }
@@ -552,13 +560,12 @@ export function useSSE() {
       }
     },
     [
-      pushSegment, updateCurrentSegment, addToolCallToSegment,
+      pushSegment, updateCurrentSegment, updateAgentSegment, addToolCallToSegment,
       updateToolCallInSegment, snapshotSegments, setPermissionRequest,
       setError, endStream, refreshAfterComplete, setArtifactPanelVisible,
-      setArtifactSessionId, setArtifactCurrent, setArtifacts,
-      setArtifactVersions, setSelectedVersion,
+      setArtifactSessionId,
       applyArtifactCreated, applyArtifactUpdated,
-      pushNonAgentBlock, updateNonAgentBlock, setExecutionMetrics, setCancelled,
+      pushNonAgentBlock, updateNonAgentBlock, confirmPendingInject, setExecutionMetrics, setCancelled,
       setQueuedInfo,
     ]
   );
@@ -580,6 +587,7 @@ export function useSSE() {
         try {
           const active = await api.getActiveStream(conversationId);
           if (_sharedAbortController !== ownerController || ownerController.signal.aborted) return;
+          if (!active.active) continue;
 
           // Execution still active — reconnect with lastEventId
           setReconnecting(false);
@@ -626,7 +634,7 @@ export function useSSE() {
           );
           return; // SSE connection initiated (handlers take over)
         } catch {
-          // getActiveStream failed (404 or network error) — try next attempt
+          // getActiveStream failed (network/server error) — try next attempt
           continue;
         }
       }
@@ -714,13 +722,14 @@ export function useSSE() {
     async (conversationId: string) => {
       try {
         const active = await api.getActiveStream(conversationId);
+        if (!active.active) return;
         // The probe is async and switchConversation can fire several in
         // quick succession (e.g. B → C). A late-resolving probe for B must
         // not steal the SSE connection from the now-active C.
         if (useConversationStore.getState().current?.id !== conversationId) return;
         connect(active.stream_url, conversationId, active.message_id);
       } catch {
-        // 404 (no active execution) / 410 (stream expired) — nothing live to attach to
+        // Network/server error — nothing live to attach to for now.
       }
     },
     [connect]

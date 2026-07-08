@@ -1,0 +1,93 @@
+'use client';
+
+import { useCallback, useState } from 'react';
+import { fetchArtifactRawObjectUrl, type ArtifactRawObjectUrlFetcher } from '@/lib/api';
+import { triggerObjectUrlDownload } from '@/lib/download';
+import { BUTTON_PRIMARY } from '@/lib/styles';
+import { useArtifactStore } from '@/stores/artifactStore';
+
+/** Render a non-image blob-backed artifact (docx / pdf upload — C-0 blob-only:
+ *  rich formats have no text representation; reading/converting them is a
+ *  sandbox capability). The panel shows a file card with a raw download.
+ *
+ *  Mirrors ImagePreview's live-turn handling: while the artifact is live THIS
+ *  turn (pendingFlush) the blob isn't flushed yet → /raw would 404, so the
+ *  download is replaced by a pending hint. COMPLETE clears liveContent and
+ *  re-renders us with the download enabled. */
+export default function BinaryFilePreview({
+  sessionId,
+  artifactId,
+  originalFilename,
+  contentType,
+  description,
+  pendingMessage,
+  downloadLabel = '下载原件',
+  fetchRawObjectUrl = fetchArtifactRawObjectUrl,
+  pendingFlush: pendingFlushProp,
+}: {
+  sessionId: string;
+  artifactId: string;
+  originalFilename?: string | null;
+  contentType: string;
+  description?: string;
+  pendingMessage?: string;
+  downloadLabel?: string;
+  fetchRawObjectUrl?: ArtifactRawObjectUrlFetcher;
+  pendingFlush?: boolean;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  // Live this turn, not yet flushed. Cleared at COMPLETE.
+  const storePendingFlush = useArtifactStore((s) => !!s.liveContent[artifactId]);
+  const pendingFlush = pendingFlushProp ?? storePendingFlush;
+
+  const handleDownload = useCallback(async () => {
+    setError(null);
+    try {
+      const url = await fetchRawObjectUrl(sessionId, artifactId);
+      triggerObjectUrlDownload(originalFilename ?? artifactId, url);
+    } catch {
+      // Generic, user-facing — the raw error + request id are logged server-side.
+      setError('下载失败，请稍后重试');
+    }
+  }, [artifactId, fetchRawObjectUrl, originalFilename, sessionId]);
+
+  return (
+    <div className="h-full flex items-center justify-center p-6">
+      <div className="flex flex-col items-center gap-3 text-center max-w-sm">
+        <svg
+          width="40"
+          height="40"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          className="text-text-tertiary dark:text-text-tertiary-dark"
+        >
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6" />
+        </svg>
+        <div className="text-sm text-text-primary dark:text-text-primary-dark break-all">
+          {originalFilename ?? artifactId}
+        </div>
+        <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark break-all">
+          {description ?? `${contentType} · 二进制文件，无文本预览`}
+        </div>
+        {pendingFlush ? (
+          <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
+            {pendingMessage ?? '本回合完成后可下载原件'}
+          </div>
+        ) : (
+          <button
+            onClick={handleDownload}
+            className={`${BUTTON_PRIMARY} px-3 py-1.5 text-xs rounded-lg`}
+          >
+            {downloadLabel}
+          </button>
+        )}
+        {error && (
+          <div className="text-xs text-status-error">{error}</div>
+        )}
+      </div>
+    </div>
+  );
+}

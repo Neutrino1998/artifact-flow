@@ -1,12 +1,14 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { MENU_ROW_HOVER } from '@/lib/styles';
 import * as api from '@/lib/api';
 import type { UserResponse, DepartmentTreeNode } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 import Checkbox from '@/components/forms/Checkbox';
+import { PillBadge } from '@/components/ui/PillBadge';
 import PanelSearchBar from './PanelSearchBar';
 import Pagination from './Pagination';
 
@@ -59,13 +61,12 @@ export default function UserManagementPanel() {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const currentUserId = useAuthStore((s) => s.user?.id);
-  const setUserManagementVisible = useUIStore((s) => s.setUserManagementVisible);
+  const setActiveMode = useUIStore((s) => s.setActiveMode);
   const setRightView = useUIStore((s) => s.setUserManagementRightView);
   const rightView = useUIStore((s) => s.userManagementRightView);
   const listVersion = useUIStore((s) => s.userMgmtListVersion);
   const selectionMode = useUIStore((s) => s.selectionMode);
   const selection = useUIStore((s) => s.userManagementSelection);
-  const enterSelectionMode = useUIStore((s) => s.enterSelectionMode);
   const exitSelectionMode = useUIStore((s) => s.exitSelectionMode);
   const toggleUserSelection = useUIStore((s) => s.toggleUserSelection);
   const setUserManagementSelection = useUIStore((s) => s.setUserManagementSelection);
@@ -161,8 +162,8 @@ export default function UserManagementPanel() {
   }, [fetchUsers]);
 
   const handleClose = useCallback(() => {
-    setUserManagementVisible(false);
-  }, [setUserManagementVisible]);
+    setActiveMode('none');
+  }, [setActiveMode]);
 
   // Esc 退出选择模式（与中间面板的其他 Esc 行为不打架 — 只在选择模式生效）
   useEffect(() => {
@@ -192,76 +193,27 @@ export default function UserManagementPanel() {
       <PanelSearchBar
         value={query}
         onChange={handleQueryChange}
-        placeholder="搜索用户名 / 显示名 / 部门..."
+        placeholder="搜索用户名 / 显示名 / 部门…"
         countLabel={`${total} 用户`}
         onClose={handleClose}
       />
 
       {/* Content */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4">
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-3xl mx-auto pt-3">
           {/* Error */}
           {error && (
-            <div className="mb-3 px-3 py-2 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg">
+            <div className="mb-3 px-3 py-2 text-status-error bg-status-error/10 rounded-lg">
               {error}
             </div>
           )}
 
-          {/* Top-level actions — selection mode shows selection toolbar instead */}
-          {!selectionMode ? (
-            <div className="mb-3 flex items-center gap-2">
-              <button
-                onClick={() => setRightView({ type: 'create-user' })}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border font-medium transition-colors ${
-                  rightView.type === 'create-user'
-                    ? 'text-accent border-accent bg-bg dark:bg-bg-dark'
-                    : 'text-accent border-border dark:border-border-dark bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark'
-                }`}
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M7 2v10M2 7h10" />
-                </svg>
-                新建用户
-              </button>
-              <button
-                onClick={() => setRightView({ type: 'bulk-import' })}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border font-medium transition-colors ${
-                  rightView.type === 'bulk-import'
-                    ? 'text-accent border-accent bg-bg dark:bg-bg-dark'
-                    : 'text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark'
-                }`}
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M7 2v8M3 8l4 4 4-4M2 13h10" />
-                </svg>
-                批量导入
-              </button>
-              <button
-                onClick={() => setRightView({ type: 'dept-manager' })}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border font-medium transition-colors ${
-                  rightView.type === 'dept-manager'
-                    ? 'text-accent border-accent bg-bg dark:bg-bg-dark'
-                    : 'text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark'
-                }`}
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M2 3h10M2 7h10M2 11h6" />
-                </svg>
-                管理部门
-              </button>
-              <button
-                onClick={enterSelectionMode}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl border font-medium text-text-secondary dark:text-text-secondary-dark border-border dark:border-border-dark bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <rect x="2" y="2" width="10" height="10" rx="1.5" />
-                  <path d="M5 7l1.5 1.5L9 6" />
-                </svg>
-                批量管理
-              </button>
-            </div>
-          ) : (
-            <div className="mb-3 flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-accent/40 bg-accent/5 dark:bg-accent/10">
+          {/* Selection toolbar — shown only in selection mode. The top-level
+              actions (新建用户 / 批量导入 / 管理部门 / 批量管理) live in the
+              sidebar now; this toolbar stays here because 全选当前页 is scoped
+              to the visible page. */}
+          {selectionMode && (
+            <div className="mb-3 flex items-center gap-2 px-4 py-2.5 rounded-xl border border-accent/40 bg-accent/5 dark:bg-accent/10">
               <span className="text-sm text-text-secondary dark:text-text-secondary-dark">
                 已选 <span className="text-text-primary dark:text-text-primary-dark font-medium">{selection.length}</span> 项
               </span>
@@ -314,16 +266,14 @@ export default function UserManagementPanel() {
       {total > 0 && (
         <div className="px-4 pt-2 pb-4">
           <div className="max-w-3xl mx-auto">
-            <div className="bg-surface dark:bg-surface-dark rounded-2xl px-4">
-              <Pagination
-                page={page}
-                pageSize={pageSize}
-                total={total}
-                onPageChange={handlePageChange}
-                onPageSizeChange={handlePageSizeChange}
-                disabled={loading}
-              />
-            </div>
+            <Pagination
+              page={page}
+              pageSize={pageSize}
+              total={total}
+              onPageChange={handlePageChange}
+              onPageSizeChange={handlePageSizeChange}
+              disabled={loading}
+            />
           </div>
         </div>
       )}
@@ -372,7 +322,7 @@ function UserRow({
     ? 'bg-accent/10 dark:bg-accent/15'
     : isSelected
     ? 'bg-panel dark:bg-panel-accent-dark'
-    : 'hover:bg-panel/60 dark:hover:bg-panel-accent-dark/60';
+    : MENU_ROW_HOVER;
   const rowCursor = selectionMode && isSelf ? 'cursor-not-allowed opacity-60' : 'cursor-pointer';
 
   return (
@@ -408,30 +358,25 @@ function UserRow({
       {/* "当前" badge — placed before role/status so the eye lands on
           identity first, then runs through the right-aligned status cluster */}
       {isSelf && (
-        <span className="flex-shrink-0 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-          当前
-        </span>
+        <PillBadge>当前</PillBadge>
       )}
 
       {/* Role badge */}
-      <span
-        className={`flex-shrink-0 inline-block px-1.5 py-0.5 text-xs rounded ${
-          user.role === 'admin'
-            ? 'bg-accent/10 text-accent'
-            : 'bg-bg dark:bg-bg-dark text-text-secondary dark:text-text-secondary-dark'
-        }`}
+      <PillBadge
+        tone={user.role === 'admin' ? 'accent' : 'neutral'}
+        size="regular"
       >
         {user.role}
-      </span>
+      </PillBadge>
 
       {/* Status */}
       <span className="flex-shrink-0 inline-flex items-center gap-1.5">
         <span
           className={`inline-block w-2 h-2 rounded-full ${
-            user.is_active ? 'bg-green-500' : 'bg-red-400'
+            user.is_active ? 'bg-status-success' : 'bg-status-error'
           }`}
         />
-        <span className={`text-xs ${user.is_active ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+        <span className={`text-xs ${user.is_active ? 'text-status-success' : 'text-status-error'}`}>
           {user.is_active ? '启用' : '禁用'}
         </span>
       </span>

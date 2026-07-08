@@ -11,7 +11,7 @@ import {
   LABEL_CLASS,
 } from '@/lib/styles';
 import type { DepartmentResponse } from '@/types';
-import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
+import DangerConfirmModal, { DangerConfirmTarget } from '@/components/layout/DangerConfirmModal';
 import PanelShell from '@/components/layout/PanelShell';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
 
@@ -99,7 +99,7 @@ export default function DepartmentDetailForm({
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center bg-chat dark:bg-chat-dark p-6">
-        <div className="text-sm text-text-tertiary dark:text-text-tertiary-dark">加载中...</div>
+        <div className="text-sm text-text-tertiary dark:text-text-tertiary-dark">加载中…</div>
       </div>
     );
   }
@@ -154,7 +154,7 @@ export default function DepartmentDetailForm({
             disabled={!dirty || saving || nameInvalid}
             className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
           >
-            {saving ? '保存中...' : '保存'}
+            {saving ? '保存中…' : '保存'}
           </button>
         </>
       }
@@ -206,11 +206,16 @@ export default function DepartmentDetailForm({
       {confirmDelete && (
         <DangerConfirmModal
           title="删除部门"
-          message={`部门："${dept.name}"\n操作不可恢复。`}
+          message="操作不可恢复。"
           confirmLabel="确认删除"
           onCancel={() => setConfirmDelete(false)}
           onConfirm={handleDelete}
-        />
+        >
+          <DangerConfirmTarget
+            name={dept.name}
+            description={`直接用户 ${dept.user_count} · 子部门 ${dept.child_count}`}
+          />
+        </DangerConfirmModal>
       )}
     </PanelShell>
   );

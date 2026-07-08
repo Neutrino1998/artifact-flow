@@ -31,6 +31,7 @@ from collections import deque
 from typing import Optional
 
 from observability.jsonl_sink import JsonlSink
+from utils.instance import INSTANCE_ID
 from utils.logger import get_logger
 from utils.time import utc_now
 
@@ -73,6 +74,10 @@ class LoopLagWatchdog:
         # snapshot(对外暴露给 sampler / /admin/runtime;原子赋值,无锁)
         self._snapshot: dict = {"p50_ms": 0, "p99_ms": 0, "max_1m_ms": 0, "samples": 0}
 
+        # 最近一次 wedge/超阈事件摘要(供 Phase C 心跳读):watchdog 线程写、loop
+        # 线程读,dict 整体赋值原子、无锁(同 _snapshot)。None = 本进程从未抓到过。
+        self._last_wedge: Optional[dict] = None
+
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
@@ -100,6 +105,14 @@ class LoopLagWatchdog:
     def snapshot(self) -> dict:
         """供 sampler / /admin/runtime 读取当前 loop_lag 滚动统计。"""
         return dict(self._snapshot)
+
+    def last_wedge(self) -> Optional[dict]:
+        """供 Phase C 心跳读取最近一次 wedge/超阈事件摘要;从未抓到过返回 None。
+
+        栈明细仍只落 loop-lag.jsonl(取证用),这里只带面板变黄要用的轻摘要
+        {ts, lag_ms, wedged}。
+        """
+        return dict(self._last_wedge) if self._last_wedge else None
 
     # ── 内部实现 ─────────────────────────────────────────────
 
@@ -167,9 +180,24 @@ class LoopLagWatchdog:
         except Exception:
             tasks_info = []
 
+        # 只有**硬 wedge**(回调彻底不来)才留 last_wedge 摘要 —— 心跳的「黄色」里
+        # 「watchdog 抓到过 wedge」这一档是永久标记(进程生命周期不清),必须只对真
+        # wedge 生效。软告警(lag≥warn 但回调仍来)是 routine 抖动(GC/冷 import),
+        # 若也写 last_wedge,一次 550ms 抖动就把实例永久钉黄 + 假报「抓到 wedge」到
+        # 重启为止——毁掉面板信号。软告警的可见性由 loop_lag.max_1m_ms(60s 窗口自愈)
+        # 承载;jsonl 两者都记(取证不受影响)。
+        if wedged:
+            self._last_wedge = {
+                "ts": utc_now().isoformat(),
+                "lag_ms": round(lag_ms, 1),
+                "wedged": True,
+            }
+
         try:
             self._sink.write({
                 "ts": utc_now().isoformat(),
+                # 目录已按实例分,但记录内也带:文件被拷走聚合后目录信息即丢
+                "instance_id": INSTANCE_ID,
                 "lag_ms": round(lag_ms, 1),
                 "wedged": wedged,
                 "warn_ms": self._warn_ms,

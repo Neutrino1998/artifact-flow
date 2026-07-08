@@ -23,7 +23,7 @@ class AgentConfig:
     name: str                                        # Agent 唯一标识
     description: str                                 # Agent 描述（用于 call_subagent 候选列表）
     tools: dict[str, str] = field(default_factory=dict)  # {tool_name: permission_level}
-    model: str = "qwen3.6-plus-no-thinking"          # LLM 模型别名
+    model: str = "qwen3.7-plus-no-thinking"          # LLM 模型别名
     max_tool_rounds: int = 3                         # 最大工具调用轮数
     internal: bool = False                           # 内部 Agent（不出现在候选列表）
     role_prompt: str = ""                            # MD body（角色提示词）
@@ -45,7 +45,7 @@ tools:
   web_fetch: confirm
   read_artifact: auto
   grep_artifact: auto
-model: qwen3.6-plus
+model: qwen3.7-plus
 max_tool_rounds: 50
 ---
 ```
@@ -57,7 +57,7 @@ max_tool_rounds: 50
 | `name` | string | 是 | — | Agent 唯一标识（与文件名无关，以此字段为准） |
 | `description` | string | 否 | `""` | Agent 描述，注入到 `<available_subagents>` 列表中 |
 | `tools` | dict | 否 | `{}` | 工具白名单 + 权限覆盖，格式 `{tool_name: auto\|confirm}` |
-| `model` | string | 否 | `"qwen3.6-plus-no-thinking"` | 引用 `config/models/models.yaml` 中的模型别名 |
+| `model` | string | 是 | — | 引用 `config/models/models.yaml` 中的模型别名;未指定则加载失败(不静默兜底) |
 | `max_tool_rounds` | int | 否 | `3` | 最大工具调用轮数，超过后注入系统提示要求总结 |
 | `internal` | bool | 否 | `false` | 内部 Agent，不出现在 `call_subagent` 的可用候选列表中 |
 
@@ -120,14 +120,16 @@ You can create MULTIPLE result artifacts...
 
 | Agent | 职责 | 工具 | 模型 | 最大轮数 | 内部 |
 |-------|------|------|------|---------|------|
-| `lead_agent` | 任务协调、规划、Artifact 管理、subagent 路由 | create/update/rewrite/read/grep_artifact + web_search + web_fetch + call_subagent | qwen3.6-plus | 100 | 否 |
-| `research_agent` | 大型知识探索 / 多源整合，在隔离上下文中执行 | create/update/rewrite/read/grep_artifact + web_search + web_fetch | qwen3.6-plus | 50 | 否 |
-| `compact_agent` | 对话摘要生成（Compaction） | 无 | qwen3.6-plus | 0 | 是 |
+| `lead_agent` | 任务协调、规划、Artifact 管理、subagent 路由 | create/update/rewrite/read/grep_artifact + web_search + web_fetch + call_subagent + [沙盒](sandbox.md) bash/mount/persist | qwen3.7-max | 100 | 否 |
+| `research_agent` | 大型知识探索 / 多源整合，在隔离上下文中执行 | create/update/rewrite/read/grep_artifact + web_search + web_fetch + [沙盒](sandbox.md) bash/mount/persist | qwen3.7-plus | 50 | 否 |
+| `explore_agent` | 大型既有材料分析 / 二进制与计算型处理，在隔离上下文中执行 | create/update/rewrite/read/grep_artifact + [沙盒](sandbox.md) bash/mount/persist | qwen3.7-plus | 50 | 否 |
+| `compact_agent` | 对话摘要生成（Compaction） | 无 | qwen3.7-plus | 0 | 是 |
 
 ### 角色分工
 
 - **lead_agent** 是唯一与用户直接交互的 Agent，也是唯一能创建/修改最终 Artifact 的入口；自身可直接执行 `web_search` / `web_fetch` 处理小规模查询。
 - **research_agent** 是执行型 subagent，由 lead_agent 通过 `call_subagent` 分发任务。和 lead 工具集几乎相同（除 `call_subagent`），其存在意义是**上下文隔离**：把需要 ≥3 来源 / 多步 search→fetch→read 循环的大型探索任务从 lead 的上下文中剥离，避免大量中间 fetch 结果污染主对话。
+- **explore_agent** 是执行型 subagent，面向 session 内既有材料（artifact / 上传文件 / 已有结果）的深读、交叉分析与二进制处理；它不授 web 工具，复杂文件转换和计算走沙盒。
 - **compact_agent** 是内部 Agent，由 `CompactionRunner` 在引擎循环内每次 LLM 调用后同步触发（超阈值时），输出结构化摘要作为 `COMPACTION_SUMMARY` 事件追加到 `state["events"]` 尾部，详见 [engine.md → Compaction 机制](engine.md#compaction-机制)
 
 ## Agent 协作模型
@@ -142,11 +144,11 @@ sequenceDiagram
     Lead->>Lead: 分析任务, 创建 task_plan
 
     Lead->>Sub: call_subagent(instruction)
-    Note over Lead,Sub: current_agent 切换为 subagent
+    Note over Lead,Sub: 引擎原地递归 await 子 agent 的循环
 
     Sub->>Sub: 执行工具 (web_search / web_fetch / read_artifact / grep_artifact)
     Sub-->>Lead: 返回结果 (subagent_result XML)
-    Note over Lead,Sub: current_agent 切回 lead_agent
+    Note over Lead,Sub: 递归返回，Lead 同轮剩余工具继续执行
 
     Lead->>Lead: 整合结果, 更新 Artifact
     Lead-->>User: 最终响应
@@ -154,8 +156,8 @@ sequenceDiagram
 
 **协作流程：**
 
-1. **Lead 分发**：Lead 调用 `call_subagent` 工具，提供 `agent_name` 和 `instruction`
-2. **Agent 切换**：引擎将 `state["current_agent"]` 设为目标 subagent，instruction 作为 `SUBAGENT_INSTRUCTION` 事件注入
+1. **Lead 分发**：Lead 调用 `call_subagent` 工具，提供 `agent_name` 和 `instruction`。同一轮可与其他工具/多个 `call_subagent` 混排，按自然序串行执行（多调用协议的通用语义，无 per-tool 特殊约束；后一个 subagent 运行时可读前一个写入的 artifact）
+2. **子 agent 执行**：引擎原地递归 await 目标 subagent 的 `_run_agent` 循环，instruction 作为 `SUBAGENT_INSTRUCTION` 事件注入
 3. **Sub 执行**：Subagent 不看 lead 的对话历史，只看自己那部分 agent_name-filtered 事件（instruction、LLM 响应、tool results）。`EventHistory` 扫 boundary 时对 subagent 还会停在 `SUBAGENT_INSTRUCTION.fresh_start=True` 上 — `call_subagent` 的 `fresh_start` **默认 True**，所以 Lead 默认每次调用都给 subagent 一个干净起点；仅当 Lead 显式传 `fresh_start=false` 时，第二次调用才能延续第一次调用的上下文，**直到最近的 `COMPACTION_SUMMARY` boundary**（如第一次调用中途触发过 compaction，第二次看到的仍是摘要 + 其后的事件，而非第一次的完整原始上下文）
 4. **结果回传**：Subagent 无工具调用时，响应打包为 `<subagent_result>` XML，作为 `call_subagent` 的 tool_result 返回给 Lead
 5. **Lead 继续**：Lead 看到 tool_result 后决定下一步（继续分发、整合结果、或完成）
@@ -195,9 +197,9 @@ def load_all_agents(agents_dir=None) -> dict[str, AgentConfig]:
 - **关注点分离**：Agent 的行为完全由提示词决定，执行逻辑统一在引擎中处理
 - **可审查性**：所有 Agent 的配置集中在 `config/agents/`，一目了然
 
-### 完成路由不对称性的意图
+### 完成路由的意图（Lead 唯一出口）
 
-- **Lead 是唯一出口**：只有 Lead Agent 的无工具调用才会终止执行循环
-- **Subagent 必须回传**：Subagent 完成后其响应作为工具结果返回给 Lead，由 Lead 决定下一步
+- **Lead 是唯一出口**：只有顶层 `_run_agent("lead_agent")` 的返回值会成为用户可见的最终响应
+- **Subagent 必须回传**：subagent 是 lead 的一次递归调用，其最终回复永远被包成 `<subagent_result>` tool_result 回到调用方，由 Lead 决定下一步
 - **统一控制流**：所有的任务调度、结果整合、最终响应都经过 Lead，避免 subagent 直接对用户输出
 - 这个设计使得 Lead 拥有全局视角，可以在多个 subagent 结果之间做出取舍和整合

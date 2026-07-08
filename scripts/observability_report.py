@@ -156,13 +156,18 @@ async def _load_message_events(async_engine, hours: int):
 def _load_jsonl_glob(pattern: str) -> pd.DataFrame:
     """读所有切片(`.jsonl`, `.jsonl.1` ...),拼成一个 DF。
 
+    两层布局都收:实例子目录 `<obs_dir>/<instance_id>/x.jsonl*`(现行,
+    ops plan Phase A 起)与平铺 `<obs_dir>/x.jsonl*`(历史遗留文件)。
+    多实例记录混在一个 DF 里没问题——记录内自带 `instance_id` 字段。
+
     拼好后按 `ts` 升序排,_print_lag_events.tail(5) / _print_runtime_summary
     的窗口聚合才反映"最新"语义。`sorted(glob(...))` 的字典序会把当前文件排
     在 .1/.2 前面,直接 concat 后 tail 拿到的是最旧的事件;且 `.10` 在字典
     序里夹在 `.1` 与 `.2` 之间,后缀数字感知排序也救不了所有 case。`ts` 是
     事件源头的时间戳,排它是 source of truth。
     """
-    files = sorted(glob(pattern))
+    p = Path(pattern)
+    files = sorted(set(glob(pattern)) | set(glob(str(p.parent / "*" / p.name))))
     if not files:
         return pd.DataFrame()
     frames = []

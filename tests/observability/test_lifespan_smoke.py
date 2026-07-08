@@ -68,10 +68,18 @@ async def test_start_then_stop_observability_smoke(tmp_path, monkeypatch):
     assert main_mod._deadman is None
     assert main_mod._sampler is None
 
-    # metrics.jsonl 应至少写过一行
-    metrics_file = tmp_path / "metrics.jsonl"
+    # metrics.jsonl 应至少写过一行 — 实际落点按实例分子目录
+    # (main._obs_path:多副本共享卷各写各的,消 rotate 互覆)
+    from utils.instance import INSTANCE_ID
+
+    metrics_file = tmp_path / INSTANCE_ID / "metrics.jsonl"
     assert metrics_file.exists()
-    assert metrics_file.read_text(encoding="utf-8").strip(), "expected at least one sample"
+    first_line = metrics_file.read_text(encoding="utf-8").strip()
+    assert first_line, "expected at least one sample"
+    # 记录内也带 instance_id(文件被拷走聚合后目录信息即丢)
+    import json
+
+    assert json.loads(first_line.splitlines()[0])["instance_id"] == INSTANCE_ID
 
 
 @pytest.mark.asyncio

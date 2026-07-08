@@ -8,6 +8,7 @@ import type {
   ResumeRequest,
   ResumeResponse,
   BulkDeleteResponse,
+  StorageUsageResponse,
   ArtifactListResponse,
   ArtifactDetail,
   VersionDetail,
@@ -28,12 +29,31 @@ import type {
   DepartmentResponse,
   DepartmentListResponse,
   DepartmentTreeResponse,
+  DepartmentAccessResponse,
   CreateDepartmentRequest,
   UpdateDepartmentRequest,
   MoveDepartmentRequest,
   ResolveDepartmentRequest,
   ResolveDepartmentResponse,
   ClientConfigResponse,
+  ToolUnitListResponse,
+  ToolUnitResponse,
+  ToolUnitImportResponse,
+  ToolUnitTestResponse,
+  CreateToolUnitRequest,
+  UpdateToolUnitRequest,
+  MountUnitRequest,
+  MountResponse,
+  SetCredentialRequest,
+  AgentListResponse,
+  SkillItem,
+  SkillListResponse,
+  SkillImportResponse,
+  AdminSkillListResponse,
+  AdminSkillUpdateRequest,
+  AdminSkillItem,
+  SiteNotificationsResponse,
+  UpdateSiteNotificationsRequest,
 } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
 import { API_URL } from './apiBase';
@@ -180,6 +200,122 @@ export function listConversations(limit = 20, offset = 0, query?: string) {
   return request<ConversationListResponse>(`/api/v1/chat?${params}`);
 }
 
+// Per-user blob storage usage vs quota (quota_bytes === 0 → unlimited).
+export function getStorageUsage() {
+  return request<StorageUsageResponse>('/api/v1/chat/storage');
+}
+
+// Skills (C-3) — user-side list + personal enable/disable. Returns ALL visible
+// skills (including disabled ones — the management page needs them to re-enable);
+// the composer picker filters to `enabled` client-side.
+export function getSkills() {
+  return request<SkillListResponse>('/api/v1/skills');
+}
+
+export function setSkillEnabled(slug: string, enabled: boolean) {
+  return request<SkillItem>(`/api/v1/skills/${encodeURIComponent(slug)}/enabled`, {
+    method: 'PUT',
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+/**
+ * 导入 skill zip（E-2）。marketplace=true 走 admin 共享通道（可指定
+ * public/department 与默认开关）；否则私有导入（仅自己可见、立即启用）。
+ *
+ * 错误（detail 由 SkillManager 结构化产出）：
+ * - 422 + dict detail（`{message, findings[]}`）→ 硬门拒收，ApiError.body 给 UI
+ *   逐条渲染 rule/severity/message
+ * - 413 → 超存储配额；409 → slug 撞名（改 name 重打包）
+ */
+export async function importSkill(
+  file: File,
+  opts?: {
+    marketplace?: boolean;
+    visibility?: 'public' | 'department';
+    defaultEnabled?: boolean;
+  },
+): Promise<SkillImportResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (opts?.marketplace) {
+    if (opts.visibility) formData.append('visibility', opts.visibility);
+    if (opts.defaultEnabled !== undefined) {
+      formData.append('default_enabled', String(opts.defaultEnabled));
+    }
+  }
+  const path = opts?.marketplace
+    ? '/api/v1/admin/skills/import'
+    : '/api/v1/skills/import';
+
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+  if (res.status === 401) {
+    useAuthStore.getState().logout();
+    throw new ApiError(401, 'Session expired');
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    const requestId = res.headers.get('X-Request-ID') ?? undefined;
+    let parsed: unknown = undefined;
+    try { parsed = JSON.parse(text); } catch { /* not JSON */ }
+    throw new ApiError(res.status, formatApiError(res.status, text, requestId), parsed, requestId);
+  }
+  return res.json() as Promise<SkillImportResponse>;
+}
+
+/** 导出后端保存的 skill zip。 */
+export async function downloadSkillBundle(
+  slug: string,
+  opts?: { admin?: boolean },
+): Promise<Blob> {
+  const path = opts?.admin
+    ? `/api/v1/admin/skills/${encodeURIComponent(slug)}/export`
+    : `/api/v1/skills/${encodeURIComponent(slug)}/export`;
+  const res = await fetch(
+    `${BASE_URL}${path}`,
+    { headers: authHeaders() },
+  );
+  if (res.status === 401) {
+    useAuthStore.getState().logout();
+    throw new ApiError(401, 'Session expired');
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    const requestId = res.headers.get('X-Request-ID') ?? undefined;
+    throw new ApiError(res.status, formatApiError(res.status, body, requestId), undefined, requestId);
+  }
+  return res.blob();
+}
+
+/** 删除自己导入的 skill（owner 通道）。 */
+export function deleteSkill(slug: string) {
+  return request<void>(`/api/v1/skills/${encodeURIComponent(slug)}`, {
+    method: 'DELETE',
+  });
+}
+
+/** admin 删任意 dynamic skill（含共享/他人私有；seeded 400）。 */
+export function adminDeleteSkill(slug: string) {
+  return request<void>(`/api/v1/admin/skills/${encodeURIComponent(slug)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function adminListSkills() {
+  return request<AdminSkillListResponse>('/api/v1/admin/skills');
+}
+
+export function adminUpdateSkill(slug: string, body: AdminSkillUpdateRequest) {
+  return request<AdminSkillItem>(`/api/v1/admin/skills/${encodeURIComponent(slug)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
 export function getConversation(convId: string, options?: GetConversationOptions) {
   const force = options?.force ?? false;
   const now = Date.now();
@@ -322,8 +458,12 @@ export async function bulkDeleteConversations(ids: string[]) {
   return res;
 }
 
+type ActiveStreamResponse =
+  | { active: true; conversation_id: string; message_id: string; stream_url: string }
+  | { active: false; conversation_id: string; message_id: null; stream_url: null };
+
 export async function getActiveStream(conversationId: string) {
-  return request<{ conversation_id: string; message_id: string; stream_url: string }>(
+  return request<ActiveStreamResponse>(
     `/api/v1/chat/${conversationId}/active-stream`
   );
 }
@@ -369,15 +509,8 @@ export function getVersion(
   );
 }
 
-export async function exportArtifact(
-  sessionId: string,
-  artifactId: string,
-  format: string
-): Promise<Blob> {
-  const res = await fetch(
-    `${BASE_URL}/api/v1/artifacts/${sessionId}/${artifactId}/export?format=${format}`,
-    { headers: authHeaders() }
-  );
+async function fetchRawBlob(path: string): Promise<Blob> {
+  const res = await fetch(`${BASE_URL}${path}`, { headers: authHeaders() });
 
   if (res.status === 401) {
     useAuthStore.getState().logout();
@@ -389,6 +522,29 @@ export async function exportArtifact(
     throw new ApiError(res.status, formatApiError(res.status, body, requestId), undefined, requestId);
   }
   return res.blob();
+}
+
+export type ArtifactRawBlobFetcher = (sessionId: string, artifactId: string) => Promise<Blob>;
+export type ArtifactRawObjectUrlFetcher = (sessionId: string, artifactId: string) => Promise<string>;
+
+/** Fetch an artifact's raw binary blob (uploaded image / rich-format source) as an
+ *  object URL for an <img> or a download anchor. An `<img src>` can't carry the
+ *  Authorization header, so we fetch with auth → blob → createObjectURL (same pattern as SSE).
+ *  The blob is DB-only server-side: an image uploaded *this* turn is available only
+ *  after the turn flushes (COMPLETE), mirroring the REST-lags-live tradeoff for all
+ *  artifacts. Caller MUST URL.revokeObjectURL() the returned URL when done. */
+export async function fetchArtifactRawBlob(
+  sessionId: string,
+  artifactId: string
+): Promise<Blob> {
+  return fetchRawBlob(`/api/v1/artifacts/${sessionId}/${artifactId}/raw`);
+}
+
+export async function fetchArtifactRawObjectUrl(
+  sessionId: string,
+  artifactId: string
+): Promise<string> {
+  return URL.createObjectURL(await fetchArtifactRawBlob(sessionId, artifactId));
 }
 
 // Message Events (historical replay)
@@ -432,6 +588,7 @@ export interface AdminConversationListResponse {
 
 export interface AdminEventItem {
   id: number;
+  event_id: string | null; // 业务事件 id；agent_start 用它当 prompt 重建锚
   event_type: string;
   agent_name: string | null;
   data: Record<string, unknown> | null;
@@ -440,11 +597,21 @@ export interface AdminEventItem {
 
 export interface AdminMessageGroup {
   message_id: string;
+  parent_id: string | null; // 消息树父节点（分支结构）
   user_input: string;
   response: string | null;
   created_at: string;
   events: AdminEventItem[];
   execution_metrics: Record<string, unknown> | null;
+}
+
+export interface AdminPromptReconstructResponse {
+  conversation_id: string;
+  message_id: string;
+  agent_start_event_id: string;
+  agent_name: string | null;
+  has_reminder: boolean;
+  messages: Record<string, unknown>[];
 }
 
 export interface AdminConversationEventsResponse {
@@ -477,6 +644,51 @@ export function getAdminConversationEvents(convId: string) {
   );
 }
 
+// ── Fleet instances (Phase C) ──
+// The backend endpoint returns a dynamic dict (no response_model), so the shape
+// is hand-declared here rather than generated. One entry per live heartbeat.
+export interface InstanceHeartbeat {
+  instance_id: string;
+  version?: string;
+  started_at?: string;
+  ts?: string | null;
+  loop_lag_ms?: { p50_ms?: number; p99_ms?: number; max_1m_ms?: number; samples?: number };
+  in_flight?: number;
+  tasks_long_running?: number;
+  process?: { rss_mb?: number; cpu_pct?: number; open_fds?: number };
+  db_pool?: { in_use?: number; size?: number; overflow?: number };
+  redis?: { used_mb?: number; maxmemory_mb?: number };
+  data_dir_mb?: number;
+  error_count?: number;
+  last_error_ts?: string | null;
+  last_wedge?: { ts?: string; lag_ms?: number; wedged?: boolean } | null;
+  last_autoheal?: { ts?: string; reason?: string; count?: number } | null;
+  status: 'green' | 'yellow' | 'red';
+  status_reasons?: { code: string; label: string }[];
+}
+
+export interface AdminInstancesResponse {
+  ts: string;
+  instance_id: string;   // the instance that answered this request
+  shared: boolean;       // true = Redis fleet view; false = single-instance local view
+  instances: InstanceHeartbeat[];
+}
+
+export function getAdminInstances() {
+  return request<AdminInstancesResponse>('/api/v1/admin/instances');
+}
+
+export function getAdminPromptReconstruct(
+  convId: string,
+  messageId: string,
+  agentStartEventId: string,
+) {
+  const params = new URLSearchParams({ agent_start_event_id: agentStartEventId });
+  return request<AdminPromptReconstructResponse>(
+    `/api/v1/admin/conversations/${convId}/messages/${messageId}/reconstruct?${params}`
+  );
+}
+
 export function listAdminConversationArtifacts(convId: string) {
   return request<ArtifactListResponse>(
     `/api/v1/admin/conversations/${convId}/artifacts`
@@ -497,6 +709,20 @@ export function getAdminConversationArtifactVersion(
   return request<VersionDetail>(
     `/api/v1/admin/conversations/${convId}/artifacts/${artifactId}/versions/${version}`
   );
+}
+
+export async function fetchAdminArtifactRawBlob(
+  convId: string,
+  artifactId: string
+): Promise<Blob> {
+  return fetchRawBlob(`/api/v1/admin/conversations/${convId}/artifacts/${artifactId}/raw`);
+}
+
+export async function fetchAdminArtifactRawObjectUrl(
+  convId: string,
+  artifactId: string
+): Promise<string> {
+  return URL.createObjectURL(await fetchAdminArtifactRawBlob(convId, artifactId));
 }
 
 // User Management (Admin)
@@ -645,4 +871,163 @@ export function resolveDepartmentPath(body: ResolveDepartmentRequest) {
     method: 'POST',
     body: JSON.stringify(body),
   });
+}
+
+// Department Access (Admin) — G department-scoped skill/unit rules.
+export function getDepartmentAccess(deptId: string) {
+  return request<DepartmentAccessResponse>(
+    `/api/v1/admin/department-access/${encodeURIComponent(deptId)}`,
+  );
+}
+
+export function putDepartmentSkillRule(deptId: string, slug: string) {
+  return request<void>(
+    `/api/v1/admin/department-access/${encodeURIComponent(deptId)}/skills/${encodeURIComponent(slug)}`,
+    { method: 'PUT' },
+  );
+}
+
+export function deleteDepartmentSkillRule(deptId: string, slug: string) {
+  return request<void>(
+    `/api/v1/admin/department-access/${encodeURIComponent(deptId)}/skills/${encodeURIComponent(slug)}`,
+    { method: 'DELETE' },
+  );
+}
+
+export function putDepartmentUnitRule(deptId: string, unitName: string) {
+  return request<void>(
+    `/api/v1/admin/department-access/${encodeURIComponent(deptId)}/units/${encodeURIComponent(unitName)}`,
+    { method: 'PUT' },
+  );
+}
+
+export function deleteDepartmentUnitRule(deptId: string, unitName: string) {
+  return request<void>(
+    `/api/v1/admin/department-access/${encodeURIComponent(deptId)}/units/${encodeURIComponent(unitName)}`,
+    { method: 'DELETE' },
+  );
+}
+
+// Runtime Site Config (Admin)
+export function getSiteNotifications() {
+  return request<SiteNotificationsResponse>('/api/v1/admin/site/notifications');
+}
+
+export function updateSiteNotifications(body: UpdateSiteNotificationsRequest) {
+  return request<SiteNotificationsResponse>('/api/v1/admin/site/notifications', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+// Tool Registry (Admin) — B-4 工具 unit 管理。
+// 单名段用 encodeURIComponent：unit/placeholder 名虽受后端字符约束，但走 URL path
+// 仍统一编码，避免任何含特殊字符的值（如占位符）破坏路径。
+export function listToolUnits() {
+  return request<ToolUnitListResponse>('/api/v1/admin/tools/units');
+}
+
+export function getToolUnit(name: string) {
+  return request<ToolUnitResponse>(`/api/v1/admin/tools/units/${encodeURIComponent(name)}`);
+}
+
+export function createToolUnit(body: CreateToolUnitRequest) {
+  return request<ToolUnitResponse>('/api/v1/admin/tools/units', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateToolUnit(name: string, body: UpdateToolUnitRequest) {
+  return request<ToolUnitResponse>(`/api/v1/admin/tools/units/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteToolUnit(name: string) {
+  return request<void>(`/api/v1/admin/tools/units/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  });
+}
+
+/** 导入工具 seed bundle（zip 或单个 .md），落库为 dynamic unit。 */
+export async function importToolUnitSeed(file: File): Promise<ToolUnitImportResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${BASE_URL}/api/v1/admin/tools/units/import`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+  if (res.status === 401) {
+    useAuthStore.getState().logout();
+    throw new ApiError(401, 'Session expired');
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    const requestId = res.headers.get('X-Request-ID') ?? undefined;
+    let parsed: unknown = undefined;
+    try { parsed = JSON.parse(text); } catch { /* not JSON */ }
+    throw new ApiError(res.status, formatApiError(res.status, text, requestId), parsed, requestId);
+  }
+  return res.json() as Promise<ToolUnitImportResponse>;
+}
+
+/** 导出工具 unit 的 seed bundle；真实凭证不会出现在 bundle 中。 */
+export async function downloadToolUnitSeedBundle(name: string): Promise<Blob> {
+  const res = await fetch(
+    `${BASE_URL}/api/v1/admin/tools/units/${encodeURIComponent(name)}/export`,
+    { headers: authHeaders() },
+  );
+  if (res.status === 401) {
+    useAuthStore.getState().logout();
+    throw new ApiError(401, 'Session expired');
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    const requestId = res.headers.get('X-Request-ID') ?? undefined;
+    throw new ApiError(res.status, formatApiError(res.status, body, requestId), undefined, requestId);
+  }
+  return res.blob();
+}
+
+export function testToolUnit(name: string) {
+  return request<ToolUnitTestResponse>(
+    `/api/v1/admin/tools/units/${encodeURIComponent(name)}/test`,
+    { method: 'POST' },
+  );
+}
+
+export function listToolAgents() {
+  return request<AgentListResponse>('/api/v1/admin/tools/agents');
+}
+
+export function mountToolUnit(name: string, agentName: string, body: MountUnitRequest) {
+  return request<MountResponse>(
+    `/api/v1/admin/tools/units/${encodeURIComponent(name)}/agents/${encodeURIComponent(agentName)}`,
+    { method: 'PUT', body: JSON.stringify(body) },
+  );
+}
+
+export function unmountToolUnit(name: string, agentName: string) {
+  return request<void>(
+    `/api/v1/admin/tools/units/${encodeURIComponent(name)}/agents/${encodeURIComponent(agentName)}`,
+    { method: 'DELETE' },
+  );
+}
+
+// 凭证写-only：set 提交明文，GET 永不回读（仅 configured 布尔）。
+export function setToolCredential(name: string, placeholder: string, body: SetCredentialRequest) {
+  return request<void>(
+    `/api/v1/admin/tools/units/${encodeURIComponent(name)}/credentials/${encodeURIComponent(placeholder)}`,
+    { method: 'PUT', body: JSON.stringify(body) },
+  );
+}
+
+export function deleteToolCredential(name: string, placeholder: string) {
+  return request<void>(
+    `/api/v1/admin/tools/units/${encodeURIComponent(name)}/credentials/${encodeURIComponent(placeholder)}`,
+    { method: 'DELETE' },
+  );
 }

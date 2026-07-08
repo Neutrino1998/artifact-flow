@@ -3,6 +3,7 @@
 
 提供跨 router / schema / 批量导入复用的校验函数。
 失败时抛 ValueError（带具体原因），由调用方决定转成 422 / 400。
+（例外:`is_config_entry` 是 bool 谓词,不抛 —— 跳过不是错误。）
 """
 
 import re
@@ -28,3 +29,13 @@ def validate_username(name: str) -> None:
         raise ValueError(
             "Username must be 2-64 chars of letters, digits, '.', '_' or '-'"
         )
+
+
+def is_config_entry(name: str) -> bool:
+    """config 目录条目是否参与加载:跳过 `_`(operator 禁用约定)/ `.`(隐藏/传输垃圾)前缀。
+
+    **唯一实现** —— tools/skills seed 解析、agents 的运行时 loader 与 DB seed 解析
+    共用(两个活 lister 必须逐字节一致,否则 DB 物化集与运行时可加载集分裂)。
+    落在 utils 叶子:seeds.py import agents.loader,谓词放 seeds 会成环。
+    """
+    return not name.startswith(("_", "."))

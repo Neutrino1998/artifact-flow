@@ -5,6 +5,7 @@ import { useUIStore } from '@/stores/uiStore';
 import { listAdminConversations } from '@/lib/api';
 import type { AdminConversationSummary } from '@/lib/api';
 import { parseUtcIso } from '@/lib/time';
+import { MENU_ROW_HOVER } from '@/lib/styles';
 
 export default function AdminConversationList() {
   const [conversations, setConversations] = useState<AdminConversationSummary[]>([]);
@@ -40,13 +41,13 @@ export default function AdminConversationList() {
           className={`group relative cursor-pointer transition-colors rounded-lg mx-2 px-3 py-2.5 ${
             conv.id === selectedConvId
               ? 'bg-chat dark:bg-panel-accent-dark'
-              : 'hover:bg-chat/60 dark:hover:bg-panel-accent-dark/60'
+              : MENU_ROW_HOVER
           }`}
           onClick={() => setSelectedConvId(conv.id)}
         >
           <div className="flex items-center gap-1.5">
             {conv.is_active && (
-              <span className="inline-block w-2 h-2 rounded-full bg-orange-500 flex-shrink-0" title="运行中" />
+              <span className="inline-block w-2 h-2 rounded-full bg-status-running flex-shrink-0" title="运行中" />
             )}
             <span className="font-medium truncate text-text-primary dark:text-text-primary-dark">
               {conv.title || 'Untitled'}
@@ -70,7 +71,7 @@ export default function AdminConversationList() {
         <div className="mx-2 mb-1">
           <button
             onClick={() => setObservabilityBrowseVisible(true)}
-            className="w-full px-3 py-2 text-xs text-text-secondary dark:text-text-secondary-dark rounded-lg hover:bg-chat/60 dark:hover:bg-panel-accent-dark/60 transition-colors"
+            className={`w-full px-3 py-2 text-xs text-text-secondary dark:text-text-secondary-dark rounded-lg ${MENU_ROW_HOVER}`}
           >
             显示所有对话
           </button>

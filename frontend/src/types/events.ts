@@ -74,6 +74,8 @@ export interface AgentCompleteData {
 export interface ToolStartData {
   tool: string;
   params: Record<string, unknown>;
+  /** The model's stated intent for this call (<reason> tag); display-only. */
+  reason?: string;
 }
 
 export interface ToolCompleteData {
@@ -97,6 +99,17 @@ export interface ArtifactCreatedData {
   current_version: number;
   content?: string;
   content_omitted?: boolean;
+  // Present only for user_upload artifacts: the original file name, used to
+  // correlate this event back to the send-local preview File (artifactStore
+  // .localPreviews) so the panel can render it locally before the blob is
+  // flushed to the DB.
+  original_filename?: string;
+  // Blob-backed artifact (image / rich-format upload): no text content; raw
+  // bytes via GET …/raw after flush. Drives the binary view + raw download.
+  // MIME comes from `content_type` (XOR: a blob artifact's content_type is the
+  // original file's true MIME).
+  has_blob?: boolean;
+  blob_size?: number;
 }
 
 /** ARTIFACT_UPDATED: rewrite → full `content`; targeted update → authoritative span
@@ -113,12 +126,21 @@ export interface ArtifactUpdatedData {
     deleted_len: number;
     inserted_text: string;
   };
+  // Blob overwrite (sandbox persist artifact_id=…): bytes replaced in place,
+  // no text payload (content=""). Carries content_type so a cross-turn artifact
+  // whose first event this turn is this one still renders the binary view
+  // (no live base to inherit from). Bytes via GET …/raw after flush.
+  has_blob?: boolean;
+  blob_size?: number;
+  content_type?: string;
 }
 
 export interface PermissionRequestData {
   permission_level: string;
   tool: string;
   params: Record<string, unknown>;
+  /** The model's stated intent for this call (<reason> tag); display-only. */
+  reason?: string;
 }
 
 export interface PermissionResultData {

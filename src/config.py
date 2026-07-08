@@ -1,6 +1,6 @@
 """服务级配置"""
 
-from typing import List
+from typing import Dict, List
 from pydantic_settings import BaseSettings
 from pydantic import ConfigDict
 
@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     CORS_ALLOW_METHODS: List[str] = ["*"]
     CORS_ALLOW_HEADERS: List[str] = ["*"]
 
+    # Runtime site config (notifications / welcome tips / branding). The
+    # frontend serves the same host directory as static /site/*.json files; the
+    # admin API writes through this path so notices can be managed from the UI
+    # without moving low-frequency site config into the database.
+    SITE_CONFIG_DIR: str = "config/site"
+
     # SSE 配置
     SSE_PING_INTERVAL: int = 15  # 秒，保持连接活跃
     EXECUTION_TIMEOUT: int = 1800   # 秒，引擎循环执行上限（含 permission 等待）；超时 → TIMED_OUT 终态
@@ -44,11 +50,37 @@ class Settings(BaseSettings):
     COMPACTION_TIMEOUT: int = 300            # 秒, 单次 compact LLM 调用超时（thinking 模型压缩 ~100k token 输入需较长 TTFT+生成时间，120s 偏紧）
     INVENTORY_PREVIEW_LENGTH: int = 200     # artifact 清单内容预览截断长度
     READ_ARTIFACT_MAX_CHARS: int = 50000    # read_artifact 默认字符上限（隐藏，模型不可见）
+    HTTP_TOOL_MAX_RESULT_CHARS: int = 50000  # external http 工具响应文本上限（隐藏）；超限尾部截断并显式标记
+    MCP_TOOL_MAX_RESULT_CHARS: int = 50000   # external mcp 工具 text/structured 响应上限（隐藏）；超限尾部截断并显式标记
+    MCP_TOOL_LIST_CACHE_SECONDS: int = 60    # MCP tools/list 进程内缓存 TTL；0=每次重新发现
     TOOL_PERSIST_PREVIEW_LENGTH: int = 1000  # 工具结果落盘后回填给模型的预览长度
+    SEARCH_TOOLS_MAX_RESULTS: int = 15      # search_tools 单次渲染完整 doc 的工具数上限（隐藏）；
+                                            # 超出只列名，防把整集 schema 灌爆下一次 call（压缩不兜底 tool-result overflow）
+    # 是否在工具目录(<available_tools> / search_tools 结果)里给每个工具渲染 XML 调用示例。
+    # 部署级开关(对齐模型能力):弱模型 → 留 True 换调用稳定性;强模型 → 可关省 token,
+    # 调用语法已由 generate_tool_grammar 的稳定前缀(含 CDATA 结构)自洽承载,无示例也能调。
+    # 粒度刻意是 deployment(非 per-tool):示例需不需要取决于这台部署用什么模型,与具体工具无关。
+    RENDER_TOOL_EXAMPLES: bool = True
     # ARTIFACT_CREATED / ARTIFACT_UPDATED(rewrite)整文事件的体积上限。超限则事件
     # 只带"已变更"信号(content 省略、content_omitted=True),前端靠 COMPLETE 后的
     # DB 对齐补全(对齐本就兜底)。update 的 span delta 不受此限(权威且体量随模型输出)。
     ARTIFACT_LIVE_CONTENT_MAX_CHARS: int = 256000
+    # Artifact 二进制存储(ArtifactBlob)单条字节上限。写入侧 loud-fail(不静默截断)。
+    # 隐藏常量,非模型可调。刻意高于 MAX_UPLOAD_SIZE(100MB):留 2× 余量给 C 阶段沙盒
+    # 回写的 blob(模型自生成,不走上传路径),免得再调一次。**ops 依赖**:200MB 单行
+    # 要求 MySQL/TDSQL 服务端 max_allowed_packet 抬到其上(默认常仅 16–64MB),否则大
+    # insert 在驱动层失败;且跨中心复制 200MB 行成本不低,值随该上限演进再核。
+    ARTIFACT_BLOB_MAX_BYTES: int = 200 * 1024 * 1024
+    # 识图:read_artifact 把图注入上下文前 resize 到最长边 ≤ 此值(像素),应用侧控
+    # token 成本可预测(不靠 provider 的 HF processor)。原始 blob 不变,只降采样注入副本。
+    # 1568 对齐主流 VLM 的高分辨率 tile 上限,既清晰又不爆 token。隐藏常量,非模型可调。
+    VISION_IMAGE_MAX_EDGE: int = 1568
+    # 解压炸弹闸:像素总数(w*h)上限。Pillow 默认仅在 ~178M 像素抛错、89–178M 段只
+    # `warnings.warn`(图照常打开)——一张纯色 10000×10000(100M 像素)PNG 可压到十几 KB,
+    # 轻松绕过 MAX_UPLOAD_SIZE,落到 read 路径 resize 时才解码,撑爆 CPU/内存。故在**解码前**
+    # (Image.open 只读头、拿 size,不解码)显式校验 w*h:上传校验侧拒(loud-fail)、read 侧防御性
+    # 再校验。50M 像素 ≈ 50MP,宽于真实相机/截图,远低于 DoS 量级。隐藏常量,operator 可调。
+    VISION_IMAGE_MAX_PIXELS: int = 50 * 1000 * 1000
 
     # Cancel-path Message.response placeholders.
     # 三条 cancel 路径都要写一个非空占位 —— 前端 MessageList 用 node.response 非空
@@ -121,6 +153,14 @@ class Settings(BaseSettings):
                                                # 打开作为 "持久卷未挂载" 的兜底,代价是污染主应用日志流 / docker logs)
                                                # env 覆盖:`ARTIFACTFLOW_OBS_STDOUT_MIRROR=true`(env_prefix 强制带前缀)
 
+    # 舰队心跳注册表(Phase C):sampler 每 tick 把快照子集写 `{prefix:instance:<id>}`,
+    # 管理端 /admin/instances scan 出全舰队。双时间轴红/黄:key TTL 放长,颜色由
+    # payload 内 `ts` 新鲜度在读侧判(详见 observability/heartbeat.py 文档)。
+    OBS_HEARTBEAT_TTL_SEC: int = 300           # 心跳 key TTL;> STALE 数倍,给 wedge 实例留「在册显红」窗口
+    OBS_HEARTBEAT_STALE_SEC: int = 60          # ts 超此值 = 陈旧 → 面板红(wedge/停更);约 2× sample interval
+    OBS_ERROR_WINDOW_SEC: int = 300            # last_error 在此窗口内 → 面板黄(近期出过 ERROR)
+    OBS_AUTOHEAL_MARKER_PATH: str = ""         # 宿主 autoheal marker(JSONL)容器内只读路径;空=未挂载,面板不显示重启轨迹
+
     # Redis（空 = InMemory fallback，非空 = Redis）
     REDIS_URL: str = ""
     REDIS_CLUSTER: bool = False           # 生产 Cluster 模式
@@ -131,24 +171,135 @@ class Settings(BaseSettings):
     # 并发控制
     MAX_CONCURRENT_TASKS: int = 10  # 最大并发引擎执行数
 
-    # 上传限制
-    MAX_UPLOAD_SIZE: int = 20 * 1024 * 1024  # 20MB
+    # 上传限制。单文件字节上限(API 边界 loud 422)。批量**总**字节由代理层
+    # client_max_body_size 独立封顶(200MB,见 deploy/nginx.conf|Caddyfile):
+    # 允许「1 个大文件 or 多个小文件」但控总量——单文件 100MB、数量 30、总量 200MB
+    # 三轴独立,总量刻意 < 100MB×30。前端经 /api/v1/meta 取此值做 UX 预挡(后端权威)。
+    MAX_UPLOAD_SIZE: int = 100 * 1024 * 1024  # 100MB
+    # 文本转换路径(DocConverter._convert_text)的独立、更低字节闸。文本是唯一无自身
+    # 成本 envelope 的转换路径:charset 检测 + str(best) + split() 会**物化整份解码
+    # 内容 + 词列表**,内存放大远超输入字节,且跑在 event loop 上(2026-05-14 wedge 同类)。
+    # docx/pdf 存原 blob 不解析(C-0 起 blob-only)、图片存原 blob 不物化文本,只有裸
+    # 文本会随 100MB 上传上限线性放大 → 给它保留旧的 20MB envelope。字节上界是首要护栏
+    # (to_thread 只缓解 loop 阻塞,解不了内存)。隐藏常量,operator 可调。
+    MAX_TEXT_CONVERT_BYTES: int = 20 * 1024 * 1024  # 20MB
+    # per-用户 blob 存储配额(字节)。该用户**所有 blob 字节之和**(ArtifactBlob.size_bytes
+    # 跨其全部会话)+ 本次新增若超此值 → 拒。**写入侧守门在唯一 chokepoint
+    # create_from_upload**(所有 blob 都经此:上传 + 沙盒 persist + 未来任何路径,一处校验
+    # 全覆盖,不逐路径加闸)——上传转 413、沙盒 persist 转 ToolResult 让模型提示用户清理。
+    # /chat 另有 HTTP 预闸做 fail-fast(起 turn 前拒、零 DB 状态),非唯一守门。只数 blob
+    # —— 二进制是"狂传大文件"灌爆盘的主向量(尤其沙盒 persist:无 nginx body / 数量闸,
+    # 纯靠它兜底),文本(Artifact.content)有 MAX_TEXT_CONVERT_BYTES 兜着、量级小,刻意不计
+    # (进度条同口径,标"附件占用"非"总盘")。account = SUM(size_bytes) compute-on-read(DB
+    # 唯一真相,不存计数器),靠 ix_artifact_blobs_session_size 走 index-only;校验计入
+    # 「DB 已落 + 本轮已 stage 未 flush」否则一轮多次 persist 各自只看 DB 会齐齐击穿。
+    # 软上限:跨会话并发可略微超额,挡量级非字节级。0 = 不限(禁用)。operator 经 env 可调。
+    ARTIFACT_USER_QUOTA_BYTES: int = 2 * 1024 * 1024 * 1024  # 2GB
+
+    # Skill 导入硬门槛(Phase E,utils/skill_validator;隐藏常量,operator 经 env 可调)。
+    # 宿主侧只读 namelist + SKILL.md 一个成员,全包解压归沙盒 —— 这组上限是 bomb 预拒,
+    # 沙盒 watchdog 仍是真兜底。单 zip 字节上限刻意 ≤ 代理层 client_max_body_size,
+    # 别声明一个过不了边缘的数(deploy/nginx.conf|Caddyfile)。
+    # 用户 skill 总量不设独立配额:bundle 字节计入 ARTIFACT_USER_QUOTA_BYTES 同一池
+    # (原则 7③;记账在 ConversationManager.get_user_upload_bytes,413 闸与存储条同口径)。
+    SKILL_BUNDLE_MAX_BYTES: int = 100 * 1024 * 1024     # 单个 skill zip 上限,对齐 MAX_UPLOAD_SIZE
+                                                        # 的「单文件 100MB」口径(边缘 210M 放得下)。
+                                                        # 执行点 = E-2 导入端点(非 validator:按信任
+                                                        # 分层,seed/admin 无闸,wheels bundle 合法可超)
+    SKILL_ZIP_MAX_MEMBERS: int = 2000                   # zip 文件成员数上限
+    SKILL_ZIP_MAX_UNCOMPRESSED_BYTES: int = 500 * 1024 * 1024  # 声明解压总量上限
+    SKILL_MD_MAX_BYTES: int = 5 * 1024 * 1024           # SKILL.md 成员实际读取硬帽(bomb-in-member)
+    SKILL_MD_LEGIBILITY_WARN_CHARS: int = 20_000        # 正文 legibility 警告阈值(不拦)
+
+    # 沙盒（C 阶段;隐藏常量,operator 经 env 可调,模型不可见）。
+    # DooD:镜像 / 挂载 / runtime 全部固定在代码侧 —— 容器创建参数绝不可被模型
+    # 生成内容污染(backend 持 docker.sock = host root,这是硬安全边界)。
+    SANDBOX_IMAGE: str = "artifactflow-sandbox:latest"  # scripts/build-sandbox-image.sh 产物
+    SANDBOX_RUNTIME: str = ""        # Docker runtime;"" = daemon 默认(本机 dev=runc),prod="runsc"(gVisor)
+    # 宿主侧 scratch 工作区根目录。DooD 下 bind-mount 源路径在 **daemon 那台机**解析:
+    # backend 容器化部署时必须把同一宿主路径以**相同路径**挂进 backend 容器(经典
+    # DooD 同路径要求)。多套部署共用一个 daemon 时各自配不同根目录 —— reaper(C-reap)
+    # 以本根目录为第二枚举源,共用根目录会互删对方的 scratch。
+    SANDBOX_SCRATCH_ROOT: str = "/tmp/artifactflow-sandbox"
+    SANDBOX_COMMAND_TIMEOUT: int = 300  # 秒,单条 bash 命令上限。容器内 `timeout --signal=KILL` 强杀
+                                        # (真杀进程);tool 侧另有 +grace 的 asyncio 弃等护栏,只负责
+                                        # 提前返回(进程不死,2026-05-14 同型),残留交由 turn 末拆容器兜底。
+                                        # 曾兼任"最坏 cancel 延迟上界"(=120);cancel-interrupt 落地后
+                                        # (engine 在工具 await 期轮询 cancel → task.cancel 在飞调用,
+                                        # core/cancellation.py)该职责剥离,本值只剩 runaway 上界一职,放宽到 300。
+    SANDBOX_START_TIMEOUT: int = 60     # 秒,容器 create+start 上限(daemon 卡死时 loud-fail,不 wedge 整 turn)
+    SANDBOX_MEM_LIMIT_MB: int = 1024    # 容器内存上限;MemorySwap 设同值 = 禁 swap
+    SANDBOX_CPU_LIMIT: float = 1.0      # CPU 核数上限(换算 NanoCpus)
+    SANDBOX_PIDS_LIMIT: int = 256       # fork 炸弹闸
+    SANDBOX_MAX_OUTPUT_CHARS: int = 200_000  # 单命令输出捕获硬帽:超出继续 drain 但丢弃(防内存放大),
+                                             # 截断显式标记。>50k 的部分由引擎溢出转 artifact idiom 接手。
+    SANDBOX_STATUS_MAX_ENTRIES: int = 20     # 动态状态注入的工作区第一层清单条数帽:工作区是模型可写的树,
+                                             # 不设帽=prompt 注水放大器;超出部分显式 "(+N more)" 标记
+    # 磁盘配额(2026-06-10 C′ 方向:loop 池子=硬墙、以下=软配额与准入;host-prep 见 D 段)。
+    # prod 把 SANDBOX_SCRATCH_ROOT 挂成定容 loop 文件系统,race 窗口写穿只伤池子不伤宿主。
+    SANDBOX_WORKSPACE_QUOTA_MB: int = 2048   # per-turn scratch 软配额:watchdog du 超额 → 杀容器 + sticky 失败
+    SANDBOX_WATCHDOG_INTERVAL_SEC: int = 5   # watchdog 巡检周期。探针①:50k 小文件 os.walk ~150ms(线程内),无感
+    SANDBOX_POOL_MIN_FREE_MB: int = 1024     # 起容器准入水位:scratch 根所在 fs 剩余低于此拒绝新沙盒(statvfs,O(1))
+    SANDBOX_PERSIST_MAX_TEXT_BYTES: int = 20 * 1024 * 1024  # persist 文本判定上限:超此即使可解码也按 blob 存
+                                                            # (对齐 MAX_TEXT_CONVERT_BYTES 的量级;blob 上限
+                                                            # 复用 ARTIFACT_BLOB_MAX_BYTES,写入侧守门)
+    # lease-anchored reaper(C-reap):进程死亡(SIGKILL/OOM,_wrapped finally 不执行)
+    # 的二级兜底。资源侧双源枚举(daemon label 容器 + scratch 根目录)− list_active_executions
+    # 活跃集 = 孤儿 → 删。最坏烧 CPU 时长 = lease TTL 剩余 + 本间隔(有界,~分钟级)。
+    SANDBOX_REAP_ENABLED: bool = True        # 无沙盒部署(无 docker / 不授 bash)置 False,免空轮询刷日志
+    SANDBOX_REAP_INTERVAL_SEC: int = 60      # reaper 周期扫间隔(启动立即先扫一次)
+    SANDBOX_REAP_GRACE_SEC: int = 60         # 只回收存活 > 此值且无活跃 lease 的资源:躲开
+                                             # "刚 lazy 创建 / scratch 刚建、lease 可见性差一拍"的误杀竞态
+    # reaper 的跨进程安全要求**共享** liveness 源(Redis):活跃集来自 list_active_executions,
+    # InMemory store 只反映本进程 → 多副本/多 worker 下每个进程把兄弟的活沙盒看成无 lease
+    # 孤儿、60s 后误删(破坏性,非仅降级)。故 InMemory 下默认不起 reaper;单进程 InMemory
+    # (如 Mode-1 轻量部署)要用,操作者在此显式 affirm "我只跑一个进程"。多 worker 一律配 Redis。
+    SANDBOX_REAP_ALLOW_LOCAL_STORE: bool = False
 
     # SSRF / 外联工具防护（隐藏常量，不暴露 API / 工具参数）
     WEB_FETCH_MAX_BYTES: int = 20 * 1024 * 1024   # fallback 下载体上限（解压后字节），
-                                                  # 超即中断 —— 防 gzip 炸弹 / 大响应 OOM；
-                                                  # 与 MAX_UPLOAD_SIZE / DocConverter 对齐
+                                                  # 超即中断 —— 防 gzip 炸弹 / 大响应 OOM。
+                                                  # 出网下载是独立威胁面,与 MAX_UPLOAD_SIZE
+                                                  #（上传,已抬到 100MB）解耦,各自取值。
+    # web_fetch 文件旁路:这些 URL 尾缀在 Jina 之前分流为直连下载,以 blob artifact 落盘
+    # (而非 Jina 抽文本——对二进制本就坏)。值 = 尾缀 → content_type 兜底(响应头缺失/
+    # 撒谎时用)。运行时工具内自决,非模型参数(守「最小化工具参数面」)。
+    WEB_FETCH_BLOB_SUFFIXES: Dict[str, str] = {
+        ".pdf": "application/pdf",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ".doc": "application/msword",
+        ".xls": "application/vnd.ms-excel",
+        ".ppt": "application/vnd.ms-powerpoint",
+        ".zip": "application/zip",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+    }
     CUSTOM_TOOL_SECRET_PREFIX: str = "TOOL_SECRET_"  # 自定义工具 {{VAR}} 只能解析此前缀的环境变量；
                                                      # 把签名密钥 / DB 密码挡在自定义工具可触及范围外
+
+    # 工具凭证主密钥(B-4)。external 工具凭证可逆加密落库(tool_credentials),此密钥
+    # 加密/解密用 —— 单把、不轮转、与 JWT_SECRET 同信任模型(DB dump 无此密钥=废密文)。
+    # 生成:python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # **强制**:validate_config 缺它即 fail-to-start(同 JWT_SECRET)。无凭证部署也须设——
+    # 单点强制换来运行期无「缺 key」分支(reconcile / resolver / set_credential 全假设它在;
+    # 缺 = 部署配置错,启动期 loud-fail,不留运行期谜题)。Fernet key 格式(32B urlsafe-base64),
+    # 格式错构造即抛。
+    CREDENTIAL_KEY: str = ""
 
     # 输入限制
     MAX_MESSAGE_CHARS: int = 20000   # 单条用户输入 / inject 内容字符上限（超即 422）；
                                      # 超大粘贴在前端转为暂存附件而非 inline 消息
     MAX_INJECT_QUEUE_SIZE: int = 5   # 单轮执行待处理 inject 队列深度上限（满即 429 背压；
                                      # 最坏单次 drain = MAX_MESSAGE_CHARS × 此值，详见输入挡板设计）
-    MAX_CHAT_ATTACHMENTS: int = 10   # 单条 /chat 消息附件数量上限（超即 422）；上传后逐个
+    MAX_CHAT_ATTACHMENTS: int = 30   # 单条 /chat 消息附件数量上限（超即 422）；上传后逐个
                                      # 串行转换落库，限制总转换时长 / DB 写入 / 归属串膨胀。
-                                     # 注：原始上传带宽 / 临时盘占用属代理层（nginx client_max_body_size）
+                                     # 注：批量**总**字节由代理层 client_max_body_size(200MB)
+                                     # 独立封顶——数量轴管「几个」,总量轴管「多大」,两轴独立。
 
     # 批量导入用户（CSV）
     MAX_BULK_IMPORT_ROWS: int = 1000          # 行数上限，超过整体拒绝（防误传）
@@ -233,6 +384,23 @@ def validate_config() -> None:
             "ARTIFACTFLOW_JWT_SECRET environment variable is not set. "
             "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
         )
+    if not config.CREDENTIAL_KEY:
+        raise RuntimeError(
+            "ARTIFACTFLOW_CREDENTIAL_KEY environment variable is not set. "
+            "It encrypts external-tool credentials at rest (tool_credentials). "
+            "Required even with no credentialed tools — single-point enforcement keeps "
+            "the runtime free of missing-key branches. Generate one with: python -c "
+            "\"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+        )
+    # Validate the Fernet key format at startup (non-empty already checked), so the
+    # per-turn snapshot decrypt path never carries a key-validity branch: a malformed
+    # key fails loudly here at boot, not silently on every turn. Imported lazily to
+    # avoid a config<->credentials import cycle.
+    from tools.custom.credentials import CredentialCipher, CredentialKeyError
+    try:
+        CredentialCipher(config.CREDENTIAL_KEY)
+    except CredentialKeyError as e:
+        raise RuntimeError(str(e)) from e
     # CORS footgun guard (DEP-01): with credentials enabled, Starlette reflects
     # the request Origin whenever CORS_ORIGINS contains "*", which silently turns
     # an env misconfig (ARTIFACTFLOW_CORS_ORIGINS='["*"]') into "any site may read

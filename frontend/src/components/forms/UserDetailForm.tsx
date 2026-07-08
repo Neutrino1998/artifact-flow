@@ -12,11 +12,12 @@ import {
   LABEL_CLASS,
 } from '@/lib/styles';
 import type { UserResponse } from '@/types';
-import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
+import DangerConfirmModal, { DangerConfirmTarget } from '@/components/layout/DangerConfirmModal';
 import { parseUtcIso } from '@/lib/time';
 import PanelShell from '@/components/layout/PanelShell';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
 import Checkbox from '@/components/forms/Checkbox';
+import { SELECT_CHEVRON } from '@/components/ui/SelectChevron';
 import {
   PASSWORD_POLICY_HINT,
   validatePasswordStrength,
@@ -170,7 +171,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center bg-chat dark:bg-chat-dark p-6">
-        <div className="text-sm text-text-tertiary dark:text-text-tertiary-dark">加载中...</div>
+        <div className="text-sm text-text-tertiary dark:text-text-tertiary-dark">加载中…</div>
       </div>
     );
   }
@@ -233,7 +234,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
               disabled={!dirty || saving}
               className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
             >
-              {saving ? '保存中...' : '保存'}
+              {saving ? '保存中…' : '保存'}
             </button>
           </>
         )
@@ -285,12 +286,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
-            <svg
-              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-tertiary dark:text-text-tertiary-dark"
-              width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
-            >
-              <path d="M3 4.5l3 3 3-3" />
-            </svg>
+            {SELECT_CHEVRON}
           </div>
         </div>
 
@@ -363,14 +359,18 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
         <DangerConfirmModal
           title="删除用户"
           message={
-            `用户：${user.display_name || user.username} (@${user.username})\n` +
             `将级联删除该用户的 ${deleteImpact ?? 0} 条会话及相关消息、事件、artifact。\n` +
             `操作不可恢复。`
           }
           confirmLabel="确认删除"
           onCancel={() => setConfirmDelete(false)}
           onConfirm={handleDelete}
-        />
+        >
+          <DangerConfirmTarget
+            name={user.display_name || user.username}
+            description={`@${user.username} · ${user.role}`}
+          />
+        </DangerConfirmModal>
       )}
     </PanelShell>
   );

@@ -273,3 +273,49 @@ class TestMessageConversion:
         assert msgs[0]["content"] == "u1"
         assert msgs[1]["content"] == "a1"
         assert msgs[2]["content"] == "u2"
+
+
+class TestVisionImageBlock:
+    """识图 tool_complete 携图片引用 + vision_blocks 缓存 → 块列表 vs 占位文本门控。"""
+
+    _IMG_EVENT = dict(
+        tool="read_artifact", success=True, result_data="[image artifact 'shot' v1, image/png]",
+        metadata={"image": {"artifact_id": "shot", "version": 1, "content_type": "image/png"}},
+    )
+    _DATA_URI = "data:image/png;base64,AAAA"
+
+    def _events(self):
+        return [_ev(StreamEventType.TOOL_COMPLETE.value, "lead_agent", dict(self._IMG_EVENT))]
+
+    def test_hit_and_vision_capable_expands_to_block_list(self):
+        msgs = build_event_history(
+            self._events(), "lead_agent",
+            vision_blocks={("shot", 1): self._DATA_URI}, vision_capable=True,
+        )
+        assert len(msgs) == 1
+        content = msgs[0]["content"]
+        assert isinstance(content, list)
+        assert any(b["type"] == "image_url" and b["image_url"]["url"] == self._DATA_URI for b in content)
+
+    def test_hit_but_not_vision_capable_falls_back_to_placeholder(self):
+        """文本模型(vision_capable=False)即便缓存命中也只得占位文本 —— 不注入 image_url 块。
+        且文案主体是模型(you can't view),不诱导无效重读(重读也永远看不到)。"""
+        msgs = build_event_history(
+            self._events(), "lead_agent",
+            vision_blocks={("shot", 1): self._DATA_URI}, vision_capable=False,
+        )
+        assert len(msgs) == 1
+        content = msgs[0]["content"]
+        assert isinstance(content, str)
+        assert "you can't view images" in content
+        assert "not multimodal" in content  # 指明不能看的原因是模型非多模态
+        assert "re-read" not in content  # 文本模型不应被诱导重读
+        assert self._DATA_URI not in content
+
+    def test_miss_falls_back_to_placeholder_even_if_vision_capable(self):
+        """跨轮(state 已空、缓存未命中)→ 占位文本「需要再看就重读」(条件式,非命令)。"""
+        msgs = build_event_history(
+            self._events(), "lead_agent", vision_blocks={}, vision_capable=True,
+        )
+        assert isinstance(msgs[0]["content"], str)
+        assert "re-read artifact 'shot' if you need to view it" in msgs[0]["content"]

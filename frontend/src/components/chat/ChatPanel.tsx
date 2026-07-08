@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
+import Image from 'next/image';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useStreamStore } from '@/stores/streamStore';
 import { useUIStore } from '@/stores/uiStore';
@@ -12,8 +13,13 @@ import StreamingMessage from './StreamingMessage';
 import ErrorFlowBlock from './ErrorFlowBlock';
 import UserMessage from './UserMessage';
 import ConversationBrowser from './ConversationBrowser';
+import SkillManagementPanel from './SkillManagementPanel';
 import UserManagementPanel from './UserManagementPanel';
+import ToolUnitManagementPanel from './ToolUnitManagementPanel';
+import DepartmentAccessPanel from './DepartmentAccessPanel';
 import ObservabilityPanel from './ObservabilityPanel';
+import InstancePanel from './InstancePanel';
+import NotificationConfigPanel from './NotificationConfigPanel';
 import { useAuthStore } from '@/stores/authStore';
 
 function getGreeting(): string {
@@ -29,11 +35,10 @@ export default function ChatPanel() {
   const currentLoading = useConversationStore((s) => s.currentLoading);
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const pendingUserMessage = useStreamStore((s) => s.pendingUserMessage);
+  const pendingUserFiles = useStreamStore((s) => s.pendingUserFiles);
   const sendError = useStreamStore((s) => s.sendError);
 
-  const conversationBrowserVisible = useUIStore((s) => s.conversationBrowserVisible);
-  const userManagementVisible = useUIStore((s) => s.userManagementVisible);
-  const observabilityVisible = useUIStore((s) => s.observabilityVisible);
+  const activeMode = useUIStore((s) => s.activeMode);
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
 
   const addFiles = useStagedFilesStore((s) => s.addFiles);
@@ -60,16 +65,37 @@ export default function ChatPanel() {
     setIsDragOver(false);
   }, []);
 
-  if (observabilityVisible && isAdmin) {
+  if (activeMode === 'observability' && isAdmin) {
     return <ObservabilityPanel />;
   }
 
-  if (userManagementVisible && isAdmin) {
+  if (activeMode === 'instances' && isAdmin) {
+    return <InstancePanel />;
+  }
+
+  if (activeMode === 'notificationConfig' && isAdmin) {
+    return <NotificationConfigPanel />;
+  }
+
+  if (activeMode === 'userManagement' && isAdmin) {
     return <UserManagementPanel />;
   }
 
-  if (conversationBrowserVisible) {
+  if (activeMode === 'toolUnit' && isAdmin) {
+    return <ToolUnitManagementPanel />;
+  }
+
+  if (activeMode === 'departmentAccess' && isAdmin) {
+    return <DepartmentAccessPanel />;
+  }
+
+  if (activeMode === 'conversationBrowser') {
     return <ConversationBrowser />;
+  }
+
+  // 技能管理:全用户(非 admin),中间面板接管。
+  if (activeMode === 'skills') {
+    return <SkillManagementPanel />;
   }
 
   if (currentLoading) {
@@ -109,6 +135,7 @@ export default function ChatPanel() {
                 messageId=""
                 parentId={null}
                 pending
+                attachments={pendingUserFiles?.map((filename) => ({ filename }))}
               />
             )}
             <StreamingMessage />
@@ -117,15 +144,21 @@ export default function ChatPanel() {
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center gap-2">
           <div className="relative">
-            <img
+            <Image
               src="/cat-sleep-light.svg"
               alt=""
-              className="dark:hidden w-72 translate-y-6"
+              width={578}
+              height={316}
+              priority
+              className="dark:hidden w-72 h-auto translate-y-6"
             />
-            <img
+            <Image
               src="/cat-sleep-dark.svg"
               alt=""
-              className="hidden dark:block w-72 translate-y-6"
+              width={578}
+              height={316}
+              priority
+              className="hidden dark:block w-72 h-auto translate-y-6"
             />
           </div>
           <div className="text-text-secondary dark:text-text-secondary-dark text-3xl font-semibold">
@@ -165,7 +198,7 @@ export default function ChatPanel() {
               释放以上传文件
             </div>
             <div className="text-text-tertiary dark:text-text-tertiary-dark text-xs mt-1">
-              支持 .docx / .pdf / .txt / .md / .csv / 代码文件
+              支持任意格式文件
             </div>
           </div>
         </div>

@@ -6,6 +6,7 @@ Admin-only endpoints for observability and monitoring:
 - GET /api/v1/admin/conversations/{conv_id}/events — event timeline grouped by message
 - GET /api/v1/admin/conversations/{conv_id}/artifacts — flushed artifact list (no in-memory overlay)
 - GET /api/v1/admin/conversations/{conv_id}/artifacts/{artifact_id} — current content + version list
+- GET /api/v1/admin/conversations/{conv_id}/artifacts/{artifact_id}/raw — raw blob bytes
 - GET /api/v1/admin/conversations/{conv_id}/artifacts/{artifact_id}/versions/{version} — specific version
 """
 
@@ -13,7 +14,9 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 
+from api.artifact_raw_response import RAW_ARTIFACT_RESPONSES, build_artifact_blob_response
 from api.dependencies import (
     get_artifact_service,
     get_conversation_manager,
@@ -27,6 +30,7 @@ from api.schemas.admin import (
     AdminEventItem,
     AdminMessageGroup,
     AdminConversationEventsResponse,
+    AdminPromptReconstructResponse,
 )
 from api.schemas.artifact import (
     ArtifactListResponse,
@@ -118,12 +122,14 @@ async def get_admin_conversation_events(
 
         groups.append(AdminMessageGroup(
             message_id=msg.id,
+            parent_id=msg.parent_id,
             user_input=msg.user_input,
             response=msg.response,
             created_at=msg.created_at,
             events=[
                 AdminEventItem(
                     id=e.id,
+                    event_id=e.event_id,
                     event_type=e.event_type,
                     agent_name=e.agent_name,
                     data=e.data,
@@ -145,6 +151,34 @@ async def get_admin_conversation_events(
         updated_at=conv.updated_at,
         messages=groups,
     )
+
+
+@router.get(
+    "/conversations/{conv_id}/messages/{message_id}/reconstruct",
+    response_model=AdminPromptReconstructResponse,
+)
+async def reconstruct_admin_prompt(
+    conv_id: str,
+    message_id: str,
+    agent_start_event_id: str = Query(..., max_length=96),
+    _admin: TokenPayload = Depends(require_admin),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
+):
+    """重建某一发 LLM 调用实际发出的完整 prompt（admin 取证，按 agent_start 锚定）。
+
+    锚 = 该次调用前发出的 agent_start 事件（其 event_id 由 events 端点返回）。重建走
+    分支正确的 path，复用引擎同一套装配逻辑，不重新生成动态内容 —— 详见
+    ConversationManager.reconstruct_prompt。
+    """
+    result = await conversation_manager.reconstruct_prompt(
+        conv_id, message_id, agent_start_event_id
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Conversation, message, or agent_start event not found on this branch path",
+        )
+    return AdminPromptReconstructResponse(**result)
 
 
 # ============================================================
@@ -188,6 +222,7 @@ async def list_admin_conversation_artifacts(
                 current_version=art["version"],
                 source=art.get("source"),
                 original_filename=art.get("original_filename"),
+                has_blob=bool(art.get("has_blob")),
                 created_at=datetime.fromisoformat(art["created_at"]),
                 updated_at=datetime.fromisoformat(art["updated_at"]),
             )
@@ -236,10 +271,32 @@ async def get_admin_conversation_artifact(
         current_version=result["version"],
         source=result.get("source"),
         original_filename=result.get("original_filename"),
+        has_blob=bool(result.get("has_blob")),
         created_at=datetime.fromisoformat(result["created_at"]),
         updated_at=datetime.fromisoformat(result["updated_at"]),
         versions=version_summaries,
     )
+
+
+@router.get(
+    "/conversations/{conv_id}/artifacts/{artifact_id}/raw",
+    response_class=Response,
+    responses=RAW_ARTIFACT_RESPONSES,
+)
+async def get_admin_conversation_artifact_raw(
+    conv_id: str,
+    artifact_id: str,
+    _admin: TokenPayload = Depends(require_admin),
+    artifact_service: ArtifactService = Depends(get_artifact_service),
+):
+    """Serve raw blob bytes for an artifact in any conversation (admin-only)."""
+    blob = await artifact_service.get_blob(conv_id, artifact_id)
+    if blob is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Artifact blob '{artifact_id}' not found in conversation '{conv_id}'",
+        )
+    return build_artifact_blob_response(blob)
 
 
 @router.get(

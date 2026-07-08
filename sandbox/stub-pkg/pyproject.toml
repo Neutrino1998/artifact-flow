@@ -1,0 +1,11 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "af-sandbox-stub"
+version = "0.0.1"
+description = "Offline-install fixture for ArtifactFlow sandbox gVisor verification"
+
+# Single top-level package (af_sandbox_stub) → setuptools auto-discovery finds
+# it; no explicit [tool.setuptools.packages] needed.

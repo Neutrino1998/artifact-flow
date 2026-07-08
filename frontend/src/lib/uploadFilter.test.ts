@@ -1,56 +1,38 @@
 import { describe, test, expect } from 'vitest';
-import { rejectionReason, partitionStageable } from './uploadFilter';
+import { partitionStageable } from './uploadFilter';
 
-describe('uploadFilter.rejectionReason', () => {
-  test('rejects blacklisted office extensions with backend-matching wording', () => {
-    // Must match src/utils/doc_converter.py's message verbatim.
-    expect(rejectionReason('report.doc')).toBe(
-      '暂不支持 .doc 格式（Word 文件）。请用 Office/WPS 另存为 .docx 后再上传。',
-    );
-    expect(rejectionReason('budget.xlsx')).toBe(
-      '暂不支持 .xlsx 格式（Excel 文件）。请导出为 .csv，或将需要的内容复制到对话框。',
-    );
-    expect(rejectionReason('macro.docm')).toContain('取消宏');
-    expect(rejectionReason('slides.pptm')).toContain('PowerPoint');
-    expect(rejectionReason('sheet.ods')).toContain('ODF 表格');
-  });
-
-  test('accepts supported / unknown extensions (backend attempts them as text)', () => {
-    expect(rejectionReason('notes.txt')).toBeNull();
-    expect(rejectionReason('doc.docx')).toBeNull();
-    expect(rejectionReason('paper.pdf')).toBeNull();
-    expect(rejectionReason('code.py')).toBeNull();
-    expect(rejectionReason('readme.md')).toBeNull();
-    expect(rejectionReason('weird.xyz')).toBeNull();
-    expect(rejectionReason('noextension')).toBeNull();
-  });
-
-  test('extension match is case-insensitive', () => {
-    expect(rejectionReason('A.DOC')).not.toBeNull();
-    expect(rejectionReason('B.XlSx')).not.toBeNull();
-  });
-
-  test('leading-dot names are dotfiles with no extension (matches os.path.splitext)', () => {
-    // Backend: splitext('.doc') == ('.doc', '') → attempted as text. We must
-    // accept these, not reject them, to honor "only block what the backend rejects".
-    expect(rejectionReason('.doc')).toBeNull();
-    expect(rejectionReason('..doc')).toBeNull();
-    expect(rejectionReason('.xlsx')).toBeNull();
-    // ...but a real extension after a non-dot char still rejects.
-    expect(rejectionReason('a..doc')).not.toBeNull(); // splitext → '.doc'
-    expect(rejectionReason('archive.tar.doc')).not.toBeNull();
-  });
-});
+// 上传翻转后(2026-06-11)后端收任意格式,前端唯一可预判的闸 = 单文件体积。
+// 原扩展名黑名单镜像(rejectionReason)已随后端拒绝名单一起删除。
 
 describe('uploadFilter.partitionStageable', () => {
-  test('splits accepted vs rejected, preserving order within each', () => {
+  test('all formats pass — no extension blacklist anymore', () => {
     const { accepted, rejected } = partitionStageable([
       new File(['x'], 'a.txt'),
       new File(['x'], 'b.doc'),
-      new File(['x'], 'c.md'),
+      new File(['x'], 'c.xlsx'),
       new File(['x'], 'd.ods'),
+      new File(['x'], 'e.gif'),
+      new File(['x'], 'f.zip'),
+      new File(['x'], 'g.bin'),
     ]);
-    expect(accepted.map((f) => f.name)).toEqual(['a.txt', 'c.md']);
-    expect(rejected.map((r) => r.name)).toEqual(['b.doc', 'd.ods']);
+    expect(accepted.map((f) => f.name)).toEqual([
+      'a.txt', 'b.doc', 'c.xlsx', 'd.ods', 'e.gif', 'f.zip', 'g.bin',
+    ]);
+    expect(rejected).toEqual([]);
+  });
+
+  test('rejects files over maxBytes with a size reason; under-limit pass', () => {
+    const small = new File(['ab'], 'small.txt'); // 2 bytes
+    const big = new File(['abcdef'], 'big.txt'); // 6 bytes
+    const { accepted, rejected } = partitionStageable([small, big], 4);
+    expect(accepted.map((f) => f.name)).toEqual(['small.txt']);
+    expect(rejected.map((r) => r.name)).toEqual(['big.txt']);
+    expect(rejected[0].reason).toContain('文件过大');
+  });
+
+  test('maxBytes omitted → size gate skipped (limit not yet fetched)', () => {
+    const big = new File(['abcdef'], 'big.txt');
+    const { accepted } = partitionStageable([big]);
+    expect(accepted.map((f) => f.name)).toEqual(['big.txt']);
   });
 });

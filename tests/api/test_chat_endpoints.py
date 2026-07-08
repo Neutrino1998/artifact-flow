@@ -8,6 +8,7 @@ Uses API fixtures with simulated active tasks.
 import asyncio
 import json
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Tuple, List
 from unittest.mock import patch
@@ -89,6 +90,45 @@ async def conv_with_messages(
     db_manager: DatabaseManager, test_user: User
 ) -> Tuple[str, List[str]]:
     return await _seed_conversation(db_manager, test_user.id)
+
+
+# ============================================================
+# TestActiveStream
+# ============================================================
+
+
+class TestActiveStream:
+
+    async def test_no_active_stream_is_empty_state(
+        self, client: AsyncClient, conv_with_messages
+    ):
+        conv_id, _ = conv_with_messages
+        resp = await client.get(f"/api/v1/chat/{conv_id}/active-stream")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body == {
+            "active": False,
+            "conversation_id": conv_id,
+            "message_id": None,
+            "stream_url": None,
+        }
+
+    async def test_expired_stream_is_empty_state(
+        self, client: AsyncClient, app, conv_with_messages
+    ):
+        conv_id, msg_ids = conv_with_messages
+        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        assert await runner.store.try_acquire_lease(conv_id, msg_ids[0]) is None
+        try:
+            resp = await client.get(f"/api/v1/chat/{conv_id}/active-stream")
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["active"] is False
+            assert body["conversation_id"] == conv_id
+            assert body["message_id"] is None
+            assert body["stream_url"] is None
+        finally:
+            await runner.store.release_lease(conv_id, msg_ids[0])
 
 
 # ============================================================
@@ -357,10 +397,45 @@ class _FakeAgentConfig:
     name: str = "lead_agent"
     description: str = "test lead"
     tools: dict = field(default_factory=dict)
-    model: str = "fake-model"
+    model: str = "openai/fake-model"
     max_tool_rounds: int = 3
     role_prompt: str = "You are a test agent."
     internal: bool = False
+
+
+@contextmanager
+def _patch_snapshot(fake_agents):
+    """Patch the per-turn registry snapshot the flipped controller_factory loads.
+
+    Post-B-2 `create_controller` no longer reads `deps._agents`/`get_agents()` —
+    it builds agents + external tools from registry snapshot loaders (DB).
+    These E2E tests mock only the LLM and don't reconcile config into the test DB,
+    so we synthesize a snapshot from the fake agent configs instead. builtin_tools
+    / units are empty: the happy-path LLM returns plain text (no tool calls), and
+    upload staging is independent of the effective toolset."""
+    from reconcile.snapshot import AgentSnapshot, RegistrySnapshot
+
+    agents = {
+        n: AgentSnapshot(
+            name=c.name, description=c.description, model=c.model,
+            max_tool_rounds=c.max_tool_rounds, internal=c.internal,
+            role_prompt=c.role_prompt, builtin_tools={}, units={},
+        )
+        for n, c in fake_agents.items()
+    }
+
+    async def _load(session, *, db_manager=None):
+        return RegistrySnapshot(external_tools={}, units={}, agents=agents)
+
+    async def _load_with_unit_matches(session, dept_ids, *, db_manager=None):
+        return await _load(session, db_manager=db_manager), set()
+
+    with patch("reconcile.snapshot.load_registry_snapshot", _load), \
+         patch(
+             "reconcile.snapshot.load_registry_snapshot_with_unit_matches",
+             _load_with_unit_matches,
+         ):
+        yield
 
 
 def _make_fake_llm_stream(text: str):
@@ -420,7 +495,8 @@ class TestChatStreamE2E:
         deps._execution_runner = runner
 
         try:
-            with patch("models.llm.astream_with_retry", _make_fake_llm_stream("Hello from agent")):
+            with patch("models.llm.astream_with_retry", _make_fake_llm_stream("Hello from agent")), \
+                 _patch_snapshot(fake_agents):
                 # 1. POST /chat — multipart: `payload` form field carries the
                 # ChatRequest JSON; (None, value) sends it as a form field (no
                 # file attachments here). Starts background execution.
@@ -505,7 +581,8 @@ class TestChatStreamE2E:
         deps._execution_runner = runner
 
         try:
-            with patch("models.llm.astream_with_retry", _make_fake_llm_stream("Done")):
+            with patch("models.llm.astream_with_retry", _make_fake_llm_stream("Done")), \
+                 _patch_snapshot(fake_agents):
                 resp = await client.post(
                     "/api/v1/chat",
                     files={

@@ -1,16 +1,18 @@
 """
 Web内容抓取工具
-基于Jina Reader API实现网页内容抓取，支持HTML和PDF文件
-降级路径：HTML → BeautifulSoup纯文本提取，PDF → pypdf文本提取
+基于Jina Reader API实现网页内容抓取
+文件类 URL(.pdf 等 WEB_FETCH_BLOB_SUFFIXES 尾缀)在 Jina 之前走直连 blob 旁路
+降级路径：Jina 失败 → BeautifulSoup 纯文本提取
 """
 
 import asyncio
 import os
 import re
 import aiohttp
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
+from urllib.parse import urlparse, unquote
 
-from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
+from tools.base import ArtifactSpec, BaseTool, ToolResult, ToolParameter, ToolPermission
 from config import config
 from utils.logger import get_logger
 from utils.time import utc_now
@@ -19,7 +21,6 @@ import random
 
 from bs4 import BeautifulSoup
 
-from utils.doc_converter import DocConverter
 
 logger = get_logger("ArtifactFlow")
 
@@ -81,12 +82,12 @@ class WebFetchTool(BaseTool):
     """
     Web内容抓取工具
     使用Jina Reader API抓取网页内容并转换为Markdown格式
-    支持HTML和PDF文件的统一处理
+    文件类 URL(blob 尾缀)在 Jina 之前走直连 blob 旁路
 
     特性：
-    - Jina Reader API：统一处理HTML和PDF，返回clean markdown
+    - Jina Reader API：网页 → clean markdown
     - 429重试：命中限额时自动等待重试
-    - 智能降级：Jina失败后按类型降级（PDF → pypdf，HTML → BeautifulSoup）
+    - 降级：Jina 失败 → BeautifulSoup 纯文本提取
     """
 
     def __init__(self):
@@ -150,6 +151,36 @@ class WebFetchTool(BaseTool):
 
         try:
             result = await self._fetch_single_url(url)
+
+            # 文件旁路:二进制结果声明为 artifact,由引擎中间件落盘 + 回填句柄
+            # (见 ArtifactSpec / engine._maybe_persist_tool_result)。
+            if result.get("is_blob"):
+                if not result.get("success"):
+                    logger.info(f"Fetch failed (blob): {url}")
+                    return ToolResult(
+                        success=False,
+                        error=result.get("error", "File download failed"),
+                    )
+                blob = result["blob"]
+                content_type = result["content_type"]
+                spec = ArtifactSpec(
+                    content_type=content_type,
+                    filename=result["filename"],
+                    title=result["filename"],
+                    content="",  # 二进制不抽文本
+                    blob=blob,
+                    metadata={"source_url": url, "fetched_at": result["fetched_at"]},
+                )
+                # 占位 data:引擎 _maybe_persist_tool_result 两路都会替换它(落盘成功
+                # → 预览,失败 → error),模型任何现有路径都看不到 —— 仅防 artifact
+                # 中间件被旁路时裸 blob 无说明。
+                note = (
+                    f'<file url="{url}" content_type="{content_type}" '
+                    f'bytes="{len(blob)}">Downloaded binary file; stored as artifact.</file>'
+                )
+                logger.info(f"Fetch succeeded (blob): {url}")
+                return ToolResult(success=True, data=note, artifact=spec)
+
             xml_result = self._format_result_to_xml(result)
             success = result.get("success", False)
 
@@ -165,24 +196,51 @@ class WebFetchTool(BaseTool):
             logger.exception(f"Fetch failed: {str(e)}")
             return ToolResult(success=False, error=f"Fetch failed: {str(e)}")
 
+    @staticmethod
+    def _url_path_lower(url: str) -> str:
+        """URL → 小写、去查询参数/片段的路径,尾缀判断的**唯一归一化**。
+
+        _detect_content_type 与 _blob_route_for_url 共用 —— 两处各自手写时
+        已漂移过一次(`#`-strip 只有一边有),归一化不一致 = 同一 URL 两处
+        判型不同。
+        """
+        return url.lower().split('?')[0].split('#')[0]
+
     def _detect_content_type(self, url: str) -> str:
         """
-        通过 URL 后缀检测内容类型
-
-        Args:
-            url: 目标URL
+        通过 URL 后缀检测内容类型(仅用于 Jina 结果的 source_type 标注;
+        默认配置下 .pdf ∈ blob 尾缀、在 Jina 之前已被旁路截走,'pdf' 仅在
+        operator 从 WEB_FETCH_BLOB_SUFFIXES 移除 .pdf 时可达)
 
         Returns:
             'pdf' 或 'html'
         """
-        url_lower = url.lower().split('?')[0]  # 去掉查询参数
-        if url_lower.endswith('.pdf'):
+        if self._url_path_lower(url).endswith('.pdf'):
             return 'pdf'
         return 'html'
 
+    def _blob_route_for_url(self, url: str) -> Optional[Tuple[str, str]]:
+        """文件类 URL 尾缀 → (suffix, content_type 兜底);非文件类返回 None。
+
+        命中即走直连 blob 旁路(Jina 之前),不抽文本——Jina 对二进制本就坏。
+        """
+        path = self._url_path_lower(url)
+        for suffix, mime in config.WEB_FETCH_BLOB_SUFFIXES.items():
+            if path.endswith(suffix):
+                return suffix, mime
+        return None
+
+    def _filename_from_url(self, url: str, fallback_suffix: str) -> str:
+        """从 URL 末段取下载文件名;缺失/无扩展名时用 download<suffix> 兜底。"""
+        path = urlparse(url).path
+        name = unquote(path.rsplit('/', 1)[-1]) if path else ""
+        if not name or '.' not in name:
+            name = f"download{fallback_suffix}"
+        return name
+
     async def _fetch_single_url(self, url: str) -> Dict[str, Any]:
         """
-        抓取单个URL：先试Jina Reader API，失败后按类型降级
+        抓取单个URL：文件类尾缀直连 blob 旁路;否则先试 Jina,失败后按类型降级
 
         Args:
             url: 目标URL
@@ -190,6 +248,13 @@ class WebFetchTool(BaseTool):
         Returns:
             抓取结果字典
         """
+        # 文件旁路:文件类尾缀在 Jina 之前分流为直连下载(blob,不抽文本)。
+        blob_route = self._blob_route_for_url(url)
+        if blob_route is not None:
+            suffix, fallback_mime = blob_route
+            logger.info(f"File-type URL, routing to blob bypass: {url}")
+            return await self._fetch_file_as_blob(url, suffix, fallback_mime)
+
         # 主路径：Jina Reader API
         jina_result = await self._fetch_via_jina(url)
         if jina_result is not None:
@@ -208,14 +273,10 @@ class WebFetchTool(BaseTool):
                 "error": "URL is not an allowed public address",
             }
 
-        # 降级路径：按类型分别处理
-        content_type = self._detect_content_type(url)
-        if content_type == 'pdf':
-            logger.info(f"Jina failed for PDF, falling back to pypdf: {url}")
-            return await self._fetch_pdf(url)
-        else:
-            logger.info(f"Jina failed for HTML, falling back to BeautifulSoup: {url}")
-            return await self._fetch_via_bs4(url)
+        # 降级路径:直连 + BeautifulSoup 抽文本。真 PDF 到不了这里(`.pdf` ∈
+        # WEB_FETCH_BLOB_SUFFIXES,在 Jina 之前已走 blob 旁路),旧 pypdf 降级分支已删。
+        logger.info(f"Jina failed, falling back to BeautifulSoup: {url}")
+        return await self._fetch_via_bs4(url)
 
     async def _fetch_via_jina(self, url: str) -> Optional[Dict[str, Any]]:
         """
@@ -349,19 +410,28 @@ class WebFetchTool(BaseTool):
             logger.warning(f"BS4 fetch failed for {url}: {e}")
             return {"success": False, "url": url, "error": "Failed to fetch content"}
 
-    async def _fetch_pdf(self, url: str) -> Dict[str, Any]:
-        """
-        降级路径：抓取并解析PDF文件（DocConverter / pymupdf）
+    async def _fetch_file_as_blob(
+        self, url: str, suffix: str, fallback_mime: str
+    ) -> Dict[str, Any]:
+        """文件类 URL 直连下载为 blob(不抽文本)。
 
-        Args:
-            url: PDF文件URL
-
-        Returns:
-            抓取结果字典
+        **SSRF**:本旁路在 Jina 之前直连,故 ``_fetch_single_url`` 末尾的二次校验在此
+        分支被**跳过**;入口 ``validate_public_url`` 与此刻之间仍有 DNS-rebinding 窗口。
+        因此直连前必须自带一次校验 + ``allow_redirects=False``(杜绝 302 → 内网/元数据)。
         """
         try:
-            logger.info(f"Fetching PDF: {url}")
+            await validate_public_url(url)
+        except SsrfBlockedError as e:
+            logger.warning(f"web_fetch blob bypass blocked non-public URL: {e}")
+            return {
+                "success": False,
+                "url": url,
+                "is_blob": True,
+                "error": "URL is not an allowed public address",
+            }
 
+        try:
+            logger.info(f"Fetching file (blob bypass): {url}")
             timeout = aiohttp.ClientTimeout(total=60)
             async with aiohttp.ClientSession() as session:
                 async with session.get(
@@ -374,37 +444,39 @@ class WebFetchTool(BaseTool):
                         return {
                             "success": False,
                             "url": url,
-                            "error": f"HTTP {response.status}"
+                            "is_blob": True,
+                            "error": f"HTTP {response.status}",
                         }
 
-                    # 流式读取并封顶字节（先于全量入内存，保护下载本身）
-                    pdf_bytes = await _read_capped(response, config.WEB_FETCH_MAX_BYTES)
+                    # 流式读取并封顶字节(防 gzip 炸弹 / 大响应 OOM)
+                    blob = await _read_capped(response, config.WEB_FETCH_MAX_BYTES)
 
-                    converter = DocConverter()
-                    result = await converter.convert(pdf_bytes, "document.pdf")
+            # content_type **不信远端 Content-Type 头**:它是不可信输入,会流进 artifact
+            # 的 XML 属性(`type="..."`)与 /raw 服务的 MIME —— 恶意服务器可借此让 envelope
+            # 非良构,或对 .png URL 回 image/svg+xml 制造 stored-XSS。我们只在 URL 尾缀命中
+            # 受控映射(WEB_FETCH_BLOB_SUFFIXES)时才进本旁路,故尾缀 MIME 即权威且安全。
+            content_type = fallback_mime
 
-                    content = result.content
-                    page_count = result.metadata.get("page_count", 0)
-                    logger.info(f"PDF extracted: {page_count} pages, {len(content)} chars")
-
-                    return {
-                        "success": True,
-                        "url": url,
-                        "title": "PDF Document",
-                        "content": content,
-                        "word_count": len(content.split()),
-                        "fetched_at": utc_now().isoformat(),
-                        "source_type": "pdf",
-                        "page_count": page_count,
-                    }
+            filename = self._filename_from_url(url, suffix)
+            logger.info(f"Downloaded {url}: {len(blob)} bytes, {content_type}")
+            return {
+                "success": True,
+                "url": url,
+                "is_blob": True,
+                "blob": blob,
+                "content_type": content_type,
+                "filename": filename,
+                "fetched_at": utc_now().isoformat(),
+                "source_type": "file",
+            }
 
         except _ResponseTooLargeError as e:
-            logger.warning(f"PDF fetch too large for {url}: {e}")
-            return {"success": False, "url": url, "error": "PDF too large"}
+            logger.warning(f"File too large for {url}: {e}")
+            return {"success": False, "url": url, "is_blob": True, "error": "File too large"}
         except Exception as e:
-            # 不回显 str(e)（可能含内网地址/路径），仅入 server 日志（SSRF-06）
-            logger.exception(f"PDF fetch failed for {url}")
-            return {"success": False, "url": url, "error": "PDF extraction failed"}
+            # 不回显 str(e)(可能含内网地址/路径),仅入 server 日志(SSRF-06)
+            logger.exception(f"File download failed for {url}")
+            return {"success": False, "url": url, "is_blob": True, "error": "File download failed"}
 
     def _format_result_to_xml(self, result: Dict[str, Any]) -> str:
         """将单个抓取结果格式化为 XML"""
@@ -412,8 +484,6 @@ class WebFetchTool(BaseTool):
             source_type = result.get("source_type", "unknown")
             words = result["word_count"]
             attrs = f'type="{source_type}" words="{words}"'
-            if result.get("page_count"):
-                attrs += f' pages="{result["page_count"]}"'
 
             xml_parts = [f"<page {attrs}>"]
             xml_parts.append(f"  <url>{result['url']}</url>")

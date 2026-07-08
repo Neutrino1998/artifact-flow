@@ -249,20 +249,38 @@ describe('fetchNotifications: failure modes', () => {
 // 组件拿到 null 就整个隐藏，运维删 branding.json 就能彻底关掉页脚。
 
 describe('fetchBranding', () => {
-  test('returns parsed branding on happy path', async () => {
-    mockFetchJson(BRAND_URL, { developer: 'XX 科技', contact_email: 'contact@xx.com' });
+  test('returns parsed branding with mailto feedback on happy path', async () => {
+    mockFetchJson(BRAND_URL, {
+      developer: 'XX 科技',
+      feedback: { label: '问题反馈', href: 'mailto:contact@xx.com' },
+    });
     const result = await fetchBranding();
-    expect(result).toEqual({ developer: 'XX 科技', contact_email: 'contact@xx.com' });
+    expect(result).toEqual({
+      developer: 'XX 科技',
+      feedback: { label: '问题反馈', href: 'mailto:contact@xx.com' },
+    });
   });
 
-  test('accepts branding with only developer (contact_email optional)', async () => {
+  test('returns parsed branding with https feedback', async () => {
+    mockFetchJson(BRAND_URL, {
+      developer: 'XX 科技',
+      feedback: { label: '问题反馈', href: 'https://docs.example.com/feedback' },
+    });
+    const result = await fetchBranding();
+    expect(result).toEqual({
+      developer: 'XX 科技',
+      feedback: { label: '问题反馈', href: 'https://docs.example.com/feedback' },
+    });
+  });
+
+  test('accepts branding with only developer (feedback optional)', async () => {
     mockFetchJson(BRAND_URL, { developer: 'XX 科技' });
     const result = await fetchBranding();
-    expect(result).toEqual({ developer: 'XX 科技', contact_email: undefined });
+    expect(result).toEqual({ developer: 'XX 科技', feedback: undefined });
   });
 
   test('returns null when developer is missing', async () => {
-    mockFetchJson(BRAND_URL, { contact_email: 'a@b.com' });
+    mockFetchJson(BRAND_URL, { feedback: { label: '问题反馈', href: 'mailto:a@b.com' } });
     expect(await fetchBranding()).toBeNull();
   });
 
@@ -271,15 +289,29 @@ describe('fetchBranding', () => {
     expect(await fetchBranding()).toBeNull();
   });
 
-  test('returns null when contact_email is present but non-string', async () => {
-    mockFetchJson(BRAND_URL, { developer: 'X', contact_email: 42 });
+  test('returns null when legacy contact_email is the only link config', async () => {
+    mockFetchJson(BRAND_URL, { developer: 'X', contact_email: 'contact@xx.com' });
     expect(await fetchBranding()).toBeNull();
   });
 
-  test('returns null when contact_email is empty string', async () => {
-    // 与 dismissible fail-closed 同款：present-but-empty 不当成「未填」，
-    // 整条丢，避免渲染出 "由 X · " 后面挂个空 mailto。
-    mockFetchJson(BRAND_URL, { developer: 'X', contact_email: '   ' });
+  test('returns null when feedback is present but not an object', async () => {
+    mockFetchJson(BRAND_URL, { developer: 'X', feedback: 'mailto:contact@xx.com' });
+    expect(await fetchBranding()).toBeNull();
+  });
+
+  test('returns null when feedback label is empty', async () => {
+    mockFetchJson(BRAND_URL, {
+      developer: 'X',
+      feedback: { label: '   ', href: 'mailto:contact@xx.com' },
+    });
+    expect(await fetchBranding()).toBeNull();
+  });
+
+  test('returns null when feedback href uses unsupported protocol', async () => {
+    mockFetchJson(BRAND_URL, {
+      developer: 'X',
+      feedback: { label: '问题反馈', href: 'javascript:alert(1)' },
+    });
     expect(await fetchBranding()).toBeNull();
   });
 

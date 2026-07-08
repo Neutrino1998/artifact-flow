@@ -6,14 +6,16 @@ Artifact Repository
 
 from typing import Optional, List, Dict, Any, Tuple
 
-from sqlalchemy import select, and_
+from sqlalchemy import select, update, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from db.models import (
     Artifact,
+    ArtifactBlob,
     ArtifactSession,
     ArtifactVersion,
+    Conversation,
 )
 from repositories.base import BaseRepository, NotFoundError, DuplicateError
 
@@ -100,6 +102,7 @@ class ArtifactRepository(BaseRepository[Artifact]):
         metadata: Optional[Dict[str, Any]] = None,
         source: str = "agent",
         target_version: int = 1,
+        blob: Optional[bytes] = None,
     ) -> Artifact:
         """
         创建 Artifact（同时创建初始版本）
@@ -113,6 +116,8 @@ class ArtifactRepository(BaseRepository[Artifact]):
             metadata: 扩展元数据
             source: 来源 (agent, user_upload)
             target_version: 版本号（默认 1）。flush 折叠内存编辑时可传更大值。
+            blob: 可选的二进制源字节。提供时在**同一事务**写入 ArtifactBlob 行
+                  (与 artifact + version 原子),保证「artifact 在则 blob 在」。
 
         Returns:
             创建的 Artifact
@@ -133,6 +138,7 @@ class ArtifactRepository(BaseRepository[Artifact]):
             content_type=content_type,
             title=title,
             content=content,
+            has_blob=blob is not None,  # 二进制判别权威列(set-once,随 blob 在场写死)
             current_version=target_version,
             metadata_=metadata or {},
             source=source
@@ -150,6 +156,15 @@ class ArtifactRepository(BaseRepository[Artifact]):
         )
 
         self._session.add(version)
+
+        if blob is not None:
+            self._session.add(ArtifactBlob(
+                artifact_id=artifact_id,
+                session_id=session_id,
+                data=blob,
+                size_bytes=len(blob),
+            ))
+
         await self._session.flush()
         await self._session.commit()
         await self._session.refresh(artifact)
@@ -257,6 +272,165 @@ class ArtifactRepository(BaseRepository[Artifact]):
 
         result = await self._session.execute(query)
         return list(result.scalars().all())
+
+    # ========================================
+    # 二进制存储 (ArtifactBlob)
+    # ========================================
+
+    async def get_blob(
+        self,
+        session_id: str,
+        artifact_id: str,
+    ) -> Optional[ArtifactBlob]:
+        """获取 artifact 的二进制 blob（含字节）。
+
+        **仅 raw-fetch 路径调用**：显式 SELECT 而非走 `Artifact.blob` 关系，使
+        「载入 MB 级字节」永远是一次有意的调用，杜绝任何热路径(list/inventory/
+        get_artifact)经关系误触发字节载入。
+        """
+        query = select(ArtifactBlob).where(
+            and_(
+                ArtifactBlob.session_id == session_id,
+                ArtifactBlob.artifact_id == artifact_id,
+            )
+        )
+        result = await self._session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def get_blob_sizes_total(
+        self,
+        session_id: str,
+        artifact_ids: List[str],
+    ) -> int:
+        """一批 artifact 的 blob 总字节（只读 size_bytes 冗余列，不载入 data）。
+
+        配额抵扣用：本轮所有 replace-staged 的 blob,其 DB 旧字节在 flush 前
+        仍计在 committed 里、新字节又已进 staged —— 准入时须把这批旧字节整体
+        扣除,否则同轮覆盖多个已落库 blob 会按「旧+新」双份记账而误拒。
+        空入参短路返回 0。
+        """
+        if not artifact_ids:
+            return 0
+        stmt = select(func.coalesce(func.sum(ArtifactBlob.size_bytes), 0)).where(
+            and_(
+                ArtifactBlob.session_id == session_id,
+                ArtifactBlob.artifact_id.in_(artifact_ids),
+            )
+        )
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one())
+
+    async def update_artifact_blob(
+        self,
+        session_id: str,
+        artifact_id: str,
+        data: bytes,
+        source: Optional[str] = None,
+    ) -> None:
+        """原地替换 blob 字节（persist 覆盖回写的 flush 路径）。
+
+        blob = 可变单版：不产 ArtifactVersion 行、current_version 不动 —— 二进制
+        历史归沙盒内 git 管，DB 永远只存最新字节。两条 bulk UPDATE：blob 行避免
+        把旧 MB 级字节先 SELECT 进内存；artifact 行不能走「同值 ORM 赋值」触
+        onupdate（SQLAlchemy 判无净变化会跳过 UPDATE），故显式 SET
+        updated_at=func.now()（行需要 DB 侧值，符合 bulk-UPDATE 使用约定）。
+
+        Raises:
+            NotFoundError: artifact 不存在或无 blob 行
+        """
+        await self.get_artifact_or_raise(session_id, artifact_id)
+
+        result = await self._session.execute(
+            update(ArtifactBlob)
+            .where(
+                and_(
+                    ArtifactBlob.session_id == session_id,
+                    ArtifactBlob.artifact_id == artifact_id,
+                )
+            )
+            .values(data=data, size_bytes=len(data))
+        )
+        if result.rowcount == 0:
+            raise NotFoundError("ArtifactBlob", f"{session_id}/{artifact_id}")
+
+        artifact_values: Dict[str, Any] = {"updated_at": func.now()}
+        if source is not None:
+            artifact_values["source"] = source
+        await self._session.execute(
+            update(Artifact)
+            .where(
+                and_(
+                    Artifact.session_id == session_id,
+                    Artifact.id == artifact_id,
+                )
+            )
+            .values(**artifact_values)
+        )
+
+        await self._session.flush()
+        await self._session.commit()
+
+    # ========================================
+    # 存储配额聚合（只读 size_bytes 冗余列，绝不载入 data）
+    # ========================================
+
+    async def get_user_blob_bytes(self, user_id: str) -> int:
+        """该用户名下所有 artifact blob 的总字节数（跨其全部 conversation/session）。
+
+        用于上传准入配额检查 + 进度条总量。join Conversation 取 user_id（
+        ArtifactBlob.session_id == Conversation.id，session_id 与 conversation_id 同）。
+        只聚合 size_bytes（走 ix_artifact_blobs_session_size，index-only），不触 data。
+        SUM 在 PG 升 bigint / SQLite 任意精度，跨用户总量不受列的 Integer 上限制约。
+        """
+        stmt = (
+            select(func.coalesce(func.sum(ArtifactBlob.size_bytes), 0))
+            .select_from(ArtifactBlob)
+            .join(Conversation, Conversation.id == ArtifactBlob.session_id)
+            .where(Conversation.user_id == user_id)
+        )
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one())
+
+    async def get_user_blob_bytes_for_session(self, session_id: str) -> int:
+        """该 session 属主已占用的 blob 总字节（跨属主全部会话），**一趟查询**。
+
+        写入侧 chokepoint（create_from_upload）只有 session_id，配额却是 per-user 跨
+        全部会话；子查询内联解析属主，免去额外一趟 owner 查询。无主会话 → 子查询
+        NULL → `user_id = NULL` 匹配不到 → 返回 0（单个超大 blob 仍由数值判定拦下）。
+        只读 size_bytes，走 ix_artifact_blobs_session_size（index-only）。
+        """
+        owner = (
+            select(Conversation.user_id)
+            .where(Conversation.id == session_id)
+            .scalar_subquery()
+        )
+        stmt = (
+            select(func.coalesce(func.sum(ArtifactBlob.size_bytes), 0))
+            .select_from(ArtifactBlob)
+            .join(Conversation, Conversation.id == ArtifactBlob.session_id)
+            .where(Conversation.user_id == owner)
+        )
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one())
+
+    async def get_blob_bytes_by_sessions(self, session_ids: List[str]) -> Dict[str, int]:
+        """一批 session 各自的 blob 总字节（GROUP BY）。
+
+        用于会话列表逐项展示"附件占用"。无 blob 的 session 不出现在结果里 ——
+        调用方用 `.get(id, 0)` 兜 0。空入参短路返回 {}。
+        """
+        if not session_ids:
+            return {}
+        stmt = (
+            select(
+                ArtifactBlob.session_id,
+                func.coalesce(func.sum(ArtifactBlob.size_bytes), 0),
+            )
+            .where(ArtifactBlob.session_id.in_(session_ids))
+            .group_by(ArtifactBlob.session_id)
+        )
+        result = await self._session.execute(stmt)
+        return {row[0]: int(row[1]) for row in result.all()}
 
     # ========================================
     # 内容更新

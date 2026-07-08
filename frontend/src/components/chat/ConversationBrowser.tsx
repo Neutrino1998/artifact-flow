@@ -4,14 +4,14 @@ import { useState, useCallback, useEffect, useRef, } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useChat } from '@/hooks/useChat';
-import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 import { listConversations, deleteConversation, bulkDeleteConversations } from '@/lib/api';
 import { parseUtcIso } from '@/lib/time';
+import { formatBytes } from '@/lib/formatBytes';
 import type { ConversationSummary } from '@/types';
-import { BUTTON_DANGER } from '@/lib/styles';
-import ConfirmModal from '@/components/layout/ConfirmModal';
+import { BUTTON_DANGER, MENU_ROW_HOVER } from '@/lib/styles';
 import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
+import ConversationActionsMenu from '@/components/sidebar/ConversationActionsMenu';
 import Checkbox from '@/components/forms/Checkbox';
 import PanelSearchBar from './PanelSearchBar';
 import Pagination from './Pagination';
@@ -40,7 +40,7 @@ export default function ConversationBrowser() {
 
   const currentId = useConversationStore((s) => s.current?.id);
   const removeConversation = useConversationStore((s) => s.removeConversation);
-  const setConversationBrowserVisible = useUIStore((s) => s.setConversationBrowserVisible);
+  const setActiveMode = useUIStore((s) => s.setActiveMode);
   const { switchConversation } = useChat();
   const claim = useLatestOnly();
 
@@ -94,9 +94,9 @@ export default function ConversationBrowser() {
   }, [fetchConversations, query]);
 
   const handleSelect = useCallback(async (id: string) => {
-    setConversationBrowserVisible(false);
+    setActiveMode('none');
     await switchConversation(id);
-  }, [switchConversation, setConversationBrowserVisible]);
+  }, [switchConversation, setActiveMode]);
 
   const handleDelete = useCallback(async (id: string) => {
     try {
@@ -114,8 +114,8 @@ export default function ConversationBrowser() {
   }, [removeConversation, total, page, pageSize, query, fetchConversations]);
 
   const handleClose = useCallback(() => {
-    setConversationBrowserVisible(false);
-  }, [setConversationBrowserVisible]);
+    setActiveMode('none');
+  }, [setActiveMode]);
 
   const exitSelectionMode = useCallback(() => {
     setSelectionMode(false);
@@ -180,7 +180,7 @@ export default function ConversationBrowser() {
       <PanelSearchBar
         value={query}
         onChange={handleQueryChange}
-        placeholder="搜索对话标题..."
+        placeholder="搜索对话标题…"
         disabled={selectionMode}
         countLabel={selectionMode ? null : `${total} 对话`}
         rightSlot={
@@ -205,7 +205,7 @@ export default function ConversationBrowser() {
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4">
         <div className="max-w-3xl mx-auto">
         {selectionMode && (
-          <div className="mb-3 flex items-center gap-2 px-4 py-2.5 rounded-2xl border border-accent/40 bg-accent/5 dark:bg-accent/10">
+          <div className="mb-3 flex items-center gap-2 px-4 py-2.5 rounded-xl border border-accent/40 bg-accent/5 dark:bg-accent/10">
             <span className="text-sm text-text-secondary dark:text-text-secondary-dark">
               已选 <span className="text-text-primary dark:text-text-primary-dark font-medium">{selectedCount}</span> 项
             </span>
@@ -226,7 +226,7 @@ export default function ConversationBrowser() {
             <button
               onClick={() => setConfirmBulkDelete(true)}
               disabled={selectedCount === 0}
-              className={`${BUTTON_DANGER} rounded-md px-3 py-1 text-xs`}
+              className={`${BUTTON_DANGER} rounded-lg px-3 py-1 text-xs`}
             >
               删除 ({selectedCount})
             </button>
@@ -262,16 +262,14 @@ export default function ConversationBrowser() {
       {total > 0 && (
         <div className="px-4 pt-2 pb-4">
           <div className="max-w-3xl mx-auto">
-            <div className="bg-surface dark:bg-surface-dark rounded-2xl px-4">
-              <Pagination
-                page={page}
-                pageSize={pageSize}
-                total={total}
-                onPageChange={handlePageChange}
-                onPageSizeChange={handlePageSizeChange}
-                disabled={loading}
-              />
-            </div>
+            <Pagination
+              page={page}
+              pageSize={pageSize}
+              total={total}
+              onPageChange={handlePageChange}
+              onPageSizeChange={handlePageSizeChange}
+              disabled={loading}
+            />
           </div>
         </div>
       )}
@@ -279,8 +277,8 @@ export default function ConversationBrowser() {
       {confirmBulkDelete && (
         <DangerConfirmModal
           title="批量删除对话"
-          message={`将删除 ${selectedCount} 条会话，此操作不可恢复。`}
-          confirmLabel="删除"
+          message={`将删除 ${selectedCount} 条会话。\n操作不可恢复。`}
+          confirmLabel="确认删除"
           onConfirm={handleBulkDeleteConfirm}
           onCancel={() => setConfirmBulkDelete(false)}
         />
@@ -308,28 +306,8 @@ function BrowserItem({
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const { copy } = useCopyFeedback();
-  const menuRef = useRef<HTMLDivElement>(null);
   const title = conversation.title || 'Untitled';
   const date = parseUtcIso(conversation.updated_at).toLocaleDateString();
-
-  const handleCopyId = async () => {
-    await copy(conversation.id);
-    setMenuOpen(false);
-  };
-
-  // Close menu on outside click
-  useEffect(() => {
-    if (!menuOpen) return;
-    function handleClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [menuOpen]);
 
   const handleRowClick = () => {
     if (selectionMode) {
@@ -340,20 +318,19 @@ function BrowserItem({
   };
 
   return (
-    <>
-      <div
-        className={`group relative cursor-pointer transition-colors rounded-lg mb-1 ${
+    <div
+      className={`group relative cursor-pointer transition-colors rounded-lg mb-1 ${
           menuOpen ? 'z-40' : ''
         } ${
           selectionMode && selected
             ? 'bg-accent/10 dark:bg-accent/15 px-4 py-3'
             : isActive
             ? 'bg-panel dark:bg-panel-accent-dark px-4 py-3'
-            : 'hover:bg-panel/60 dark:hover:bg-panel-accent-dark/60 px-4 py-3'
+            : `${MENU_ROW_HOVER} px-4 py-3`
         }`}
         onClick={handleRowClick}
         onMouseEnter={() => setShowMenu(true)}
-        onMouseLeave={() => { if (!menuOpen) setShowMenu(false); }}
+        onMouseLeave={() => setShowMenu(false)}
       >
         <div className="flex items-center gap-3">
           {selectionMode && (
@@ -371,75 +348,25 @@ function BrowserItem({
             <div className="flex items-center gap-2 mt-1 text-xs text-text-tertiary dark:text-text-tertiary-dark">
               <span>{date}</span>
               <span>{conversation.message_count} messages</span>
+              {conversation.upload_bytes > 0 && (
+                <span title="附件占用">{formatBytes(conversation.upload_bytes)}</span>
+              )}
             </div>
           </div>
         </div>
 
-        {/* ··· menu trigger — hidden in selection mode */}
-        {!selectionMode && (showMenu || menuOpen) && (
-          <div ref={menuRef} className="absolute right-3 top-1/2 -translate-y-1/2">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setMenuOpen((prev) => !prev);
-              }}
-              className="p-1.5 rounded-md text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-surface dark:hover:bg-surface-dark transition-colors"
-              aria-label="More actions"
-            >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                <circle cx="8" cy="3" r="1.5" />
-                <circle cx="8" cy="8" r="1.5" />
-                <circle cx="8" cy="13" r="1.5" />
-              </svg>
-            </button>
-
-            {menuOpen && (
-              <div className="absolute right-0 top-full mt-1 z-50 w-40 bg-surface dark:bg-panel-dark border border-border dark:border-border-dark rounded-lg shadow-modal p-1">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleCopyId();
-                  }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-sm text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-surface-dark rounded-md transition-colors"
-                >
-                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <rect x="5" y="5" width="9" height="9" rx="1.5" />
-                    <path d="M5 11H3.5A1.5 1.5 0 0 1 2 9.5v-7A1.5 1.5 0 0 1 3.5 1h7A1.5 1.5 0 0 1 12 2.5V5" />
-                  </svg>
-                  复制 ID
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setMenuOpen(false);
-                    setConfirmDelete(true);
-                  }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-sm text-status-error hover:bg-status-error/10 rounded-md transition-colors"
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6" />
-                  </svg>
-                  删除对话
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {confirmDelete && (
-        <ConfirmModal
-          title="删除对话"
-          message={`确定要删除对话「${title}」吗？此操作无法撤销。`}
-          confirmLabel="删除"
-          destructive
-          onConfirm={() => {
-            onDelete(conversation.id);
-            setConfirmDelete(false);
-          }}
-          onCancel={() => setConfirmDelete(false)}
+        {/* ··· 操作菜单(复制 ID / 删除对话)—— 与侧栏 ConversationItem 共用实现。
+            选择模式下整条 hover 触发器都隐藏,故 visible 额外带上 !selectionMode。 */}
+        <ConversationActionsMenu
+          conversationId={conversation.id}
+          title={title}
+          visible={!selectionMode && (showMenu || menuOpen)}
+          open={menuOpen}
+          onOpenChange={setMenuOpen}
+          onDelete={onDelete}
+          wrapperClassName="absolute right-3 top-1/2 -translate-y-1/2"
+          triggerClassName="p-1.5 rounded-md text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-surface dark:hover:bg-surface-dark transition-colors"
         />
-      )}
-    </>
+      </div>
   );
 }

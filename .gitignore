@@ -86,7 +86,9 @@ Thumbs.db
 # ==========================
 # 5. Frontend (Node.js / Next.js)
 # ==========================
-frontend/node_modules/
+# node_modules at any depth (also catches a stray root one from running vitest/vite
+# outside frontend/ — that creates ./node_modules/.vite cache with no real packages)
+node_modules/
 frontend/.next/
 frontend/out/
 frontend/tsconfig.tsbuildinfo

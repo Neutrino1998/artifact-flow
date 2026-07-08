@@ -1,0 +1,55 @@
+# ArtifactFlow fleet topology — Phase D (决策 7:单机/多机同一连续谱).
+#
+# For the common single-host case, prefer:
+#   deploy/scripts/fleet.sh init-local
+# It writes deploy/fleet.conf with the local arch and seeds deploy/.env from the
+# intranet template. Copy/edit this file manually for custom or multi-host
+# layouts. fleet.sh reads it to know which role runs on which host.
+#
+# To enable sandbox tools from a bundle that includes --with-sandbox:
+#   sudo env AF_SANDBOX_POOL_SIZE=8G deploy/scripts/fleet.sh prepare-sandbox .
+#   AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy .
+#
+# ── Format ──
+# One row per (role, host). Blank lines and `#` comments ignored.
+# Columns:  <role>  <host>  [arch=arm64|amd64]  [scale=N]
+#   role   one of: infra | release | app | lb   (see below)
+#   host   an ssh-reachable hostname/IP, OR the literal `local`
+#          (= run right here, no ssh — the single-box degenerate case)
+#   arch   target CPU arch; fleet.sh VALIDATES it against the bundle's
+#          manifest Platform + the host's `uname -m` (loud-fail on mismatch).
+#          release.sh emits one arch per build. Homogeneous fleet is the
+#          assumption; build either x86 or arm with release.sh --platform.
+#   scale  app rows only: number of backend replicas (frontend stays 1 —
+#          only backend is the multi-replica, Redis-coordinated tier).
+#
+# ── Roles ──
+#   infra    postgres + redis  (compose --profile infra; omit row for
+#            external/managed DB — then set DATABASE_URL/REDIS_URL in .env)
+#   release  the ONE host that runs the one-shot migrate+reconcile (release
+#            service) under the PG advisory lock. Exactly one release row.
+#   app      backend (×scale) + frontend. One row per app host.
+#   lb       caddy reverse proxy / LB entry. Exactly one lb row.
+
+# ─────────────────────────────────────────────────────────────────────
+# Single machine — the common case. Every role on `local`, no ssh at all.
+# This is the degenerate form of the multi-host sequence: fleet.sh runs the
+# SAME deploy序列, transport just resolves to local execution.
+# ─────────────────────────────────────────────────────────────────────
+infra    local
+release  local
+app      local   arch=arm64  scale=2
+lb       local
+
+# ─────────────────────────────────────────────────────────────────────
+# Two machines — comment out the single-box block above and uncomment this.
+# Control host runs fleet.sh and ssh's to k1/k2 (see deploy/FLEET.md).
+# NOTE: cross-host is authored but UNEXERCISED until a 2nd machine exists —
+# read the "Multi-host: unexercised seams" section of FLEET.md before relying
+# on it (backend port publishing, static Caddy upstream, per-host DB URLs).
+# ─────────────────────────────────────────────────────────────────────
+# infra    k1   arch=arm64
+# release  k1
+# app      k1   arch=arm64  scale=2
+# app      k2   arch=arm64  scale=2
+# lb       k1   arch=arm64

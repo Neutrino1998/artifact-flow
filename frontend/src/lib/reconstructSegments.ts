@@ -3,8 +3,14 @@ import type { ExecutionSegment, ToolCallInfo, NonAgentBlock, CompactionBlock } f
 import type { TokenUsage, LLMCompleteData } from '@/types/events';
 
 /**
- * Reconstruct ExecutionSegment[] from persisted MessageEvent records.
- * Mirrors the SSE event handling logic in useSSE.ts.
+ * Reconstruct ExecutionSegment[] from persisted MessageEvent records (history reload).
+ *
+ * TWIN of the live SSE reducer in useSSE.ts: both fold the SAME events into the SAME
+ * ExecutionSegment / ToolCallInfo shapes. Per-event field mapping is duplicated, NOT
+ * shared — the orchestration genuinely differs (batch fold here vs streaming + llm_chunk
+ * there), so the two loops stay separate by design. Add/remove a field on a UI object in
+ * EITHER file → mirror it in the other. (The `reason` field once shipped live-only because
+ * this side was missed on reload.)
  */
 export function reconstructSegments(events: MessageEventItem[]): ExecutionSegment[] {
   const segments: ExecutionSegment[] = [];
@@ -59,7 +65,19 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
       }
 
       case 'tool_start': {
-        const seg = current();
+        // Lane by agent (TWIN of useSSE TOOL_START): with in-place subagent
+        // recursion the caller's later tools arrive AFTER the subagent's
+        // segment — current() would misfile them onto the subagent's lane.
+        // Fall back to current() when no lane matches (agent missing).
+        const lane = agent_name ?? 'Agent';
+        let seg: ExecutionSegment | undefined;
+        for (let i = segments.length - 1; i >= 0; i--) {
+          if (segments[i].agent === lane) {
+            seg = segments[i];
+            break;
+          }
+        }
+        if (!seg) seg = current();
         if (!seg) break;
         const toolName = (data?.tool as string) ?? '';
         // Preserve LLM output before clearing content
@@ -68,12 +86,17 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
         }
         const permission = pendingPermission ?? undefined;
         pendingPermission = null;
+        // TWIN: keep this field set identical to useSSE.ts TOOL_START. `reason`
+        // is the model's stated intent (display-only) and must survive reload —
+        // omitting it here is the live/replay drift the twin comments guard against.
+        const reason = data?.reason as string | undefined;
         seg.toolCalls.push({
           id: `${toolName}-${evt.created_at}-${toolCallSeq++}`,
           toolName,
           params: (data?.params as Record<string, unknown>) ?? {},
           agent: agent_name ?? '',
           status: 'running',
+          ...(reason ? { reason } : {}),
           ...(permission ? { permission } : {}),
         });
         seg.content = '';

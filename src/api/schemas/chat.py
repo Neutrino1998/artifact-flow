@@ -29,6 +29,17 @@ class ChatRequest(BaseModel):
             "relaxes the empty-input guard so a compact-only turn (no text) is allowed."
         ),
     )
+    activate_skills: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Skill slugs the user activated for this turn (pressed a skill's button). Each "
+            "visible skill's instructions are injected into this turn's context and its "
+            "agent-disabled tools are enabled; the activation is sticky across the "
+            "conversation (mirrors always-allowed tools). Invisible slugs are silently "
+            "dropped. Like force_compact, it relaxes the empty-input guard so an "
+            "activation-only turn (no text) is allowed."
+        ),
+    )
 
 
 class InjectRequest(BaseModel):
@@ -78,9 +89,23 @@ class ChatResponse(BaseModel):
     stream_url: str = Field(..., description="SSE endpoint URL for streaming")
 
 
+class ActiveStreamResponse(BaseModel):
+    """GET /api/v1/chat/{conv_id}/active-stream response"""
+    active: bool = Field(..., description="Whether the conversation has a reconnectable live stream")
+    conversation_id: str = Field(..., description="Conversation ID")
+    message_id: Optional[str] = Field(None, description="Active execution message ID, when active")
+    stream_url: Optional[str] = Field(None, description="SSE endpoint URL, when active")
+
+
 class ResumeResponse(BaseModel):
     """POST /api/v1/chat/{conv_id}/resume response"""
     stream_url: str = Field(..., description="New SSE endpoint URL")
+
+
+class UploadedFileRef(BaseModel):
+    """File the user attached to a message (display-only snapshot)"""
+    id: str = Field(..., description="Artifact ID the upload was staged as")
+    filename: str = Field(..., description="Original filename")
 
 
 class MessageResponse(BaseModel):
@@ -94,6 +119,14 @@ class MessageResponse(BaseModel):
     execution_metrics: Optional[Dict[str, Any]] = Field(
         None,
         description="Turn-level metrics from Message.metadata_['execution_metrics']: started_at, completed_at, total_duration_ms, total_token_usage, etc.",
+    )
+    uploaded_files: Optional[List[UploadedFileRef]] = Field(
+        None,
+        description="Files the user attached this turn, from Message.metadata_['uploaded_files']. Display-only (best-effort): absent for turns that failed before artifact flush.",
+    )
+    active_skills: Optional[List[str]] = Field(
+        None,
+        description="Skill slugs active as of this turn (sticky, from Message.metadata_['active_skills']). The branch-tail message's list is the conversation's current active set; the composer reads it to mark already-active skills in the activation picker. Absent/empty when no skills are active.",
     )
 
 
@@ -114,6 +147,17 @@ class ConversationSummary(BaseModel):
             "completion clobbering a freshly-started new turn's indicator."
         ),
     )
+    upload_bytes: int = Field(
+        0,
+        description=(
+            "Total stored attachment/blob bytes for this conversation "
+            "(SUM of ArtifactBlob.size_bytes). Surfaced per-row in the list so the "
+            "user can see which conversation is consuming storage and pick what to "
+            "delete when over quota. Blob-only: text content and event history are "
+            "NOT counted (deleting the conversation reclaims those too, so the "
+            "displayed number understates what is freed)."
+        ),
+    )
 
 
 class ConversationListResponse(BaseModel):
@@ -121,6 +165,21 @@ class ConversationListResponse(BaseModel):
     conversations: List[ConversationSummary] = Field(..., description="Conversation list")
     total: int = Field(..., description="Total count")
     has_more: bool = Field(..., description="Whether more results exist")
+
+
+class StorageUsageResponse(BaseModel):
+    """GET /api/v1/chat/storage response — per-user attachment storage usage."""
+    used_bytes: int = Field(
+        ..., description="Total stored blob bytes across all the user's conversations."
+    )
+    quota_bytes: int = Field(
+        ...,
+        description=(
+            "Per-user blob quota (ARTIFACT_USER_QUOTA_BYTES). An upload is rejected "
+            "with 413 when used_bytes + incoming would exceed it. 0 = unlimited "
+            "(quota disabled); the frontend should render the bar as unbounded."
+        ),
+    )
 
 
 class ConversationDetailResponse(BaseModel):

@@ -84,6 +84,34 @@ class TestEmitBehavior:
         assert updated[0]["data"]["current_version"] == 2
         assert "delta" not in updated[0]["data"]
 
+    async def test_blob_replace_emits_metadata_with_content_type(
+        self, service: ArtifactService, session_id: str
+    ):
+        """persist 覆盖回写的 ARTIFACT_UPDATED:has_blob/blob_size/content_type +
+        空 content、绝不带字节。content_type 必带——跨轮 artifact 本轮首个事件
+        可能就是本条,前端无 live base 时靠它选二进制视图(reviewer #1 回归)。"""
+        service.set_session(session_id)
+        ok, _, info = await service.create_from_upload(
+            session_id=session_id, filename="pkg.zip", content="",
+            content_type="application/zip", blob=b"\x89old", source="sandbox",
+        )
+        assert ok
+        rec = _Recorder()
+        service.bind_emit(rec)
+        ok, msg, _ = await service.replace_from_upload(
+            session_id, info["id"], blob=b"\x89new-bytes"
+        )
+        assert ok, msg
+        updated = rec.of(_EVT_ARTIFACT_UPDATED)
+        assert len(updated) == 1
+        d = updated[0]["data"]
+        assert d["has_blob"] is True
+        assert d["blob_size"] == len(b"\x89new-bytes")
+        assert d["content_type"] == "application/zip"
+        assert d["content"] == ""
+        assert "delta" not in d
+        assert updated[0]["sse_only"] is True
+
     async def test_update_emits_span_delta_that_reconstructs(self, service: ArtifactService, session_id: str):
         # bind BEFORE create (real loop order: bind_emit at loop start) so the
         # create establishes the frontend base and the subsequent update is a delta.
@@ -145,10 +173,24 @@ class TestEmitBehavior:
         e = rec.of(_EVT_ARTIFACT_CREATED)[0]
         assert e["data"]["source"] == "user_upload"
         assert e["data"]["content"] == "uploaded body"
+        # original_filename rides the event so the frontend can correlate this
+        # artifact back to the staged File (local render before flush).
+        assert e["data"]["original_filename"] == "Report.md"
         # not in DB yet (staged only)
         assert await artifact_repo.get_artifact(session_id, info["id"]) is None
         await service.flush_all(session_id)
         assert await artifact_repo.get_artifact(session_id, info["id"]) is not None
+
+    async def test_model_created_artifact_has_no_original_filename(
+        self, service: ArtifactService, session_id: str
+    ):
+        """模型自建件不带 original_filename(只有用户上传件有)——事件保持干净。"""
+        service.set_session(session_id)
+        rec = _Recorder()
+        service.bind_emit(rec)
+        await service.create_artifact(session_id, "plan", "text/markdown", "Plan", "body")
+        e = rec.of(_EVT_ARTIFACT_CREATED)[0]
+        assert "original_filename" not in e["data"]
 
     async def test_upload_dedups_within_workingset(self, service: ArtifactService, session_id: str):
         """Two same-name uploads in one turn dedup in the WorkingSet (not just DB):

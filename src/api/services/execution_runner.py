@@ -13,7 +13,7 @@ ExecutionRunner — 本地 asyncio 任务调度
 import asyncio
 import contextlib
 import time
-from typing import TYPE_CHECKING, Callable, Coroutine
+from typing import TYPE_CHECKING, Awaitable, Callable, Coroutine
 
 from api.services.runtime_store import InMemoryRuntimeStore, RuntimeStore
 from core.events import StreamEventType
@@ -24,6 +24,13 @@ if TYPE_CHECKING:
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
+
+# 单个 turn 级清理回调的硬上限(秒)。cleanup 跑在释放 lease 之前,而回调里的
+# 外部调用(aiodocker delete 走 aiohttp,默认无超时)在 daemon/socket 卡死时会
+# 无限等 —— 没有这个界,InMemory 下会话永久死锁、Redis 下 stream 不关/任务泄漏。
+# 超时 = 弃等不是修复:残留容器等 reaper 收;to_thread 里的 rmtree 弃等后线程
+# 会自行跑完,无正确性问题。30s 对"杀容器+删目录"非常宽裕,卡过它基本必是 daemon 级故障。
+CLEANUP_CALLBACK_TIMEOUT_SEC = 30
 
 
 class DuplicateExecutionError(Exception):
@@ -59,12 +66,29 @@ class ExecutionRunner:
         # task_id → monotonic 起始时刻;observability 的 long_running_count 用。
         # 与 _tasks 同生同灭(submit set / finally pop),不暴露给业务路径。
         self._task_started_at: dict[str, float] = {}
+        # task_id → 该 turn 注册的异步清理回调(沙盒容器拆除等"绑 turn 的易失
+        # 资源")。在 _wrapped 的真 finally、cleanup_execution(释放 lease)**之前**
+        # 执行 —— 资源与 lease 同生灭,且先拆资源后放 lease,reaper 的"无 lease
+        # 即孤儿"谓词才没有窗口。注册发生在 coro 体内(controller_factory),
+        # 无注册的 turn 在 finally 只 pop 到空列表,零成本。
+        self._task_cleanups: dict[str, list[Callable[[], Awaitable[None]]]] = {}
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._max_concurrent = max_concurrent
         self._lease_ttl = lease_ttl  # 0 = 不续租（InMemory 场景）
         self.store: RuntimeStore = store or InMemoryRuntimeStore()
 
         logger.info(f"ExecutionRunner initialized (max_concurrent={max_concurrent}, lease_ttl={lease_ttl})")
+
+    def register_cleanup(self, task_id: str, callback: Callable[[], Awaitable[None]]) -> None:
+        """注册 turn 级清理回调,在该任务 _wrapped 的真 finally 执行。
+
+        给"绑 turn 的易失资源"用(沙盒容器/scratch 工作区):五条退出路径
+        (成功/超时/协作取消/外部取消/崩溃)都在解栈时执行,与 lease 释放同层。
+        **绝不放 post-processing** —— 那里被设计成可被 late-cancel 抢占、靠重试
+        补审计,兜不住会烧 CPU 的活资源(2026-05-14 同款失效模式)。
+        回调必须幂等;异常被吞(记日志),不阻断 lease 释放,残留由 reaper 兜底。
+        """
+        self._task_cleanups.setdefault(task_id, []).append(callback)
 
     async def submit(
         self,
@@ -202,6 +226,27 @@ class ExecutionRunner:
                     with contextlib.suppress(asyncio.CancelledError):
                         await heartbeat
                 coro.close()
+                # turn 级资源清理(沙盒容器等)在释放 lease 之前:先拆资源后放
+                # lease,"无 lease 即孤儿"才无窗口。逐个 best-effort —— 包括
+                # CancelledError(finally 段再次被 cancel)也只记日志继续,
+                # 后面的 cleanup_execution / close_stream 不能被跳过。
+                for cleanup in reversed(self._task_cleanups.pop(task_id, [])):
+                    try:
+                        async with asyncio.timeout(CLEANUP_CALLBACK_TIMEOUT_SEC):
+                            await cleanup()
+                    except asyncio.CancelledError:
+                        logger.warning(
+                            f"Task {task_id} cleanup callback interrupted by cancel; "
+                            f"continuing teardown (reaper backstops leftovers)"
+                        )
+                    except TimeoutError:
+                        logger.error(
+                            f"Task {task_id} cleanup callback timed out after "
+                            f"{CLEANUP_CALLBACK_TIMEOUT_SEC}s; abandoning it so the "
+                            f"lease/stream can be released (reaper backstops leftovers)"
+                        )
+                    except Exception:
+                        logger.exception(f"Task {task_id} cleanup callback failed")
                 self._tasks.pop(task_id, None)
                 self._task_started_at.pop(task_id, None)
                 await self.store.cleanup_execution(conversation_id, task_id)
@@ -287,8 +332,9 @@ class ExecutionRunner:
                 task.cancel()
             await asyncio.gather(*pending, return_exceptions=True)
 
-        # 4. 清理
+        # 4. 清理(_task_cleanups 正常已被各任务 finally pop 空,clear 仅对称兜底)
         self._tasks.clear()
+        self._task_cleanups.clear()
         logger.info("ExecutionRunner shutdown complete")
 
     @property

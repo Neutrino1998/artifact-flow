@@ -223,9 +223,9 @@ function gutterClassName(type: DiffLine['type']): string {
 function lineClassName(type: DiffLine['type']): string {
   switch (type) {
     case 'added':
-      return 'bg-green-50 dark:bg-green-950/20';
+      return 'bg-status-success/10';
     case 'removed':
-      return 'bg-red-50 dark:bg-red-950/20';
+      return 'bg-status-error/10';
     default:
       return '';
   }

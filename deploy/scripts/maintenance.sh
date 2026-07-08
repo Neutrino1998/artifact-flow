@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Toggle maintenance mode — shared by Mode 2 (Caddy) and Mode 3 (nginx).
+# Toggle maintenance mode — shared by Mode 2 and Mode 3 (both Caddy-fronted).
 #
 # Usage:
 #   maintenance.sh on  ["运维说明文案"]   # enable, optional note
@@ -7,7 +7,7 @@
 #   maintenance.sh status                 # report state
 #
 # Mechanism: writes/removes a flag file under deploy/maintenance/. The proxy
-# stat's it per-request (nginx `if (-f ...)` / Caddy `file` matcher) — no reload.
+# stat's it per-request (Caddy `file` matcher) — no reload.
 
 set -euo pipefail
 

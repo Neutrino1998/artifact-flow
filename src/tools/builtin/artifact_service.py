@@ -17,7 +17,6 @@ overlay 跨 worker 读不到执行 worker 的内存态)。现在:
 import math  # noqa: F401  (保留:历史上 ReadArtifactTool 用过,避免无意义 churn——实际由 artifact_ops 持有)
 import os
 import re
-import secrets
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -26,6 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from config import config
 from repositories.artifact_repo import ArtifactRepository
 from repositories.base import NotFoundError, DuplicateError
+from tools.base import ArtifactSpec
 from tools.builtin.artifact_working_set import ArtifactMemory, ArtifactWorkingSet
 from utils.logger import get_logger
 from utils.time import utc_now
@@ -50,8 +50,8 @@ def _evt_artifact_updated() -> str:
 
 # Artifact ID 合法字符集:letter/digit/underscore + hyphen + dot,1-64 字符。
 # envelope renderer 依赖此前提把 id 当受控值放入 XML attribute;create_artifact
-# 入口校验,create_from_upload / persist_tool_result 通过 sanitize 保证生成的 ID
-# 满足该 pattern。
+# 入口校验,_stage_artifact(create_from_upload / ingest_tool_result 共用内核)
+# 通过 _normalize_filename_to_id + dedup 保证生成的 ID 满足该 pattern。
 _ARTIFACT_ID_PATTERN = re.compile(r"^[\w\-.]{1,64}$")
 
 
@@ -79,19 +79,25 @@ class ArtifactService:
     """Artifact 用例编排:dedup / 版本计算 / 调纯算法 / 上传 stage / tool-result
     持久化 / flush(WorkingSet→Repo)/ 发事件。无 artifact 领域状态(那在 WorkingSet)。
 
-    用法:
-        repo = ArtifactRepository(session)
-        service = ArtifactService(repo)          # 自带一个独占 WorkingSet
-        service.set_session(session_id)
-        await service.create_artifact(...)
+    用法(两种,B-5):
+        # 引擎/turn 路径 —— 持 db_manager,DB 读/写各开短 retrying session 读完即关
+        # (不骑 turn-long session),WorkingSet 留在本实例做 turn-live 缓存:
+        service = ArtifactService(db_manager=db_manager)
+        # REST/请求路径 —— 绑请求级 session 的 repo(请求生命周期内有效):
+        service = ArtifactService(ArtifactRepository(session))
     """
 
     def __init__(
         self,
         repository: Optional[ArtifactRepository] = None,
         working_set: Optional[ArtifactWorkingSet] = None,
+        db_manager=None,
     ):
+        # repository = 请求级 bound session(REST/测试);db_manager = 短 session 工厂
+        # (引擎/turn 路径)。turn-path DB 触碰一律经 _run_with_repo:有 db_manager → fresh
+        # retrying session 读完即关(B-5);否则回落 bound repo(REST 请求级 / 测试)。
         self.repository = repository
+        self._db_manager = db_manager
         self._ws = working_set or ArtifactWorkingSet()
         # turn 级事件回调(引擎 bind);REST 侧恒 None → 不发事件。详见模块 docstring。
         self._emit = None
@@ -142,12 +148,32 @@ class ArtifactService:
         self._ws.put(session_id, memory)
         self._ws.mark_new(session_id, memory.id)
         payload = self._content_payload(memory.content)
+        # 二进制 artifact:事件只带元数据(has_blob/size/真实 MIME),**绝不带字节**——
+        # 前端据 has_blob 去 GET …/raw 取图渲染或下载原件(blob 有专属持久家,事件流
+        # 里再塞一份字节无读者、且撑爆 SSE)。图片 content="" 本就天然 metadata-only。
+        blob = getattr(memory, "blob", None)
+        blob_meta: Dict[str, Any] = {}
+        if blob is not None:
+            # 前端据 has_blob 去 /raw 取图/下载;MIME 用事件已带的 content_type
+            # (XOR 下即原件真实 MIME),不另发 blob_content_type。
+            blob_meta = {
+                "has_blob": True,
+                "blob_size": len(blob),
+            }
+        # 用户上传件带 original_filename:前端据此把本轮 ARTIFACT_CREATED 关联回 send-local
+        # 预览缓存里的图片 File(发送时存入、与 liveContent 同生命周期),turn 内(blob 未落库、
+        # /raw 还 404)直接用本地副本渲染缩略图/预览,COMPLETE 后再切回 DB(见前端 ImagePreview
+        # 本地优先解析)。模型自建无此字段 → 不带,事件保持干净。
+        original_filename = (memory.metadata or {}).get("original_filename")
+        name_meta = {"original_filename": original_filename} if original_filename else {}
         await self._emit_artifact(_evt_artifact_created(), {
             "id": memory.id,
             "title": memory.title,
             "content_type": memory.content_type,
             "source": memory.source,
             "current_version": memory.current_version,
+            **name_meta,
+            **blob_meta,
             **payload,
         })
         self._note_base(memory.id, payload)
@@ -169,10 +195,22 @@ class ArtifactService:
             raise RuntimeError("ArtifactService: repository not configured")
         return self.repository
 
+    async def _run_with_repo(self, fn):
+        """单次 DB 触碰的会话边界(B-5)。有 db_manager → fresh retrying session,fn 在其
+        内拿一个临时 ArtifactRepository、读完即关;否则回落 bound repo(REST 请求级 / 测试)。
+
+        闸:fn **必须在回调内完成读 + 序列化**(返回纯 dict / 标量 / bool),不得把 ORM 行
+        漏到回调外 —— session 已关,detached 实例触 lazy 属性会 MissingGreenlet。
+        """
+        if self._db_manager is not None:
+            async def _attempt(session):
+                return await fn(ArtifactRepository(session))
+            return await self._db_manager.with_retry(_attempt)
+        return await fn(self._ensure_repository())
+
     async def ensure_session_exists(self, session_id: str) -> None:
         """确保 ArtifactSession 存在(数据库层)。"""
-        repo = self._ensure_repository()
-        await repo.ensure_session_exists(session_id)
+        await self._run_with_repo(lambda repo: repo.ensure_session_exists(session_id))
 
     # ========================================
     # 创建
@@ -199,13 +237,14 @@ class ArtifactService:
         try:
             await self.ensure_session_exists(session_id)
 
-            # 检查缓存和 DB 中是否已存在
+            # 检查缓存和 DB 中是否已存在(DB 查经短 session,B-5;只判存在性,不读行属性)
             if self._ws.peek(session_id, artifact_id) is not None:
                 return False, f"Artifact '{artifact_id}' already exists in session"
 
-            repo = self._ensure_repository()
-            existing = await repo.get_artifact(session_id, artifact_id)
-            if existing:
+            existing = await self._run_with_repo(
+                lambda repo: repo.get_artifact(session_id, artifact_id)
+            )
+            if existing is not None:
                 return False, f"Artifact '{artifact_id}' already exists in session"
 
             memory = ArtifactMemory(
@@ -228,88 +267,165 @@ class ArtifactService:
             logger.exception(f"Failed to create artifact: {e}")
             return False, f"Failed to create artifact: {str(e)}"
 
-    async def persist_tool_result(
+    async def _blob_admission_error(
         self,
         session_id: str,
-        tool_name: str,
-        content: str,
-    ) -> Tuple[str, int]:
-        """把超长工具结果持久化为 artifact,返回 (artifact_id, version)。
+        blob: bytes,
+        *,
+        target_artifact_id: Optional[str] = None,
+    ) -> Optional[str]:
+        """blob 写入准入(大小上限 + per-user 配额),超限返回错误文案,放行返回 None。
 
-        由引擎中间件调用(见 core/engine.py)。content_type 固定 text/plain,
-        source 固定 "tool"。artifact_id 自动生成,避免和用户/agent 命名冲突。
+        新建(_stage_artifact)与覆盖回写(replace_from_upload)共用的单一守门——
+        blob 存储边界不逐路径加闸。``target_artifact_id`` = 本次覆盖的目标
+        (新建时 None):其已 stage 的旧字节从 staged 计数剔除(马上被本次替换)。
 
-        tool_name 可能含非法字符(MCP 工具的 ``:``、``.``)或过长(自定义 HTTP
-        工具名 50+ 字符),都会让 create_artifact 的 ID 校验拒绝。这里先 sanitize +
-        truncate 到安全范围,保证持久化路径不会因为名字格式问题 fail-open 到原文
-        回填——那是这个机制最不该出现的失败模式。
+        配额按**净占用投影**记账:write-back 时序下,replace-staged 的 blob 在
+        flush 前旧字节仍在 DB(committed 计入)、新字节又已进 staged —— 同一
+        artifact 双份在账。故把「本轮所有 replace-staged + 本次目标」的 DB 旧
+        字节整体作 credit 扣除,不是只扣当前目标一个;否则同轮覆盖 ≥2 个已落库
+        blob(或覆盖后再新建)会按虚高账面误拒。
+
+        大小上限 loud-fail(写入侧,不静默截断)。上传本已受 MAX_UPLOAD_SIZE
+        约束,此处是 blob 存储边界的兜底守门(沙盒回写 / 工具结果走 blob 时同样受护)。
+        两个 reject 出口都记 warning:format/size/业务规则类拒绝,用户会报障,
+        没有本工具自己的 access log 可查(两受众规则)。
         """
-        suffix = secrets.token_hex(6)  # 12 hex chars
-        # 字符预算:64 - len("tool_") - len("_") - 12 = 46,留余量到 40
-        safe_name = re.sub(r"[^\w\-.]", "_", tool_name)[:40]
-        artifact_id = f"tool_{safe_name}_{suffix}"
-        title = f"Output of {tool_name}"  # title 不受 ID 规则约束
-        metadata = {
-            "tool_name": tool_name,  # metadata 保留原始名字便于审计
-            "persisted_at": utc_now().isoformat(),
-        }
-        success, message = await self.create_artifact(
-            session_id=session_id,
-            artifact_id=artifact_id,
-            content_type="text/plain",
-            title=title,
-            content=content,
-            metadata=metadata,
-            source="tool",
-        )
-        if not success:
-            raise RuntimeError(f"persist_tool_result failed: {message}")
-        return artifact_id, 1
+        if len(blob) > config.ARTIFACT_BLOB_MAX_BYTES:
+            max_mb = config.ARTIFACT_BLOB_MAX_BYTES / 1024 / 1024
+            logger.warning(
+                f"Blob write rejected (size cap): {len(blob)} bytes > "
+                f"{config.ARTIFACT_BLOB_MAX_BYTES} (session={session_id}, "
+                f"target={target_artifact_id or '<new>'})"
+            )
+            return (
+                f"Binary too large for storage: {len(blob) / 1024 / 1024:.1f}MB "
+                f"(max {max_mb:.0f}MB)"
+            )
 
-    async def create_from_upload(
+        # per-用户 blob 配额：写入侧的真正守门。所有 blob 都经此 chokepoint（上传 +
+        # 沙盒 persist + 工具结果 + 未来任何路径），所以一处校验全覆盖 —— 不逐路径加闸。
+        # /chat 的 HTTP 预闸保留为 fail-fast（起 turn 前就拒、零 DB 状态），此处是
+        # correctness 兜底，也是沙盒 persist / 工具结果唯一的配额闸。计入「DB 已落 +
+        # 本轮已 stage 未 flush」的 blob：否则一轮内多次写各自只看 DB，会齐齐放行、
+        # 整体击穿配额。超限返回文案 → 调用方转 ToolResult 错误（沙盒 persist /
+        # 工具结果）或 loud-abort 本轮（上传 staging）。
+        if config.ARTIFACT_USER_QUOTA_BYTES > 0:
+            # 一趟查询：子查询内联把 session_id 解析成属主再聚合(属主跨全部会话已落字节)。
+            # 无主会话 → 返回 0,仍由下方数值判定兜单个超大 blob。短 session 读(B-5),返回标量。
+            committed = await self._run_with_repo(
+                lambda repo: repo.get_user_blob_bytes_for_session(session_id)
+            )
+            # staged = 本轮已 stage 但**未 flush** 的 blob(剔除本次目标自己的上一笔
+            # ——马上被替换)。扫 dirty 标记(非整个 cache):flush 的 clear_one 已把
+            # 已落盘条目移出 dirty,故已 committed 的 blob 不会在此被重复计数。
+            # credit_ids = 所有 replace-staged(dirty、非新建、带 staged blob)+ 本次
+            # 目标(若非新建):它们的 DB 旧字节 flush 后即被替换,须从 committed 扣除。
+            staged = 0
+            credit_ids: List[str] = []
+            for sid, aid in self._ws.dirty_keys(session_id):
+                if aid == target_artifact_id:
+                    continue
+                m = self._ws.peek(sid, aid)
+                if m is None or m.blob is None:
+                    continue
+                staged += len(m.blob)
+                if not self._ws.is_new(sid, aid):
+                    credit_ids.append(aid)
+            if target_artifact_id is not None and not self._ws.is_new(
+                session_id, target_artifact_id
+            ):
+                credit_ids.append(target_artifact_id)
+            credit = await self._run_with_repo(
+                lambda repo: repo.get_blob_sizes_total(session_id, credit_ids)
+            ) if credit_ids else 0
+            used = committed + staged - credit
+            if used + len(blob) > config.ARTIFACT_USER_QUOTA_BYTES:
+                quota_mb = config.ARTIFACT_USER_QUOTA_BYTES / 1024 / 1024
+                used_mb = used / 1024 / 1024
+                logger.warning(
+                    f"Blob write rejected (user quota): incoming={len(blob)} bytes, "
+                    f"projected_used={used}, quota={config.ARTIFACT_USER_QUOTA_BYTES} "
+                    f"(session={session_id}, target={target_artifact_id or '<new>'})"
+                )
+                return (
+                    f"Storage quota exceeded: this {len(blob) / 1024 / 1024:.1f}MB file "
+                    f"would put the user over their {quota_mb:.0f}MB storage limit "
+                    f"(currently using {used_mb:.1f}MB). Tell the user to delete a "
+                    f"conversation to free space, then retry."
+                )
+        return None
+
+    async def _stage_artifact(
         self,
         session_id: str,
-        filename: str,
-        content: str,
+        id_base: str,
         content_type: str,
+        title: str,
+        content: str,
+        *,
         metadata: Optional[Dict] = None,
-    ) -> Tuple[bool, str, Optional[Dict]]:
-        """从用户上传文件 **stage** 一个 artifact 进 WorkingSet(不即时 commit)。
+        blob: Optional[bytes] = None,
+        source: str,
+        original_filename: Optional[str] = None,
+    ) -> Tuple[bool, str, Optional[str]]:
+        """共享 stage 内核:XOR 校验 → dedup → ID 校验 → blob 上限 → per-user 配额 → register。
+        返回 ``(success, message, artifact_id)``;失败时 artifact_id 为 None。
 
-        与模型自建走同一 write-back 路径:mark_new → 发 ARTIFACT_CREATED → 随 turn 末
-        flush_all 落库。由 execute_loop 在 turn 起点调用(uploads closure-carry 进引擎)。
-        因此上传 turn 中途死 = 与模型产物一致地丢失(ephemeral 语义),用户侧由前端
-        staged 文件保留到 COMPLETE 兜底。`_normalize` + dedup 在此完成。
+        三个调用方(用户上传 / 沙盒 persist / 工具结果)经此单一 chokepoint,blob
+        存储边界、配额与 XOR 不变量只在这一处守门(不逐路径加闸)。``id_base`` 须已是
+        合法 artifact_id base(经 ``_normalize_filename_to_id``)。
         """
-        artifact_id = _normalize_filename_to_id(filename)
+        # XOR 不变量:一个 artifact 只存**一份**实质 data —— 文本走 content、二进制走 blob,
+        # 二者不可兼得。双表示(blob 原件 + content 转换文本)语义对模型 confusing,且
+        # backend 已无转换路径产生它;模型侧统一按「blob = 无文本表示、需 mount」认知
+        # (见 read_artifact / inventory 文案)。空 content + blob = blob-only;有 content
+        # + 无 blob = text;两者皆有 = loud-fail。
+        if blob is not None and content:
+            return False, (
+                "An artifact stores exactly one representation: text in `content` "
+                "OR binary in `blob`, never both."
+            ), None
 
         # Dedup:同时对 WorkingSet(本轮已 stage / 缓存)与 DB(往轮已落库)去重,
-        # 追加后缀直到唯一。
-        repo = self._ensure_repository()
-        suffix = 0
-        original_id = artifact_id
-        while (
-            self._ws.peek(session_id, artifact_id) is not None
-            or await repo.get_artifact(session_id, artifact_id) is not None
-        ):
-            suffix += 1
-            name_part, _, ext_part = original_id.rpartition('.')
-            if name_part:
-                artifact_id = f"{name_part}_{suffix}.{ext_part}"
-            else:
-                artifact_id = f"{original_id}_{suffix}"
+        # 追加后缀直到唯一。整个冲突扫描在**一条**短 session 内走完(B-5 #4)——不再每探一次
+        # 各开一条 session(K 个同名冲突 → K+1 次借还)。WorkingSet.peek 是内存、放回调内无妨;
+        # 只判存在性(is not None),不读行属性,故 ORM 行不外逃。
+        async def _dedup(repo) -> str:
+            aid = id_base
+            suffix = 0
+            while (
+                self._ws.peek(session_id, aid) is not None
+                or await repo.get_artifact(session_id, aid) is not None
+            ):
+                suffix += 1
+                name_part, _, ext_part = id_base.rpartition('.')
+                if name_part:
+                    aid = f"{name_part}_{suffix}.{ext_part}"
+                else:
+                    aid = f"{id_base}_{suffix}"
+            return aid
+
+        artifact_id = await self._run_with_repo(_dedup)
 
         # 最终守门员:理论上 normalize + dedup(≤4 位后缀)总 ≤ 64,但留个防御性
         # 检查避免万一边界 bug 让脏 ID 进 DB
         if not _ARTIFACT_ID_PATTERN.match(artifact_id):
             return False, (
-                f"Generated invalid artifact_id from filename {filename!r}: "
-                f"{artifact_id!r} (must match {_ARTIFACT_ID_PATTERN.pattern})"
+                f"Generated invalid artifact_id {artifact_id!r} "
+                f"(must match {_ARTIFACT_ID_PATTERN.pattern})"
             ), None
 
-        title = os.path.splitext(filename)[0]
-        upload_metadata = dict(metadata or {})
-        upload_metadata["original_filename"] = filename
+        if blob is not None:
+            admission_error = await self._blob_admission_error(session_id, blob)
+            if admission_error:
+                return False, admission_error, None
+
+        stage_metadata = dict(metadata or {})
+        if original_filename is not None:
+            stage_metadata["original_filename"] = original_filename  # 下载文件名
+        # 「是否二进制」由 Artifact.has_blob 列承载(repo 建行时按 blob 在场写死),
+        # 不再往 metadata 塞 blob_content_type —— content_type 已是原件 MIME。
 
         try:
             await self.ensure_session_exists(session_id)
@@ -319,23 +435,197 @@ class ArtifactService:
                 title=title,
                 content=content,
                 current_version=1,
-                metadata=upload_metadata,
-                source="user_upload",
+                metadata=stage_metadata,
+                source=source,
+                blob=blob,
             )
             await self._register_new(session_id, memory)
-
-            return True, f"Created artifact '{artifact_id}'", {
-                "id": artifact_id,
-                "session_id": session_id,
-                "content_type": content_type,
-                "title": title,
-                "current_version": 1,
-                "source": "user_upload",
-                "original_filename": filename,
-            }
+            return True, f"Created artifact '{artifact_id}'", artifact_id
         except Exception as e:
-            logger.exception(f"Failed to stage upload artifact: {e}")
+            logger.exception(f"Failed to stage artifact: {e}")
             return False, f"Failed to create artifact: {str(e)}", None
+
+    async def ingest_tool_result(
+        self,
+        session_id: str,
+        spec: ArtifactSpec,
+        tool_name: Optional[str] = None,
+    ) -> Tuple[bool, str, Optional[str]]:
+        """把工具声明的结果(``ArtifactSpec``)落盘为具名 artifact,返回
+        ``(success, message, artifact_id)``。
+
+        ``create_from_upload`` 之外的第三调用方,共用同一 ``_stage_artifact`` 内核
+        (dedup / blob 上限 / 配额)。两种形态:① **具名**——工具显式给 spec(如
+        web_fetch 文件旁路:blob + content_type);② **无名兜底**——引擎对超长文本
+        结果合成一个 ``text/plain`` spec(原 ``persist_tool_result`` 的去向)。
+        source 固定 "tool"。
+        """
+        # id base:filename 优先(决定下载名 + id),否则 title,否则工具名,最后兜底。
+        base_name = spec.filename or spec.title or (
+            f"{tool_name}_output" if tool_name else "tool_output"
+        )
+        id_base = _normalize_filename_to_id(base_name)
+
+        tool_metadata = dict(spec.metadata or {})
+        if tool_name:
+            tool_metadata.setdefault("tool_name", tool_name)  # 审计:原始工具名
+        tool_metadata.setdefault("persisted_at", utc_now().isoformat())
+
+        title = spec.title or os.path.splitext(spec.filename or id_base)[0]
+
+        return await self._stage_artifact(
+            session_id=session_id,
+            id_base=id_base,
+            content_type=spec.content_type,
+            title=title,
+            content=spec.content or "",
+            metadata=tool_metadata,
+            blob=spec.blob,
+            source="tool",
+            original_filename=spec.filename,
+        )
+
+    async def create_from_upload(
+        self,
+        session_id: str,
+        filename: str,
+        content: str,
+        content_type: str,
+        metadata: Optional[Dict] = None,
+        blob: Optional[bytes] = None,
+        source: str = "user_upload",
+        artifact_id: Optional[str] = None,
+    ) -> Tuple[bool, str, Optional[Dict]]:
+        """从一个「文件」**stage** 一个 artifact 进 WorkingSet(不即时 commit)。
+
+        与模型自建走同一 write-back 路径:mark_new → 发 ARTIFACT_CREATED → 随 turn 末
+        flush_all 落库。两个调用方:① 用户上传(execute_loop 在 turn 起点调用,uploads
+        closure-carry 进引擎;turn 中途死 = 与模型产物一致地丢失,用户重选文件重试);
+        ② 沙盒 persist 产新件(source="sandbox",同一套 `_normalize` + `_N` dedup;
+        既有 artifact 覆盖走 ``replace_from_upload``)。dedup / blob 上限 / 配额走
+        共享 ``_stage_artifact``。
+
+        ``artifact_id`` 显式指定:persist 的 upsert 路径在目标不存在时以模型给的 id
+        新建(而非文件名派生),使 ``persist(path=X.html, artifact_id=风格样单)`` 能一步
+        产出可被 ``artifact://风格样单`` 引用的具名件。校验规则与 ``create_artifact``
+        一致(不合法即 loud-fail,不静默 normalize);None 时保持文件名派生。
+        """
+        if artifact_id is not None:
+            if not _ARTIFACT_ID_PATTERN.match(artifact_id):
+                return False, (
+                    f"Invalid artifact_id '{artifact_id}': must be 1-64 chars of "
+                    f"letters/digits/underscore/hyphen/dot only."
+                ), None
+            # 显式 id 同时兜底 title:面板/inventory 显示模型挑的语义名,而非 path 里
+            # 那个随手起的临时文件名(原样用,不剥扩展名:id 是模型敲的句柄,不替它猜)。
+            id_base = artifact_id
+            title = artifact_id
+        else:
+            id_base = _normalize_filename_to_id(filename)
+            title = os.path.splitext(filename)[0]
+        ok, message, artifact_id = await self._stage_artifact(
+            session_id=session_id,
+            id_base=id_base,
+            content_type=content_type,
+            title=title,
+            content=content,
+            metadata=metadata,
+            blob=blob,
+            source=source,
+            original_filename=filename,
+        )
+        if not ok:
+            return False, message, None
+        return True, message, {
+            "id": artifact_id,
+            "session_id": session_id,
+            "content_type": content_type,
+            "title": title,
+            "current_version": 1,
+            "source": source,
+            "original_filename": filename,
+            "has_blob": blob is not None,
+        }
+
+    async def replace_from_upload(
+        self,
+        session_id: str,
+        artifact_id: str,
+        *,
+        content: Optional[str] = None,
+        blob: Optional[bytes] = None,
+    ) -> Tuple[bool, str, Optional[Dict]]:
+        """沙盒 persist 覆盖回写:用文件内容**原地替换**既有 artifact(create 的对偶)。
+
+        覆盖 = 同一 artifact 换内容:不产新 id,不动 title / content_type /
+        original_filename。**target 类型优先**(``has_blob`` 判别权威 set-once,
+        不因覆盖翻转):
+
+        - 文本目标 + 文本内容 → 走 ``rewrite_artifact``(版本 +1,历史照常可回溯);
+        - blob 目标 + 任意内容 → **可变单版**原地替换(不产版本行,历史归沙盒内
+          git 管);内容恰好 UTF-8 可解码时按字节存(``content.encode()``)——
+          覆盖保持类型,不因新字节碰巧可解码就拒掉逼模型堆新件。stage 进
+          WorkingSet、随 turn 末 flush 经 ``repo.update_artifact_blob`` 落库,
+          配额按净占用投影准入(见 ``_blob_admission_error``);
+        - 文本目标 + 二进制内容 → loud-fail(字节无文本表示,唯一不可覆盖方向)。
+
+        content / blob 恰给其一(XOR,与 ``_stage_artifact`` 同约定)。
+        """
+        if (content is None) == (blob is None):
+            return False, (
+                "Exactly one of text content or binary blob must be provided."
+            ), None
+
+        memory = await self.get_artifact(session_id, artifact_id)
+        if not memory:
+            return False, f"Artifact '{artifact_id}' not found", None
+
+        if memory.has_blob:
+            data = blob if blob is not None else content.encode("utf-8")
+            admission_error = await self._blob_admission_error(
+                session_id, data, target_artifact_id=artifact_id
+            )
+            if admission_error:
+                return False, admission_error, None
+
+            memory.blob = data
+            memory.updated_at = utc_now()
+            memory.source = "sandbox"
+            self._ws.mark_dirty(session_id, artifact_id)
+            # 事件形状与 blob 的 ARTIFACT_CREATED 一致:元数据 + 空 content,绝不带
+            # 字节(前端据 has_blob 走 /raw;turn 内 /raw 仍是旧字节,COMPLETE 后 DB
+            # 对齐 —— 与「REST 落后于 live」的既有契约一致)。带 content_type:跨轮
+            # artifact 本轮首个事件可能就是本条,前端无 base 时靠它选对二进制视图。
+            await self._emit_artifact(_evt_artifact_updated(), {
+                "id": artifact_id,
+                "current_version": memory.current_version,
+                "content_type": memory.content_type,
+                "has_blob": True,
+                "blob_size": len(data),
+                "content": "",
+            })
+            message = f"Replaced binary content of artifact '{artifact_id}'"
+        else:
+            if blob is not None:
+                return False, (
+                    f"Artifact '{artifact_id}' is a text artifact but this file is "
+                    "binary. Persist it as a new artifact instead (omit artifact_id)."
+                ), None
+            ok, message = await self.rewrite_artifact(
+                session_id, artifact_id, content, source="sandbox"
+            )
+            if not ok:
+                return False, message, None
+
+        return True, message, {
+            "id": artifact_id,
+            "session_id": session_id,
+            "content_type": memory.content_type,
+            "title": memory.title,
+            "current_version": memory.current_version,
+            "source": memory.source,
+            "has_blob": memory.has_blob,
+        }
 
     # ========================================
     # 读取
@@ -351,21 +641,27 @@ class ArtifactService:
         if cached is not None:
             return cached
 
-        repo = self._ensure_repository()
-        db_artifact = await repo.get_artifact(session_id, artifact_id)
-        if not db_artifact:
-            return None
+        # cache-miss → 短 session 读 DB(B-5)。在回调内就地建 ArtifactMemory(纯 dataclass)
+        # 再返回,ORM 行不出 session;回填 WorkingSet 后即 turn-live 缓存(故只 miss 时读 DB)。
+        async def _load(repo) -> Optional[ArtifactMemory]:
+            db_artifact = await repo.get_artifact(session_id, artifact_id)
+            if not db_artifact:
+                return None
+            return ArtifactMemory(
+                artifact_id=db_artifact.id,
+                content_type=db_artifact.content_type,
+                title=db_artifact.title,
+                content=db_artifact.content,
+                current_version=db_artifact.current_version,
+                metadata=db_artifact.metadata_,
+                created_at=db_artifact.created_at,
+                source=db_artifact.source,
+                has_blob=db_artifact.has_blob,  # blob lazy 未载,判别取列值
+            )
 
-        memory = ArtifactMemory(
-            artifact_id=db_artifact.id,
-            content_type=db_artifact.content_type,
-            title=db_artifact.title,
-            content=db_artifact.content,
-            current_version=db_artifact.current_version,
-            metadata=db_artifact.metadata_,
-            created_at=db_artifact.created_at,
-            source=db_artifact.source,
-        )
+        memory = await self._run_with_repo(_load)
+        if memory is None:
+            return None
         self._ws.put(session_id, memory)
         return memory
 
@@ -380,38 +676,26 @@ class ArtifactService:
             memory = await self.get_artifact(session_id, artifact_id)
             if not memory:
                 return None
-            return {
-                "id": memory.id,
-                "content_type": memory.content_type,
-                "title": memory.title,
-                "content": memory.content,
-                "version": memory.current_version,
-                "source": memory.source,
-                "original_filename": (memory.metadata or {}).get("original_filename"),
-                "created_at": memory.created_at.isoformat(),
-                "updated_at": memory.updated_at.isoformat(),
-            }
+            # 当前版本视图 = 与 list_artifacts 同一形状,收敛到单一序列化点
+            # (含 has_blob —— read 工具据此给二进制契约文案;避免 read/list 字段漂移)。
+            return self._serialize_memory(memory, include_content=True)
 
         # 显式 version 读取:优先匹配 in-memory current_version。否则 read 一个还没
         # flush 的 artifact(如刚 web_fetch 持久化的)用它 envelope 里看到的 version=1
         # 会 404,模型困惑。
         memory = await self.get_artifact(session_id, artifact_id)
         if memory and memory.current_version == version:
-            return {
-                "id": memory.id,
-                "content_type": memory.content_type,
-                "title": memory.title,
-                "content": memory.content,
-                "version": memory.current_version,
-                "source": memory.source,
-                "original_filename": (memory.metadata or {}).get("original_filename"),
-                "created_at": memory.created_at.isoformat(),
-                "updated_at": memory.updated_at.isoformat(),
-            }
+            # 显式 version 命中当前版本 = 同上当前视图,复用同一序列化点。
+            return self._serialize_memory(memory, include_content=True)
 
-        # 不是当前版本 → 走 DB 取历史版本快照
-        repo = self._ensure_repository()
-        content = await repo.get_version_content(session_id, artifact_id, version)
+        # 不是当前版本 → 走 DB 取历史版本快照(短 session,B-5;返回纯文本)。
+        # 这是**旧版本快照**,与「当前 artifact 视图」(_serialize_memory)是不同形状,故意不并:
+        #   - updated_at=None —— 旧版本无独立更新时间(不存 per-version 时间戳);套当前版本的会误导
+        #   - 不带 has_blob —— blob artifact 单版无历史(覆盖回写也不产版本行),走到这必是文本(has_blob 恒 False)
+        #   - memory 可能为 None(当前行已不在、历史 content 仍可取的边界)→ 字段走兜底,helper 给不了
+        content = await self._run_with_repo(
+            lambda repo: repo.get_version_content(session_id, artifact_id, version)
+        )
         if content is None:
             return None
         return {
@@ -425,9 +709,70 @@ class ArtifactService:
             "updated_at": None,
         }
 
+    async def get_blob(
+        self,
+        session_id: str,
+        artifact_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """读取 artifact 的二进制原始字节 + 取字节所需的元数据。raw-fetch(REST)专用。
+
+        返回 None = artifact 不存在或无 blob(纯文本 artifact)。元数据走 get_artifact
+        (REST 路径自带空 WorkingSet → 落 DB),字节走 repo.get_blob(显式 SELECT,不
+        碰 `Artifact.blob` 关系)。
+
+        raw 服务的 MIME 即 artifact 自身 `content_type` —— XOR 下 blob artifact 的
+        content_type 就是原件真实 MIME。
+        """
+        memory = await self.get_artifact(session_id, artifact_id)
+        if not memory:
+            return None
+        meta = memory.metadata or {}
+        # 字节来源二选一:① 本轮 staged 但**未 flush** 的上传 → 在 WorkingSet memory.blob
+        # (用户传图即问的常见场景:upload→read 同一 turn,DB 里此时还没有行);② 否则
+        # 查 DB(往轮已 flush / REST 路径空 WorkingSet)。两条都没有 → None(纯文本 artifact)。
+        staged = getattr(memory, "blob", None)
+        if staged is not None:
+            data, size = staged, len(staged)
+        else:
+            # 短 session 读字节(B-5):工具路径(sandbox/artifact 投递)也走此法,不再骑
+            # turn-long session。在回调内取列(data/size_bytes),不漏 ORM 行到 session 外。
+            async def _load_blob(repo):
+                row = await repo.get_blob(session_id, artifact_id)
+                if row is None:
+                    return None
+                return row.data, row.size_bytes
+
+            loaded = await self._run_with_repo(_load_blob)
+            if loaded is None:
+                return None
+            data, size = loaded
+        return {
+            "data": data,
+            "size_bytes": size,
+            "content_type": memory.content_type,  # XOR:即原件真实 MIME
+            "filename": meta.get("original_filename") or memory.id,
+        }
+
     # ========================================
     # 更新 / 重写
     # ========================================
+
+    @staticmethod
+    def _binary_immutable_error(memory: ArtifactMemory) -> Optional[str]:
+        """blob 类 artifact(图片/docx/pdf 等)无文本表示,文本编辑工具一律拒。
+
+        否则 update/rewrite 会在二进制 artifact 上长出一份文本 content —— 与 blob
+        形成"哪份权威"的双轨(C-0 刚删掉的状态借编辑工具还魂)。改二进制 = 走沙盒
+        (mount → 编辑 → persist 覆盖回写)或产新 artifact,字节永远只有 blob 一份。
+        """
+        if memory.has_blob:
+            return (
+                f"Artifact '{memory.id}' is a binary file with no editable text "
+                "content. To modify it, mount it into the sandbox, edit the file, "
+                f"then persist it back with artifact_id='{memory.id}'; or create "
+                "a new artifact for derived content."
+            )
+        return None
 
     async def update_artifact(
         self,
@@ -450,6 +795,10 @@ class ArtifactService:
         memory = await self.get_artifact(session_id, artifact_id)
         if not memory:
             return False, f"Artifact '{artifact_id}' not found", None
+
+        blocked = self._binary_immutable_error(memory)
+        if blocked:
+            return False, blocked, None
 
         info = compute_update(memory.content, old_str, new_str)
 
@@ -510,16 +859,24 @@ class ArtifactService:
         session_id: str,
         artifact_id: str,
         new_content: str,
+        source: str = "agent",
     ) -> Tuple[bool, str]:
-        """完全重写 Artifact 内容(只改 WorkingSet,标记 dirty)。"""
+        """完全重写 Artifact 内容(只改 WorkingSet,标记 dirty)。
+
+        source:内容来源(rewrite 工具 = "agent",沙盒 persist 覆盖回写 = "sandbox")。
+        """
         memory = await self.get_artifact(session_id, artifact_id)
         if not memory:
             return False, f"Artifact '{artifact_id}' not found"
 
+        blocked = self._binary_immutable_error(memory)
+        if blocked:
+            return False, blocked
+
         memory.content = new_content
         memory.current_version += 1
         memory.updated_at = utc_now()
-        memory.source = "agent"
+        memory.source = source
 
         self._ws.mark_dirty(session_id, artifact_id)
 
@@ -557,7 +914,8 @@ class ArtifactService:
         这是预期行为。
 
         - 新建的 artifact → repo.create_artifact(target_version=memory.current_version)
-        - 已有的 artifact → repo.upsert_artifact_content(target_version=memory.current_version)
+        - 已有 blob artifact 带新字节(persist 覆盖回写)→ repo.update_artifact_blob(可变单版,不产版本行)
+        - 其余已有 artifact → repo.upsert_artifact_content(target_version=memory.current_version)
 
         db_manager 提供时,每个 artifact flush 使用 fresh session + retry(对 DB 瞬时
         失败有韧性)。只清除 flush 成功的条目。任一失败则 raise,由调用方决定终态。
@@ -590,11 +948,22 @@ class ArtifactService:
 
         async def _write(repo):
             if is_new:
+                # 新建时连同暂存的二进制源一并写(同一事务,原子)。blob=None 即纯文本/
+                # 模型自建,不写 ArtifactBlob 行。同轮"新建 + 覆盖回写"自然折叠:
+                # memory.blob 已是最终字节,create 一次写成。
                 await repo.create_artifact(
                     session_id=sid, artifact_id=aid,
                     content_type=memory.content_type, title=memory.title,
                     content=memory.content, metadata=memory.metadata,
                     source=memory.source, target_version=memory.current_version,
+                    blob=getattr(memory, "blob", None),
+                )
+            elif memory.has_blob and getattr(memory, "blob", None) is not None:
+                # 既有 blob artifact 带新字节 = persist 覆盖回写(唯一给已落库
+                # blob 置 memory.blob 的路径)。可变单版:原地换字节,不产版本行。
+                await repo.update_artifact_blob(
+                    session_id=sid, artifact_id=aid,
+                    data=memory.blob, source=memory.source,
                 )
             else:
                 await repo.upsert_artifact_content(
@@ -639,49 +1008,55 @@ class ArtifactService:
 
         合并 DB 结果与 WorkingSet 里的 dirty/new artifact,使引擎 context 装配看到
         同轮改动。REST 侧 WorkingSet 恒空,故等价纯 DB 列表。
-        """
-        repo = self._ensure_repository()
-        db_artifacts = await repo.list_artifacts(
-            session_id=session_id,
-            content_type=content_type,
-        )
 
-        seen_ids: set = set()
-        result = []
-        for art in db_artifacts:
-            memory = self._ws.peek(session_id, art.id)
-            if memory and self._ws.is_dirty(session_id, art.id):
+        DB 读 + 序列化全在短 session 回调内完成(B-5):`art.*` 在 session 内即 序列化成
+        纯 dict,ORM 行不出回调;WorkingSet 合并是内存操作,放回调内一并完成无妨。
+        """
+        async def _build(repo) -> List[Dict[str, Any]]:
+            db_artifacts = await repo.list_artifacts(
+                session_id=session_id,
+                content_type=content_type,
+            )
+
+            seen_ids: set = set()
+            result: List[Dict[str, Any]] = []
+            for art in db_artifacts:
+                memory = self._ws.peek(session_id, art.id)
+                if memory and self._ws.is_dirty(session_id, art.id):
+                    if content_type and memory.content_type != content_type:
+                        continue
+                    info = self._serialize_memory(memory, include_content)
+                else:
+                    info = {
+                        "id": art.id,
+                        "content_type": art.content_type,
+                        "title": art.title,
+                        "version": art.current_version,
+                        "source": art.source,
+                        "original_filename": (art.metadata_ or {}).get("original_filename"),
+                        "has_blob": art.has_blob,
+                        "created_at": art.created_at.isoformat(),
+                        "updated_at": art.updated_at.isoformat(),
+                    }
+                    if include_content:
+                        info["content"] = art.content
+                result.append(info)
+                seen_ids.add(art.id)
+
+            # 追加 WorkingSet 里尚未落 DB 的 new artifact
+            for sid, aid in self._ws.new_keys(session_id):
+                if aid in seen_ids:
+                    continue
+                memory = self._ws.peek(sid, aid)
+                if not memory:
+                    continue
                 if content_type and memory.content_type != content_type:
                     continue
-                info = self._serialize_memory(memory, include_content)
-            else:
-                info = {
-                    "id": art.id,
-                    "content_type": art.content_type,
-                    "title": art.title,
-                    "version": art.current_version,
-                    "source": art.source,
-                    "original_filename": (art.metadata_ or {}).get("original_filename"),
-                    "created_at": art.created_at.isoformat(),
-                    "updated_at": art.updated_at.isoformat(),
-                }
-                if include_content:
-                    info["content"] = art.content
-            result.append(info)
-            seen_ids.add(art.id)
+                result.append(self._serialize_memory(memory, include_content))
 
-        # 追加 WorkingSet 里尚未落 DB 的 new artifact
-        for sid, aid in self._ws.new_keys(session_id):
-            if aid in seen_ids:
-                continue
-            memory = self._ws.peek(sid, aid)
-            if not memory:
-                continue
-            if content_type and memory.content_type != content_type:
-                continue
-            result.append(self._serialize_memory(memory, include_content))
+            return result
 
-        return result
+        return await self._run_with_repo(_build)
 
     @staticmethod
     def _serialize_memory(memory: ArtifactMemory, include_content: bool) -> Dict[str, Any]:
@@ -692,6 +1067,7 @@ class ArtifactService:
             "version": memory.current_version,
             "source": memory.source,
             "original_filename": (memory.metadata or {}).get("original_filename"),
+            "has_blob": memory.has_blob,
             "created_at": memory.created_at.isoformat(),
             "updated_at": memory.updated_at.isoformat(),
         }

@@ -43,11 +43,19 @@ export default function ThreeColumnLayout({
   // Draggable divider state
   const [artifactWidth, setArtifactWidth] = useState(DEFAULT_ARTIFACT_WIDTH);
   const isDragging = useRef(false);
+  // Mirrors isDragging for rendering the drag overlay (the ref alone can't drive a
+  // re-render). Flipped only on drag start/end — never in mousemove — so it adds no
+  // per-move cost. The overlay sits above the artifact panel so the cursor lands on
+  // a same-document div, not an embedded iframe (e.g. the HTML artifact preview).
+  // Without it, an iframe swallows the document-level mousemove/mouseup and the drag
+  // sticks / never releases.
+  const [dragging, setDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     isDragging.current = true;
+    setDragging(true);
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
   }, []);
@@ -67,6 +75,7 @@ export default function ThreeColumnLayout({
     const handleMouseUp = () => {
       if (isDragging.current) {
         isDragging.current = false;
+        setDragging(false);
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
       }
@@ -90,6 +99,11 @@ export default function ThreeColumnLayout({
 
   return (
     <div ref={containerRef} className="flex h-screen overflow-hidden bg-chat dark:bg-chat-dark">
+      {/* Drag overlay — present only while resizing. Covers the whole layout
+          (including any artifact-preview iframe) so the cursor stays on a
+          same-document surface and mousemove/mouseup keep reaching `document`. */}
+      {dragging && <div className="fixed inset-0 z-50 cursor-col-resize" />}
+
       {/* Mobile menu button — visible below md */}
       {!isMd && (
         <button

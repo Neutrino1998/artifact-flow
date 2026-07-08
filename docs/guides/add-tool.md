@@ -37,7 +37,7 @@ method: POST
 headers:
   Authorization: "Bearer {{STOCK_API_KEY}}"
 timeout: 30
-response_extract: "$.data.price"
+response_extract: "data.price"
 parameters:
   - name: symbol
     type: string
@@ -78,7 +78,7 @@ tools:
 | `method` | string | 否 | `GET` | HTTP 方法；`POST/PUT/PATCH` 时参数走 JSON body，其他方法走 query string |
 | `headers` | dict | 否 | `{}` | 请求头；值支持 `{{VAR}}` 环境变量模板 |
 | `timeout` | int | 否 | `30` | 请求超时（秒） |
-| `response_extract` | string | 否 | — | JSONPath 表达式，从响应中提取子字段 |
+| `response_extract` | string | 否 | — | JMESPath 表达式（无 `$.` 前缀），从响应中提取子字段 |
 | `parameters` | list | 否 | `[]` | LLM 可传递的参数列表，详见下表 |
 
 ### Parameters 字段
@@ -88,11 +88,23 @@ tools:
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `name` | string | 是 | 参数名，也是 HTTP 请求中的字段名 |
-| `type` | string | 是 | `string` / `integer` / `number` / `boolean` |
+| `type` | string | 是 | `string` / `integer` / `number` / `boolean` / `json` |
 | `description` | string | 否 | 参数说明（供 LLM 理解用途） |
 | `required` | bool | 否 | 默认 `true` |
 | `default` | any | 否 | 默认值，LLM 未提供时填入 |
 | `enum` | list | 否 | 枚举可选值；LLM 给出非 enum 值会被拒绝 |
+
+`json` 用于数组或对象字段。模型在 XML 参数里传 JSON 字符串，运行时会解析成真正的 JSON
+array/object 后再放进 HTTP body；默认值也可以直接写 YAML 数组/对象：
+
+```yaml
+parameters:
+  - name: dataset_ids
+    type: json
+    description: "RAGFlow dataset id list"
+    required: true
+    default: ["c750d2f6752411f191e693d1a844b0ba"]
+```
 
 ### 密钥模板 `{{VAR}}`
 
@@ -107,17 +119,19 @@ headers:
 
 未找到的变量保持原样（`{{VAR_NAME}}` 字面量）并记录警告，不阻断加载。
 
-### JSONPath 响应提取
+### JMESPath 响应提取
 
-`response_extract` 是一个简易 JSONPath 表达式，支持：
+`response_extract` 是一个 [JMESPath](https://jmespath.org/) 表达式（**无 `$.` 前缀**），常用形态：
 
-- `$` — 根对象
-- `$.key1.key2` — 嵌套访问
-- `$.list[0]` / `$.data.items[2].name` — 数组索引
+- 留空 — 返回整个 JSON 响应
+- `data.price` — 嵌套访问
+- `list[0]` / `data.items[2].name` — 数组索引
+- `results[*].id` — 通配投影（取列表每个元素的某字段）
+- `items[?price > \`10\`].name` — 过滤
 
-示例：API 返回 `{"code": 200, "data": {"price": 189.5}}`，`response_extract: "$.data.price"` 则工具返回 `189.5`。
+示例：API 返回 `{"code": 200, "data": {"price": 189.5}}`，`response_extract: "data.price"` 则工具返回 `189.5`。
 
-超出支持范围（过滤器、通配符、递归下降）的表达式请在 agent role prompt 中引导 LLM 自行解析完整 JSON。
+表达式语法在 reconcile / 保存时即校验，写错会 loud-fail（不会等到首次调用）。表达式合法但匹配不到（键缺失 / 值为 null）时，工具显式返回 “matched nothing”，不会静默返回空串。
 
 ### 参考示例
 
@@ -246,10 +260,11 @@ tools:
 
 ### 保留工具名
 
-以下名字是 Artifact 工具保留名，自定义工具不可同名：
+以下名字由请求级创建的内置工具占用（artifact 工具 + [沙盒工具](../architecture/sandbox.md)），自定义工具不可同名（`RESERVED_TOOL_NAMES`，`src/tools/base.py`）：
 
 ```
-create_artifact, update_artifact, rewrite_artifact, read_artifact
+create_artifact, update_artifact, rewrite_artifact, read_artifact, grep_artifact,
+bash, mount, persist
 ```
 
 与 builtin 工具同名也会在启动时抛 `ValueError`（`build_tool_map` 中的冲突检测）。
@@ -264,7 +279,9 @@ create_artifact, update_artifact, rewrite_artifact, read_artifact
 
 ### XML 调用示例自动生成
 
-`BaseTool.to_xml_example()` 会根据 `ToolParameter` 自动生成 XML 调用示例，注入到 system prompt 供 LLM 参考。你不需要手写这部分。
+`BaseTool.to_xml_example()` 会根据 `ToolParameter` 自动生成 XML 调用示例，注入到工具目录供 LLM 参考。你不需要手写这部分。
+
+是否渲染示例由**部署级**开关 `config.RENDER_TOOL_EXAMPLES`（默认 `True`）统一控制，不是 per-tool 配置 —— 示例需不需要取决于这台部署用什么模型（弱模型留示例换调用稳定性 / 强模型可关掉省 token），与具体工具无关。调用语法本身（含 CDATA 结构）由 `generate_tool_grammar` 的稳定 system 前缀承载，关掉示例后模型仍能据语法调用。环境变量 `ARTIFACTFLOW_RENDER_TOOL_EXAMPLES=false` 关闭。
 
 ### 测试建议
 

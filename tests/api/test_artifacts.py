@@ -233,3 +233,160 @@ class TestUploadSizeGuard:
             await art.convert_uploaded_file(f)
         assert ei.value.status_code == 422
         assert f.read_called is True
+
+
+# ============================================================
+# has_blob:二进制 artifact 在用户路由与 admin 路由都要标对(C-0)
+# ============================================================
+
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+@pytest.fixture
+async def seed_blob_artifact(
+    db_manager: DatabaseManager, test_user: User
+) -> Tuple[str, str]:
+    """Seed a conversation + blob-only docx artifact. Returns (session_id, artifact_id)."""
+    async with db_manager.session() as session:
+        conv_repo = ConversationRepository(session)
+        art_repo = ArtifactRepository(session)
+
+        conv_id = f"conv-{uuid.uuid4().hex}"
+        await conv_repo.create_conversation(
+            conversation_id=conv_id,
+            title="Blob Artifact Test",
+            user_id=test_user.id,
+        )
+
+        artifact_id = f"doc-{uuid.uuid4().hex}"
+        await art_repo.create_artifact(
+            session_id=conv_id,
+            artifact_id=artifact_id,
+            content_type=_DOCX_MIME,
+            title="spec",
+            content="",
+            metadata={"original_filename": "spec.docx"},
+            source="user_upload",
+            blob=b"PK\x03\x04" + b"\x00" * 16,
+        )
+
+    return conv_id, artifact_id
+
+
+class TestHasBlobField:
+    """has_blob 取自 Artifact.has_blob 列(repo 建行时按 blob 在场写死);admin 路由
+    复用同一 schema,填充点独立 —— 两条路由都锁住。"""
+
+    async def test_user_routes_mark_blob(
+        self, client: AsyncClient, seed_blob_artifact: Tuple[str, str],
+        seed_artifacts: Tuple[str, str],
+    ):
+        session_id, artifact_id = seed_blob_artifact
+        resp = await client.get(f"/api/v1/artifacts/{session_id}")
+        assert resp.status_code == 200
+        (item,) = resp.json()["artifacts"]
+        assert item["has_blob"] is True
+
+        resp = await client.get(f"/api/v1/artifacts/{session_id}/{artifact_id}")
+        assert resp.status_code == 200
+        assert resp.json()["has_blob"] is True
+
+        # 纯文本 artifact 对照:has_blob=False
+        text_session, text_artifact = seed_artifacts
+        resp = await client.get(f"/api/v1/artifacts/{text_session}/{text_artifact}")
+        assert resp.json()["has_blob"] is False
+
+    async def test_raw_disables_caching(
+        self, client: AsyncClient, seed_blob_artifact: Tuple[str, str]
+    ):
+        """blob 可变单版(persist 覆盖回写原地换字节,URL/version 均不变)后,
+        /raw 必须显式禁缓存 —— 旧契约「字节变=新 id=新 URL」的天然 cache-bust
+        已不存在,浏览器/中间代理复用旧字节会看到覆盖前的内容。"""
+        session_id, artifact_id = seed_blob_artifact
+        resp = await client.get(f"/api/v1/artifacts/{session_id}/{artifact_id}/raw")
+        assert resp.status_code == 200
+        assert resp.headers["cache-control"] == "no-cache"
+
+    async def test_raw_svg_image_is_attachment(
+        self, client: AsyncClient, db_manager: DatabaseManager, test_user: User
+    ):
+        """SVG is image/* but not a safe raster preview; raw must download it."""
+        async with db_manager.session() as session:
+            conv_repo = ConversationRepository(session)
+            art_repo = ArtifactRepository(session)
+            conv_id = f"conv-{uuid.uuid4().hex}"
+            await conv_repo.create_conversation(
+                conversation_id=conv_id,
+                title="SVG Artifact Test",
+                user_id=test_user.id,
+            )
+            await art_repo.create_artifact(
+                session_id=conv_id,
+                artifact_id="logo.svg",
+                content_type="image/svg+xml",
+                title="logo",
+                content="",
+                metadata={"original_filename": "logo.svg"},
+                source="tool",
+                blob=b'<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+            )
+
+        resp = await client.get(f"/api/v1/artifacts/{conv_id}/logo.svg/raw")
+        assert resp.status_code == 200
+        assert resp.headers["content-disposition"].startswith("attachment;")
+
+    async def test_raw_safe_raster_image_is_inline(
+        self, client: AsyncClient, db_manager: DatabaseManager, test_user: User
+    ):
+        async with db_manager.session() as session:
+            conv_repo = ConversationRepository(session)
+            art_repo = ArtifactRepository(session)
+            conv_id = f"conv-{uuid.uuid4().hex}"
+            await conv_repo.create_conversation(
+                conversation_id=conv_id,
+                title="PNG Artifact Test",
+                user_id=test_user.id,
+            )
+            await art_repo.create_artifact(
+                session_id=conv_id,
+                artifact_id="plot.png",
+                content_type="image/png",
+                title="plot",
+                content="",
+                metadata={"original_filename": "plot.png"},
+                source="tool",
+                blob=b"\x89PNG\r\n\x1a\n",
+            )
+
+        resp = await client.get(f"/api/v1/artifacts/{conv_id}/plot.png/raw")
+        assert resp.status_code == 200
+        assert resp.headers["content-disposition"].startswith("inline;")
+
+    async def test_admin_routes_mark_blob(
+        self, admin_client: AsyncClient, seed_blob_artifact: Tuple[str, str]
+    ):
+        session_id, artifact_id = seed_blob_artifact
+        resp = await admin_client.get(
+            f"/api/v1/admin/conversations/{session_id}/artifacts"
+        )
+        assert resp.status_code == 200
+        (item,) = resp.json()["artifacts"]
+        assert item["has_blob"] is True
+
+        resp = await admin_client.get(
+            f"/api/v1/admin/conversations/{session_id}/artifacts/{artifact_id}"
+        )
+        assert resp.status_code == 200
+        assert resp.json()["has_blob"] is True
+
+    async def test_admin_raw_serves_user_blob(
+        self, admin_client: AsyncClient, seed_blob_artifact: Tuple[str, str]
+    ):
+        session_id, artifact_id = seed_blob_artifact
+        resp = await admin_client.get(
+            f"/api/v1/admin/conversations/{session_id}/artifacts/{artifact_id}/raw"
+        )
+        assert resp.status_code == 200
+        assert resp.content == b"PK\x03\x04" + b"\x00" * 16
+        assert resp.headers["cache-control"] == "no-cache"
+        assert resp.headers["content-disposition"].startswith("attachment;")

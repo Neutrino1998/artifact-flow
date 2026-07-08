@@ -15,6 +15,7 @@ import pytest
 
 from core.engine import EngineHooks, create_initial_state, execute_loop
 from core.events import StreamEventType, ExecutionEvent
+from tests.core._toolset import effective_for
 from api.services.runtime_store import InMemoryRuntimeStore
 from tools.base import BaseTool, ToolPermission, ToolResult
 
@@ -29,7 +30,7 @@ class _FakeAgentConfig:
     name: str = "lead_agent"
     description: str = "test lead"
     tools: dict = field(default_factory=dict)
-    model: str = "fake-model"
+    model: str = "openai/fake-model"
     max_tool_rounds: int = 3
     role_prompt: str = "You are a test agent."
     internal: bool = False
@@ -196,6 +197,7 @@ async def _run_engine(
             state=state,
             agents=agents,
             tools=tools or {},
+            effective_toolsets=effective_for(agents, tools or {}),
             hooks=_hooks_from_store(store),
             emit=capture_emit,
         )
@@ -352,6 +354,84 @@ class TestToolExecution:
         assert len(completes) == 1
         assert completes[0]["data"]["success"] is True
 
+    async def test_search_tools_routed_renders_docs(self):
+        # B-3:引擎特殊路由 search_tools,渲染当前可调集里匹配工具的完整 doc。
+        from tools.builtin.search_tools import SearchToolsTool
+
+        agent = _FakeAgentConfig(tools={"search_tools": "auto", "weather": "auto"})
+        tools = {
+            "search_tools": SearchToolsTool(),
+            "weather": _FakeTool("weather", ToolResult(success=True, data="x")),
+        }
+        xml = _tool_call_xml("search_tools", query="select:weather")
+        rounds = [
+            _tool_call_chunks(xml),
+            _simple_llm_chunks("got the schema"),
+        ]
+
+        result, emitted, store = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": agent},
+            tools=tools,
+        )
+
+        starts = [e for e in emitted if e["type"] == "tool_start" and e["data"]["tool"] == "search_tools"]
+        completes = [e for e in emitted if e["type"] == "tool_complete" and e["data"]["tool"] == "search_tools"]
+        assert len(starts) == 1
+        assert len(completes) == 1
+        assert completes[0]["data"]["success"] is True
+        # 渲染了 weather 的完整 doc(SearchToolsTool.execute 不该被走到 —— 那会回错误)
+        assert "weather" in completes[0]["data"]["result_data"]
+        assert "Fake weather" in completes[0]["data"]["result_data"]
+
+    async def test_wants_context_param_collision_is_tool_failure_not_turn_error(self):
+        # 模型误吐 `_context` 参数 → 与引擎注入键撞车 → 绑定 TypeError。协程构造在 try 内,
+        # 故降级为单工具失败(tool_complete success=False),turn 照常继续并完成、不掀翻整轮。
+        from tools.builtin.search_tools import SearchToolsTool
+
+        agent = _FakeAgentConfig(tools={"search_tools": "auto"})
+        tools = {"search_tools": SearchToolsTool()}
+        xml = _tool_call_xml("search_tools", _context="oops")
+        rounds = [
+            _tool_call_chunks(xml),
+            _simple_llm_chunks("recovered"),
+        ]
+
+        result, emitted, store = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": agent},
+            tools=tools,
+        )
+
+        completes = [e for e in emitted if e["type"] == "tool_complete" and e["data"]["tool"] == "search_tools"]
+        assert len(completes) == 1
+        assert completes[0]["data"]["success"] is False     # 工具级失败
+        assert result.get("error") is not True              # turn 未被掀翻
+        assert result.get("completed") is True              # 第二轮正常收尾
+
+    async def test_search_tools_blocked_when_not_in_toolset(self):
+        # 未授 search_tools(无 deferred unit / 未声明)→ 走白名单闸,不路由
+        from tools.builtin.search_tools import SearchToolsTool
+
+        agent = _FakeAgentConfig(tools={})  # 空可调集
+        tools = {"search_tools": SearchToolsTool()}
+        xml = _tool_call_xml("search_tools", query="select:weather")
+        rounds = [
+            _tool_call_chunks(xml),
+            _simple_llm_chunks("ok"),
+        ]
+
+        result, emitted, store = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": agent},
+            tools=tools,
+        )
+
+        completes = [e for e in emitted if e["type"] == "tool_complete" and e["data"]["tool"] == "search_tools"]
+        assert len(completes) == 1
+        assert completes[0]["data"]["success"] is False
+        assert "not available" in completes[0]["data"]["error"]
+
     async def test_tool_not_found(self):
         agent = _FakeAgentConfig(tools={"my_tool": "auto"})
         xml = _tool_call_xml("my_tool")
@@ -490,6 +570,7 @@ class TestPermissionInterrupt:
                 state=state,
                 agents={"lead_agent": agent},
                 tools={"sensitive_tool": tool},
+                effective_toolsets=effective_for({"lead_agent": agent}, {"sensitive_tool": tool}),
                 hooks=_hooks_from_store(store),
                 emit=capture_emit,
             )
@@ -533,6 +614,7 @@ class TestPermissionInterrupt:
                 state=state,
                 agents={"lead_agent": agent},
                 tools={"sensitive_tool": tool},
+                effective_toolsets=effective_for({"lead_agent": agent}, {"sensitive_tool": tool}),
                 hooks=_hooks_from_store(store),
                 emit=capture_emit,
             )
@@ -577,6 +659,7 @@ class TestPermissionInterrupt:
                 state=state,
                 agents={"lead_agent": agent},
                 tools={"sensitive_tool": tool},
+                effective_toolsets=effective_for({"lead_agent": agent}, {"sensitive_tool": tool}),
                 hooks=_hooks_from_store(store),
                 emit=capture_emit,
             )
@@ -622,7 +705,10 @@ class TestPermissionInterrupt:
         assert len(tool_starts) == 1
         assert len(tool_completes) == 1
         assert tool_completes[0]["data"]["success"] is False
-        assert "timed out" in tool_completes[0]["data"]["error"].lower()
+        timeout_error = tool_completes[0]["data"]["error"].lower()
+        assert "without user approval" in timeout_error
+        assert "not a tool failure" in timeout_error
+        assert "necessary to complete the task" in timeout_error
         # START 必须在 COMPLETE 之前
         assert emitted.index(tool_starts[0]) < emitted.index(tool_completes[0])
 
@@ -669,6 +755,7 @@ class TestPermissionInterrupt:
                 state=state,
                 agents={"lead_agent": agent},
                 tools={"sensitive_tool": tool},
+                effective_toolsets=effective_for({"lead_agent": agent}, {"sensitive_tool": tool}),
                 hooks=_hooks_from_store(store),
                 emit=capture_emit,
             )
@@ -735,6 +822,9 @@ class TestCancellation:
                 state=state,
                 agents={"lead_agent": agent},
                 tools={"t1": _FakeTool("t1"), "t2": _FakeTool("t2")},
+                effective_toolsets=effective_for(
+                    {"lead_agent": agent}, {"t1": _FakeTool("t1"), "t2": _FakeTool("t2")}
+                ),
                 hooks=_hooks_from_store(store),
                 emit=capture_emit,
             )
@@ -755,6 +845,58 @@ class TestCancellation:
 
         assert result["cancelled"] is True
         assert result["completed"] is True
+
+    async def test_cancel_interrupts_in_flight_tool(self):
+        """Cancel while a tool await is in flight → run_cancellable cancels the
+        tool task immediately (no waiting out the per-tool timeout), a paired
+        TOOL_COMPLETE(success=False) is emitted, and the turn ends CANCELLED."""
+        store = InMemoryRuntimeStore()
+        message_id = "msg-cancel-tool"
+        child_cancelled = asyncio.Event()
+
+        class _HangingTool(BaseTool):
+            def __init__(self):
+                super().__init__(name="hang", description="hangs", permission=ToolPermission.AUTO)
+
+            def get_parameters(self):
+                return []
+
+            async def execute(self, **p):
+                # Set the cancel flag once we're in flight, then hang far past
+                # anything the test should wait — only task.cancel() ends this.
+                await store.request_cancel(message_id)
+                try:
+                    await asyncio.sleep(30)
+                except asyncio.CancelledError:
+                    child_cancelled.set()
+                    raise
+                return ToolResult(success=True, data="never")
+
+            async def __call__(self, **p):
+                return await self.execute(**p)
+
+        lead = _FakeAgentConfig(tools={"hang": "auto"})
+        result, emitted, _store = await _run_engine(
+            _make_fake_stream(_tool_call_chunks(_tool_call_xml("hang"))),
+            agents={"lead_agent": lead},
+            tools={"hang": _HangingTool()},
+            message_id=message_id,
+            store=store,
+            cancel_check_interval=0.01,
+        )
+
+        assert result["completed"] is True
+        assert result["cancelled"] is True
+        assert not result.get("error")
+        # The in-flight tool task was actually cancelled, not abandoned
+        assert child_cancelled.is_set()
+        # START/COMPLETE pairing invariant holds on the cancel path
+        starts = _events_of_type(emitted, "tool_start")
+        completes = _events_of_type(emitted, "tool_complete")
+        assert len(starts) == 1
+        assert len(completes) == 1
+        assert completes[0]["data"]["success"] is False
+        assert "Cancelled by user" in completes[0]["data"]["error"]
 
     async def test_cancel_mid_stream_plain_text(self):
         """Cancel during a plain-text stream → accumulated prose lands in
@@ -833,10 +975,143 @@ class TestCancellation:
 # ============================================================
 
 
+class TestCancelProbeFailure:
+    """check_cancelled 探针故障（Redis 瞬断）的 fail-open 语义（reviewer F2 回归）：
+    探针异常绝不伪装成它所落的消费点的故障 —— 工具不被杀、流式不记 "LLM call
+    failed"、loop 顶不 ERROR 整个 turn。持续故障的 fail-closed 兜底在
+    heartbeat/lease 层（execution_runner 连续失败 → 外部 task.cancel），不在探针。"""
+
+    @staticmethod
+    def _hooks_with_flaky_probe(store, flaky):
+        return EngineHooks(
+            check_cancelled=flaky,
+            wait_for_interrupt=store.wait_for_interrupt,
+            drain_messages=store.drain_messages,
+        )
+
+    async def test_probe_failure_during_tool_keeps_tool_alive(self):
+        """探针一次性故障落在工具在飞期间 → 工具不受惊扰、结果如实、turn 正常完成。"""
+        store = InMemoryRuntimeStore()
+        in_tool = {"armed": False}
+
+        async def flaky(message_id):
+            if in_tool["armed"]:
+                in_tool["armed"] = False
+                raise RuntimeError("cancel store timeout")
+            return await store.is_cancelled(message_id)
+
+        class _SlowTool(BaseTool):
+            def __init__(self):
+                super().__init__(name="slow", description="slow", permission=ToolPermission.AUTO)
+
+            def get_parameters(self):
+                return []
+
+            async def execute(self, **p):
+                in_tool["armed"] = True  # 让下一拍探针在我们在飞时爆
+                await asyncio.sleep(0.05)  # 跨过若干个 0.01s 轮询 tick
+                return ToolResult(success=True, data="slow-ok")
+
+            async def __call__(self, **p):
+                return await self.execute(**p)
+
+        lead = _FakeAgentConfig(tools={"slow": "auto"})
+        rounds = [
+            _tool_call_chunks(_tool_call_xml("slow")),
+            _simple_llm_chunks("Done"),
+        ]
+        state = create_initial_state(task="t", session_id="s1", message_id="msg-1", path_events=[])
+        emitted = []
+
+        async def capture(e):
+            emitted.append(e)
+
+        with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
+             patch("core.engine.config.CANCEL_CHECK_INTERVAL", 0.01):
+            result = await execute_loop(
+                state=state,
+                agents={"lead_agent": lead},
+                tools={"slow": _SlowTool()},
+                effective_toolsets=effective_for({"lead_agent": lead}, {"slow": _SlowTool()}),
+                hooks=self._hooks_with_flaky_probe(store, flaky),
+                emit=capture,
+            )
+
+        assert result["completed"] is True
+        assert not result.get("cancelled")
+        assert not result.get("error")
+        assert result["response"] == "Done"
+        completes = _events_of_type(emitted, "tool_complete")
+        assert len(completes) == 1
+        assert completes[0]["data"]["success"] is True
+        assert completes[0]["data"]["result_data"] == "slow-ok"
+        # 探针确实在工具在飞期间被打过且失败过（armed 被消费）
+        assert in_tool["armed"] is False
+
+    async def test_probe_failure_at_loop_top_does_not_error_turn(self):
+        """探针故障落在 loop 顶 → turn 不 ERROR，正常跑完。"""
+        store = InMemoryRuntimeStore()
+        calls = {"n": 0}
+
+        async def flaky(message_id):
+            calls["n"] += 1
+            if calls["n"] == 1:  # 第一次调用 = while 顶部检查
+                raise RuntimeError("cancel store timeout")
+            return await store.is_cancelled(message_id)
+
+        state = create_initial_state(task="t", session_id="s1", message_id="msg-1", path_events=[])
+
+        with patch("models.llm.astream_with_retry", _make_fake_stream(_simple_llm_chunks("Done!"))):
+            agents = {"lead_agent": _FakeAgentConfig()}
+            result = await execute_loop(
+                state=state,
+                agents=agents,
+                tools={},
+                effective_toolsets=effective_for(agents, {}),
+                hooks=self._hooks_with_flaky_probe(store, flaky),
+                emit=None,
+            )
+
+        assert result["completed"] is True
+        assert not result.get("error")
+        assert result["response"] == "Done!"
+
+    async def test_probe_failure_mid_stream_not_llm_failure(self):
+        """探针故障落在 LLM 流式轮询 → 不得被记成 "LLM call failed" 的 ERROR。"""
+        store = InMemoryRuntimeStore()
+        calls = {"n": 0}
+
+        async def flaky(message_id):
+            calls["n"] += 1
+            if calls["n"] == 2:  # 1=loop 顶；2=第一个 chunk 的流式轮询
+                raise RuntimeError("cancel store timeout")
+            return await store.is_cancelled(message_id)
+
+        state = create_initial_state(task="t", session_id="s1", message_id="msg-1", path_events=[])
+
+        with patch("models.llm.astream_with_retry", _make_fake_stream(_simple_llm_chunks("Done!"))), \
+             patch("core.engine.config.CANCEL_CHECK_INTERVAL", 0):
+            agents = {"lead_agent": _FakeAgentConfig()}
+            result = await execute_loop(
+                state=state,
+                agents=agents,
+                tools={},
+                effective_toolsets=effective_for(agents, {}),
+                hooks=self._hooks_with_flaky_probe(store, flaky),
+                emit=None,
+            )
+
+        assert calls["n"] >= 2  # 故障确实落在流式轮询上
+        assert result["completed"] is True
+        assert not result.get("error")
+        assert result["response"] == "Done!"
+
+
 class TestRoundLimits:
 
-    async def test_max_tool_rounds_injects_system_message(self):
-        """After max_tool_rounds, a system message should be injected."""
+    async def test_max_tool_rounds_adds_tool_budget_reminder(self):
+        """After max_tool_rounds, a <tool_budget> wrap-up nudge is folded into the
+        reminder (merged into the last user message) — no longer a separate system message."""
         agent = _FakeAgentConfig(tools={"my_tool": "auto"}, max_tool_rounds=1)
         tool = _FakeTool("my_tool")
 
@@ -862,12 +1137,15 @@ class TestRoundLimits:
             tools={"my_tool": tool},
         )
 
-        # Second call should have the system message about max rounds
-        if len(captured_messages) >= 2:
-            last_call_msgs = captured_messages[-1]
-            system_msgs = [m for m in last_call_msgs if m["role"] == "system"]
-            has_limit_msg = any("maximum number of tool calls" in m["content"] for m in system_msgs)
-            assert has_limit_msg
+        # Second call: the budget nudge rides in the reminder on the last user message
+        assert len(captured_messages) >= 2
+        last_call_msgs = captured_messages[-1]
+        joined = "\n".join(
+            m["content"] if isinstance(m["content"], str) else str(m["content"])
+            for m in last_call_msgs
+        )
+        assert "<tool_budget>" in joined
+        assert "Tool-round budget reached" in joined
 
 
 # ============================================================
@@ -995,7 +1273,7 @@ class TestMetrics:
              patch("litellm.token_counter", return_value=42):
             chunks = []
             async for chunk in astream_with_retry(
-                [{"role": "user", "content": "hi"}], model="fake-model"
+                [{"role": "user", "content": "hi"}], model="openai/fake-model"
             ):
                 chunks.append(chunk)
 
@@ -1068,7 +1346,7 @@ class TestInEngineCompaction:
         # Content = memory-aid frame + raw summary from compact_agent
         assert summary_ev.data["content"].startswith("[Prior conversation has been compacted")
         assert "compacted prior turn" in summary_ev.data["content"]
-        assert summary_ev.data["model"] == "fake-model"
+        assert summary_ev.data["model"] == "openai/fake-model"
         assert summary_ev.data["error"] is None
 
     async def test_under_threshold_no_compaction(self):
@@ -1091,6 +1369,56 @@ class TestInEngineCompaction:
         emitted_types = [e["type"] for e in emitted]
         assert "compaction_start" not in emitted_types
         assert "compaction_summary" not in emitted_types
+
+    async def test_cancel_during_compaction_routes_to_cancelled(self):
+        """User cancel landing inside the compaction LLM call (previously the
+        longest cancel blind window: COMPACTION_TIMEOUT) → the in-flight compact
+        call is task-cancelled, a paired success=False compaction_summary is
+        appended, and the turn ends CANCELLED — NOT ERROR."""
+        store = InMemoryRuntimeStore()
+        message_id = "msg-cancel-compact"
+        compact_call_cancelled = asyncio.Event()
+        calls = {"n": 0}
+
+        async def fake_llm(messages, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                # Lead call: usage over threshold → compaction triggers next
+                for c in _simple_llm_chunks("Done", input_tokens=80, output_tokens=30):
+                    yield c
+            else:
+                # Compact call: set the cancel flag once in flight, then hang
+                await store.request_cancel(message_id)
+                try:
+                    await asyncio.sleep(30)
+                except asyncio.CancelledError:
+                    compact_call_cancelled.set()
+                    raise
+                yield {"type": "content", "content": "never"}
+
+        lead = _FakeAgentConfig(tools={})
+        compact = _FakeAgentConfig(name="compact_agent", role_prompt="Compactor.", tools={})
+
+        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100), \
+             patch("core.compaction_runner.config.CANCEL_CHECK_INTERVAL", 0.01):
+            result, emitted, _ = await _run_engine(
+                fake_llm,
+                agents={"lead_agent": lead, "compact_agent": compact},
+                message_id=message_id,
+                store=store,
+            )
+
+        assert result["completed"] is True
+        assert result["cancelled"] is True
+        assert not result.get("error")
+        assert compact_call_cancelled.is_set()
+
+        # compaction_start has its paired success=False terminator (no boundary
+        # for EventHistory, but the event stream stays well-formed)
+        event_types = [e.event_type for e in result["events"]]
+        assert "compaction_start" in event_types
+        summary_ev = next(e for e in result["events"] if e.event_type == "compaction_summary")
+        assert summary_ev.data["success"] is False
 
     async def test_no_compact_agent_silently_skips_over_threshold(self):
         """Over threshold but compact_agent not registered → no crash, no compaction events."""
@@ -1262,4 +1590,393 @@ class TestInEngineCompaction:
             f"got {result['execution_metrics']['last_input_tokens']} — "
             "if this is 12345, the post-compaction write in compaction_runner is gone "
             "and the gauge will show stale pre-compaction tokens."
+        )
+
+
+# ============================================================
+# TestSkillActivation (C-2: read_skill → active_skills + skill_grants merge)
+# ============================================================
+
+
+class _ActivatingTool(BaseTool):
+    """read_skill 替身:返回正文 + activated_skill metadata(引擎据此激活)。"""
+
+    def __init__(self, slug: str):
+        super().__init__(name="read_skill", description="read a skill",
+                         permission=ToolPermission.AUTO)
+        self._slug = slug
+
+    def get_parameters(self):
+        return []
+
+    async def execute(self, **params) -> ToolResult:
+        return ToolResult(success=True, data="GUIDANCE",
+                          metadata={"activated_skill": self._slug})
+
+    async def __call__(self, **params) -> ToolResult:
+        return await self.execute(**params)
+
+
+class TestSkillActivation:
+    async def test_read_skill_activates_and_grants_tool_mid_turn(self):
+        from core.effective_toolset import EffectiveToolset, SkillGrant
+
+        read_skill = _ActivatingTool("s")
+        granted = _FakeTool("granted_tool", ToolResult(success=True, data="granted-ran"))
+        tools = {"read_skill": read_skill, "granted_tool": granted}
+
+        # 初始可调集只有 read_skill;granted_tool 不在(模拟 agent disabled),仅在 skill_grants
+        eff = EffectiveToolset(
+            permissions={"read_skill": ToolPermission.AUTO},
+            skill_grants={"s": SkillGrant(permissions={"granted_tool": ToolPermission.AUTO})},
+        )
+        agents = {"lead_agent": _FakeAgentConfig()}
+        effective_toolsets = {"lead_agent": eff}
+
+        # 三轮:① 调 read_skill ② 调 granted_tool(激活后才可调)③ 收尾
+        rounds = [
+            _tool_call_chunks(_tool_call_xml("read_skill", slug="s")),
+            _tool_call_chunks(_tool_call_xml("granted_tool")),
+            _simple_llm_chunks("Done"),
+        ]
+        state = create_initial_state(task="hi", session_id="sess", message_id="msg-act")
+        store = InMemoryRuntimeStore()
+        emitted = []
+
+        async def capture_emit(e):
+            emitted.append(e)
+
+        with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
+             patch("core.engine.config") as mock_config:
+            from config import config as real_config
+            for attr in dir(real_config):
+                if attr.isupper():
+                    setattr(mock_config, attr, getattr(real_config, attr))
+            result = await execute_loop(
+                state=state, agents=agents, tools=tools,
+                effective_toolsets=effective_toolsets,
+                hooks=_hooks_from_store(store), emit=capture_emit,
+            )
+
+        # 激活持久进 state(回合末由 controller 写 metadata)
+        assert result["active_skills"] == ["s"]
+        # granted_tool 被激活后翻进可调集
+        assert "granted_tool" in eff
+        # 两个工具都真执行成功(granted_tool 没被白名单闸拒)
+        completes = {e["data"]["tool"]: e["data"]["success"]
+                     for e in emitted if e["type"] == "tool_complete"}
+        assert completes.get("read_skill") is True
+        assert completes.get("granted_tool") is True
+
+    async def test_failed_read_skill_does_not_activate(self):
+        from core.effective_toolset import EffectiveToolset, SkillGrant
+
+        class _FailRead(BaseTool):
+            def __init__(self):
+                super().__init__(name="read_skill", description="x",
+                                 permission=ToolPermission.AUTO)
+            def get_parameters(self): return []
+            async def execute(self, **p):
+                return ToolResult(success=False, error="nope",
+                                  metadata={"activated_skill": "s"})
+            async def __call__(self, **p): return await self.execute(**p)
+
+        eff = EffectiveToolset(
+            permissions={"read_skill": ToolPermission.AUTO},
+            skill_grants={"s": SkillGrant(permissions={"granted_tool": ToolPermission.AUTO})},
+        )
+        state = create_initial_state(task="hi", session_id="sess", message_id="msg-f")
+        rounds = [_tool_call_chunks(_tool_call_xml("read_skill", slug="s")),
+                  _simple_llm_chunks("Done")]
+        store = InMemoryRuntimeStore()
+
+        with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
+             patch("core.engine.config") as mock_config:
+            from config import config as real_config
+            for attr in dir(real_config):
+                if attr.isupper():
+                    setattr(mock_config, attr, getattr(real_config, attr))
+            result = await execute_loop(
+                state=state, agents={"lead_agent": _FakeAgentConfig()},
+                tools={"read_skill": _FailRead()},
+                effective_toolsets={"lead_agent": eff},
+                hooks=_hooks_from_store(store), emit=lambda e: asyncio.sleep(0),
+            )
+
+        # 失败调用不激活(only on success)
+        assert result["active_skills"] == []
+        assert "granted_tool" not in eff
+
+    async def test_button_activation_injects_body_into_user_input(self):
+        """C-3:用户按钮激活 → controller 传 activated_skill_bodies → engine 注入 USER_INPUT
+        正文(仅 LLM 可见,同 force_compact/上传路径),让模型即刻看到 skill 指令。"""
+        from core.effective_toolset import EffectiveToolset
+
+        state = create_initial_state(
+            task="use it", session_id="sess", message_id="msg-b",
+            active_skills=["s"],
+            activated_skill_bodies=[
+                {"slug": "s", "name": "My Skill", "body": "DO THE THING"}
+            ],
+        )
+        rounds = [_simple_llm_chunks("Done")]
+        store = InMemoryRuntimeStore()
+
+        with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
+             patch("core.engine.config") as mock_config:
+            from config import config as real_config
+            for attr in dir(real_config):
+                if attr.isupper():
+                    setattr(mock_config, attr, getattr(real_config, attr))
+            result = await execute_loop(
+                state=state, agents={"lead_agent": _FakeAgentConfig()}, tools={},
+                effective_toolsets={"lead_agent": EffectiveToolset(permissions={})},
+                hooks=_hooks_from_store(store), emit=lambda e: asyncio.sleep(0),
+            )
+
+        user_inputs = [
+            e for e in result["events"]
+            if e.event_type == StreamEventType.USER_INPUT.value
+        ]
+        assert user_inputs, "expected a USER_INPUT event"
+        content = user_inputs[-1].data["content"]
+        assert "use it" in content              # 原始输入保留
+        assert "My Skill" in content            # skill 名注入
+        assert "DO THE THING" in content        # skill 正文注入
+
+    async def test_activation_only_turn_body_becomes_content(self):
+        """纯激活轮(无文本):skill 正文即 USER_INPUT 正文,让 lead 总有可回应输入。"""
+        from core.effective_toolset import EffectiveToolset
+
+        state = create_initial_state(
+            task="", session_id="sess", message_id="msg-b2",
+            active_skills=["s"],
+            activated_skill_bodies=[{"slug": "s", "name": "S", "body": "BODY-ONLY"}],
+        )
+        rounds = [_simple_llm_chunks("Done")]
+        store = InMemoryRuntimeStore()
+
+        with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
+             patch("core.engine.config") as mock_config:
+            from config import config as real_config
+            for attr in dir(real_config):
+                if attr.isupper():
+                    setattr(mock_config, attr, getattr(real_config, attr))
+            result = await execute_loop(
+                state=state, agents={"lead_agent": _FakeAgentConfig()}, tools={},
+                effective_toolsets={"lead_agent": EffectiveToolset(permissions={})},
+                hooks=_hooks_from_store(store), emit=lambda e: asyncio.sleep(0),
+            )
+
+        content = [
+            e for e in result["events"]
+            if e.event_type == StreamEventType.USER_INPUT.value
+        ][-1].data["content"]
+        assert "BODY-ONLY" in content
+
+
+# ============================================================
+# TestMixedSerialDelegation — 同轮 [tool, subagent, subagent, tool] 混合串行
+# ============================================================
+
+
+class TestMixedSerialDelegation:
+    """call_subagent 原地递归后:同轮混合调用按自然序串行执行,不再 sort-to-end
+    + break;turn 在子 agent 内终止(cancel / error)则剩余工具不执行。"""
+
+    @staticmethod
+    def _real_call_subagent(valid_agents):
+        from tools.builtin.call_subagent import CallSubagentTool
+        return CallSubagentTool(valid_agents=valid_agents)
+
+    async def test_mixed_order_natural_serial(self):
+        """[tool_a, sub_a, sub_b, tool_b] 按模型给出的顺序执行,结果按序回填。"""
+        lead = _FakeAgentConfig(
+            tools={"call_subagent": "auto", "tool_a": "auto", "tool_b": "auto"}
+        )
+        sub_a = _FakeAgentConfig(name="sub_a", tools={})
+        sub_b = _FakeAgentConfig(name="sub_b", tools={})
+
+        response_r1 = "\n".join([
+            _tool_call_xml("tool_a"),
+            _tool_call_xml("call_subagent", agent_name="sub_a", instruction="task A"),
+            _tool_call_xml("call_subagent", agent_name="sub_b", instruction="task B"),
+            _tool_call_xml("tool_b"),
+        ])
+        rounds = [
+            _tool_call_chunks(response_r1),       # lead round 1: 4 calls
+            _simple_llm_chunks("result from A"),  # sub_a
+            _simple_llm_chunks("result from B"),  # sub_b
+            _simple_llm_chunks("Final answer"),   # lead round 2
+        ]
+
+        result, emitted, store = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": lead, "sub_a": sub_a, "sub_b": sub_b},
+            tools={
+                "tool_a": _FakeTool("tool_a", ToolResult(success=True, data="A-ok")),
+                "tool_b": _FakeTool("tool_b", ToolResult(success=True, data="B-ok")),
+                "call_subagent": self._real_call_subagent(["sub_a", "sub_b"]),
+            },
+        )
+
+        assert result["completed"] is True
+        assert result["response"] == "Final answer"
+
+        # 自然序:call_subagent 不再被排到末尾
+        start_names = [e["data"]["tool"] for e in _events_of_type(emitted, "tool_start")]
+        assert start_names == ["tool_a", "call_subagent", "call_subagent", "tool_b"]
+
+        # agent 泳道按执行序展开
+        agent_starts = [e["agent"] for e in _events_of_type(emitted, "agent_start")]
+        assert agent_starts == ["lead_agent", "sub_a", "sub_b", "lead_agent"]
+
+        # 两个 subagent 的结果按序回填成 <subagent_result>
+        sub_results = [
+            e["data"]["result_data"]
+            for e in _events_of_type(emitted, "tool_complete")
+            if e["data"].get("tool") == "call_subagent"
+        ]
+        assert len(sub_results) == 2
+        assert 'agent="sub_a"' in sub_results[0] and "result from A" in sub_results[0]
+        assert 'agent="sub_b"' in sub_results[1] and "result from B" in sub_results[1]
+
+        # 事件序 = 执行序:tool_b 的 START 在 sub_b 完成之后
+        idx_sub_b_done = next(
+            i for i, e in enumerate(emitted)
+            if e["type"] == "agent_complete" and e.get("agent") == "sub_b"
+        )
+        idx_tool_b = next(
+            i for i, e in enumerate(emitted)
+            if e["type"] == "tool_start" and (e.get("data") or {}).get("tool") == "tool_b"
+        )
+        assert idx_tool_b > idx_sub_b_done
+
+        # 两条 SUBAGENT_INSTRUCTION 各归其主
+        instr = [
+            e for e in result["events"]
+            if e.event_type == StreamEventType.SUBAGENT_INSTRUCTION.value
+        ]
+        assert [e.agent_name for e in instr] == ["sub_a", "sub_b"]
+
+    async def test_cancel_during_subagent_skips_remaining_tools(self):
+        """cancel 落在子 agent 的 LLM 流期间:call_subagent 留 orphan TOOL_START
+        (无 COMPLETE = 调用未完成),同轮剩余工具不执行,turn 收口 CANCELLED。"""
+        lead = _FakeAgentConfig(tools={"call_subagent": "auto", "tool_b": "auto"})
+        sub_a = _FakeAgentConfig(name="sub_a", tools={})
+        store = InMemoryRuntimeStore()
+
+        r1 = "\n".join([
+            _tool_call_xml("call_subagent", agent_name="sub_a", instruction="task A"),
+            _tool_call_xml("tool_b"),
+        ])
+        call_count = {"n": 0}
+
+        async def fake(messages, **kwargs):
+            idx = call_count["n"]
+            call_count["n"] += 1
+            if idx == 0:
+                for c in _tool_call_chunks(r1):
+                    yield c
+            else:
+                chunks = _simple_llm_chunks("partial sub answer")
+                for i, c in enumerate(chunks):
+                    if i == 1:
+                        store._cancellations["msg-1"] = asyncio.Event()
+                        store._cancellations["msg-1"].set()
+                    yield c
+
+        result, emitted, _ = await _run_engine(
+            fake,
+            agents={"lead_agent": lead, "sub_a": sub_a},
+            tools={
+                "call_subagent": self._real_call_subagent(["sub_a"]),
+                "tool_b": _FakeTool("tool_b"),
+            },
+            store=store,
+            cancel_check_interval=0,
+        )
+
+        assert result["completed"] is True
+        assert result.get("cancelled") is True
+        start_names = [e["data"]["tool"] for e in _events_of_type(emitted, "tool_start")]
+        assert start_names == ["call_subagent"]  # tool_b 从未启动
+        sub_completes = [
+            e for e in _events_of_type(emitted, "tool_complete")
+            if e["data"].get("tool") == "call_subagent"
+        ]
+        assert sub_completes == []
+
+    async def test_subagent_llm_error_skips_remaining_tools(self):
+        """子 agent 的 LLM 失败:error 归因到子 agent,同轮剩余工具不执行,
+        turn 收口 ERROR(record-not-emit,详见 decide_terminal)。"""
+        lead = _FakeAgentConfig(tools={"call_subagent": "auto", "tool_b": "auto"})
+        sub_a = _FakeAgentConfig(name="sub_a", tools={})
+
+        r1 = "\n".join([
+            _tool_call_xml("call_subagent", agent_name="sub_a", instruction="task A"),
+            _tool_call_xml("tool_b"),
+        ])
+        call_count = {"n": 0}
+
+        async def fake(messages, **kwargs):
+            idx = call_count["n"]
+            call_count["n"] += 1
+            if idx == 0:
+                for c in _tool_call_chunks(r1):
+                    yield c
+            else:
+                raise RuntimeError("llm boom")
+                yield  # pragma: no cover — 保持 async generator 形态
+
+        result, emitted, _ = await _run_engine(
+            fake,
+            agents={"lead_agent": lead, "sub_a": sub_a},
+            tools={
+                "call_subagent": self._real_call_subagent(["sub_a"]),
+                "tool_b": _FakeTool("tool_b"),
+            },
+        )
+
+        assert result["error"] is True
+        assert result["error_detail"]["agent"] == "sub_a"
+        assert "llm boom" in result["error_detail"]["error"]
+        start_names = [e["data"]["tool"] for e in _events_of_type(emitted, "tool_start")]
+        assert start_names == ["call_subagent"]  # tool_b 从未启动
+
+    async def test_call_subagent_parser_warnings_in_tool_complete(self):
+        """repair 过的 call_subagent 调用,其 TOOL_COMPLETE 原地带 parser_warnings
+        (旧实现经 state 暂存槽 deferred 回填,新实现随结果直接写入)。"""
+        lead = _FakeAgentConfig(tools={"call_subagent": "auto"})
+        sub_a = _FakeAgentConfig(name="sub_a", tools={})
+
+        # <name=...</name> 等号语法触发 _repair_tag_equals_syntax warning
+        xml_with_repair = """<tool_call>
+<name=call_subagent</name>
+<params>
+<agent_name><![CDATA[sub_a]]></agent_name>
+<instruction><![CDATA[do it]]></instruction>
+</params>
+</tool_call>"""
+        rounds = [
+            _tool_call_chunks(xml_with_repair),
+            _simple_llm_chunks("sub done"),
+            _simple_llm_chunks("lead done"),
+        ]
+
+        result, emitted, _ = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": lead, "sub_a": sub_a},
+            tools={"call_subagent": self._real_call_subagent(["sub_a"])},
+        )
+
+        assert result["completed"] is True
+        sub_completes = [
+            e for e in _events_of_type(emitted, "tool_complete")
+            if e["data"].get("tool") == "call_subagent"
+        ]
+        assert len(sub_completes) == 1
+        assert sub_completes[0]["data"]["success"] is True
+        assert sub_completes[0]["data"].get("parser_warnings"), (
+            "call_subagent TOOL_COMPLETE 应带上本次调用的 parser_warnings"
         )

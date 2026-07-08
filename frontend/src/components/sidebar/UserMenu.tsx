@@ -5,6 +5,9 @@ import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import ChangePasswordDialog from '@/components/layout/ChangePasswordDialog';
 import EditDisplayNameDialog from '@/components/layout/EditDisplayNameDialog';
+import { PillBadge } from '@/components/ui/PillBadge';
+import { MENU_ROW_HOVER, MENU_ROW_DANGER_HOVER } from '@/lib/styles';
+import StorageBar from './StorageBar';
 
 export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
   const user = useAuthStore((s) => s.user);
@@ -14,8 +17,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
-  const setUserManagementVisible = useUIStore((s) => s.setUserManagementVisible);
-  const setObservabilityVisible = useUIStore((s) => s.setObservabilityVisible);
+  const setActiveMode = useUIStore((s) => s.setActiveMode);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
@@ -36,7 +38,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
           position: 'fixed',
           bottom: window.innerHeight - rect.top + 4,
           left: rect.left,
-          minWidth: collapsed ? 180 : rect.width,
+          minWidth: Math.max(collapsed ? 220 : rect.width, 220),
         });
       }
       return !prev;
@@ -63,12 +65,32 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
 
   const handleManageUsers = () => {
     setPopoverOpen(false);
-    setUserManagementVisible(true);
+    setActiveMode('userManagement');
+  };
+
+  const handleManageTools = () => {
+    setPopoverOpen(false);
+    setActiveMode('toolUnit');
+  };
+
+  const handleDepartmentAccess = () => {
+    setPopoverOpen(false);
+    setActiveMode('departmentAccess');
   };
 
   const handleObservability = () => {
     setPopoverOpen(false);
-    setObservabilityVisible(true);
+    setActiveMode('observability');
+  };
+
+  const handleInstances = () => {
+    setPopoverOpen(false);
+    setActiveMode('instances');
+  };
+
+  const handleNotificationConfig = () => {
+    setPopoverOpen(false);
+    setActiveMode('notificationConfig');
   };
 
   const handleChangePassword = () => {
@@ -91,7 +113,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
           <button
             ref={triggerRef}
             onClick={togglePopover}
-            className="w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-chat/60 dark:hover:bg-panel-accent-dark/60 transition-colors"
+            className={`w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark ${MENU_ROW_HOVER}`}
             title={user.display_name || user.username}
           >
             <div className="w-7 h-7 rounded-lg bg-panel-accent dark:bg-surface-dark text-text-primary dark:text-text-primary-dark ring-1 ring-border/60 dark:ring-border-dark/60 flex items-center justify-center text-xs font-medium">
@@ -102,7 +124,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
           <button
             ref={triggerRef}
             onClick={togglePopover}
-            className="w-full flex items-center gap-3 px-3 py-2.5 bg-chat dark:bg-panel-accent-dark rounded-card hover:bg-surface dark:hover:bg-[#141414] transition-colors text-left"
+            className={`w-full flex items-center gap-3 px-3 py-2.5 bg-chat dark:bg-panel-accent-dark rounded-card text-left ${MENU_ROW_HOVER}`}
           >
             <div className="w-8 h-8 rounded-lg bg-panel-accent dark:bg-surface-dark text-text-primary dark:text-text-primary-dark ring-1 ring-border/60 dark:ring-border-dark/60 flex items-center justify-center font-medium shrink-0">
               {initial}
@@ -111,9 +133,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
               <div className="font-medium text-text-primary dark:text-text-primary-dark truncate flex items-center gap-1.5">
                 <span className="truncate">{user.display_name || user.username}</span>
                 {isAdmin && (
-                  <span className="inline-block px-1 py-px text-[10px] rounded bg-accent/10 text-accent shrink-0">
-                    admin
-                  </span>
+                  <PillBadge tone="accent">admin</PillBadge>
                 )}
               </div>
               <div className="text-xs text-text-secondary dark:text-text-secondary-dark truncate">
@@ -138,16 +158,20 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
         {/* Popover (opens upward) */}
         {popoverOpen && (
           <div
-            className="z-40 bg-bg dark:bg-panel-accent-dark border-none rounded-card shadow-modal p-1.5"
+            className="z-40 max-h-[calc(100vh-24px)] overflow-y-auto bg-bg dark:bg-panel-accent-dark border-none rounded-card shadow-modal p-1.5"
             style={popoverStyle}
           >
+            <div className="mb-1.5">
+              <StorageBar />
+            </div>
+
             {/* Theme toggle */}
             <button
               onClick={() => {
                 toggleTheme();
                 setPopoverOpen(false);
               }}
-              className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-[#141414] rounded-lg transition-colors"
+              className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
             >
               {theme === 'light' ? (
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -164,7 +188,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             {/* Edit display name (all users) */}
             <button
               onClick={handleEditProfile}
-              className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-[#141414] rounded-lg transition-colors"
+              className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M11 2l3 3-9 9H2v-3z" />
@@ -175,7 +199,7 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             {/* Change password (all users) */}
             <button
               onClick={handleChangePassword}
-              className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-[#141414] rounded-lg transition-colors"
+              className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <rect x="3" y="7" width="10" height="7" rx="1" />
@@ -188,13 +212,40 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             {isAdmin && (
               <button
                 onClick={handleManageUsers}
-                className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-[#141414] rounded-lg transition-colors"
+                className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <circle cx="8" cy="5" r="3" />
                   <path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" />
                 </svg>
-                管理用户
+                用户管理
+              </button>
+            )}
+
+            {/* Admin: manage tool units */}
+            {isAdmin && (
+              <button
+                onClick={handleManageTools}
+                className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9.8 4.2a.67.67 0 0 0 0 .93l1.07 1.07a.67.67 0 0 0 .93 0l2.51-2.51a4 4 0 0 1-5.29 5.29l-4.61 4.61a1.41 1.41 0 0 1-2-2l4.61-4.61a4 4 0 0 1 5.29-5.29l-2.51 2.51z" />
+                </svg>
+                工具管理
+              </button>
+            )}
+
+            {/* Admin: department access */}
+            {isAdmin && (
+              <button
+                onClick={handleDepartmentAccess}
+                className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 4h10M3 8h10M3 12h6" />
+                  <path d="M11.5 11.5l1 1 1.8-2" />
+                </svg>
+                部门授权
               </button>
             )}
 
@@ -202,24 +253,53 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
             {isAdmin && (
               <button
                 onClick={handleObservability}
-                className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark hover:bg-surface dark:hover:bg-[#141414] rounded-lg transition-colors"
+                className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M2 12a6 6 0 1 1 12 0" />
                   <path d="M8 12l3-4" />
                   <circle cx="8" cy="12" r="0.6" fill="currentColor" stroke="none" />
                 </svg>
-                运行监控
+                会话监控
               </button>
             )}
 
-            {/* Divider */}
+            {/* Admin: fleet instances (Phase C) */}
+            {isAdmin && (
+              <button
+                onClick={handleInstances}
+                className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="2.5" width="12" height="4" rx="1" />
+                  <rect x="2" y="9.5" width="12" height="4" rx="1" />
+                  <circle cx="4.5" cy="4.5" r="0.6" fill="currentColor" stroke="none" />
+                  <circle cx="4.5" cy="11.5" r="0.6" fill="currentColor" stroke="none" />
+                </svg>
+                实例监控
+              </button>
+            )}
+
+            {/* Admin: site notifications */}
+            {isAdmin && (
+              <button
+                onClick={handleNotificationConfig}
+                className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M8 2v1M4 6a4 4 0 0 1 8 0v3l1.5 2H2.5L4 9V6z" />
+                  <path d="M6.5 13a1.5 1.5 0 0 0 3 0" />
+                </svg>
+                通知管理
+              </button>
+            )}
+
             <div className="my-1 border-t border-border dark:border-border-dark" />
 
             {/* Logout */}
             <button
               onClick={handleLogout}
-              className="w-full flex items-center gap-2 px-2.5 py-2 text-red-500 hover:bg-surface dark:hover:bg-[#141414] rounded-lg transition-colors"
+              className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-status-error rounded-lg ${MENU_ROW_DANGER_HOVER}`}
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3M11 11l3-3-3-3M6 8h8" />

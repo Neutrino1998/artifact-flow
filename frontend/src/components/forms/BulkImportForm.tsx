@@ -5,6 +5,7 @@ import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useUIStore } from '@/stores/uiStore';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
+import { triggerBlobDownload } from '@/lib/download';
 import PanelShell from '@/components/layout/PanelShell';
 import type { BulkImportResponse, BulkImportFailedRow } from '@/types';
 
@@ -21,15 +22,10 @@ const TEMPLATE_SAMPLE =
 
 function downloadCsv(filename: string, content: string) {
   // Excel 中文环境识别 UTF-8 BOM 为 UTF-8；不带 BOM 会被当 GBK 乱码
-  const blob = new Blob(['﻿' + content], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  triggerBlobDownload(
+    filename,
+    new Blob(['﻿' + content], { type: 'text/csv;charset=utf-8' }),
+  );
 }
 
 function failedRowsToCsv(rows: BulkImportFailedRow[]): string {
@@ -304,7 +300,7 @@ function UploadStage({
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
-        className={`rounded-2xl border-2 border-dashed p-8 text-center transition-colors ${
+        className={`rounded-xl border-2 border-dashed p-8 text-center transition-colors ${
           dragActive
             ? 'border-accent bg-panel/50 dark:bg-panel-accent-dark/50'
             : 'border-border dark:border-border-dark'
@@ -490,9 +486,9 @@ function SummaryCard({
 }) {
   const accentClass =
     accent === 'success'
-      ? 'text-green-600 dark:text-green-400'
+      ? 'text-status-success'
       : accent === 'warn'
-      ? 'text-yellow-600 dark:text-yellow-400'
+      ? 'text-status-warning'
       : 'text-status-error';
   return (
     <div className="rounded-lg border border-border dark:border-border-dark p-3 text-center">

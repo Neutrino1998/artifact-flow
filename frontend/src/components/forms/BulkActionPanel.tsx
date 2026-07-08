@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect } from 'react';
 import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useUIStore } from '@/stores/uiStore';
-import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
+import { BUTTON_DANGER_OUTLINE, BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
 import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
 import type { BulkActionResponse, BulkImpactResponse } from '@/types';
@@ -184,7 +184,7 @@ export default function BulkActionPanel() {
             <button
               onClick={handleStartDelete}
               disabled={empty || submitting}
-              className="w-full px-4 py-2.5 rounded-lg border border-status-error/40 text-status-error hover:bg-status-error/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-left"
+              className={`${BUTTON_DANGER_OUTLINE} w-full rounded-lg px-4 py-2.5 text-left`}
             >
               <div className="font-medium">删除</div>
               <div className="text-xs opacity-80">硬删用户 + 级联会话；操作不可恢复</div>
@@ -215,7 +215,7 @@ export default function BulkActionPanel() {
                 disabled={submitting}
                 className={`${BUTTON_PRIMARY} flex-1 rounded-lg px-4 py-2`}
               >
-                {submitting ? '处理中...' : pendingDeptId === null ? '清空部门' : '应用'}
+                {submitting ? '处理中…' : pendingDeptId === null ? '清空部门' : '应用'}
               </button>
             </div>
           </div>
@@ -227,12 +227,13 @@ export default function BulkActionPanel() {
           title="批量删除用户"
           message={
             impactLoading
-              ? '正在加载影响数据...'
+              ? '正在加载影响数据…'
               : impact
-                ? `将删除 ${selection.length} 个用户、共 ${impact.conversation_count} 条会话。\n此操作不可恢复，关联的消息 / 事件 / artifacts 也会被级联删除。`
-                : `将删除 ${selection.length} 个用户及其所有会话。\n此操作不可恢复。`
+                ? `将删除 ${selection.length} 个用户、共 ${impact.conversation_count} 条会话。\n关联的消息、事件、artifacts 也会被级联删除。\n操作不可恢复。`
+                : `将删除 ${selection.length} 个用户及其所有会话。\n操作不可恢复。`
           }
-          confirmLabel="删除"
+          confirmLabel="确认删除"
+          confirmDisabled={impactLoading}
           onConfirm={handleConfirmDelete}
           onCancel={() => { setMode('idle'); setImpact(null); }}
         />

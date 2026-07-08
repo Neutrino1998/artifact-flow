@@ -5,6 +5,7 @@ import Sidebar from '@/components/sidebar/Sidebar';
 import ChatPanel from '@/components/chat/ChatPanel';
 import ArtifactPanel from '@/components/artifact/ArtifactPanel';
 import UserManagementDetailPanel from '@/components/chat/UserManagementDetailPanel';
+import ToolUnitDetailPanel from '@/components/chat/ToolUnitDetailPanel';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import AuthGuard from '@/components/AuthGuard';
 import { useStreamStore } from '@/stores/streamStore';
@@ -12,29 +13,36 @@ import { useUIStore } from '@/stores/uiStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useMediaQuery, BREAKPOINTS } from '@/hooks/useMediaQuery';
 import PermissionModal from '@/components/layout/PermissionModal';
+import { artifactVisibilityOverride } from '@/lib/panelMode';
 
 export default function Home() {
   const permissionRequest = useStreamStore((s) => s.permissionRequest);
-  const userManagementVisible = useUIStore((s) => s.userManagementVisible);
+  const activeMode = useUIStore((s) => s.activeMode);
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
   const isMd = useMediaQuery(BREAKPOINTS.md);
-  const userMgmtMode = userManagementVisible && isAdmin;
+  const userMgmtMode = activeMode === 'userManagement' && isAdmin;
+  const toolUnitMode = activeMode === 'toolUnit' && isAdmin;
 
   // Right-panel visibility override (see ThreeColumnLayout's prop doc):
-  //   desktop user-mgmt → true  (master-detail force-show)
-  //   mobile  user-mgmt → false (force-hide; overrides any prior artifactPanelVisible
-  //                              so opening user management while the artifact drawer
-  //                              was open does not bury the user list under an empty
+  //   desktop master-detail (user-mgmt / tool-unit) → true  (force-show)
+  //   mobile  master-detail → false (force-hide; overrides any prior artifactPanelVisible
+  //                              so opening admin management while the artifact drawer
+  //                              was open does not bury the master list under an empty
   //                              detail panel — admin work isn't a mobile use case)
-  //   not in user-mgmt  → undefined (defer to user-controlled artifactPanelVisible)
-  const forceArtifactVisible = userMgmtMode ? isMd : undefined;
+  //   full-screen takeover → false (SSE artifact events must not reopen the right panel)
+  //   neither → undefined (defer to user-controlled artifactPanelVisible)
+  const forceArtifactVisible = artifactVisibilityOverride(activeMode, isAdmin, isMd);
 
   const rightContent = userMgmtMode ? (
     <ErrorBoundary fallbackLabel="用户管理详情面板出错了">
       <UserManagementDetailPanel />
     </ErrorBoundary>
+  ) : toolUnitMode ? (
+    <ErrorBoundary fallbackLabel="工具管理详情面板出错了">
+      <ToolUnitDetailPanel />
+    </ErrorBoundary>
   ) : (
-    <ErrorBoundary fallbackLabel="文稿面板出错了">
+    <ErrorBoundary fallbackLabel="文件面板出错了">
       <ArtifactPanel />
     </ErrorBoundary>
   );

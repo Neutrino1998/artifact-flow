@@ -1,11 +1,14 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useCallback } from 'react';
 import { useArtifactStore } from '@/stores/artifactStore';
 import { useStreamStore } from '@/stores/streamStore';
 import { useArtifacts } from '@/hooks/useArtifacts';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
-import { exportArtifact } from '@/lib/api';
+import { fetchArtifactRawObjectUrl } from '@/lib/api';
+import { triggerBlobDownload, triggerObjectUrlDownload } from '@/lib/download';
+import { BUTTON_GHOST_ICON, BUTTON_PRIMARY, SELECT_COMPACT } from '@/lib/styles';
+import { SELECT_CHEVRON_COMPACT } from '@/components/ui/SelectChevron';
 import ArtifactTabs from './ArtifactTabs';
 
 function getFileExtension(contentType: string): string {
@@ -32,57 +35,31 @@ export default function ArtifactToolbar() {
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const { selectVersion, selectArtifact } = useArtifacts();
   const { copied, copy } = useCopyFeedback();
-  const [showDownloadMenu, setShowDownloadMenu] = useState(false);
-  const downloadMenuRef = useRef<HTMLDivElement>(null);
-
-  // Close download menu on outside click
-  useEffect(() => {
-    if (!showDownloadMenu) return;
-    const handler = (e: MouseEvent) => {
-      if (downloadMenuRef.current && !downloadMenuRef.current.contains(e.target as Node)) {
-        setShowDownloadMenu(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [showDownloadMenu]);
 
   const handleCopy = useCallback(() => {
     copy(selectedVersion?.content ?? current?.content ?? '');
   }, [current, selectedVersion, copy]);
 
-  const handleDownload = useCallback(() => {
+  const handleDownload = useCallback(async () => {
     if (!current) return;
+    // Blob-backed artifact (image / docx / pdf upload): download the immutable
+    // original via /raw (text path would emit an empty file — there is no text
+    // representation). Hidden while streaming, so the blob is always flushed here.
+    if (current.has_blob) {
+      try {
+        const url = await fetchArtifactRawObjectUrl(current.session_id, current.id);
+        triggerObjectUrlDownload(current.original_filename ?? current.title, url);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Download failed';
+        window.alert(message);
+      }
+      return;
+    }
     const content = selectedVersion?.content ?? current.content;
     const ext = getFileExtension(current.content_type);
     const filename = current.title.replace(/[/\\?%*:|"<>]/g, '-') + ext;
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-    setShowDownloadMenu(false);
+    triggerBlobDownload(filename, new Blob([content], { type: 'text/plain;charset=utf-8' }));
   }, [current, selectedVersion]);
-
-  const handleExportDocx = useCallback(async () => {
-    if (!current) return;
-    setShowDownloadMenu(false);
-
-    try {
-      const blob = await exportArtifact(current.session_id, current.id, 'docx');
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = current.title.replace(/[/\\?%*:|"<>]/g, '-') + '.docx';
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Export failed';
-      window.alert(message);
-    }
-  }, [current]);
 
   const handleRefresh = useCallback(() => {
     if (!current) return;
@@ -101,7 +78,6 @@ export default function ArtifactToolbar() {
   if (!current) return null;
 
   const displayVersion = selectedVersion?.version ?? current.current_version;
-  const isMarkdown = current.content_type === 'text/markdown';
 
   return (
     <>
@@ -119,17 +95,20 @@ export default function ArtifactToolbar() {
         <div className="flex items-center gap-1">
           {/* Version selector — hidden during streaming (in-memory versions not in DB yet) */}
           {!isStreaming && versions.length > 1 && (
-            <select
-              value={displayVersion}
-              onChange={handleVersionChange}
-              className="text-xs bg-bg dark:bg-bg-dark border border-border dark:border-border-dark rounded px-1.5 py-0.5 text-text-secondary dark:text-text-secondary-dark"
-            >
-              {versions.map((v) => (
-                <option key={v.version} value={v.version}>
-                  v{v.version} ({v.update_type})
-                </option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                value={displayVersion}
+                onChange={handleVersionChange}
+                className={SELECT_COMPACT}
+              >
+                {versions.map((v) => (
+                  <option key={v.version} value={v.version}>
+                    v{v.version} ({v.update_type})
+                  </option>
+                ))}
+              </select>
+              {SELECT_CHEVRON_COMPACT}
+            </div>
           )}
 
           {/* Refresh — hidden during streaming: it re-reads via REST (pure DB now,
@@ -138,7 +117,7 @@ export default function ArtifactToolbar() {
           {!isStreaming && (
             <button
               onClick={handleRefresh}
-              className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
+              className={`${BUTTON_GHOST_ICON} p-1.5`}
               aria-label="Refresh artifact"
               title="刷新"
             >
@@ -149,10 +128,11 @@ export default function ArtifactToolbar() {
             </button>
           )}
 
-          {/* Copy */}
+          {/* Copy — hidden for blob-backed artifacts (no text content to copy) */}
+          {!current.has_blob && (
           <button
             onClick={handleCopy}
-            className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
+            className={`${BUTTON_GHOST_ICON} p-1.5`}
             aria-label="Copy content"
             title={copied ? '已复制' : '复制内容'}
           >
@@ -167,17 +147,16 @@ export default function ArtifactToolbar() {
               </svg>
             )}
           </button>
+          )}
 
-          {/* Download / export — hidden during streaming (decision 6): both are
-              durable-acting reads. Raw download would emit live-but-uncommitted
-              content; docx export reads pure DB (the last flushed version, not the
-              live edits) AND converts possibly half-edited content. Re-enabled
+          {/* Download — hidden during streaming (decision 6): a durable-acting
+              read. Text download would emit live-but-uncommitted content; blob
+              raw download would 404 (blob not flushed until turn end). Re-enabled
               after COMPLETE, when the DB re-pull has aligned everything. */}
           {!isStreaming && (
-          <div className="relative" ref={downloadMenuRef}>
             <button
-              onClick={() => setShowDownloadMenu((v) => !v)}
-              className="p-1.5 rounded text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
+              onClick={handleDownload}
+              className={`${BUTTON_GHOST_ICON} p-1.5`}
               aria-label="Download artifact"
               title="下载"
             >
@@ -185,32 +164,12 @@ export default function ArtifactToolbar() {
                 <path d="M7 2v7.5M4 7l3 3 3-3M2.5 11.5h9" />
               </svg>
             </button>
-
-            {showDownloadMenu && (
-              <div className="absolute right-0 top-full mt-1 bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-lg shadow-float py-1 z-50 min-w-[160px]">
-                <button
-                  onClick={handleDownload}
-                  className="w-full text-left px-3 py-1.5 text-xs text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-                >
-                  下载原格式
-                </button>
-                {isMarkdown && (
-                  <button
-                    onClick={handleExportDocx}
-                    className="w-full text-left px-3 py-1.5 text-xs text-text-primary dark:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-                  >
-                    导出为 Word (.docx)
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
           )}
 
           {/* Back to list */}
           <button
             onClick={() => setCurrent(null)}
-            className="ml-2 w-7 h-7 flex items-center justify-center rounded-full bg-accent text-white hover:bg-accent-hover transition-colors"
+            className={`${BUTTON_PRIMARY} ml-2 w-7 h-7 flex items-center justify-center rounded-full`}
             aria-label="Back to artifact list"
             title="返回列表"
           >

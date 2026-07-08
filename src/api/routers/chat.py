@@ -34,6 +34,7 @@ from api.schemas.chat import (
     CancelResponse,
     ChatRequest,
     ChatResponse,
+    ActiveStreamResponse,
     InjectRequest,
     InjectResponse,
     ResumeRequest,
@@ -42,6 +43,7 @@ from api.schemas.chat import (
     ConversationDetailResponse,
     ConversationSummary,
     MessageResponse,
+    StorageUsageResponse,
 )
 from api.services.controller_factory import create_controller, run_and_push, sanitize_error_event
 from api.services.stream_transport import StreamTransport
@@ -95,7 +97,8 @@ async def send_message(
         raise HTTPException(status_code=422, detail=f"Invalid chat payload: {msgs}")
 
     # 附件数量上限：尽早拒绝（在建会话 / 转换之前），避免无界附件导致长时间串行
-    # 转换 + DB 写入 + USER_INPUT 归属串膨胀。每个文件的 20MB 大小限制仍在转换处生效。
+    # 转换 + DB 写入 + USER_INPUT 归属串膨胀。每个文件的大小限制（MAX_UPLOAD_SIZE）
+    # 仍在转换处生效；批量总字节由代理层独立封顶。
     attachment_count = sum(1 for f in files if f.filename)
     if attachment_count > config.MAX_CHAT_ATTACHMENTS:
         raise HTTPException(
@@ -106,9 +109,14 @@ async def send_message(
     # 空白正文且无附件 = 本轮无可处理输入：USER_INPUT 正文为空 → 被 EventHistory 过滤
     # → history 为空 → build() 在 [-1] 崩。边界即拒（前端 sendDisabled 同条件，这里是
     # 非 UI 客户端的兜底）；带附件时由归属串补足正文，故仅无附件时要求非空。
-    # force_compact 与附件同理：execute_loop 会向 USER_INPUT 正文注入压缩指令（非空），
-    # 故「点压缩但不打字」的纯压缩轮次同样放行。
-    if not request.user_input.strip() and attachment_count == 0 and not request.force_compact:
+    # force_compact / activate_skills 与附件同理：execute_loop 会向 USER_INPUT 正文注入压缩
+    # 指令 / skill 正文（非空），故「只点压缩/只激活 skill 但不打字」的轮次同样放行。
+    if (
+        not request.user_input.strip()
+        and attachment_count == 0
+        and not request.force_compact
+        and not request.activate_skills
+    ):
         raise HTTPException(
             status_code=422,
             detail="user_input must not be blank when no files are attached",
@@ -135,12 +143,37 @@ async def send_message(
     #   - `_N` 去重副本 bug 消失:submit 抛 409（已有活跃执行）时尚未 stage 任何东西，
     #     execute_and_push 根本不会跑 → 重发不产生副本（旧实现在 submit 前已 commit）。
     #   - 上传与模型产物的「turn 中途死即丢失」语义一致（皆 ephemeral，随 lease 重启而失）；
-    #     用户侧由前端 staged 文件保留到 COMPLETE 兜底。
+    #     turn 中途死则上传丢失，用户从本地重新选文件重试（composer 发送即清空，不做保留）。
     converted = [
         await convert_uploaded_file(f)
         for f in files
         if f.filename  # 空 file part（前端无附件时不应出现，防御性跳过）
     ]
+
+    # blob 存储配额准入挡板：本次新增 blob 字节 + 该用户已占用 > 配额 → 413，让用户
+    # 删对话腾空间(删 conversation 级联清 artifact/blob)。只数 blob —— 二进制是灌爆盘的
+    # 唯一向量,文本不计(见 config.ARTIFACT_USER_QUOTA_BYTES)。在建会话 / stage 前拦,
+    # 拒绝时零 DB 状态。软上限:并发上传可略微超额,挡量级不挡字节。0 = 禁用挡板。
+    # business-rule reject → loud 落原因(req-id ↔ 用户+用量),否则 grep 只见一条 413。
+    incoming_blob_bytes = sum(len(c.blob) for c in converted if c.blob is not None)
+    if config.ARTIFACT_USER_QUOTA_BYTES > 0 and incoming_blob_bytes > 0:
+        used_bytes = await conversation_manager.get_user_upload_bytes(user_id)
+        if used_bytes + incoming_blob_bytes > config.ARTIFACT_USER_QUOTA_BYTES:
+            quota_mb = config.ARTIFACT_USER_QUOTA_BYTES / 1024 / 1024
+            logger.warning(
+                f"Upload rejected (413): user={user_id} quota exceeded — "
+                f"used={used_bytes} incoming={incoming_blob_bytes} "
+                f"quota={config.ARTIFACT_USER_QUOTA_BYTES}"
+            )
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"存储空间不足：本次上传（{incoming_blob_bytes / 1024 / 1024:.1f}MB）"
+                    f"将超出你的 {quota_mb:.0f}MB 存储配额"
+                    f"（当前已用 {used_bytes / 1024 / 1024:.1f}MB）。"
+                    f"请删除一些对话或已导入的技能以释放空间后重试。"
+                ),
+            )
 
     # 确保 conversation 存在（失败需返回 HTTP 错误，保留在路由层；FK: artifact_session
     # → conversation，但 artifact 现在 turn 末才落库，ensure 仍需在 submit 前建好会话行）
@@ -153,6 +186,7 @@ async def send_message(
             "content": c.content,
             "content_type": c.content_type,
             "metadata": c.metadata,
+            "blob": c.blob,                          # 二进制源(图片/富格式),纯文本为 None
         }
         for c in converted
     ]
@@ -163,7 +197,7 @@ async def send_message(
     # 构造执行闭包
     async def execute_and_push():
         try:
-            async with create_controller(conversation_id, message_id) as ctrl:
+            async with create_controller(conversation_id, message_id, user_id) as ctrl:
                 parent_kwargs = {}
                 if 'parent_message_id' in request.model_fields_set:
                     parent_kwargs['parent_message_id'] = request.parent_message_id
@@ -176,6 +210,7 @@ async def send_message(
                         message_id=message_id,
                         uploaded_files=uploaded_files,
                         force_compact=request.force_compact,
+                        activate_skills=request.activate_skills,
                         **parent_kwargs,
                     ),
                 )
@@ -208,7 +243,7 @@ async def send_message(
     )
 
 
-@router.get("/{conv_id}/active-stream")
+@router.get("/{conv_id}/active-stream", response_model=ActiveStreamResponse)
 async def get_active_stream(
     conv_id: str,
     current_user: TokenPayload = Depends(get_current_user),
@@ -216,22 +251,23 @@ async def get_active_stream(
     stream_transport: StreamTransport = Depends(get_stream_transport),
     runner: ExecutionRunner = Depends(get_execution_runner),
 ):
-    """查询会话是否有活跃的执行流，用于断线重连"""
+    """查询会话是否有活跃的执行流，用于断线重连。无活跃流是正常空状态。"""
     await _verify_ownership(conv_id, current_user, conversation_manager)
 
     message_id = await runner.store.get_leased_message_id(conv_id)
     if not message_id:
-        raise HTTPException(status_code=404, detail="No active execution")
+        return ActiveStreamResponse(active=False, conversation_id=conv_id)
 
     # 校验 stream 是否仍存活（meta key 未过期）
     if not await stream_transport.is_stream_alive(message_id):
-        raise HTTPException(status_code=410, detail="Stream expired")
+        return ActiveStreamResponse(active=False, conversation_id=conv_id)
 
-    return {
-        "conversation_id": conv_id,
-        "message_id": message_id,
-        "stream_url": f"/api/v1/stream/{message_id}",
-    }
+    return ActiveStreamResponse(
+        active=True,
+        conversation_id=conv_id,
+        message_id=message_id,
+        stream_url=f"/api/v1/stream/{message_id}",
+    )
 
 
 @router.post("/{conv_id}/inject", response_model=InjectResponse)
@@ -352,11 +388,29 @@ async def list_conversations(
                 created_at=datetime.fromisoformat(conv["created_at"]),
                 updated_at=datetime.fromisoformat(conv["updated_at"]),
                 active_message_id=active_executions.get(conv["conversation_id"]),
+                upload_bytes=conv.get("upload_bytes", 0),
             )
             for conv in conversations
         ],
         total=total,
         has_more=offset + len(conversations) < total,
+    )
+
+
+@router.get("/storage", response_model=StorageUsageResponse)
+async def get_storage_usage(
+    current_user: TokenPayload = Depends(get_current_user),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
+):
+    """当前用户的附件存储用量 + 配额（喂前端进度条）。
+
+    与上传挡板同口径（compute-on-read，单一数据源）。声明在 `/{conv_id}` 之前，
+    否则 `storage` 会被当作 conv_id 命中详情路由。
+    """
+    used_bytes = await conversation_manager.get_user_upload_bytes(current_user.user_id)
+    return StorageUsageResponse(
+        used_bytes=used_bytes,
+        quota_bytes=config.ARTIFACT_USER_QUOTA_BYTES,
     )
 
 
@@ -396,6 +450,8 @@ async def get_conversation(
                     created_at=msg.created_at,
                     children=children_map.get(msg.id, []),
                     execution_metrics=(msg.metadata_ or {}).get("execution_metrics"),
+                    uploaded_files=(msg.metadata_ or {}).get("uploaded_files"),
+                    active_skills=(msg.metadata_ or {}).get("active_skills"),
                 )
                 for msg in messages
             ],
@@ -569,5 +625,4 @@ async def resume_execution(
     return ResumeResponse(
         stream_url=f"/api/v1/stream/{message_id}"
     )
-
 

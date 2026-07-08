@@ -4,39 +4,60 @@ XML 格式化器
 与 xml_parser.py 互为 formatter / parser 对
 """
 
+import json
 from typing import List, Dict, Any
 
+from config import config
 from tools.base import BaseTool
 
 
-def generate_tool_instruction(tools: List[BaseTool]) -> str:
-    """生成工具使用说明（注入 system prompt）"""
-    if not tools:
-        return "<tool_instructions>\nNo tools available.\n</tool_instructions>"
-
-    instruction = """<tool_instructions>
-<format>
+# 工具调用协议语法块 —— 对所有 agent / 所有轮恒等,是理想的 prompt-cache 可缓存前缀。
+# per-tool 描述不在此(B-3 渐进式披露):描述挪到 <available_tools> 动态 reminder,
+# 故 catalog 变化只失效消息尾部、这段语法前缀恒稳。
+_TOOL_GRAMMAR_BODY = """<format>
 You may make one or more tool calls per turn. They execute sequentially.
-Wrap ALL parameter values in <![CDATA[...]]>.
+Inside <params>, emit one element per parameter whose tag is that parameter's own name (from the tool's Parameters list) and wrap EVERY value in <![CDATA[...]]>.
+
+Every tool call must include a <reason> sibling before <name>: one short sentence, in the user's language, saying why you are making THIS call. It is shown to the user (and is what they read when a tool needs their approval). <reason> is NOT a parameter — it goes outside <params>, never inside it.
+
+<tool_call>
+  <reason><![CDATA[why you are making this call]]></reason>
+  <name>tool_name</name>
+  <params>
+    <replace_with_param_name><![CDATA[value]]></replace_with_param_name>
+  </params>
+</tool_call>
 
 For multiple calls, emit each <tool_call> block one after another — there is NO wrapping container tag:
 <tool_call>
+  <reason><![CDATA[why the first call]]></reason>
   <name>first_tool</name>
   <params>...</params>
 </tool_call>
 <tool_call>
+  <reason><![CDATA[why the second call]]></reason>
   <name>second_tool</name>
   <params>...</params>
 </tool_call>
-</format>
-"""
+</format>"""
 
-    for tool in tools:
-        instruction += f"\n{_format_tool_doc(tool)}"
 
-    instruction += "\n</tool_instructions>"
+def generate_tool_grammar() -> str:
+    """工具调用协议语法块（注入 system prompt 稳定前缀，保 APC）。
 
-    return instruction
+    不含任何 per-tool 描述 —— 描述挪到 `<available_tools>` 动态 reminder（B-3 渐进式
+    披露，见 ContextManager._build_available_tools）。语法对所有 agent / 所有轮恒等。
+    """
+    return f"<tool_instructions>\n{_TOOL_GRAMMAR_BODY}\n</tool_instructions>"
+
+
+def render_tool_docs(tools: List[BaseTool]) -> str:
+    """渲染一组工具的完整 doc（name/description/params/example），换行连接。
+
+    供 `<available_tools>` 的 non-deferred 段与 `search_tools` 结果共用 —— 「完整描述
+    长什么样」只此一处定义,两条披露路径不会漂移。
+    """
+    return "\n".join(_format_tool_doc(tool) for tool in tools)
 
 
 def format_result(name: str, result: Dict[str, Any]) -> str:
@@ -79,13 +100,23 @@ def _format_tool_doc(tool: BaseTool) -> str:
             required = " (required)" if param.required else " (optional)"
             doc += f"  - {param.name}: {param.type}{required} - {param.description}\n"
             if param.enum:
-                doc += f"    Values: {', '.join(param.enum)}\n"
+                values = [
+                    json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else str(v)
+                    for v in param.enum
+                ]
+                doc += f"    Values: {', '.join(values)}\n"
             if param.default is not None:
-                doc += f"    Default: {param.default}\n"
+                if isinstance(param.default, (dict, list)):
+                    default = json.dumps(param.default, ensure_ascii=False)
+                else:
+                    default = str(param.default)
+                doc += f"    Default: {default}\n"
     else:
         doc += "Parameters: None\n"
 
-    if tool.show_example:
+    # 部署级开关(config.RENDER_TOOL_EXAMPLES),非 per-tool —— 示例需不需要取决于
+    # 这台部署用什么模型(弱模型留示例换稳定性 / 强模型关掉省 token),与具体工具无关。
+    if config.RENDER_TOOL_EXAMPLES:
         doc += f"Example:\n{tool.to_xml_example()}\n"
 
     doc += "</tool>"

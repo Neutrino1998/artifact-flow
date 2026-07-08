@@ -1,8 +1,19 @@
 import type { Components, UrlTransform } from 'react-markdown';
 import { defaultUrlTransform } from 'react-markdown';
+import type { PluggableList } from 'unified';
+import rehypeHighlight from 'rehype-highlight';
+import rehypeKatex from 'rehype-katex';
+import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
 import CodeBlock from './CodeBlock';
 import DiagramPre from './DiagramPre';
 import ArtifactLink from './ArtifactLink';
+
+export const markdownRemarkPlugins: PluggableList = [
+  remarkGfm,
+  [remarkMath, { singleDollarTextMath: false }],
+];
+export const markdownRehypePlugins: PluggableList = [rehypeKatex, rehypeHighlight];
 
 export const markdownComponents: Partial<Components> = {
   pre: CodeBlock as Components['pre'],

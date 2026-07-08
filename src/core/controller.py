@@ -8,13 +8,13 @@
 """
 
 import asyncio
-from typing import Awaitable, Callable, Dict, List, Optional, Any, AsyncGenerator
+from typing import Awaitable, Callable, Dict, List, Optional, Any, AsyncGenerator, Tuple
 from uuid import uuid4
 
 from sqlalchemy.exc import IntegrityError
 
 from config import config
-from core.engine import EngineHooks, create_initial_state, execute_loop, finalize_metrics
+from core.engine import EmptyTurnInputError, EngineHooks, create_initial_state, execute_loop, finalize_metrics, turn_has_content
 from core.events import StreamEventType
 from core.conversation_manager import ConversationManager
 from core.post_processing import (
@@ -23,10 +23,10 @@ from core.post_processing import (
     decide_terminal,
     ensure_terminal,
     make_external_cancelled_event,
-    uploads_persisted,
 )
 from tools.base import BaseTool
 from tools.builtin.artifact_service import ArtifactService
+from utils.instance import INSTANCE_ID
 from utils.logger import get_logger, get_request_id
 from utils.time import utc_now
 
@@ -39,50 +39,83 @@ _UNSET = object()
 _SENTINEL = object()
 
 
+def resolve_skill_activation(
+    activate_skills: Optional[List[str]],
+    visible: Any,  # 支持 `slug in visible` 的容器(EffectiveSkillSet.visible dict)
+    parent_active_skills: List[str],
+) -> Tuple[List[str], List[str]]:
+    """用户按钮激活的 slug 解析(纯函数,C-3)—— 两件正交的事:
+
+      - **to_inject** = 勾选的可见 skill,**只请求内去重**(不按 parent 去重)。重勾一个往轮
+        已激活的 skill = 重新注入正文(对齐 agent 自调 read_skill 每次都返回正文,补"正文被
+        压缩掉后想重提醒"的缺口)。
+      - **active_skills** = parent ∪ to_inject 去重(sticky 名单不堆重复;能力 grant 幂等)。
+
+    可见性 gate 在此(不可见静默丢,不 404 免泄露);空 body gate 另在取正文时(需 DB)。"""
+    to_inject: List[str] = []
+    for slug in (activate_skills or []):
+        if slug in visible and slug not in to_inject:
+            to_inject.append(slug)
+    active_skills = list(parent_active_skills)
+    for slug in to_inject:
+        if slug not in active_skills:
+            active_skills.append(slug)
+    return to_inject, active_skills
+
+
 class ExecutionController:
     """Pi-style 执行控制器，驱动 agent/tool 循环并管理 interrupt resume。"""
 
     def __init__(
         self,
-        agents: Dict[str, Any],           # {name: AgentConfig}
+        agents: Dict[str, Any],           # {name: AgentSnapshot}
         tools: Dict[str, BaseTool],        # {name: BaseTool}
+        effective_toolsets: Dict[str, Any],  # {agent_name: EffectiveToolset}(决策 11 单一解析点)
         hooks: EngineHooks,
         artifact_service: Optional[ArtifactService] = None,
         conversation_manager: Optional[ConversationManager] = None,
         message_event_repo: Optional[Any] = None,  # MessageEventRepository
         on_engine_exit: Optional[Callable[[str, str], Awaitable[None]]] = None,
         db_manager: Optional[Any] = None,
+        sandbox_session: Optional[Any] = None,  # duck-typed: status_snapshot(动态上下文快照用,
+                                                # 生命周期归 controller_factory + runner cleanup)
+        effective_skillset: Optional[Any] = None,  # EffectiveSkillSet(C-2;None = 无 skill)
     ):
         self.agents = agents
         self.tools = tools
+        self.effective_toolsets = effective_toolsets
+        self.effective_skillset = effective_skillset
         self.hooks = hooks
         self.artifact_service = artifact_service
         self.conversation_manager = conversation_manager or ConversationManager()
         self.message_event_repo = message_event_repo
         self._on_engine_exit = on_engine_exit
         self._db_manager = db_manager
+        self.sandbox_session = sandbox_session
         logger.info("ExecutionController initialized")
 
     async def _with_db_retry(self, fn):
         """
         DB 操作重试适配器。
 
-        fn: async (conv_mgr, event_repo, art_mgr) -> result
+        fn: async (conv_mgr, event_repo) -> result
         有 db_manager 时委托 db_manager.with_retry（fresh session + 瞬断重试）。
         无 db_manager 时回退到 bound 实例（不重试）。
+
+        **fn 必须幂等**(见 db_manager.with_retry 契约):with_retry 失败时从头重跑 fn。
+        幂等键在调用前定好、跨重试稳定;写操作把「已存在」当成功(见 add_message_async /
+        start_conversation_async 的撞重吞、batch_create 的稳定 event_id)。
         """
         if not self._db_manager:
-            return await fn(self.conversation_manager, self.message_event_repo, self.artifact_service)
+            return await fn(self.conversation_manager, self.message_event_repo)
 
         from repositories.conversation_repo import ConversationRepository
         from repositories.message_event_repo import MessageEventRepository
-        from repositories.artifact_repo import ArtifactRepository
 
         async def _with_session(session):
             conv_mgr = ConversationManager(ConversationRepository(session))
             event_repo = MessageEventRepository(session)
-            art_svc = ArtifactService(ArtifactRepository(session))
-            return await fn(conv_mgr, event_repo, art_svc)
+            return await fn(conv_mgr, event_repo)
 
         return await self._db_manager.with_retry(_with_session)
 
@@ -94,6 +127,7 @@ class ExecutionController:
         message_id: Optional[str] = None,
         uploaded_files: Optional[List[Dict[str, Any]]] = None,
         force_compact: bool = False,
+        activate_skills: Optional[List[str]] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         流式执行接口（新消息）
@@ -118,21 +152,41 @@ class ExecutionController:
         # 为空 → 被 EventHistory 过滤 → 空 history → ContextManager.build 在 [-1] 崩。
         # 在此（任何 yield / DB 写之前）拒掉，不依赖调用方校验；router 另留 422 作为 HTTP
         # 快速边界。带附件时 execute_loop 会给 USER_INPUT 拼归属串（非空），故仅无附件时要求非空。
-        # force_compact 同理：execute_loop 会注入压缩指令补足正文，纯压缩轮次（无文本无附件）放行。
-        if not user_input.strip() and not uploaded_files and not force_compact:
+        # 顶层快速闸(pre-DB):文本/附件/compact/activate_skills 全空 = 真无输入,早拒(免下方
+        # DB setup)。这里对 activate_skills 用 **raw** 值(此刻还没解析可见性/body)—— 它是放行
+        # 代理,非权威;skill 可能全被过滤成空,那种情况由**解析后**的 turn_has_content 闸收口
+        # (见下,#1:raw activate_skills ≠ 会注入内容)。
+        if (
+            not user_input.strip()
+            and not uploaded_files
+            and not force_compact
+            and not activate_skills
+        ):
             raise ValueError(
                 "'user_input' must be non-empty when no artifacts are attached"
             )
 
         # ========== 准备工作 ==========
+        # setup 期对话读写也走 _with_db_retry(B-5):每调一次开短 retrying session,不再
+        # 骑 controller_factory 预开的 turn-long session(那条已退役)。
         if not conversation_id:
-            conversation_id = await self.conversation_manager.start_conversation_async()
+            # conv_id 在 retry 边界**之前**生成(幂等键稳定):否则瞬断重试会另生成一个
+            # uuid、提交出第二个孤儿会话(reviewer #2)。传入固定 id → 重试复用同 id →
+            # create_conversation 撞重被 start_conversation_async 吞掉 → 幂等。
+            conversation_id = f"conv-{uuid4().hex}"
+            await self._with_db_retry(
+                lambda cm, er: cm.start_conversation_async(conversation_id)
+            )
         else:
-            await self.conversation_manager.ensure_conversation_exists(conversation_id)
+            await self._with_db_retry(
+                lambda cm, er: cm.ensure_conversation_exists(conversation_id)
+            )
 
         # Auto-detect parent
         if parent_message_id is _UNSET:
-            parent_message_id = await self.conversation_manager.get_active_branch(conversation_id)
+            parent_message_id = await self._with_db_retry(
+                lambda cm, er: cm.get_active_branch(conversation_id)
+            )
             if parent_message_id:
                 logger.debug(f"Auto-set parent_message_id to active_branch: {parent_message_id}")
 
@@ -159,7 +213,7 @@ class ExecutionController:
             path_events = []
         else:
             path_events = await self._with_db_retry(
-                lambda cm, er, am: cm.load_event_history_async(
+                lambda cm, er: cm.load_event_history_async(
                     conv_id=conversation_id, to_message_id=resolved_parent
                 )
             )
@@ -171,11 +225,95 @@ class ExecutionController:
         if self.artifact_service:
             self.artifact_service.set_session(session_id)
 
-        # 从父消息 metadata 中恢复 always_allowed_tools
+        # 从父消息 metadata 中恢复 always_allowed_tools + active_skills(同生命周期)
         parent_always_allowed = []
+        parent_active_skills = []
         if resolved_parent:
-            parent_meta = await self.conversation_manager.get_message_metadata_async(resolved_parent)
+            parent_meta = await self._with_db_retry(
+                lambda cm, er: cm.get_message_metadata_async(resolved_parent)
+            )
             parent_always_allowed = parent_meta.get("always_allowed_tools", [])
+            parent_active_skills = parent_meta.get("active_skills", [])
+
+        # 用户点按钮激活(C-3):activate_skills 经 EffectiveSkillSet.visible 校验(可见=正确性,
+        # 不要求 enabled —— 显式激活自己关掉的可见 skill 是合法 opt-in;不可见的静默丢弃,不 404
+        # 避免泄露存在性)。拆成两件正交的事(对齐 agent 自调 read_skill:正文每次都返回、名单/
+        # 能力幂等去重):
+        #   ① 注入集 to_inject = 所有勾选的可见 skill(**只请求内去重**,不按 parent 去重)——
+        #      重勾一个往轮已激活的 skill = **重新注入正文**,补上"正文被压缩掉后想重提醒"的缺口
+        #      (agent 自调 read_skill 本就每次返回正文,此举把按钮对齐到同一自由度)。
+        #   ② sticky 名单 active_skills = parent ∪ to_inject 去重(名单不堆重复;能力 grant 幂等)。
+        visible = self.effective_skillset.visible if self.effective_skillset else {}
+        to_inject, active_skills = resolve_skill_activation(
+            activate_skills, visible, parent_active_skills
+        )
+
+        # 能力轴 sticky 跨 turn:在已算好的字典上 merge 预烤 skill_grants(全 agent),与 mid-turn
+        # read_skill 同入口。activate_skill 幂等,对全量 active_skills(parent∪注入)跑一遍即可。
+        # 工具能力跨 turn 持有 ≠ L3 mount 跨 turn(沙盒 per-turn 销毁,原则 8 护栏)。
+        for slug in active_skills:
+            for ets in self.effective_toolsets.values():
+                ets.activate_skill(slug)
+
+        # obs:能力变更审计(info)—— 只记本轮**新**授予能力的 skill(button/sticky-new),
+        # 不含 parent 已激活的重放(那非新事件、每轮都有 = 噪音)。无授予=其 allowed-tools 本就可调。
+        for slug in to_inject:
+            if slug in parent_active_skills:
+                continue
+            granted: set = set()
+            for ets in self.effective_toolsets.values():
+                grant = ets.skill_grants.get(slug)
+                if grant is not None:
+                    granted.update(grant.permissions)
+            logger.info(
+                "Skill %r activated via button (message %s); enabled tools: %s",
+                slug, message_id, sorted(granted) or "(none)",
+            )
+
+        # 注入集正文:短 session 取 skill_md(B-5),供 engine 注入 USER_INPUT。空正文 skip(不注
+        # 入 None);查不到=脏 slug,静默略过。重勾已激活 → 正文重注入(对齐 agent read_skill)。
+        activated_skill_bodies: List[Dict[str, Any]] = []
+        if to_inject and self._db_manager:
+            from repositories.skill_repo import SkillRepository
+
+            async def _load_bodies(session):
+                repo = SkillRepository(session)
+                out = []
+                for slug in to_inject:
+                    body = await repo.get_skill_md(slug)
+                    if body and body.strip():
+                        info = visible.get(slug)
+                        out.append({
+                            "slug": slug,
+                            "name": getattr(info, "name", slug),
+                            "body": body,
+                        })
+                return out
+
+            activated_skill_bodies = await self._db_manager.with_retry(_load_bodies)
+
+        # 权威空输入闸(#1):activate_skills 是意图,经可见性/空 body 过滤后才知本轮真会不会注入
+        # 内容。顶层闸放行 raw activate_skills;这里按**解析后**的 activated_skill_bodies 收口 ——
+        # 与上传/compact 对齐(三者都以"真会注入非空"为准)。全空(勾的全不可见 / 空 body,或
+        # 啥也没勾)→ 拒,免空 USER_INPUT 击穿 context_manager 的 [-1]。
+        if not turn_has_content(
+            user_input, uploaded_files, force_compact, activated_skill_bodies
+        ):
+            raise EmptyTurnInputError(
+                "'user_input' resolves to empty content: the activated skill(s) "
+                "produced nothing to inject (not visible / empty body)"
+            )
+
+        # L1:enabled 可见 skill(全 agent 同一份)→ <available_skills>。effective_skillset
+        # 缺省(无 skill / 测试)→ 空列表,不注入。
+        available_skills = (
+            [
+                {"slug": info.slug, "name": info.name, "description": info.description}
+                for info in self.effective_skillset.available_for_l1()
+            ]
+            if self.effective_skillset
+            else []
+        )
 
         # 创建初始状态
         initial_state = create_initial_state(
@@ -184,6 +322,8 @@ class ExecutionController:
             message_id=message_id,
             path_events=path_events,
             always_allowed_tools=parent_always_allowed,
+            active_skills=active_skills,
+            activated_skill_bodies=activated_skill_bodies,
             uploaded_files=uploaded_files,
             force_compact=force_compact,
         )
@@ -191,11 +331,13 @@ class ExecutionController:
         logger.info(f"Processing new message (streaming) in conversation {conversation_id}")
 
         # 添加消息到 conversation (after all pre-engine setup to avoid orphaned rows on failure)
-        await self.conversation_manager.add_message_async(
-            conv_id=conversation_id,
-            message_id=message_id,
-            user_input=user_input,
-            parent_id=resolved_parent,
+        await self._with_db_retry(
+            lambda cm, er: cm.add_message_async(
+                conv_id=conversation_id,
+                message_id=message_id,
+                user_input=user_input,
+                parent_id=resolved_parent,
+            )
         )
 
         # ========== 执行引擎 ==========
@@ -224,9 +366,12 @@ class ExecutionController:
                         state=initial_state,
                         agents=self.agents,
                         tools=self.tools,
+                        effective_toolsets=self.effective_toolsets,
                         hooks=self.hooks,
                         artifact_service=self.artifact_service,
                         emit=emit_to_queue,
+                        sandbox_session=self.sandbox_session,
+                        available_skills=available_skills,
                     )
             except TimeoutError:
                 # 引擎执行超时。模仿协作式 cancel:置 flag 正常返回,让 post-processing
@@ -317,7 +462,7 @@ class ExecutionController:
                     response_to_write = choose_response_for_terminal(pp_engine)
                     try:
                         await self._with_db_retry(
-                            lambda cm, er, am: cm.update_response_async(
+                            lambda cm, er: cm.update_response_async(
                                 conv_id=conversation_id,
                                 message_id=message_id,
                                 response=response_to_write,
@@ -346,8 +491,8 @@ class ExecutionController:
                 initial_state["response"] = f"Engine error: {str(e)}"
                 # record-not-emit:不在此 append/yield ERROR。统一终态发射点是 post-processing
                 # 的 decide_terminal —— 它在 flush 之后读 error_detail 构建唯一的 ERROR 终态
-                # (带 request_id + artifacts_flushed),controller 再 append + yield。若这里也
-                # 自行 emit,会与 decide_terminal 双发 ERROR。request_id 在此 contextvar still
+                # (带 request_id),controller 再 append + yield。若这里也自行 emit,会与
+                # decide_terminal 双发 ERROR。request_id 在此 contextvar still
                 # 有效(engine_task 继承发起轮 POST 的 id),先冻结进 error_detail。
                 initial_state["error_detail"] = {
                     "error": str(e),
@@ -415,7 +560,7 @@ class ExecutionController:
             # 或硬删用户触发的 CASCADE）。早返回跳过后续三段写库，避免撞 FK。
             try:
                 pp.conv_alive = await self._with_db_retry(
-                    lambda cm, er, am: cm.exists_async(conversation_id)
+                    lambda cm, er: cm.exists_async(conversation_id)
                 )
             except Exception as exists_err:
                 # exists 探测的瞬断不应阻塞 post-processing —— 当作 alive 走原流程。
@@ -441,7 +586,6 @@ class ExecutionController:
                         await self.artifact_service.flush_all(
                             session_id, db_manager=self._db_manager
                         )
-                        pp.artifacts_flushed = True
                     except IntegrityError as flush_ie:
                         # Layer 2: exists() 之后到 flush 之间 conv 被删（TOCTOU）
                         logger.warning(
@@ -491,10 +635,8 @@ class ExecutionController:
                             "conversation_id": conversation_id,
                             "message_id": message_id,
                             "error": "Event persistence failed — turn aborted, please retry",
+                            "instance_id": INSTANCE_ID,
                             "execution_metrics": pp.final_state.get("execution_metrics", {}),
-                            # transport 层直发 ERROR(绕过 decide_terminal),但仍须带 bit:
-                            # flush 已成功 → 附件在 DB → 前端清掉输入框附件,重试不再重复 staging。
-                            "artifacts_flushed": uploads_persisted(pp),
                         },
                     }
                     return
@@ -512,7 +654,7 @@ class ExecutionController:
                     pp.response_update_attempted = True
                     try:
                         await self._with_db_retry(
-                            lambda cm, er, am: cm.update_response_async(
+                            lambda cm, er: cm.update_response_async(
                                 conv_id=conversation_id, message_id=message_id,
                                 response=response_to_write,
                             )
@@ -530,13 +672,24 @@ class ExecutionController:
                 always_allowed = pp.final_state.get("always_allowed_tools", [])
                 if always_allowed:
                     metadata_updates["always_allowed_tools"] = always_allowed
+                # active_skills 能力轴持久化(append-only sticky,照抄 always_allowed_tools)
+                active_skills = pp.final_state.get("active_skills", [])
+                if active_skills:
+                    metadata_updates["active_skills"] = active_skills
                 execution_metrics = pp.final_state.get("execution_metrics", {})
                 if execution_metrics:
                     metadata_updates["execution_metrics"] = execution_metrics
+                # 本轮上传文件 [{id, filename}] — display-only 快照,供用户气泡在重载/
+                # 切分支后渲染附件(LLM 侧的归属在 USER_INPUT 事件里,与此互不依赖)。
+                # flush 失败不写:artifact 没落库,气泡不该声称附件存在(staging 失败
+                # 路径 uploaded_artifacts 已被 engine 清空,空列表自然跳过)。
+                uploaded_files = pp.final_state.get("uploaded_artifacts") or []
+                if uploaded_files and not pp.flush_error:
+                    metadata_updates["uploaded_files"] = uploaded_files
                 if metadata_updates:
                     try:
                         await self._with_db_retry(
-                            lambda cm, er, am: cm.update_message_metadata_async(
+                            lambda cm, er: cm.update_message_metadata_async(
                                 conv_id=conversation_id, message_id=message_id, metadata=metadata_updates,
                             )
                         )
@@ -568,9 +721,7 @@ class ExecutionController:
                         "conversation_id": conversation_id,
                         "message_id": message_id,
                         "error": str(e),
-                        # transport 层直发 ERROR:带 bit 反映 flush 真实进度(异常可能落在
-                        # flush 前或后),前端据此决定保留/清掉输入框附件,避免重复 staging。
-                        "artifacts_flushed": uploads_persisted(pp),
+                        "instance_id": INSTANCE_ID,
                     }
                 }
         except asyncio.CancelledError:
@@ -634,7 +785,7 @@ class ExecutionController:
         pp.response_update_attempted = True
         try:
             await self._with_db_retry(
-                lambda cm, er, am: cm.update_response_async(
+                lambda cm, er: cm.update_response_async(
                     conv_id=pp.conversation_id, message_id=pp.message_id,
                     response=response_to_write,
                 )
@@ -661,7 +812,10 @@ class ExecutionController:
         Raises:
             IntegrityError — conv 已被删除（caller 应早返回，跳过后续阶段）
         """
-        if not self.message_event_repo:
+        # 能否持久化 = 有 db_manager(走 _with_db_retry 的 fresh er)或有 bound event_repo。
+        # B-5:turn 路径下 factory 不再绑 message_event_repo,持久化经 db_manager 短 session;
+        # 两者皆无(裸 controller / 部分测试)才是真的「无处可写」→ 跳过。
+        if not self._db_manager and not self.message_event_repo:
             return True
 
         all_events = final_state.get("events", [])
@@ -686,7 +840,7 @@ class ExecutionController:
 
         try:
             await self._with_db_retry(
-                lambda cm, er, am: er.batch_create(db_events)
+                lambda cm, er: er.batch_create(db_events)
             )
             logger.info(f"Persisted {len(db_events)} events for message {message_id}")
             return True

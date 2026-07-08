@@ -46,7 +46,9 @@ class ConversationManager:
             repository: ConversationRepository 实例（可以为 None）
         """
         self.repository = repository
-        logger.info("ConversationManager initialized")
+        # DEBUG 而非 INFO:构造无上下文、每请求处理器各 new 一个(单轮可达 ~8 次),
+        # INFO 下纯噪音会淹没真实里程碑。真业务事件(start_conversation_async 等)才打 INFO。
+        logger.debug("ConversationManager initialized")
 
     def _ensure_repository(self) -> ConversationRepository:
         """确保 Repository 已设置"""
@@ -155,12 +157,19 @@ class ConversationManager:
         now = utc_now().isoformat()
 
         if self.repository:
-            await self.repository.add_message(
-                conversation_id=conv_id,
-                message_id=message_id,
-                user_input=user_input,
-                parent_id=parent_id
-            )
+            try:
+                await self.repository.add_message(
+                    conversation_id=conv_id,
+                    message_id=message_id,
+                    user_input=user_input,
+                    parent_id=parent_id
+                )
+            except DuplicateError:
+                # 幂等(with_retry 契约):本方法被 _with_db_retry 包裹,瞬断会从头重跑;
+                # 若上次尝试已 commit 了这条 message(message_id 是稳定幂等键),重跑会撞重 —
+                # 当作上次已成功,不 raise(否则非瞬断异常逃出 with_retry → 整轮崩,即便消息
+                # 已落库)。与兄弟 start_conversation_async 同范式。title 重设天然幂等,照常走。
+                logger.debug(f"Message {message_id} already exists (idempotent retry)")
 
             # 如果是第一条消息（无 parent），自动生成 title
             if parent_id is None:
@@ -314,6 +323,8 @@ class ConversationManager:
         Returns:
             对话信息字典列表
         """
+        from repositories.artifact_repo import ArtifactRepository
+
         repo = self._ensure_repository()
         conversations = await repo.list_conversations(
             limit=limit,
@@ -322,13 +333,18 @@ class ConversationManager:
             title_query=title_query,
             load_messages=True
         )
+        # 逐项"附件占用"：一次 GROUP BY 聚合本页 session 的 blob 字节（同 session 复用
+        # repo.session；只读 size_bytes，index-only）。缺失项 = 无 blob → 兜 0。
+        art_repo = ArtifactRepository(repo.session)
+        sizes = await art_repo.get_blob_bytes_by_sessions([conv.id for conv in conversations])
         return [
             {
                 "conversation_id": conv.id,
                 "title": conv.title,
                 "message_count": len(conv.messages) if conv.messages else 0,
                 "created_at": conv.created_at.isoformat(),
-                "updated_at": conv.updated_at.isoformat()
+                "updated_at": conv.updated_at.isoformat(),
+                "upload_bytes": sizes.get(conv.id, 0),
             }
             for conv in conversations
         ]
@@ -346,6 +362,24 @@ class ConversationManager:
         """
         repo = self._ensure_repository()
         return await repo.count_conversations(user_id=user_id, title_query=title_query)
+
+    async def get_user_upload_bytes(self, user_id: str) -> int:
+        """该用户已占用的存储总字节 = artifact blob(跨其全部会话)+ 私有 skill bundle。
+
+        上传/导入准入配额检查 + 存储用量进度条共用此口径（单一数据源：DB 现算，
+        不存计数器；skill 与 artifact 共用一个池，见 config.ARTIFACT_USER_QUOTA_BYTES）。
+        临时实例化 Repository 复用本 manager 的 session，维持三层边界。
+
+        已接受的软度:artifact 写路径深处的 chokepoint(create_from_upload)保持
+        blob-only 口径 —— 配额本就「挡量级非字节级」,不在 turn 内写路径加跨 repo 读。
+        """
+        from repositories.artifact_repo import ArtifactRepository
+        from repositories.skill_repo import SkillRepository
+
+        repo = self._ensure_repository()
+        blob_bytes = await ArtifactRepository(repo.session).get_user_blob_bytes(user_id)
+        bundle_bytes = await SkillRepository(repo.session).get_user_bundle_bytes(user_id)
+        return blob_bytes + bundle_bytes
 
     # ========================================
     # Router 代理方法
@@ -501,6 +535,72 @@ class ConversationManager:
                 owner_display_name = row[0] or row[1]
 
         return conv, messages, events, owner_display_name
+
+    async def reconstruct_prompt(
+        self,
+        conv_id: str,
+        message_id: str,
+        agent_start_event_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Admin 取证：重建某一发 LLM 调用实际发出的完整 prompt（messages 列表）。
+
+        忠实性策略 = 持久化后纯重放，不重新生成动态内容：
+          - 静态 system_prompt + 动态 reminder 取自锚 agent_start 事件的持久化原值；
+          - 历史 messages 用 build_event_history 在「锚之前的 path 事件」上确定性重放；
+          - 两者经 ContextManager.assemble（与 live build 同一拼接叶子）合成。
+        分支安全：按 message_id 走 load_event_history_async（分支正确的 path），锚事件
+        必须落在该 path 上，否则（选错分支 / 不存在）返回 None → 404。
+
+        「100%」是**版本内**的 100%：历史重放仍跑当前版本的 build_event_history，且
+        reminder 仅对本次变更上线后产生的事件存在（旧事件 reminder=None，只重建
+        system_prompt + 历史，has_reminder=False 标注）。识图块因 vision_blocks 是
+        per-turn 内存缓存、已不可得，统一降级为占位文本（与跨轮 reload 同口径）。
+
+        Returns:
+            重建结果 dict；conv / message / 锚事件任一在该 path 上找不到时返回 None。
+        """
+        from core.event_history import build_event_history
+        from core.context_manager import ContextManager
+        from core.events import StreamEventType
+
+        events = await self.load_event_history_async(conv_id, to_message_id=message_id)
+        if not events:
+            return None
+
+        anchor_idx = next(
+            (i for i, e in enumerate(events)
+             if e.event_type == StreamEventType.AGENT_START.value
+             and e.event_id == agent_start_event_id),
+            None,
+        )
+        if anchor_idx is None:
+            return None
+
+        anchor = events[anchor_idx]
+        data = anchor.data or {}
+        system_prompt = data.get("system_prompt") or ""
+        reminder = data.get("reminder")  # 旧事件无此字段 → None
+        agent_name = anchor.agent_name
+
+        history = build_event_history(events[:anchor_idx], agent_name)
+        if not history:
+            # 锚前无本 agent 历史 = 数据异常（正常下至少有 user_input / subagent_instruction）。
+            # 取证场景、admin 会上报，记一笔便于排查。
+            logger.warning(
+                f"reconstruct_prompt: empty history before anchor "
+                f"(conv={conv_id} msg={message_id} event={agent_start_event_id})"
+            )
+            return None
+
+        messages = ContextManager.assemble(system_prompt, history, reminder)
+        return {
+            "conversation_id": conv_id,
+            "message_id": message_id,
+            "agent_start_event_id": agent_start_event_id,
+            "agent_name": agent_name,
+            "has_reminder": reminder is not None,
+            "messages": messages,
+        }
 
     async def delete_conversation(self, conversation_id: str) -> bool:
         """

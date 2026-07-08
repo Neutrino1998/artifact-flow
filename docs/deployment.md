@@ -22,15 +22,21 @@ graph TD
 | **1: Quick Trial** | 本地试用 | backend + frontend | SQLite + InMemory | `docker-compose.yml` |
 | **2A: Prod 自建** | 生产 + 自建基础设施 | Caddy + backend + frontend + PG + Redis | 容器化 | `docker-compose.prod.yml --profile infra` |
 | **2B: Prod 云数据库** | 生产 + RDS/ElastiCache | Caddy + backend + frontend | 外部托管 | `docker-compose.prod.yml` |
-| **3A: 内网 自建** | 离线/内网部署 | nginx + backend + frontend + PG + Redis | 容器化 | `deploy/docker-compose.intranet.yml --profile infra` |
-| **3B: 内网 托管DB** | 离线 + 内部DB服务 | nginx + backend + frontend | 内部托管 | `deploy/docker-compose.intranet.yml` |
+| **3A: 内网 自建** | 离线/内网部署 | Caddy + backend + frontend + PG + Redis | 容器化 | `deploy/docker-compose.intranet.yml --profile infra` |
+| **3B: 内网 托管DB** | 离线 + 内部DB服务 | Caddy + backend + frontend | 内部托管 | `deploy/docker-compose.intranet.yml` |
 
 **关键区别：**
 
 - **Mode 2 vs 1：** Caddy 反向代理（自动 HTTPS / Let's Encrypt，端口 80+443）、PG + Redis 持久化、Alembic 自动迁移
-- **Mode 3 vs 2：** 反向代理用 **nginx**（内网无公网域名 / 不签证书，HTTP 单端口 80 即可）；`image:` 替代 `build:`，通过 `docker save/load` 离线部署，无需访问外部镜像仓库
-- **代理分叉的原因：** 公网（Mode 2）需要自动签发 / 续期 TLS 证书 → Caddy 一行配置搞定；内网（Mode 3）是气隙环境，Let's Encrypt 不可达、也不需要域名证书 → 保留零依赖的 nginx。两套反向代理共用同一套维护页 flag 机制（`deploy/maintenance/`）。
+- **Mode 3 vs 2：** 同为 Caddy，但 **TLS 姿态相反**——内网是气隙环境，ACME 不可达，用**静态证书**（公司测试中心/内部 CA 签发，放 `deploy/certs/`，见该目录 README）+ 全局 `auto_https off`（防手滑写出裸域名 site 触发 ACME 拨号卡死）；`image:` 替代 `build:`，通过 `docker save/load` 离线部署，无需访问外部镜像仓库
+- **代理配置的组织：** 两个模式共用 `deploy/caddy/common.caddy`（路由顺序 / 维护页 gate / SSE flush / 上传总量闸 / X-Real-IP / 多副本轮询 + wedge 副本被动摘除，全部模式无关机制只写一遍），入口文件各留薄壳——`deploy/caddy/Caddyfile`（Mode 2：ACME + AF_DOMAIN）/ `deploy/caddy/Caddyfile.intranet`（Mode 3：静态 tls + HTTP→HTTPS 跳转）。`deploy/caddy/` 整目录挂载进容器（单文件挂载 pin inode，编辑/tar 覆盖后 reload 会断）。维护页 flag 机制（`deploy/maintenance/`）同一套。
 - **2A/3A vs 2B/3B：** `--profile infra` 控制是否启动 PG/Redis 容器
+
+**`deploy/` 下的独立文档**（本文档覆盖不到的细节，按需展开）：
+
+- [`deploy/FLEET.md`](https://github.com/Neutrino1998/artifact-flow/blob/main/deploy/FLEET.md) — `fleet.sh` 单机→多机统一发布入口（见下方「扩缩容与多机发布」）
+- [`deploy/MULTI-REPLICA.md`](https://github.com/Neutrino1998/artifact-flow/blob/main/deploy/MULTI-REPLICA.md) — release-vs-serve 多副本拆分的完整设计 + 真机验收记录/清单
+- [`deploy/MIGRATION-project-name.md`](https://github.com/Neutrino1998/artifact-flow/blob/main/deploy/MIGRATION-project-name.md) — 一次性 `deploy_*` → `artifactflow_*` volume 改名迁移（仅升级自 pre-pin 版本的老部署需要，新部署跳过）
 
 ---
 
@@ -137,8 +143,9 @@ open https://$AF_DOMAIN
 # 水平扩展 backend（Caddy 自动负载均衡）
 docker compose -f docker-compose.prod.yml --profile infra up -d --scale backend=2
 
-# 注意：首次启动多副本时，Alembic 迁移通过 PG advisory lock 串行化
-# 只有一个副本执行迁移，其他副本等待并验证后再启动
+# 注意：一次性 release 服务先跑迁移 + reconcile 并退出，backend 靠 compose
+# depends_on 等它完成后再起来 serve（release-vs-serve 拆分，非各副本抢锁）
+# 详见「运维参考 → 数据库迁移」与 deploy/MULTI-REPLICA.md
 ```
 
 ---
@@ -190,88 +197,140 @@ docker compose -f docker-compose.prod.yml up -d
 #   artifactflow-1.0.0.manifest.txt       发版清单（commit、镜像 id、关键文件）
 #   *.sha256                              逐 tar 校验和
 
-# 首次部署 / nginx-pg-redis 版本升级 —— 显式加 infra
+# 首次部署 / caddy-pg-redis 版本升级 —— 显式加 infra
 ./scripts/release.sh 1.0.0 --with-infra
 # 额外产出：
-#   artifactflow-infra-nginx1.30.1-pg16-redis7.tar.gz  (~130MB)
-# 文件名按 base image 版本内容寻址 —— 目标机已有同名 tar 就跳过 scp
+#   artifactflow-infra-caddy2.10-pg16-redis7.tar.gz  (~130MB)
+# 文件名按 base image 版本内容寻址 —— 目标机已有同名 tar 就可跳过传输
+
+# 首次部署且要启用 bash/mount/persist 沙盒工具 —— 再加 sandbox 宿主前置包
+./scripts/release.sh 1.0.0 --with-infra --with-sandbox
+# 额外产出：
+#   artifactflow-sandbox-1.0.0-amd64.tar.gz       sandbox 运行镜像
+#   artifactflow-sandbox-verify-1.0.0.tar.gz      gVisor 验证探针
+#   sandbox-gvisor-<date>-x86_64.tar.gz           runsc 离线安装包
+
+# release 是阶段化的；如果网络在后段下载 gVisor / wheels 时抖掉，
+# 修复网络后用 --resume 重跑，会跳过已完成且输入未变的 app/infra/sandbox-image 等阶段。
+./scripts/release.sh 1.0.0 --with-infra --with-sandbox --resume
+# 如需强制重跑某一阶段：
+./scripts/release.sh 1.0.0 --with-infra --with-sandbox --resume --force gvisor
 ```
 
 > **拆 4 tar 按变更频率分层：**
-> - `config` / `deploy` 是 bind-mount 进容器的,改 prompt / nginx / scripts 重传对应 tar 即可,不动镜像。
+> - `config` / `deploy` 是 bind-mount 进容器的,改 prompt / Caddyfile / scripts 重传对应 tar 即可,不动镜像。
 > - `app` 是 backend + frontend,几乎每次发版都改。
-> - `infra` 是 nginx / postgres / redis 三个 base image,版本动得极少（半年一次量级）,默认**不打**,显式 `--with-infra` 才生成。命名带 base image 版本号方便目标机一眼看出"我已经有这个 infra tar 了"。
+> - `infra` 是 caddy / postgres / redis 三个 base image,版本动得极少（半年一次量级）,默认**不打**,显式 `--with-infra` 才生成。命名带 base image 版本号方便目标机一眼看出"我已经有这个 infra tar 了"。
 
-> **目标平台默认 `linux/amd64`。** Apple Silicon 上跑 `release.sh` 会自动通过 buildx + QEMU 交叉编译，省得装到 x86_64 服务器后撞 `exec format error`。要构建别的平台传 `PLATFORM=linux/arm64 ./scripts/release.sh ...`。
+> **目标平台默认 `linux/amd64`。** Apple Silicon 上跑 `release.sh` 会自动通过 buildx + QEMU 交叉编译，省得装到 x86_64 服务器后撞 `exec format error`。要构建 arm64 目标，用 `./scripts/release.sh 1.0.0 --platform linux/arm64`（或继续传 `PLATFORM=linux/arm64`）。一次 release 只产出一个目标架构的 bundle。
 
 ### 首次部署（在目标内网机器上）
 
 ```bash
-# 1. 传 4 个 tar + sha256 + manifest 到目标机
-scp dist/artifactflow-{app,config,deploy}-1.0.0.tar.gz{,.sha256} \
-    dist/artifactflow-infra-nginx1.30.1-pg16-redis7.tar.gz{,.sha256} \
-    dist/artifactflow-1.0.0.manifest.txt \
-    target:/opt/artifactflow/
+# 1. 用现场批准的介质/流程把发布文件放到 /opt/artifactflow/
+#    必备：
+#      artifactflow-{app,config,deploy}-1.0.0.tar.gz{,.sha256}
+#      artifactflow-1.0.0.manifest.txt
+#    首次部署 / infra 镜像变更时还需要：
+#      artifactflow-infra-caddy2.10-pg16-redis7.tar.gz{,.sha256}
+#    启用 sandbox 时还需要 sandbox image / verify / gVisor 三件套及其 .sha256。
 
-# 2. 校验 + 解包
+# 2. 先解 deploy/，拿到 fleet/verify 脚本
 cd /opt/artifactflow
-# 首次部署 deploy/ 还没解出来,verify-bundle.sh 用不了 —— 直接 sha256sum -c。
-# CWD 跟 tar 在同一层、不会撞路径坑;glob 在全新目录里也只会匹配本次的 tar。
-sha256sum -c artifactflow-*.tar.gz.sha256
-tar xzf artifactflow-deploy-1.0.0.tar.gz       # 解出 ./deploy/(下次升级起就能用 verify-bundle.sh)
-tar xzf artifactflow-config-1.0.0.tar.gz       # 解出 ./config/
-docker load -i artifactflow-infra-nginx1.30.1-pg16-redis7.tar.gz
-docker load -i artifactflow-app-1.0.0.tar.gz
+tar xzf artifactflow-deploy-1.0.0.tar.gz
+deploy/scripts/verify-bundle.sh .
 
-# 3. 配置 .env
-cp deploy/.env.intranet.example deploy/.env
-# 编辑 deploy/.env，填写密码和 API Keys
+# 3. 初始化单机拓扑和 .env，然后编辑密码/API Keys
+deploy/scripts/fleet.sh init-local --scale 1
+vi deploy/.env
+vi deploy/fleet.conf
 
 # 4. 内网 LLM（如需）：编辑 config/models/models.yaml，把 base_url 指向内部推理端点
 
-# 5. 启动（3A: 自建基础设施）
-AF_VERSION=1.0.0 docker compose -f deploy/docker-compose.intranet.yml --profile infra up -d
+# 5. 启动（fleet 会校验 bundle、解 config/deploy、load 镜像、跑 release gate、等待健康）
+AF_BUNDLE_VERSION=1.0.0 deploy/scripts/fleet.sh deploy .
+# 启用沙盒时，先以 root 准备 runsc / sandbox 镜像 / scratch 根，再 deploy：
+# sudo env AF_BUNDLE_VERSION=1.0.0 AF_SANDBOX_POOL_SIZE=8G deploy/scripts/fleet.sh prepare-sandbox .
+# AF_ENABLE_SANDBOX=1 AF_BUNDLE_VERSION=1.0.0 deploy/scripts/fleet.sh deploy .
 
 # 6. 创建管理员
 docker compose -f deploy/docker-compose.intranet.yml exec backend \
   python scripts/create_admin.py admin --password <your-password>
 ```
 
-### 滚动更新已有部署
+### 扩缩容与多机发布（fleet.sh）
 
-新版本到位后，`pause.sh` / `resume.sh` 把维护窗口包成两个动作：起维护页 + 停服务 → 加载新镜像 → 起新版本 + 关维护页。
+`deploy/scripts/fleet.sh` 是从「一台机器」到「多台机器」的统一发布入口，把上面「校验 + 解包 + 加载 + 启动 + 探活」
+收成一条命令，并原生支持 `--scale`：
 
 ```bash
-# 在内网机（假设新 tar 已 scp 到 ./tmp/ 下，typically 不含 infra）
-cd /opt/artifactflow
-
-# 1. 校验 + 解包（不影响在跑容器，可在维护开始前做）
-./deploy/scripts/verify-bundle.sh tmp    # 一次性校验 tmp/ 下所有 tar
-tar xzf tmp/artifactflow-deploy-1.0.1.tar.gz
-tar xzf tmp/artifactflow-config-1.0.1.tar.gz
-docker load -i tmp/artifactflow-app-1.0.1.tar.gz
-
-# 2. 进维护窗口
-./deploy/scripts/pause.sh "升级到 v1.0.1"
-
-# 3. 退维护窗口（resume 失败 → 维护页保持开启，运维有时间排查）
-./deploy/scripts/resume.sh 1.0.1
+deploy/scripts/fleet.sh init-local           # 生成单机 fleet.conf，并从模板种 deploy/.env
+deploy/scripts/fleet.sh preflight            # 单机/每台机器就绪检查
+deploy/scripts/fleet.sh deploy <bundle-dir>  # 校验 → 解包 → load → release 门 → up → 探活
+deploy/scripts/fleet.sh deploy --dry-run <d> # 只打印计划，不改动任何东西
+deploy/scripts/fleet.sh prepare-sandbox <d>  # 从 bundle 单独准备 runsc/sandbox/verify
+deploy/scripts/fleet.sh status               # 各机器 compose ps + LB 健康
+deploy/scripts/fleet.sh rollback             # 回退到上一个成功版本
 ```
 
-> **首次启用维护页（一次性 bootstrap）：** 如果现有 nginx 容器是用旧 compose 起的（没有 maintenance 卷挂载），先 force-recreate 一次让它读新 nginx.conf：
-> ```bash
-> docker compose -f deploy/docker-compose.intranet.yml up -d --force-recreate nginx
-> ```
-> 之后 `pause.sh` 写的 flag 文件才能被 nginx 看到。后续升级直接 pause/resume 即可，不再需要 force-recreate。
+拓扑写在 `deploy/fleet.conf`（从 `fleet.conf.example` 复制，gitignored），单机场景下四个角色
+（`infra`/`release`/`app`/`lb`）都填 `local`；`app` 行的 `scale=N` 就是 `--scale backend=N`
+的等价物。完整命令、多机时序、以及 TLS 证书自动兜底（`up` 前自动跑
+`ensure-cert.sh`），见 [`deploy/FLEET.md`](https://github.com/Neutrino1998/artifact-flow/blob/main/deploy/FLEET.md)。
 
-> **涉及 compose infra config 变更的升级（罕见）：** 多数升级只改 backend / frontend 镜像和它们用到的 `ARTIFACTFLOW_*` env，`pause/resume` 已覆盖（resume.sh `up backend frontend` → compose 自动 diff config-hash → 改了就 recreate）。但若本版本动了 `postgres` / `redis` / `nginx` 服务块的 HostConfig 字段（`image` / `logging` / `mem_limit` / `volumes` / `ports` / `cap_add` / `command`，典型例：commit `d7f26f8`），或 `.env` 里 `AF_HTTP_PORT`（nginx `ports:` interpolation），resume.sh 不触碰 infra 容器，新配置永远不生效。**前提**：先按上面常规流程完成 `verify-bundle.sh` + `docker load` + `tar xzf deploy/config`，让新 compose + 新 nginx.conf 就位，再进入下面两个时机（否则 recreate 用的是旧 compose / 旧 nginx.conf）：
+> **现状：** 单机路径（含 `--scale`）已跑通并推荐日常使用；**多机路径目前 gated off**
+> （`fleet.sh` 里显式 `die`，只有 `--dry-run` 能打印计划），要等第二台机器上跑通验收后才解封——
+> 详见 FLEET.md「Multi-host: unexercised seams」。多机到位前，扩容仍只能在单机上
+> `--scale`；跨机负载均衡 / 多机数据库 URL 等留在文档里作为**已设计未验证**的路径。
 >
-> **(a) nginx 块或 `AF_HTTP_PORT` 变了 → 在 `pause.sh` 之前 recreate**：
+> `fleet.sh` 默认只包装 `deploy/docker-compose.intranet.yml`（Mode 3 基础栈）。
+> 如果 bundle 带 sandbox 且要启用 `bash` / `mount` / `persist`，设置
+> `AF_ENABLE_SANDBOX=1`；但宿主前置是 root 级操作，需先显式运行
+> `sudo env ... deploy/scripts/fleet.sh prepare-sandbox <bundle-dir>`，再 deploy。
+> deploy/preflight 会追加 `deploy/docker-compose.sandbox.yml` overlay，并把 runsc /
+> sandbox 镜像 / scratch root 缺失视为 blocker。
+> Mode 2（公网）扩缩容仍用上面 Mode 2A「扩缩容」小节里的裸 `--scale` +
+> `deploy-prod.sh`。
+>
+> `fleet.sh deploy` 是直接 `up`（数秒 blip，无维护页）；要维护页包住整个升级窗口，
+> 在 deploy 前后用 `maintenance.sh on|off` 包住即可。
+
+### 滚动更新已有部署
+
+新版本到位后，`fleet deploy` 接管校验、解包、加载镜像、起服务和探活；需要维护页窗口时，用 `maintenance.sh on|off` 包住它。
+
+```bash
+# 在内网机（假设新 release 文件已通过现场介质放到 ./tmp/ 下，typically 不含 infra）
+cd /opt/artifactflow
+
+# 1. 校验（不影响在跑容器，可在维护开始前做）
+./deploy/scripts/verify-bundle.sh tmp    # 一次性校验 tmp/ 下所有 tar
+
+# 1b. 自举新版 deploy 脚本。旧版 fleet.sh 不知道如何从 bundle 解 deploy/config，
+#     所以调用 fleet deploy 前，必须先让新版 fleet.sh 落盘。
+tar xzf tmp/artifactflow-deploy-1.0.1.tar.gz
+
+# 如本次 bundle 带 sandbox 且要刷新 sandbox 前置，先以 root 执行：
+# sudo env AF_BUNDLE_VERSION=1.0.1 AF_SANDBOX_POOL_SIZE=8G ./deploy/scripts/fleet.sh prepare-sandbox tmp
+
+# 2. 进维护窗口（可选；fleet deploy 本身是直接 up）
+./deploy/scripts/maintenance.sh on "升级到 v1.0.1"
+
+# 3. fleet 接管解包 + docker load + compose up + 健康检查；成功后关闭维护页
+AF_BUNDLE_VERSION=1.0.1 ./deploy/scripts/fleet.sh deploy tmp && \
+  ./deploy/scripts/maintenance.sh off
+```
+
+> **nginx→Caddy 一次性切换（既有内网部署首次升到 Caddy 版）：** 新 compose 里反向代理服务从 `nginx` 换成了 `caddy`，`up -d` 不会自动移除旧服务的容器。切换步骤：证书就位（`deploy/certs/server.crt` + `server.key`，完整链，见该目录 README）→ 常规 prep（verify-bundle / docker load / tar xzf deploy+config）→ `docker compose -f deploy/docker-compose.intranet.yml --profile infra down` → `AF_VERSION=<版本> ... up -d`（infra 服务定义变更走 down/up，不走 pause/resume）。防火墙记得放行 HTTPS 端口（默认 443，`AF_HTTPS_PORT` 可改）。切换后旧的 `nginx:*` 镜像可 `docker rmi` 回收。
+
+> **涉及 compose infra config 变更的升级（罕见）：** 多数升级只改 backend / frontend 镜像和它们用到的 `ARTIFACTFLOW_*` env，`pause/resume` 已覆盖（resume.sh `up backend frontend` → compose 自动 diff config-hash → 改了就 recreate）。但若本版本动了 `postgres` / `redis` / `caddy` 服务块的 HostConfig 字段（`image` / `logging` / `mem_limit` / `volumes` / `ports` / `cap_add` / `command`），`deploy/caddy/` 下的配置，或 `.env` 里 `AF_HTTP_PORT` / `AF_HTTPS_PORT`（caddy `ports:` interpolation），resume.sh 不触碰 infra 容器，新配置永远不生效。**前提**：先按上面常规流程完成 `verify-bundle.sh` + `docker load` + `tar xzf deploy/config`，让新 compose + 新 Caddyfile 就位，再进入下面两个时机（否则 recreate 用的是旧 compose / 旧 Caddyfile）：
+>
+> **(a) caddy 块 / Caddyfile / `AF_HTTP(S)_PORT` 变了 → 在 `pause.sh` 之前 recreate**：
 > ```bash
 > docker compose -f deploy/docker-compose.intranet.yml --profile infra \
->     up -d --force-recreate --no-deps nginx
+>     up -d --force-recreate --no-deps caddy
 > ```
-> 接受 1–2 秒 nginx 重启的连接 RST（量级跟任意一次 nginx restart 一致，可由维护窗口公告吸收）。**为什么不能放到 pause 之后**：`deploy/nginx.conf:1-7` 用静态 `upstream backend { server backend:8000; }`，OSS nginx 启动时**一次性**解析 upstream 名称（`resolver 127.0.0.11` 只对 `proxy_pass http://$variable` 这种变量写法生效；静态 upstream 块的运行时重解析需要 nginx-plus 的 `resolve` flag，OSS 没有）。pause 后 backend/frontend 已 stopped，从 Docker DNS 消失 → nginx 启动时 upstream 解析失败 → nginx 进程退出 → 维护页连同 nginx 一起掉。
+> 接受 1–2 秒 caddy 重启的连接 RST（可由维护窗口公告吸收）。放 pause 之前只是流程简单（维护页全程可用）；Caddy 按请求时解析 upstream，backend 停止时启动也不会崩，没有旧 nginx 静态 upstream 的顺序硬约束。仅改 `deploy/caddy/` 配置内容（不动 compose 字段）时也可以用零停机的 `docker compose ... exec caddy caddy reload --config /etc/caddy/conf/Caddyfile.intranet --adapter caddyfile` 代替 recreate。
 >
 > **(b) postgres 或 redis 块变了 → 在 `pause` 与 `resume` 之间 recreate**：
 > ```bash
@@ -282,27 +341,27 @@ docker load -i tmp/artifactflow-app-1.0.1.tar.gz
 >
 > ⚠️ **`POSTGRES_*` 不属于本流程**：`POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` 是 init-only —— `postgres:16-alpine` 的 entrypoint 只在 `postgres_data` 卷**为空**时用这些 env 跑 `initdb`，已有卷的情况下完全忽略。改 .env 里这些值然后 recreate postgres，**库内用户/密码不会变**：backend 会用 `DATABASE_URL` 里的新密码、PG 库内仍是旧密码 → 认证失败 → backend 起不来（`pg_isready` 不做认证 → PG healthy 但 backend 连不上，故障表现更隐蔽）。旋转密码 / 改用户的正确流程：连进 PG 跑 `ALTER USER artifactflow WITH PASSWORD '...';`（或 `CREATE USER` / `CREATE DATABASE`），改完同步 `.env` 里 `ARTIFACTFLOW_DATABASE_URL`（backend 真正用的值）和 `POSTGRES_PASSWORD`（仅作 .env 文档，给未来 fresh-init 用），然后走 pause/resume（无需 infra recreate）。`POSTGRES_*` 真正生效的场景只有清空数据卷重新 init（生产几乎不会做）。
 >
-> 两条 recreate 都必须 `--no-deps`：不加 compose 会顺手把 backend/frontend 也起来（nginx `depends_on` 它俩），违反前提，且会用 `${AF_VERSION:-latest}` 拉镜像（内网通常没有 `latest` tag）。数据安全：named volume 在 recreate 中不动；PG 走 crash recovery 启动（5–15s），Redis 控制状态全是 TTL key 应用层自愈，nginx 无状态。
+> 两条 recreate 都必须 `--no-deps`：不加 compose 会顺手把 backend/frontend 也起来（caddy `depends_on` 它俩），违反前提，且会用 `${AF_VERSION:-latest}` 拉镜像（内网通常没有 `latest` tag）。数据安全：named volume 在 recreate 中不动；PG 走 crash recovery 启动（5–15s），Redis 控制状态全是 TTL key 应用层自愈，caddy 无状态（静态证书在 bind-mount 目录，不在容器里）。
 >
 > **`.env` 变量归属(`.env.{intranet,prod}.example` 头注释也复述了同样规则)**：
 >
 > | 变量 | 走哪条路径 |
 > |---|---|
 > | `ARTIFACTFLOW_*`（JWT / DATABASE_URL / REDIS_URL / MAX_CONCURRENT_TASKS / API keys 等） | 常规 pause/resume（resume.sh up backend → compose 检测 env_file 变化 → recreate backend） |
-> | `AF_HTTP_PORT`（仅 prod 模板有；nginx `ports:` interpolation） | 上面 (a) —— nginx pre-pause force-recreate |
+> | `AF_HTTP_PORT` / `AF_HTTPS_PORT`（caddy `ports:` interpolation；后者兼作 HTTP→HTTPS 跳转目标端口） | 上面 (a) —— caddy pre-pause force-recreate |
 > | `POSTGRES_*` | 见上方 ⚠ 块 —— **不能**走 recreate，必须 SQL `ALTER USER` |
 > | `AF_VERSION` | `resume.sh <VERSION>` 显式传入即可 |
 >
 > **验证 HostConfig 已生效**（recreate 完毕后、resume 之前；容器名按当前 compose project 实际命名，默认 `artifactflow-<svc>-1`）：
 >
 > ```bash
-> for s in nginx backend frontend postgres redis; do
+> for s in caddy backend frontend postgres redis; do
 >   echo "--- $s ---"
 >   docker inspect artifactflow-${s}-1 --format \
 >     '{{.HostConfig.LogConfig.Type}} {{.HostConfig.LogConfig.Config}} mem={{.HostConfig.Memory}}'
 > done
 > # 期望 LogConfig.Type=json-file，Config 含 max-size:100m / max-file:3；
-> # Memory（字节）：nginx=0 / backend=2147483648 / frontend=1073741824 /
+> # Memory（字节）：caddy=0 / backend=2147483648 / frontend=1073741824 /
 > # postgres=2147483648 / redis=805306368
 > ```
 
@@ -313,13 +372,14 @@ docker load -i tmp/artifactflow-app-1.0.1.tar.gz
 | `config/agents/*.md`（agent prompt） | 直接编辑宿主机文件 | `docker compose -f deploy/docker-compose.intranet.yml restart backend` |
 | `config/models/models.yaml`（模型 / base_url） | 直接编辑宿主机文件 | 同上 — `restart backend` |
 | `config/tools/*.md`（自定义工具） | 直接编辑宿主机文件 | 同上 — `restart backend` |
-| `config/site/notifications.json`（左栏通知） | 直接编辑宿主机文件，schema 见 `config/site/README.md` | **无需 restart** — 挂载在 frontend 容器，前端 60s 轮询自动重拉（标签回前台时立即重拉） |
+| `config/site/notifications.json`（左栏通知） | 管理员菜单「通知管理」或直接编辑宿主机文件，schema 见 `config/site/README.md` | **无需 restart** — backend 只写 `config/site` 挂载目录，frontend 只读服务同一目录；前端 60s 轮询自动重拉（标签回前台时立即重拉） |
 | `config/site/welcome_tips.json` / `branding.json`（欢迎页提示 / 版权页脚） | 直接编辑宿主机文件；`branding.json` 首次启用需 `cp branding.example.json branding.json` 再填值（仓库 `.gitignore` 排除真实文件） | **无需 restart**，但**只在挂载时拉一次、不轮询**——改完需用户刷新页面才看到。文件缺失 / schema 错位 → 对应 UI 自动隐藏或回落默认（fail-closed）。 |
 | `deploy/.env`（任何 `ARTIFACTFLOW_*` 变量） | 直接编辑 | **`up -d backend`**（restart 不会重读 .env，up 会检测 env 变化重建容器） |
-| `deploy/nginx.conf` | 直接编辑 | `docker compose -f deploy/docker-compose.intranet.yml restart nginx` |
+| `deploy/caddy/`（Caddyfile.intranet / common.caddy） | 直接编辑（或 tar 覆盖） | `docker compose -f deploy/docker-compose.intranet.yml exec caddy caddy reload --config /etc/caddy/conf/Caddyfile.intranet --adapter caddyfile`（零停机；`restart caddy` 也行） |
+| `deploy/certs/`（换证书） | 覆盖 `server.crt` / `server.key` | 同上 — `caddy reload` |
 | `deploy/docker-compose.intranet.yml`（端口、profile 等） | 直接编辑 | `up -d` |
 
-> **关键区别：** 改 `config/*` 用 `restart backend`（让进程重读文件），改 `.env` 用 `up -d`（让 compose 重建容器注入环境变量）。`config/site/` 是例外：挂在 frontend 容器，无需重启；其中 `notifications.json` 前端轮询自动重拉，`welcome_tips.json` / `branding.json` 只在页面加载时读取，运维改完需用户刷新。
+> **关键区别：** 改 `config/*` 用 `restart backend`（让进程重读文件），改 `.env` 用 `up -d`（让 compose 重建容器注入环境变量）。`config/site/` 是例外：同一个宿主目录只读挂在 frontend、可写挂在 backend 的通知管理入口，无需重启；其中 `notifications.json` 前端轮询自动重拉，`welcome_tips.json` / `branding.json` 只在页面加载时读取，运维改完需用户刷新。
 
 ### 仅推送 config 更新（不动镜像）
 
@@ -327,14 +387,82 @@ docker load -i tmp/artifactflow-app-1.0.1.tar.gz
 # 在构建机上重新打包（或手工 tar）
 tar czf artifactflow-config-1.0.1.tar.gz config/
 
-# 推到内网
-scp artifactflow-config-1.0.1.tar.gz target:/opt/artifactflow/
-ssh target 'cd /opt/artifactflow && \
-            tar xzf artifactflow-config-1.0.1.tar.gz && \
-            docker compose -f deploy/docker-compose.intranet.yml restart backend'
+# 通过现场介质放到目标机 /opt/artifactflow/ 后，在目标机执行：
+cd /opt/artifactflow
+tar xzf artifactflow-config-1.0.1.tar.gz
+docker compose -f deploy/docker-compose.intranet.yml restart backend
 ```
 
 > 上面的 `restart backend` 是给 `config/agents/`、`config/models/`、`config/tools/` 用的。如果**只**改了 `config/site/*.json`，不需要任何 docker 命令；其中 `notifications.json` 前端 60s 轮询自己生效，`welcome_tips.json` / `branding.json` 只在挂载时拉一次，需要用户刷新页面才看到。
+
+---
+
+## 沙盒执行环境（可选 overlay）
+
+`bash` / `mount` / `persist` 三个沙盒工具需要宿主侧前置 + 一个 compose overlay。**没有沙盒需求的部署跳过本节**——基础 compose 不挂 `docker.sock`，没有这个暴露面。架构与全部 `SANDBOX_*` 旋钮见 [架构 · 沙盒执行](architecture/sandbox.md)。
+
+随发布包额外携带三个传输单元（与应用包同一构建机产出）：**沙盒镜像** tar（`scripts/build-sandbox-image.sh`，注意按目标机选 `PLATFORM`）、**verify 探针** tar（同脚本产出，arch 无关）、**gVisor 包** tar（`sandbox/gvisor-pkg/fetch-and-package.sh`）。
+
+### 宿主前置（一次性）
+
+先显式运行 `prepare-sandbox` 从 release bundle 完成宿主前置。这个步骤会安装/注册
+runsc、写 `/etc/fstab` 并挂载 scratch loop，所以需要 root；排障时也可以直接跑
+同一套底层动作（安装 gVisor、加载 sandbox 镜像、
+创建 scratch loop、跑 smoke/verify，并把 `ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT` /
+`ARTIFACTFLOW_SANDBOX_RUNTIME` 写入 `deploy/.env`）：
+
+```bash
+# 默认 scratch pool 为 8G；可按并发 × ARTIFACTFLOW_SANDBOX_WORKSPACE_QUOTA_MB 调大。
+sudo env AF_SANDBOX_POOL_SIZE=8G deploy/scripts/fleet.sh prepare-sandbox .
+# 或直接：
+# sudo env AF_SANDBOX_POOL_SIZE=8G deploy/scripts/prepare-host.sh sandbox
+```
+
+它等价于以下手工步骤，保留在这里便于排障：
+
+1. **gVisor（runsc）**：解开 gVisor 包，`sudo ./install.sh && sudo systemctl reload docker && sudo ./smoke-test.sh`（内含 `unshare -U` 预检）。arm / 鲲鹏注意：Kylin V10 arm 默认 64K 页内核，gVisor 拒启——先用 `sandbox/kernel-4k-pkg/` 换 4K 内核再装（x86 跳过）。
+2. **沙盒镜像**：`gunzip -c artifactflow-sandbox-<ver>-<arch>.tar.gz | docker load`。
+3. **scratch 根 = 定容 loop 文件系统**（磁盘配额的硬墙层：watchdog race 窗口内写穿也只是池子满，宿主盘无恙；独立 inode 表顺带兜住海量小文件）：
+
+   ```bash
+   POOL=/var/lib/artifactflow/sandbox-pool.img
+   ROOT=/var/lib/artifactflow/sandbox-scratch
+   sudo mkdir -p "$(dirname "$POOL")" "$ROOT"
+   sudo fallocate -l 20G "$POOL"          # 容量 ≈ 并发 turn 数 × SANDBOX_WORKSPACE_QUOTA_MB(默认2G) + 余量
+   sudo mkfs.ext4 -m 0 "$POOL"
+   echo "$POOL $ROOT ext4 loop,nosuid,nodev 0 0" | sudo tee -a /etc/fstab
+   sudo mount "$ROOT" && df -h "$ROOT"    # 期望:定容 ext4 挂载成功
+   ```
+
+   不加 `noexec`——模型在工作区 `chmod +x` 后直接执行脚本是合法用法。
+4. **验证**：`tar xzf artifactflow-sandbox-verify-<ver>.tar.gz`，`IMAGE=artifactflow-sandbox:<ver>-<arch> bash verify/run-all.sh`，全绿后记录 manifest 里的 image id 作为本部署的冻结锚点。
+
+### 启动
+
+`deploy/.env` 增加（**路径必须与宿主一致**——overlay 把 scratch 根以同一绝对路径挂进 backend 容器，因为 backend 把工作区路径作为 bind source 传给 daemon、daemon 按宿主路径解析；改路径只改这一处 env，compose 两侧与应用配置同步取值）：
+
+```bash
+ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT=/var/lib/artifactflow/sandbox-scratch
+# ARTIFACTFLOW_SANDBOX_RUNTIME 默认 runsc(overlay 内兜底),无需显式写
+```
+
+```bash
+AF_VERSION=1.0.0 docker compose -f deploy/docker-compose.intranet.yml \
+                              -f deploy/docker-compose.sandbox.yml \
+                              --profile infra up -d
+
+# 使用 fleet 单机入口:
+sudo env AF_SANDBOX_POOL_SIZE=8G deploy/scripts/fleet.sh prepare-sandbox .
+AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy .
+# 如需 deploy 前单独检查，先准备再 preflight：
+# AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh preflight
+```
+
+> **安全提醒**：overlay 把 `/var/run/docker.sock` 挂进 backend 容器（等同宿主 root）。这是 DooD 架构的固有前提，防线是代码侧纪律——容器创建参数全为 backend 常量、绝不被模型内容污染（见架构文档「隔离边界」）。不要把这个 overlay 用在不需要沙盒的部署上。
+
+### 验证沙盒链路
+
+前端对话里让 agent 在沙盒里跑一条命令（例如"用 bash 运行 echo ok"）：应弹出权限确认 → 批准后返回输出。turn 结束后 `docker ps -a --filter label=artifactflow.sandbox` 应无残留容器、scratch 根下无残留目录（崩溃残留由 reaper 周期回收）。
 
 ---
 
@@ -412,9 +540,19 @@ ssh target 'cd /opt/artifactflow && \
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `ARTIFACTFLOW_MAX_CONCURRENT_TASKS` | `10` | 最大并发引擎执行数 |
-| `ARTIFACTFLOW_MAX_UPLOAD_SIZE` | `20971520` | 上传大小限制（字节，默认 20MB） |
+| `ARTIFACTFLOW_MAX_UPLOAD_SIZE` | `104857600` | 单文件上传大小限制（字节，默认 100MB）；批量总字节由代理层独立封顶（200MB）。注：文本转换另有更低的独立闸 20MB——超闸**不 422、落为二进制 blob artifact**（可下载、可 mount 进沙盒处理） |
 | `ARTIFACTFLOW_DEFAULT_PAGE_SIZE` | `20` | 分页默认每页条数 |
 | `ARTIFACTFLOW_MAX_PAGE_SIZE` | `100` | 分页最大每页条数 |
+
+### 舰队可观测（Phase C）
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `AF_VERSION` | `latest` | 镜像版本,由 compose 注入 backend、透出到实例面板(非 `ARTIFACTFLOW_` 前缀) |
+| `ARTIFACTFLOW_OBS_HEARTBEAT_TTL_SEC` | `300` | 心跳 key TTL;放长于 STALE,给 wedge 实例留「在册显红」窗口 |
+| `ARTIFACTFLOW_OBS_HEARTBEAT_STALE_SEC` | `60` | 心跳 `ts` 超此值 = 陈旧 → 面板红(约 2× sample 周期) |
+| `ARTIFACTFLOW_OBS_ERROR_WINDOW_SEC` | `300` | 最近 ERROR / autoheal 在此窗口内 → 面板黄 |
+| `ARTIFACTFLOW_OBS_AUTOHEAL_MARKER_PATH` | `` | autoheal marker 容器内路径;compose 已设为 `/app/autoheal/restart-marker.jsonl`,空=不读 |
 
 ### LLM 与工具 API Key
 
@@ -503,7 +641,7 @@ Mode A 的 compose 把 Redis `--maxmemory` 从默认 `256mb` 提到 **`512mb`**�
 
 `mem_limit` 在这里**是 tripwire 不是分配额度**（loud-failure 原则，与上一节 Redis `noeviction` 同一思路）：触上限 → OOM kill → 容器 restart → 运维收到告警，而不是悄无声息吃满 host 把同机服务一起拖死。Postgres `2g` 的稳态保守估算 `256MB shared_buffers + 200 connection × 典型 work_mem + 内核 buffer ≈ 1.2–1.5g`，留 ~30% safety margin。若 p99 RSS 长期超过 1.5g，先排查异常（慢查询/连接泄漏）再谈调参，不要直接放宽。
 
-反向代理（nginx / Caddy）不设 `mem_limit`：长期 < 50 MB，加了纯属冗余。
+反向代理（Caddy）不设 `mem_limit`：长期 < 50 MB，加了纯属冗余。
 
 ---
 
@@ -511,7 +649,10 @@ Mode A 的 compose 把 Redis `--maxmemory` 从默认 `256mb` 提到 **`512mb`**�
 
 ### 数据库迁移
 
-容器启动时 `deploy/entrypoint.sh` 自动处理迁移：
+**两条路径，`docker-compose.prod.yml` / `deploy/docker-compose.intranet.yml` 默认走前者：**
+
+- **Release-vs-serve 拆分（Mode 2/3 默认）：** 一次性 `release` 服务（`entrypoint.sh release`）单独跑迁移 + reconcile 后退出；backend 带 `AF_SKIP_RELEASE=1`，靠 compose `depends_on: { release: { condition: service_completed_successfully } }` 等它退出，**不再自己抢锁**——多副本时所有 backend 走同一条"等 release 退出"的依赖关系，下面 Leader/Follower 抢锁的分支在这条路径下根本不会进入（backend 直接跳到"继续启动"）。详见 [`deploy/MULTI-REPLICA.md`](https://github.com/Neutrino1998/artifact-flow/blob/main/deploy/MULTI-REPLICA.md)。
+- **Inline 自迁移（Mode 1 / 向后兼容 fallback）：** 不设 `AF_SKIP_RELEASE` 时的默认行为——容器启动时自己判断数据库类型、按下面这套逻辑决出 leader/follower。SQLite 单副本走这条（`release` 拆分只对 PG/MySQL 有意义）。
 
 ```mermaid
 flowchart TD
@@ -534,60 +675,56 @@ flowchart TD
     Continue --> Server[启动服务]
 ```
 
-- **多副本安全：** 通过 `pg_advisory_lock(hashtext('alembic_migrate'))` 保证只有一个副本执行迁移
+> 上图是 `run_release()` 的迁移执行逻辑本身（`entrypoint.sh` 内的共享函数）——Release-vs-serve 路径下，一次性 `release` 服务只会走到 Leader 分支（没有其他副本在抢同一把锁）；Follower 分支只在 inline fallback 下、多个 backend 同时自迁移时才会触发。
+
 - **失败处理：** Leader 迁移失败后不释放 lock（连接关闭自动释放），Follower 检测到 schema 未到 head 后退出，容器 restart policy 会重试
 - **Fallback：** 如果 advisory lock 不可用（如 MySQL），直接执行 `alembic upgrade head`
 
 ### 反向代理配置
 
-两种部署用不同的反向代理，但职责（SSE 不缓冲、挡 Swagger、维护页 flag、真实 IP 透传、上传上限）一一对应：
+两种部署统一用 Caddy。共性机制（SSE 不缓冲 `flush_interval -1`、挡 Swagger `/docs|/redoc|/openapi.json`→404、维护页 `file` matcher 每请求 stat `MAINTENANCE_ON`、真实 IP `header_up X-Real-IP {remote_host}`、上传总量闸 `request_body max_size 210MiB`、内部健康监听 `:2021`）全部住在共享片段 `deploy/caddy/common.caddy`，只写一遍；入口文件只差 TLS 姿态：
 
-| 维度 | **Mode 2（公网）= Caddy** | **Mode 3（内网）= nginx** |
+| 维度 | **Mode 2（公网）** | **Mode 3（内网）** |
 |---|---|---|
-| 配置文件 | `deploy/Caddyfile` | `deploy/nginx.conf` |
-| TLS | **自动 HTTPS**（Let's Encrypt，端口 80+443） | 无（HTTP 单端口 80，内网气隙环境） |
-| SSE | `flush_interval -1`（关响应缓冲） | `proxy_buffering off`，超时 1800s |
-| Swagger | `/docs`、`/redoc`、`/openapi.json` → 404 | 同左 |
-| 上传上限 | `request_body max_size 210MB` | `client_max_body_size 210M` |
-| 维护开关 | `file` matcher 每请求 stat `MAINTENANCE_ON` | `if (-f ... MAINTENANCE_ON) return 503` |
-| 真实 IP | `header_up X-Real-IP {remote_host}` | `proxy_set_header X-Real-IP $remote_addr` |
+| 入口文件 | `deploy/caddy/Caddyfile` | `deploy/caddy/Caddyfile.intranet` |
+| TLS | **自动 HTTPS**（Let's Encrypt / ACME，端口 80+443；证书状态在 `caddy_data` 卷） | **静态证书**（`tls /etc/caddy/certs/server.crt server.key`，全局 `auto_https off` 防 ACME 拨号；证书在 bind-mount 目录，无状态卷）。证书缺文件时 Caddy 起不来——真证书没到位可用 `deploy/scripts/ensure-cert.sh` 生成自签占位证书先顶着（幂等、不覆盖真证书） |
+| HTTP :80 | ACME 验证 + 自动跳 https（Caddy 内建） | 显式 `redir` 到 `https://{host}:{$AF_HTTPS_PORT}`（`auto_https off` 关掉了内建跳转） |
+| 端口 | 80/443 固定（协议要求） | `AF_HTTP_PORT`（默认 80）/ `AF_HTTPS_PORT`（默认 443）可改 |
 
-- **上传上限 210MB**：`POST /api/v1/chat` 把整批附件放进**一个** multipart 请求，body 是整批之和（per-file ≤20MB × ≤10 文件 = 200MB + 10MB multipart 开销）。代理层放到 210MB，让后端的 per-file / count 校验做唯一权威、超大文件拿到干净的 422 而非代理层抢先 413。两份配置数值一致。
+- **上传上限（代理层是总量权威闸）**：`POST /api/v1/chat` 把整批附件放进**一个** multipart 请求，body 是整批之和。三轴**独立**：单文件 ≤100MB（`MAX_UPLOAD_SIZE`，后端 422）、数量 ≤30（`MAX_CHAT_ATTACHMENTS`，后端 422）、**总量 ≤200MiB（代理层 413）**。总量**刻意小于** per-file×count（100MB×30=3GB）——设计意图是"1 个大文件 or 多个小文件，但控总量"，故大批量时代理层**会按设计抢先** 413（单个超大文件仍由后端给干净 422）。`210MiB` = 200MiB 内容 + 10MiB multipart 开销。**单位注意**：Caddy 的 `MB` 是 decimal 10⁶、`MiB` 才是二进制 2²⁰——写 `210MB` 会把 200MiB 批次的开销预算从 10MiB 压到 ~285KB，必须写 `MiB`。另：文本转换路径有更低的独立闸 `MAX_TEXT_CONVERT_BYTES`（20MB，防解码+词表物化的内存放大），blob 路径（图片/PDF/docx/其它二进制）不受此限；**超文本闸不 422**，文件落为二进制 blob artifact（可下载、可 mount 进沙盒处理）。
 - **`X-Real-IP`（登录频控依赖）**：后端 per-IP 登录频控**只读这个头**（刻意不信可被客户端伪造的 `X-Forwarded-For`）。安全前提是 backend 仅 `expose`、不发布主机端口，只经反向代理可达，故这个头不可伪造。删掉它 / 换不写该头的代理 → per-IP 限流静默退化成"所有请求共用代理容器一个 IP 桶"（per-username 主防线仍在）。
   - **Mode 2 灰云（CF DNS only）直连**：`{remote_host}` 就是真实客户端 IP，直接写进 `X-Real-IP`，不退化。
-  - **Mode 2 若改用 CF 橙云（proxied）**：真实客户端 IP 移到 `X-Forwarded-For`、`{remote_host}` 变成 CF 边缘 IP —— 需在 Caddyfile 加 `trusted_proxies`（CF IP 段）并改用 `{client_ip}`，否则 per-IP 限流退化。`deploy/Caddyfile` 头部注释了这一点。
-- **`--scale` 支持**：nginx 用 Docker 内部 DNS resolver `127.0.0.11`；Caddy 用服务名 `backend:8000` / `frontend:3000`，运行时按需解析，原生支持多副本。
+  - **Mode 2 若改用 CF 橙云（proxied）**：真实客户端 IP 移到 `X-Forwarded-For`、`{remote_host}` 变成 CF 边缘 IP —— 需在 Caddyfile 加 `trusted_proxies`（CF IP 段）并改用 `{client_ip}`，否则 per-IP 限流退化。`deploy/caddy/Caddyfile` 头部注释了这一点。
+- **`--scale` 支持**：backend 走 `dynamic a` 动态 upstream（按 DNS 刷新把每个副本 IP 当独立 upstream + `round_robin`）——直接写 `reverse_proxy backend:8000` 会经 keepalive 连接池钉死单副本，实测 12/12 同实例。wedge 副本摘除是**被动**的（主动健康检查不作用于 dynamic upstream）：分路径 `response_header_timeout` + 失败重试 + `fail_duration` 记忆，caddy 容器自身的 healthcheck 打 `:2021` 兼作探针。机制详注在 `deploy/caddy/common.caddy`。frontend 单副本，保持静态 upstream。
 
 ### 维护模式（无停机更新窗口）
 
-适用于 **Mode 2（公网 / Caddy）** 和 **Mode 3（内网 / nginx）**。Mode 1 无反向代理，不适用。
+适用于 **Mode 2（公网）** 和 **Mode 3（内网）**（都是 Caddy 入口）。Mode 1 无反向代理，不适用。
 
-**脚本分两套，机制完全相同（共享 `deploy/scripts/_maint_lib.sh`），只差 compose 文件与健康探针：**
+**脚本分两套，机制完全相同（共享 `deploy/scripts/_maint_lib.sh`，含同一个 resume 健康探针），只差 compose 文件：**
 
 | | Mode 2（公网） | Mode 3（内网） |
 |---|---|---|
 | 进维护窗口 | `pause-prod.sh` | `pause.sh` |
 | 退维护窗口 | `resume-prod.sh` | `resume.sh` |
 | compose 文件 | `docker-compose.prod.yml` | `deploy/docker-compose.intranet.yml` |
-| resume 健康探针 | caddy 容器内经 Caddy 内部端口 `wget localhost:2021/health`（真正过 Caddy 反代 → 验证配置已加载 + Caddy→backend 通；该端口不发布到宿主机，避开 TLS-on-localhost 域名不匹配） | host → nginx 发布端口 `localhost:${AF_HTTP_PORT}/health`（顺带验证 nginx 静态 upstream 解析未过期） |
+| resume 健康探针 | 共用：caddy 容器内经 Caddy 内部端口 `wget localhost:2021/health/ready`（真正过 Caddy 反代 → 验证配置已加载 + Caddy→backend 通；该端口不发布到宿主机，避开 TLS-on-localhost 域名不匹配） | 同左（`_maint_lib.sh` 默认实现） |
 
 **两层接口：** 镜像升级（典型场景）用 `pause*.sh` / `resume*.sh`，封装"维护页 + 停服务 → 起新版本 + 关维护页"全套；config-only 改动不需要停服务，直接用底层的 `maintenance.sh on|off`（公网内网共用同一个）。
 
 **机制：**
 
 - `deploy/scripts/maintenance.sh on|off|status` 在宿主机 `deploy/maintenance/` 下写入 / 删除 `MAINTENANCE_ON` flag 文件（两套部署共用同一目录、同一脚本）
-- 反向代理每请求检查该 flag → 命中渲染 `maintenance.html`（带睡猫的静态页）：
-  - **nginx**：每个 gated location 头部 `if (-f ... MAINTENANCE_ON) { return 503; }` → `error_page 503 @maintenance`
-  - **Caddy**：`file` matcher stat `MAINTENANCE_ON` → `file_server { status 503 }` 直接服务维护页
+- Caddy 每请求检查该 flag（`file` matcher stat `MAINTENANCE_ON`）→ 命中由 `file_server { status 503 }` 直接服务 `maintenance.html`（带睡猫的静态页）
 - 检查是 per-request 的，**无需 reload**，切换秒级生效
 - `/health/` 故意不挡——容器 healthcheck 和外部监控仍要看到真实状态
-- **上游真实 503 原样穿透**：维护页 503 只在 gated 路径内产生，`/health/ready` 在 DB/Redis 异常时返回的 JSON 503 不会被改写为 HTML（nginx 靠 `error_page` 不放 server 级 + `proxy_intercept_errors off`；Caddy 靠 `/health` 在 handle 链里排在维护 gate 之前）
+- **上游真实 503 原样穿透**：维护页 503 只在 gated 路径内产生，`/health/ready` 在 DB/Redis 异常时返回的 JSON 503 不会被改写为 HTML（`/health` 的 handle 在链里排在维护 gate 之前）
 
 **首次启用（仅一次）：** compose 已声明 `deploy/maintenance` 卷挂载，但既有代理容器需要 force-recreate 一次才会挂上：
 
 ```bash
-# Mode 3（内网 / nginx）
-docker compose -f deploy/docker-compose.intranet.yml up -d --force-recreate nginx
+# Mode 3（内网）
+docker compose -f deploy/docker-compose.intranet.yml up -d --force-recreate --no-deps caddy
 # Mode 2（公网 / Caddy）
 docker compose -f docker-compose.prod.yml --profile infra up -d --force-recreate caddy
 ```
@@ -657,6 +794,32 @@ docker compose -f deploy/docker-compose.intranet.yml restart backend
 |------|------|----------|
 | `GET /health/live` | 存活探测（Mode 1 / K8s liveness） | 进程存活，始终返回 200 |
 | `GET /health/ready` | 就绪探测（Mode 2/3 / K8s readiness） | 进程 + DB + Redis 连通性，失败返回 503 |
+
+### 舰队可观测与自愈（Phase C）
+
+多副本下「哪个实例活着 / 有没有出错 / watchdog 抓没抓到过异常」在管理端一眼可见，
+wedge 副本自动重启。三件套，都复用已有件、不引外部监控栈：
+
+- **心跳注册表**：每个 backend 的 `RuntimeSampler`（30s 周期）把快照子集多写一份到
+  Redis `{prefix:instance:<id>}`（单 SET+EX，每实例独占 slot）。字段含版本 / 上线时间 /
+  loop_lag / RSS / 在途 turn 数 / **ERROR 计数** / **watchdog 最近 wedge 摘要** /
+  **autoheal 重启轨迹**。单机（无 Redis）无注册表，面板退化成本机一行。
+- **实例面板**：管理端菜单 →「舰队实例」（admin-only 独立 tab）。红黄绿：
+  - 🟢 绿 = 心跳新鲜（`ts` < `OBS_HEARTBEAT_STALE_SEC`，默认 60s）且无异常
+  - 🟡 黄 = 活着但 loop_lag 近分钟峰值超阈 / 窗口内出过 ERROR / watchdog 抓到过 wedge /
+    近期被 autoheal 重启
+  - 🔴 红 = 心跳 `ts` 陈旧（停更）但 key 仍在 TTL 窗口内 —— wedge「在册可见」，给自愈留窗口；
+    key 真过期（> `OBS_HEARTBEAT_TTL_SEC`，默认 300s）才从列表消失（死透已收殓）
+  - **双时间轴**是刻意的:TTL 若只有 ~ STALE，wedge 实例的 key 直接过期蒸发、面板根本
+    没机会显红。颜色由读侧按 `ts` 新鲜度算(阈值可调不需回填)。
+- **autoheal**：宿主 systemd timer 每 60s 把 unhealthy 容器 `docker restart`。装法与约束
+  见 `deploy/autoheal/README.md`。两个要点：(1) 与维护窗口互斥（`MAINTENANCE_ON` 旗标在
+  即整轮 no-op，不拉活 pause.sh 有意停掉的服务）；(2) 归因经 marker 文件中转、backend
+  只读挂载代报（脚本不直连 Redis，保十行可审计），`docker restart` 保容器身份 → 面板
+  同一行连续、`started_at` 变新即重启轨迹。
+
+验收（真机随发版窗口）：`--scale backend=2` 面板见两实例；`kill -STOP` 一个副本模拟
+wedge → ≤90s 变红 → autoheal 重启 → 恢复绿；制造一条 ERROR 日志 → 对应实例变黄且计数可见。
 
 ### 数据卷
 

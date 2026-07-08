@@ -109,7 +109,7 @@ export interface paths {
         };
         /**
          * Get Active Stream
-         * @description 查询会话是否有活跃的执行流，用于断线重连
+         * @description 查询会话是否有活跃的执行流，用于断线重连。无活跃流是正常空状态。
          */
         get: operations["get_active_stream_api_v1_chat__conv_id__active_stream_get"];
         put?: never;
@@ -164,6 +164,29 @@ export interface paths {
          *     请求取消 conversation 当前正在运行的执行。引擎会在下一个检查点优雅退出。
          */
         post: operations["cancel_execution_api_v1_chat__conv_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/chat/storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Storage Usage
+         * @description 当前用户的附件存储用量 + 配额（喂前端进度条）。
+         *
+         *     与上传挡板同口径（compute-on-read，单一数据源）。声明在 `/{conv_id}` 之前，
+         *     否则 `storage` 会被当作 conv_id 命中详情路由。
+         */
+        get: operations["get_storage_usage_api_v1_chat_storage_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -290,7 +313,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/artifacts/{session_id}/{artifact_id}/export": {
+    "/api/v1/artifacts/{session_id}/{artifact_id}/raw": {
         parameters: {
             query?: never;
             header?: never;
@@ -298,14 +321,20 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Export Artifact
-         * @description Export an artifact to a different format.
-         *     Currently supports exporting text/markdown artifacts to docx.
+         * Get Artifact Raw
+         * @description Serve an artifact's raw binary blob (uploaded image / rich-format source).
          *
-         *     Note: reads from DB only — during execution, exports the last flushed
-         *     version, not in-memory edits.  Frontend hides export while streaming.
+         *     DB-only read (request-scoped Service, empty WorkingSet) — like all GETs here,
+         *     during execution it serves the last flushed blob. 404 when the artifact has no
+         *     blob (pure-text artifacts) or doesn't exist; not logged (self-evident 404).
+         *
+         *     Safe raster images are served `inline` so a frontend `<img src=.../raw>`
+         *     renders in place; everything else is `attachment` (download). Do not inline
+         *     every `image/*`: SVG is XML and must not be treated as a safe image blob.
+         *     Content-Type is the artifact's `content_type` — under the XOR model a blob
+         *     artifact's content_type is the original file's true MIME.
          */
-        get: operations["export_artifact_api_v1_artifacts__session_id___artifact_id__export_get"];
+        get: operations["get_artifact_raw_api_v1_artifacts__session_id___artifact_id__raw_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -435,6 +464,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/conversations/{conv_id}/messages/{message_id}/reconstruct": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reconstruct Admin Prompt
+         * @description 重建某一发 LLM 调用实际发出的完整 prompt（admin 取证，按 agent_start 锚定）。
+         *
+         *     锚 = 该次调用前发出的 agent_start 事件（其 event_id 由 events 端点返回）。重建走
+         *     分支正确的 path，复用引擎同一套装配逻辑，不重新生成动态内容 —— 详见
+         *     ConversationManager.reconstruct_prompt。
+         */
+        get: operations["reconstruct_admin_prompt_api_v1_admin_conversations__conv_id__messages__message_id__reconstruct_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/conversations/{conv_id}/artifacts": {
         parameters: {
             query?: never;
@@ -467,6 +520,26 @@ export interface paths {
          * @description Get current artifact content + version list (DB-only).
          */
         get: operations["get_admin_conversation_artifact_api_v1_admin_conversations__conv_id__artifacts__artifact_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/conversations/{conv_id}/artifacts/{artifact_id}/raw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Admin Conversation Artifact Raw
+         * @description Serve raw blob bytes for an artifact in any conversation (admin-only).
+         */
+        get: operations["get_admin_conversation_artifact_raw_api_v1_admin_conversations__conv_id__artifacts__artifact_id__raw_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -699,6 +772,8 @@ export interface paths {
          *     Response:
          *         {
          *             "ts": ISO8601,
+         *             "instance_id": str,   # 本次应答实例 — sampler/active_tasks 是进程本地视图,
+         *                                   # 多副本经 LB 随机路由时读数跳变由此可解释
          *             "sampler": {<sampler.latest_snapshot 结构,见 sampler.py 文档>},
          *             "active_conversations": [conv_id, ...],
          *             "active_tasks": int,
@@ -706,6 +781,338 @@ export interface paths {
          */
         get: operations["get_runtime_api_v1_admin_runtime_get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/instances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Instances
+         * @description 舰队实例面板数据源(Phase C 决策 4)。
+         *
+         *     多副本(Redis):scan `{prefix:instance:*}` + pipelined GET fan-out(镜像
+         *     RedisRuntimeStore.list_active_executions,Cluster-safe —— 无跨 slot 多 key 操作),
+         *     每条心跳 payload 读侧附一个 status(green/yellow/red)。
+         *     单机(InMemory,无 Redis):没有注册表可 scan,用本机最近 snapshot 造出唯一一行。
+         *
+         *     Response:
+         *         {
+         *             "ts": ISO8601,
+         *             "instance_id": str,        # 本次应答实例
+         *             "shared": bool,            # True=Redis 舰队视图;False=单机本地视图
+         *             "instances": [
+         *               {<心跳 payload>, "status": "green|yellow|red",
+         *                "status_reasons": [{"code": str, "label": str}, ...]}, ...
+         *             ],
+         *         }
+         */
+        get: operations["list_instances_api_v1_admin_instances_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/tools/units": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Units */
+        get: operations["list_units_api_v1_admin_tools_units_get"];
+        put?: never;
+        /** Create Unit */
+        post: operations["create_unit_api_v1_admin_tools_units_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/tools/units/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Unit Seed */
+        post: operations["import_unit_seed_api_v1_admin_tools_units_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/tools/units/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Unit */
+        get: operations["get_unit_api_v1_admin_tools_units__name__get"];
+        /** Update Unit */
+        put: operations["update_unit_api_v1_admin_tools_units__name__put"];
+        post?: never;
+        /** Delete Unit */
+        delete: operations["delete_unit_api_v1_admin_tools_units__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/tools/units/{name}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export Unit Seed */
+        get: operations["export_unit_seed_api_v1_admin_tools_units__name__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/tools/units/{name}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Unit Connection */
+        post: operations["test_unit_connection_api_v1_admin_tools_units__name__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/tools/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Agents */
+        get: operations["list_agents_api_v1_admin_tools_agents_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/tools/units/{name}/agents/{agent_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Mount Unit */
+        put: operations["mount_unit_api_v1_admin_tools_units__name__agents__agent_name__put"];
+        post?: never;
+        /** Unmount Unit */
+        delete: operations["unmount_unit_api_v1_admin_tools_units__name__agents__agent_name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/tools/units/{name}/credentials/{placeholder}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set Credential */
+        put: operations["set_credential_api_v1_admin_tools_units__name__credentials__placeholder__put"];
+        post?: never;
+        /** Delete Credential */
+        delete: operations["delete_credential_api_v1_admin_tools_units__name__credentials__placeholder__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin List Skills
+         * @description 列出所有 shared skill,不按 admin 自己的部门可见性过滤。
+         */
+        get: operations["admin_list_skills_api_v1_admin_skills_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/skills/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Admin Import Skill
+         * @description 导入共享 skill(owner=null),可指定 visibility/default_enabled 初始值。
+         */
+        post: operations["admin_import_skill_api_v1_admin_skills_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/skills/{slug}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin Export Skill
+         * @description 导出 shared catalog skill,不按当前 admin 的部门可见性过滤。
+         */
+        get: operations["admin_export_skill_api_v1_admin_skills__slug__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/skills/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Admin Delete Skill
+         * @description 删除任意 dynamic skill(绕过可见性;seeded → 400)。级联清 user_skill/dept 规则。
+         */
+        delete: operations["admin_delete_skill_api_v1_admin_skills__slug__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Admin Update Skill
+         * @description 编辑 dynamic shared skill 的 visibility/default_enabled。seeded 仍 config-owned。
+         */
+        patch: operations["admin_update_skill_api_v1_admin_skills__slug__patch"];
+        trace?: never;
+    };
+    "/api/v1/admin/department-access/{dept_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Department Access */
+        get: operations["get_department_access_api_v1_admin_department_access__dept_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/department-access/{dept_id}/skills/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put Department Skill Rule */
+        put: operations["put_department_skill_rule_api_v1_admin_department_access__dept_id__skills__slug__put"];
+        post?: never;
+        /** Delete Department Skill Rule */
+        delete: operations["delete_department_skill_rule_api_v1_admin_department_access__dept_id__skills__slug__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/department-access/{dept_id}/units/{unit_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put Department Unit Rule */
+        put: operations["put_department_unit_rule_api_v1_admin_department_access__dept_id__units__unit_name__put"];
+        post?: never;
+        /** Delete Department Unit Rule */
+        delete: operations["delete_department_unit_rule_api_v1_admin_department_access__dept_id__units__unit_name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/site/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Site Notifications */
+        get: operations["get_site_notifications_api_v1_admin_site_notifications_get"];
+        /** Update Site Notifications */
+        put: operations["update_site_notifications_api_v1_admin_site_notifications_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -866,6 +1273,107 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Skills
+         * @description 列出对当前用户可见的 skill + 有效启用态。
+         */
+        get: operations["list_skills_api_v1_skills_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/skills/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Skill
+         * @description 导入私有 skill zip(owner=本人,立即进自己的 L1)。硬门拒收 → 422 结构化
+         *     findings;超单包上限 → 422;超存储配额 → 413;slug 撞名 → 409。
+         */
+        post: operations["import_skill_api_v1_skills_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/skills/{slug}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Skill
+         * @description 导出 DB 中保存的 skill zip。不可见 → 404。
+         */
+        get: operations["export_skill_api_v1_skills__slug__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/skills/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Skill
+         * @description 删除自己导入的 dynamic skill。不可见 → 404;seeded → 400;非本人共享 → 403。
+         */
+        delete: operations["delete_skill_api_v1_skills__slug__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/skills/{slug}/enabled": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Skill Enabled
+         * @description 个人开关某 skill 是否进 L1 索引(写 user_skill 覆盖)。
+         */
+        put: operations["set_skill_enabled_api_v1_skills__slug__enabled_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health/live": {
         parameters: {
             query?: never;
@@ -904,6 +1412,32 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * ActiveStreamResponse
+         * @description GET /api/v1/chat/{conv_id}/active-stream response
+         */
+        ActiveStreamResponse: {
+            /**
+             * Active
+             * @description Whether the conversation has a reconnectable live stream
+             */
+            active: boolean;
+            /**
+             * Conversation Id
+             * @description Conversation ID
+             */
+            conversation_id: string;
+            /**
+             * Message Id
+             * @description Active execution message ID, when active
+             */
+            message_id: string | null;
+            /**
+             * Stream Url
+             * @description SSE endpoint URL, when active
+             */
+            stream_url: string | null;
+        };
         /**
          * AdminConversationEventsResponse
          * @description GET /api/v1/admin/conversations/{conv_id}/events response
@@ -990,6 +1524,8 @@ export interface components {
         AdminEventItem: {
             /** Id */
             id: number;
+            /** Event Id */
+            event_id: string | null;
             /** Event Type */
             event_type: string;
             /** Agent Name */
@@ -1011,6 +1547,8 @@ export interface components {
         AdminMessageGroup: {
             /** Message Id */
             message_id: string;
+            /** Parent Id */
+            parent_id: string | null;
             /** User Input */
             user_input: string;
             /** Response */
@@ -1028,6 +1566,119 @@ export interface components {
             } | null;
         };
         /**
+         * AdminPromptReconstructResponse
+         * @description GET .../messages/{message_id}/reconstruct response — 重建某发 LLM 调用的完整 prompt。
+         *
+         *     has_reminder=False 表示该 agent_start 早于 reminder 持久化（只重建了 system_prompt +
+         *     历史，无动态 reminder）。messages 的 content 可能是 str 或块列表（识图块降级为占位文本）。
+         */
+        AdminPromptReconstructResponse: {
+            /** Conversation Id */
+            conversation_id: string;
+            /** Message Id */
+            message_id: string;
+            /** Agent Start Event Id */
+            agent_start_event_id: string;
+            /** Agent Name */
+            agent_name: string | null;
+            /**
+             * Has Reminder
+             * @default false
+             */
+            has_reminder: boolean;
+            /** Messages */
+            messages: {
+                [key: string]: unknown;
+            }[];
+        };
+        /**
+         * AdminSkillItem
+         * @description Admin shared skill catalog item (not filtered by the admin user's department).
+         */
+        AdminSkillItem: {
+            /**
+             * Slug
+             * @description Skill slug (natural key)
+             */
+            slug: string;
+            /**
+             * Name
+             * @description Display name
+             */
+            name: string;
+            /**
+             * Description
+             * @description One-line description
+             */
+            description: string;
+            /**
+             * Visibility
+             * @description public (default allow) or department (default deny)
+             * @enum {string}
+             */
+            visibility: "public" | "department";
+            /**
+             * Default Enabled
+             * @description Whether this shared skill enters users' L1 index by default
+             */
+            default_enabled: boolean;
+            /**
+             * Source
+             * @description seeded skills are config-owned; dynamic shared skills are editable
+             * @enum {string}
+             */
+            source: "seeded" | "dynamic";
+            /**
+             * Has Extra Files
+             * @description Whether the skill bundle contains files beyond SKILL.md
+             */
+            has_extra_files: boolean;
+            /**
+             * Can Edit
+             * @description True only for dynamic shared skills
+             */
+            can_edit: boolean;
+        };
+        /**
+         * AdminSkillListResponse
+         * @description GET /api/v1/admin/skills response.
+         */
+        AdminSkillListResponse: {
+            /**
+             * Skills
+             * @description All shared skills, including seeded read-only ones
+             */
+            skills: components["schemas"]["AdminSkillItem"][];
+        };
+        /**
+         * AdminSkillUpdateRequest
+         * @description PATCH /api/v1/admin/skills/{slug} request body.
+         */
+        AdminSkillUpdateRequest: {
+            /**
+             * Visibility
+             * @description New shared visibility. Changing it clears department rules.
+             */
+            visibility?: ("public" | "department") | null;
+            /**
+             * Default Enabled
+             * @description New default L1 enabled state for users without an override.
+             */
+            default_enabled?: boolean | null;
+        };
+        /** AgentListResponse */
+        AgentListResponse: {
+            /** Agents */
+            agents: components["schemas"]["AgentSummaryResponse"][];
+        };
+        /** AgentSummaryResponse */
+        AgentSummaryResponse: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+        };
+        /**
          * ArtifactListResponse
          * @description GET /api/v1/artifacts/{session_id} response
          */
@@ -1042,6 +1693,26 @@ export interface components {
              * @description Artifact list
              */
             artifacts: components["schemas"]["ArtifactSummary"][];
+        };
+        /** ArtifactOutputSpec */
+        ArtifactOutputSpec: {
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * Mode
+             * @default text
+             * @enum {string}
+             */
+            mode: "text" | "binary";
+            /** Content Type */
+            content_type: string | null;
+            /** Filename */
+            filename: string | null;
+            /** Title */
+            title: string | null;
         };
         /**
          * ArtifactResponse
@@ -1088,6 +1759,12 @@ export interface components {
              * @description For source=user_upload artifacts: the filename the user uploaded. From metadata['original_filename'].
              */
             original_filename: string | null;
+            /**
+             * Has Blob
+             * @description True for blob-backed artifacts (images / rich-format uploads): no text content; raw bytes via GET …/raw.
+             * @default false
+             */
+            has_blob: boolean;
             /**
              * Created At
              * Format: date-time
@@ -1142,6 +1819,12 @@ export interface components {
              */
             original_filename: string | null;
             /**
+             * Has Blob
+             * @description True for blob-backed artifacts (images / rich-format uploads): no text content; raw bytes via GET …/raw.
+             * @default false
+             */
+            has_blob: boolean;
+            /**
              * Created At
              * Format: date-time
              * @description Creation time
@@ -1154,8 +1837,43 @@ export interface components {
              */
             updated_at: string;
         };
+        /** Body_admin_import_skill_api_v1_admin_skills_import_post */
+        Body_admin_import_skill_api_v1_admin_skills_import_post: {
+            /**
+             * File
+             * Format: binary
+             */
+            file: string;
+            /**
+             * Visibility
+             * @default public
+             * @enum {string}
+             */
+            visibility: "public" | "department";
+            /**
+             * Default Enabled
+             * @default true
+             */
+            default_enabled: boolean;
+        };
         /** Body_bulk_import_users_api_v1_admin_users_bulk_import_post */
         Body_bulk_import_users_api_v1_admin_users_bulk_import_post: {
+            /**
+             * File
+             * Format: binary
+             */
+            file: string;
+        };
+        /** Body_import_skill_api_v1_skills_import_post */
+        Body_import_skill_api_v1_skills_import_post: {
+            /**
+             * File
+             * Format: binary
+             */
+            file: string;
+        };
+        /** Body_import_unit_seed_api_v1_admin_tools_units_import_post */
+        Body_import_unit_seed_api_v1_admin_tools_units_import_post: {
             /**
              * File
              * Format: binary
@@ -1418,9 +2136,14 @@ export interface components {
             compaction_token_threshold: number;
             /**
              * Lead Agent Model
-             * @description Model identifier configured for the lead_agent (e.g. 'qwen3.6-plus'). Surfaced in the composer so the user can see which model is driving the current conversation without digging into agent MD files.
+             * @description Model identifier configured for the lead_agent (e.g. 'qwen3.7-max'). Surfaced in the composer so the user can see which model is driving the current conversation without digging into agent MD files.
              */
             lead_agent_model: string;
+            /**
+             * Max Upload Size
+             * @description Per-file upload byte limit (MAX_UPLOAD_SIZE). The composer uses it to pre-reject an oversize file with instant feedback instead of staging + POSTing it for a backend 422. Backend stays authoritative; the batch TOTAL is capped separately at the proxy layer (not surfaced here — it lives in nginx/Caddy config, outside src/config.py).
+             */
+            max_upload_size: number;
         };
         /**
          * ConversationDetailResponse
@@ -1524,6 +2247,12 @@ export interface components {
              * @description The message_id of the currently-running execution on this conversation, or null if no execution is in flight. Carries execution identity (not just a boolean) so the frontend can compare-and-clear on terminal events without an old turn's completion clobbering a freshly-started new turn's indicator.
              */
             active_message_id: string | null;
+            /**
+             * Upload Bytes
+             * @description Total stored attachment/blob bytes for this conversation (SUM of ArtifactBlob.size_bytes). Surfaced per-row in the list so the user can see which conversation is consuming storage and pick what to delete when over quota. Blob-only: text content and event history are NOT counted (deleting the conversation reclaims those too, so the displayed number understates what is freed).
+             * @default 0
+             */
+            upload_bytes: number;
         };
         /**
          * CreateDepartmentRequest
@@ -1540,6 +2269,42 @@ export interface components {
              * @description Parent department id; null = top-level
              */
             parent_id?: string | null;
+        };
+        /**
+         * CreateToolUnitRequest
+         * @description POST /api/v1/admin/tools/units —— 新建 dynamic unit。
+         */
+        CreateToolUnitRequest: {
+            /**
+             * Name
+             * @description unit 名,全局唯一,禁含 '__'
+             */
+            name: string;
+            /**
+             * Kind
+             * @default tool
+             * @enum {string}
+             */
+            kind: "tool" | "toolset" | "mcp";
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Visibility
+             * @default public
+             * @enum {string}
+             */
+            visibility: "public" | "department";
+            /**
+             * Defer
+             * @default false
+             */
+            defer: boolean;
+            /** Members */
+            members?: components["schemas"]["ToolMemberSpec"][];
+            provider_config?: components["schemas"]["McpProviderConfigSpec"] | null;
         };
         /**
          * CreateUserRequest
@@ -1572,6 +2337,45 @@ export interface components {
              * @description Department id; null = unassigned
              */
             department_id?: string | null;
+        };
+        /** CredentialStatusResponse */
+        CredentialStatusResponse: {
+            /** Placeholder */
+            placeholder: string;
+            /** Configured */
+            configured: boolean;
+            /** Source */
+            source: string | null;
+        };
+        /** DepartmentAccessDepartment */
+        DepartmentAccessDepartment: {
+            /** Id */
+            id: string;
+            /** Parent Id */
+            parent_id: string | null;
+            /** Name */
+            name: string;
+        };
+        /** DepartmentAccessInheritedRule */
+        DepartmentAccessInheritedRule: {
+            /**
+             * Department Id
+             * @description Ancestor department id
+             */
+            department_id: string;
+            /**
+             * Department Name
+             * @description Ancestor department display name
+             */
+            department_name: string;
+        };
+        /** DepartmentAccessResponse */
+        DepartmentAccessResponse: {
+            department: components["schemas"]["DepartmentAccessDepartment"];
+            /** Skills */
+            skills: components["schemas"]["DepartmentSkillAccessItem"][];
+            /** Units */
+            units: components["schemas"]["DepartmentUnitAccessItem"][];
         };
         /**
          * DepartmentListResponse
@@ -1613,6 +2417,42 @@ export interface components {
              */
             updated_at: string;
         };
+        /** DepartmentSkillAccessItem */
+        DepartmentSkillAccessItem: {
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /**
+             * Visibility
+             * @enum {string}
+             */
+            visibility: "public" | "department";
+            /** Source */
+            source: string;
+            /** Default Enabled */
+            default_enabled: boolean;
+            /**
+             * Rule Action
+             * @description 'deny' for public resources, 'grant' for department resources.
+             * @enum {string}
+             */
+            rule_action: "grant" | "deny";
+            /**
+             * Direct Rule
+             * @description Whether this exact department has an exception row.
+             */
+            direct_rule: boolean;
+            /** @description Nearest ancestor exception row, if any. */
+            inherited_rule: components["schemas"]["DepartmentAccessInheritedRule"] | null;
+            /**
+             * Effective Allowed
+             * @description Whether users in this department can see/use this resource.
+             */
+            effective_allowed: boolean;
+        };
         /**
          * DepartmentTreeNode
          * @description Tree node — 递归结构，包含 children
@@ -1639,6 +2479,53 @@ export interface components {
         DepartmentTreeResponse: {
             /** Nodes */
             nodes: components["schemas"]["DepartmentTreeNode"][];
+        };
+        /** DepartmentUnitAccessItem */
+        DepartmentUnitAccessItem: {
+            /** Name */
+            name: string;
+            /** Kind */
+            kind: string;
+            /** Description */
+            description: string;
+            /**
+             * Visibility
+             * @enum {string}
+             */
+            visibility: "public" | "department";
+            /** Source */
+            source: string;
+            /**
+             * Rule Action
+             * @enum {string}
+             */
+            rule_action: "grant" | "deny";
+            /** Direct Rule */
+            direct_rule: boolean;
+            inherited_rule: components["schemas"]["DepartmentAccessInheritedRule"] | null;
+            /** Effective Allowed */
+            effective_allowed: boolean;
+        };
+        /**
+         * FindingItem
+         * @description 一条 validator finding(E-1 硬门产出;rule id 稳定,前端按 severity 渲染)。
+         */
+        FindingItem: {
+            /**
+             * Rule
+             * @description Stable rule id, e.g. 'zip.invalid' / 'md.body_empty'.
+             */
+            rule: string;
+            /**
+             * Severity
+             * @description 'error' (rejected) or 'warning' (surfaced only).
+             */
+            severity: string;
+            /**
+             * Message
+             * @description Human-readable explanation.
+             */
+            message: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1712,6 +2599,30 @@ export interface components {
             /** @description User info */
             user: components["schemas"]["UserInfo"];
         };
+        /** McpProviderConfigSpec */
+        McpProviderConfigSpec: {
+            /**
+             * Transport
+             * @constant
+             */
+            transport: "streamable_http";
+            /** Url */
+            url: string;
+            /** Headers */
+            headers: {
+                [key: string]: string;
+            };
+            /**
+             * Timeout
+             * @default 60
+             */
+            timeout: number;
+            /**
+             * Default Permission
+             * @enum {string}
+             */
+            default_permission: "auto" | "confirm";
+        };
         /**
          * MessageResponse
          * @description Message in conversation detail response
@@ -1755,6 +2666,51 @@ export interface components {
             execution_metrics: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Uploaded Files
+             * @description Files the user attached this turn, from Message.metadata_['uploaded_files']. Display-only (best-effort): absent for turns that failed before artifact flush.
+             */
+            uploaded_files: components["schemas"]["UploadedFileRef"][] | null;
+            /**
+             * Active Skills
+             * @description Skill slugs active as of this turn (sticky, from Message.metadata_['active_skills']). The branch-tail message's list is the conversation's current active set; the composer reads it to mark already-active skills in the activation picker. Absent/empty when no skills are active.
+             */
+            active_skills: string[] | null;
+        };
+        /**
+         * MountResponse
+         * @description PUT .../agents/{agent} 的返回(挂载/改成员态后的绑定快照)。
+         */
+        MountResponse: {
+            /** Agent Name */
+            agent_name: string;
+            /** Unit Name */
+            unit_name: string;
+            /** Member State */
+            member_state: string;
+            /** Source */
+            source: string;
+        };
+        /**
+         * MountUnitRequest
+         * @description PUT /api/v1/admin/tools/units/{name}/agents/{agent_name}
+         */
+        MountUnitRequest: {
+            /**
+             * Member State
+             * @default enabled
+             * @enum {string}
+             */
+            member_state: "enabled" | "disabled";
+        };
+        /** MountedAgentResponse */
+        MountedAgentResponse: {
+            /** Agent Name */
+            agent_name: string;
+            /** Member State */
+            member_state: string;
+            /** Source */
+            source: string;
         };
         /**
          * MoveDepartmentRequest
@@ -1823,6 +2779,295 @@ export interface components {
             stream_url: string;
         };
         /**
+         * SetCredentialRequest
+         * @description PUT /api/v1/admin/tools/units/{name}/credentials/{placeholder} —— 写-only。
+         */
+        SetCredentialRequest: {
+            /**
+             * Value
+             * @description 明文,加密落库后永不回读
+             */
+            value: string;
+        };
+        /** SiteNotification */
+        SiteNotification: {
+            /** Id */
+            id: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "info" | "warn" | "critical";
+            /** Title */
+            title: string;
+            /** Body */
+            body: string;
+            /** Starts At */
+            starts_at: string | null;
+            /** Ends At */
+            ends_at: string | null;
+            /**
+             * Dismissible
+             * @default true
+             */
+            dismissible: boolean;
+        };
+        /** SiteNotificationsResponse */
+        SiteNotificationsResponse: {
+            /** Notifications */
+            notifications: components["schemas"]["SiteNotification"][];
+            /** Revision */
+            revision: string;
+        };
+        /**
+         * SkillImportResponse
+         * @description POST /api/v1/skills/import(+ admin 变体)成功响应。硬门拒收走 422,
+         *     detail = {message, findings[]} 同一 FindingItem 形状。
+         */
+        SkillImportResponse: {
+            /**
+             * Status
+             * @description Always 'imported' on success.
+             */
+            status: string;
+            /** @description The imported skill as it appears in the list. */
+            skill: components["schemas"]["SkillItem"];
+            /**
+             * Findings
+             * @description Non-blocking warnings surfaced by the validator (may be empty).
+             */
+            findings: components["schemas"]["FindingItem"][];
+        };
+        /**
+         * SkillItem
+         * @description 一个对用户可见的 skill + 其有效启用态。
+         */
+        SkillItem: {
+            /**
+             * Slug
+             * @description Skill slug (natural key)
+             */
+            slug: string;
+            /**
+             * Name
+             * @description Display name
+             */
+            name: string;
+            /**
+             * Description
+             * @description One-line description (the L1 index text)
+             */
+            description: string;
+            /**
+             * Enabled
+             * @description Effective enabled state (config default overridden by the user's setting). Controls whether the skill enters the model's L1 <available_skills> index. A disabled skill is still visible and can be activated on demand via its button.
+             */
+            enabled: boolean;
+            /**
+             * Default Enabled
+             * @description Config-seed default; shown so the UI can flag skills the user overrode.
+             */
+            default_enabled: boolean;
+            /**
+             * Is Overridden
+             * @description Whether the user has an explicit personal enable/disable for this skill.
+             */
+            is_overridden: boolean;
+            /**
+             * Source
+             * @description 'seeded' (config-owned, read-only in the UI) or 'dynamic' (imported via the UI; deletable by its owner or an admin).
+             */
+            source: string;
+            /**
+             * Has Extra Files
+             * @description Whether the skill bundle contains files beyond SKILL.md. Controls whether read_skill points to mount_skill.
+             */
+            has_extra_files: boolean;
+            /**
+             * Visibility
+             * @description private (owner-only) | public (shared) | department
+             */
+            visibility: string;
+            /**
+             * Is Owner
+             * @description Whether the current user imported (owns) this dynamic skill.
+             */
+            is_owner: boolean;
+        };
+        /**
+         * SkillListResponse
+         * @description GET /api/v1/skills response.
+         */
+        SkillListResponse: {
+            /**
+             * Skills
+             * @description Skills visible to the user, with effective enabled state.
+             */
+            skills: components["schemas"]["SkillItem"][];
+        };
+        /**
+         * SkillToggleRequest
+         * @description PUT /api/v1/skills/{slug}/enabled request body.
+         */
+        SkillToggleRequest: {
+            /**
+             * Enabled
+             * @description Personal enable/disable override for this skill.
+             */
+            enabled: boolean;
+        };
+        /**
+         * StorageUsageResponse
+         * @description GET /api/v1/chat/storage response — per-user attachment storage usage.
+         */
+        StorageUsageResponse: {
+            /**
+             * Used Bytes
+             * @description Total stored blob bytes across all the user's conversations.
+             */
+            used_bytes: number;
+            /**
+             * Quota Bytes
+             * @description Per-user blob quota (ARTIFACT_USER_QUOTA_BYTES). An upload is rejected with 413 when used_bytes + incoming would exceed it. 0 = unlimited (quota disabled); the frontend should render the bar as unbounded.
+             */
+            quota_bytes: number;
+        };
+        /** ToolMemberResponse */
+        ToolMemberResponse: {
+            /** Member Name */
+            member_name: string;
+            /** Full Name */
+            full_name: string;
+            /** Permission */
+            permission: string;
+            /** Definition */
+            definition: {
+                [key: string]: unknown;
+            };
+        };
+        /** ToolMemberSpec */
+        ToolMemberSpec: {
+            /**
+             * Member Name
+             * @description 作者裸名;singleton 会被规整为 unit 名
+             */
+            member_name: string;
+            /**
+             * Permission
+             * @default confirm
+             * @enum {string}
+             */
+            permission: "auto" | "confirm";
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Endpoint
+             * @default
+             */
+            endpoint: string;
+            /**
+             * Method
+             * @default GET
+             */
+            method: string;
+            /** Headers */
+            headers: {
+                [key: string]: string;
+            };
+            /** Parameters */
+            parameters: components["schemas"]["ToolParamSpec"][];
+            /** Response Extract */
+            response_extract: string | null;
+            artifact_output: components["schemas"]["ArtifactOutputSpec"] | null;
+            /**
+             * Timeout
+             * @default 60
+             */
+            timeout: number;
+        };
+        /** ToolParamSpec */
+        ToolParamSpec: {
+            /** Name */
+            name: string;
+            /**
+             * Type
+             * @default string
+             * @enum {string}
+             */
+            type: "string" | "integer" | "number" | "boolean" | "json";
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Required
+             * @default true
+             */
+            required: boolean;
+            /** Default */
+            default: unknown | null;
+            /** Enum */
+            enum: unknown[] | null;
+        };
+        /** ToolUnitImportResponse */
+        ToolUnitImportResponse: {
+            /**
+             * Status
+             * @default imported
+             * @constant
+             */
+            status: "imported";
+            unit: components["schemas"]["ToolUnitResponse"];
+        };
+        /** ToolUnitListResponse */
+        ToolUnitListResponse: {
+            /** Units */
+            units: components["schemas"]["ToolUnitResponse"][];
+        };
+        /** ToolUnitResponse */
+        ToolUnitResponse: {
+            /** Name */
+            name: string;
+            /** Kind */
+            kind: string;
+            /** Description */
+            description: string;
+            /** Visibility */
+            visibility: string;
+            /** Defer */
+            defer: boolean;
+            /** Provider */
+            provider: string;
+            /** Provider Config */
+            provider_config: {
+                [key: string]: unknown;
+            } | null;
+            /** Source */
+            source: string;
+            /** Members */
+            members: components["schemas"]["ToolMemberResponse"][];
+            /** Mounted Agents */
+            mounted_agents: components["schemas"]["MountedAgentResponse"][];
+            /** Credentials */
+            credentials: components["schemas"]["CredentialStatusResponse"][];
+        };
+        /** ToolUnitTestResponse */
+        ToolUnitTestResponse: {
+            /** Success */
+            success: boolean;
+            /** Message */
+            message: string;
+            /**
+             * Tool Count
+             * @default 0
+             */
+            tool_count: number;
+        };
+        /**
          * UpdateDepartmentRequest
          * @description PATCH /api/v1/departments/{id} request body — 仅改名
          */
@@ -1843,6 +3088,49 @@ export interface components {
              * @description Display name; pass empty string to clear
              */
             display_name?: string | null;
+        };
+        /** UpdateSiteNotificationsRequest */
+        UpdateSiteNotificationsRequest: {
+            /** Notifications */
+            notifications: components["schemas"]["SiteNotification"][];
+            /** Expected Revision */
+            expected_revision: string;
+        };
+        /**
+         * UpdateToolUnitRequest
+         * @description PUT /api/v1/admin/tools/units/{name} —— 整体替换 dynamic unit(name 取自路径)。
+         */
+        UpdateToolUnitRequest: {
+            /**
+             * Name
+             * @description unit 名,全局唯一,禁含 '__'
+             */
+            name: string;
+            /**
+             * Kind
+             * @default tool
+             * @enum {string}
+             */
+            kind: "tool" | "toolset" | "mcp";
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Visibility
+             * @default public
+             * @enum {string}
+             */
+            visibility: "public" | "department";
+            /**
+             * Defer
+             * @default false
+             */
+            defer: boolean;
+            /** Members */
+            members?: components["schemas"]["ToolMemberSpec"][];
+            provider_config?: components["schemas"]["McpProviderConfigSpec"] | null;
         };
         /**
          * UpdateUserRequest
@@ -1877,6 +3165,22 @@ export interface components {
              * @description Department id; explicit null clears
              */
             department_id?: string | null;
+        };
+        /**
+         * UploadedFileRef
+         * @description File the user attached to a message (display-only snapshot)
+         */
+        UploadedFileRef: {
+            /**
+             * Id
+             * @description Artifact ID the upload was staged as
+             */
+            id: string;
+            /**
+             * Filename
+             * @description Original filename
+             */
+            filename: string;
         };
         /**
          * UserImpactResponse
@@ -2233,7 +3537,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ActiveStreamResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2309,6 +3613,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_storage_usage_api_v1_chat_storage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageUsageResponse"];
                 };
             };
         };
@@ -2509,12 +3833,9 @@ export interface operations {
             };
         };
     };
-    export_artifact_api_v1_artifacts__session_id___artifact_id__export_get: {
+    get_artifact_raw_api_v1_artifacts__session_id___artifact_id__raw_get: {
         parameters: {
-            query: {
-                /** @description Export format (docx) */
-                format: string;
-            };
+            query?: never;
             header?: never;
             path: {
                 session_id: string;
@@ -2524,13 +3845,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description Raw artifact blob (image inline, else attachment). */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "*/*": string;
                 };
             };
             /** @description Validation Error */
@@ -2705,6 +4026,40 @@ export interface operations {
             };
         };
     };
+    reconstruct_admin_prompt_api_v1_admin_conversations__conv_id__messages__message_id__reconstruct_get: {
+        parameters: {
+            query: {
+                agent_start_event_id: string;
+            };
+            header?: never;
+            path: {
+                conv_id: string;
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminPromptReconstructResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_admin_conversation_artifacts_api_v1_admin_conversations__conv_id__artifacts_get: {
         parameters: {
             query?: never;
@@ -2755,6 +4110,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ArtifactResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_admin_conversation_artifact_raw_api_v1_admin_conversations__conv_id__artifacts__artifact_id__raw_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conv_id: string;
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Raw artifact blob (image inline, else attachment). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
                 };
             };
             /** @description Validation Error */
@@ -3110,6 +4497,771 @@ export interface operations {
             };
         };
     };
+    list_instances_api_v1_admin_instances_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_units_api_v1_admin_tools_units_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolUnitListResponse"];
+                };
+            };
+        };
+    };
+    create_unit_api_v1_admin_tools_units_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateToolUnitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolUnitResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_unit_seed_api_v1_admin_tools_units_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_unit_seed_api_v1_admin_tools_units_import_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolUnitImportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_unit_api_v1_admin_tools_units__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolUnitResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_unit_api_v1_admin_tools_units__name__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateToolUnitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolUnitResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_unit_api_v1_admin_tools_units__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_unit_seed_api_v1_admin_tools_units__name__export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_unit_connection_api_v1_admin_tools_units__name__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolUnitTestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_agents_api_v1_admin_tools_agents_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentListResponse"];
+                };
+            };
+        };
+    };
+    mount_unit_api_v1_admin_tools_units__name__agents__agent_name__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                agent_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MountUnitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MountResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unmount_unit_api_v1_admin_tools_units__name__agents__agent_name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                agent_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_credential_api_v1_admin_tools_units__name__credentials__placeholder__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                placeholder: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetCredentialRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_credential_api_v1_admin_tools_units__name__credentials__placeholder__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                placeholder: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_list_skills_api_v1_admin_skills_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSkillListResponse"];
+                };
+            };
+        };
+    };
+    admin_import_skill_api_v1_admin_skills_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_admin_import_skill_api_v1_admin_skills_import_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillImportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_export_skill_api_v1_admin_skills__slug__export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_delete_skill_api_v1_admin_skills__slug__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_update_skill_api_v1_admin_skills__slug__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminSkillUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSkillItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_department_access_api_v1_admin_department_access__dept_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dept_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartmentAccessResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_department_skill_rule_api_v1_admin_department_access__dept_id__skills__slug__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dept_id: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_department_skill_rule_api_v1_admin_department_access__dept_id__skills__slug__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dept_id: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_department_unit_rule_api_v1_admin_department_access__dept_id__units__unit_name__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dept_id: string;
+                unit_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_department_unit_rule_api_v1_admin_department_access__dept_id__units__unit_name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dept_id: string;
+                unit_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_site_notifications_api_v1_admin_site_notifications_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteNotificationsResponse"];
+                };
+            };
+        };
+    };
+    update_site_notifications_api_v1_admin_site_notifications_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSiteNotificationsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteNotificationsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_departments_api_v1_departments_get: {
         parameters: {
             query?: {
@@ -3374,6 +5526,154 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClientConfigResponse"];
+                };
+            };
+        };
+    };
+    list_skills_api_v1_skills_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillListResponse"];
+                };
+            };
+        };
+    };
+    import_skill_api_v1_skills_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_skill_api_v1_skills_import_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillImportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_skill_api_v1_skills__slug__export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_skill_api_v1_skills__slug__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_skill_enabled_api_v1_skills__slug__enabled_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillToggleRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

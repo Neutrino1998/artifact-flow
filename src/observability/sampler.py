@@ -28,6 +28,7 @@ from typing import Any, Optional
 
 import psutil
 
+from utils.instance import INSTANCE_ID
 from utils.time import utc_now
 
 from observability.jsonl_sink import JsonlSink
@@ -73,6 +74,7 @@ class RuntimeSampler:
         long_task_age_sec: int = 60,
         interval_sec: int = 30,
         mem_limit_bytes: Optional[int] = None,
+        heartbeat: Any = None,
     ):
         self._sink = sink
         self._watchdog = watchdog
@@ -83,6 +85,8 @@ class RuntimeSampler:
         self._long_task_age_sec = long_task_age_sec
         self._interval = interval_sec
         self._mem_limit = mem_limit_bytes  # None = 用 ulimit fallback
+        # Phase C 心跳:每 tick 把快照子集多写一份到 Redis。None = 不写(未配置)。
+        self._heartbeat = heartbeat
 
         self._proc = psutil.Process(os.getpid())
         # 第一次调 cpu_percent 是 prime,得到 0;后面才有真实读数
@@ -138,6 +142,8 @@ class RuntimeSampler:
         """采一次并写 jsonl。返回采集的 snapshot(便于测试与 /admin/runtime 复用)。"""
         snapshot: dict = {
             "ts": utc_now().isoformat(),
+            # 目录已按实例分,但记录内也带:文件被拷走聚合后目录信息即丢
+            "instance_id": INSTANCE_ID,
         }
 
         # ── loop lag(来自 watchdog 滚动窗口) ──
@@ -171,6 +177,14 @@ class RuntimeSampler:
         # 写入 jsonl(swallow on error,JsonlSink 内已防御)
         self._sink.write(snapshot)
         self._latest = snapshot
+
+        # 舰队心跳:把快照子集多写一份到 Redis(HeartbeatWriter 内已吞异常,
+        # 但这里再包一层 —— 心跳写失败绝不能拖垮采样主职)。
+        if self._heartbeat is not None:
+            try:
+                await self._heartbeat.write(snapshot)
+            except Exception:
+                logger.debug("Heartbeat write raised into sampler; ignored", exc_info=True)
 
         # 高水位告警
         self._check_thresholds(snapshot)

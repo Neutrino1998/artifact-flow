@@ -47,6 +47,8 @@ class ArtifactMemory:
         metadata: Optional[Dict] = None,
         created_at: Optional[datetime] = None,
         source: str = "agent",
+        blob: Optional[bytes] = None,
+        has_blob: Optional[bool] = None,
     ):
         self.id = artifact_id
         self.content_type = content_type
@@ -57,6 +59,13 @@ class ArtifactMemory:
         self.created_at = created_at or utc_now()
         self.updated_at = utc_now()
         self.source = source
+        # 暂存的二进制源字节(图片/富格式上传),仅在新建 flush 时连同 artifact 一并
+        # 写入 ArtifactBlob(原子)。非 Artifact 的 DB 字段——是个待 flush 的暂存载荷,
+        # flush 成功后即无用(缓存保留但 blob 不再被读)。纯文本/模型自建 artifact 为 None。
+        self.blob = blob
+        # 「是否二进制」的判别。写路径(blob 在手)按 blob 在场派生;DB 读路径(blob
+        # lazy 未载)由调用方显式传 Artifact.has_blob 列值。
+        self.has_blob = (blob is not None) if has_blob is None else has_blob
 
 
 # ============================================================

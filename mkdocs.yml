@@ -66,6 +66,7 @@ nav:
       - Execution Lifecycle: architecture/execution-lifecycle.md
       - Agents: architecture/agents.md
       - Tools: architecture/tools.md
+      - Sandbox: architecture/sandbox.md
       - Artifacts: architecture/artifacts.md
       - Data Layer: architecture/data-layer.md
       - Streaming: architecture/streaming.md

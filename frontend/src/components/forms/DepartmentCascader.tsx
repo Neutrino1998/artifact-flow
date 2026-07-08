@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
+import { BUTTON_PRIMARY, INPUT_ON_PANEL } from '@/lib/styles';
+import { SELECT_CHEVRON } from '@/components/ui/SelectChevron';
 import type { DepartmentTreeNode } from '@/types';
 
 interface DepartmentCascaderProps {
@@ -186,7 +188,7 @@ export default function DepartmentCascader({
   };
 
   if (loading) {
-    return <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">加载部门...</div>;
+    return <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">加载部门…</div>;
   }
   if (loadError) {
     return (
@@ -211,22 +213,17 @@ export default function DepartmentCascader({
                 value={selected}
                 onChange={(e) => handleSelectChange(i, level.parentId, e.target.value)}
                 disabled={disabled || creating}
-                className="w-full appearance-none px-3 py-1.5 pr-9 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-sm text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent dark:focus:border-accent disabled:opacity-40"
+                className={`${INPUT_ON_PANEL} appearance-none pr-9`}
               >
                 <option value="">— 不选 —</option>
                 {visibleOptions.map((o) => (
                   <option key={o.id} value={o.id}>{o.name}</option>
                 ))}
                 {allowCreate && (
-                  <option value={CREATE_TOKEN}>+ 在此层级新建...</option>
+                  <option value={CREATE_TOKEN}>+ 在此层级新建…</option>
                 )}
               </select>
-              <svg
-                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-tertiary dark:text-text-tertiary-dark"
-                width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
-              >
-                <path d="M3 4.5l3 3 3-3" />
-              </svg>
+              {SELECT_CHEVRON}
             </div>
           </div>
         );
@@ -251,15 +248,15 @@ export default function DepartmentCascader({
             }}
             disabled={creating}
             placeholder="新部门名称"
-            className="flex-1 px-3 py-1.5 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-sm text-text-primary dark:text-text-primary-dark focus:outline-none focus:border-accent dark:focus:border-accent disabled:opacity-40"
+            className={`${INPUT_ON_PANEL} flex-1`}
           />
           <button
             type="button"
             onClick={handleCreateSubmit}
             disabled={creating || !createName.trim()}
-            className="px-3 py-1.5 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent-hover disabled:opacity-40 transition-colors"
+            className={`${BUTTON_PRIMARY} px-3 py-1.5 rounded-lg text-sm`}
           >
-            {creating ? '创建中...' : '创建'}
+            {creating ? '创建中…' : '创建'}
           </button>
           <button
             type="button"

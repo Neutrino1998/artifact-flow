@@ -2,6 +2,7 @@
 
 import { useArtifactStore } from '@/stores/artifactStore';
 import { useArtifacts } from '@/hooks/useArtifacts';
+import { compactMimeType } from '@/lib/compactMimeType';
 import { parseUtcIso } from '@/lib/time';
 
 export default function ArtifactList() {
@@ -14,7 +15,7 @@ export default function ArtifactList() {
     return (
       <div className="h-full flex items-center justify-center bg-chat dark:bg-chat-dark">
         <span className="text-text-tertiary dark:text-text-tertiary-dark">
-          加载文稿中...
+          加载文件中...
         </span>
       </div>
     );
@@ -24,7 +25,7 @@ export default function ArtifactList() {
     return (
       <div className="h-full flex items-center justify-center bg-chat dark:bg-chat-dark">
         <span className="text-text-tertiary dark:text-text-tertiary-dark">
-          暂无文稿
+          暂无文件
         </span>
       </div>
     );
@@ -34,7 +35,7 @@ export default function ArtifactList() {
     <div className="h-full flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
       <div className="px-4 py-3 border-b border-border dark:border-border-dark">
         <h3 className="font-semibold text-text-primary dark:text-text-primary-dark">
-          文稿列表
+          文件列表
         </h3>
       </div>
       <div className="flex-1 overflow-y-auto px-2 py-2 space-y-2">
@@ -51,15 +52,17 @@ export default function ArtifactList() {
                   {artifact.title}
                 </span>
                 {hasPending && (
-                  <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
+                  <span className="w-2 h-2 rounded-full bg-status-error flex-shrink-0" />
                 )}
               </div>
-              <div className="flex items-center gap-2 mt-0.5 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                <span>{artifact.content_type}</span>
-                <span>v{artifact.current_version}</span>
-                <span>{parseUtcIso(artifact.updated_at).toLocaleDateString()}</span>
+              <div className="flex min-w-0 items-center gap-2 mt-0.5 overflow-hidden whitespace-nowrap text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                <span className="font-mono shrink-0" title={artifact.content_type}>
+                  {compactMimeType(artifact.content_type)}
+                </span>
+                <span className="shrink-0">v{artifact.current_version}</span>
+                <span className="shrink-0">{parseUtcIso(artifact.updated_at).toLocaleDateString()}</span>
                 {artifact.source && artifact.source !== 'user_upload' && (
-                  <span className="flex items-center gap-1 truncate" title={artifact.source}>
+                  <span className="flex min-w-0 items-center gap-1 truncate" title={artifact.source}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
                       <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
                     </svg>
@@ -67,7 +70,7 @@ export default function ArtifactList() {
                   </span>
                 )}
                 {artifact.original_filename && (
-                  <span className="flex items-center gap-1 truncate" title={artifact.original_filename}>
+                  <span className="flex min-w-0 items-center gap-1 truncate" title={artifact.original_filename}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
                       <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
                     </svg>

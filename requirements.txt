@@ -4,6 +4,8 @@
 
 # LiteLLM - 统一 LLM 接口
 # 支持 OpenAI/DeepSeek/Qwen/Ollama/vLLM 等 100+ 提供商
+# !=1.82.7/!=1.82.8：TeamPCP 供应链投毒版本（见 commit 5ab1348），升级时不可移除排除项；
+# <2.0.0：防止 pip-compile --upgrade 时失控跨大版本
 litellm>=1.82.4,<2.0.0,!=1.82.7,!=1.82.8
 
 # ========================================
@@ -15,15 +17,23 @@ python-dotenv>=1.0.0
 
 # 网络抓取
 beautifulsoup4>=4.11.0  # HTML解析器：Jina Reader API fallback
-aiohttp>=3.9.0  # 异步HTTP客户端
+aiohttp>=3.14.0  # 异步HTTP客户端（3.14.0 修 CVE-2026-34993 / CVE-2026-47265）
 
 # 文档转换
-pymupdf>=1.24.0  # PDF文本提取
 charset-normalizer>=3.0.0  # 文本编码检测
-python-multipart>=0.0.9  # 文件上传支持
+# 0.0.31 修 CVE-2026-53538/53539（0.0.30）+ CVE-2026-53540（0.0.31）—— multipart 解析侧 DoS，升级时不可回退 floor
+python-multipart>=0.0.31  # 文件上传支持
+
+# 图片处理：上传校验（按内容探测 png/jpeg + 解压炸弹闸）+ 识图 read 路径降采样
+Pillow>=10.4.0
 
 # 可观测性（PR-obs-lite sampler：进程 RSS / CPU% / FD / disk usage）
 psutil>=5.9.0
+
+# 沙盒（C 阶段）：Docker daemon HTTP API 的 asyncio 原生客户端。
+# 选它因容器生灭要 await、直接挂引擎的 asyncio.Task.cancel() 取消/超时/lease 栈；
+# docker CLI / 同步 docker-py 与之对不上。调用全部收口在 SandboxSession seam。
+aiodocker>=0.24.0
 
 # 文本模糊匹配（update_artifact Layer 2，锚定 + 有界 Levenshtein 校验）
 rapidfuzz>=3.0.0
@@ -35,6 +45,11 @@ google-re2>=1.1.0
 
 # YAML 解析（Agent MD 文件）
 pyyaml>=6.0
+
+# JMESPath（http_tool response_extract 提取语法）—— 纯 Python、零传递依赖（boto3/awscli
+# 的 --query 同款），单一权威 spec。替代旧手写点号解析器:支持通配/过滤/函数，且能
+# jmespath.compile() 在写入边界校验表达式语法。
+jmespath>=1.0.0
 
 # ========================================
 # 数据库
@@ -63,13 +78,23 @@ fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
 
 # 配置管理
-pydantic-settings>=2.0.0
+pydantic-settings>=2.14.2  # 2.14.2 修 GHSA-4xgf-cpjx-pc3j
+
+# starlette —— fastapi 的传递依赖，此处直接约束安全 floor：
+# 1.3.0 修 PYSEC-2026-248，1.3.1 修 PYSEC-2026-249（升级时不可回退 floor）
+starlette>=1.3.1
 
 # 异步文件操作（预留）
 aiofiles>=23.2.0
 
 # 异步 HTTP 客户端（http_tool + CLI api_client 运行时使用）
 httpx>=0.26.0
+
+# MCP client（F 阶段）：只启用 streamable HTTP 传输；stdio 明确 non-goal。
+mcp>=1.28.1,<2
+
+# MCP JSON Schema 参数校验（SDK 传递依赖也会带；这里作为直接消费依赖声明）。
+jsonschema>=4.0.0
 
 # ========================================
 # 认证依赖
@@ -79,6 +104,8 @@ httpx>=0.26.0
 PyJWT>=2.8.0
 # 密码哈希
 bcrypt>=4.1.0
+# 工具凭证可逆加密（B-4 tool_credential：Fernet = AES-128-CBC + HMAC，单主密钥、不轮转）
+cryptography>=42.0.0
 
 # ========================================
 # CLI 依赖

@@ -48,6 +48,19 @@ class TestLease:
         store = InMemoryRuntimeStore()
         await store.release_lease("conv-x", "msg-x")  # should not raise
 
+    async def test_get_lease_owner_degrades_to_local_instance(self):
+        """进程本地 store:有 lease 即本实例持有,无 lease 为 None。"""
+        from utils.instance import INSTANCE_ID
+
+        store = InMemoryRuntimeStore()
+        assert await store.get_lease_owner("conv-1") is None
+
+        await store.try_acquire_lease("conv-1", "msg-1")
+        assert await store.get_lease_owner("conv-1") == INSTANCE_ID
+
+        await store.release_lease("conv-1", "msg-1")
+        assert await store.get_lease_owner("conv-1") is None
+
     async def test_list_active_executions_includes_message_id(self):
         store = InMemoryRuntimeStore()
         assert await store.list_active_executions() == {}

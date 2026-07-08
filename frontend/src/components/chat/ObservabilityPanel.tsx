@@ -1,11 +1,18 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { CopyIcon } from '@/components/ui/CopyIcon';
+import { PillBadge } from '@/components/ui/PillBadge';
+import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
+import { SELECT_COMPACT, MENU_ROW_HOVER } from '@/lib/styles';
+import { SELECT_CHEVRON_COMPACT } from '@/components/ui/SelectChevron';
 import * as api from '@/lib/api';
+import { isCsvMime } from '@/lib/artifactPreview';
 import { parseUtcIso } from '@/lib/time';
+import { triggerBlobDownload } from '@/lib/download';
+import ArtifactPreviewContent from '@/components/artifact/ArtifactPreviewContent';
 import PanelSearchBar from './PanelSearchBar';
 import Pagination from './Pagination';
 import type {
@@ -21,13 +28,53 @@ import { useLatestOnly } from '@/hooks/useLatestOnly';
 const DEFAULT_PAGE_SIZE = 20;
 
 // ── Event type colors ──
-function eventColor(type: string): string {
+// Categorical palette via the scoped `trace` tokens; agent_* shares accent
+// (agent activity = brand hue, same reasoning as status.running).
+function eventColor(event: AdminEventItem): string {
+  const type = event.event_type;
+  const tone = eventIssueTone(event);
+  if (tone === 'error') return 'text-status-error';
+  if (tone === 'warning') return 'text-status-warning';
   if (type === 'error') return 'text-status-error';
-  if (type.startsWith('permission')) return 'text-yellow-500 dark:text-yellow-400';
-  if (type === 'llm_complete') return 'text-accent';
-  if (type.startsWith('tool_')) return 'text-blue-500 dark:text-blue-400';
-  if (type.startsWith('agent_')) return 'text-purple-500 dark:text-purple-400';
+  if (type.startsWith('permission')) return 'text-status-warning';
+  if (type === 'llm_complete') return 'text-trace-llm dark:text-trace-llm-dark';
+  if (type.startsWith('tool_')) return 'text-trace-tool dark:text-trace-tool-dark';
+  if (type.startsWith('agent_')) return 'text-accent';
   return 'text-text-tertiary dark:text-text-tertiary-dark';
+}
+
+function compactText(value: unknown, max = 96): string {
+  if (typeof value !== 'string') return '';
+  const oneLine = value.replace(/\s+/g, ' ').trim();
+  return oneLine.length > max ? `${oneLine.slice(0, max)}...` : oneLine;
+}
+
+function isToolFailure(event: AdminEventItem): boolean {
+  return event.event_type === 'tool_complete' && event.data?.success === false;
+}
+
+function isPermissionDenied(event: AdminEventItem): boolean {
+  return event.event_type === 'permission_result' && event.data?.approved === false;
+}
+
+function isTerminalIssue(event: AdminEventItem): boolean {
+  return event.event_type === 'error' || event.event_type === 'timed_out' || event.event_type === 'cancelled';
+}
+
+function isFailedCompaction(event: AdminEventItem): boolean {
+  return event.event_type === 'compaction_summary' && event.data?.success === false;
+}
+
+function isIssueEvent(event: AdminEventItem): boolean {
+  return isTerminalIssue(event) || isToolFailure(event) || isPermissionDenied(event) || isFailedCompaction(event);
+}
+
+function eventIssueTone(event: AdminEventItem): 'error' | 'warning' | null {
+  if (event.event_type === 'error') return 'error';
+  if (isToolFailure(event) || event.event_type === 'timed_out' || event.event_type === 'cancelled' || isPermissionDenied(event) || isFailedCompaction(event)) {
+    return 'warning';
+  }
+  return null;
 }
 
 function eventSummary(event: AdminEventItem): string {
@@ -45,7 +92,8 @@ function eventSummary(event: AdminEventItem): string {
     case 'tool_complete': {
       const ok = d.success as boolean;
       const dur = d.duration_ms as number | undefined;
-      return `${d.tool as string} ${ok ? 'OK' : 'FAIL'} ${dur ?? 0}ms`;
+      const err = compactText(d.error, 90);
+      return `${d.tool as string} ${ok ? 'OK' : 'FAIL'} ${dur ?? 0}ms${!ok && err ? ` | ${err}` : ''}`;
     }
     case 'agent_start':
       return d.agent as string;
@@ -56,7 +104,11 @@ function eventSummary(event: AdminEventItem): string {
     case 'permission_request':
       return `${d.tool as string} (${d.permission_level as string})`;
     case 'permission_result':
-      return d.approved ? 'approved' : 'denied';
+      return d.approved ? 'approved' : `denied${d.reason ? ` | ${d.reason as string}` : ''}`;
+    case 'timed_out':
+      return 'execution timed out';
+    case 'cancelled':
+      return (d.reason as string) || (d.response as string) || 'cancelled';
     case 'user_input':
       return (d.content as string)?.slice(0, 60) || '';
     default:
@@ -80,16 +132,40 @@ interface AggregatedStats {
   llmCalls: number;
   toolCalls: number;
   toolFails: number;
+  terminalErrors: number;
+  timedOut: number;
+  cancelled: number;
+  permissionDenied: number;
+  compactionFails: number;
+  issueEvents: number;
   totalDurationMs: number;
 }
 
 function aggregateStats(messages: AdminMessageGroup[]): AggregatedStats {
-  const stats: AggregatedStats = { inputTokens: 0, outputTokens: 0, llmCalls: 0, toolCalls: 0, toolFails: 0, totalDurationMs: 0 };
+  const stats: AggregatedStats = {
+    inputTokens: 0,
+    outputTokens: 0,
+    llmCalls: 0,
+    toolCalls: 0,
+    toolFails: 0,
+    terminalErrors: 0,
+    timedOut: 0,
+    cancelled: 0,
+    permissionDenied: 0,
+    compactionFails: 0,
+    issueEvents: 0,
+    totalDurationMs: 0,
+  };
   for (const msg of messages) {
     const metrics = msg.execution_metrics as Record<string, number> | null;
     if (metrics?.total_duration_ms) stats.totalDurationMs += metrics.total_duration_ms;
     for (const ev of msg.events) {
       const d = ev.data;
+      if (isIssueEvent(ev)) stats.issueEvents++;
+      if (ev.event_type === 'error') stats.terminalErrors++;
+      if (ev.event_type === 'timed_out') stats.timedOut++;
+      if (ev.event_type === 'cancelled') stats.cancelled++;
+      if (isFailedCompaction(ev)) stats.compactionFails++;
       if (!d) continue;
       if (ev.event_type === 'llm_complete') {
         stats.llmCalls++;
@@ -101,6 +177,8 @@ function aggregateStats(messages: AdminMessageGroup[]): AggregatedStats {
       } else if (ev.event_type === 'tool_complete') {
         stats.toolCalls++;
         if (!(d.success as boolean)) stats.toolFails++;
+      } else if (ev.event_type === 'permission_result' && d.approved === false) {
+        stats.permissionDenied++;
       }
     }
   }
@@ -122,11 +200,58 @@ function formatDuration(ms: number): string {
   return `${mins}m ${secs}s`;
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function StatCard({ label, value, tone = 'neutral' }: { label: string; value: string; tone?: 'neutral' | 'warning' | 'error' }) {
+  const toneClass =
+    tone === 'error'
+      ? 'bg-status-error/10 border border-status-error/30'
+      : tone === 'warning'
+        ? 'bg-status-warning/10 border border-status-warning/30'
+        : 'bg-panel-accent dark:bg-surface-dark';
   return (
-    <div className="px-3 py-1.5 rounded-lg bg-panel-accent dark:bg-surface-dark">
+    <div className={`px-3 py-1.5 rounded-lg ${toneClass}`}>
       <div className="text-[10px] text-text-tertiary dark:text-text-tertiary-dark uppercase tracking-wide">{label}</div>
       <div className="text-sm font-semibold text-text-primary dark:text-text-primary-dark">{value}</div>
+    </div>
+  );
+}
+
+function IssueSummaryBar({
+  stats,
+  issuesOnly,
+  onToggle,
+}: {
+  stats: AggregatedStats;
+  issuesOnly: boolean;
+  onToggle: () => void;
+}) {
+  if (stats.issueEvents === 0) return null;
+  const tone = stats.terminalErrors > 0 ? 'error' : 'warning';
+  const bits: string[] = [];
+  if (stats.terminalErrors > 0) bits.push(`${stats.terminalErrors} error`);
+  if (stats.timedOut > 0) bits.push(`${stats.timedOut} timeout`);
+  if (stats.cancelled > 0) bits.push(`${stats.cancelled} cancelled`);
+  if (stats.toolFails > 0) bits.push(`${stats.toolFails} tool fail`);
+  if (stats.permissionDenied > 0) bits.push(`${stats.permissionDenied} permission denied`);
+  if (stats.compactionFails > 0) bits.push(`${stats.compactionFails} compaction fail`);
+  return (
+    <div className={`mx-4 mt-3 px-3 py-2 rounded-lg border flex items-center gap-3 text-xs ${
+      tone === 'error'
+        ? 'bg-status-error/10 border-status-error/30 text-status-error'
+        : 'bg-status-warning/10 border-status-warning/30 text-status-warning'
+    }`}>
+      <span className="font-medium">
+        发现 {stats.issueEvents} 个异常信号
+      </span>
+      <span className="text-text-secondary dark:text-text-secondary-dark truncate">
+        {bits.join(' · ')}
+      </span>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="ml-auto shrink-0 px-2 py-0.5 rounded-md border bg-surface dark:bg-bg-dark border-current transition-colors"
+      >
+        {issuesOnly ? '显示全部' : '只看异常'}
+      </button>
     </div>
   );
 }
@@ -204,11 +329,15 @@ export default function ObservabilityPanel() {
   const [eventsLoading, setEventsLoading] = useState(false);
   const [collapsedMessages, setCollapsedMessages] = useState<Set<string>>(new Set());
   const [selectedEvent, setSelectedEvent] = useState<AdminEventItem | null>(null);
+  // message_id 的选中事件所属消息 —— prompt 重建需要它（分支正确的 path 锚定）
+  const [selectedMsgId, setSelectedMsgId] = useState<string | null>(null);
   const refreshTick = useUIStore((s) => s.observabilityRefreshTick);
   const [viewMode, setViewMode] = useState<'events' | 'artifacts'>('events');
+  const [issuesOnly, setIssuesOnly] = useState(false);
 
   useEffect(() => {
     setViewMode('events');
+    setIssuesOnly(false);
   }, [selectedConvId]);
 
   // Fetch events when selected conversation changes or refresh is triggered
@@ -216,11 +345,13 @@ export default function ObservabilityPanel() {
     if (!selectedConvId) {
       setEventsData(null);
       setSelectedEvent(null);
+      setSelectedMsgId(null);
       return;
     }
     let cancelled = false;
     setEventsData(null);
     setSelectedEvent(null);
+    setSelectedMsgId(null);
     setEventsLoading(true);
     api.getAdminConversationEvents(selectedConvId).then((res) => {
       if (!cancelled) {
@@ -246,6 +377,30 @@ export default function ObservabilityPanel() {
       return next;
     });
   }, []);
+
+  // 活动分支路径：从 active_branch(叶子)沿 parent_id 上溯到根。对话有分支时（路径
+  // 未覆盖全部消息），不在路径上的消息标「旁支」，让 admin 看出分支结构 —— 否则
+  // 扁平时间线把所有分支混在一起、分不清谁在当前活动线上。
+  // 必须在下面的 early-return 之前调用：rules-of-hooks 要求所有 hook 无条件先于任何
+  // return。eventsData 为空时返回空集，提前计算无副作用。
+  const activePathIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!eventsData) return ids;
+    const parentOf = new Map<string, string | null>();
+    for (const m of eventsData.messages) parentOf.set(m.message_id, m.parent_id);
+    let cur: string | null | undefined = eventsData.active_branch;
+    while (cur != null && parentOf.has(cur) && !ids.has(cur)) {
+      ids.add(cur);
+      cur = parentOf.get(cur) ?? null;
+    }
+    return ids;
+  }, [eventsData]);
+
+  const visibleMessages = useMemo(() => {
+    if (!eventsData) return [];
+    if (!issuesOnly) return eventsData.messages;
+    return eventsData.messages.filter((msg) => msg.events.some(isIssueEvent));
+  }, [eventsData, issuesOnly]);
 
   // Browse mode: show admin conversation browser
   if (browseVisible) {
@@ -277,6 +432,10 @@ export default function ObservabilityPanel() {
   const stats = eventsData != null ? aggregateStats(eventsData.messages) : null;
   const headerTitle = eventsData?.title || selectedConvId;
 
+  // activePathIds 在 early-return 之前已算好（见上）。有分支 = 活动路径未覆盖全部消息。
+  const hasBranches = eventsData != null && activePathIds.size > 0
+    && activePathIds.size < eventsData.messages.length;
+
   // Timeline + Detail
   return (
     <div className="flex-1 flex min-h-0 bg-chat dark:bg-chat-dark">
@@ -288,14 +447,16 @@ export default function ObservabilityPanel() {
             {headerTitle}
           </div>
           <ConvMetaBlock data={eventsData} fallbackConvId={selectedConvId} />
-          <div className="mt-2 inline-flex p-0.5 rounded-lg bg-panel-accent dark:bg-surface-dark text-xs">
-            <TabButton active={viewMode === 'events'} onClick={() => setViewMode('events')}>
-              Events
-            </TabButton>
-            <TabButton active={viewMode === 'artifacts'} onClick={() => setViewMode('artifacts')}>
-              Artifacts
-            </TabButton>
-          </div>
+          <SegmentedTabs
+            ariaLabel="Conversation detail view"
+            className="mt-2"
+            value={viewMode}
+            options={[
+              { value: 'events', label: 'Events' },
+              { value: 'artifacts', label: 'Artifacts' },
+            ]}
+            onChange={setViewMode}
+          />
         </div>
 
         {viewMode === 'events' ? (
@@ -312,20 +473,44 @@ export default function ObservabilityPanel() {
                 <StatCard label="Tokens In" value={formatNumber(stats.inputTokens)} />
                 <StatCard label="Tokens Out" value={formatNumber(stats.outputTokens)} />
                 <StatCard label="LLM Calls" value={String(stats.llmCalls)} />
-                <StatCard label="Tool Calls" value={stats.toolFails > 0 ? `${stats.toolCalls} (${stats.toolFails} fail)` : String(stats.toolCalls)} />
+                <StatCard
+                  label="Tool Calls"
+                  value={stats.toolFails > 0 ? `${stats.toolCalls} (${stats.toolFails} fail)` : String(stats.toolCalls)}
+                  tone={stats.toolFails > 0 ? 'warning' : 'neutral'}
+                />
+                {stats.terminalErrors > 0 ? (
+                  <StatCard label="Errors" value={String(stats.terminalErrors)} tone="error" />
+                ) : null}
+                {stats.timedOut > 0 ? (
+                  <StatCard label="Timeouts" value={String(stats.timedOut)} tone="warning" />
+                ) : null}
+                {stats.cancelled > 0 ? (
+                  <StatCard label="Cancelled" value={String(stats.cancelled)} tone="warning" />
+                ) : null}
                 <StatCard label="Total Time" value={formatDuration(stats.totalDurationMs)} />
               </div>
+              <IssueSummaryBar
+                stats={stats}
+                issuesOnly={issuesOnly}
+                onToggle={() => setIssuesOnly((v) => !v)}
+              />
 
               {/* Messages & events */}
               <div className="flex-1 overflow-y-auto px-4 py-2">
-                {eventsData.messages.map((msg) => (
+                {visibleMessages.length === 0 ? (
+                  <div className="py-10 text-center text-sm text-text-tertiary dark:text-text-tertiary-dark">
+                    当前对话没有异常事件
+                  </div>
+                ) : visibleMessages.map((msg) => (
                   <MessageGroupView
                     key={msg.message_id}
                     group={msg}
                     collapsed={collapsedMessages.has(msg.message_id)}
                     onToggle={() => toggleMessageCollapse(msg.message_id)}
+                    offActiveBranch={hasBranches && !activePathIds.has(msg.message_id)}
+                    issuesOnly={issuesOnly}
                     selectedEventId={selectedEvent?.id ?? null}
-                    onSelectEvent={setSelectedEvent}
+                    onSelectEvent={(e, msgId) => { setSelectedEvent(e); setSelectedMsgId(msgId); }}
                   />
                 ))}
               </div>
@@ -338,32 +523,15 @@ export default function ObservabilityPanel() {
 
       {/* Right detail panel — only for events tab */}
       {viewMode === 'events' && selectedEvent != null ? (
-        <DetailPanel key={selectedEvent.id} event={selectedEvent} onClose={() => setSelectedEvent(null)} />
+        <DetailPanel
+          key={selectedEvent.id}
+          event={selectedEvent}
+          convId={selectedConvId}
+          messageId={selectedMsgId}
+          onClose={() => { setSelectedEvent(null); setSelectedMsgId(null); }}
+        />
       ) : null}
     </div>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`px-3 py-1 rounded-md transition-colors ${
-        active
-          ? 'bg-surface dark:bg-bg-dark text-accent font-medium shadow-sm'
-          : 'text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark'
-      }`}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -396,6 +564,9 @@ function serializeEventToText(event: AdminEventItem): string {
   if (d != null && event.event_type === 'agent_start' && d.system_prompt != null) {
     lines.push(`\n--- System Prompt ---\n${d.system_prompt as string}`);
   }
+  if (d != null && event.event_type === 'agent_start' && d.reminder != null) {
+    lines.push(`\n--- Reminder ---\n${d.reminder as string}`);
+  }
   if (d != null && event.event_type === 'error') {
     lines.push(`\n--- Error ---\n${(d.error as string) || JSON.stringify(d, null, 2)}`);
   }
@@ -405,7 +576,17 @@ function serializeEventToText(event: AdminEventItem): string {
   return lines.join('\n');
 }
 
-function DetailPanel({ event, onClose }: { event: AdminEventItem; onClose: () => void }) {
+function DetailPanel({
+  event,
+  convId,
+  messageId,
+  onClose,
+}: {
+  event: AdminEventItem;
+  convId: string | null;
+  messageId: string | null;
+  onClose: () => void;
+}) {
   const { copied, copy } = useCopyFeedback();
 
   const handleCopy = useCallback(() => {
@@ -446,7 +627,7 @@ function DetailPanel({ event, onClose }: { event: AdminEventItem; onClose: () =>
         </div>
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-3">
-        <EventDetail event={event} />
+        <EventDetail event={event} convId={convId} messageId={messageId} />
       </div>
     </div>
   );
@@ -543,7 +724,7 @@ function AdminConversationBrowser({
       <PanelSearchBar
         value={query}
         onChange={handleQueryChange}
-        placeholder="搜索对话标题或 ID..."
+        placeholder="搜索对话标题或 ID…"
         countLabel={`${total} 对话`}
         onClose={onClose}
       />
@@ -554,12 +735,12 @@ function AdminConversationBrowser({
           {conversations.map((conv) => (
             <div
               key={conv.id}
-              className="group relative cursor-pointer transition-colors rounded-lg mb-1 hover:bg-panel/60 dark:hover:bg-panel-accent-dark/60 px-4 py-3"
+              className={`group relative cursor-pointer transition-colors rounded-lg mb-1 px-4 py-3 ${MENU_ROW_HOVER}`}
               onClick={() => onSelect(conv.id)}
             >
               <div className="flex items-center gap-2">
                 {conv.is_active && (
-                  <span className="inline-block w-2 h-2 rounded-full bg-orange-500 flex-shrink-0" title="运行中" />
+                  <span className="inline-block w-2 h-2 rounded-full bg-status-running flex-shrink-0" title="运行中" />
                 )}
                 <span className="font-medium text-text-primary dark:text-text-primary-dark truncate">
                   {conv.title || 'Untitled'}
@@ -590,16 +771,14 @@ function AdminConversationBrowser({
       {total > 0 && (
         <div className="px-4 pt-2 pb-4">
           <div className="max-w-3xl mx-auto">
-            <div className="bg-surface dark:bg-surface-dark rounded-2xl px-4">
-              <Pagination
-                page={page}
-                pageSize={pageSize}
-                total={total}
-                onPageChange={handlePageChange}
-                onPageSizeChange={handlePageSizeChange}
-                disabled={loading}
-              />
-            </div>
+            <Pagination
+              page={page}
+              pageSize={pageSize}
+              total={total}
+              onPageChange={handlePageChange}
+              onPageSizeChange={handlePageSizeChange}
+              disabled={loading}
+            />
           </div>
         </div>
       )}
@@ -608,27 +787,60 @@ function AdminConversationBrowser({
 }
 
 // ── Message Group ──
+function groupIssueCounts(group: AdminMessageGroup) {
+  return group.events.reduce((acc, event) => {
+    if (event.event_type === 'error') acc.errors += 1;
+    else if (event.event_type === 'timed_out') acc.timeouts += 1;
+    else if (event.event_type === 'cancelled') acc.cancelled += 1;
+    else if (isToolFailure(event)) acc.toolFails += 1;
+    else if (isPermissionDenied(event)) acc.permissionDenied += 1;
+    else if (isFailedCompaction(event)) acc.compactionFails += 1;
+    return acc;
+  }, {
+    errors: 0,
+    timeouts: 0,
+    cancelled: 0,
+    toolFails: 0,
+    permissionDenied: 0,
+    compactionFails: 0,
+  });
+}
+
 function MessageGroupView({
   group,
   collapsed,
   onToggle,
+  offActiveBranch,
+  issuesOnly,
   selectedEventId,
   onSelectEvent,
 }: {
   group: AdminMessageGroup;
   collapsed: boolean;
   onToggle: () => void;
+  offActiveBranch: boolean;
+  issuesOnly: boolean;
   selectedEventId: number | null;
-  onSelectEvent: (e: AdminEventItem) => void;
+  onSelectEvent: (e: AdminEventItem, messageId: string) => void;
 }) {
   const inputPreview = group.user_input.slice(0, 80) + (group.user_input.length > 80 ? '...' : '');
+  const issues = groupIssueCounts(group);
+  const hasHardError = issues.errors > 0;
+  const hasIssues = Object.values(issues).some((n) => n > 0);
+  const visibleEvents = issuesOnly ? group.events.filter(isIssueEvent) : group.events;
 
   return (
     <div className="mb-3">
       {/* Message header */}
       <button
         onClick={onToggle}
-        className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-surface dark:hover:bg-bg-dark transition-colors"
+        className={`w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors ${
+          hasHardError
+            ? 'bg-status-error/5 hover:bg-status-error/10'
+            : hasIssues
+              ? 'bg-status-warning/5 hover:bg-status-warning/10'
+              : 'hover:bg-surface dark:hover:bg-bg-dark'
+        }`}
       >
         <svg
           width="10"
@@ -642,40 +854,62 @@ function MessageGroupView({
         <span className="text-xs font-medium text-text-primary dark:text-text-primary-dark truncate">
           {inputPreview}
         </span>
+        {offActiveBranch ? (
+          <span
+            className="flex-shrink-0 px-1 py-px rounded bg-status-warning/10 text-status-warning text-[10px]"
+            title="不在当前活动分支路径上（旁支历史消息）"
+          >
+            旁支
+          </span>
+        ) : null}
+        {issues.errors > 0 ? <PillBadge tone="error">ERROR</PillBadge> : null}
+        {issues.timeouts > 0 ? <PillBadge tone="warning">TIMEOUT</PillBadge> : null}
+        {issues.cancelled > 0 ? <PillBadge tone="warning">CANCELLED</PillBadge> : null}
+        {issues.toolFails > 0 ? <PillBadge tone="warning">{issues.toolFails} tool fail</PillBadge> : null}
+        {issues.permissionDenied > 0 ? <PillBadge tone="warning">{issues.permissionDenied} denied</PillBadge> : null}
+        {issues.compactionFails > 0 ? <PillBadge tone="warning">compaction fail</PillBadge> : null}
         <span className="flex-shrink-0 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-          {group.events.length} events
+          {issuesOnly ? `${visibleEvents.length}/${group.events.length} events` : `${group.events.length} events`}
         </span>
       </button>
 
       {/* Events */}
       {!collapsed && (
         <div className="ml-4 mt-1 space-y-0.5">
-          {group.events.map((event) => (
-            <button
-              key={event.id}
-              onClick={() => onSelectEvent(event)}
-              className={`w-full text-left flex items-center gap-2 px-2 py-1 rounded text-xs transition-colors ${
-                selectedEventId === event.id
-                  ? 'bg-accent/10'
-                  : 'hover:bg-surface dark:hover:bg-bg-dark'
-              }`}
-            >
-              <span className="flex-shrink-0 text-text-tertiary dark:text-text-tertiary-dark w-[52px]">
-                {formatTime(event.created_at)}
-              </span>
-              {event.agent_name != null ? (
-                <span className="flex-shrink-0 px-1 py-px rounded bg-purple-500/10 text-purple-600 dark:text-purple-400 text-[10px]">
-                  {event.agent_name.replace('_agent', '')}
+          {visibleEvents.map((event) => {
+            const tone = eventIssueTone(event);
+            return (
+              <button
+                key={event.id}
+                onClick={() => onSelectEvent(event, group.message_id)}
+                className={`w-full text-left flex items-center gap-2 px-2 py-1 rounded text-xs transition-colors ${
+                  selectedEventId === event.id
+                    ? 'bg-accent/10'
+                    : tone === 'error'
+                      ? 'bg-status-error/5 hover:bg-status-error/10'
+                      : tone === 'warning'
+                        ? 'bg-status-warning/5 hover:bg-status-warning/10'
+                        : 'hover:bg-surface dark:hover:bg-bg-dark'
+                }`}
+              >
+                <span className="flex-shrink-0 text-text-tertiary dark:text-text-tertiary-dark w-[52px]">
+                  {formatTime(event.created_at)}
                 </span>
-              ) : null}
-              <span className={`flex-shrink-0 font-mono ${eventColor(event.event_type)}`}>
-                {event.event_type}
-              </span>
-              <span className="text-text-tertiary dark:text-text-tertiary-dark truncate">
-                {eventSummary(event)}
-              </span>
-            </button>
-          ))}
+                {event.agent_name != null ? (
+                  <PillBadge tone="accent">{event.agent_name.replace('_agent', '')}</PillBadge>
+                ) : null}
+                {tone != null ? (
+                  <PillBadge tone={tone}>{tone === 'error' ? 'ERROR' : 'FAIL'}</PillBadge>
+                ) : null}
+                <span className={`flex-shrink-0 font-mono ${eventColor(event)}`}>
+                  {event.event_type}
+                </span>
+                <span className={`${tone === 'error' ? 'text-status-error' : tone === 'warning' ? 'text-status-warning' : 'text-text-tertiary dark:text-text-tertiary-dark'} truncate`}>
+                  {eventSummary(event)}
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
@@ -683,7 +917,15 @@ function MessageGroupView({
 }
 
 // ── Event Detail ──
-function EventDetail({ event }: { event: AdminEventItem }) {
+function EventDetail({
+  event,
+  convId,
+  messageId,
+}: {
+  event: AdminEventItem;
+  convId: string | null;
+  messageId: string | null;
+}) {
   const d = event.data;
 
   return (
@@ -733,8 +975,16 @@ function EventDetail({ event }: { event: AdminEventItem }) {
         </div>
       ) : null}
 
-      {d != null && event.event_type === 'agent_start' && d.system_prompt != null ? (
-        <DetailBlock label="System Prompt" content={d.system_prompt as string} />
+      {event.event_type === 'agent_start' ? (
+        <>
+          {d?.system_prompt != null ? (
+            <DetailBlock label="System Prompt" content={d.system_prompt as string} />
+          ) : null}
+          {d?.reminder != null ? (
+            <DetailBlock label="Reminder（动态，并入末条消息）" content={d.reminder as string} />
+          ) : null}
+          <PromptReconstructSection convId={convId} messageId={messageId} event={event} />
+        </>
       ) : null}
 
       {d != null && event.event_type === 'error' ? (
@@ -759,6 +1009,15 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 }
 
 // ── Artifacts Tab ──
+function shouldUseAdminArtifactPreview(detail: ArtifactDetail): boolean {
+  if (detail.has_blob) return true;
+  return (
+    detail.content_type === 'text/markdown' ||
+    detail.content_type === 'text/html' ||
+    isCsvMime(detail.content_type)
+  );
+}
+
 function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: number }) {
   const [list, setList] = useState<ArtifactSummary[] | null>(null);
   const [listLoading, setListLoading] = useState(false);
@@ -866,13 +1125,22 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
     : versionContentMatches
       ? versionContent!.content
       : '';
+  const viewingHistoricalBlob =
+    detail != null && detail.has_blob && versionContentReady && !isViewingCurrent;
+  const showingRichPreview =
+    detail != null && versionContentReady && shouldUseAdminArtifactPreview(detail) && !viewingHistoricalBlob;
+  const contentClassName = showingRichPreview
+    ? detail?.content_type === 'text/markdown'
+      ? 'flex-1 min-h-0 overflow-y-auto'
+      : 'flex-1 min-h-0 overflow-hidden'
+    : 'flex-1 min-h-0 overflow-y-auto px-4 py-3';
 
   return (
     <div className="flex-1 flex min-h-0">
       {/* List */}
       <div className="w-[280px] flex-shrink-0 border-r border-border dark:border-border-dark overflow-y-auto">
         {listLoading ? (
-          <div className="p-4 text-xs text-text-tertiary dark:text-text-tertiary-dark">加载中...</div>
+          <div className="p-4 text-xs text-text-tertiary dark:text-text-tertiary-dark">加载中…</div>
         ) : list == null || list.length === 0 ? (
           <div className="p-4 text-xs text-text-tertiary dark:text-text-tertiary-dark">该会话暂无 artifacts</div>
         ) : (
@@ -912,7 +1180,7 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
           </div>
         ) : detailLoading ? (
           <div className="flex-1 flex items-center justify-center text-xs text-text-tertiary dark:text-text-tertiary-dark">
-            加载中...
+            加载中…
           </div>
         ) : detail == null ? (
           <div className="flex-1 flex items-center justify-center text-xs text-text-tertiary dark:text-text-tertiary-dark">
@@ -934,38 +1202,140 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
                 {detail.versions.length > 0 ? (
                   <>
                     <span>·</span>
-                    <select
-                      value={viewingVersion ?? detail.current_version}
-                      onChange={(e) => setViewingVersion(Number(e.target.value))}
-                      className="text-xs bg-bg dark:bg-bg-dark border border-border dark:border-border-dark rounded px-1.5 py-0.5 text-text-secondary dark:text-text-secondary-dark"
-                    >
-                      {detail.versions.map((v) => (
-                        <option key={v.version} value={v.version}>
-                          v{v.version} ({v.update_type}){v.version === detail.current_version ? ' · current' : ''}
-                        </option>
-                      ))}
-                    </select>
-                    {versionLoading ? <span>加载...</span> : null}
+                    <span className="relative">
+                      <select
+                        value={viewingVersion ?? detail.current_version}
+                        onChange={(e) => setViewingVersion(Number(e.target.value))}
+                        className={SELECT_COMPACT}
+                      >
+                        {detail.versions.map((v) => (
+                          <option key={v.version} value={v.version}>
+                            v{v.version} ({v.update_type}){v.version === detail.current_version ? ' · current' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      {SELECT_CHEVRON_COMPACT}
+                    </span>
+                    {versionLoading ? <span>加载…</span> : null}
                   </>
                 ) : null}
               </div>
             </div>
 
             {/* Content */}
-            <div className="flex-1 overflow-y-auto px-4 py-3">
+            <div className={contentClassName}>
               {versionContentReady ? (
-                <pre className="text-xs text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words font-mono">
-                  {displayedContent}
-                </pre>
+                viewingHistoricalBlob ? (
+                  <div className="flex h-full items-center justify-center text-center text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                    历史版本的二进制原件暂不能预览；请切回当前版本查看或下载原件。
+                  </div>
+                ) : showingRichPreview && detail != null ? (
+                  <ArtifactPreviewContent
+                    sessionId={convId}
+                    artifactId={detail.id}
+                    content={displayedContent}
+                    contentType={detail.content_type}
+                    hasBlob={!!detail.has_blob}
+                    originalFilename={detail.original_filename}
+                    refreshKey={detail.updated_at}
+                    fetchRawBlob={api.fetchAdminArtifactRawBlob}
+                    fetchRawObjectUrl={api.fetchAdminArtifactRawObjectUrl}
+                    pendingFlush={false}
+                    useLocalPreview={false}
+                  />
+                ) : (
+                  <pre className="text-xs text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words font-mono">
+                    {displayedContent}
+                  </pre>
+                )
               ) : (
                 <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                  加载版本内容中...
+                  加载版本内容中…
                 </div>
               )}
             </div>
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Prompt Reconstruction (admin forensics) ──
+// 重建某发 agent_start 后 LLM 调用实际发出的完整 prompt：后端走分支正确的 path，
+// 用持久化的 system_prompt + reminder + 重放历史合成，不重新生成动态内容。
+function PromptReconstructSection({
+  convId,
+  messageId,
+  event,
+}: {
+  convId: string | null;
+  messageId: string | null;
+  event: AdminEventItem;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<api.AdminPromptReconstructResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const eventId = event.event_id;
+  const canReconstruct = convId != null && messageId != null && eventId != null;
+
+  const handleReconstruct = useCallback(() => {
+    if (convId == null || messageId == null || eventId == null) return;
+    setLoading(true);
+    setError(null);
+    api.getAdminPromptReconstruct(convId, messageId, eventId)
+      .then(setResult)
+      .catch((err) => setError(err instanceof Error ? err.message : '重建失败'))
+      .finally(() => setLoading(false));
+  }, [convId, messageId, eventId]);
+
+  const handleDownload = useCallback(() => {
+    if (!result) return;
+    const blob = new Blob([JSON.stringify(result.messages, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    });
+    triggerBlobDownload(`prompt-${messageId ?? 'msg'}-${eventId ?? 'evt'}.json`, blob);
+  }, [result, messageId, eventId]);
+
+  return (
+    <div className="space-y-2 border-t border-border dark:border-border-dark pt-3">
+      <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
+        重建此发实际发给模型的完整 prompt（持久化重放，不重新生成；忠实性为版本内）
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          onClick={handleReconstruct}
+          disabled={!canReconstruct || loading}
+          className="px-2 py-1 rounded-md text-xs bg-accent/10 text-accent hover:bg-accent/20 disabled:opacity-50 transition-colors"
+        >
+          {loading ? '重建中…' : '重建 Prompt'}
+        </button>
+        {result ? (
+          <button onClick={handleDownload} className="text-xs text-accent">
+            下载 JSON
+          </button>
+        ) : null}
+      </div>
+      {!canReconstruct ? (
+        <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
+          该事件缺少 event_id（早于此能力上线），无法重建。
+        </div>
+      ) : null}
+      {error ? <div className="text-xs text-status-error">{error}</div> : null}
+      {result ? (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 flex-wrap text-xs text-text-tertiary dark:text-text-tertiary-dark">
+            <span>{result.messages.length} 条消息 · {result.agent_name ?? '-'}</span>
+            {!result.has_reminder ? (
+              <span className="px-1 py-px rounded bg-status-warning/10 text-status-warning text-[10px]">
+                无持久化 reminder（旧事件：仅 system + 历史）
+              </span>
+            ) : null}
+          </div>
+          <DetailBlock label="重建 Messages" content={JSON.stringify(result.messages, null, 2)} />
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -19,10 +19,20 @@ class ToolCall:
     # 解析时触发的兜底修复提示（祈使句，回传给模型在下一轮看到）。
     # 仅在 repair 实际改写了输入时登记；正常解析路径为空列表。
     warnings: List[str] = field(default_factory=list)
+    # 模型在调用前写的一句意图（<reason> 兄弟标签）。display-only：透出到 CONFIRM
+    # 审批弹窗 / TOOL_START 事件，**绝不**进 params、绝不进 execute()。best-effort：
+    # 缺失或在 repair 路径丢失都不影响工具执行。
+    reason: Optional[str] = None
 
 
 class XMLToolCallParser:
     """XML工具调用解析器"""
+
+    # 协议的 depth-0 结构性兄弟标签（既非用户参数、也非工具名）。**任何要区分"结构性兄弟
+    # vs 用户内容/工具名"的 repair 必须查这张表**——否则每新增一个结构标签，就会被一个个
+    # repair 连环踩雷（reason 落地时 _repair_scattered_params / _repair_tool_name_as_tag
+    # 就是这么一轮轮踩出来的）。深度无关的 pattern 型 repair 不需要它。
+    _RESERVED_SIBLING_TAGS = frozenset({'name', 'params', 'reason'})
 
     @staticmethod
     def parse_tool_calls(text: str) -> List[ToolCall]:
@@ -100,6 +110,10 @@ class XMLToolCallParser:
 
         返回 None 仅当 content 为空白。无法解析时返回带 error 的 ToolCall（engine 反馈给 agent）。
         触发 repair 兜底时 warnings 带上祈使句提示。
+
+        <reason>（调用意图，display-only）由语法层 _parse_with_etree 像 <name>/<params> 一样
+        depth-0 提取——不在这里、也不在任何 repair 里特殊处理。malformed 调用经 generic repair
+        合法化后再解析，reason 的深度由 etree 权威判定；修不好的退化路径 reason 为 None（best-effort）。
 
         is_trailing：本块是拆分层判定的尾部未终止块 —— **截断只可能发生在这里**。complete 块
         （有 CDATA 外的 </tool_call>）按定义完整，永不按截断处理。
@@ -206,7 +220,13 @@ class XMLToolCallParser:
         params_elem = root.find('params')
         params = XMLToolCallParser._parse_element(params_elem) if params_elem is not None else {}
 
-        return ToolCall(name=name, params=params)
+        # 提取 reason（调用意图，display-only）。root.find 只匹配直接子节点 = depth-0，故嵌在
+        # <params> 里、名为 reason 的合法参数（root/params/reason）天然不会被当成调用意图。
+        # 与 name/params 同属协议 grammar，由语法层在此一处处理，repair 层不感知。
+        reason_elem = root.find('reason')
+        reason = (reason_elem.text or "").strip() if reason_elem is not None else None
+
+        return ToolCall(name=name, params=params, reason=reason or None)
 
     @staticmethod
     def _parse_element(elem: ET.Element) -> Dict[str, Any]:
@@ -241,23 +261,35 @@ class XMLToolCallParser:
 
         也处理有闭合标签的情况：<web_fetch>...</web_fetch>
         """
-        # 已有 <name> 标签 → 无需修复
-        if re.search(r'<name[\s>=]', content) or re.search(r'<name>', content):
+        # 所有结构判定都在遮蔽 CDATA 的 masked 串上做（_mask_cdata 等长替换，span 与 content
+        # 1:1），真实文本按 span 切自 content —— 否则 CDATA 内的字面 <name>/</reason> 会骗过下面的
+        # 早退与 <reason> 跳过逻辑，把本可 repair 的调用判死（reviewer round-5）。
+        masked = XMLToolCallParser._mask_cdata(content)
+
+        # 已有 <name> 标签 → 无需修复（masked 上查，CDATA 里的字面 <name> 不算）
+        if re.search(r'<name[\s>=]', masked):
             return content
 
-        # 匹配首个标签（跳过空白）
-        match = re.match(r'\s*<(\w+)>(.*)', content, re.DOTALL)
+        # 跳过开头的结构性 sibling <reason>（完整元素，承载调用意图）——它不是工具名外包标签。
+        # 否则"第一个标签=工具名"会把 <reason> 误当工具名（name='reason'、真实工具名丢失）。
+        # span 取自 masked → CDATA 内字面 </reason> 不会截断 prefix；prefix 真实文本切自 content。
+        reason_m = re.match(r'\s*<reason\s*>.*?</reason\s*>\s*', masked, re.DOTALL | re.IGNORECASE)
+        start = reason_m.end() if reason_m else 0
+        prefix = content[:start]
+
+        # 在 reason 之后找首个标签（masked 上匹配开标签，位置即可切 content）
+        match = re.match(r'\s*<(\w+)>', masked[start:], re.DOTALL)
         if not match:
             return content
 
         tag_name = match.group(1)
-        rest = match.group(2)
 
-        # 如果首标签就是 params → 不是工具名，跳过
-        if tag_name.lower() == 'params':
+        # 首标签是结构性 sibling（params/reason）→ 不是工具名，原样返回（含已剥的 prefix）
+        if tag_name.lower() in XMLToolCallParser._RESERVED_SIBLING_TAGS:
             return content
 
-        # 移除对应的闭合标签（如果有）
+        # 开标签之后的真实内容；末尾若有该工具名闭合标签（end-anchored，不会误伤 CDATA 内字面量）去掉
+        rest = content[start + match.end():]
         rest = re.sub(rf'</\s*{re.escape(tag_name)}\s*>\s*$', '', rest, flags=re.DOTALL)
 
         warnings.append(
@@ -265,7 +297,7 @@ class XMLToolCallParser:
             f"Correct form: <name>{tag_name}</name> with <params> as a sibling. "
             f"Do not wrap the call body with the tool name."
         )
-        return f'<name>{tag_name}</name>\n{rest}'
+        return f'{prefix}<name>{tag_name}</name>\n{rest}'
 
     @staticmethod
     def _repair_tag_equals_syntax(content: str, warnings: List[str]) -> str:
@@ -276,19 +308,29 @@ class XMLToolCallParser:
             <name=call_subagent</name>
         修复为：
             <name>call_subagent</name>
+
+        CDATA-aware：匹配只在遮蔽 CDATA 的 masked 串上找（span 与 content 1:1），按 span 逆序
+        改写 content —— 否则 CDATA 内的字面 <a=b</a>（如 reason/content 里的代码示例）会被误重写、
+        污染参数值。
         """
-        new_content = re.sub(
-            r'<(\w+)=([^<>]+)</\1>',
-            r'<\1>\2</\1>',
-            content,
+        masked = XMLToolCallParser._mask_cdata(content)
+        matches = list(re.finditer(r'<(\w+)=([^<>]+)</\1>', masked))
+        if not matches:
+            return content
+
+        # 逆序按 span 改写，避免前面的替换位移后面的偏移；value 真实文本切自 content
+        result = content
+        for m in reversed(matches):
+            tag = m.group(1)
+            value = content[m.start(2):m.end(2)]
+            result = result[:m.start()] + f'<{tag}>{value}</{tag}>' + result[m.end():]
+
+        warnings.append(
+            "Used '=' inside tag opening (e.g., <name=foo</name>). "
+            "Correct form: <name>foo</name>. "
+            "Never use '=' in tag openings — open with '>' and close with '</tag>'."
         )
-        if new_content != content:
-            warnings.append(
-                "Used '=' inside tag opening (e.g., <name=foo</name>). "
-                "Correct form: <name>foo</name>. "
-                "Never use '=' in tag openings — open with '>' and close with '</tag>'."
-            )
-        return new_content
+        return result
 
     @staticmethod
     def _detect_truncation(content: str) -> bool:
@@ -370,9 +412,12 @@ class XMLToolCallParser:
             after = m.group(3)
             return f'<{tag}><![CDATA[{cdata}]]></{tag}>{after}'
 
-        # CDATA 内容用 (?:(?!\]\]>).)* 匹配，防止跨越 ]]> 边界回溯
+        # CDATA 内容用 (?:(?!\]\]>).)*+ 匹配：不跨越 ]]> 边界，且 *+（possessive，
+        # Python 3.11+）禁止回溯进组——内容里不可能含 ]]>，回溯只会在未闭合 CDATA 上
+        # 线性反复试 \]\]> 白耗 CPU（O(n²) 起步）。目前未闭合 CDATA 被上游
+        # _detect_truncation 短路、走不到这里，但安全性不应依赖调用顺序这个隐式前提。
         new_content = re.sub(
-            r'<(\w+)>\s*<!\[CDATA\[((?:(?!\]\]>).)*)\]\]>(?!\s*</\1>)(\s*<[/\w])',
+            r'<(\w+)>\s*<!\[CDATA\[((?:(?!\]\]>).)*+)\]\]>(?!\s*</\1>)(\s*<[/\w])',
             _repair_match,
             content,
             flags=re.DOTALL,
@@ -393,6 +438,11 @@ class XMLToolCallParser:
         的字面标签**（</tool_call> / </params> / <div> 等）骗；长度不变，故 masked 上 match 的
         span 可直接切回 content 取真实文本。只遮蔽**已闭合**的 CDATA（未闭合 = 截断，已由
         _detect_truncation 在更早处短路，走不到这些 repair）。
+
+        **不变量**：凡是在 raw 内容上做结构判定的 repair（找标签 / 判早退 / 切 span）都必须先经此
+        遮蔽，否则会被 CDATA 内字面标签骗（reviewer 连环踩了 _repair_scattered_params /
+        _repair_missing_closing_tags / _repair_tool_name_as_tag / _repair_tag_equals_syntax 才补齐）。
+        这是 raw-string 扫描的两根支柱之一；另一根是 _RESERVED_SIBLING_TAGS（结构性标签词汇表）。
         """
         return re.sub(
             r'<!\[CDATA\[.*?\]\]>',
@@ -438,16 +488,30 @@ class XMLToolCallParser:
             for i in range(s, e):
                 masked_chars[i] = ''
         masked_remainder = ''.join(masked_chars)
-        has_orphans = bool(re.search(r'<\w+\s*>', masked_remainder))
 
-        # 只有一个 params 块且无孤立标签 → 无需修复
+        # 顶层 <reason> 是协议的结构性兄弟（与 <name> 同类，承载调用意图），**不是**散落参数：
+        # 不并进 <params>、原位保留。masked_remainder 已抠掉 name + 所有 params 区间，残留的
+        # <reason> 必为 depth-0（params 内同名参数已随 params span 一并抠除）→ 深度无歧义，
+        # 无需额外判断。这是本 repair 唯一需要认识的协议字段，与既有的 <name> 同等待遇。
+        reason_m = re.search(r'<reason\s*>.*?</reason\s*>', masked_remainder, re.DOTALL | re.IGNORECASE)
+        reason_block = f"{content[reason_m.start():reason_m.end()].strip()}\n" if reason_m else ""
+
+        # 真实散落参数（排除结构性 sibling；masked_remainder 已抠掉 name+params，故残留的
+        # 结构标签只可能是上面的 <reason>）
+        has_orphans = any(m.group(1).lower() not in XMLToolCallParser._RESERVED_SIBLING_TAGS
+                          for m in re.finditer(r'<(\w+)\s*>', masked_remainder))
+
+        # 单一 params 块且无真实孤立标签 → 无需重组（顶层 <reason> 交给 etree 原样解析）
         if len(params_spans) <= 1 and not has_orphans:
             return content
 
         all_children = []
-        # 孤立标签（放前面，后面 params 块同名 key 覆盖）；span 取自 masked，文本切自 content
+        # 孤立标签（放前面，后面 params 块同名 key 覆盖）；结构性 sibling（已单独提走的 <reason>
+        # 等）跳过，不并进参数
         if has_orphans:
             for m in re.finditer(r'<(\w+)>.*?</\1>', masked_remainder, re.DOTALL):
+                if m.group(1).lower() in XMLToolCallParser._RESERVED_SIBLING_TAGS:
+                    continue
                 all_children.append(content[m.start():m.end()].strip())
         # 有子元素的 params 块（跳过纯文本/CDATA 的垃圾块——masked 后 inner 无 <词> 即垃圾块）
         for _, _, cs, ce in params_spans:
@@ -463,7 +527,7 @@ class XMLToolCallParser:
             "Wrap ALL parameters in a single <params>...</params> block. "
             "Do not duplicate <params> and do not place param tags as siblings of <name>."
         )
-        return f"{content[name_m.start():name_m.end()]}\n<params>\n{merged}\n</params>"
+        return f"{reason_block}{content[name_m.start():name_m.end()]}\n<params>\n{merged}\n</params>"
 
     @staticmethod
     def _repair_missing_closing_tags(content: str, warnings: List[str]) -> str:

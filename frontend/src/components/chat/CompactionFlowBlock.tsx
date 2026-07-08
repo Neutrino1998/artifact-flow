@@ -1,12 +1,9 @@
 'use client';
 
 import { memo } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeHighlight from 'rehype-highlight';
 import FlowBlock from './FlowBlock';
-import { PROSE_CLASSES } from '@/lib/styles';
-import { markdownComponents, markdownUrlTransform } from '@/components/markdown';
+import MarkdownBlock from '@/components/markdown/MarkdownBlock';
+import { PillBadge } from '@/components/ui/PillBadge';
 import type { CompactionBlock } from '@/stores/streamStore';
 
 interface CompactionFlowBlockProps {
@@ -46,26 +43,26 @@ const CheckIcon = () => (
 function Badge({ state }: { state: CompactionBlock['state'] }) {
   if (state === 'running') {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-medium bg-accent/10 text-accent">
+      <PillBadge tone="accent" size="regular" className="gap-1.5">
         <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
         compaction
-      </span>
+      </PillBadge>
     );
   }
   if (state === 'error') {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-medium bg-status-error/10 text-status-error">
+      <PillBadge tone="error" size="regular" className="gap-1.5">
         <PackageIcon />
         compaction failed
-      </span>
+      </PillBadge>
     );
   }
   // done
   return (
-    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-medium bg-bg dark:bg-transparent text-text-secondary dark:text-text-secondary-dark">
+    <PillBadge size="regular" className="gap-1.5">
       <CheckIcon />
       compaction
-    </span>
+    </PillBadge>
   );
 }
 
@@ -118,16 +115,7 @@ function Body({ block }: { block: CompactionBlock }) {
   // done
   if (!block.summary) return null;
   return (
-    <div className={PROSE_CLASSES}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight]}
-        components={markdownComponents}
-        urlTransform={markdownUrlTransform}
-      >
-        {block.summary}
-      </ReactMarkdown>
-    </div>
+    <MarkdownBlock>{block.summary}</MarkdownBlock>
   );
 }
 

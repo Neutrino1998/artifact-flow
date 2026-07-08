@@ -5,11 +5,17 @@ RedisRuntimeStore — Redis-backed RuntimeStore 实现
 使用 Lua 脚本保证原子性，Pub/Sub 实现 interrupt 唤醒。
 
 Key 设计（{prefix:id} 为 hash tag，确保同 entity 同 slot）：
-    {prefix:conv_id}:lease        STRING (msg_id)   TTL=LEASE_TTL   conversation lease
-    {prefix:conv_id}:interactive  STRING (msg_id)   TTL=LEASE_TTL   engine interactive
-    {prefix:msg_id}:interrupt     HASH              TTL=PERM+60     interrupt 状态
-    {prefix:msg_id}:cancel        STRING "1"        TTL=EXEC_TO     取消标记
-    {prefix:msg_id}:queue         LIST              TTL=EXEC_TO     消息注入队列
+    {prefix:conv_id}:lease        STRING (msg_id)       TTL=LEASE_TTL   conversation lease
+    {prefix:conv_id}:owner        STRING (instance_id)  TTL=LEASE_TTL   lease 持有实例（观测用）
+    {prefix:conv_id}:interactive  STRING (msg_id)       TTL=LEASE_TTL   engine interactive
+    {prefix:msg_id}:interrupt     HASH                  TTL=PERM+60     interrupt 状态
+    {prefix:msg_id}:cancel        STRING "1"            TTL=EXEC_TO     取消标记
+    {prefix:msg_id}:queue         LIST                  TTL=EXEC_TO     消息注入队列
+
+owner 旁挂而非并入 lease value：lease value = msg_id 是所有 compare-and-*
+脚本与读方的既定契约，改成复合值要动每个比较/解析点；owner 只是观测维度，
+与 lease 同 hash tag 同 slot，acquire/release Lua 顺带写删（多 key 同槽，
+Cluster-safe，先例 = mark_interactive_if_owner 的双 key）。
 """
 
 import asyncio
@@ -20,6 +26,7 @@ import redis.asyncio as aioredis
 
 from config import config
 from api.services.runtime_store import InjectQueueFull
+from utils.instance import INSTANCE_ID
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -46,13 +53,27 @@ else
 end
 """
 
-# acquire-lease: 原子 SET NX 或返回现有持有者
+# acquire-lease: 原子 SET NX 或返回现有持有者。
+# 成功时顺带写 owner key（本实例 id，观测用）——KEYS[1]/[2] 同 conv hash tag
+# 同 slot，Cluster-safe。ARGV[3]=instance_id
 _LUA_ACQUIRE_LEASE = """
 local ok = redis.call('SET', KEYS[1], ARGV[1], 'NX', 'EX', tonumber(ARGV[2]))
 if ok then
+    redis.call('SET', KEYS[2], ARGV[3], 'EX', tonumber(ARGV[2]))
     return nil
 end
 return redis.call('GET', KEYS[1])
+"""
+
+# release-lease: lease 仍归 ARGV[1] 时删 lease + owner（都是 conv hash tag，
+# 同 slot）。owner 不能走通用 compare-and-del（它的值是 instance_id 非 msg_id）。
+_LUA_RELEASE_LEASE = """
+local val = redis.call('GET', KEYS[1])
+if val == ARGV[1] then
+    redis.call('DEL', KEYS[1], KEYS[2])
+    return 1
+end
+return 0
 """
 
 # mark-interactive-if-owner: 仅当 lease 仍归 ARGV[1] 时才 SET interactive。
@@ -108,6 +129,8 @@ return 'resolved'
 class RedisRuntimeStore:
     """Redis-backed RuntimeStore 实现"""
 
+    is_shared = True  # 跨进程共享真相源:多 worker 安全(沙盒 reaper 可据此放心跑)
+
     def __init__(
         self,
         redis_client: aioredis.Redis,
@@ -124,6 +147,7 @@ class RedisRuntimeStore:
 
         # Lua scripts（register_script 对象，自动处理 NOSCRIPT 重试）
         self._script_acquire_lease = None
+        self._script_release_lease = None
         self._script_mark_interactive_if_owner = None
         self._script_compare_and_del = None
         self._script_compare_and_expire = None
@@ -137,6 +161,7 @@ class RedisRuntimeStore:
     def init_scripts(self) -> None:
         """注册所有 Lua 脚本（register_script 是同步方法，自动处理 NOSCRIPT 重试）"""
         self._script_acquire_lease = self._redis.register_script(_LUA_ACQUIRE_LEASE)
+        self._script_release_lease = self._redis.register_script(_LUA_RELEASE_LEASE)
         self._script_mark_interactive_if_owner = self._redis.register_script(_LUA_MARK_INTERACTIVE_IF_OWNER)
         self._script_compare_and_del = self._redis.register_script(_LUA_COMPARE_AND_DEL)
         self._script_compare_and_expire = self._redis.register_script(_LUA_COMPARE_AND_EXPIRE)
@@ -149,6 +174,9 @@ class RedisRuntimeStore:
 
     def _lease_key(self, conversation_id: str) -> str:
         return f"{{{self._prefix}:{conversation_id}}}:lease"
+
+    def _lease_owner_key(self, conversation_id: str) -> str:
+        return f"{{{self._prefix}:{conversation_id}}}:owner"
 
     def _interactive_key(self, conversation_id: str) -> str:
         return f"{{{self._prefix}:{conversation_id}}}:interactive"
@@ -172,16 +200,23 @@ class RedisRuntimeStore:
         # 原子操作：SET NX 成功返回 nil，否则返回现有持有者
         # 消除了原先 SET NX + GET 之间的竞态窗口
         result = await self._script_acquire_lease(
-            keys=[key], args=[message_id, str(self._lease_ttl)]
+            keys=[key, self._lease_owner_key(conversation_id)],
+            args=[message_id, str(self._lease_ttl), INSTANCE_ID],
         )
         return result  # None = acquired, str = existing owner
 
     async def release_lease(self, conversation_id: str, message_id: str) -> None:
-        key = self._lease_key(conversation_id)
-        await self._script_compare_and_del(keys=[key], args=[message_id])
+        await self._script_release_lease(
+            keys=[self._lease_key(conversation_id), self._lease_owner_key(conversation_id)],
+            args=[message_id],
+        )
 
     async def get_leased_message_id(self, conversation_id: str) -> Optional[str]:
         return await self._redis.get(self._lease_key(conversation_id))
+
+    async def get_lease_owner(self, conversation_id: str) -> Optional[str]:
+        """当前 lease 持有实例的 instance_id（无 lease / owner 已过期 → None）。"""
+        return await self._redis.get(self._lease_owner_key(conversation_id))
 
     # ── Engine interactive ──
 
@@ -425,9 +460,10 @@ class RedisRuntimeStore:
             self._cancel_key(message_id),
             self._queue_key(message_id),
         )
-        # lease 和 interactive：compare-and-del（只删自己持有的）
-        await self._script_compare_and_del(
-            keys=[self._lease_key(conversation_id)], args=[message_id]
+        # lease（连带 owner）和 interactive：compare-and-del（只删自己持有的）
+        await self._script_release_lease(
+            keys=[self._lease_key(conversation_id), self._lease_owner_key(conversation_id)],
+            args=[message_id],
         )
         await self._script_compare_and_del(
             keys=[self._interactive_key(conversation_id)], args=[message_id]
@@ -462,6 +498,10 @@ class RedisRuntimeStore:
             keys=[self._interactive_key(conversation_id)],
             args=[message_id, str(ttl_int)],
         )
+        if lease_result == 1:
+            # owner 与 lease 同寿(值是 instance_id,不走 compare 脚本;
+            # 仅在自己仍是 lease 持有者时续,不会给别人的 owner 续命)
+            await self._redis.expire(self._lease_owner_key(conversation_id), ttl_int)
         # No cancel-flag renewal: cancel only ever targets a RUNNING turn (gated on
         # interactive), whose engine reads the flag within seconds — the flag never
         # has to outlive the worker-local queue wait, so EX=EXECUTION_TIMEOUT is

@@ -366,3 +366,199 @@ class TestFormatResultWarnings:
 
         out = format_result("foo", {"success": True, "data": "ok"})
         assert "<parser_warnings>" not in out
+
+
+# ============================================================
+# <reason> 兄弟标签：调用意图（display-only），depth-0 前置剥离
+# ============================================================
+
+class TestReasonExtraction:
+    """<reason> 是 <name>/<params> 的兄弟，承载模型调用意图，display-only。
+    解析时在 repair 链之前**只剥 depth-0**：嵌在 <params> 里的同名参数必须保留。"""
+
+    def test_top_level_reason_extracted(self):
+        text = """<tool_call>
+<reason><![CDATA[确认 parser 文件位置]]></reason>
+<name>bash</name>
+<params><command><![CDATA[ls -la]]></command></params>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.name == "bash"
+        assert tc.reason == "确认 parser 文件位置"
+        assert tc.params == {"command": "ls -la"}  # reason 不进 params
+
+    def test_plain_text_reason(self):
+        text = """<tool_call>
+<reason>读取目录</reason>
+<name>bash</name>
+<params><command><![CDATA[pwd]]></command></params>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.reason == "读取目录"
+
+    def test_no_reason_is_none(self):
+        """向后兼容：不带 <reason> 的调用照常解析，reason=None。"""
+        text = """<tool_call>
+<name>web_search</name>
+<params><query><![CDATA[python async]]></query></params>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.reason is None
+        assert tc.params == {"query": "python async"}
+
+    def test_param_named_reason_not_stripped(self):
+        """Finding 2 回归：custom 工具合法的 `reason` 参数（在 <params> 内）不得被当
+        调用意图剥走，否则工具少参。"""
+        text = """<tool_call>
+<name>moderate</name>
+<params><reason><![CDATA[内容违规理由]]></reason><action><![CDATA[block]]></action></params>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.reason is None, "param 级 <reason> 不应被抽成调用意图"
+        assert tc.params == {"reason": "内容违规理由", "action": "block"}
+
+    def test_top_level_and_param_reason_coexist(self):
+        """顶层 reason（意图）与 param reason（参数）并存时各归各位。"""
+        text = """<tool_call>
+<reason><![CDATA[调用审核接口]]></reason>
+<name>moderate</name>
+<params><reason><![CDATA[内容违规理由]]></reason><action><![CDATA[block]]></action></params>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.reason == "调用审核接口"
+        assert tc.params == {"reason": "内容违规理由", "action": "block"}
+
+    def test_param_reason_among_other_params_preserved(self):
+        text = """<tool_call>
+<name>reject</name>
+<params>
+<id><![CDATA[req_1]]></id>
+<reason><![CDATA[材料不全]]></reason>
+</params>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.reason is None
+        assert tc.params == {"id": "req_1", "reason": "材料不全"}
+
+    def test_reason_survives_repair_path(self):
+        """reason 在 repair 之前剥离 → 即便触发 repair（这里缺 </params>），reason 仍保留、
+        params 仍救回，且 reason 不会被 _repair_scattered_params 误并进 params。"""
+        text = """<tool_call>
+<reason><![CDATA[建任务计划]]></reason>
+<name>create_artifact</name>
+<params>
+<id><![CDATA[task_plan]]></id>
+<content><![CDATA[# Task]]></content>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.reason == "建任务计划"
+        assert tc.params == {"id": "task_plan", "content": "# Task"}
+        assert "reason" not in tc.params
+        assert tc.warnings  # 触发了 missing-</params> repair
+
+    def test_reason_cdata_with_literal_close_tag(self):
+        """reason 值里含字面 </reason>（在 CDATA 内）不被腰斩 —— etree 原生处理 CDATA。"""
+        text = """<tool_call>
+<reason><![CDATA[解释 </reason> 这个标签]]></reason>
+<name>bash</name>
+<params><command><![CDATA[echo hi]]></command></params>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.reason == "解释 </reason> 这个标签"
+        assert tc.params == {"command": "echo hi"}
+
+    def test_param_named_reason_with_missing_close_tag(self):
+        """reviewer 回归：param 名为 reason + 缺 </params>。靠 generic 的 _repair_missing_closing_tags
+        补 </params> 合法化后，etree depth-0 提取使 param 级 reason 留在 params、不被当调用意图。"""
+        text = """<tool_call>
+<name>moderate</name>
+<params>
+<reason><![CDATA[内容违规理由]]></reason>
+<action><![CDATA[block]]></action>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.reason is None
+        assert tc.params == {"reason": "内容违规理由", "action": "block"}
+
+    def test_reason_cdata_literal_close_tag_with_tool_name_as_tag(self):
+        """reviewer round-5：reason 的 CDATA 含字面 </reason> + 工具名外包标签。
+        _repair_tool_name_as_tag 必须 CDATA-aware，否则 prefix 被 CDATA 内 </reason> 截断 → __malformed__。"""
+        text = """<tool_call>
+<reason><![CDATA[explain </reason> tag]]></reason>
+<web_fetch><params><url><![CDATA[https://x.com]]></url></params></web_fetch>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.name == "web_fetch"
+        assert tc.reason == "explain </reason> tag"
+        assert tc.params == {"url": "https://x.com"}
+
+    def test_reason_cdata_literal_name_tag_with_tool_name_as_tag(self):
+        """reviewer round-5：reason 的 CDATA 含字面 <name> + 工具名外包标签。
+        "已有 <name>" 早退必须 CDATA-aware，否则被 CDATA 内 <name> 骗到、不修 → __malformed__。"""
+        text = """<tool_call>
+<reason><![CDATA[mention <name> format]]></reason>
+<web_fetch><params><url><![CDATA[https://y.com]]></url></params></web_fetch>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.name == "web_fetch"
+        assert tc.reason == "mention <name> format"
+        assert tc.params == {"url": "https://y.com"}
+
+    def test_tag_equals_repair_preserves_cdata_literal(self):
+        """_repair_tag_equals_syntax CDATA-aware：name= 触发修复时，CDATA 内的字面 <a=b</a>
+        （如代码示例）不被误重写。"""
+        text = """<tool_call>
+<name=bash</name>
+<params><command><![CDATA[test <a=b</a> end]]></command></params>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.name == "bash"
+        assert tc.params == {"command": "test <a=b</a> end"}
+
+    def test_reason_with_tool_name_as_outer_tag(self):
+        """reviewer 回归：顶层 reason + 工具名写成外包标签（<web_fetch>...</web_fetch>）。
+        _repair_tool_name_as_tag 必须跳过结构性 <reason> 再找工具名，否则 name 被误判为 'reason'、
+        真实工具名与 reason 双双丢失。reason 原位保留、工具名/参数都还原。"""
+        text = """<tool_call>
+<reason><![CDATA[fetch the page]]></reason>
+<web_fetch>
+<params><url><![CDATA[https://example.com]]></url></params>
+</web_fetch>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.name == "web_fetch"
+        assert tc.reason == "fetch the page"
+        assert tc.params == {"url": "https://example.com"}
+        assert "web_fetch" not in tc.params
+
+    def test_tool_name_as_outer_tag_no_reason_unchanged(self):
+        """无 reason 时 tool-name-as-tag 老行为不回归。"""
+        text = """<tool_call>
+<web_search>
+<params><query><![CDATA[ai]]></query></params>
+</web_search>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.name == "web_search"
+        assert tc.reason is None
+        assert tc.params == {"query": "ai"}
+
+    def test_top_level_reason_with_scattered_params(self):
+        """复合场景：顶层 reason（意图）+ 真实触发 scattered-params 重组（name= 语法使 etree 失败、
+        重复 params 块 + 孤立参数）。散落参数被 _repair_scattered_params 收进 <params>，而顶层
+        <reason> 作为结构性兄弟（与 <name> 同类）原位保留、不被并入 params。"""
+        text = """<tool_call>
+<reason><![CDATA[创建文档]]></reason>
+<name=create_artifact</name>
+<params><![CDATA[content]]></params>
+<content_type><![CDATA[text/markdown]]></content_type>
+<id><![CDATA[doc_1]]></id>
+<params>
+<content><![CDATA[# Body]]></content>
+</params>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.reason == "创建文档"
+        assert "reason" not in tc.params
+        assert tc.params == {"content_type": "text/markdown", "id": "doc_1", "content": "# Body"}
+        assert tc.warnings  # 触发了 name=/scattered-params 重组

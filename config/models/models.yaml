@@ -32,6 +32,12 @@ models:
         chat_template_kwargs:
           thinking: false
 
+  qwen3.6-27b-vision:
+    model: openai/qwen3.6-27b
+    base_url: http://27.192.67.54/v1
+    api_key_env: GPUSTACK_VISION_API_KEY
+    vision: true
+
 # ========================================
 # 备用配置示例（添加新内网模型时参考）
 # ========================================
@@ -41,5 +47,7 @@ models:
 #   model: openai/my-model-name
 #   base_url: http://10.0.0.1:8080/v1
 #   api_key: dummy
+#   # 或使用环境变量承载密钥，避免把真实 token 写进 git:
+#   # api_key_env: MY_MODEL_API_KEY
 #   params:
 #     temperature: 0.5

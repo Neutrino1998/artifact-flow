@@ -1,0 +1,32 @@
+# Sandbox runtime deps — tier-1 baked scientific stack (plan §B "验什么" / 原则 7).
+#
+# DECOUPLED from the backend's requirements.txt / requirements.lock on purpose:
+# the sandbox is its own runtime, not the app. Do NOT fold these into the app
+# lockfile (DEP-02 governs the backend image only).
+#
+# All pins have manylinux2014 cp311 wheels (self-contained: Pillow bundles
+# libjpeg/zlib, matplotlib bundles freetype), so the image builds with no
+# compiler and the intranet load needs zero network.
+#
+# The headline ENOSYS gamble under runsc is the C-extension set
+# (numpy/pandas/matplotlib/Pillow); openpyxl/pypdf are pure-Python (low risk,
+# verified anyway because xlsx/pdf are core upload scenarios).
+
+numpy==1.26.4
+pandas==2.2.3
+matplotlib==3.9.2
+Pillow==12.3.0        # 10.4.0→12.3.0:pdfplumber 0.11.10 要求 >=12.2(matplotlib 只要 >=8)
+openpyxl==3.1.5
+pypdf==4.3.1
+
+# 文档 skill 层(Phase E-4 预装集):docx/pptx/pdf 的读写栈,全部离线 wheel。
+# 取舍纪律:不为单一功能引依赖 —— defusedxml 不进(脚本跑在沙盒内,沙盒即隔离
+# 边界,标准库 ElementTree 够用);markitdown 不进(python-pptx 自己能抽文本);
+# LibreOffice/tesseract 不烤(docx→pdf、xlsx 公式重算、pptx 缩略图三路径显式
+# 降级;扫描件 OCR 走多模态 subagent,见 config/agents/vision_agent.md)。
+python-docx==1.2.0    # docx 创建/修订(w:ins/w:del)/批注脚本的底座(纯 Python,lxml 之上)
+python-pptx==1.0.2    # pptx 生成/几何检查/文本抽取(纯 Python,lxml+Pillow 之上)
+lxml==6.1.1           # docx/pptx 的传递依赖,显式钉住(C-ext,runsc ENOSYS 面,进冒烟)
+pdfplumber==0.11.10   # pdf 文本/表格抽取(pdfminer.six 之上)
+pypdfium2==5.11.0     # pdf 页→PNG(自带 pdfium 的独立 wheel,免 apt poppler);
+                      # 唯一单用途例外:gate 整条「扫描件→图→多模态 subagent」路径

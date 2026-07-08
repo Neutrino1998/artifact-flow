@@ -172,15 +172,37 @@ describe('artifactStore live reduce (ARTIFACT_* events)', () => {
     expect(st.pendingUpdates).toContain('doc');
   });
 
-  test('CREATED with source=tool does NOT grab the panel', () => {
+  test('CREATED with source=tool now auto-opens (visible live)', () => {
     const s = useArtifactStore.getState();
+    s.setSessionId('sess-1');
     s.applyArtifactCreated({
       id: 'tool_out', title: 'Output', content_type: 'text/plain',
       source: 'tool', current_version: 1, content: 'log',
     });
     const st = useArtifactStore.getState();
-    expect(st.current).toBeNull();            // not auto-opened
-    expect(st.artifacts.some((a) => a.id === 'tool_out')).toBe(true);  // but listed
+    expect(st.current?.id).toBe('tool_out');  // tool output no longer hidden behind the list
+    expect(st.autoSelected).toBe(true);
+    expect(st.artifacts.some((a) => a.id === 'tool_out')).toBe(true);
+  });
+
+  test('CREATED does NOT steal from a user-selected artifact', () => {
+    const s = useArtifactStore.getState();
+    s.setSessionId('sess-1');
+    // user actively picks an artifact: setCurrent marks autoSelected=false
+    s.applyArtifactCreated({
+      id: 'doc', title: 'Doc', content_type: 'text/markdown',
+      source: 'agent', current_version: 1, content: 'hello',
+    });
+    s.setCurrent(useArtifactStore.getState().current!);
+    expect(useArtifactStore.getState().autoSelected).toBe(false);
+    // a tool artifact arrives mid-turn → listed, but must NOT grab the panel
+    useArtifactStore.getState().applyArtifactCreated({
+      id: 'tool_out', title: 'Output', content_type: 'text/plain',
+      source: 'tool', current_version: 1, content: 'log',
+    });
+    const st = useArtifactStore.getState();
+    expect(st.current?.id).toBe('doc');  // user selection untouched
+    expect(st.artifacts.some((a) => a.id === 'tool_out')).toBe(true);  // still listed
   });
 
   test('UPDATED span delta applies onto the live base', () => {
@@ -211,12 +233,42 @@ describe('artifactStore live reduce (ARTIFACT_* events)', () => {
     expect(useArtifactStore.getState().liveContent['doc'].content).toBe('brand new');
   });
 
+  test('UPDATED blob overwrite with NO live base renders binary, not empty markdown', () => {
+    // Cross-turn `mount → edit → persist artifact_id=…`: the artifact came from a
+    // prior turn, so its first event this turn is the blob ARTIFACT_UPDATED. It must
+    // synthesize a binary live entry from the event's has_blob/content_type — not an
+    // empty text/markdown view (reviewer #1 regression).
+    useArtifactStore.getState().applyArtifactUpdated({
+      id: 'pkg.zip', current_version: 1, content: '',
+      has_blob: true, blob_size: 2048, content_type: 'application/zip',
+    });
+    const st = useArtifactStore.getState();
+    expect(st.liveContent['pkg.zip'].hasBlob).toBe(true);
+    expect(st.liveContent['pkg.zip'].contentType).toBe('application/zip');
+  });
+
+  test('UPDATED without blob fields keeps base hasBlob/contentType (text path unchanged)', () => {
+    const s = useArtifactStore.getState();
+    s.applyArtifactCreated({
+      id: 'doc', title: 'Doc', content_type: 'text/plain',
+      source: 'agent', current_version: 1, content: 'old',
+    });
+    useArtifactStore.getState().applyArtifactUpdated({
+      id: 'doc', current_version: 2, content: 'new',
+    });
+    const st = useArtifactStore.getState();
+    expect(st.liveContent['doc'].hasBlob).toBe(false);
+    expect(st.liveContent['doc'].contentType).toBe('text/plain');
+  });
+
   test('selectFromLive returns true and opens user-picked (not auto)', () => {
     const s = useArtifactStore.getState();
     s.applyArtifactCreated({
       id: 'doc', title: 'Doc', content_type: 'text/markdown',
-      source: 'tool', current_version: 1, content: 'body',  // tool → not auto-opened
+      source: 'tool', current_version: 1, content: 'body',
     });
+    // selectFromLive flips an auto-opened artifact into a user pick (autoSelected=false),
+    // independent of source — that override is what this asserts.
     const handled = useArtifactStore.getState().selectFromLive('doc');
     expect(handled).toBe(true);
     expect(useArtifactStore.getState().current?.id).toBe('doc');

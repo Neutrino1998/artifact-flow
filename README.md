@@ -58,8 +58,9 @@ cd artifact-flow
 
 cp .env.example .env
 # 编辑 .env，至少填入：
-#   ARTIFACTFLOW_JWT_SECRET  (python -c "import secrets; print(secrets.token_urlsafe(32))" 生成)
-#   DASHSCOPE_API_KEY        (或改用其他 provider 对应的 key)
+#   ARTIFACTFLOW_JWT_SECRET      (python -c "import secrets; print(secrets.token_urlsafe(32))" 生成)
+#   ARTIFACTFLOW_CREDENTIAL_KEY  (python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 生成；缺失服务无法启动)
+#   DASHSCOPE_API_KEY            (或改用其他 provider 对应的 key)
 #   BOCHA_API_KEY
 
 docker compose up -d
@@ -90,6 +91,7 @@ pip install -e .
 
 cp .env.example .env
 echo "ARTIFACTFLOW_JWT_SECRET=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
+echo "ARTIFACTFLOW_CREDENTIAL_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> .env
 # 编辑 .env 填入其余 API Keys
 
 python scripts/create_admin.py admin --password admin
@@ -111,6 +113,7 @@ python run_cli.py chat "帮我调研一下 LLM Agent 框架"
 | 变量 | 必填 | 默认值 | 说明 |
 |------|------|--------|------|
 | `ARTIFACTFLOW_JWT_SECRET` | **是** | — | JWT 签名密钥 |
+| `ARTIFACTFLOW_CREDENTIAL_KEY` | **是** | — | 外部工具凭证静态加密密钥（Fernet）；缺失服务无法启动，即使未配置任何带凭证的工具 |
 | `ARTIFACTFLOW_DATABASE_URL` | **是** | — | DB 连接串（SQLite / PostgreSQL / MySQL） |
 | `ARTIFACTFLOW_REDIS_URL` | 否 | `""` (InMemory) | 生产建议配置 |
 | `ARTIFACTFLOW_DEBUG` | 否 | `false` | 调试日志 + Swagger |

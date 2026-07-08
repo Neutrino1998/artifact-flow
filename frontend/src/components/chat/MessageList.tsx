@@ -14,6 +14,7 @@ export default function MessageList() {
   const streamConversationId = useStreamStore((s) => s.conversationId);
   const streamParentId = useStreamStore((s) => s.streamParentId);
   const pendingUserMessage = useStreamStore((s) => s.pendingUserMessage);
+  const pendingUserFiles = useStreamStore((s) => s.pendingUserFiles);
 
   // Only show streaming UI if the active stream belongs to this conversation
   const isStreamingHere = isStreaming && streamConversationId === currentId;
@@ -39,13 +40,19 @@ export default function MessageList() {
       <div className="max-w-3xl mx-auto pl-8 pr-4 py-6 space-y-12">
         {displayPath.map((node) => (
             <div key={node.id} className="space-y-10">
-              {/* User message */}
+              {/* User message (persisted path). TWIN: the live pre-refresh bubble
+                  below (search `pending`) renders the SAME UserMessage component, so
+                  layout can't drift. The field SOURCES differ, though — any new
+                  per-message field surfaced here from the persisted DTO must also be
+                  mirrored into the live pending source (useChat.ts setPendingUser* +
+                  streamStore), or it'll show on reload but not live. */}
               <UserMessage
                 content={node.user_input}
                 messageId={node.id}
                 parentId={node.parent_id}
                 siblingIndex={node.siblingIndex}
                 siblingCount={node.siblingCount}
+                attachments={node.uploaded_files}
               />
 
               {/* Assistant response */}
@@ -72,6 +79,7 @@ export default function MessageList() {
             messageId=""
             parentId={streamParentId ?? null}
             pending
+            attachments={pendingUserFiles?.map((filename) => ({ filename }))}
           />
         )}
 

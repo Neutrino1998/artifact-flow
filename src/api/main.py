@@ -25,16 +25,37 @@ from api.dependencies import (
     get_execution_runner,
 )
 from api.middleware import RequestContextMiddleware
-from api.routers import admin, admin_users, auth, chat, artifacts, departments, meta, stream
+from api.routers import (
+    admin,
+    admin_department_access,
+    admin_site_config,
+    admin_skills,
+    admin_tools,
+    admin_users,
+    artifacts,
+    auth,
+    chat,
+    departments,
+    meta,
+    skills,
+    stream,
+)
 from observability import (
     LoopLagWatchdog, DeadmanSwitch, RuntimeSampler, JsonlSink,
-    resolve_mem_limit_bytes,
+    resolve_mem_limit_bytes, HeartbeatWriter, error_counter,
 )
 from observability import admin_runtime
-from utils.doc_converter import DocConverter
+from utils.instance import INSTANCE_ID
 from utils.logger import get_logger, get_request_id
 
 logger = get_logger("ArtifactFlow")
+
+
+def _obs_path(configured: str) -> Path:
+    """obs jsonl 路径按实例分子目录(同 file-log):多副本共享卷各写各的,
+    消 RotatingFileHandler 多写者 rotate 互覆。"""
+    p = Path(configured)
+    return p.parent / INSTANCE_ID / p.name
 
 
 # Observability 组件句柄（生命周期跨 lifespan;在 startup 创建,shutdown 关闭)
@@ -43,6 +64,9 @@ _deadman: Optional[DeadmanSwitch] = None
 _sampler: Optional[RuntimeSampler] = None
 _loop_lag_sink: Optional[JsonlSink] = None
 _metrics_sink: Optional[JsonlSink] = None
+
+# lease-anchored 沙盒孤儿回收器(C-reap);生命周期跨 lifespan
+_sandbox_reaper = None  # type: ignore[var-annotated]
 
 
 def _enable_faulthandler() -> None:
@@ -75,7 +99,7 @@ def _start_observability(loop: asyncio.AbstractEventLoop) -> None:
 
     # loop-lag.jsonl sink
     _loop_lag_sink = JsonlSink(
-        Path(config.OBS_LOOP_LAG_LOG_PATH),
+        _obs_path(config.OBS_LOOP_LAG_LOG_PATH),
         max_mb=config.OBS_JSONL_MAX_MB,
         backups=config.OBS_JSONL_BACKUP_COUNT,
         mirror_stdout=config.OBS_STDOUT_MIRROR,
@@ -91,7 +115,7 @@ def _start_observability(loop: asyncio.AbstractEventLoop) -> None:
     _deadman.start()
 
     _metrics_sink = JsonlSink(
-        Path(config.OBS_METRICS_LOG_PATH),
+        _obs_path(config.OBS_METRICS_LOG_PATH),
         max_mb=config.OBS_JSONL_MAX_MB,
         backups=config.OBS_JSONL_BACKUP_COUNT,
         mirror_stdout=config.OBS_STDOUT_MIRROR,
@@ -110,18 +134,37 @@ def _start_observability(loop: asyncio.AbstractEventLoop) -> None:
             "Observability mem_limit unset (no env override and no readable cgroup) — "
             "RSS high-water WARN disabled"
         )
+    # 进程内 ERROR 计数:挂到已构造好的 ArtifactFlow logger(此时各模块 import 早已
+    # 触发其构造,不会被后续 handlers.clear() 清掉),喂心跳「黄色」信号。
+    _error_counter = error_counter.install()
+
+    # 舰队心跳:sampler 每 tick 把快照子集多写一份到 Redis。redis 为 None(单机
+    # InMemory)时 HeartbeatWriter.write no-op,/admin/instances 走本机 snapshot。
+    redis_client = get_redis_client()
+    _heartbeat = HeartbeatWriter(
+        redis_client=redis_client,
+        key_prefix=config.REDIS_KEY_PREFIX,
+        ttl_sec=config.OBS_HEARTBEAT_TTL_SEC,
+        error_counter=_error_counter,
+        watchdog=_watchdog,
+        autoheal_marker_path=config.OBS_AUTOHEAL_MARKER_PATH,
+    )
+
     _sampler = RuntimeSampler(
         sink=_metrics_sink,
         watchdog=_watchdog,
         execution_runner=get_execution_runner(),
         db_manager=get_db_manager(),
-        redis_client=get_redis_client(),
+        redis_client=redis_client,
         long_task_age_sec=config.OBS_LONG_TASK_AGE_SEC,
         interval_sec=config.OBS_SAMPLE_INTERVAL_SEC,
         mem_limit_bytes=mem_limit_bytes,
+        heartbeat=_heartbeat,
     )
     _sampler.start()
     admin_runtime.set_sampler(_sampler)
+    # /admin/instances 读侧要用 heartbeat 的 key 形状 + 本机 payload 构造器。
+    admin_runtime.set_heartbeat(_heartbeat)
 
 
 async def _stop_observability() -> None:
@@ -132,6 +175,12 @@ async def _stop_observability() -> None:
         await _sampler.stop()
         _sampler = None
         admin_runtime.set_sampler(None)
+        # sampler 已停 = 不再有 in-flight 写 → 现在删本实例心跳 key,优雅停机/缩容
+        # 不留幽灵红行(见 HeartbeatWriter.delete)。
+        _hb = admin_runtime.get_heartbeat()
+        if _hb is not None:
+            await _hb.delete()
+        admin_runtime.set_heartbeat(None)
     if _deadman is not None:
         await _deadman.stop()
         _deadman = None
@@ -146,6 +195,29 @@ async def _stop_observability() -> None:
         _loop_lag_sink = None
 
 
+def _should_start_reaper(
+    *, enabled: bool, store_is_shared: bool, allow_local_store: bool
+) -> tuple[bool, str]:
+    """沙盒 reaper 启停判定 → (start?, reason)。提纯成函数好单测。
+
+    跨进程安全要求**共享** liveness 源(Redis):InMemory 是进程本地,多副本下每个进程
+    把兄弟的活沙盒看成无 lease 孤儿 → 误删(破坏性,非仅降级 —— lease/stream 在 InMemory
+    多 worker 下本就坏,但只是"找不到";reaper 把同一误配升级成"删活资源")。故 InMemory
+    下默认不起,需操作者显式 affirm 单进程(SANDBOX_REAP_ALLOW_LOCAL_STORE)。
+    """
+    if not enabled:
+        return False, "SANDBOX_REAP_ENABLED=false"
+    if store_is_shared:
+        return True, "shared store (Redis)"
+    if allow_local_store:
+        return True, "process-local store, operator-affirmed single-worker"
+    return False, (
+        "process-local (InMemory) store — disabled to avoid cross-deleting sibling "
+        "sandboxes if multiple workers/replicas run without Redis; set "
+        "SANDBOX_REAP_ALLOW_LOCAL_STORE=true for single-worker InMemory, or use Redis"
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
@@ -155,9 +227,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     关闭时：对称清理
     """
     # 启动
-    logger.info("Starting ArtifactFlow API...")
+    logger.info(f"Starting ArtifactFlow API... (instance_id={INSTANCE_ID})")
     validate_config()
-    DocConverter.check_pandoc()
     await init_globals()
 
     # Sync logger debug level from API config (single source of truth)
@@ -171,12 +242,59 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # 观测层失败不挂应用启动 — 但留 ERROR 便于发现
         logger.exception("Observability bootstrap failed; continuing without it")
 
+    # 沙盒孤儿回收器(在 init_globals 之后:依赖 ExecutionRunner.store 取活跃集)。
+    # 启动失败不挂应用 —— 它是兜底,缺它只是 SIGKILL 路径少一层防护。
+    global _sandbox_reaper
+    store = get_execution_runner().store
+    store_is_shared = getattr(store, "is_shared", False)
+    start_reaper, reason = _should_start_reaper(
+        enabled=config.SANDBOX_REAP_ENABLED,
+        store_is_shared=store_is_shared,
+        allow_local_store=config.SANDBOX_REAP_ALLOW_LOCAL_STORE,
+    )
+    if start_reaper:
+        try:
+            from api.services.sandbox_reaper import SandboxReaper
+            _sandbox_reaper = SandboxReaper(store)
+            _sandbox_reaper.start()
+            if not store_is_shared:
+                # opt-in 路径:契约提醒。多 worker 误配在此会删活沙盒,留显眼 WARNING。
+                logger.warning(
+                    "Sandbox reaper running under a process-local store "
+                    "(SANDBOX_REAP_ALLOW_LOCAL_STORE=true): safe ONLY with exactly one "
+                    "worker/replica. Multiple workers without Redis WILL cross-delete live "
+                    "sandboxes."
+                )
+        except Exception:
+            logger.exception("Sandbox reaper bootstrap failed; continuing without it")
+            _sandbox_reaper = None
+    else:
+        logger.info(f"Sandbox reaper not started: {reason}")
+
     logger.info("ArtifactFlow API started successfully")
 
     yield
 
     # 关闭
     logger.info("Shutting down ArtifactFlow API...")
+    # Runner 先优雅停:在途 turn 跑完/取消 → 各自 _wrapped finally → SandboxSession.close()
+    # (部分 close 可能超时/失败)。提前到此(close_globals 内会再调一次,_tasks 已空 →
+    # no-op),好让 reaper 在 store/docker 仍存活时做最后一扫,兜住 shutdown 期间漏拆的孤儿
+    # (P2:单副本停机后不再有 reaper 收尾,孤儿会一直跑到下次启动)。
+    if _sandbox_reaper is not None:
+        try:
+            await get_execution_runner().shutdown()
+        except Exception:
+            logger.exception("Execution runner early shutdown failed; continuing")
+        try:
+            await _sandbox_reaper.final_sweep()
+        except Exception:
+            logger.exception("Sandbox reaper final sweep failed; continuing")
+        try:
+            await _sandbox_reaper.stop()
+        except Exception:
+            logger.exception("Sandbox reaper shutdown failed; continuing")
+        _sandbox_reaper = None
     try:
         await _stop_observability()
     except Exception:
@@ -215,7 +333,7 @@ def create_app() -> FastAPI:
         allow_credentials=config.CORS_ALLOW_CREDENTIALS,
         allow_methods=config.CORS_ALLOW_METHODS,
         allow_headers=config.CORS_ALLOW_HEADERS,
-        expose_headers=["X-Request-ID"],
+        expose_headers=["X-Request-ID", "X-Instance-ID"],
     )
 
     # 全局 ValueError → 400(防御纵深;ACC-04)。业务校验失败大多在 Pydantic
@@ -267,6 +385,26 @@ def create_app() -> FastAPI:
         tags=["admin"]
     )
     app.include_router(
+        admin_tools.router,
+        prefix="/api/v1/admin",
+        tags=["admin"]
+    )
+    app.include_router(
+        admin_skills.router,
+        prefix="/api/v1/admin",
+        tags=["admin"]
+    )
+    app.include_router(
+        admin_department_access.router,
+        prefix="/api/v1/admin",
+        tags=["admin"]
+    )
+    app.include_router(
+        admin_site_config.router,
+        prefix="/api/v1/admin",
+        tags=["admin"]
+    )
+    app.include_router(
         departments.router,
         prefix="/api/v1/departments",
         tags=["departments"]
@@ -275,6 +413,11 @@ def create_app() -> FastAPI:
         meta.router,
         prefix="/api/v1/meta",
         tags=["meta"]
+    )
+    app.include_router(
+        skills.router,
+        prefix="/api/v1/skills",
+        tags=["skills"]
     )
 
     # 健康检查端点

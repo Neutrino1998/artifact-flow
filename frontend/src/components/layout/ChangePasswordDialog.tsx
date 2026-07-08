@@ -164,7 +164,7 @@ export default function ChangePasswordDialog({ onClose, forced = false }: Change
               disabled={!canSubmit}
               className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
             >
-              {submitting ? '修改中...' : '确认修改'}
+              {submitting ? '修改中…' : '确认修改'}
             </button>
           </div>
         </form>

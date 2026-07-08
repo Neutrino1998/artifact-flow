@@ -290,7 +290,7 @@
           "chat"
         ],
         "summary": "Get Active Stream",
-        "description": "\u67e5\u8be2\u4f1a\u8bdd\u662f\u5426\u6709\u6d3b\u8dc3\u7684\u6267\u884c\u6d41\uff0c\u7528\u4e8e\u65ad\u7ebf\u91cd\u8fde",
+        "description": "\u67e5\u8be2\u4f1a\u8bdd\u662f\u5426\u6709\u6d3b\u8dc3\u7684\u6267\u884c\u6d41\uff0c\u7528\u4e8e\u65ad\u7ebf\u91cd\u8fde\u3002\u65e0\u6d3b\u8dc3\u6d41\u662f\u6b63\u5e38\u7a7a\u72b6\u6001\u3002",
         "operationId": "get_active_stream_api_v1_chat__conv_id__active_stream_get",
         "security": [
           {
@@ -313,7 +313,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveStreamResponse"
+                }
               }
             }
           },
@@ -434,6 +436,33 @@
             }
           }
         }
+      }
+    },
+    "/api/v1/chat/storage": {
+      "get": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Get Storage Usage",
+        "description": "\u5f53\u524d\u7528\u6237\u7684\u9644\u4ef6\u5b58\u50a8\u7528\u91cf + \u914d\u989d\uff08\u5582\u524d\u7aef\u8fdb\u5ea6\u6761\uff09\u3002\n\n\u4e0e\u4e0a\u4f20\u6321\u677f\u540c\u53e3\u5f84\uff08compute-on-read\uff0c\u5355\u4e00\u6570\u636e\u6e90\uff09\u3002\u58f0\u660e\u5728 `/{conv_id}` \u4e4b\u524d\uff0c\n\u5426\u5219 `storage` \u4f1a\u88ab\u5f53\u4f5c conv_id \u547d\u4e2d\u8be6\u60c5\u8def\u7531\u3002",
+        "operationId": "get_storage_usage_api_v1_chat_storage_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageUsageResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/chat/{conv_id}": {
@@ -754,14 +783,14 @@
         }
       }
     },
-    "/api/v1/artifacts/{session_id}/{artifact_id}/export": {
+    "/api/v1/artifacts/{session_id}/{artifact_id}/raw": {
       "get": {
         "tags": [
           "artifacts"
         ],
-        "summary": "Export Artifact",
-        "description": "Export an artifact to a different format.\nCurrently supports exporting text/markdown artifacts to docx.\n\nNote: reads from DB only \u2014 during execution, exports the last flushed\nversion, not in-memory edits.  Frontend hides export while streaming.",
-        "operationId": "export_artifact_api_v1_artifacts__session_id___artifact_id__export_get",
+        "summary": "Get Artifact Raw",
+        "description": "Serve an artifact's raw binary blob (uploaded image / rich-format source).\n\nDB-only read (request-scoped Service, empty WorkingSet) \u2014 like all GETs here,\nduring execution it serves the last flushed blob. 404 when the artifact has no\nblob (pure-text artifacts) or doesn't exist; not logged (self-evident 404).\n\nSafe raster images are served `inline` so a frontend `<img src=.../raw>`\nrenders in place; everything else is `attachment` (download). Do not inline\nevery `image/*`: SVG is XML and must not be treated as a safe image blob.\nContent-Type is the artifact's `content_type` \u2014 under the XOR model a blob\nartifact's content_type is the original file's true MIME.",
+        "operationId": "get_artifact_raw_api_v1_artifacts__session_id___artifact_id__raw_get",
         "security": [
           {
             "HTTPBearer": []
@@ -785,25 +814,17 @@
               "type": "string",
               "title": "Artifact Id"
             }
-          },
-          {
-            "name": "format",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "description": "Export format (docx)",
-              "title": "Format"
-            },
-            "description": "Export format (docx)"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "Raw artifact blob (image inline, else attachment).",
             "content": {
-              "application/json": {
-                "schema": {}
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
               }
             }
           },
@@ -1133,6 +1154,73 @@
         }
       }
     },
+    "/api/v1/admin/conversations/{conv_id}/messages/{message_id}/reconstruct": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Reconstruct Admin Prompt",
+        "description": "\u91cd\u5efa\u67d0\u4e00\u53d1 LLM \u8c03\u7528\u5b9e\u9645\u53d1\u51fa\u7684\u5b8c\u6574 prompt\uff08admin \u53d6\u8bc1\uff0c\u6309 agent_start \u951a\u5b9a\uff09\u3002\n\n\u951a = \u8be5\u6b21\u8c03\u7528\u524d\u53d1\u51fa\u7684 agent_start \u4e8b\u4ef6\uff08\u5176 event_id \u7531 events \u7aef\u70b9\u8fd4\u56de\uff09\u3002\u91cd\u5efa\u8d70\n\u5206\u652f\u6b63\u786e\u7684 path\uff0c\u590d\u7528\u5f15\u64ce\u540c\u4e00\u5957\u88c5\u914d\u903b\u8f91\uff0c\u4e0d\u91cd\u65b0\u751f\u6210\u52a8\u6001\u5185\u5bb9 \u2014\u2014 \u8be6\u89c1\nConversationManager.reconstruct_prompt\u3002",
+        "operationId": "reconstruct_admin_prompt_api_v1_admin_conversations__conv_id__messages__message_id__reconstruct_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conv_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conv Id"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Message Id"
+            }
+          },
+          {
+            "name": "agent_start_event_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 96,
+              "title": "Agent Start Event Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPromptReconstructResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/conversations/{conv_id}/artifacts": {
       "get": {
         "tags": [
@@ -1221,6 +1309,64 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ArtifactResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/conversations/{conv_id}/artifacts/{artifact_id}/raw": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Admin Conversation Artifact Raw",
+        "description": "Serve raw blob bytes for an artifact in any conversation (admin-only).",
+        "operationId": "get_admin_conversation_artifact_raw_api_v1_admin_conversations__conv_id__artifacts__artifact_id__raw_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conv_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conv Id"
+            }
+          },
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Raw artifact blob (image inline, else attachment).",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
                 }
               }
             }
@@ -1772,7 +1918,7 @@
           "admin"
         ],
         "summary": "Get Runtime",
-        "description": "\u5b9e\u65f6\u6c34\u4f4d + \u6d3b\u8dc3\u4efb\u52a1\u8bca\u65ad\u5feb\u7167\u3002\n\nResponse:\n    {\n        \"ts\": ISO8601,\n        \"sampler\": {<sampler.latest_snapshot \u7ed3\u6784,\u89c1 sampler.py \u6587\u6863>},\n        \"active_conversations\": [conv_id, ...],\n        \"active_tasks\": int,\n    }",
+        "description": "\u5b9e\u65f6\u6c34\u4f4d + \u6d3b\u8dc3\u4efb\u52a1\u8bca\u65ad\u5feb\u7167\u3002\n\nResponse:\n    {\n        \"ts\": ISO8601,\n        \"instance_id\": str,   # \u672c\u6b21\u5e94\u7b54\u5b9e\u4f8b \u2014 sampler/active_tasks \u662f\u8fdb\u7a0b\u672c\u5730\u89c6\u56fe,\n                              # \u591a\u526f\u672c\u7ecf LB \u968f\u673a\u8def\u7531\u65f6\u8bfb\u6570\u8df3\u53d8\u7531\u6b64\u53ef\u89e3\u91ca\n        \"sampler\": {<sampler.latest_snapshot \u7ed3\u6784,\u89c1 sampler.py \u6587\u6863>},\n        \"active_conversations\": [conv_id, ...],\n        \"active_tasks\": int,\n    }",
         "operationId": "get_runtime_api_v1_admin_runtime_get",
         "responses": {
           "200": {
@@ -1780,6 +1926,1152 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/instances": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Instances",
+        "description": "\u8230\u961f\u5b9e\u4f8b\u9762\u677f\u6570\u636e\u6e90(Phase C \u51b3\u7b56 4)\u3002\n\n\u591a\u526f\u672c(Redis):scan `{prefix:instance:*}` + pipelined GET fan-out(\u955c\u50cf\nRedisRuntimeStore.list_active_executions,Cluster-safe \u2014\u2014 \u65e0\u8de8 slot \u591a key \u64cd\u4f5c),\n\u6bcf\u6761\u5fc3\u8df3 payload \u8bfb\u4fa7\u9644\u4e00\u4e2a status(green/yellow/red)\u3002\n\u5355\u673a(InMemory,\u65e0 Redis):\u6ca1\u6709\u6ce8\u518c\u8868\u53ef scan,\u7528\u672c\u673a\u6700\u8fd1 snapshot \u9020\u51fa\u552f\u4e00\u4e00\u884c\u3002\n\nResponse:\n    {\n        \"ts\": ISO8601,\n        \"instance_id\": str,        # \u672c\u6b21\u5e94\u7b54\u5b9e\u4f8b\n        \"shared\": bool,            # True=Redis \u8230\u961f\u89c6\u56fe;False=\u5355\u673a\u672c\u5730\u89c6\u56fe\n        \"instances\": [\n          {<\u5fc3\u8df3 payload>, \"status\": \"green|yellow|red\",\n           \"status_reasons\": [{\"code\": str, \"label\": str}, ...]}, ...\n        ],\n    }",
+        "operationId": "list_instances_api_v1_admin_instances_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/tools/units": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Units",
+        "operationId": "list_units_api_v1_admin_tools_units_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolUnitListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Create Unit",
+        "operationId": "create_unit_api_v1_admin_tools_units_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateToolUnitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolUnitResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/tools/units/import": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Import Unit Seed",
+        "operationId": "import_unit_seed_api_v1_admin_tools_units_import_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_unit_seed_api_v1_admin_tools_units_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolUnitImportResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/tools/units/{name}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Unit",
+        "operationId": "get_unit_api_v1_admin_tools_units__name__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolUnitResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update Unit",
+        "operationId": "update_unit_api_v1_admin_tools_units__name__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateToolUnitRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolUnitResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete Unit",
+        "operationId": "delete_unit_api_v1_admin_tools_units__name__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/tools/units/{name}/export": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Export Unit Seed",
+        "operationId": "export_unit_seed_api_v1_admin_tools_units__name__export_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/tools/units/{name}/test": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Test Unit Connection",
+        "operationId": "test_unit_connection_api_v1_admin_tools_units__name__test_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolUnitTestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/tools/agents": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Agents",
+        "operationId": "list_agents_api_v1_admin_tools_agents_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/tools/units/{name}/agents/{agent_name}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Mount Unit",
+        "operationId": "mount_unit_api_v1_admin_tools_units__name__agents__agent_name__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "agent_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MountUnitRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MountResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Unmount Unit",
+        "operationId": "unmount_unit_api_v1_admin_tools_units__name__agents__agent_name__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "agent_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/tools/units/{name}/credentials/{placeholder}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Set Credential",
+        "operationId": "set_credential_api_v1_admin_tools_units__name__credentials__placeholder__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "placeholder",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Placeholder"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCredentialRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete Credential",
+        "operationId": "delete_credential_api_v1_admin_tools_units__name__credentials__placeholder__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "placeholder",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Placeholder"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/skills": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin List Skills",
+        "description": "\u5217\u51fa\u6240\u6709 shared skill,\u4e0d\u6309 admin \u81ea\u5df1\u7684\u90e8\u95e8\u53ef\u89c1\u6027\u8fc7\u6ee4\u3002",
+        "operationId": "admin_list_skills_api_v1_admin_skills_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSkillListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/skills/import": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Import Skill",
+        "description": "\u5bfc\u5165\u5171\u4eab skill(owner=null),\u53ef\u6307\u5b9a visibility/default_enabled \u521d\u59cb\u503c\u3002",
+        "operationId": "admin_import_skill_api_v1_admin_skills_import_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_admin_import_skill_api_v1_admin_skills_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillImportResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/skills/{slug}/export": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Export Skill",
+        "description": "\u5bfc\u51fa shared catalog skill,\u4e0d\u6309\u5f53\u524d admin \u7684\u90e8\u95e8\u53ef\u89c1\u6027\u8fc7\u6ee4\u3002",
+        "operationId": "admin_export_skill_api_v1_admin_skills__slug__export_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/skills/{slug}": {
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Update Skill",
+        "description": "\u7f16\u8f91 dynamic shared skill \u7684 visibility/default_enabled\u3002seeded \u4ecd config-owned\u3002",
+        "operationId": "admin_update_skill_api_v1_admin_skills__slug__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminSkillUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSkillItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Delete Skill",
+        "description": "\u5220\u9664\u4efb\u610f dynamic skill(\u7ed5\u8fc7\u53ef\u89c1\u6027;seeded \u2192 400)\u3002\u7ea7\u8054\u6e05 user_skill/dept \u89c4\u5219\u3002",
+        "operationId": "admin_delete_skill_api_v1_admin_skills__slug__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/department-access/{dept_id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Department Access",
+        "operationId": "get_department_access_api_v1_admin_department_access__dept_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dept_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dept Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DepartmentAccessResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/department-access/{dept_id}/skills/{slug}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Put Department Skill Rule",
+        "operationId": "put_department_skill_rule_api_v1_admin_department_access__dept_id__skills__slug__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dept_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dept Id"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete Department Skill Rule",
+        "operationId": "delete_department_skill_rule_api_v1_admin_department_access__dept_id__skills__slug__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dept_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dept Id"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/department-access/{dept_id}/units/{unit_name}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Put Department Unit Rule",
+        "operationId": "put_department_unit_rule_api_v1_admin_department_access__dept_id__units__unit_name__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dept_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dept Id"
+            }
+          },
+          {
+            "name": "unit_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Unit Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete Department Unit Rule",
+        "operationId": "delete_department_unit_rule_api_v1_admin_department_access__dept_id__units__unit_name__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dept_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dept Id"
+            }
+          },
+          {
+            "name": "unit_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Unit Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/site/notifications": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Site Notifications",
+        "operationId": "get_site_notifications_api_v1_admin_site_notifications_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiteNotificationsResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Update Site Notifications",
+        "operationId": "update_site_notifications_api_v1_admin_site_notifications_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSiteNotificationsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiteNotificationsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -2195,6 +3487,225 @@
         ]
       }
     },
+    "/api/v1/skills": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "List Skills",
+        "description": "\u5217\u51fa\u5bf9\u5f53\u524d\u7528\u6237\u53ef\u89c1\u7684 skill + \u6709\u6548\u542f\u7528\u6001\u3002",
+        "operationId": "list_skills_api_v1_skills_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/skills/import": {
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Import Skill",
+        "description": "\u5bfc\u5165\u79c1\u6709 skill zip(owner=\u672c\u4eba,\u7acb\u5373\u8fdb\u81ea\u5df1\u7684 L1)\u3002\u786c\u95e8\u62d2\u6536 \u2192 422 \u7ed3\u6784\u5316\nfindings;\u8d85\u5355\u5305\u4e0a\u9650 \u2192 422;\u8d85\u5b58\u50a8\u914d\u989d \u2192 413;slug \u649e\u540d \u2192 409\u3002",
+        "operationId": "import_skill_api_v1_skills_import_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_skill_api_v1_skills_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillImportResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/skills/{slug}/export": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Export Skill",
+        "description": "\u5bfc\u51fa DB \u4e2d\u4fdd\u5b58\u7684 skill zip\u3002\u4e0d\u53ef\u89c1 \u2192 404\u3002",
+        "operationId": "export_skill_api_v1_skills__slug__export_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{slug}": {
+      "delete": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Delete Skill",
+        "description": "\u5220\u9664\u81ea\u5df1\u5bfc\u5165\u7684 dynamic skill\u3002\u4e0d\u53ef\u89c1 \u2192 404;seeded \u2192 400;\u975e\u672c\u4eba\u5171\u4eab \u2192 403\u3002",
+        "operationId": "delete_skill_api_v1_skills__slug__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{slug}/enabled": {
+      "put": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Set Skill Enabled",
+        "description": "\u4e2a\u4eba\u5f00\u5173\u67d0 skill \u662f\u5426\u8fdb L1 \u7d22\u5f15(\u5199 user_skill \u8986\u76d6)\u3002",
+        "operationId": "set_skill_enabled_api_v1_skills__slug__enabled_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillToggleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health/live": {
       "get": {
         "summary": "Liveness",
@@ -2230,6 +3741,53 @@
   },
   "components": {
     "schemas": {
+      "ActiveStreamResponse": {
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "description": "Whether the conversation has a reconnectable live stream"
+          },
+          "conversation_id": {
+            "type": "string",
+            "title": "Conversation Id",
+            "description": "Conversation ID"
+          },
+          "message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Id",
+            "description": "Active execution message ID, when active"
+          },
+          "stream_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stream Url",
+            "description": "SSE endpoint URL, when active"
+          }
+        },
+        "type": "object",
+        "required": [
+          "active",
+          "conversation_id",
+          "message_id",
+          "stream_url"
+        ],
+        "title": "ActiveStreamResponse",
+        "description": "GET /api/v1/chat/{conv_id}/active-stream response"
+      },
       "AdminConversationEventsResponse": {
         "properties": {
           "conversation_id": {
@@ -2425,6 +3983,17 @@
             "type": "integer",
             "title": "Id"
           },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
           "event_type": {
             "type": "string",
             "title": "Event Type"
@@ -2461,6 +4030,7 @@
         "type": "object",
         "required": [
           "id",
+          "event_id",
           "event_type",
           "agent_name",
           "data",
@@ -2474,6 +4044,17 @@
           "message_id": {
             "type": "string",
             "title": "Message Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
           },
           "user_input": {
             "type": "string",
@@ -2518,6 +4099,7 @@
         "type": "object",
         "required": [
           "message_id",
+          "parent_id",
           "user_input",
           "response",
           "created_at",
@@ -2526,6 +4108,209 @@
         ],
         "title": "AdminMessageGroup",
         "description": "Events grouped by message"
+      },
+      "AdminPromptReconstructResponse": {
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "title": "Conversation Id"
+          },
+          "message_id": {
+            "type": "string",
+            "title": "Message Id"
+          },
+          "agent_start_event_id": {
+            "type": "string",
+            "title": "Agent Start Event Id"
+          },
+          "agent_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Name"
+          },
+          "has_reminder": {
+            "type": "boolean",
+            "title": "Has Reminder",
+            "default": false
+          },
+          "messages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Messages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "conversation_id",
+          "message_id",
+          "agent_start_event_id",
+          "agent_name",
+          "has_reminder",
+          "messages"
+        ],
+        "title": "AdminPromptReconstructResponse",
+        "description": "GET .../messages/{message_id}/reconstruct response \u2014 \u91cd\u5efa\u67d0\u53d1 LLM \u8c03\u7528\u7684\u5b8c\u6574 prompt\u3002\n\nhas_reminder=False \u8868\u793a\u8be5 agent_start \u65e9\u4e8e reminder \u6301\u4e45\u5316\uff08\u53ea\u91cd\u5efa\u4e86 system_prompt +\n\u5386\u53f2\uff0c\u65e0\u52a8\u6001 reminder\uff09\u3002messages \u7684 content \u53ef\u80fd\u662f str \u6216\u5757\u5217\u8868\uff08\u8bc6\u56fe\u5757\u964d\u7ea7\u4e3a\u5360\u4f4d\u6587\u672c\uff09\u3002"
+      },
+      "AdminSkillItem": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug",
+            "description": "Skill slug (natural key)"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Display name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "One-line description"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "department"
+            ],
+            "title": "Visibility",
+            "description": "public (default allow) or department (default deny)"
+          },
+          "default_enabled": {
+            "type": "boolean",
+            "title": "Default Enabled",
+            "description": "Whether this shared skill enters users' L1 index by default"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "seeded",
+              "dynamic"
+            ],
+            "title": "Source",
+            "description": "seeded skills are config-owned; dynamic shared skills are editable"
+          },
+          "has_extra_files": {
+            "type": "boolean",
+            "title": "Has Extra Files",
+            "description": "Whether the skill bundle contains files beyond SKILL.md"
+          },
+          "can_edit": {
+            "type": "boolean",
+            "title": "Can Edit",
+            "description": "True only for dynamic shared skills"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "description",
+          "visibility",
+          "default_enabled",
+          "source",
+          "has_extra_files",
+          "can_edit"
+        ],
+        "title": "AdminSkillItem",
+        "description": "Admin shared skill catalog item (not filtered by the admin user's department)."
+      },
+      "AdminSkillListResponse": {
+        "properties": {
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/AdminSkillItem"
+            },
+            "type": "array",
+            "title": "Skills",
+            "description": "All shared skills, including seeded read-only ones"
+          }
+        },
+        "type": "object",
+        "required": [
+          "skills"
+        ],
+        "title": "AdminSkillListResponse",
+        "description": "GET /api/v1/admin/skills response."
+      },
+      "AdminSkillUpdateRequest": {
+        "properties": {
+          "visibility": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "public",
+                  "department"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visibility",
+            "description": "New shared visibility. Changing it clears department rules."
+          },
+          "default_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Enabled",
+            "description": "New default L1 enabled state for users without an override."
+          }
+        },
+        "type": "object",
+        "title": "AdminSkillUpdateRequest",
+        "description": "PATCH /api/v1/admin/skills/{slug} request body."
+      },
+      "AgentListResponse": {
+        "properties": {
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/AgentSummaryResponse"
+            },
+            "type": "array",
+            "title": "Agents"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agents"
+        ],
+        "title": "AgentListResponse"
+      },
+      "AgentSummaryResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description"
+        ],
+        "title": "AgentSummaryResponse"
       },
       "ArtifactListResponse": {
         "properties": {
@@ -2550,6 +4335,69 @@
         ],
         "title": "ArtifactListResponse",
         "description": "GET /api/v1/artifacts/{session_id} response"
+      },
+      "ArtifactOutputSpec": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "text",
+              "binary"
+            ],
+            "title": "Mode",
+            "default": "text"
+          },
+          "content_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Type"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "title": "ArtifactOutputSpec",
+        "required": [
+          "enabled",
+          "mode",
+          "content_type",
+          "filename",
+          "title"
+        ]
       },
       "ArtifactResponse": {
         "properties": {
@@ -2607,6 +4455,12 @@
             "title": "Original Filename",
             "description": "For source=user_upload artifacts: the filename the user uploaded. From metadata['original_filename']."
           },
+          "has_blob": {
+            "type": "boolean",
+            "title": "Has Blob",
+            "description": "True for blob-backed artifacts (images / rich-format uploads): no text content; raw bytes via GET \u2026/raw.",
+            "default": false
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -2638,6 +4492,7 @@
           "current_version",
           "source",
           "original_filename",
+          "has_blob",
           "created_at",
           "updated_at",
           "versions"
@@ -2691,6 +4546,12 @@
             "title": "Original Filename",
             "description": "For source=user_upload artifacts: the filename the user uploaded. From metadata['original_filename']."
           },
+          "has_blob": {
+            "type": "boolean",
+            "title": "Has Blob",
+            "description": "True for blob-backed artifacts (images / rich-format uploads): no text content; raw bytes via GET \u2026/raw.",
+            "default": false
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -2712,11 +4573,42 @@
           "current_version",
           "source",
           "original_filename",
+          "has_blob",
           "created_at",
           "updated_at"
         ],
         "title": "ArtifactSummary",
         "description": "Artifact summary in list response"
+      },
+      "Body_admin_import_skill_api_v1_admin_skills_import_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "department"
+            ],
+            "title": "Visibility",
+            "default": "public"
+          },
+          "default_enabled": {
+            "type": "boolean",
+            "title": "Default Enabled",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "file",
+          "visibility",
+          "default_enabled"
+        ],
+        "title": "Body_admin_import_skill_api_v1_admin_skills_import_post"
       },
       "Body_bulk_import_users_api_v1_admin_users_bulk_import_post": {
         "properties": {
@@ -2731,6 +4623,34 @@
           "file"
         ],
         "title": "Body_bulk_import_users_api_v1_admin_users_bulk_import_post"
+      },
+      "Body_import_skill_api_v1_skills_import_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_skill_api_v1_skills_import_post"
+      },
+      "Body_import_unit_seed_api_v1_admin_tools_units_import_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_unit_seed_api_v1_admin_tools_units_import_post"
       },
       "Body_send_message_api_v1_chat_post": {
         "properties": {
@@ -3133,13 +5053,19 @@
           "lead_agent_model": {
             "type": "string",
             "title": "Lead Agent Model",
-            "description": "Model identifier configured for the lead_agent (e.g. 'qwen3.6-plus'). Surfaced in the composer so the user can see which model is driving the current conversation without digging into agent MD files."
+            "description": "Model identifier configured for the lead_agent (e.g. 'qwen3.7-max'). Surfaced in the composer so the user can see which model is driving the current conversation without digging into agent MD files."
+          },
+          "max_upload_size": {
+            "type": "integer",
+            "title": "Max Upload Size",
+            "description": "Per-file upload byte limit (MAX_UPLOAD_SIZE). The composer uses it to pre-reject an oversize file with instant feedback instead of staging + POSTing it for a backend 422. Backend stays authoritative; the batch TOTAL is capped separately at the proxy layer (not surfaced here \u2014 it lives in nginx/Caddy config, outside src/config.py)."
           }
         },
         "type": "object",
         "required": [
           "compaction_token_threshold",
-          "lead_agent_model"
+          "lead_agent_model",
+          "max_upload_size"
         ],
         "title": "ClientConfigResponse",
         "description": "GET /api/v1/meta response \u2014 runtime constants for the frontend."
@@ -3292,6 +5218,12 @@
             ],
             "title": "Active Message Id",
             "description": "The message_id of the currently-running execution on this conversation, or null if no execution is in flight. Carries execution identity (not just a boolean) so the frontend can compare-and-clear on terminal events without an old turn's completion clobbering a freshly-started new turn's indicator."
+          },
+          "upload_bytes": {
+            "type": "integer",
+            "title": "Upload Bytes",
+            "description": "Total stored attachment/blob bytes for this conversation (SUM of ArtifactBlob.size_bytes). Surfaced per-row in the list so the user can see which conversation is consuming storage and pick what to delete when over quota. Blob-only: text content and event history are NOT counted (deleting the conversation reclaims those too, so the displayed number understates what is freed).",
+            "default": 0
           }
         },
         "type": "object",
@@ -3301,7 +5233,8 @@
           "message_count",
           "created_at",
           "updated_at",
-          "active_message_id"
+          "active_message_id",
+          "upload_bytes"
         ],
         "title": "ConversationSummary",
         "description": "Conversation summary in list response"
@@ -3334,6 +5267,68 @@
         ],
         "title": "CreateDepartmentRequest",
         "description": "POST /api/v1/departments request body"
+      },
+      "CreateToolUnitRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Name",
+            "description": "unit \u540d,\u5168\u5c40\u552f\u4e00,\u7981\u542b '__'"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "tool",
+              "toolset",
+              "mcp"
+            ],
+            "title": "Kind",
+            "default": "tool"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "department"
+            ],
+            "title": "Visibility",
+            "default": "public"
+          },
+          "defer": {
+            "type": "boolean",
+            "title": "Defer",
+            "default": false
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/ToolMemberSpec"
+            },
+            "type": "array",
+            "title": "Members"
+          },
+          "provider_config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/McpProviderConfigSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "CreateToolUnitRequest",
+        "description": "POST /api/v1/admin/tools/units \u2014\u2014 \u65b0\u5efa dynamic unit\u3002"
       },
       "CreateUserRequest": {
         "properties": {
@@ -3389,6 +5384,114 @@
         ],
         "title": "CreateUserRequest",
         "description": "POST /api/v1/admin/users request body"
+      },
+      "CredentialStatusResponse": {
+        "properties": {
+          "placeholder": {
+            "type": "string",
+            "title": "Placeholder"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "placeholder",
+          "configured",
+          "source"
+        ],
+        "title": "CredentialStatusResponse"
+      },
+      "DepartmentAccessDepartment": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "parent_id",
+          "name"
+        ],
+        "title": "DepartmentAccessDepartment"
+      },
+      "DepartmentAccessInheritedRule": {
+        "properties": {
+          "department_id": {
+            "type": "string",
+            "title": "Department Id",
+            "description": "Ancestor department id"
+          },
+          "department_name": {
+            "type": "string",
+            "title": "Department Name",
+            "description": "Ancestor department display name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "department_id",
+          "department_name"
+        ],
+        "title": "DepartmentAccessInheritedRule"
+      },
+      "DepartmentAccessResponse": {
+        "properties": {
+          "department": {
+            "$ref": "#/components/schemas/DepartmentAccessDepartment"
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/DepartmentSkillAccessItem"
+            },
+            "type": "array",
+            "title": "Skills"
+          },
+          "units": {
+            "items": {
+              "$ref": "#/components/schemas/DepartmentUnitAccessItem"
+            },
+            "type": "array",
+            "title": "Units"
+          }
+        },
+        "type": "object",
+        "required": [
+          "department",
+          "skills",
+          "units"
+        ],
+        "title": "DepartmentAccessResponse"
       },
       "DepartmentListResponse": {
         "properties": {
@@ -3462,6 +5565,82 @@
         "title": "DepartmentResponse",
         "description": "Single department response (\u542b\u76f4\u5c5e\u8ba1\u6570)"
       },
+      "DepartmentSkillAccessItem": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "department"
+            ],
+            "title": "Visibility"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "default_enabled": {
+            "type": "boolean",
+            "title": "Default Enabled"
+          },
+          "rule_action": {
+            "type": "string",
+            "enum": [
+              "grant",
+              "deny"
+            ],
+            "title": "Rule Action",
+            "description": "'deny' for public resources, 'grant' for department resources."
+          },
+          "direct_rule": {
+            "type": "boolean",
+            "title": "Direct Rule",
+            "description": "Whether this exact department has an exception row."
+          },
+          "inherited_rule": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DepartmentAccessInheritedRule"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Nearest ancestor exception row, if any."
+          },
+          "effective_allowed": {
+            "type": "boolean",
+            "title": "Effective Allowed",
+            "description": "Whether users in this department can see/use this resource."
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "description",
+          "visibility",
+          "source",
+          "default_enabled",
+          "rule_action",
+          "direct_rule",
+          "inherited_rule",
+          "effective_allowed"
+        ],
+        "title": "DepartmentSkillAccessItem"
+      },
       "DepartmentTreeNode": {
         "properties": {
           "id": {
@@ -3523,6 +5702,100 @@
         ],
         "title": "DepartmentTreeResponse",
         "description": "GET /api/v1/departments/tree response \u2014 \u9876\u5c42\u8282\u70b9\u5217\u8868"
+      },
+      "DepartmentUnitAccessItem": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "department"
+            ],
+            "title": "Visibility"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "rule_action": {
+            "type": "string",
+            "enum": [
+              "grant",
+              "deny"
+            ],
+            "title": "Rule Action"
+          },
+          "direct_rule": {
+            "type": "boolean",
+            "title": "Direct Rule"
+          },
+          "inherited_rule": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DepartmentAccessInheritedRule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "effective_allowed": {
+            "type": "boolean",
+            "title": "Effective Allowed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "description",
+          "visibility",
+          "source",
+          "rule_action",
+          "direct_rule",
+          "inherited_rule",
+          "effective_allowed"
+        ],
+        "title": "DepartmentUnitAccessItem"
+      },
+      "FindingItem": {
+        "properties": {
+          "rule": {
+            "type": "string",
+            "title": "Rule",
+            "description": "Stable rule id, e.g. 'zip.invalid' / 'md.body_empty'."
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity",
+            "description": "'error' (rejected) or 'warning' (surfaced only)."
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable explanation."
+          }
+        },
+        "type": "object",
+        "required": [
+          "rule",
+          "severity",
+          "message"
+        ],
+        "title": "FindingItem",
+        "description": "\u4e00\u6761 validator finding(E-1 \u786c\u95e8\u4ea7\u51fa;rule id \u7a33\u5b9a,\u524d\u7aef\u6309 severity \u6e32\u67d3)\u3002"
       },
       "HTTPValidationError": {
         "properties": {
@@ -3631,6 +5904,50 @@
         "title": "LoginResponse",
         "description": "POST /api/v1/auth/login response"
       },
+      "McpProviderConfigSpec": {
+        "properties": {
+          "transport": {
+            "type": "string",
+            "const": "streamable_http",
+            "title": "Transport"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Headers"
+          },
+          "timeout": {
+            "type": "integer",
+            "maximum": 600.0,
+            "minimum": 1.0,
+            "title": "Timeout",
+            "default": 60
+          },
+          "default_permission": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "confirm"
+            ],
+            "title": "Default Permission"
+          }
+        },
+        "type": "object",
+        "required": [
+          "transport",
+          "url",
+          "headers",
+          "timeout",
+          "default_permission"
+        ],
+        "title": "McpProviderConfigSpec"
+      },
       "MessageResponse": {
         "properties": {
           "id": {
@@ -3693,6 +6010,36 @@
             ],
             "title": "Execution Metrics",
             "description": "Turn-level metrics from Message.metadata_['execution_metrics']: started_at, completed_at, total_duration_ms, total_token_usage, etc."
+          },
+          "uploaded_files": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/UploadedFileRef"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uploaded Files",
+            "description": "Files the user attached this turn, from Message.metadata_['uploaded_files']. Display-only (best-effort): absent for turns that failed before artifact flush."
+          },
+          "active_skills": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Skills",
+            "description": "Skill slugs active as of this turn (sticky, from Message.metadata_['active_skills']). The branch-tail message's list is the conversation's current active set; the composer reads it to mark already-active skills in the activation picker. Absent/empty when no skills are active."
           }
         },
         "type": "object",
@@ -3703,10 +6050,80 @@
           "response",
           "created_at",
           "children",
-          "execution_metrics"
+          "execution_metrics",
+          "uploaded_files",
+          "active_skills"
         ],
         "title": "MessageResponse",
         "description": "Message in conversation detail response"
+      },
+      "MountResponse": {
+        "properties": {
+          "agent_name": {
+            "type": "string",
+            "title": "Agent Name"
+          },
+          "unit_name": {
+            "type": "string",
+            "title": "Unit Name"
+          },
+          "member_state": {
+            "type": "string",
+            "title": "Member State"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_name",
+          "unit_name",
+          "member_state",
+          "source"
+        ],
+        "title": "MountResponse",
+        "description": "PUT .../agents/{agent} \u7684\u8fd4\u56de(\u6302\u8f7d/\u6539\u6210\u5458\u6001\u540e\u7684\u7ed1\u5b9a\u5feb\u7167)\u3002"
+      },
+      "MountUnitRequest": {
+        "properties": {
+          "member_state": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled"
+            ],
+            "title": "Member State",
+            "default": "enabled"
+          }
+        },
+        "type": "object",
+        "title": "MountUnitRequest",
+        "description": "PUT /api/v1/admin/tools/units/{name}/agents/{agent_name}"
+      },
+      "MountedAgentResponse": {
+        "properties": {
+          "agent_name": {
+            "type": "string",
+            "title": "Agent Name"
+          },
+          "member_state": {
+            "type": "string",
+            "title": "Member State"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_name",
+          "member_state",
+          "source"
+        ],
+        "title": "MountedAgentResponse"
       },
       "MoveDepartmentRequest": {
         "properties": {
@@ -3809,6 +6226,587 @@
         "title": "ResumeResponse",
         "description": "POST /api/v1/chat/{conv_id}/resume response"
       },
+      "SetCredentialRequest": {
+        "properties": {
+          "value": {
+            "type": "string",
+            "maxLength": 8192,
+            "minLength": 1,
+            "title": "Value",
+            "description": "\u660e\u6587,\u52a0\u5bc6\u843d\u5e93\u540e\u6c38\u4e0d\u56de\u8bfb"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "title": "SetCredentialRequest",
+        "description": "PUT /api/v1/admin/tools/units/{name}/credentials/{placeholder} \u2014\u2014 \u5199-only\u3002"
+      },
+      "SiteNotification": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "info",
+              "warn",
+              "critical"
+            ],
+            "title": "Severity"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Body"
+          },
+          "starts_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starts At"
+          },
+          "ends_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ends At"
+          },
+          "dismissible": {
+            "type": "boolean",
+            "title": "Dismissible",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "severity",
+          "title",
+          "body",
+          "starts_at",
+          "ends_at",
+          "dismissible"
+        ],
+        "title": "SiteNotification"
+      },
+      "SiteNotificationsResponse": {
+        "properties": {
+          "notifications": {
+            "items": {
+              "$ref": "#/components/schemas/SiteNotification"
+            },
+            "type": "array",
+            "title": "Notifications"
+          },
+          "revision": {
+            "type": "string",
+            "title": "Revision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "notifications",
+          "revision"
+        ],
+        "title": "SiteNotificationsResponse"
+      },
+      "SkillImportResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Always 'imported' on success."
+          },
+          "skill": {
+            "$ref": "#/components/schemas/SkillItem",
+            "description": "The imported skill as it appears in the list."
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/FindingItem"
+            },
+            "type": "array",
+            "title": "Findings",
+            "description": "Non-blocking warnings surfaced by the validator (may be empty)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "skill",
+          "findings"
+        ],
+        "title": "SkillImportResponse",
+        "description": "POST /api/v1/skills/import(+ admin \u53d8\u4f53)\u6210\u529f\u54cd\u5e94\u3002\u786c\u95e8\u62d2\u6536\u8d70 422,\ndetail = {message, findings[]} \u540c\u4e00 FindingItem \u5f62\u72b6\u3002"
+      },
+      "SkillItem": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug",
+            "description": "Skill slug (natural key)"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Display name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "One-line description (the L1 index text)"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Effective enabled state (config default overridden by the user's setting). Controls whether the skill enters the model's L1 <available_skills> index. A disabled skill is still visible and can be activated on demand via its button."
+          },
+          "default_enabled": {
+            "type": "boolean",
+            "title": "Default Enabled",
+            "description": "Config-seed default; shown so the UI can flag skills the user overrode."
+          },
+          "is_overridden": {
+            "type": "boolean",
+            "title": "Is Overridden",
+            "description": "Whether the user has an explicit personal enable/disable for this skill."
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "'seeded' (config-owned, read-only in the UI) or 'dynamic' (imported via the UI; deletable by its owner or an admin)."
+          },
+          "has_extra_files": {
+            "type": "boolean",
+            "title": "Has Extra Files",
+            "description": "Whether the skill bundle contains files beyond SKILL.md. Controls whether read_skill points to mount_skill."
+          },
+          "visibility": {
+            "type": "string",
+            "title": "Visibility",
+            "description": "private (owner-only) | public (shared) | department"
+          },
+          "is_owner": {
+            "type": "boolean",
+            "title": "Is Owner",
+            "description": "Whether the current user imported (owns) this dynamic skill."
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "description",
+          "enabled",
+          "default_enabled",
+          "is_overridden",
+          "source",
+          "has_extra_files",
+          "visibility",
+          "is_owner"
+        ],
+        "title": "SkillItem",
+        "description": "\u4e00\u4e2a\u5bf9\u7528\u6237\u53ef\u89c1\u7684 skill + \u5176\u6709\u6548\u542f\u7528\u6001\u3002"
+      },
+      "SkillListResponse": {
+        "properties": {
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/SkillItem"
+            },
+            "type": "array",
+            "title": "Skills",
+            "description": "Skills visible to the user, with effective enabled state."
+          }
+        },
+        "type": "object",
+        "required": [
+          "skills"
+        ],
+        "title": "SkillListResponse",
+        "description": "GET /api/v1/skills response."
+      },
+      "SkillToggleRequest": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Personal enable/disable override for this skill."
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "SkillToggleRequest",
+        "description": "PUT /api/v1/skills/{slug}/enabled request body."
+      },
+      "StorageUsageResponse": {
+        "properties": {
+          "used_bytes": {
+            "type": "integer",
+            "title": "Used Bytes",
+            "description": "Total stored blob bytes across all the user's conversations."
+          },
+          "quota_bytes": {
+            "type": "integer",
+            "title": "Quota Bytes",
+            "description": "Per-user blob quota (ARTIFACT_USER_QUOTA_BYTES). An upload is rejected with 413 when used_bytes + incoming would exceed it. 0 = unlimited (quota disabled); the frontend should render the bar as unbounded."
+          }
+        },
+        "type": "object",
+        "required": [
+          "used_bytes",
+          "quota_bytes"
+        ],
+        "title": "StorageUsageResponse",
+        "description": "GET /api/v1/chat/storage response \u2014 per-user attachment storage usage."
+      },
+      "ToolMemberResponse": {
+        "properties": {
+          "member_name": {
+            "type": "string",
+            "title": "Member Name"
+          },
+          "full_name": {
+            "type": "string",
+            "title": "Full Name"
+          },
+          "permission": {
+            "type": "string",
+            "title": "Permission"
+          },
+          "definition": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Definition"
+          }
+        },
+        "type": "object",
+        "required": [
+          "member_name",
+          "full_name",
+          "permission",
+          "definition"
+        ],
+        "title": "ToolMemberResponse"
+      },
+      "ToolMemberSpec": {
+        "properties": {
+          "member_name": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Member Name",
+            "description": "\u4f5c\u8005\u88f8\u540d;singleton \u4f1a\u88ab\u89c4\u6574\u4e3a unit \u540d"
+          },
+          "permission": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "confirm"
+            ],
+            "title": "Permission",
+            "default": "confirm"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "endpoint": {
+            "type": "string",
+            "title": "Endpoint",
+            "default": ""
+          },
+          "method": {
+            "type": "string",
+            "title": "Method",
+            "default": "GET"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Headers"
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/ToolParamSpec"
+            },
+            "type": "array",
+            "title": "Parameters"
+          },
+          "response_extract": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Extract"
+          },
+          "artifact_output": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArtifactOutputSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timeout": {
+            "type": "integer",
+            "maximum": 600.0,
+            "minimum": 1.0,
+            "title": "Timeout",
+            "default": 60
+          }
+        },
+        "type": "object",
+        "required": [
+          "member_name",
+          "permission",
+          "description",
+          "endpoint",
+          "method",
+          "headers",
+          "parameters",
+          "response_extract",
+          "artifact_output",
+          "timeout"
+        ],
+        "title": "ToolMemberSpec"
+      },
+      "ToolParamSpec": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Name"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "string",
+              "integer",
+              "number",
+              "boolean",
+              "json"
+            ],
+            "title": "Type",
+            "default": "string"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "default": true
+          },
+          "default": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default"
+          },
+          "enum": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enum"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "type",
+          "description",
+          "required",
+          "default",
+          "enum"
+        ],
+        "title": "ToolParamSpec"
+      },
+      "ToolUnitImportResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "imported",
+            "title": "Status",
+            "default": "imported"
+          },
+          "unit": {
+            "$ref": "#/components/schemas/ToolUnitResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "unit"
+        ],
+        "title": "ToolUnitImportResponse"
+      },
+      "ToolUnitListResponse": {
+        "properties": {
+          "units": {
+            "items": {
+              "$ref": "#/components/schemas/ToolUnitResponse"
+            },
+            "type": "array",
+            "title": "Units"
+          }
+        },
+        "type": "object",
+        "required": [
+          "units"
+        ],
+        "title": "ToolUnitListResponse"
+      },
+      "ToolUnitResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "visibility": {
+            "type": "string",
+            "title": "Visibility"
+          },
+          "defer": {
+            "type": "boolean",
+            "title": "Defer"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "provider_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Config"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/ToolMemberResponse"
+            },
+            "type": "array",
+            "title": "Members"
+          },
+          "mounted_agents": {
+            "items": {
+              "$ref": "#/components/schemas/MountedAgentResponse"
+            },
+            "type": "array",
+            "title": "Mounted Agents"
+          },
+          "credentials": {
+            "items": {
+              "$ref": "#/components/schemas/CredentialStatusResponse"
+            },
+            "type": "array",
+            "title": "Credentials"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "description",
+          "visibility",
+          "defer",
+          "provider",
+          "provider_config",
+          "source",
+          "members",
+          "mounted_agents",
+          "credentials"
+        ],
+        "title": "ToolUnitResponse"
+      },
+      "ToolUnitTestResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "tool_count": {
+            "type": "integer",
+            "title": "Tool Count",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "message",
+          "tool_count"
+        ],
+        "title": "ToolUnitTestResponse"
+      },
       "UpdateDepartmentRequest": {
         "properties": {
           "name": {
@@ -3845,6 +6843,92 @@
         "type": "object",
         "title": "UpdateMyProfileRequest",
         "description": "PATCH /api/v1/auth/me request body \u2014 \u81ea\u52a9\u4fee\u6539\u81ea\u5df1\u7684\u975e\u654f\u611f\u8d44\u6599\u5b57\u6bb5"
+      },
+      "UpdateSiteNotificationsRequest": {
+        "properties": {
+          "notifications": {
+            "items": {
+              "$ref": "#/components/schemas/SiteNotification"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Notifications"
+          },
+          "expected_revision": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Expected Revision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "notifications",
+          "expected_revision"
+        ],
+        "title": "UpdateSiteNotificationsRequest"
+      },
+      "UpdateToolUnitRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Name",
+            "description": "unit \u540d,\u5168\u5c40\u552f\u4e00,\u7981\u542b '__'"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "tool",
+              "toolset",
+              "mcp"
+            ],
+            "title": "Kind",
+            "default": "tool"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "department"
+            ],
+            "title": "Visibility",
+            "default": "public"
+          },
+          "defer": {
+            "type": "boolean",
+            "title": "Defer",
+            "default": false
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/ToolMemberSpec"
+            },
+            "type": "array",
+            "title": "Members"
+          },
+          "provider_config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/McpProviderConfigSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "UpdateToolUnitRequest",
+        "description": "PUT /api/v1/admin/tools/units/{name} \u2014\u2014 \u6574\u4f53\u66ff\u6362 dynamic unit(name \u53d6\u81ea\u8def\u5f84)\u3002"
       },
       "UpdateUserRequest": {
         "properties": {
@@ -3914,6 +6998,27 @@
         "type": "object",
         "title": "UpdateUserRequest",
         "description": "PUT /api/v1/admin/users/{id} request body.\n\nAll fields optional. department_id semantics: \u5b57\u6bb5\u88ab\u663e\u5f0f\u4f20\u5165\u65f6\u751f\u6548\uff08\u5305\u62ec\n\u4f20 null = \u6e05\u7a7a\u5f52\u5c5e\uff09\uff1b\u5b57\u6bb5\u7f3a\u7701 \u2192 \u4e0d\u6539\u3002\u8def\u7531\u901a\u8fc7 model_fields_set \u533a\u5206\u3002"
+      },
+      "UploadedFileRef": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Artifact ID the upload was staged as"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename",
+            "description": "Original filename"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "filename"
+        ],
+        "title": "UploadedFileRef",
+        "description": "File the user attached to a message (display-only snapshot)"
       },
       "UserImpactResponse": {
         "properties": {

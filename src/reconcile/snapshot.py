@@ -1,0 +1,397 @@
+"""
+注册表快照(读侧)—— 从 DB 行重建运行期形状(external `HttpTool` + unit/agent 元数据)。
+
+ORM 实例不外逃(CLAUDE.md):本模块在 session 内读行、就地重建出 detached 的
+`HttpTool` / 纯 dataclass 返回,调用方拿不到 ORM 对象。
+"""
+
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Set
+
+from sqlalchemy import exists, literal, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from db.models import (
+    Agent,
+    AgentUnit,
+    DepartmentSkillRule,
+    DepartmentUnitRule,
+    Skill,
+    ToolMember,
+    ToolUnit,
+)
+from tools.base import BaseTool, ToolParameter, is_builtin_name
+from tools.custom.credentials import CredentialResolver
+from tools.custom.http_tool import HttpTool, HttpToolConfig
+from tools.custom.mcp_tool import build_mcp_tool
+from utils.logger import get_logger
+
+logger = get_logger("ArtifactFlow")
+
+
+@dataclass
+class UnitInfo:
+    """unit 元数据 + 成员 full_name 列表(供披露 / 部门授权侧消费)。"""
+    name: str
+    kind: str
+    description: str
+    visibility: str
+    defer: bool
+    provider: str
+    source: str
+    provider_config: Optional[dict] = None
+    discovery_error: Optional[str] = None
+    member_full_names: List[str] = field(default_factory=list)
+
+
+@dataclass
+class AgentSnapshot:
+    """agent 重建形状。`builtin_tools`/`units` 分开存(决策 11 两轴)。
+
+    engine 消费侧的扁平 `{tool: level}` 合成属 `EffectiveToolset` resolver,不在此做。"""
+    name: str
+    description: str
+    model: str
+    max_tool_rounds: int
+    internal: bool
+    role_prompt: str
+    builtin_tools: Dict[str, str] = field(default_factory=dict)   # {名: enabled|disabled}
+    units: Dict[str, str] = field(default_factory=dict)           # {unit_name: enabled|disabled}
+
+
+@dataclass
+class RegistrySnapshot:
+    external_tools: Dict[str, BaseTool]   # full_name -> HttpTool/McpTool(external 单元成员)
+    units: Dict[str, UnitInfo]            # unit_name -> UnitInfo
+    agents: Dict[str, AgentSnapshot]      # agent_name -> AgentSnapshot
+
+
+@dataclass
+class SkillInfo:
+    """skill 轻量元数据(user-agnostic)。L1 列举 / 可见性 / skill_grants 用;**不含
+    skill_md / bundle**(大,按需经 repo 读 —— L2 read_skill / L3 mount)。"""
+    slug: str
+    name: str
+    description: str
+    visibility: str
+    default_enabled: bool
+    owner_user_id: Optional[str]
+    allowed_tools: List[str] = field(default_factory=list)
+    has_extra_files: bool = False      # bundle 内有 SKILL.md 外文件,需要 mount_skill 才能读/运行
+    compatibility: Optional[dict] = None  # frontmatter `compatibility` 声明(mount_skill 依赖提示原样透出,D-2;小 JSON、随快照)
+    source: str = "seeded"             # seeded(config 只读)/ dynamic(UI 导入,可删;E-2)
+
+
+def build_http_tool(
+    full_name: str,
+    permission: str,
+    definition: dict,
+    *,
+    unit_name: Optional[str] = None,
+    credential_resolver: Optional[CredentialResolver] = None,
+) -> HttpTool:
+    """从 tool_member 行重建 HttpTool。full_name 作工具名、permission 作等级。
+
+    unit_name + credential_resolver 灌入运行期凭证通路(B-4;B-5 lazy):execute 期按 unit
+    从 tool_credentials 开短 session 解密填 {{NAME}}。两者缺省(测试直接调)→ 回落 env。
+    """
+    params = [
+        ToolParameter(
+            name=p["name"],
+            type=p.get("type", "string"),
+            description=p.get("description", ""),
+            required=p.get("required", True),
+            default=p.get("default"),
+            enum=p.get("enum"),
+        )
+        for p in (definition.get("parameters") or [])
+    ]
+    config = HttpToolConfig(
+        name=full_name,
+        description=definition.get("description", ""),
+        permission=permission,
+        endpoint=definition.get("endpoint", ""),
+        method=definition.get("method", "GET"),
+        headers=definition.get("headers", {}) or {},
+        parameters=params,
+        response_extract=definition.get("response_extract"),
+        artifact_output=definition.get("artifact_output"),
+        timeout=definition.get("timeout", 60),
+    )
+    return HttpTool(config, unit_name=unit_name, credential_resolver=credential_resolver)
+
+
+async def load_registry_snapshot(
+    session: AsyncSession, *, db_manager=None
+) -> RegistrySnapshot:
+    snapshot, _ = await _load_registry_snapshot_and_unit_matches(
+        session, db_manager=db_manager, dept_ids=None
+    )
+    return snapshot
+
+
+async def load_registry_snapshot_with_unit_matches(
+    session: AsyncSession, dept_ids: List[str], *, db_manager=None
+) -> tuple[RegistrySnapshot, Set[str]]:
+    """Load registry snapshot and department-unit rule matches in one unit projection.
+
+    The unit visibility column and "does this user's ancestor chain match a
+    department_unit_rule for this unit?" must come from the same SQL statement.
+    PostgreSQL READ COMMITTED gives each SELECT its own snapshot, so a separate
+    visibility read + rule read can mix states across a concurrent visibility
+    change that clears rules. This helper returns both facts from one projection.
+    """
+    return await _load_registry_snapshot_and_unit_matches(
+        session, db_manager=db_manager, dept_ids=dept_ids
+    )
+
+
+async def _load_registry_snapshot_and_unit_matches(
+    session: AsyncSession, *, db_manager=None, dept_ids: Optional[List[str]]
+) -> tuple[RegistrySnapshot, Set[str]]:
+    """一次性读全部注册表行,重建 external 工具 + unit 元数据 + agent 元数据。
+
+    显式 order_by 定序的是 **external/unit 轴**(member/agent_unit 行序)—— 这一轴喂
+    进系统提示词的工具渲染顺序(EffectiveToolset.names() 里 unit 展开部分),无序则
+    PG 不保证行序 → 提示词抖动击穿 APC 缓存 + prompt 快照 flaky。**builtin 轴**的顺序
+    另有来源:`agent.builtin_tools` JSON key 序 = reconcile 时的 MD 声明序,由
+    order-preserving `JSON` 列(非 `JSONB`)在 PG/SQLite 都保序,不归这里的 order_by 管。
+
+    撞名兜底(skip+log,非 raise):external 名撞 builtin/reserved 时**跳过该行 + 打
+    WARNING**,让 builtin 对象在 controller_factory 合并里继续活(消除遮蔽 = 权限绕过)。
+    不 raise —— 本函数每 turn 每用户都跑,一行坏数据 raise 会拖垮全机群;主防线是写入期
+    loud-fail(reconcile / B-4 CRUD),这里只作兜底,不该有全局爆炸半径。
+    """
+    # 凭证 resolver 持 db_manager(非本快照 session):execute 期按 unit 开短 session lazy
+    # 解密(B-5)—— 本 session 只读注册表行、读完即关,不被凭证解析骑成 turn-long 连接。
+    # db_manager 缺省(测试 / 进程级重建脚本不带)→ resolver=None,HttpTool 回落 env。
+    credential_resolver = CredentialResolver(db_manager) if db_manager is not None else None
+
+    dept_match_expr = (
+        exists().where(
+            DepartmentUnitRule.unit_name == ToolUnit.name,
+            DepartmentUnitRule.department_id.in_(dept_ids),
+        )
+        if dept_ids
+        else literal(False)
+    ).label("dept_matched")
+    units_rows = (await session.execute(
+        select(
+            ToolUnit.name.label("name"),
+            ToolUnit.kind.label("kind"),
+            ToolUnit.description.label("description"),
+            ToolUnit.visibility.label("visibility"),
+            ToolUnit.defer.label("defer"),
+            ToolUnit.provider.label("provider"),
+            ToolUnit.source.label("source"),
+            ToolUnit.provider_config.label("provider_config"),
+            dept_match_expr,
+        ).order_by(ToolUnit.name)
+    )).mappings().all()
+    member_rows = (await session.execute(
+        select(ToolMember).order_by(ToolMember.full_name)
+    )).scalars().all()
+    agent_rows = (await session.execute(
+        select(Agent).order_by(Agent.name)
+    )).scalars().all()
+    agent_unit_rows = (await session.execute(
+        select(AgentUnit).order_by(AgentUnit.agent_name, AgentUnit.unit_name)
+    )).scalars().all()
+
+    units: Dict[str, UnitInfo] = {}
+    dept_matched_units: Set[str] = set()
+    for u in units_rows:
+        name = u["name"]
+        if is_builtin_name(name):
+            # unit 名撞 builtin/reserved → 不 surface(其成员随之不重建,见下),
+            # 防 B-3/B-4/C 精确匹配路径的命名空间歧义。
+            logger.warning(
+                "Skipping external tool unit %r: name collides with a builtin/reserved "
+                "tool name (row bypassed write-time validation — fix the DB row)",
+                name,
+            )
+            continue
+        if u["dept_matched"]:
+            dept_matched_units.add(name)
+        units[name] = UnitInfo(
+            name=name,
+            kind=u["kind"],
+            description=u["description"],
+            visibility=u["visibility"],
+            defer=u["defer"],
+            provider=u["provider"],
+            source=u["source"],
+            provider_config=dict(u["provider_config"] or {}) or None,
+        )
+
+    external_tools: Dict[str, BaseTool] = {}
+    for m in member_rows:
+        # 撞名兜底:full_name 撞 builtin/reserved → 跳过(不进 external_tools),让
+        # builtin 在 controller_factory 合并里保活(消除遮蔽 = 权限绕过)。skip+log
+        # 而非 raise:本函数每 turn 每用户跑,raise = 一行坏数据拖垮全机群;主防线在
+        # 写入期(reconcile / B-4 CRUD loud-fail),这里只兜绕过写校验的行。
+        if is_builtin_name(m.full_name):
+            logger.warning(
+                "Skipping external tool member %r (unit %r): full_name collides with a "
+                "builtin/reserved tool name — builtin kept live (fix the DB row)",
+                m.full_name, m.unit_name,
+            )
+            continue
+        # unit 名撞 builtin 被上面跳过的,其成员 m.unit_name ∉ units → 自然不重建
+        # (无需在此再判 / 再 log,unit 级 WARNING 已覆盖)。
+        if m.unit_name in units:
+            units[m.unit_name].member_full_names.append(m.full_name)
+        # 仅 http provider 从 DB member 重建为 HttpTool;mcp provider 在 DB session
+        # 关闭后的 hydrate_mcp_tools 阶段从 tools/list 填。
+        unit = units.get(m.unit_name)
+        if unit is not None and unit.provider == "http":
+            external_tools[m.full_name] = build_http_tool(
+                m.full_name, m.permission, m.definition or {},
+                unit_name=m.unit_name,
+                credential_resolver=credential_resolver,
+            )
+
+    agents: Dict[str, AgentSnapshot] = {
+        a.name: AgentSnapshot(
+            name=a.name,
+            description=a.description,
+            model=a.model,
+            max_tool_rounds=a.max_tool_rounds,
+            internal=a.internal,
+            role_prompt=a.role_prompt,
+            builtin_tools=dict(a.builtin_tools or {}),
+        )
+        for a in agent_rows
+    }
+    for au in agent_unit_rows:
+        agent = agents.get(au.agent_name)
+        if agent is not None:
+            agent.units[au.unit_name] = au.member_state
+
+    return (
+        RegistrySnapshot(external_tools=external_tools, units=units, agents=agents),
+        dept_matched_units,
+    )
+
+
+async def hydrate_mcp_tools(
+    snapshot: RegistrySnapshot,
+    *,
+    mcp_manager,
+    db_manager=None,
+    allowed_unit_names: Optional[Set[str]] = None,
+) -> RegistrySnapshot:
+    """Session-free MCP discovery pass.
+
+    `load_registry_snapshot` owns only DB reads. This function runs after that
+    session has closed, so a slow/unreachable MCP server cannot pin a DB
+    connection while waiting for external HTTP. Credential resolution still uses
+    `db_manager`, but only through short lazy sessions inside CredentialResolver.
+
+    `allowed_unit_names`(G-0) lets the caller apply department visibility before
+    discovery, so a dept-denied MCP server is not contacted at all.
+    """
+    credential_resolver = CredentialResolver(db_manager) if db_manager is not None else None
+    for unit in snapshot.units.values():
+        if unit.provider != "mcp":
+            continue
+        if allowed_unit_names is not None and unit.name not in allowed_unit_names:
+            continue
+        listing = await mcp_manager.list_tools(
+            unit.name,
+            unit.provider_config or {},
+            credential_resolver=credential_resolver,
+        )
+        unit.discovery_error = listing.error
+        for definition in listing.tools:
+            tool = build_mcp_tool(
+                server_name=unit.name,
+                provider_config=unit.provider_config or {},
+                definition=definition,
+                client_manager=mcp_manager,
+                credential_resolver=credential_resolver,
+            )
+            if tool is None:
+                continue
+            if tool.name in snapshot.external_tools:
+                logger.warning(
+                    "Skipping MCP tool %r from server %r: full_name already exists",
+                    tool.name,
+                    unit.name,
+                )
+                continue
+            unit.member_full_names.append(tool.name)
+            snapshot.external_tools[tool.name] = tool
+    return snapshot
+
+
+async def load_skill_snapshot(session: AsyncSession) -> Dict[str, SkillInfo]:
+    snapshot, _ = await _load_skill_snapshot_and_matches(session, dept_ids=None)
+    return snapshot
+
+
+async def load_skill_snapshot_with_matches(
+    session: AsyncSession, dept_ids: List[str]
+) -> tuple[Dict[str, SkillInfo], Set[str]]:
+    """Load skill metadata and department-skill rule matches in one projection.
+
+    Mirrors `load_registry_snapshot_with_unit_matches`: visibility and matching
+    dept-rule state need to come from the same SELECT under READ COMMITTED.
+    """
+    return await _load_skill_snapshot_and_matches(session, dept_ids=dept_ids)
+
+
+async def _load_skill_snapshot_and_matches(
+    session: AsyncSession, *, dept_ids: Optional[List[str]]
+) -> tuple[Dict[str, SkillInfo], Set[str]]:
+    """读全部 skill 行,重建轻量 user-agnostic 元数据(`{slug: SkillInfo}`)。
+
+    每 turn 一次快照(同 load_registry_snapshot,controller_factory 调用,C-2 接入);
+    per-user 解析(user_skill 覆盖 + dept 规则)另在 `EffectiveSkillSet` 做(C-2)。
+    slug 定序保 L1 渲染顺序稳定(APC / prompt 快照)。skill_md / bundle 字节**不入快照**(大,
+    L2/L3 按需读)—— `bundle` 对正常行恒存在,快照只投影 `has_extra_files` 来决定
+    read_skill 是否提示 / 创建 mount_skill。
+    ORM 不外逃:直接投影列、物化成 SkillInfo dataclass。"""
+    dept_match_expr = (
+        exists().where(
+            DepartmentSkillRule.skill_slug == Skill.slug,
+            DepartmentSkillRule.department_id.in_(dept_ids),
+        )
+        if dept_ids
+        else literal(False)
+    ).label("dept_matched")
+    rows = (
+        await session.execute(
+            select(
+                Skill.slug,
+                Skill.name,
+                Skill.description,
+                Skill.visibility,
+                Skill.default_enabled,
+                Skill.owner_user_id,
+                Skill.allowed_tools,
+                Skill.has_extra_files,
+                Skill.compatibility,
+                Skill.source,
+                dept_match_expr,
+            ).order_by(Skill.slug)
+        )
+    ).all()
+    snapshot: Dict[str, SkillInfo] = {}
+    dept_matched: Set[str] = set()
+    for r in rows:
+        if r.dept_matched:
+            dept_matched.add(r.slug)
+        snapshot[r.slug] = SkillInfo(
+            slug=r.slug,
+            name=r.name,
+            description=r.description,
+            visibility=r.visibility,
+            default_enabled=r.default_enabled,
+            owner_user_id=r.owner_user_id,
+            allowed_tools=list(r.allowed_tools or []),
+            has_extra_files=bool(r.has_extra_files),
+            compatibility=r.compatibility,
+            source=r.source,
+        )
+    return snapshot, dept_matched

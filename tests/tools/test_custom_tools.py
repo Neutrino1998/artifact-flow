@@ -17,9 +17,12 @@ import tempfile
 from unittest.mock import patch
 
 from tools.base import BaseTool, ToolParameter, ToolPermission, ToolResult
+from tools.artifact_output import filename_from_headers, normalize_artifact_output_config
 from tools.custom.loader import load_custom_tool, load_custom_tools
-from tools.custom.http_tool import HttpTool, HttpToolConfig, _extract_jsonpath
+import jmespath
+from tools.custom.http_tool import HttpTool, HttpToolConfig, validate_response_extract
 from tools.custom.secrets import resolve_secrets, SecretResolutionError
+from tools.custom.url_template import validate_url_path_template
 
 
 # ============================================================
@@ -67,31 +70,74 @@ class TestResolveSecrets:
 
 
 # ============================================================
-# JSONPath 提取
+# response_extract（JMESPath）
 # ============================================================
 
-class TestExtractJsonpath:
-    def test_simple_key(self):
-        assert _extract_jsonpath({"data": {"price": 100}}, "$.data.price") == 100
+class TestResponseExtractSemantics:
+    """response_extract 现在直接用 jmespath.search（无 $. 前缀）。锁定文档承诺的形态。"""
 
-    def test_root(self):
-        data = {"a": 1}
-        assert _extract_jsonpath(data, "$") == data
-        assert _extract_jsonpath(data, "") == data
+    def test_nested_key(self):
+        assert jmespath.search("data.price", {"data": {"price": 100}}) == 100
 
     def test_array_index(self):
         data = {"items": [{"name": "a"}, {"name": "b"}]}
-        assert _extract_jsonpath(data, "$.items[1].name") == "b"
+        assert jmespath.search("items[1].name", data) == "b"
 
-    def test_missing_key_returns_none(self):
-        assert _extract_jsonpath({"a": 1}, "$.b.c") is None
+    def test_wildcard_projection(self):
+        # 旧手写解析器做不到 [*]——正是换 JMESPath 的动机之一
+        data = {"results": [{"id": 1}, {"id": 2}]}
+        assert jmespath.search("results[*].id", data) == [1, 2]
 
-    def test_array_out_of_bounds(self):
-        assert _extract_jsonpath({"items": [1, 2]}, "$.items[5]") is None
+    def test_matched_nothing_is_none(self):
+        # 合法表达式但匹配不到 → None（execute 把它转成显式 "matched nothing"，不静默空）
+        assert jmespath.search("nope.x", {"data": 1}) is None
 
-    def test_nested_path(self):
-        data = {"a": {"b": {"c": {"d": "deep"}}}}
-        assert _extract_jsonpath(data, "$.a.b.c.d") == "deep"
+
+class TestValidateResponseExtract:
+    """写入边界校验：语法错 loud-fail（ValueError），各调用方包成域错误。"""
+
+    def test_valid_expressions_pass(self):
+        for expr in ("data.price", "results[*].id", "id", "items[?price > `10`].name"):
+            validate_response_extract(expr)  # 不抛即通过
+
+    def test_unset_is_ok(self):
+        validate_response_extract(None)
+        validate_response_extract("")
+
+    def test_bad_syntax_raises(self):
+        with pytest.raises(ValueError, match="invalid JMESPath"):
+            validate_response_extract("data[")
+
+    def test_legacy_dollar_prefix_rejected(self):
+        # clean break:旧式 $. 前缀不再兼容(jmespath 无 $ token),写入边界即拒
+        with pytest.raises(ValueError, match="invalid JMESPath"):
+            validate_response_extract("$.data.price")
+
+    def test_non_string_rejected_with_attribution(self):
+        # YAML 未加引号 → int/bool 等非串:在此显式拦成 ValueError(保住 SeedError 文件名归属),
+        # 不漏到 reconcile 顶层裸 traceback。含 falsy 的 0 / False。
+        for bad in (123, True, 0, False):
+            with pytest.raises(ValueError, match="must be a string"):
+                validate_response_extract(bad)
+
+
+class TestArtifactOutputHeaders:
+    def test_filename_star_wins_over_ascii_fallback(self):
+        filename = filename_from_headers({
+            "content-disposition": (
+                'attachment; filename="report.docx"; '
+                "filename*=UTF-8''%E6%8A%A5%E5%91%8A.docx"
+            )
+        })
+
+        assert filename == "报告.docx"
+
+    def test_filename_falls_back_to_plain_filename(self):
+        filename = filename_from_headers({
+            "content-disposition": 'attachment; filename="report.docx"'
+        })
+
+        assert filename == "report.docx"
 
 
 # ============================================================
@@ -164,6 +210,100 @@ parameters:
             params = tool.get_parameters()
             assert params[0].enum == ["US", "HK", "SH"]
             assert params[0].default == "US"
+
+    def test_json_parameter_default(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            md = """---
+name: ragflow_retrieval
+description: "RAGFlow retrieval"
+type: http
+endpoint: "https://ragflow.example.com/api/v1/retrieval"
+method: POST
+parameters:
+  - name: question
+    type: string
+    description: "Question"
+    required: true
+  - name: dataset_ids
+    type: json
+    description: "Dataset id list"
+    required: true
+    default: ["c750d2f6752411f191e693d1a844b0ba"]
+---
+"""
+            path = self._write_md(tmpdir, "ragflow.md", md)
+            tool = load_custom_tool(path)
+
+            params = tool.get_parameters()
+            assert [(p.name, p.type) for p in params] == [
+                ("question", "string"),
+                ("dataset_ids", "json"),
+            ]
+            assert params[1].default == ["c750d2f6752411f191e693d1a844b0ba"]
+
+    def test_json_parameter_rejects_scalar_default(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            md = """---
+name: bad_json
+description: "Bad JSON"
+type: http
+endpoint: "https://api.example.com/bad"
+parameters:
+  - name: payload
+    type: json
+    default: not-an-object
+---
+"""
+            path = self._write_md(tmpdir, "bad_json.md", md)
+
+            with pytest.raises(ValueError, match="payload.*default.*JSON object or array"):
+                load_custom_tool(path)
+
+    def test_path_parameter_endpoint_loads(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            md = """---
+name: ragflow_download
+description: "Download RAGFlow document"
+type: http
+endpoint: "https://ragflow.example.com/api/v1/datasets/{dataset_id}/documents/{document_id}"
+method: GET
+parameters:
+  - name: dataset_id
+    type: string
+    required: true
+  - name: document_id
+    type: string
+    required: true
+artifact_output:
+  enabled: true
+  mode: binary
+---
+"""
+            path = self._write_md(tmpdir, "ragflow_download.md", md)
+            tool = load_custom_tool(path)
+
+            assert isinstance(tool, HttpTool)
+            assert [p.name for p in tool.get_parameters()] == ["dataset_id", "document_id"]
+            assert tool._artifact_output["content_type"] is None
+
+    def test_path_parameter_endpoint_rejects_undeclared_param(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            md = """---
+name: ragflow_download
+description: "Download RAGFlow document"
+type: http
+endpoint: "https://ragflow.example.com/api/v1/datasets/{dataset_id}/documents/{document_id}"
+method: GET
+parameters:
+  - name: dataset_id
+    type: string
+    required: true
+---
+"""
+            path = self._write_md(tmpdir, "ragflow_download.md", md)
+
+            with pytest.raises(ValueError, match="document_id.*declared parameter"):
+                load_custom_tool(path)
 
     def test_permission_override(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -365,6 +505,7 @@ class TestCoerceParams:
                 ToolParameter(name="count", type="integer", description=""),
                 ToolParameter(name="rate", type="number", description=""),
                 ToolParameter(name="flag", type="boolean", description=""),
+                ToolParameter(name="payload", type="json", description=""),
             ]
 
         async def execute(self, **params):
@@ -423,6 +564,21 @@ class TestCoerceParams:
         tool = self.DummyTool(name="t", description="t")
         result = tool._coerce_params({"unknown_field": "123"})
         assert result["unknown_field"] == "123"
+
+    def test_json_object_conversion(self):
+        tool = self.DummyTool(name="t", description="t")
+        result = tool._coerce_params({"payload": '{"filters":{"warehouse":"east"}}'})
+        assert result["payload"] == {"filters": {"warehouse": "east"}}
+
+    def test_json_array_conversion(self):
+        tool = self.DummyTool(name="t", description="t")
+        result = tool._coerce_params({"payload": '["c750d2f6752411f191e693d1a844b0ba"]'})
+        assert result["payload"] == ["c750d2f6752411f191e693d1a844b0ba"]
+
+    def test_invalid_json_stays_string(self):
+        tool = self.DummyTool(name="t", description="t")
+        result = tool._coerce_params({"payload": "not json"})
+        assert result["payload"] == "not json"
 
 
 # ============================================================
@@ -508,6 +664,32 @@ class TestValidateParams:
         assert coerced["n"] == 42
         assert coerced["f"] is True
 
+    def test_invalid_json_rejected(self):
+        class JsonTool(BaseTool):
+            def get_parameters(self):
+                return [ToolParameter(name="payload", type="json", description="")]
+            async def execute(self, **params):
+                return ToolResult(success=True, data="ok")
+
+        tool = JsonTool(name="t", description="t")
+        coerced = tool._coerce_params({"payload": "not json"})
+        error = tool.validate_params(coerced)
+        assert error is not None
+        assert "JSON" in error
+
+    def test_json_scalar_rejected(self):
+        class JsonTool(BaseTool):
+            def get_parameters(self):
+                return [ToolParameter(name="payload", type="json", description="")]
+            async def execute(self, **params):
+                return ToolResult(success=True, data="ok")
+
+        tool = JsonTool(name="t", description="t")
+        coerced = tool._coerce_params({"payload": '"scalar"'})
+        error = tool.validate_params(coerced)
+        assert error is not None
+        assert "JSON" in error
+
 
 # ============================================================
 # HttpTool endpoint —— 运维配置面（刻意不做公网校验）+ metadata 脱敏
@@ -575,3 +757,314 @@ class TestHttpToolEndpoint:
         meta_str = str(result.metadata)
         assert "93.184.216.34" not in meta_str   # host(拓扑)不外泄
         assert "SUPERSECRET" not in meta_str      # query 密钥不外泄
+
+    async def test_json_param_is_sent_as_json_array_in_post_body(self, monkeypatch):
+        seen = {}
+
+        class _Client:
+            def __init__(self, *a, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def request(self, method, url, **kwargs):
+                seen.update(method=method, url=url, json=kwargs.get("json"))
+                return _FakeHttpxResponse()
+
+        monkeypatch.setattr("tools.custom.http_tool.httpx.AsyncClient", _Client)
+        tool = HttpTool(HttpToolConfig(
+            name="ragflow_retrieval",
+            description="RAGFlow retrieval",
+            permission="auto",
+            endpoint="http://10.0.0.1/api/v1/retrieval",
+            method="POST",
+            parameters=[
+                ToolParameter(name="question", type="string", description=""),
+                ToolParameter(name="dataset_ids", type="json", description=""),
+            ],
+        ))
+
+        result = await tool(
+            question="告诉我账户信息监测模型分类有哪些",
+            dataset_ids='["c750d2f6752411f191e693d1a844b0ba"]',
+        )
+
+        assert result.success is True
+        assert seen["method"] == "POST"
+        assert seen["json"] == {
+            "question": "告诉我账户信息监测模型分类有哪些",
+            "dataset_ids": ["c750d2f6752411f191e693d1a844b0ba"],
+        }
+
+    async def test_path_params_substitute_and_are_not_sent_as_query(self, monkeypatch):
+        seen = {}
+
+        class _Client:
+            def __init__(self, *a, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def request(self, method, url, **kwargs):
+                seen.update(method=method, url=url, params=kwargs.get("params"))
+                return _FakeHttpxResponse()
+
+        monkeypatch.setattr("tools.custom.http_tool.httpx.AsyncClient", _Client)
+        tool = HttpTool(HttpToolConfig(
+            name="ragflow_download",
+            description="RAGFlow download",
+            permission="auto",
+            endpoint="http://10.0.0.1/api/v1/datasets/{dataset_id}/documents/{document_id}",
+            method="GET",
+            parameters=[
+                ToolParameter(name="dataset_id", type="string", description=""),
+                ToolParameter(name="document_id", type="string", description=""),
+                ToolParameter(name="view", type="string", description="", required=False),
+            ],
+        ))
+
+        result = await tool(
+            dataset_id="c750",
+            document_id="doc/1?raw=true",
+            view="metadata",
+        )
+
+        assert result.success is True
+        assert seen["url"] == (
+            "http://10.0.0.1/api/v1/datasets/c750/documents/doc%2F1%3Fraw%3Dtrue"
+        )
+        assert seen["params"] == {"view": "metadata"}
+
+    def test_url_path_template_rejects_host_placeholder(self):
+        with pytest.raises(ValueError, match="only allowed in the path"):
+            validate_url_path_template(
+                "https://{host}/api/v1/documents/{document_id}",
+                [
+                    {"name": "host", "type": "string", "required": True},
+                    {"name": "document_id", "type": "string", "required": True},
+                ],
+            )
+
+    def test_url_path_template_rejects_json_param(self):
+        with pytest.raises(ValueError, match="cannot use json"):
+            validate_url_path_template(
+                "https://ragflow.example.com/api/v1/datasets/{dataset_ids}",
+                [{"name": "dataset_ids", "type": "json", "required": True}],
+            )
+
+    def test_url_path_template_rejects_optional_param_without_default(self):
+        with pytest.raises(ValueError, match="required or have a default"):
+            validate_url_path_template(
+                "https://ragflow.example.com/api/v1/datasets/{dataset_id}",
+                [{"name": "dataset_id", "type": "string", "required": False}],
+            )
+
+    def test_url_path_template_rejects_empty_default(self):
+        with pytest.raises(ValueError, match="non-empty scalar"):
+            validate_url_path_template(
+                "https://ragflow.example.com/api/v1/datasets/{dataset_id}",
+                [{"name": "dataset_id", "type": "string", "required": True, "default": ""}],
+            )
+
+    @staticmethod
+    def _client_returning(payload):
+        """返回一个固定吐 payload(JSON)的 httpx.AsyncClient 替身类。"""
+        class _Resp:
+            status_code = 200
+            headers = {"content-type": "application/json"}
+            text = "{}"
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return payload
+
+        class _Client:
+            def __init__(self, *a, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def request(self, method, url, **kwargs):
+                return _Resp()
+
+        return _Client
+
+    def _tool_extract(self, expr: str) -> HttpTool:
+        return HttpTool(HttpToolConfig(
+            name="probe", description="probe", permission="auto",
+            endpoint="http://10.0.0.1/x", method="GET",
+            parameters=[], response_extract=expr,
+        ))
+
+    async def test_response_extract_pulls_nested_field(self, monkeypatch):
+        # execute() 真正跑提取(测的是集成,不是 jmespath 库本身)
+        monkeypatch.setattr(
+            "tools.custom.http_tool.httpx.AsyncClient",
+            self._client_returning({"data": {"price": 189.5}}),
+        )
+        result = await self._tool_extract("data.price").execute()
+        assert result.success is True
+        assert result.data == "189.5"
+
+    async def test_response_extract_matched_nothing_is_explicit(self, monkeypatch):
+        # 合法表达式但匹配不到 → 显式 "matched nothing"(而非旧的静默空串)。
+        # 锁住本次改动的核心契约:回归(删分支 / is None 改 falsy)会被它抓住。
+        monkeypatch.setattr(
+            "tools.custom.http_tool.httpx.AsyncClient",
+            self._client_returning({"data": {}}),
+        )
+        result = await self._tool_extract("data.price").execute()
+        assert result.success is True
+        assert "matched nothing" in result.data
+
+    async def test_text_artifact_output_uses_extracted_content(self, monkeypatch):
+        monkeypatch.setattr(
+            "tools.custom.http_tool.httpx.AsyncClient",
+            self._client_returning({"data": {"csv": "city,temp\nParis,18"}}),
+        )
+        artifact_output = normalize_artifact_output_config(
+            {
+                "enabled": True,
+                "mode": "text",
+                "content_type": "text/csv",
+                "filename": "weather.csv",
+                "title": "Weather",
+            },
+            response_extract="data.csv",
+        )
+        tool = HttpTool(HttpToolConfig(
+            name="weather",
+            description="weather",
+            permission="auto",
+            endpoint="http://10.0.0.1/weather",
+            method="GET",
+            parameters=[],
+            response_extract="data.csv",
+            artifact_output=artifact_output,
+        ))
+
+        result = await tool.execute()
+
+        assert result.success is True
+        assert result.artifact is not None
+        assert result.artifact.content == "city,temp\nParis,18"
+        assert result.artifact.blob is None
+        assert result.artifact.content_type == "text/csv"
+        assert result.artifact.filename == "weather.csv"
+        assert result.artifact.title == "Weather"
+        assert result.metadata["status_code"] == 200
+
+    async def test_binary_artifact_output_uses_configured_content_type(self, monkeypatch):
+        class _Resp:
+            status_code = 200
+            headers = {"content-type": "text/plain"}
+            text = "not used"
+            content = b"%PDF-1.7"
+
+            def raise_for_status(self):
+                pass
+
+        class _Client:
+            def __init__(self, *a, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def request(self, method, url, **kwargs):
+                return _Resp()
+
+        monkeypatch.setattr("tools.custom.http_tool.httpx.AsyncClient", _Client)
+        artifact_output = normalize_artifact_output_config({
+            "enabled": True,
+            "mode": "binary",
+            "content_type": "application/pdf",
+            "filename": "report.pdf",
+        })
+        tool = HttpTool(HttpToolConfig(
+            name="report",
+            description="report",
+            permission="auto",
+            endpoint="http://10.0.0.1/report",
+            method="GET",
+            parameters=[],
+            artifact_output=artifact_output,
+        ))
+
+        result = await tool.execute()
+
+        assert result.success is True
+        assert result.artifact is not None
+        assert result.artifact.blob == b"%PDF-1.7"
+        assert result.artifact.content == ""
+        assert result.artifact.content_type == "application/pdf"
+        assert result.artifact.filename == "report.pdf"
+
+    async def test_binary_artifact_output_uses_response_headers_for_auto_fields(self, monkeypatch):
+        class _Resp:
+            status_code = 200
+            headers = {
+                "content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "content-disposition": 'attachment; filename="3.3 账户信息监测功能（含附录）.docx"',
+            }
+            text = "not used"
+            content = b"PK\x03\x04docx"
+
+            def raise_for_status(self):
+                pass
+
+        class _Client:
+            def __init__(self, *a, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def request(self, method, url, **kwargs):
+                return _Resp()
+
+        monkeypatch.setattr("tools.custom.http_tool.httpx.AsyncClient", _Client)
+        artifact_output = normalize_artifact_output_config({
+            "enabled": True,
+            "mode": "binary",
+        })
+        tool = HttpTool(HttpToolConfig(
+            name="ragflow_download",
+            description="RAGFlow download",
+            permission="auto",
+            endpoint="http://10.0.0.1/report",
+            method="GET",
+            parameters=[],
+            artifact_output=artifact_output,
+        ))
+
+        result = await tool.execute()
+
+        assert result.success is True
+        assert result.artifact is not None
+        assert result.artifact.blob == b"PK\x03\x04docx"
+        assert result.artifact.content_type == (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        assert result.artifact.filename == "3.3 账户信息监测功能（含附录）.docx"
+        assert result.artifact.title == "3.3 账户信息监测功能（含附录）"

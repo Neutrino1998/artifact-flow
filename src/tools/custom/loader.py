@@ -26,7 +26,7 @@ parameters:
     description: "市场"
     enum: [US, HK, SH]
     default: "US"
-response_extract: "$.data.price"
+response_extract: "data.price"
 timeout: 30
 ---
 
@@ -38,9 +38,12 @@ import os
 import yaml
 from typing import List, Optional
 
-from tools.base import BaseTool, ToolParameter
+from tools.artifact_output import normalize_artifact_output_config
+from tools.base import BaseTool
 from tools.custom.http_tool import HttpTool, HttpToolConfig
 from tools.custom.secrets import assert_secret_refs_allowed
+from tools.custom.url_template import validate_url_path_template
+from tools.param_specs import normalize_parameter_specs, parameter_specs_to_tool_parameters
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -84,29 +87,18 @@ def _build_http_tool(frontmatter: dict, body: str) -> HttpTool:
     """从 frontmatter + body 构建 HttpTool"""
 
     # 解析参数定义
-    _VALID_PARAM_TYPES = {"string", "integer", "number", "boolean"}
-
-    param_defs = []
-    for p in frontmatter.get("parameters", []):
-        param_type = p.get("type", "string")
-        if param_type not in _VALID_PARAM_TYPES:
-            raise ValueError(
-                f"Unsupported parameter type '{param_type}' for '{p['name']}'. "
-                f"Valid types: {sorted(_VALID_PARAM_TYPES)}"
-            )
-        param_defs.append(ToolParameter(
-            name=p["name"],
-            type=param_type,
-            description=p.get("description", ""),
-            required=p.get("required", True),
-            default=p.get("default"),
-            enum=p.get("enum"),
-        ))
+    param_specs = normalize_parameter_specs(frontmatter.get("parameters", []))
+    param_defs = parameter_specs_to_tool_parameters(param_specs)
 
     # SSRF-02 load-time 闸门：endpoint / headers 里的 {{VAR}} 必须用白名单前缀，
     # 否则整个工具拒绝加载（不把任意 env 变量暴露给自定义工具的注入面）。
     assert_secret_refs_allowed(frontmatter.get("endpoint", ""))
     assert_secret_refs_allowed(frontmatter.get("headers", {}))
+    validate_url_path_template(frontmatter.get("endpoint", ""), param_specs)
+    artifact_output = normalize_artifact_output_config(
+        frontmatter.get("artifact_output"),
+        response_extract=frontmatter.get("response_extract"),
+    )
 
     # description: frontmatter 的 description + body（body 作为扩展说明）
     description = frontmatter.get("description", "")
@@ -122,7 +114,8 @@ def _build_http_tool(frontmatter: dict, body: str) -> HttpTool:
         headers=frontmatter.get("headers", {}),
         parameters=param_defs,
         response_extract=frontmatter.get("response_extract"),
-        timeout=frontmatter.get("timeout", 30),
+        artifact_output=artifact_output,
+        timeout=frontmatter.get("timeout", 60),
     )
 
     return HttpTool(config)
@@ -150,7 +143,9 @@ def load_custom_tools(tools_dir: Optional[str] = None) -> List[BaseTool]:
 
     tools = []
     for filename in sorted(os.listdir(tools_dir)):
-        if not filename.endswith(".md") or filename.startswith("_"):
+        # `_` 前缀=操作者显式禁用(_example.md 约定);`.` 前缀=隐藏文件,永远不是
+        # 配置(macOS AppleDouble `._x.md` / 编辑器临时文件,同 agents loader)。
+        if not filename.endswith(".md") or filename.startswith(("_", ".")):
             continue
 
         md_path = os.path.join(tools_dir, filename)

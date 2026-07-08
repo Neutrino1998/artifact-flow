@@ -90,8 +90,9 @@ docker compose -f deploy/docker-compose.intranet.yml exec redis redis-cli DBSIZE
 
 # 这块 3A / 3B 都跑:
 docker compose -f deploy/docker-compose.intranet.yml exec backend \
-  ls /app/data /app/data/observability
-#   观测 jsonl 文件应在
+  ls /app/data /app/data/observability /app/data/observability/*/
+#   观测 jsonl 按实例分子目录(<instance_id>/metrics.jsonl 等);顶层可能只见
+#   子目录与迁移前的历史平铺文件
 
 # ── 6. 通过冒烟测试,真的没问题再删旧 volume ──
 #    跑 1-2 个真实对话,看历史能不能拉出来、新消息能不能落库

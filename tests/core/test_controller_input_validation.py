@@ -22,7 +22,7 @@ def _make_controller() -> ExecutionController:
         wait_for_interrupt=AsyncMock(return_value=None),
         drain_messages=AsyncMock(return_value=[]),
     )
-    return ExecutionController(agents={}, tools={}, hooks=hooks)
+    return ExecutionController(agents={}, tools={}, effective_toolsets={}, hooks=hooks)
 
 
 class TestStreamExecuteInputValidation:
@@ -39,4 +39,13 @@ class TestStreamExecuteInputValidation:
         ctrl = _make_controller()
         with pytest.raises(ValueError, match="non-empty"):
             async for _ in ctrl.stream_execute(user_input=blank):
+                pass
+
+    async def test_blank_input_with_unresolvable_skills_rejected(self):
+        """空文本 + activate_skills 但 skill 解析后为空(此 controller 无 effective_skillset →
+        visible 空 → 任何 slug 都被滤掉)→ 权威闸拒(#1)。顶层闸放行 raw activate_skills,
+        但 turn_has_content 按**解析后**的 bodies 收口 —— 无内容可注入 = 空轮,该拒。"""
+        ctrl = _make_controller()
+        with pytest.raises(ValueError, match="empty content"):
+            async for _ in ctrl.stream_execute(user_input="", activate_skills=["s"]):
                 pass

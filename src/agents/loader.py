@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from utils.logger import get_logger
+from utils.validators import is_config_entry
 
 logger = get_logger("ArtifactFlow")
 
@@ -21,8 +22,8 @@ class AgentConfig:
     """Agent 配置（从 MD 文件加载）"""
     name: str
     description: str
+    model: str  # 必填,无默认 — 缺失即 loud-fail(见 load_agent),不静默兜底到某个别名
     tools: dict[str, str] = field(default_factory=dict)  # {tool_name: permission_level}
-    model: str = "qwen3.6-plus-no-thinking"
     max_tool_rounds: int = 3
     internal: bool = False
     role_prompt: str = ""  # MD body（纯文本）
@@ -39,7 +40,7 @@ def load_agent(md_path: str) -> AgentConfig:
     tools:
       web_search: auto
       web_fetch: confirm
-    model: qwen3.6-plus
+    model: qwen3.7-plus
     max_tool_rounds: 100
     ---
 
@@ -65,11 +66,16 @@ def load_agent(md_path: str) -> AgentConfig:
 
     frontmatter = yaml.safe_load(frontmatter_str)
 
+    # model 必填:静默兜底到某个默认别名会让 agent 在用户没察觉时跑错模型
+    # (配置与体验不一致)。缺失即 loud-fail,让 operator 在加载期就发现。
+    if not frontmatter.get("model"):
+        raise ValueError(f"Agent MD missing required 'model' field: {md_path}")
+
     return AgentConfig(
         name=frontmatter["name"],
         description=frontmatter.get("description", ""),
+        model=frontmatter["model"],
         tools=frontmatter.get("tools", {}),
-        model=frontmatter.get("model", "qwen3.6-plus-no-thinking"),
         max_tool_rounds=frontmatter.get("max_tool_rounds", 3),
         internal=frontmatter.get("internal", False),
         role_prompt=body,
@@ -92,8 +98,12 @@ def load_all_agents(agents_dir: Optional[str] = None) -> dict[str, AgentConfig]:
         agents_dir = os.path.join(project_root, "config", "agents")
 
     agents = {}
+    errors = []
     for filename in sorted(os.listdir(agents_dir)):
-        if not filename.endswith(".md"):
+        # 隐藏文件(`.` 前缀)永远不是配置:macOS 传输垃圾(AppleDouble `._x.md`、
+        # .DS_Store)/编辑器临时文件混进目录时不应阻断启动(2026-06-12 内网部署
+        # `._lead_agent.md` 二进制解码失败拒启)。真实坏配置(非隐藏)仍 loud-fail。
+        if not filename.endswith(".md") or not is_config_entry(filename):
             continue
 
         md_path = os.path.join(agents_dir, filename)
@@ -102,6 +112,17 @@ def load_all_agents(agents_dir: Optional[str] = None) -> dict[str, AgentConfig]:
             agents[config.name] = config
             logger.info(f"Loaded agent: {config.name} from {filename}")
         except Exception as e:
+            # 静默丢弃坏 agent 也是一种 silent fallback:operator 把文件放进
+            # config/agents/ 就期望它加载,丢失要到 /meta 或执行路径才暴露(若丢的是
+            # lead_agent 更难定位)。聚合全部错误后启动期 loud-fail —— 一次看全所有坏
+            # 文件,而非逐个修。与 JWT_SECRET/DATABASE_URL 缺失即停一致。
             logger.error(f"Failed to load agent from {filename}: {e}")
+            errors.append(f"{filename}: {e}")
+
+    if errors:
+        raise ValueError(
+            "Failed to load agent config(s) — fix before startup:\n  "
+            + "\n  ".join(errors)
+        )
 
     return agents

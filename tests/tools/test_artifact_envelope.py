@@ -124,16 +124,22 @@ class TestRenderArtifactSlice:
         assert "&amp;" not in out
         assert "&quot;" not in out
 
-    def test_title_not_escaped(self):
-        """title 同样不转义（user_upload 文件名虽可能含 &，转义会与 body 不一致）。"""
-        title = "Q&A draft <v2>"
+    def test_title_escaped(self):
+        """title 转义 &/<(不参与匹配,可安全 escape):不可信文件名(web_fetch 解码
+        URL path / 上传用户文件名)含 `</title>` 不能错位 slice 结构。"""
+        # 恶意文件名:解码后含闭合标签 + 注入
+        title = "x</title><injected> Q&A.pdf"
         slice = ArtifactSlice(
-            id="x", version=1, content_type="text/plain", source="user_upload",
+            id="x", version=1, content_type="application/pdf", source="tool",
             title=title, body="b",
             total_chars=1, shown_chars=1,
         )
         out = render_artifact_slice(slice)
-        assert f"<title>{title}</title>" in out
+        # 元素内容只需转义 < 与 &(> 在内容里无结构意义,原样保留)
+        assert "<title>x&lt;/title>&lt;injected> Q&amp;A.pdf</title>" in out
+        # 注入的裸闭合/开标签不得出现(< 已被转义,无法错位 slice 结构)
+        assert "x</title>" not in out
+        assert "<injected>" not in out
 
     def test_empty_body(self):
         slice = ArtifactSlice(
@@ -179,6 +185,25 @@ class TestRenderArtifactSlice:
         assert 'hint="do read_artifact(id=&quot;weird&quot;) then continue"' in out
         # updated_at 同理
         assert 'updated_at="2024-&quot;01-01"' in out
+
+    def test_attribute_value_escapes_amp_and_lt(self):
+        """Layer B 防御:attribute 值中的 `&` / `<` 也必须转义,产出始终良构 XML。
+
+        content_type 等字段可能携带不可信来源(如远端 Content-Type 头),含 `&`/`<`
+        会让 envelope 非良构。`&` 必须先转义,避免把 `&quot;`/`&lt;` 自己再编码一次。
+        """
+        slice = ArtifactSlice(
+            id="x", version=1,
+            content_type="application/pdf&evil<x>",
+            source="tool",
+            title="t", body="b",
+            total_chars=1, shown_chars=1,
+        )
+        out = render_artifact_slice(slice)
+        assert 'type="application/pdf&amp;evil&lt;x>"' in out
+        # 裸 & / < 不应残留在 attribute 区(title/body 在元素体、按设计原文,不在此断言)
+        assert "pdf&evil" not in out
+        assert "&lt;x" in out
 
     def test_attribute_order_stable(self):
         """attribute 顺序固定（便于 prompt cache 稳定）。"""

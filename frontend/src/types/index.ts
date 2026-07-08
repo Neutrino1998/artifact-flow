@@ -36,11 +36,49 @@ export type DepartmentResponse = S['DepartmentResponse'];
 export type DepartmentListResponse = S['DepartmentListResponse'];
 export type DepartmentTreeNode = S['DepartmentTreeNode'];
 export type DepartmentTreeResponse = S['DepartmentTreeResponse'];
+export type DepartmentAccessDepartment = S['DepartmentAccessDepartment'];
+export type DepartmentAccessInheritedRule = S['DepartmentAccessInheritedRule'];
+export type DepartmentSkillAccessItem = S['DepartmentSkillAccessItem'];
+export type DepartmentUnitAccessItem = S['DepartmentUnitAccessItem'];
+export type DepartmentAccessResponse = S['DepartmentAccessResponse'];
 export type CreateDepartmentRequest = S['CreateDepartmentRequest'];
 export type UpdateDepartmentRequest = S['UpdateDepartmentRequest'];
 export type MoveDepartmentRequest = S['MoveDepartmentRequest'];
 export type ResolveDepartmentRequest = S['ResolveDepartmentRequest'];
 export type ResolveDepartmentResponse = S['ResolveDepartmentResponse'];
+
+// ============================================================
+// Tool Registry Types (Admin) — B-4 工具 unit 管理
+// ============================================================
+
+export type ToolParamSpec = S['ToolParamSpec'];
+export type ToolMemberSpec = S['ToolMemberSpec'];
+export type CreateToolUnitRequest = S['CreateToolUnitRequest'];
+export type UpdateToolUnitRequest = S['UpdateToolUnitRequest'];
+export type MountUnitRequest = S['MountUnitRequest'];
+export type SetCredentialRequest = S['SetCredentialRequest'];
+export type ToolMemberResponse = S['ToolMemberResponse'];
+export type MountedAgentResponse = S['MountedAgentResponse'];
+export type MountResponse = S['MountResponse'];
+export type CredentialStatusResponse = S['CredentialStatusResponse'];
+export type ToolUnitResponse = S['ToolUnitResponse'];
+export type ToolUnitListResponse = S['ToolUnitListResponse'];
+export type ToolUnitImportResponse = S['ToolUnitImportResponse'];
+export type ToolUnitTestResponse = S['ToolUnitTestResponse'];
+export type AgentSummaryResponse = S['AgentSummaryResponse'];
+export type AgentListResponse = S['AgentListResponse'];
+
+// ============================================================
+// Skill Types — 列举/toggle (C-3) + 导入/导出/删除 (E-2)
+// ============================================================
+
+export type SkillItem = S['SkillItem'];
+export type SkillListResponse = S['SkillListResponse'];
+export type SkillFindingItem = S['FindingItem'];
+export type SkillImportResponse = S['SkillImportResponse'];
+export type AdminSkillItem = S['AdminSkillItem'];
+export type AdminSkillListResponse = S['AdminSkillListResponse'];
+export type AdminSkillUpdateRequest = S['AdminSkillUpdateRequest'];
 
 // ============================================================
 // Chat Types
@@ -58,6 +96,11 @@ export type ChatRequest = {
   // Relaxes the empty-input requirement (backend injects a directive), so a
   // compact-only send with no text is allowed.
   force_compact?: boolean;
+  // Skill slugs the user activated for this turn (composer skill picker). Each
+  // visible skill's instructions are injected + its agent-disabled tools enabled;
+  // activation is sticky across the conversation. Relaxes the empty-input
+  // requirement, so an activation-only send with no text is allowed.
+  activate_skills?: string[];
 };
 export type ChatResponse = S['ChatResponse'];
 export type InjectResponse = S['InjectResponse'];
@@ -71,6 +114,7 @@ export type ConversationDetail = S['ConversationDetailResponse'];
 export type BulkDeleteRequest = S['BulkDeleteRequest'];
 export type BulkDeleteResponse = S['BulkDeleteResponse'];
 export type BulkDeleteFailedItem = S['BulkDeleteFailedItem'];
+export type StorageUsageResponse = S['StorageUsageResponse'];
 
 // ============================================================
 // Meta / client-config Types
@@ -79,6 +123,14 @@ export type BulkDeleteFailedItem = S['BulkDeleteFailedItem'];
 // Backend-owned runtime constants (GET /api/v1/meta). Single source of truth —
 // fetched once and cached so the frontend never hardcodes server values.
 export type ClientConfigResponse = S['ClientConfigResponse'];
+
+// ============================================================
+// Runtime Site Config Types (Admin)
+// ============================================================
+
+export type SiteNotification = S['SiteNotification'];
+export type SiteNotificationsResponse = S['SiteNotificationsResponse'];
+export type UpdateSiteNotificationsRequest = S['UpdateSiteNotificationsRequest'];
 
 // ============================================================
 // Artifact Types

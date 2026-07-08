@@ -17,15 +17,16 @@ class CallSubagentTool(BaseTool):
     工作原理：
     1. Lead Agent 通过 XML 格式调用此工具
     2. Engine 检测到后调用 execute() 验证参数（agent_name、instruction）
-    3. 验证通过 → Engine 设置 state["current_agent"] 路由到目标 SubAgent
+    3. 验证通过 → Engine 原地递归 await 子 agent 的循环（嵌套串行），
+       子 agent 最终回复包成 <subagent_result> 作为本调用的 tool_result
     4. 验证失败 → 当作普通 tool_call，返回错误让 Lead 修正
-    5. SubAgent 完成后，结果通过 state 回传给 Lead Agent
+    5. 同轮可与其他工具/多个 call_subagent 混排，按自然序串行执行
     """
 
     def __init__(self, valid_agents: Optional[List[str]] = None):
         super().__init__(
             name="call_subagent",
-            description="Call a specialized sub-agent to handle specific tasks. IMPORTANT: Do NOT combine this tool with other tool calls in the same response — use it alone.",
+            description="Call a specialized sub-agent to handle specific tasks.",
             permission=ToolPermission.AUTO
         )
         self._valid_agents = valid_agents
@@ -59,10 +60,11 @@ class CallSubagentTool(BaseTool):
 
     async def execute(self, **params) -> ToolResult:
         """
-        验证参数并返回路由信息。
+        纯参数验证，无副作用。
 
-        Engine 在检测到 call_subagent 时会调用此方法进行验证，
-        验证通过后 engine 设置 state["current_agent"] 进行路由。
+        Engine 在检测到 call_subagent 时先调用此方法验证；验证通过后由
+        _execute_tools 原地递归 await 目标 agent 的 _run_agent 循环，
+        返回值包成 <subagent_result> 作为本调用的 tool_result。
         """
         agent_name = params.get("agent_name")
         instruction = params.get("instruction", "").strip()

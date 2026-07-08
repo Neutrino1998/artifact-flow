@@ -11,6 +11,7 @@ from unittest.mock import patch, AsyncMock
 
 from core.engine import EngineHooks, create_initial_state, execute_loop
 from core.events import StreamEventType
+from tests.core._toolset import effective_for
 
 
 # ============================================================
@@ -25,7 +26,7 @@ class _FakeAgentConfig:
     description: str = "test"
     capabilities: list = field(default_factory=list)
     tools: dict = field(default_factory=dict)
-    model: str = "fake-model"
+    model: str = "openai/fake-model"
     max_tool_rounds: int = 3
     role_prompt: str = ""
 
@@ -78,6 +79,7 @@ async def _run_with_fake_llm(chunks: list[dict], agent_config=None):
             state=state,
             agents={"lead_agent": agent_config},
             tools={},
+            effective_toolsets=effective_for({"lead_agent": agent_config}, {}),
             hooks=_noop_hooks(),
             emit=capture_emit,
         )
@@ -100,8 +102,6 @@ class TestAgentNotFound:
             message_id="msg-1",
             path_events=[],
         )
-        # Override to a non-existent agent
-        state["current_agent"] = "nonexistent_agent"
 
         emitted: list = []
 
@@ -110,8 +110,9 @@ class TestAgentNotFound:
 
         result = await execute_loop(
             state=state,
-            agents={},  # no agents registered
+            agents={},  # no agents registered — even lead_agent is missing
             tools={},
+            effective_toolsets={},
             hooks=_noop_hooks(),
             emit=capture_emit,
         )
@@ -119,9 +120,9 @@ class TestAgentNotFound:
         # State must be marked as error, with the detail recorded for the
         # unified terminal authority (decide_terminal) to build the ERROR event.
         assert result["error"] is True
-        assert "nonexistent_agent" in result["response"]
-        assert "nonexistent_agent" in result["error_detail"]["error"]
-        assert result["error_detail"]["agent"] == "nonexistent_agent"
+        assert "lead_agent" in result["response"]
+        assert "lead_agent" in result["error_detail"]["error"]
+        assert result["error_detail"]["agent"] == "lead_agent"
 
         # Unified terminal emission: the engine records-not-emits. It must NOT
         # append an ERROR event to state nor push one via SSE — decide_terminal
@@ -150,7 +151,10 @@ class _FakeArtifactService:
     def set_session(self, session_id):
         pass
 
-    async def create_from_upload(self, session_id, filename, content, content_type, metadata=None):
+    async def create_from_upload(
+        self, session_id, filename, content, content_type, metadata=None,
+        blob=None,
+    ):
         idx = self.calls
         self.calls += 1
         if idx == self.fail_at:
@@ -193,6 +197,7 @@ class TestUploadStagingAbort:
             state=state,
             agents={"lead_agent": _FakeAgentConfig()},
             tools={},
+            effective_toolsets=effective_for({"lead_agent": _FakeAgentConfig()}, {}),
             hooks=_noop_hooks(),
             artifact_service=svc,
             emit=capture_emit,
@@ -206,11 +211,6 @@ class TestUploadStagingAbort:
         # persists nothing this turn (no _N collision on the user's retry).
         assert svc.discarded == [("sess-1", "a_md")]
         assert result["uploaded_artifacts"] == []
-
-        # uploads_rolled_back signals decide_terminal to mark the terminal's
-        # artifacts_flushed=False even though flush_all vacuously succeeds on the
-        # (now empty) WS — so the frontend keeps the composer attachments.
-        assert result["uploads_rolled_back"] is True
 
         # record-not-emit: the engine records the detail but does NOT emit/append
         # ERROR — decide_terminal (post-flush) is the single terminal producer.

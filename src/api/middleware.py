@@ -19,9 +19,12 @@ from uuid import uuid4
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from utils.instance import INSTANCE_ID
 from utils.logger import get_logger, set_request_id, reset_request_id
 
 logger = get_logger("ArtifactFlow")
+
+_INSTANCE_HEADER = INSTANCE_ID.encode("latin-1")
 
 
 class RequestContextMiddleware:
@@ -49,6 +52,8 @@ class RequestContextMiddleware:
                 response_started = True
                 headers = message.setdefault("headers", [])
                 headers.append((b"x-request-id", header_value))
+                # 多副本下「这个请求落在哪个实例」的最直接观察手段
+                headers.append((b"x-instance-id", _INSTANCE_HEADER))
             await send(message)
 
         try:
@@ -78,6 +83,7 @@ class RequestContextMiddleware:
                 (b"content-type", b"application/json"),
                 (b"content-length", str(len(body)).encode("latin-1")),
                 (b"x-request-id", request_id.encode("latin-1")),
+                (b"x-instance-id", _INSTANCE_HEADER),
             ],
         })
         await send({"type": "http.response.body", "body": body})

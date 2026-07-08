@@ -25,7 +25,7 @@ from core.events import ExecutionEvent, StreamEventType
 @dataclass
 class _FakeAgent:
     role_prompt: str = "You are a compactor."
-    model: str = "fake-model"
+    model: str = "openai/fake-model"
 
 
 def _make_state(events=None):
@@ -112,7 +112,7 @@ class TestAppendSemantics:
         assert "mocked summary text" in summary_ev.data["content"]
         assert summary_ev.data["success"] is True
         assert summary_ev.data["error"] is None
-        assert summary_ev.data["model"] == "fake-model"
+        assert summary_ev.data["model"] == "openai/fake-model"
         assert summary_ev.agent_name == "lead_agent"
         assert summary_ev.is_historical is False
 
@@ -217,6 +217,67 @@ class TestFailureLoud:
         sse_types = [call.args[0]["type"] for call in emit.call_args_list]
         assert StreamEventType.COMPACTION_START.value in sse_types
         assert StreamEventType.COMPACTION_SUMMARY.value in sse_types
+
+
+class TestCancelInterrupt:
+
+    async def test_cooperative_cancel_raises_after_pairing_placeholder(self):
+        """check_cancelled tripping mid-compact-call → CooperativeCancelled
+        propagates (engine routes it to CANCELLED), and the success=False
+        compaction_summary placeholder is appended so compaction_start stays
+        paired. Partial streamed content is discarded — no boundary from a
+        half-built summary."""
+        import asyncio
+        from core.cancellation import CooperativeCancelled
+
+        flag = {"v": False}
+
+        async def check():
+            return flag["v"]
+
+        async def hanging_stream(messages, model=None):
+            flag["v"] = True  # cancel arrives once the compact call is in flight
+            yield {"type": "content", "content": "partial summary"}
+            await asyncio.sleep(30)
+
+        agents = {"compact_agent": _FakeAgent()}
+        emit = AsyncMock()
+        runner = CompactionRunner(agents, emit=emit, check_cancelled=check)
+        state = _make_state([
+            _ev(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+            _ev(StreamEventType.LLM_COMPLETE.value, data={
+                "content": "reply", "token_usage": {"input_tokens": 100, "output_tokens": 20},
+            }),
+        ])
+
+        with patch("models.llm.astream_with_retry", hanging_stream), \
+             patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100), \
+             patch("core.compaction_runner.config.CANCEL_CHECK_INTERVAL", 0.01):
+            with pytest.raises(CooperativeCancelled):
+                await runner.maybe_trigger(state, "lead_agent", input_tokens=80, output_tokens=30)
+
+        # Paired placeholder, same shape as the LLM-failure path
+        types = [e.event_type for e in state["events"]]
+        assert types[-2] == StreamEventType.COMPACTION_START.value
+        assert types[-1] == StreamEventType.COMPACTION_SUMMARY.value
+        summary_ev = state["events"][-1]
+        assert summary_ev.data["success"] is False
+        assert summary_ev.data["content"] == ""
+
+    async def test_no_predicate_means_no_polling(self):
+        """check_cancelled=None (standalone usage) → compact call runs to
+        completion exactly as before this feature."""
+        agents = {"compact_agent": _FakeAgent()}
+        runner = CompactionRunner(agents, emit=None)  # no check_cancelled
+
+        state = _make_state([
+            _ev(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+        ])
+        with patch("models.llm.astream_with_retry", _fake_stream_ok), \
+             patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
+            await runner.maybe_trigger(state, "lead_agent", input_tokens=80, output_tokens=30)
+
+        assert state["events"][-1].data["success"] is True
 
 
 class TestMissingCompactAgent:

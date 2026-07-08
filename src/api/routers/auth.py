@@ -97,7 +97,11 @@ async def login(
     rate_limiter=Depends(get_login_rate_limiter),
 ):
     """用户登录，返回 JWT Token"""
-    user_key = f"user:{request.username}"
+    # 登录入口归一化:去首尾空白。合法用户名不含空格(注册 validate_username
+    # 拒空格、CSV 导入 strip),故 strip 只会帮本该成功的登录匹配上,永不会
+    # 误匹配到他人。同时让频控 key 归一,避免加空格绕过 per-username 计数。
+    username = request.username.strip()
+    user_key = f"user:{username}"
     ip_key = f"ip:{_client_ip(http_request)}"
 
     # 频控预检(ACC-01):任一 key 失败累计超阈 → 锁定窗口内一律 429,连正确
@@ -109,7 +113,7 @@ async def login(
             headers={"Retry-After": str(config.LOGIN_FAILURE_WINDOW_SEC)},
         )
 
-    user = await user_repo.get_by_username(request.username)
+    user = await user_repo.get_by_username(username)
     # 时序防枚举(ACC-05):用户不存在时也对固定假 hash 跑一次 bcrypt,让
     # 「用户不存在」与「密码错误」两条分支耗时恒定 —— 否则秒回 401 即暴露
     # 用户名不存在。bcrypt 是 CPU bound (~250ms),丢线程池避免卡 event loop
