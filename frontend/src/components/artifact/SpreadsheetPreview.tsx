@@ -195,7 +195,11 @@ export default function SpreadsheetPreview({
           role="tabpanel"
           aria-labelledby={tabId(idx)}
           hidden={idx !== activeIndex}
-          className="flex min-h-0 flex-1 flex-col bg-white dark:bg-surface-dark"
+          className={
+            idx === activeIndex
+              ? 'flex min-h-0 flex-1 flex-col bg-white dark:bg-surface-dark'
+              : 'hidden'
+          }
         >
           {idx === activeIndex && (
             <>
