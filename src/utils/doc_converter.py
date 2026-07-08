@@ -205,7 +205,7 @@ class DocConverter:
             # artifact(不可下载/不可 mount)。无扩展名(README/Makefile)同落
             # blob,契约一致;不验 magic,改后缀/损坏照收,模型 mount 进沙盒
             # 后自己诊断(见模块 docstring)。
-            mime = _BINARY_EXTENSION_MIME.get(ext) or _guess_blob_mime(filename)
+            mime = guess_blob_mime(filename)
             return _blob_result(file_bytes, filename, mime)
 
     async def _convert_image(self, file_bytes: bytes, filename: str) -> ConvertResult:
@@ -255,7 +255,7 @@ class DocConverter:
                 f"Upload '{filename}' exceeds text cap "
                 f"({len(file_bytes)} > {config.MAX_TEXT_CONVERT_BYTES}), storing as blob"
             )
-            return _blob_result(file_bytes, filename, _guess_blob_mime(filename))
+            return _blob_result(file_bytes, filename, guess_blob_mime(filename))
 
         def _decode() -> Optional[tuple]:
             """Sync decode + word count, run in a worker thread so the loop stays
@@ -292,9 +292,14 @@ class DocConverter:
         )
 
 
-def _guess_blob_mime(filename: str) -> str:
-    """未知二进制的 MIME:标准库按扩展名猜,猜不出 octet-stream。"""
-    return mimetypes.guess_type(filename)[0] or "application/octet-stream"
+def guess_blob_mime(filename: str) -> str:
+    """Blob MIME:显式富格式表优先,再用标准库猜,最后 octet-stream。"""
+    ext = os.path.splitext(filename)[1].lower()
+    return (
+        _BINARY_EXTENSION_MIME.get(ext)
+        or mimetypes.guess_type(filename)[0]
+        or "application/octet-stream"
+    )
 
 
 def _blob_result(file_bytes: bytes, filename: str, mime: str) -> ConvertResult:

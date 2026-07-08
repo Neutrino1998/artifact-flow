@@ -15,7 +15,6 @@ bash 留下的后台进程)能在工作区造任意 symlink,宿主侧跟链会�
 """
 
 import asyncio
-import mimetypes
 import os
 from typing import List, Optional, Tuple
 
@@ -29,7 +28,7 @@ from tools.builtin.sandbox_session import (
     SKILLS_SUBDIR,
     WORKSPACE_MOUNT,
 )
-from utils.doc_converter import EXTENSION_MIME_MAP
+from utils.doc_converter import EXTENSION_MIME_MAP, guess_blob_mime
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -335,7 +334,7 @@ class PersistFileTool(BaseTool):
             if text is not None:
                 ext = os.path.splitext(filename)[1].lower()
                 return text, EXTENSION_MIME_MAP.get(ext, "text/plain")
-        mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        mime = guess_blob_mime(filename)
         return None, mime
 
     async def execute(self, path: str, artifact_id: str = "") -> ToolResult:

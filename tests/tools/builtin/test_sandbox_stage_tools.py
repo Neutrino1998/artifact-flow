@@ -249,6 +249,20 @@ class TestPersistTool:
         assert call["source"] == "sandbox"
         assert result.metadata["has_blob"] is True
 
+    async def test_persist_docx_uses_explicit_mime(self, session, service):
+        """python:3.11-slim mimetypes does not know OOXML; persist must."""
+        await session.ensure_container()
+        payload = b"PK\x03\x04\xff\xfe" + b"\x00" * 16
+        _write_ws(session, "report.docx", payload)
+        result = await PersistFileTool(session, service)(path="report.docx")
+        assert result.success
+        call = service.create_calls[0]
+        assert call["blob"] == payload
+        assert call["content_type"] == (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        assert result.metadata["content_type"] == call["content_type"]
+
     async def test_persist_text_with_artifact_id_routes_to_replace(self, session, service):
         """artifact_id 命中既有件 → 走 replace_from_upload(覆盖回写),不产新件。"""
         await session.ensure_container()
