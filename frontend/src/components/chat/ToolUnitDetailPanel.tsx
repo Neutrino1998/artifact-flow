@@ -2,7 +2,6 @@
 
 import { useUIStore } from '@/stores/uiStore';
 import CreateToolUnitForm from '@/components/forms/CreateToolUnitForm';
-import ImportToolUnitForm from '@/components/forms/ImportToolUnitForm';
 import ToolUnitDetailForm from '@/components/forms/ToolUnitDetailForm';
 
 export default function ToolUnitDetailPanel() {
@@ -20,10 +19,6 @@ export default function ToolUnitDetailPanel() {
 
   if (view.type === 'create-unit') {
     return <CreateToolUnitForm />;
-  }
-
-  if (view.type === 'import-unit') {
-    return <ImportToolUnitForm />;
   }
 
   // empty

@@ -17,7 +17,6 @@ export type UserMgmtRightView =
 export type ToolUnitRightView =
   | { type: 'empty' }
   | { type: 'create-unit' }
-  | { type: 'import-unit' }
   | { type: 'edit-unit'; unitName: string; showMountReminder?: boolean };
 
 // 顶层互斥 UI 模式。这是「同一时刻最多一个接管面板」这个不变量的**唯一真相源**:
@@ -75,6 +74,7 @@ interface UIState {
   // 右面板详情/创建。listVersion 由挂载/凭证/CRUD 成功后 bump 触发列表刷新。
   toolUnitRightView: ToolUnitRightView;
   toolUnitListVersion: number;
+  toolUnitImportRequestId: number;
   // PR5a: 中间面板的选择模式 + 选中集；与 RightView 协调（进入选择模式
   // 自动切到 'bulk-action'，退出回 'empty'）
   selectionMode: boolean;
@@ -102,6 +102,7 @@ interface UIState {
   bumpUserMgmtListVersion: () => void;
   setToolUnitRightView: (view: ToolUnitRightView) => void;
   bumpToolUnitListVersion: () => void;
+  requestToolUnitImport: () => void;
   enterSelectionMode: () => void;
   exitSelectionMode: () => void;
   toggleUserSelection: (userId: string) => void;
@@ -136,7 +137,7 @@ interface UIState {
 type UIData = Omit<UIState,
   | 'toggleSidebar' | 'setSidebarCollapsed' | 'toggleArtifactPanel' | 'setArtifactPanelVisible'
   | 'setActiveMode' | 'setUserManagementRightView' | 'bumpUserMgmtListVersion'
-  | 'setToolUnitRightView' | 'bumpToolUnitListVersion' | 'enterSelectionMode' | 'exitSelectionMode'
+  | 'setToolUnitRightView' | 'bumpToolUnitListVersion' | 'requestToolUnitImport' | 'enterSelectionMode' | 'exitSelectionMode'
   | 'toggleUserSelection' | 'setUserManagementSelection' | 'clearUserSelection'
   | 'setObservabilitySelectedConvId' | 'setObservabilityBrowseVisible' | 'triggerObservabilityRefresh'
   | 'triggerInstancesRefresh' | 'setNotificationConfigStatus'
@@ -154,6 +155,7 @@ export const INITIAL_UI_STATE: UIData = {
   userMgmtListVersion: 0,
   toolUnitRightView: { type: 'empty' },
   toolUnitListVersion: 0,
+  toolUnitImportRequestId: 0,
   selectionMode: false,
   userManagementSelection: [],
   observabilitySelectedConvId: null,
@@ -215,6 +217,8 @@ export const useUIStore = create<UIState>((set) => ({
   setToolUnitRightView: (view) => set({ toolUnitRightView: view }),
   bumpToolUnitListVersion: () =>
     set((s) => ({ toolUnitListVersion: s.toolUnitListVersion + 1 })),
+  requestToolUnitImport: () =>
+    set((s) => ({ toolUnitImportRequestId: s.toolUnitImportRequestId + 1 })),
   enterSelectionMode: () => set({
     selectionMode: true,
     userManagementSelection: [],

@@ -159,6 +159,12 @@ describe('uiStore list versions', () => {
     expect(s.userMgmtListVersion).toBe(1);
     expect(s.toolUnitListVersion).toBe(2);
   });
+
+  test('requestToolUnitImport increments the import request signal', () => {
+    useUIStore.getState().requestToolUnitImport();
+    useUIStore.getState().requestToolUnitImport();
+    expect(useUIStore.getState().toolUnitImportRequestId).toBe(2);
+  });
 });
 
 describe('uiStore composer focus request', () => {
