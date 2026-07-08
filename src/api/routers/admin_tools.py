@@ -2,7 +2,9 @@
 Admin Tools Router —— external 工具注册表管理(admin-only)。挂 /api/v1/admin,故路径:
 - GET    /api/v1/admin/tools/units                              列出 unit(含成员/挂载/凭证状态)
 - POST   /api/v1/admin/tools/units                              新建 dynamic unit
+- POST   /api/v1/admin/tools/units/import                       上传 seed bundle 为 dynamic unit
 - GET    /api/v1/admin/tools/units/{name}                       单查
+- GET    /api/v1/admin/tools/units/{name}/export                下载 unit 的 seed bundle
 - PUT    /api/v1/admin/tools/units/{name}                       整体替换(仅 dynamic)
 - DELETE /api/v1/admin/tools/units/{name}                       删除(仅 dynamic)
 - GET    /api/v1/admin/tools/agents                             agent 列表(挂载 UI 用)
@@ -15,7 +17,8 @@ router 只做 transport:认证(require_admin)、解析、把 ToolRegistryError �
 业务规则(seeded 只读、撞名闸、序列化掩码、加密)全在 ToolRegistryManager。
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, File, HTTPException, Path, UploadFile
+from fastapi.responses import Response
 
 from api.dependencies import (
     get_db_manager,
@@ -30,6 +33,7 @@ from api.schemas.tools import (
     MountUnitRequest,
     SetCredentialRequest,
     ToolUnitListResponse,
+    ToolUnitImportResponse,
     ToolUnitResponse,
     ToolUnitTestResponse,
     UpdateToolUnitRequest,
@@ -73,6 +77,20 @@ async def create_unit(
         raise _map(e)
 
 
+@router.post("/tools/units/import", response_model=ToolUnitImportResponse, status_code=201)
+async def import_unit_seed(
+    file: UploadFile = File(...),
+    _admin: TokenPayload = Depends(require_admin),
+    mgr: ToolRegistryManager = Depends(get_tool_registry_manager),
+):
+    blob = await file.read()
+    try:
+        unit = await mgr.import_seed_bundle(blob, file.filename or "")
+    except ToolRegistryError as e:
+        raise _map(e)
+    return ToolUnitImportResponse(unit=ToolUnitResponse(**unit))
+
+
 @router.get("/tools/units/{name}", response_model=ToolUnitResponse)
 async def get_unit(
     name: str,
@@ -83,6 +101,23 @@ async def get_unit(
         return await mgr.get_unit(name)
     except ToolRegistryError as e:
         raise _map(e)
+
+
+@router.get("/tools/units/{name}/export")
+async def export_unit_seed(
+    name: str,
+    _admin: TokenPayload = Depends(require_admin),
+    mgr: ToolRegistryManager = Depends(get_tool_registry_manager),
+):
+    try:
+        blob, filename = await mgr.export_seed_bundle(name)
+    except ToolRegistryError as e:
+        raise _map(e)
+    return Response(
+        content=blob,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.put("/tools/units/{name}", response_model=ToolUnitResponse)

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as api from '@/lib/api';
+import { triggerBlobDownload } from '@/lib/download';
 import { useUIStore } from '@/stores/uiStore';
 import {
   BUTTON_DANGER_OUTLINE,
@@ -40,6 +41,7 @@ export default function ToolUnitDetailForm({
   const setRightView = useUIStore((s) => s.setToolUnitRightView);
   const bumpListVersion = useUIStore((s) => s.bumpToolUnitListVersion);
   const mountSectionRef = useRef<HTMLDivElement | null>(null);
+  const credentialSectionRef = useRef<HTMLDivElement | null>(null);
 
   const [unit, setUnit] = useState<ToolUnitResponse | null>(null);
   const [agents, setAgents] = useState<AgentSummaryResponse[]>([]);
@@ -51,7 +53,9 @@ export default function ToolUnitDetailForm({
   const [draft, setDraft] = useState<UnitDraft | null>(null);
 
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [mcpTestEpoch, setMcpTestEpoch] = useState(0);
   const [showMountReminder, setShowMountReminder] = useState(initialShowMountReminder);
@@ -82,6 +86,7 @@ export default function ToolUnitDetailForm({
   useEffect(() => {
     load();
     setSaveError(null);
+    setExportError(null);
     setConfirmDelete(false);
   }, [load]);
 
@@ -106,6 +111,7 @@ export default function ToolUnitDetailForm({
     isDynamic && baseline !== null && draft !== null &&
     JSON.stringify(baseline) !== JSON.stringify(draft);
   const kindLabel = unit?.kind === 'mcp' ? 'MCP server' : unit?.kind === 'tool' ? '单工具' : '工具集';
+  const hasUnconfiguredCredentials = (unit?.credentials ?? []).some((c) => !c.configured);
 
   const handleSave = async () => {
     if (!draft || !dirty || saving) return;
@@ -142,6 +148,20 @@ export default function ToolUnitDetailForm({
     setRightView({ type: 'empty' });
   };
 
+  const handleExport = async () => {
+    if (!unit || exporting) return;
+    setExportError(null);
+    setExporting(true);
+    try {
+      const blob = await api.downloadToolUnitSeedBundle(unit.name);
+      triggerBlobDownload(`${unit.name}-tool-seed.zip`, blob);
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : '导出失败');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const handleCredentialChanged = useCallback(async () => {
     await refreshLiveState();
     if (unit?.kind === 'mcp') {
@@ -153,10 +173,11 @@ export default function ToolUnitDetailForm({
     setShowMountReminder(false);
   };
 
-  const scrollToMountSection = () => {
+  const scrollToSetupSection = () => {
     setShowMountReminder(false);
     requestAnimationFrame(() => {
-      mountSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      const target = hasUnconfiguredCredentials ? credentialSectionRef : mountSectionRef;
+      target.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
     });
   };
 
@@ -213,8 +234,16 @@ export default function ToolUnitDetailForm({
         isDynamic ? (
           <>
             <button
+              onClick={handleExport}
+              disabled={saving || exporting}
+              title="导出 seed bundle"
+              className={`${BUTTON_SECONDARY} rounded-lg px-5 py-2`}
+            >
+              {exporting ? '导出中…' : '导出 seed'}
+            </button>
+            <button
               onClick={() => setConfirmDelete(true)}
-              disabled={saving}
+              disabled={saving || exporting}
               title="删除该动态 unit(连带其动态挂载与凭证)"
               className={`${BUTTON_DANGER_OUTLINE} rounded-lg px-5 py-2`}
             >
@@ -229,9 +258,19 @@ export default function ToolUnitDetailForm({
             </button>
           </>
         ) : (
-          <p className="flex-1 text-center text-sm text-text-secondary dark:text-text-secondary-dark">
-            种子 unit：定义只读。改 {unit.kind === 'mcp' ? 'config/mcp' : 'config/tools'} 后重跑 reconcile。挂载可在下方调整。
-          </p>
+          <>
+            <p className="flex-1 text-center text-sm text-text-secondary dark:text-text-secondary-dark">
+              种子 unit：定义只读。改 {unit.kind === 'mcp' ? 'config/mcp' : 'config/tools'} 后重跑 reconcile。挂载可在下方调整。
+            </p>
+            <button
+              onClick={handleExport}
+              disabled={exporting}
+              title="导出 seed bundle"
+              className={`${BUTTON_SECONDARY} rounded-lg px-5 py-2`}
+            >
+              {exporting ? '导出中…' : '导出 seed'}
+            </button>
+          </>
         )
       }
     >
@@ -246,6 +285,7 @@ export default function ToolUnitDetailForm({
         />
 
         {saveError && <div className="text-status-error text-sm">{saveError}</div>}
+        {exportError && <div className="text-status-error text-sm">{exportError}</div>}
 
         {unit.kind === 'mcp' && (
           <>
@@ -274,12 +314,14 @@ export default function ToolUnitDetailForm({
         <div className="border-t border-border dark:border-border-dark" />
 
         {/* 凭证 — 写-only;dynamic 可配,seeded 仅看状态(由 reconcile/env 提供) */}
-        <CredentialSection
-          unitName={unit.name}
-          credentials={unit.credentials}
-          isDynamic={isDynamic}
-          onChanged={handleCredentialChanged}
-        />
+        <div ref={credentialSectionRef}>
+          <CredentialSection
+            unitName={unit.name}
+            credentials={unit.credentials}
+            isDynamic={isDynamic}
+            onChanged={handleCredentialChanged}
+          />
+        </div>
       </div>
 
       {confirmDelete && (
@@ -297,11 +339,15 @@ export default function ToolUnitDetailForm({
       {showMountReminder && (
         <ConfirmModal
           title="工具已创建"
-          message="还需要挂载到 agent 后，模型才能在对话中使用这个工具。"
+          message={
+            hasUnconfiguredCredentials
+              ? '检测到该工具引用了凭证。请先配置凭证，再挂载到 agent 后使用。'
+              : '还需要挂载到 agent 后，模型才能在对话中使用这个工具。'
+          }
           cancelLabel="稍后"
-          confirmLabel="去挂载"
+          confirmLabel={hasUnconfiguredCredentials ? '去配置凭证' : '去挂载'}
           onCancel={closeMountReminder}
-          onConfirm={scrollToMountSection}
+          onConfirm={scrollToSetupSection}
         />
       )}
     </PanelShell>

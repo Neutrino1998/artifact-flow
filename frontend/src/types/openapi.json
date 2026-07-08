@@ -2032,6 +2032,52 @@
         ]
       }
     },
+    "/api/v1/admin/tools/units/import": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Import Unit Seed",
+        "operationId": "import_unit_seed_api_v1_admin_tools_units_import_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_unit_seed_api_v1_admin_tools_units_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolUnitImportResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/tools/units/{name}": {
       "get": {
         "tags": [
@@ -2158,6 +2204,51 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/tools/units/{name}/export": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Export Unit Seed",
+        "operationId": "export_unit_seed_api_v1_admin_tools_units__name__export_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -4547,6 +4638,20 @@
         ],
         "title": "Body_import_skill_api_v1_skills_import_post"
       },
+      "Body_import_unit_seed_api_v1_admin_tools_units_import_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_unit_seed_api_v1_admin_tools_units_import_post"
+      },
       "Body_send_message_api_v1_chat_post": {
         "properties": {
           "payload": {
@@ -6565,6 +6670,25 @@
           "enum"
         ],
         "title": "ToolParamSpec"
+      },
+      "ToolUnitImportResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "imported",
+            "title": "Status",
+            "default": "imported"
+          },
+          "unit": {
+            "$ref": "#/components/schemas/ToolUnitResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "unit"
+        ],
+        "title": "ToolUnitImportResponse"
       },
       "ToolUnitListResponse": {
         "properties": {

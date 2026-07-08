@@ -38,6 +38,7 @@ import type {
   ClientConfigResponse,
   ToolUnitListResponse,
   ToolUnitResponse,
+  ToolUnitImportResponse,
   ToolUnitTestResponse,
   CreateToolUnitRequest,
   UpdateToolUnitRequest,
@@ -948,6 +949,47 @@ export function deleteToolUnit(name: string) {
   return request<void>(`/api/v1/admin/tools/units/${encodeURIComponent(name)}`, {
     method: 'DELETE',
   });
+}
+
+/** 导入工具 seed bundle（zip 或单个 .md），落库为 dynamic unit。 */
+export async function importToolUnitSeed(file: File): Promise<ToolUnitImportResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${BASE_URL}/api/v1/admin/tools/units/import`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+  if (res.status === 401) {
+    useAuthStore.getState().logout();
+    throw new ApiError(401, 'Session expired');
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    const requestId = res.headers.get('X-Request-ID') ?? undefined;
+    let parsed: unknown = undefined;
+    try { parsed = JSON.parse(text); } catch { /* not JSON */ }
+    throw new ApiError(res.status, formatApiError(res.status, text, requestId), parsed, requestId);
+  }
+  return res.json() as Promise<ToolUnitImportResponse>;
+}
+
+/** 导出工具 unit 的 seed bundle；真实凭证不会出现在 bundle 中。 */
+export async function downloadToolUnitSeedBundle(name: string): Promise<Blob> {
+  const res = await fetch(
+    `${BASE_URL}/api/v1/admin/tools/units/${encodeURIComponent(name)}/export`,
+    { headers: authHeaders() },
+  );
+  if (res.status === 401) {
+    useAuthStore.getState().logout();
+    throw new ApiError(401, 'Session expired');
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    const requestId = res.headers.get('X-Request-ID') ?? undefined;
+    throw new ApiError(res.status, formatApiError(res.status, body, requestId), undefined, requestId);
+  }
+  return res.blob();
 }
 
 export function testToolUnit(name: string) {

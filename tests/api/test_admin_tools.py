@@ -4,6 +4,9 @@
 agent 挂载/卸载、凭证写-only(GET 永不回明文)。
 """
 
+import io
+import zipfile
+
 import pytest
 from cryptography.fernet import Fernet
 from httpx import AsyncClient
@@ -463,6 +466,138 @@ class TestSeededReadOnly:
     async def test_delete_seeded_409(self, admin_client: AsyncClient, db_session):
         await _seed_seeded_unit(db_session)
         assert (await admin_client.delete("/api/v1/admin/tools/units/legacy")).status_code == 409
+
+
+class TestSeedImportExport:
+    @pytest.fixture
+    def key(self, monkeypatch):
+        monkeypatch.setattr(config, "CREDENTIAL_KEY", Fernet.generate_key().decode())
+
+    async def test_export_dynamic_seed_bundle_masks_credentials(
+        self, admin_client: AsyncClient, key
+    ):
+        body = _singleton_body()
+        body["members"][0]["headers"] = {"Authorization": "Bearer {{TOOL_SECRET_K}}"}
+        await admin_client.post("/api/v1/admin/tools/units", json=body)
+        await admin_client.put(
+            "/api/v1/admin/tools/units/weather/credentials/TOOL_SECRET_K",
+            json={"value": "live-secret-value"},
+        )
+
+        resp = await admin_client.get("/api/v1/admin/tools/units/weather/export")
+
+        assert resp.status_code == 200, resp.text
+        assert resp.headers["content-type"] == "application/zip"
+        assert "weather-tool-seed.zip" in resp.headers["content-disposition"]
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+            names = zf.namelist()
+            payload = "\n".join(zf.read(name).decode("utf-8") for name in names)
+        assert names == ["tools/weather.md"]
+        assert "{{TOOL_SECRET_K}}" in payload
+        assert "live-secret-value" not in payload
+
+    async def test_import_exported_tool_seed_as_dynamic(
+        self, admin_client: AsyncClient
+    ):
+        body = _singleton_body(name="weather_seed")
+        body["members"][0]["parameters"] = [
+            {"name": "city", "type": "string", "required": True},
+            {"name": "payload", "type": "json", "default": {"k": "v"}},
+        ]
+        body["members"][0]["artifact_output"] = {
+            "enabled": True,
+            "mode": "text",
+            "content_type": "text/plain",
+            "filename": "weather.txt",
+        }
+        await admin_client.post("/api/v1/admin/tools/units", json=body)
+        exported = await admin_client.get("/api/v1/admin/tools/units/weather_seed/export")
+        await admin_client.delete("/api/v1/admin/tools/units/weather_seed")
+
+        resp = await admin_client.post(
+            "/api/v1/admin/tools/units/import",
+            files={"file": ("weather_seed.zip", exported.content, "application/zip")},
+        )
+
+        assert resp.status_code == 201, resp.text
+        unit = resp.json()["unit"]
+        assert unit["name"] == "weather_seed"
+        assert unit["source"] == "dynamic"
+        definition = unit["members"][0]["definition"]
+        assert definition["parameters"][1]["default"] == {"k": "v"}
+        assert definition["artifact_output"]["filename"] == "weather.txt"
+
+    async def test_import_single_mcp_markdown_seed(self, admin_client: AsyncClient):
+        md = b"""---
+name: reports_mcp
+description: Reports MCP
+type: mcp
+url: https://mcp.example.com/mcp
+headers:
+  Authorization: Bearer {{TOOL_SECRET_MCP_TOKEN}}
+default_permission: auto
+---
+"""
+
+        resp = await admin_client.post(
+            "/api/v1/admin/tools/units/import",
+            files={"file": ("reports_mcp.md", md, "text/markdown")},
+        )
+
+        assert resp.status_code == 201, resp.text
+        unit = resp.json()["unit"]
+        assert unit["kind"] == "mcp"
+        assert unit["source"] == "dynamic"
+        assert unit["provider_config"]["default_permission"] == "auto"
+        assert {c["placeholder"] for c in unit["credentials"]} == {
+            "TOOL_SECRET_MCP_TOKEN"
+        }
+
+    async def test_import_rejects_multiple_units(self, admin_client: AsyncClient):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(
+                "tools/a.md",
+                """---
+name: a
+type: http
+endpoint: https://api.example.com/a
+---
+""",
+            )
+            zf.writestr(
+                "tools/b.md",
+                """---
+name: b
+type: http
+endpoint: https://api.example.com/b
+---
+""",
+            )
+
+        resp = await admin_client.post(
+            "/api/v1/admin/tools/units/import",
+            files={"file": ("tools.zip", buf.getvalue(), "application/zip")},
+        )
+
+        assert resp.status_code == 400
+        assert "exactly one" in resp.json()["detail"]
+
+    async def test_import_collision_409(self, admin_client: AsyncClient):
+        await admin_client.post("/api/v1/admin/tools/units", json=_singleton_body())
+        md = b"""---
+name: weather
+type: http
+endpoint: https://api.example.com/weather
+---
+"""
+
+        resp = await admin_client.post(
+            "/api/v1/admin/tools/units/import",
+            files={"file": ("weather.md", md, "text/markdown")},
+        )
+
+        assert resp.status_code == 409
 
 
 # --------------------------------------------------------------------------

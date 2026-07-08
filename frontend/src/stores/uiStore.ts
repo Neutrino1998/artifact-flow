@@ -17,6 +17,7 @@ export type UserMgmtRightView =
 export type ToolUnitRightView =
   | { type: 'empty' }
   | { type: 'create-unit' }
+  | { type: 'import-unit' }
   | { type: 'edit-unit'; unitName: string; showMountReminder?: boolean };
 
 // 顶层互斥 UI 模式。这是「同一时刻最多一个接管面板」这个不变量的**唯一真相源**:

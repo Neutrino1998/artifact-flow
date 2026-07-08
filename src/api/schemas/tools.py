@@ -141,6 +141,11 @@ class ToolUnitTestResponse(BaseModel):
     tool_count: int = 0
 
 
+class ToolUnitImportResponse(BaseModel):
+    status: Literal["imported"] = "imported"
+    unit: ToolUnitResponse
+
+
 class AgentSummaryResponse(BaseModel):
     name: str
     description: str

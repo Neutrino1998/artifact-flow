@@ -842,6 +842,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/tools/units/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Unit Seed */
+        post: operations["import_unit_seed_api_v1_admin_tools_units_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/tools/units/{name}": {
         parameters: {
             query?: never;
@@ -856,6 +873,23 @@ export interface paths {
         post?: never;
         /** Delete Unit */
         delete: operations["delete_unit_api_v1_admin_tools_units__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/tools/units/{name}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export Unit Seed */
+        get: operations["export_unit_seed_api_v1_admin_tools_units__name__export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1832,6 +1866,14 @@ export interface components {
         };
         /** Body_import_skill_api_v1_skills_import_post */
         Body_import_skill_api_v1_skills_import_post: {
+            /**
+             * File
+             * Format: binary
+             */
+            file: string;
+        };
+        /** Body_import_unit_seed_api_v1_admin_tools_units_import_post */
+        Body_import_unit_seed_api_v1_admin_tools_units_import_post: {
             /**
              * File
              * Format: binary
@@ -2975,6 +3017,16 @@ export interface components {
             default: unknown | null;
             /** Enum */
             enum: unknown[] | null;
+        };
+        /** ToolUnitImportResponse */
+        ToolUnitImportResponse: {
+            /**
+             * Status
+             * @default imported
+             * @constant
+             */
+            status: "imported";
+            unit: components["schemas"]["ToolUnitResponse"];
         };
         /** ToolUnitListResponse */
         ToolUnitListResponse: {
@@ -4523,6 +4575,39 @@ export interface operations {
             };
         };
     };
+    import_unit_seed_api_v1_admin_tools_units_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_unit_seed_api_v1_admin_tools_units_import_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolUnitImportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_unit_api_v1_admin_tools_units__name__get: {
         parameters: {
             query?: never;
@@ -4606,6 +4691,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_unit_seed_api_v1_admin_tools_units__name__export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
             };
             /** @description Validation Error */
             422: {

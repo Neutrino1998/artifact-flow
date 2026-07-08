@@ -17,6 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import AgentUnit, ToolMember, ToolUnit
+from reconcile.seeds import SeedError
 from repositories.tool_credential_repo import ToolCredentialRepository
 from repositories.tool_registry_repo import ToolRegistryRepository
 from tools.artifact_output import normalize_artifact_output_config
@@ -24,6 +25,13 @@ from tools.base import is_builtin_name
 from tools.custom.credentials import get_cipher
 from tools.custom.credentials import CredentialResolver
 from tools.custom.http_tool import validate_response_extract
+from tools.custom.seed_bundle import (
+    ToolSeedBundleError,
+    export_unit_seed_bundle,
+    parse_uploaded_seed_bundle,
+    seed_bundle_filename,
+    seed_to_create_spec,
+)
 from tools.custom.mcp_client import McpListResult
 from tools.custom.secrets import assert_secret_refs_allowed, extract_placeholders, SecretResolutionError
 from tools.custom.url_template import validate_url_path_template
@@ -98,6 +106,15 @@ class ToolRegistryManager:
         cred_map = await self._creds.placeholder_map(name)
         return self._serialize_unit(u, mounts, cred_map)
 
+    async def export_seed_bundle(self, name: str) -> tuple[bytes, str]:
+        u = await self._require_unit(name)
+        try:
+            blob = export_unit_seed_bundle(u, u.members)
+        except ToolSeedBundleError as e:
+            logger.warning("Tool seed export rejected: unit=%s reason=%s", name, e)
+            raise InvalidUnitError(str(e)) from e
+        return blob, seed_bundle_filename(name)
+
     async def list_agents(self) -> List[dict]:
         # 只列可挂载目标 —— 内部 agent(compact_agent 等)不跑工具循环,挂载端点
         # 也会拒绝它们(mount 的 InternalAgentError),故根本不暴露给挂载 UI。
@@ -165,6 +182,18 @@ class ToolRegistryManager:
         self._registry.add_unit(unit, members)
         await self._commit("create unit")
         return await self.get_unit(name)
+
+    async def import_seed_bundle(self, blob: bytes, filename: str) -> dict:
+        try:
+            seed = parse_uploaded_seed_bundle(blob, filename)
+        except (ToolSeedBundleError, SeedError) as e:
+            logger.warning(
+                "Tool seed import rejected: filename=%s reason=%s",
+                filename,
+                e,
+            )
+            raise InvalidUnitError(str(e)) from e
+        return await self.create_unit(seed_to_create_spec(seed))
 
     async def update_unit(self, name: str, spec: dict) -> dict:
         u = await self._require_unit(name, for_update=True)

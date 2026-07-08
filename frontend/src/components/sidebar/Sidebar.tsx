@@ -190,6 +190,7 @@ export default function Sidebar() {
   const handleToggleSelection = () =>
     (selectionMode ? exitSelectionMode() : enterSelectionMode());
   const handleCreateUnit = () => setToolUnitRightView({ type: 'create-unit' });
+  const handleImportUnit = () => setToolUnitRightView({ type: 'import-unit' });
 
   const inObservability = activeMode === 'observability' && isAdmin;
   // While a master-detail mode owns the right panel (force-shown on desktop,
@@ -276,9 +277,14 @@ export default function Sidebar() {
 
             {/* Tool-unit management action */}
             {inToolUnitMgmt && (
-              <IconButton onClick={handleCreateUnit} label="新建工具 unit">
-                <PlusIcon />
-              </IconButton>
+              <>
+                <IconButton onClick={handleCreateUnit} label="新建工具 unit">
+                  <PlusIcon />
+                </IconButton>
+                <IconButton onClick={handleImportUnit} label="导入工具 seed">
+                  <BulkImportIcon />
+                </IconButton>
+              </>
             )}
 
             {/* Refresh — instances only */}
@@ -441,10 +447,16 @@ export default function Sidebar() {
 
             {/* Tool-unit management action — hoisted from ToolUnitManagementPanel */}
             {inToolUnitMgmt && (
-              <button onClick={handleCreateUnit} className={navRowClass}>
-                <PlusIcon />
-                新建工具 unit
-              </button>
+              <>
+                <button onClick={handleCreateUnit} className={navRowClass}>
+                  <PlusIcon />
+                  新建工具 unit
+                </button>
+                <button onClick={handleImportUnit} className={navRowClass}>
+                  <BulkImportIcon />
+                  导入 seed
+                </button>
+              </>
             )}
 
             {/* Refresh — instances only (mirrors observability's 刷新对话) */}
