@@ -6627,19 +6627,17 @@
             "title": "Notifications"
           },
           "expected_revision": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 128
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
             "title": "Expected Revision"
           }
         },
         "type": "object",
+        "required": [
+          "notifications",
+          "expected_revision"
+        ],
         "title": "UpdateSiteNotificationsRequest"
       },
       "UpdateToolUnitRequest": {

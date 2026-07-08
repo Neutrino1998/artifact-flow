@@ -1,9 +1,14 @@
+import asyncio
+from datetime import datetime
 import json
+import time
 
 import pytest
 from httpx import AsyncClient
 
 from config import config
+from api.schemas.site_config import SiteNotification
+from core.site_config_manager import SiteConfigConflictError, SiteConfigManager
 
 pytestmark = pytest.mark.asyncio
 
@@ -67,12 +72,126 @@ class TestSiteNotificationsCrud:
         assert resp.status_code == 409
         assert json.loads((tmp_path / "notifications.json").read_text()) == []
 
+    async def test_put_requires_revision_and_notifications(self, admin_client: AsyncClient, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "SITE_CONFIG_DIR", str(tmp_path))
+
+        assert (await admin_client.put("/api/v1/admin/site/notifications", json={})).status_code == 422
+        assert (
+            await admin_client.put(
+                "/api/v1/admin/site/notifications",
+                json={"notifications": []},
+            )
+        ).status_code == 422
+        assert (
+            await admin_client.put(
+                "/api/v1/admin/site/notifications",
+                json={"expected_revision": "missing"},
+            )
+        ).status_code == 422
+
+    async def test_blank_required_text_is_rejected_before_write(self, admin_client: AsyncClient, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "SITE_CONFIG_DIR", str(tmp_path))
+
+        resp = await admin_client.put(
+            "/api/v1/admin/site/notifications",
+            json={
+                "expected_revision": "missing",
+                "notifications": [
+                    {"id": "   ", "severity": "info", "title": "   ", "body": "   "}
+                ],
+            },
+        )
+
+        assert resp.status_code == 422
+        assert not (tmp_path / "notifications.json").exists()
+
+    async def test_naive_datetime_is_saved_with_server_timezone(
+        self,
+        admin_client: AsyncClient,
+        tmp_path,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(config, "SITE_CONFIG_DIR", str(tmp_path))
+
+        resp = await admin_client.put(
+            "/api/v1/admin/site/notifications",
+            json={
+                "expected_revision": "missing",
+                "notifications": [{
+                    "id": "n1",
+                    "severity": "info",
+                    "title": "T",
+                    "body": "B",
+                    "starts_at": "2026-05-15 00:00",
+                    "ends_at": "2026-05-20T04:00:00Z",
+                }],
+            },
+        )
+
+        assert resp.status_code == 200, resp.text
+        saved = resp.json()["notifications"][0]
+        assert saved["starts_at"] != "2026-05-15 00:00"
+        assert datetime.fromisoformat(saved["starts_at"]).tzinfo is not None
+        assert datetime.fromisoformat(saved["ends_at"]).tzinfo is not None
+        assert json.loads((tmp_path / "notifications.json").read_text())[0] == saved
+
+    async def test_mixed_datetime_window_error_is_422(
+        self,
+        admin_client: AsyncClient,
+        tmp_path,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(config, "SITE_CONFIG_DIR", str(tmp_path))
+
+        resp = await admin_client.put(
+            "/api/v1/admin/site/notifications",
+            json={
+                "expected_revision": "missing",
+                "notifications": [{
+                    "id": "n1",
+                    "severity": "info",
+                    "title": "T",
+                    "body": "B",
+                    "starts_at": "2026-05-20 00:00",
+                    "ends_at": "2026-05-19T00:00:00Z",
+                }],
+            },
+        )
+
+        assert resp.status_code == 422
+
+    async def test_concurrent_same_revision_allows_one_writer(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "SITE_CONFIG_DIR", str(tmp_path))
+        manager = SiteConfigManager(str(tmp_path))
+        original_write = SiteConfigManager._atomic_write
+
+        def slow_write(self, raw):
+            time.sleep(0.1)
+            return original_write(self, raw)
+
+        monkeypatch.setattr(SiteConfigManager, "_atomic_write", slow_write)
+        n1 = SiteNotification(id="n1", severity="info", title="A", body="A")
+        n2 = SiteNotification(id="n2", severity="warn", title="B", body="B")
+
+        results = await asyncio.gather(
+            manager.update_notifications([n1], expected_revision="missing"),
+            manager.update_notifications([n2], expected_revision="missing"),
+            return_exceptions=True,
+        )
+
+        assert sum(isinstance(r, SiteConfigConflictError) for r in results) == 1
+        successes = [r for r in results if not isinstance(r, Exception)]
+        assert len(successes) == 1
+        on_disk = json.loads((tmp_path / "notifications.json").read_text())
+        assert [n["id"] for n in on_disk] == [successes[0]["notifications"][0]["id"]]
+
     async def test_duplicate_ids_rejected(self, admin_client: AsyncClient, tmp_path, monkeypatch):
         monkeypatch.setattr(config, "SITE_CONFIG_DIR", str(tmp_path))
 
         resp = await admin_client.put(
             "/api/v1/admin/site/notifications",
             json={
+                "expected_revision": "missing",
                 "notifications": [
                     {"id": "same", "severity": "info", "title": "A", "body": "A"},
                     {"id": "same", "severity": "warn", "title": "B", "body": "B"},

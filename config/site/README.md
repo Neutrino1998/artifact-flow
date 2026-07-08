@@ -28,8 +28,8 @@
     "severity": "warn",                  // 必填。"info" | "warn" | "critical"，控制小色块颜色。
     "title": "系统维护通知",              // 必填。列表里显示的标题。
     "body": "## 维护时间\n...",          // 必填。modal 里渲染的 markdown 正文。
-    "starts_at": "2026-05-15T00:00:00Z", // 可选。ISO8601，早于此时间不展示。
-    "ends_at": "2026-05-20T04:00:00Z",   // 可选。ISO8601，晚于此时间不展示。
+    "starts_at": "2026-05-15T00:00:00+08:00", // 可选。ISO8601，早于此时间不展示。
+    "ends_at": "2026-05-20T04:00:00+08:00",   // 可选。ISO8601，晚于此时间不展示。
     "dismissible": true                  // 可选，默认 true。false = 强制展示直到 ends_at 过期。
   }
 ]
@@ -38,6 +38,7 @@
 - 多条同时生效时，左栏卡片显示**最高 severity 那条**的标题 + 一个"+N"角标。
 - `dismissible: true` 的条目，用户点 × 后 ID 进入 `localStorage["af.dismissed_notifications"]`，再不展示（除非 ID 变了）。
 - 管理员 UI 保存时会校验 JSON schema、通知 ID 唯一性和 revision；如果文件在页面加载后被别人改过，会拒绝覆盖并提示刷新。
+- 管理员 UI 可输入无时区的本地时间（如 `2026-05-15 00:00`）；后端按服务器本地时区解释并写回带 offset 的 ISO8601 字符串，避免浏览器按客户端时区误读。
 
 ## `welcome_tips.json` schema
 

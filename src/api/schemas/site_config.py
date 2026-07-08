@@ -14,8 +14,18 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def _parse_iso_datetime(value: str) -> datetime:
-    """Accept ISO8601 strings including the common trailing-Z UTC form."""
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    """Accept ISO8601 strings including trailing-Z and local naive forms."""
+    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if dt.tzinfo is None or dt.utcoffset() is None:
+        local_tz = datetime.now().astimezone().tzinfo
+        if local_tz is None:
+            raise ValueError("server local timezone is unavailable")
+        dt = dt.replace(tzinfo=local_tz)
+    return dt
+
+
+def _normalize_iso_datetime(value: str) -> str:
+    return _parse_iso_datetime(value).isoformat(timespec="seconds")
 
 
 class SiteNotification(BaseModel):
@@ -27,12 +37,12 @@ class SiteNotification(BaseModel):
     ends_at: Optional[str] = Field(default=None, max_length=64)
     dismissible: bool = True
 
-    @field_validator("id", "title", "body", "starts_at", "ends_at")
+    @field_validator("id", "title", "body", "starts_at", "ends_at", mode="before")
     @classmethod
-    def strip_text(cls, value: Optional[str]) -> Optional[str]:
-        if value is None:
-            return None
-        return value.strip()
+    def strip_text(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip()
+        return value
 
     @field_validator("starts_at", "ends_at")
     @classmethod
@@ -40,10 +50,12 @@ class SiteNotification(BaseModel):
         if value is None or value == "":
             return None
         try:
-            _parse_iso_datetime(value)
+            return _normalize_iso_datetime(value)
         except ValueError as e:
-            raise ValueError("must be an ISO8601 datetime") from e
-        return value
+            raise ValueError(
+                "must be an ISO8601 datetime; timezone is optional and defaults "
+                "to the server local timezone"
+            ) from e
 
     @model_validator(mode="after")
     def validate_time_window(self) -> "SiteNotification":
@@ -59,8 +71,8 @@ class SiteNotificationsResponse(BaseModel):
 
 
 class UpdateSiteNotificationsRequest(BaseModel):
-    notifications: List[SiteNotification] = Field(default_factory=list, max_length=50)
-    expected_revision: Optional[str] = Field(default=None, max_length=128)
+    notifications: List[SiteNotification] = Field(..., max_length=50)
+    expected_revision: str = Field(..., min_length=1, max_length=128)
 
     @model_validator(mode="after")
     def validate_unique_ids(self) -> "UpdateSiteNotificationsRequest":

@@ -8,6 +8,8 @@ table for low-frequency site notices.
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
+import fcntl
 import hashlib
 import json
 import os
@@ -47,6 +49,10 @@ class SiteConfigManager:
     def notifications_path(self) -> Path:
         return self._site_dir / "notifications.json"
 
+    @property
+    def _notifications_lock_path(self) -> Path:
+        return self._site_dir / ".notifications.lock"
+
     async def get_notifications(self) -> dict:
         return await asyncio.to_thread(self._get_notifications_sync)
 
@@ -54,7 +60,7 @@ class SiteConfigManager:
         self,
         notifications: Iterable[SiteNotification],
         *,
-        expected_revision: str | None,
+        expected_revision: str,
     ) -> dict:
         return await asyncio.to_thread(
             self._update_notifications_sync,
@@ -91,22 +97,36 @@ class SiteConfigManager:
     def _update_notifications_sync(
         self,
         notifications: list[SiteNotification],
-        expected_revision: str | None,
+        expected_revision: str,
     ) -> dict:
-        current_revision = self._read_revision_only()
-        if expected_revision is not None and expected_revision != current_revision:
-            raise SiteConfigConflictError(
-                "notifications.json changed since it was loaded; refresh and retry"
-            )
+        with self._notifications_lock():
+            current_revision = self._read_revision_only()
+            if expected_revision != current_revision:
+                raise SiteConfigConflictError(
+                    "notifications.json changed since it was loaded; refresh and retry"
+                )
 
-        payload = [
-            n.model_dump(exclude_none=True)
-            for n in notifications
-        ]
-        raw = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
-        revision = self._hash(raw)
-        self._atomic_write(raw)
-        return {"notifications": payload, "revision": revision}
+            payload = [
+                n.model_dump(exclude_none=True)
+                for n in notifications
+            ]
+            raw = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            revision = self._hash(raw)
+            self._atomic_write(raw)
+            return {"notifications": payload, "revision": revision}
+
+    @contextmanager
+    def _notifications_lock(self):
+        self._site_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            with self._notifications_lock_path.open("a+b") as lock:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+        except OSError as e:
+            raise SiteConfigWriteError(f"failed to lock notifications.json: {e}") from e
 
     def _read_raw(self) -> tuple[bytes | None, str]:
         path = self.notifications_path

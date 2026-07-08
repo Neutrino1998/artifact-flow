@@ -122,9 +122,6 @@ function validateItems(items: SiteNotification[]): string | null {
     const endsMs = ends ? Date.parse(ends) : undefined;
     if (starts && Number.isNaN(startsMs)) return `${n.id} 的开始时间格式无效`;
     if (ends && Number.isNaN(endsMs)) return `${n.id} 的结束时间格式无效`;
-    if (startsMs !== undefined && endsMs !== undefined && startsMs > endsMs) {
-      return `${n.id} 的开始时间晚于结束时间`;
-    }
   }
   return null;
 }
@@ -217,6 +214,11 @@ export default function NotificationConfigPanel() {
     const validationError = validateItems(normalized);
     if (validationError) {
       setError(validationError);
+      setMessage(null);
+      return;
+    }
+    if (revision === null) {
+      setError('请先刷新通知配置后再保存');
       setMessage(null);
       return;
     }
@@ -420,7 +422,7 @@ export default function NotificationConfigPanel() {
                           type="text"
                           value={selected.starts_at ?? ''}
                           onChange={(e) => updateSelected({ starts_at: e.target.value })}
-                          placeholder="2026-05-15T00:00:00Z"
+                          placeholder="2026-05-15 00:00"
                           className="rounded-lg border border-border dark:border-border-dark bg-bg dark:bg-bg-dark px-3 py-2 text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none focus:border-accent"
                         />
                       </label>
@@ -431,7 +433,7 @@ export default function NotificationConfigPanel() {
                           type="text"
                           value={selected.ends_at ?? ''}
                           onChange={(e) => updateSelected({ ends_at: e.target.value })}
-                          placeholder="2026-05-20T04:00:00Z"
+                          placeholder="2026-05-20 04:00"
                           className="rounded-lg border border-border dark:border-border-dark bg-bg dark:bg-bg-dark px-3 py-2 text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none focus:border-accent"
                         />
                       </label>

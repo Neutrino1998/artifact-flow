@@ -2999,9 +2999,9 @@ export interface components {
         /** UpdateSiteNotificationsRequest */
         UpdateSiteNotificationsRequest: {
             /** Notifications */
-            notifications?: components["schemas"]["SiteNotification"][];
+            notifications: components["schemas"]["SiteNotification"][];
             /** Expected Revision */
-            expected_revision?: string | null;
+            expected_revision: string;
         };
         /**
          * UpdateToolUnitRequest
