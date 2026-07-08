@@ -250,7 +250,7 @@ vi deploy/fleet.conf
 # 5. 启动（fleet 会校验 bundle、解 config/deploy、load 镜像、跑 release gate、等待健康）
 AF_BUNDLE_VERSION=1.0.0 deploy/scripts/fleet.sh deploy .
 # 启用沙盒时，先以 root 准备 runsc / sandbox 镜像 / scratch 根，再 deploy：
-# sudo env AF_BUNDLE_VERSION=1.0.0 AF_SANDBOX_POOL_SIZE=8G deploy/scripts/fleet.sh prepare-sandbox .
+# sudo env AF_BUNDLE_VERSION=1.0.0 AF_SANDBOX_POOL_SIZE=80G deploy/scripts/fleet.sh prepare-sandbox .
 # AF_ENABLE_SANDBOX=1 AF_BUNDLE_VERSION=1.0.0 deploy/scripts/fleet.sh deploy .
 
 # 6. 创建管理员
@@ -311,7 +311,8 @@ cd /opt/artifactflow
 tar xzf tmp/artifactflow-deploy-1.0.1.tar.gz
 
 # 如本次 bundle 带 sandbox 且要刷新 sandbox 前置，先以 root 执行：
-# sudo env AF_BUNDLE_VERSION=1.0.1 AF_SANDBOX_POOL_SIZE=8G ./deploy/scripts/fleet.sh prepare-sandbox tmp
+# 8G 是 starter；32 路沙盒按默认 2G workspace 估算应准备 80G 级别池子。
+# sudo env AF_BUNDLE_VERSION=1.0.1 AF_SANDBOX_POOL_SIZE=80G ./deploy/scripts/fleet.sh prepare-sandbox tmp
 
 # 2. 进维护窗口（可选；fleet deploy 本身是直接 up）
 ./deploy/scripts/maintenance.sh on "升级到 v1.0.1"
@@ -412,10 +413,11 @@ runsc、写 `/etc/fstab` 并挂载 scratch loop，所以需要 root；排障时�
 `ARTIFACTFLOW_SANDBOX_RUNTIME` 写入 `deploy/.env`）：
 
 ```bash
-# 默认 scratch pool 为 8G；可按并发 × ARTIFACTFLOW_SANDBOX_WORKSPACE_QUOTA_MB 调大。
-sudo env AF_SANDBOX_POOL_SIZE=8G deploy/scripts/fleet.sh prepare-sandbox .
+# 默认 scratch pool 为 8G starter；可按并发 × ARTIFACTFLOW_SANDBOX_WORKSPACE_QUOTA_MB 调大。
+# 例：32 路都可能跑沙盒且 workspace quota 默认 2G 时，用 80G 级别池子更稳。
+sudo env AF_SANDBOX_POOL_SIZE=80G deploy/scripts/fleet.sh prepare-sandbox .
 # 或直接：
-# sudo env AF_SANDBOX_POOL_SIZE=8G deploy/scripts/prepare-host.sh sandbox
+# sudo env AF_SANDBOX_POOL_SIZE=80G deploy/scripts/prepare-host.sh sandbox
 ```
 
 它等价于以下手工步骤，保留在这里便于排障：
@@ -428,7 +430,7 @@ sudo env AF_SANDBOX_POOL_SIZE=8G deploy/scripts/fleet.sh prepare-sandbox .
    POOL=/var/lib/artifactflow/sandbox-pool.img
    ROOT=/var/lib/artifactflow/sandbox-scratch
    sudo mkdir -p "$(dirname "$POOL")" "$ROOT"
-   sudo fallocate -l 20G "$POOL"          # 容量 ≈ 并发 turn 数 × SANDBOX_WORKSPACE_QUOTA_MB(默认2G) + 余量
+   sudo fallocate -l 80G "$POOL"          # 容量 ≈ 并发 turn 数 × SANDBOX_WORKSPACE_QUOTA_MB(默认2G) + 余量
    sudo mkfs.ext4 -m 0 "$POOL"
    echo "$POOL $ROOT ext4 loop,nosuid,nodev 0 0" | sudo tee -a /etc/fstab
    sudo mount "$ROOT" && df -h "$ROOT"    # 期望:定容 ext4 挂载成功
@@ -452,7 +454,7 @@ AF_VERSION=1.0.0 docker compose -f deploy/docker-compose.intranet.yml \
                               --profile infra up -d
 
 # 使用 fleet 单机入口:
-sudo env AF_SANDBOX_POOL_SIZE=8G deploy/scripts/fleet.sh prepare-sandbox .
+sudo env AF_SANDBOX_POOL_SIZE=80G deploy/scripts/fleet.sh prepare-sandbox .
 AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy .
 # 如需 deploy 前单独检查，先准备再 preflight：
 # AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh preflight
@@ -490,8 +492,8 @@ AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy .
 |------|--------|------|
 | `ARTIFACTFLOW_DATABASE_URL` | — (**必填**) | 连接串，如 `sqlite+aiosqlite:///data/artifactflow.db` 或 `postgresql+asyncpg://...` |
 | `ARTIFACTFLOW_DATABASE_URLS` | `""` | 逗号分隔多地址列表，启用 primary-first failover（按顺序尝试，首个可连即用）；非空时优先于 `DATABASE_URL`，所有地址必须同一 driver（MySQL 或 PostgreSQL） |
-| `ARTIFACTFLOW_DATABASE_POOL_SIZE` | `5` | 连接池大小 |
-| `ARTIFACTFLOW_DATABASE_MAX_OVERFLOW` | `10` | 连接池溢出上限 |
+| `ARTIFACTFLOW_DATABASE_POOL_SIZE` | `10` | 连接池大小 |
+| `ARTIFACTFLOW_DATABASE_MAX_OVERFLOW` | `20` | 连接池溢出上限 |
 | `ARTIFACTFLOW_DATABASE_POOL_TIMEOUT` | `30` | 获取连接超时（秒） |
 | `ARTIFACTFLOW_DATABASE_POOL_RECYCLE` | `300` | 连接回收周期（秒） |
 
@@ -502,7 +504,7 @@ AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy .
 | `ARTIFACTFLOW_REDIS_URL` | `""` | 空 = InMemory 回退；非空 = Redis 模式 |
 | `ARTIFACTFLOW_REDIS_CLUSTER` | `false` | Redis Cluster 模式 |
 | `ARTIFACTFLOW_REDIS_KEY_PREFIX` | `""` | Key 命名空间前缀（启用 Redis 时**必填**） |
-| `ARTIFACTFLOW_REDIS_MAX_CONNECTIONS` | `50` | 连接池上限 |
+| `ARTIFACTFLOW_REDIS_MAX_CONNECTIONS` | `64` | 连接池上限 |
 | `ARTIFACTFLOW_LEASE_TTL` | `90` | 对话租约 TTL（秒），心跳每 TTL/3 续租 |
 
 ### SSE 与执行超时
@@ -539,8 +541,8 @@ AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy .
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `ARTIFACTFLOW_MAX_CONCURRENT_TASKS` | `10` | 最大并发引擎执行数 |
-| `ARTIFACTFLOW_MAX_UPLOAD_SIZE` | `104857600` | 单文件上传大小限制（字节，默认 100MB）；批量总字节由代理层独立封顶（200MB）。注：文本转换另有更低的独立闸 20MB——超闸**不 422、落为二进制 blob artifact**（可下载、可 mount 进沙盒处理） |
+| `ARTIFACTFLOW_MAX_CONCURRENT_TASKS` | `32` | 最大并发引擎执行数 |
+| `ARTIFACTFLOW_MAX_UPLOAD_SIZE` | `209715200` | 单文件上传大小限制（字节，默认 200MB）；批量总字节由代理层独立封顶（约 200MiB 内容 + multipart 开销）。注：文本转换另有更低的独立闸 20MB——超闸**不 422、落为二进制 blob artifact**（可下载、可 mount 进沙盒处理） |
 | `ARTIFACTFLOW_DEFAULT_PAGE_SIZE` | `20` | 分页默认每页条数 |
 | `ARTIFACTFLOW_MAX_PAGE_SIZE` | `100` | 分页最大每页条数 |
 
@@ -579,14 +581,14 @@ AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy .
 
 ## 容量规划
 
-`src/config.py` 的代码默认值（`MAX_CONCURRENT_TASKS=10`、`DATABASE_POOL_SIZE=5+10`、`REDIS_MAX_CONNECTIONS=50`）在没有特定模型 API 并发预算时是安全起点，但**对于 Mode 2/3 的实际生产部署偏保守** —— 单 backend 只允许 10 个引擎并发，模型 API 配额（如 64 路并行）会被严重浪费。
+`src/config.py` 的代码默认值已按单 backend 32 路执行做了一组稳妥起点：`MAX_CONCURRENT_TASKS=32`、`DATABASE_POOL_SIZE=10`、`DATABASE_MAX_OVERFLOW=20`、`REDIS_MAX_CONNECTIONS=64`。这能吃满中等模型 API 配额，同时不会像 64 路默认那样把小型 DB / 内网宿主的资源承诺拉得过猛。
 
-`deploy/.env.intranet.example` 和 `deploy/.env.prod.example` 已按 64 路模型并发预设了一组推荐值，下面是这组值的依据，便于按你自己的模型 API 配额线性缩放。
+`deploy/.env.intranet.example` 和 `deploy/.env.prod.example` 也显式写入这组 32 路默认，下面是这组值的依据，便于按你自己的模型 API 配额线性缩放。
 
 ### 三个互相绑定的旋钮
 
 ```
-模型 API 并发预算 (例 64)
+模型 API 并发预算 (默认 32)
         │
         ▼
 ARTIFACTFLOW_MAX_CONCURRENT_TASKS  ← 单 backend 引擎执行 Semaphore (src/api/services/execution_runner.py)
@@ -599,7 +601,7 @@ ARTIFACTFLOW_MAX_CONCURRENT_TASKS  ← 单 backend 引擎执行 Semaphore (src/a
               建议 ≈ 2× MAX_CONCURRENT_TASKS（runtime store + stream consumer + pub/sub）
 ```
 
-如果模型 API 并发不是 64，把以上三个值按比例缩放即可。
+如果模型 API 并发不是 32，把以上三个值按比例缩放即可；例如 64 路可用 `MAX_CONCURRENT_TASKS=64`、`REDIS_MAX_CONNECTIONS=128`，并在 DB 容量允许时把池上限抬到 60 左右。
 
 ### Mode A vs Mode B：DB 池的安全边界
 
@@ -607,8 +609,8 @@ ARTIFACTFLOW_MAX_CONCURRENT_TASKS  ← 单 backend 引擎执行 Semaphore (src/a
 
 | 部署形态 | DB 来源 | `max_connections` 上限 | DB 池处理 |
 |---|---|---|---|
-| Mode 2A / 3A（`--profile infra`） | 捆绑的 `postgres` 容器 | `200`（compose `command:` 显式设置） | **取消注释开启 20+40** —— 60 连接安全 |
-| Mode 2B（云托管 DB） | 外部 RDS / Aurora 等 | 由托管层级决定（小规格 ~85–150） | **保持注释或缩小** —— 否则单 backend 60 连接易打满 |
+| Mode 2A / 3A（`--profile infra`） | 捆绑的 `postgres` 容器 | `200`（compose `command:` 显式设置） | 默认 10+20；64 路时可提高到 20+40 |
+| Mode 2B（云托管 DB） | 外部 RDS / Aurora 等 | 由托管层级决定（小规格 ~85–150） | 按单 backend 池上限 × backend 副本数核算 |
 | Mode 3B（内部企业 DB，无 `--profile infra`） | 公司内部 DB | 由 DBA 配置 | 同上 —— 由内部 DB 容量决定 |
 
 详见 [`deploy/docker-compose.intranet.yml`](https://github.com/Neutrino1998/artifact-flow/blob/main/deploy/docker-compose.intranet.yml) 和 [`docker-compose.prod.yml`](https://github.com/Neutrino1998/artifact-flow/blob/main/docker-compose.prod.yml) 中 `postgres` 服务的 `command: postgres -c max_connections=200 -c shared_buffers=256MB`，**这条 patch 仅在 `--profile infra` 启动时生效**。
@@ -621,10 +623,10 @@ Mode A 的 compose 把 Redis `--maxmemory` 从默认 `256mb` 提到 **`512mb`**�
 
 | 并发 | 典型峰值 | 重负载峰值 |
 |---|---|---|
-| 10（代码默认） | 5–10 MB | ~10 MB |
-| 64（推荐） | 30–60 MB | ~130 MB |
+| 32（代码默认） | 15–30 MB | ~65 MB |
+| 64（高并发配置） | 30–60 MB | ~130 MB |
 
-512 MB 在 64 并发下提供 ~4× 余量。如果你的模型并发 > 64 或自定义工具单条输出可能很大（>100 KB），按比例抬 `maxmemory`。
+512 MB 对 32 路默认非常宽松，也覆盖 64 路配置的既有估算。如果你的模型并发 > 64 或自定义工具单条输出可能很大（>100 KB），按比例抬 `maxmemory`。
 
 **为什么是 `noeviction` 而不是 `volatile-lru`**：所有 Redis key（lease / interrupt / cancel / queue / stream / stream_meta）都带 TTL 但承载在飞任务的关键控制状态。Redis 驱逐策略**以 key 为粒度**，LRU 类策略会随机删整个 lease/interrupt key，让 `consume_events` 误判 producer 掉线、cancel/interrupt 信号无声丢失 —— 表现为"任务随机被杀"。`noeviction` 在内存满时**显式写失败**，让运维拿到清晰信号去扩容。Stream 内的 entry 修剪由 `XADD MAXLEN ~ 1000` 在生产端处理，与 maxmemory 策略无关。
 
@@ -642,6 +644,18 @@ Mode A 的 compose 把 Redis `--maxmemory` 从默认 `256mb` 提到 **`512mb`**�
 `mem_limit` 在这里**是 tripwire 不是分配额度**（loud-failure 原则，与上一节 Redis `noeviction` 同一思路）：触上限 → OOM kill → 容器 restart → 运维收到告警，而不是悄无声息吃满 host 把同机服务一起拖死。Postgres `2g` 的稳态保守估算 `256MB shared_buffers + 200 connection × 典型 work_mem + 内核 buffer ≈ 1.2–1.5g`，留 ~30% safety margin。若 p99 RSS 长期超过 1.5g，先排查异常（慢查询/连接泄漏）再谈调参，不要直接放宽。
 
 反向代理（Caddy）不设 `mem_limit`：长期 < 50 MB，加了纯属冗余。
+
+### 沙盒并发预算
+
+`MAX_CONCURRENT_TASKS=32` 并不等于 32 个沙盒常驻；只有实际调用 `bash` / `mount` / `persist` 的 turn 才会启动沙盒容器。但如果 workload 里大量任务都会跑沙盒，需要单独按最坏情况做容量预算：
+
+| 项 | 默认 | 32 路全跑沙盒的含义 |
+|---|---|---|
+| `SANDBOX_MEM_LIMIT_MB` | `1024` | 最坏约 32GB 容器内存上限承诺；32GB 宿主应降低并发、降低沙盒内存或避免全量沙盒 workload |
+| `SANDBOX_WORKSPACE_QUOTA_MB` | `2048` | 最坏约 64GB scratch 数据；8G pool 只是 starter，32 路建议 80G 级别 |
+| `SANDBOX_CPU_LIMIT` | `1.0` | 最坏 32 vCPU 配额；16 核机器会靠调度分时，适合 I/O/LLM 等待型任务，不适合 32 路纯 CPU 文档转换 |
+
+结论：默认 1GB 沙盒内存不建议再加，真正要跟着并发调的是 `AF_SANDBOX_POOL_SIZE` 和是否允许这么多任务同时使用沙盒。
 
 ---
 
@@ -691,7 +705,7 @@ flowchart TD
 | HTTP :80 | ACME 验证 + 自动跳 https（Caddy 内建） | 显式 `redir` 到 `https://{host}:{$AF_HTTPS_PORT}`（`auto_https off` 关掉了内建跳转） |
 | 端口 | 80/443 固定（协议要求） | `AF_HTTP_PORT`（默认 80）/ `AF_HTTPS_PORT`（默认 443）可改 |
 
-- **上传上限（代理层是总量权威闸）**：`POST /api/v1/chat` 把整批附件放进**一个** multipart 请求，body 是整批之和。三轴**独立**：单文件 ≤100MB（`MAX_UPLOAD_SIZE`，后端 422）、数量 ≤30（`MAX_CHAT_ATTACHMENTS`，后端 422）、**总量 ≤200MiB（代理层 413）**。总量**刻意小于** per-file×count（100MB×30=3GB）——设计意图是"1 个大文件 or 多个小文件，但控总量"，故大批量时代理层**会按设计抢先** 413（单个超大文件仍由后端给干净 422）。`210MiB` = 200MiB 内容 + 10MiB multipart 开销。**单位注意**：Caddy 的 `MB` 是 decimal 10⁶、`MiB` 才是二进制 2²⁰——写 `210MB` 会把 200MiB 批次的开销预算从 10MiB 压到 ~285KB，必须写 `MiB`。另：文本转换路径有更低的独立闸 `MAX_TEXT_CONVERT_BYTES`（20MB，防解码+词表物化的内存放大），blob 路径（图片/PDF/docx/其它二进制）不受此限；**超文本闸不 422**，文件落为二进制 blob artifact（可下载、可 mount 进沙盒处理）。
+- **上传上限（代理层是总量权威闸）**：`POST /api/v1/chat` 把整批附件放进**一个** multipart 请求，body 是整批之和。三轴**独立**：单文件 ≤200MB（`MAX_UPLOAD_SIZE`，后端 422）、数量 ≤30（`MAX_CHAT_ATTACHMENTS`，后端 422）、**总量约 200MiB 内容 + multipart 开销（代理层 413）**。总量**刻意小于** per-file×count（200MB×30=6GB）——设计意图是"1 个大文件 or 多个小文件，但控总量"，故大批量时代理层**会按设计抢先** 413（单个超大文件仍由后端给干净 422）。`210MiB` = 200MiB 内容 + 10MiB multipart 开销，所以单个满额文件可以穿过代理交给后端判定。**单位注意**：Caddy 的 `MB` 是 decimal 10⁶、`MiB` 才是二进制 2²⁰——写 `210MB` 会把 200MiB 批次的开销预算从 10MiB 压到 ~285KB，必须写 `MiB`。另：文本转换路径有更低的独立闸 `MAX_TEXT_CONVERT_BYTES`（20MB，防解码+词表物化的内存放大），blob 路径（图片/PDF/docx/其它二进制）不受此限；**超文本闸不 422**，文件落为二进制 blob artifact（可下载、可 mount 进沙盒处理）。
 - **`X-Real-IP`（登录频控依赖）**：后端 per-IP 登录频控**只读这个头**（刻意不信可被客户端伪造的 `X-Forwarded-For`）。安全前提是 backend 仅 `expose`、不发布主机端口，只经反向代理可达，故这个头不可伪造。删掉它 / 换不写该头的代理 → per-IP 限流静默退化成"所有请求共用代理容器一个 IP 桶"（per-username 主防线仍在）。
   - **Mode 2 灰云（CF DNS only）直连**：`{remote_host}` 就是真实客户端 IP，直接写进 `X-Real-IP`，不退化。
   - **Mode 2 若改用 CF 橙云（proxied）**：真实客户端 IP 移到 `X-Forwarded-For`、`{remote_host}` 变成 CF 边缘 IP —— 需在 Caddyfile 加 `trusted_proxies`（CF IP 段）并改用 `{client_ip}`，否则 per-IP 限流退化。`deploy/caddy/Caddyfile` 头部注释了这一点。

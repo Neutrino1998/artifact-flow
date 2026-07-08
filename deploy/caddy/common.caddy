@@ -65,13 +65,15 @@
 (af_site) {
 	# Batched upload ceiling — the AUTHORITATIVE total-bytes cap. POST /api/v1/chat
 	# sends ALL attachments in ONE multipart request, so the body is the SUM of the
-	# batch. Three INDEPENDENT axes: per-file ≤100MB (MAX_UPLOAD_SIZE, app 422),
-	# count ≤30 (MAX_CHAT_ATTACHMENTS, app 422), and total ≤200MiB (THIS cap, 413).
-	# Total is deliberately LESS than per-file×count (100MB×30=3GB): the design
+	# batch. Three INDEPENDENT axes: per-file ≤200MB (MAX_UPLOAD_SIZE, app 422),
+	# count ≤30 (MAX_CHAT_ATTACHMENTS, app 422), and total ≈200MiB content plus
+	# multipart overhead (THIS cap, 413).
+	# Total is deliberately LESS than per-file×count (200MB×30=6GB): the design
 	# intent is "one big file OR many small ones, but a bounded total". So this
 	# DOES fire ahead of the per-file/count checks for a large batch, by design
 	# (a single oversize file still gets the backend's clean 422). 210MiB =
-	# 200MiB content + 10MiB multipart boundary/header overhead.
+	# 200MiB content + 10MiB multipart boundary/header overhead, so one max-size
+	# file can pass through the proxy and be judged by the backend.
 	# UNITS — must be MiB, not MB: Caddy parses `MB` as decimal 10^6 and only
 	# `MiB` as binary 2^20. `210MB` would shrink the overhead budget over a
 	# 200MiB batch from 10 MiB to ~285 KB.
