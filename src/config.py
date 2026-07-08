@@ -66,10 +66,11 @@ class Settings(BaseSettings):
     # DB 对齐补全(对齐本就兜底)。update 的 span delta 不受此限(权威且体量随模型输出)。
     ARTIFACT_LIVE_CONTENT_MAX_CHARS: int = 256000
     # Artifact 二进制存储(ArtifactBlob)单条字节上限。写入侧 loud-fail(不静默截断)。
-    # 隐藏常量,非模型可调。刻意高于 MAX_UPLOAD_SIZE(100MB):留 2× 余量给 C 阶段沙盒
-    # 回写的 blob(模型自生成,不走上传路径),免得再调一次。**ops 依赖**:200MB 单行
-    # 要求 MySQL/TDSQL 服务端 max_allowed_packet 抬到其上(默认常仅 16–64MB),否则大
-    # insert 在驱动层失败;且跨中心复制 200MB 行成本不低,值随该上限演进再核。
+    # 隐藏常量,非模型可调。默认对齐 MAX_UPLOAD_SIZE(200MB),让单文件上传不会过了
+    # HTTP 入口后又在 artifact 写入侧被拒;沙盒 persist 的 blob 也受同一闸约束。
+    # **ops 依赖**:200MB 单行要求 MySQL/TDSQL 服务端 max_allowed_packet 抬到其上
+    # (默认常仅 16–64MB),否则大 insert 在驱动层失败;且跨中心复制 200MB 行成本不低,
+    # 值随该上限演进再核。
     ARTIFACT_BLOB_MAX_BYTES: int = 200 * 1024 * 1024
     # 识图:read_artifact 把图注入上下文前 resize 到最长边 ≤ 此值(像素),应用侧控
     # token 成本可预测(不靠 provider 的 HF processor)。原始 blob 不变,只降采样注入副本。
@@ -172,15 +173,15 @@ class Settings(BaseSettings):
     MAX_CONCURRENT_TASKS: int = 10  # 最大并发引擎执行数
 
     # 上传限制。单文件字节上限(API 边界 loud 422)。批量**总**字节由代理层
-    # client_max_body_size 独立封顶(200MB,见 deploy/nginx.conf|Caddyfile):
-    # 允许「1 个大文件 or 多个小文件」但控总量——单文件 100MB、数量 30、总量 200MB
-    # 三轴独立,总量刻意 < 100MB×30。前端经 /api/v1/meta 取此值做 UX 预挡(后端权威)。
-    MAX_UPLOAD_SIZE: int = 100 * 1024 * 1024  # 100MB
+    # request_body max_size 独立封顶(约 200MiB 内容 + multipart 开销,见 deploy/caddy):
+    # 允许「1 个大文件 or 多个小文件」但控总量——单文件 200MB、数量 30、总量约 200MiB
+    # 三轴独立,总量刻意 < 200MB×30。前端经 /api/v1/meta 取此值做 UX 预挡(后端权威)。
+    MAX_UPLOAD_SIZE: int = 200 * 1024 * 1024  # 200MB
     # 文本转换路径(DocConverter._convert_text)的独立、更低字节闸。文本是唯一无自身
     # 成本 envelope 的转换路径:charset 检测 + str(best) + split() 会**物化整份解码
     # 内容 + 词列表**,内存放大远超输入字节,且跑在 event loop 上(2026-05-14 wedge 同类)。
     # docx/pdf 存原 blob 不解析(C-0 起 blob-only)、图片存原 blob 不物化文本,只有裸
-    # 文本会随 100MB 上传上限线性放大 → 给它保留旧的 20MB envelope。字节上界是首要护栏
+    # 文本会随 200MB 上传上限线性放大 → 给它保留旧的 20MB envelope。字节上界是首要护栏
     # (to_thread 只缓解 loop 阻塞,解不了内存)。隐藏常量,operator 可调。
     MAX_TEXT_CONVERT_BYTES: int = 20 * 1024 * 1024  # 20MB
     # per-用户 blob 存储配额(字节)。该用户**所有 blob 字节之和**(ArtifactBlob.size_bytes
@@ -188,7 +189,7 @@ class Settings(BaseSettings):
     # create_from_upload**(所有 blob 都经此:上传 + 沙盒 persist + 未来任何路径,一处校验
     # 全覆盖,不逐路径加闸)——上传转 413、沙盒 persist 转 ToolResult 让模型提示用户清理。
     # /chat 另有 HTTP 预闸做 fail-fast(起 turn 前拒、零 DB 状态),非唯一守门。只数 blob
-    # —— 二进制是"狂传大文件"灌爆盘的主向量(尤其沙盒 persist:无 nginx body / 数量闸,
+    # —— 二进制是"狂传大文件"灌爆盘的主向量(尤其沙盒 persist:无代理 body / 数量闸,
     # 纯靠它兜底),文本(Artifact.content)有 MAX_TEXT_CONVERT_BYTES 兜着、量级小,刻意不计
     # (进度条同口径,标"附件占用"非"总盘")。account = SUM(size_bytes) compute-on-read(DB
     # 唯一真相,不存计数器),靠 ix_artifact_blobs_session_size 走 index-only;校验计入
@@ -198,12 +199,12 @@ class Settings(BaseSettings):
 
     # Skill 导入硬门槛(Phase E,utils/skill_validator;隐藏常量,operator 经 env 可调)。
     # 宿主侧只读 namelist + SKILL.md 一个成员,全包解压归沙盒 —— 这组上限是 bomb 预拒,
-    # 沙盒 watchdog 仍是真兜底。单 zip 字节上限刻意 ≤ 代理层 client_max_body_size,
-    # 别声明一个过不了边缘的数(deploy/nginx.conf|Caddyfile)。
+    # 沙盒 watchdog 仍是真兜底。单 zip 字节上限刻意 ≤ 代理层 request_body max_size,
+    # 别声明一个过不了边缘的数(deploy/caddy)。
     # 用户 skill 总量不设独立配额:bundle 字节计入 ARTIFACT_USER_QUOTA_BYTES 同一池
     # (原则 7③;记账在 ConversationManager.get_user_upload_bytes,413 闸与存储条同口径)。
-    SKILL_BUNDLE_MAX_BYTES: int = 100 * 1024 * 1024     # 单个 skill zip 上限,对齐 MAX_UPLOAD_SIZE
-                                                        # 的「单文件 100MB」口径(边缘 210M 放得下)。
+    SKILL_BUNDLE_MAX_BYTES: int = 200 * 1024 * 1024     # 单个 skill zip 上限,对齐 MAX_UPLOAD_SIZE
+                                                        # 的「单文件 200MB」口径(边缘 210MiB 放得下)。
                                                         # 执行点 = E-2 导入端点(非 validator:按信任
                                                         # 分层,seed/admin 无闸,wheels bundle 合法可超)
     SKILL_ZIP_MAX_MEMBERS: int = 2000                   # zip 文件成员数上限
@@ -260,7 +261,7 @@ class Settings(BaseSettings):
     WEB_FETCH_MAX_BYTES: int = 20 * 1024 * 1024   # fallback 下载体上限（解压后字节），
                                                   # 超即中断 —— 防 gzip 炸弹 / 大响应 OOM。
                                                   # 出网下载是独立威胁面,与 MAX_UPLOAD_SIZE
-                                                  #（上传,已抬到 100MB）解耦,各自取值。
+                                                  #（上传,已抬到 200MB）解耦,各自取值。
     # web_fetch 文件旁路:这些 URL 尾缀在 Jina 之前分流为直连下载,以 blob artifact 落盘
     # (而非 Jina 抽文本——对二进制本就坏)。值 = 尾缀 → content_type 兜底(响应头缺失/
     # 撒谎时用)。运行时工具内自决,非模型参数(守「最小化工具参数面」)。
@@ -298,8 +299,9 @@ class Settings(BaseSettings):
                                      # 最坏单次 drain = MAX_MESSAGE_CHARS × 此值，详见输入挡板设计）
     MAX_CHAT_ATTACHMENTS: int = 30   # 单条 /chat 消息附件数量上限（超即 422）；上传后逐个
                                      # 串行转换落库，限制总转换时长 / DB 写入 / 归属串膨胀。
-                                     # 注：批量**总**字节由代理层 client_max_body_size(200MB)
-                                     # 独立封顶——数量轴管「几个」,总量轴管「多大」,两轴独立。
+                                     # 注：批量**总**字节由代理层 request_body max_size
+                                     # (约 200MiB 内容 + multipart 开销)独立封顶——数量轴
+                                     # 管「几个」,总量轴管「多大」,两轴独立。
 
     # 批量导入用户（CSV）
     MAX_BULK_IMPORT_ROWS: int = 1000          # 行数上限，超过整体拒绝（防误传）

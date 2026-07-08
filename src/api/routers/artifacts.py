@@ -76,8 +76,8 @@ async def convert_uploaded_file(file: UploadFile) -> ConvertedUpload:
     # materializing it in RAM. Starlette's multipart parser spools each part to
     # a temp file (rolls to disk past ~1MB) and sets UploadFile.size to the full
     # part length — so reading a 1GB part here would spike RAM even though
-    # parsing kept it on disk. nginx caps the body (25MB) at the edge; this is
-    # the in-app guard for anything that bypasses it.
+    # parsing kept it on disk. Caddy caps the total multipart body at the edge;
+    # this is the per-file in-app guard for anything that bypasses it.
     max_mb = config.MAX_UPLOAD_SIZE / 1024 / 1024
     if file.size is not None and file.size > config.MAX_UPLOAD_SIZE:
         detail = f"File too large: {file.size / 1024 / 1024:.1f}MB (max {max_mb:.0f}MB)"

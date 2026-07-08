@@ -38,7 +38,8 @@ from sqlalchemy.orm import (
 # 二进制列的类型长度 hint（见 ArtifactBlob.data）：仅用于在 MySQL 上把列推到
 # LONGBLOB 这一 tier，PG/SQLite 忽略长度。app 侧 config.ARTIFACT_BLOB_MAX_BYTES
 # 才是真正的大小闸门。取 >16MB(MEDIUMBLOB 上限)即可保证 LONGBLOB；这里取 100MB
-# 与当前 cap 对齐、自文档化(LONGBLOB 物理可达 4GB,M 只选 tier 不限长)。
+# 只是稳定的 schema hint(LONGBLOB 物理可达 4GB,M 只选 tier 不限长),不随 app cap
+# 每次调整而改 migration 口径。
 _BLOB_TYPE_TIER_HINT = 100 * 1024 * 1024
 
 
