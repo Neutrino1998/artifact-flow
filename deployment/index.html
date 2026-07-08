@@ -2735,8 +2735,8 @@ Mode 2（公网）扩缩容仍用上面 Mode 2A「扩缩容」小节里的裸 <c
 </tr>
 <tr>
 <td><code>config/site/notifications.json</code>（左栏通知）</td>
-<td>直接编辑宿主机文件，schema 见 <code>config/site/README.md</code></td>
-<td><strong>无需 restart</strong> — 挂载在 frontend 容器，前端 60s 轮询自动重拉（标签回前台时立即重拉）</td>
+<td>管理员菜单「通知管理」或直接编辑宿主机文件，schema 见 <code>config/site/README.md</code></td>
+<td><strong>无需 restart</strong> — backend 只写 <code>config/site</code> 挂载目录，frontend 只读服务同一目录；前端 60s 轮询自动重拉（标签回前台时立即重拉）</td>
 </tr>
 <tr>
 <td><code>config/site/welcome_tips.json</code> / <code>branding.json</code>（欢迎页提示 / 版权页脚）</td>
@@ -2766,7 +2766,7 @@ Mode 2（公网）扩缩容仍用上面 Mode 2A「扩缩容」小节里的裸 <c
 </tbody>
 </table>
 <blockquote>
-<p><strong>关键区别：</strong> 改 <code>config/*</code> 用 <code>restart backend</code>（让进程重读文件），改 <code>.env</code> 用 <code>up -d</code>（让 compose 重建容器注入环境变量）。<code>config/site/</code> 是例外：挂在 frontend 容器，无需重启；其中 <code>notifications.json</code> 前端轮询自动重拉，<code>welcome_tips.json</code> / <code>branding.json</code> 只在页面加载时读取，运维改完需用户刷新。</p>
+<p><strong>关键区别：</strong> 改 <code>config/*</code> 用 <code>restart backend</code>（让进程重读文件），改 <code>.env</code> 用 <code>up -d</code>（让 compose 重建容器注入环境变量）。<code>config/site/</code> 是例外：同一个宿主目录只读挂在 frontend、可写挂在 backend 的通知管理入口，无需重启；其中 <code>notifications.json</code> 前端轮询自动重拉，<code>welcome_tips.json</code> / <code>branding.json</code> 只在页面加载时读取，运维改完需用户刷新。</p>
 </blockquote>
 <h3 id="仅推送-config-更新不动镜像">仅推送 config 更新（不动镜像）</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># 在构建机上重新打包（或手工 tar）</span>

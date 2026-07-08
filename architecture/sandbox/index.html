@@ -1534,7 +1534,7 @@
 <p>Per-turn、默认全禁网的 Linux 容器，让 agent 安全执行不可信的模型生成代码、处理用户上传的多格式文件，产物显式回写成 artifact。三个模型面工具（<code>bash</code> / <code>mount</code> / <code>persist</code>）共享一个 per-turn <code>SandboxSession</code>。</p>
 </blockquote>
 <h2 id="定位">定位</h2>
-<p>沙盒解决两类工作：跑模型生成的任意 shell / Python，和处理二进制上传——上传路由（2026-06-11 翻转后）纯声明式按扩展名三分：文本白名单解码为 content，png/jpeg 走识图（识图白名单限死这两种——gif/webp 等异型图照收 blob 但不进识图，要看就 mount 进沙盒转 PNG 再 persist），<strong>其余任意格式一律存为 blob</strong>（docx / pdf / xlsx / 压缩包 / 异型图 / 未知二进制，不试解码不验 magic）。这些字节在 artifact 系统里没有文本表示，只有 mount 进沙盒才能被检视 / 转换；改后缀、损坏的文件也照收，模型在沙盒里 loud-fail 后自行诊断（remediation 提示归 skill 系统）。镜像预装 Python 3.11 + 科学栈（numpy/pandas/matplotlib/openpyxl）+ pandoc + ripgrep + git（含烤入的默认 identity，开箱即 commit；仅本地仓库操作——log / diff / blame / apply，<code>--network=none</code> 下 clone / fetch 注定失败，by design）。</p>
+<p>沙盒解决两类工作：跑模型生成的任意 shell / Python，和处理二进制上传——上传路由（2026-06-11 翻转后）纯声明式按扩展名三分：文本白名单解码为 content，png/jpeg 走识图（识图白名单限死这两种——gif/webp 等异型图照收 blob 但不进识图，要看就 mount 进沙盒转 PNG 再 persist），<strong>其余任意格式一律存为 blob</strong>（docx / pdf / xlsx / 压缩包 / 异型图 / 未知二进制，不试解码不验 magic）。这些字节在 artifact 系统里没有文本表示，只有 mount 进沙盒才能被检视 / 转换；改后缀、损坏的文件也照收，模型在沙盒里 loud-fail 后自行诊断（remediation 提示归 skill 系统）。镜像预装 Python 3.11 + 科学/文档栈（numpy/pandas/matplotlib/Pillow/openpyxl/pypdf、python-docx/python-pptx/lxml/pdfplumber/pypdfium2）+ pandoc + ripgrep + zip + git（含烤入的默认 identity，开箱即 commit；仅本地仓库操作——log / diff / blame / apply，<code>--network=none</code> 下 clone / fetch 注定失败，by design）。</p>
 <p><strong>沙盒是显式 stage 进出的 scratch 工作区，不是 artifact store 的自动镜像。</strong> mount-in 与回写都显式：模型显式把指定 artifact 物化进工作区、显式调 <code>persist</code> 回写，不自动物化整 session、也不 diff 整个目录。容器 fs 不是「artifact 的第三态」，而是临时工作区——copy-in → 容器内随便改 → 显式 <code>persist</code>，persist 落回来就<strong>变成一次普通 artifact 写</strong>（进 <code>ArtifactWorkingSet</code>，随 turn 末 <code>flush_all</code> 落盘，与 <code>update_artifact</code> 同路）。工作区对 artifact store 没有同步义务，故没有三态一致性问题（对比 Claude Code：磁盘工作副本 vs git 记录，<code>commit</code> 是显式桥）。</p>
 <h2 id="三个工具一个-session">三个工具，一个 session</h2>
 <p>工具面是三个语义不同的动词、参数形状各异，分立比合成单一 <code>sandbox(action=...)</code> 参数面更小、对小模型更可读，也与现有 <code>*_artifact</code> 工具 idiom 及 per-verb 权限粒度一致。「共用启动 / 沙盒交互」是实现层事实，不构成合并工具面的理由。</p>
@@ -1569,7 +1569,7 @@
 </tbody>
 </table>
 <p>底下是一个 per-turn <code>SandboxSession</code>（<code>src/tools/builtin/sandbox_session.py</code>），owns 容器生命周期 + bind-mount 工作区 + watchdog 注册 + 绑定本 turn 的 <code>ArtifactWorkingSet</code>。三个工具都是其上的薄操作。<code>create_sandbox_tools</code>（<code>src/tools/builtin/sandbox_ops.py</code>）由 <code>controller_factory</code> 按请求调用，与 <code>create_artifact_tools</code> 同 idiom。</p>
-<p>工具只挂在拥有它们的 agent 的 <code>tools</code> 白名单（当前 <code>lead_agent</code> / <code>research_agent</code>）。bash = CONFIRM 在 agent MD 里显式声明——这是沙盒对模型的唯一暴露面，不在白名单的 agent 看不到也调不动这三个工具。</p>
+<p>工具只挂在拥有它们的 agent 的 <code>tools</code> 白名单（当前 <code>lead_agent</code> / <code>research_agent</code> / <code>explore_agent</code>）。bash = CONFIRM 在 agent MD 里显式声明——这是沙盒对模型的唯一暴露面，不在白名单的 agent 看不到也调不动这三个工具。</p>
 <h3 id="动态状态注入">动态状态注入</h3>
 <p>per-turn ephemeral 有一个提示词层面的副作用：历史里上一轮 mount / bash 的成功记录，对模型是「文件还在」的<strong>伪证</strong>。实测结论（2026-06-12）：<strong>提示词压不住这个伪证</strong>——动态注入「工作区为空」、mount 结果自带过期标记都试过，二轮对话模型照旧直接引用旧路径。接受的现实：跨轮忘 mount 由 <strong>bash file-not-found 的 loud-fail 自纠</strong>兜底（代价 = 一个废 round），不再堆提示词机器。reset 事实在模型可见文案里只各说一次：bash 描述（能力）、persist 描述（动机——"persist 是留住结果的唯一方式"）、<code>&lt;sandbox_status&gt;</code> not_started（状态）。</p>
 <p>动态注入本身保留（ContextManager 每轮 <code>&lt;system-reminder&gt;</code>，仅对授沙盒工具的 agent、且引擎递了 session 快照时渲染），价值在另两态：</p>
@@ -1626,7 +1626,7 @@
 </tbody>
 </table>
 <p>第三条尤其要紧：网络封闭<strong>不能降级成靠 CONFIRM 对命令授权来控</strong>。授权是 <em>consent</em>（人同意了某条命令的意图），网络是 <em>confinement</em>（不管谁同意，容器代码够得着什么）。开网后被授权的 <code>pip install</code> = 任意代码执行，且同容器里没被授权的代码（传递 import / 被污染 wheel / 生成代码任意一行）也拿到了网。内网 web 工具已禁、沙盒无任何合法公网需求，故 <code>--network=none</code> 是零成本纯收益。</p>
-<p><strong>依赖因此全离线投递、绝不靠出网</strong>，分三层（同一套 <code>pip --no-index --find-links</code> 机制、不同生命周期）：① 烤进镜像（python / 科学栈 / pandoc / ripgrep / git，环境定义级）；② 离线 wheel bundle 挂固定位（常驻 extras）；③ skill 自带 asset（场景 specific 长尾，随 skill 激活按需挂）。依赖 ≠ artifact——artifact 是用户拥有的数据（走 mount / persist），依赖是执行环境（走镜像 / bundle）。</p>
+<p><strong>依赖因此全离线投递、绝不靠出网</strong>，分三层（同一套 <code>pip --no-index --find-links</code> 机制、不同生命周期）：① 烤进镜像（python / 科学栈 / 文档栈 / pandoc / ripgrep / zip / git，环境定义级）；② 离线 wheel bundle 挂固定位（常驻 extras）；③ skill 自带 asset（场景 specific 长尾，随 skill 激活按需挂）。依赖 ≠ artifact——artifact 是用户拥有的数据（走 mount / persist），依赖是执行环境（走镜像 / bundle）。</p>
 <p>其余容器硬约束：<code>ReadonlyRootfs</code>（rootfs 只读）、非 root（uid 1000）、<code>SANDBOX_MEM_LIMIT_MB</code> 内存上限（MemorySwap 设同值 = 禁 swap）、<code>SANDBOX_CPU_LIMIT</code> CPU 核数、<code>SANDBOX_PIDS_LIMIT</code> fork 炸弹闸。</p>
 <h3 id="bash-的-confirm-是同意闸不是-containment">bash 的 CONFIRM 是同意闸，不是 containment</h3>
 <p>接上面的 consent / confinement 之分：bash = CONFIRM 让用户在不可信代码跑之前看一眼<strong>具体命令</strong>，是一道<strong>知情 / 同意</strong>闸；它<strong>不</strong>是安全边界。沙盒的安全靠上面三条（gVisor / DooD 参数防污染 / <code>--network=none</code>）+ per-turn ephemeral——一条 bash 命令不管确没确认，都跑在同一个无网、无逃逸、不可触宿主、turn 末即焚的容器里。</p>
