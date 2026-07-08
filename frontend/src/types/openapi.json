@@ -1326,6 +1326,64 @@
         }
       }
     },
+    "/api/v1/admin/conversations/{conv_id}/artifacts/{artifact_id}/raw": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Admin Conversation Artifact Raw",
+        "description": "Serve raw blob bytes for an artifact in any conversation (admin-only).",
+        "operationId": "get_admin_conversation_artifact_raw_api_v1_admin_conversations__conv_id__artifacts__artifact_id__raw_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conv_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conv Id"
+            }
+          },
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Raw artifact blob (image inline, else attachment).",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/conversations/{conv_id}/artifacts/{artifact_id}/versions/{version}": {
       "get": {
         "tags": [

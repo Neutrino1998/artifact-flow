@@ -1,7 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { fetchArtifactRawBlob } from '@/lib/api';
+import {
+  fetchArtifactRawBlob,
+  fetchArtifactRawObjectUrl,
+  type ArtifactRawBlobFetcher,
+  type ArtifactRawObjectUrlFetcher,
+} from '@/lib/api';
 import { useArtifactStore } from '@/stores/artifactStore';
 import BinaryFilePreview from './BinaryFilePreview';
 
@@ -526,14 +531,21 @@ export default function DocxPreview({
   artifactId,
   originalFilename,
   contentType,
+  fetchRawBlob = fetchArtifactRawBlob,
+  fetchRawObjectUrl = fetchArtifactRawObjectUrl,
+  pendingFlush: pendingFlushProp,
 }: {
   sessionId: string;
   artifactId: string;
   originalFilename?: string | null;
   contentType: string;
+  fetchRawBlob?: ArtifactRawBlobFetcher;
+  fetchRawObjectUrl?: ArtifactRawObjectUrlFetcher;
+  pendingFlush?: boolean;
 }) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  const pendingFlush = useArtifactStore((s) => !!s.liveContent[artifactId]);
+  const storePendingFlush = useArtifactStore((s) => !!s.liveContent[artifactId]);
+  const pendingFlush = pendingFlushProp ?? storePendingFlush;
   const [frameReady, setFrameReady] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -545,7 +557,7 @@ export default function DocxPreview({
     setLoading(true);
     setError(null);
 
-    fetchArtifactRawBlob(sessionId, artifactId)
+    fetchRawBlob(sessionId, artifactId)
       .then(async (blob) => {
         if (blob.size > MAX_PREVIEW_BYTES) {
           throw new Error('Word 文件较大，已跳过浏览器内预览');
@@ -597,7 +609,7 @@ export default function DocxPreview({
       cancelled = true;
       cleanupLayout?.();
     };
-  }, [artifactId, frameReady, pendingFlush, sessionId]);
+  }, [artifactId, fetchRawBlob, frameReady, pendingFlush, sessionId]);
 
   if (pendingFlush || error) {
     return (
@@ -608,6 +620,8 @@ export default function DocxPreview({
         contentType={contentType}
         description={error ?? 'Word 原件将在本回合完成后可预览'}
         pendingMessage="本回合完成后可预览或下载原件"
+        fetchRawObjectUrl={fetchRawObjectUrl}
+        pendingFlush={pendingFlush}
       />
     );
   }

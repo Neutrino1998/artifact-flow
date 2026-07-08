@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { fetchArtifactRawObjectUrl } from '@/lib/api';
+import { fetchArtifactRawObjectUrl, type ArtifactRawObjectUrlFetcher } from '@/lib/api';
 import { triggerObjectUrlDownload } from '@/lib/download';
 import { BUTTON_PRIMARY } from '@/lib/styles';
 import { useArtifactStore } from '@/stores/artifactStore';
@@ -22,6 +22,8 @@ export default function BinaryFilePreview({
   description,
   pendingMessage,
   downloadLabel = '下载原件',
+  fetchRawObjectUrl = fetchArtifactRawObjectUrl,
+  pendingFlush: pendingFlushProp,
 }: {
   sessionId: string;
   artifactId: string;
@@ -30,21 +32,24 @@ export default function BinaryFilePreview({
   description?: string;
   pendingMessage?: string;
   downloadLabel?: string;
+  fetchRawObjectUrl?: ArtifactRawObjectUrlFetcher;
+  pendingFlush?: boolean;
 }) {
   const [error, setError] = useState<string | null>(null);
   // Live this turn, not yet flushed. Cleared at COMPLETE.
-  const pendingFlush = useArtifactStore((s) => !!s.liveContent[artifactId]);
+  const storePendingFlush = useArtifactStore((s) => !!s.liveContent[artifactId]);
+  const pendingFlush = pendingFlushProp ?? storePendingFlush;
 
   const handleDownload = useCallback(async () => {
     setError(null);
     try {
-      const url = await fetchArtifactRawObjectUrl(sessionId, artifactId);
+      const url = await fetchRawObjectUrl(sessionId, artifactId);
       triggerObjectUrlDownload(originalFilename ?? artifactId, url);
     } catch {
       // Generic, user-facing — the raw error + request id are logged server-side.
       setError('下载失败，请稍后重试');
     }
-  }, [sessionId, artifactId, originalFilename]);
+  }, [artifactId, fetchRawObjectUrl, originalFilename, sessionId]);
 
   return (
     <div className="h-full flex items-center justify-center p-6">

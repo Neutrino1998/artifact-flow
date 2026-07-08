@@ -1,7 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { fetchArtifactRawBlob } from '@/lib/api';
+import {
+  fetchArtifactRawBlob,
+  fetchArtifactRawObjectUrl,
+  type ArtifactRawBlobFetcher,
+  type ArtifactRawObjectUrlFetcher,
+} from '@/lib/api';
 import { parseCsvPreview } from '@/lib/csvPreview';
 import { useArtifactStore } from '@/stores/artifactStore';
 import BinaryFilePreview from './BinaryFilePreview';
@@ -23,6 +28,9 @@ export default function CsvPreview({
   originalFilename,
   contentType,
   hasBlob,
+  fetchRawBlob = fetchArtifactRawBlob,
+  fetchRawObjectUrl = fetchArtifactRawObjectUrl,
+  pendingFlush: pendingFlushProp,
 }: {
   content: string;
   sessionId: string;
@@ -30,8 +38,12 @@ export default function CsvPreview({
   originalFilename?: string | null;
   contentType: string;
   hasBlob: boolean;
+  fetchRawBlob?: ArtifactRawBlobFetcher;
+  fetchRawObjectUrl?: ArtifactRawObjectUrlFetcher;
+  pendingFlush?: boolean;
 }) {
-  const pendingFlush = useArtifactStore((s) => !!s.liveContent[artifactId]);
+  const storePendingFlush = useArtifactStore((s) => !!s.liveContent[artifactId]);
+  const pendingFlush = pendingFlushProp ?? storePendingFlush;
   const [blobContent, setBlobContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,7 +53,7 @@ export default function CsvPreview({
     setBlobContent(null);
     setError(null);
 
-    fetchArtifactRawBlob(sessionId, artifactId)
+    fetchRawBlob(sessionId, artifactId)
       .then(async (blob) => {
         if (blob.size > MAX_BLOB_PREVIEW_BYTES) {
           throw new Error('CSV 文件较大，已跳过浏览器内预览');
@@ -58,7 +70,7 @@ export default function CsvPreview({
     return () => {
       cancelled = true;
     };
-  }, [artifactId, hasBlob, pendingFlush, sessionId]);
+  }, [artifactId, fetchRawBlob, hasBlob, pendingFlush, sessionId]);
 
   const previewContent = hasBlob ? blobContent ?? '' : content;
   const parsed = useMemo(
@@ -75,6 +87,8 @@ export default function CsvPreview({
         contentType={contentType}
         description={error ?? 'CSV 原件将在本回合完成后可预览'}
         pendingMessage="本回合完成后可预览或下载原件"
+        fetchRawObjectUrl={fetchRawObjectUrl}
+        pendingFlush={pendingFlush}
       />
     );
   }

@@ -378,3 +378,15 @@ class TestHasBlobField:
         )
         assert resp.status_code == 200
         assert resp.json()["has_blob"] is True
+
+    async def test_admin_raw_serves_user_blob(
+        self, admin_client: AsyncClient, seed_blob_artifact: Tuple[str, str]
+    ):
+        session_id, artifact_id = seed_blob_artifact
+        resp = await admin_client.get(
+            f"/api/v1/admin/conversations/{session_id}/artifacts/{artifact_id}/raw"
+        )
+        assert resp.status_code == 200
+        assert resp.content == b"PK\x03\x04" + b"\x00" * 16
+        assert resp.headers["cache-control"] == "no-cache"
+        assert resp.headers["content-disposition"].startswith("attachment;")

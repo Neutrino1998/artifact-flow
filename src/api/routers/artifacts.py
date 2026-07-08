@@ -15,6 +15,7 @@ from fastapi.responses import Response
 
 from config import config
 from api.dependencies import get_artifact_service, get_conversation_manager, get_current_user
+from api.artifact_raw_response import RAW_ARTIFACT_RESPONSES, build_artifact_blob_response
 from api.services.auth import TokenPayload
 from core.conversation_manager import ConversationManager
 from api.schemas.artifact import (
@@ -27,7 +28,6 @@ from api.schemas.artifact import (
 from tools.builtin.artifact_service import ArtifactService
 from utils.doc_converter import DocConverter
 from utils.logger import get_logger
-from utils.mime import is_safe_inline_image_mime
 
 logger = get_logger("ArtifactFlow")
 
@@ -169,20 +169,7 @@ async def list_artifacts(
     # type; `responses` then declares the real binary content types so the
     # generated OpenAPI / TS client advertises the correct contract.
     response_class=Response,
-    responses={
-        200: {
-            "content": {
-                # The handler returns the blob's TRUE content_type — image/png,
-                # image/jpeg, application/pdf, the docx OOXML MIME, the octet-
-                # stream fallback, and (C-phase) arbitrary sandbox-written types.
-                # `*/*` covers any media type without enumerating a drift-prone
-                # list; schema type=string/format=binary types the body as binary
-                # (string/Blob) in generated clients, not `unknown`.
-                "*/*": {"schema": {"type": "string", "format": "binary"}},
-            },
-            "description": "Raw artifact blob (image inline, else attachment).",
-        }
-    },
+    responses=RAW_ARTIFACT_RESPONSES,
 )
 async def get_artifact_raw(
     session_id: str,
@@ -209,30 +196,7 @@ async def get_artifact_raw(
     if blob is None:
         raise HTTPException(status_code=404, detail=f"Artifact blob '{artifact_id}' not found")
 
-    content_type = blob["content_type"] or "application/octet-stream"
-    disposition = "inline" if is_safe_inline_image_mime(content_type) else "attachment"
-
-    filename = blob["filename"].replace("/", "-").replace("\\", "-")
-    # RFC 5987: filename* for non-ASCII, with sanitized ASCII fallback.
-    from urllib.parse import quote
-    import re as _re
-    ascii_fallback = filename.encode("ascii", errors="replace").decode("ascii")
-    ascii_fallback = _re.sub(r'["\x00-\x1f\x7f]', "_", ascii_fallback)
-    utf8_encoded = quote(filename, safe="")
-    return Response(
-        content=blob["data"],
-        media_type=content_type,
-        headers={
-            "Content-Disposition": (
-                f'{disposition}; filename="{ascii_fallback}"; '
-                f"filename*=UTF-8''{utf8_encoded}"
-            ),
-            # blob 是可变单版(persist 覆盖回写原地换字节,URL 与 version 都不变),
-            # 旧契约「字节变 = 新 id = 新 URL」的天然 cache-bust 已不存在 —— 显式
-            # 禁缓存,否则浏览器内存缓存 / 中间代理可能继续供旧字节。
-            "Cache-Control": "no-cache",
-        },
-    )
+    return build_artifact_blob_response(blob)
 
 
 @router.get("/{session_id}/{artifact_id}", response_model=ArtifactResponse)

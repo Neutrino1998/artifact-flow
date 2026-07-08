@@ -508,20 +508,8 @@ export function getVersion(
   );
 }
 
-/** Fetch an artifact's raw binary blob (uploaded image / rich-format source) as an
- *  object URL for an <img> or a download anchor. An `<img src>` can't carry the
- *  Authorization header, so we fetch with auth → blob → createObjectURL (same pattern as SSE).
- *  The blob is DB-only server-side: an image uploaded *this* turn is available only
- *  after the turn flushes (COMPLETE), mirroring the REST-lags-live tradeoff for all
- *  artifacts. Caller MUST URL.revokeObjectURL() the returned URL when done. */
-export async function fetchArtifactRawBlob(
-  sessionId: string,
-  artifactId: string
-): Promise<Blob> {
-  const res = await fetch(
-    `${BASE_URL}/api/v1/artifacts/${sessionId}/${artifactId}/raw`,
-    { headers: authHeaders() }
-  );
+async function fetchRawBlob(path: string): Promise<Blob> {
+  const res = await fetch(`${BASE_URL}${path}`, { headers: authHeaders() });
 
   if (res.status === 401) {
     useAuthStore.getState().logout();
@@ -533,6 +521,22 @@ export async function fetchArtifactRawBlob(
     throw new ApiError(res.status, formatApiError(res.status, body, requestId), undefined, requestId);
   }
   return res.blob();
+}
+
+export type ArtifactRawBlobFetcher = (sessionId: string, artifactId: string) => Promise<Blob>;
+export type ArtifactRawObjectUrlFetcher = (sessionId: string, artifactId: string) => Promise<string>;
+
+/** Fetch an artifact's raw binary blob (uploaded image / rich-format source) as an
+ *  object URL for an <img> or a download anchor. An `<img src>` can't carry the
+ *  Authorization header, so we fetch with auth → blob → createObjectURL (same pattern as SSE).
+ *  The blob is DB-only server-side: an image uploaded *this* turn is available only
+ *  after the turn flushes (COMPLETE), mirroring the REST-lags-live tradeoff for all
+ *  artifacts. Caller MUST URL.revokeObjectURL() the returned URL when done. */
+export async function fetchArtifactRawBlob(
+  sessionId: string,
+  artifactId: string
+): Promise<Blob> {
+  return fetchRawBlob(`/api/v1/artifacts/${sessionId}/${artifactId}/raw`);
 }
 
 export async function fetchArtifactRawObjectUrl(
@@ -704,6 +708,20 @@ export function getAdminConversationArtifactVersion(
   return request<VersionDetail>(
     `/api/v1/admin/conversations/${convId}/artifacts/${artifactId}/versions/${version}`
   );
+}
+
+export async function fetchAdminArtifactRawBlob(
+  convId: string,
+  artifactId: string
+): Promise<Blob> {
+  return fetchRawBlob(`/api/v1/admin/conversations/${convId}/artifacts/${artifactId}/raw`);
+}
+
+export async function fetchAdminArtifactRawObjectUrl(
+  convId: string,
+  artifactId: string
+): Promise<string> {
+  return URL.createObjectURL(await fetchAdminArtifactRawBlob(convId, artifactId));
 }
 
 // User Management (Admin)

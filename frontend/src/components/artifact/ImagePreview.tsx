@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { fetchArtifactRawObjectUrl } from '@/lib/api';
+import { fetchArtifactRawObjectUrl, type ArtifactRawObjectUrlFetcher } from '@/lib/api';
 import { useArtifactStore } from '@/stores/artifactStore';
 
 /** Render an image artifact (content_type image/*). Source depends on whether the
@@ -26,11 +26,17 @@ export default function ImagePreview({
   artifactId,
   originalFilename,
   refreshKey,
+  fetchRawObjectUrl = fetchArtifactRawObjectUrl,
+  pendingFlush: pendingFlushProp,
+  useLocalPreview = true,
 }: {
   sessionId: string;
   artifactId: string;
   originalFilename?: string | null;
   refreshKey?: string;
+  fetchRawObjectUrl?: ArtifactRawObjectUrlFetcher;
+  pendingFlush?: boolean;
+  useLocalPreview?: boolean;
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -39,10 +45,11 @@ export default function ImagePreview({
   // ref → only re-renders when it appears/disappears). undefined for any image not
   // uploaded this turn (model/tool-generated, or a past-turn artifact).
   const localFile = useArtifactStore((s) =>
-    originalFilename ? s.localPreviews[originalFilename] : undefined
+    useLocalPreview && originalFilename ? s.localPreviews[originalFilename] : undefined
   );
   // Live this turn, not yet flushed (created/updated this turn). Cleared at COMPLETE.
-  const pendingFlush = useArtifactStore((s) => !!s.liveContent[artifactId]);
+  const storePendingFlush = useArtifactStore((s) => !!s.liveContent[artifactId]);
+  const pendingFlush = pendingFlushProp ?? storePendingFlush;
 
   useEffect(() => {
     setUrl(null);
@@ -69,7 +76,7 @@ export default function ImagePreview({
     }
     let cancelled = false;
     let objectUrl: string | null = null;
-    fetchArtifactRawObjectUrl(sessionId, artifactId)
+    fetchRawObjectUrl(sessionId, artifactId)
       .then((u) => {
         if (cancelled) {
           URL.revokeObjectURL(u);
@@ -86,7 +93,7 @@ export default function ImagePreview({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [localFile, pendingFlush, sessionId, artifactId, refreshKey]);
+  }, [artifactId, fetchRawObjectUrl, localFile, pendingFlush, refreshKey, sessionId]);
 
   if (error) {
     return (

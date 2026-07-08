@@ -6,6 +6,7 @@ Admin-only endpoints for observability and monitoring:
 - GET /api/v1/admin/conversations/{conv_id}/events — event timeline grouped by message
 - GET /api/v1/admin/conversations/{conv_id}/artifacts — flushed artifact list (no in-memory overlay)
 - GET /api/v1/admin/conversations/{conv_id}/artifacts/{artifact_id} — current content + version list
+- GET /api/v1/admin/conversations/{conv_id}/artifacts/{artifact_id}/raw — raw blob bytes
 - GET /api/v1/admin/conversations/{conv_id}/artifacts/{artifact_id}/versions/{version} — specific version
 """
 
@@ -13,7 +14,9 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 
+from api.artifact_raw_response import RAW_ARTIFACT_RESPONSES, build_artifact_blob_response
 from api.dependencies import (
     get_artifact_service,
     get_conversation_manager,
@@ -273,6 +276,27 @@ async def get_admin_conversation_artifact(
         updated_at=datetime.fromisoformat(result["updated_at"]),
         versions=version_summaries,
     )
+
+
+@router.get(
+    "/conversations/{conv_id}/artifacts/{artifact_id}/raw",
+    response_class=Response,
+    responses=RAW_ARTIFACT_RESPONSES,
+)
+async def get_admin_conversation_artifact_raw(
+    conv_id: str,
+    artifact_id: str,
+    _admin: TokenPayload = Depends(require_admin),
+    artifact_service: ArtifactService = Depends(get_artifact_service),
+):
+    """Serve raw blob bytes for an artifact in any conversation (admin-only)."""
+    blob = await artifact_service.get_blob(conv_id, artifact_id)
+    if blob is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Artifact blob '{artifact_id}' not found in conversation '{conv_id}'",
+        )
+    return build_artifact_blob_response(blob)
 
 
 @router.get(

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { fetchArtifactRawObjectUrl } from '@/lib/api';
+import { fetchArtifactRawObjectUrl, type ArtifactRawObjectUrlFetcher } from '@/lib/api';
 import { useArtifactStore } from '@/stores/artifactStore';
 import BinaryFilePreview from './BinaryFilePreview';
 
@@ -10,13 +10,18 @@ export default function PdfPreview({
   artifactId,
   originalFilename,
   contentType,
+  fetchRawObjectUrl = fetchArtifactRawObjectUrl,
+  pendingFlush: pendingFlushProp,
 }: {
   sessionId: string;
   artifactId: string;
   originalFilename?: string | null;
   contentType: string;
+  fetchRawObjectUrl?: ArtifactRawObjectUrlFetcher;
+  pendingFlush?: boolean;
 }) {
-  const pendingFlush = useArtifactStore((s) => !!s.liveContent[artifactId]);
+  const storePendingFlush = useArtifactStore((s) => !!s.liveContent[artifactId]);
+  const pendingFlush = pendingFlushProp ?? storePendingFlush;
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,7 +32,7 @@ export default function PdfPreview({
     setUrl(null);
     setError(null);
 
-    fetchArtifactRawObjectUrl(sessionId, artifactId)
+    fetchRawObjectUrl(sessionId, artifactId)
       .then((nextUrl) => {
         if (cancelled) {
           URL.revokeObjectURL(nextUrl);
@@ -44,7 +49,7 @@ export default function PdfPreview({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [artifactId, pendingFlush, sessionId]);
+  }, [artifactId, fetchRawObjectUrl, pendingFlush, sessionId]);
 
   if (pendingFlush || error) {
     return (
@@ -55,6 +60,8 @@ export default function PdfPreview({
         contentType={contentType}
         description={error ?? 'PDF 原件将在本回合完成后可预览'}
         pendingMessage="本回合完成后可预览或下载原件"
+        fetchRawObjectUrl={fetchRawObjectUrl}
+        pendingFlush={pendingFlush}
       />
     );
   }

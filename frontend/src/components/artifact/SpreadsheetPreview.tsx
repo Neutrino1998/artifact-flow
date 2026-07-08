@@ -1,7 +1,12 @@
 'use client';
 
 import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
-import { fetchArtifactRawBlob } from '@/lib/api';
+import {
+  fetchArtifactRawBlob,
+  fetchArtifactRawObjectUrl,
+  type ArtifactRawBlobFetcher,
+  type ArtifactRawObjectUrlFetcher,
+} from '@/lib/api';
 import { useArtifactStore } from '@/stores/artifactStore';
 import BinaryFilePreview from './BinaryFilePreview';
 
@@ -36,13 +41,20 @@ export default function SpreadsheetPreview({
   artifactId,
   originalFilename,
   contentType,
+  fetchRawBlob = fetchArtifactRawBlob,
+  fetchRawObjectUrl = fetchArtifactRawObjectUrl,
+  pendingFlush: pendingFlushProp,
 }: {
   sessionId: string;
   artifactId: string;
   originalFilename?: string | null;
   contentType: string;
+  fetchRawBlob?: ArtifactRawBlobFetcher;
+  fetchRawObjectUrl?: ArtifactRawObjectUrlFetcher;
+  pendingFlush?: boolean;
 }) {
-  const pendingFlush = useArtifactStore((s) => !!s.liveContent[artifactId]);
+  const storePendingFlush = useArtifactStore((s) => !!s.liveContent[artifactId]);
+  const pendingFlush = pendingFlushProp ?? storePendingFlush;
   const [sheets, setSheets] = useState<SheetPreview[]>([]);
   const [activeSheet, setActiveSheet] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -57,7 +69,7 @@ export default function SpreadsheetPreview({
     setSheets([]);
     setActiveSheet(0);
 
-    fetchArtifactRawBlob(sessionId, artifactId)
+    fetchRawBlob(sessionId, artifactId)
       .then(async (blob) => {
         if (blob.size > MAX_PREVIEW_BYTES) {
           throw new Error('表格文件较大，已跳过浏览器内预览');
@@ -94,7 +106,7 @@ export default function SpreadsheetPreview({
     return () => {
       cancelled = true;
     };
-  }, [artifactId, pendingFlush, sessionId]);
+  }, [artifactId, fetchRawBlob, pendingFlush, sessionId]);
 
   if (pendingFlush || error) {
     return (
@@ -105,6 +117,8 @@ export default function SpreadsheetPreview({
         contentType={contentType}
         description={error ?? '表格原件将在本回合完成后可预览'}
         pendingMessage="本回合完成后可预览或下载原件"
+        fetchRawObjectUrl={fetchRawObjectUrl}
+        pendingFlush={pendingFlush}
       />
     );
   }
@@ -127,6 +141,8 @@ export default function SpreadsheetPreview({
         originalFilename={originalFilename}
         contentType={contentType}
         description="没有可预览的工作表，可下载原件查看"
+        fetchRawObjectUrl={fetchRawObjectUrl}
+        pendingFlush={pendingFlush}
       />
     );
   }

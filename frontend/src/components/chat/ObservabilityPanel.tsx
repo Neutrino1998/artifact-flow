@@ -9,8 +9,10 @@ import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
 import { SELECT_COMPACT, MENU_ROW_HOVER } from '@/lib/styles';
 import { SELECT_CHEVRON_COMPACT } from '@/components/ui/SelectChevron';
 import * as api from '@/lib/api';
+import { isCsvMime } from '@/lib/artifactPreview';
 import { parseUtcIso } from '@/lib/time';
 import { triggerBlobDownload } from '@/lib/download';
+import ArtifactPreviewContent from '@/components/artifact/ArtifactPreviewContent';
 import PanelSearchBar from './PanelSearchBar';
 import Pagination from './Pagination';
 import type {
@@ -1007,6 +1009,15 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 }
 
 // ── Artifacts Tab ──
+function shouldUseAdminArtifactPreview(detail: ArtifactDetail): boolean {
+  if (detail.has_blob) return true;
+  return (
+    detail.content_type === 'text/markdown' ||
+    detail.content_type === 'text/html' ||
+    isCsvMime(detail.content_type)
+  );
+}
+
 function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: number }) {
   const [list, setList] = useState<ArtifactSummary[] | null>(null);
   const [listLoading, setListLoading] = useState(false);
@@ -1114,6 +1125,10 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
     : versionContentMatches
       ? versionContent!.content
       : '';
+  const viewingHistoricalBlob =
+    detail != null && detail.has_blob && versionContentReady && !isViewingCurrent;
+  const showingRichPreview =
+    detail != null && versionContentReady && shouldUseAdminArtifactPreview(detail) && !viewingHistoricalBlob;
 
   return (
     <div className="flex-1 flex min-h-0">
@@ -1203,11 +1218,31 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
             </div>
 
             {/* Content */}
-            <div className="flex-1 overflow-y-auto px-4 py-3">
+            <div className={showingRichPreview ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 overflow-y-auto px-4 py-3'}>
               {versionContentReady ? (
-                <pre className="text-xs text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words font-mono">
-                  {displayedContent}
-                </pre>
+                viewingHistoricalBlob ? (
+                  <div className="flex h-full items-center justify-center text-center text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                    历史版本的二进制原件暂不能预览；请切回当前版本查看或下载原件。
+                  </div>
+                ) : showingRichPreview && detail != null ? (
+                  <ArtifactPreviewContent
+                    sessionId={convId}
+                    artifactId={detail.id}
+                    content={displayedContent}
+                    contentType={detail.content_type}
+                    hasBlob={!!detail.has_blob}
+                    originalFilename={detail.original_filename}
+                    refreshKey={detail.updated_at}
+                    fetchRawBlob={api.fetchAdminArtifactRawBlob}
+                    fetchRawObjectUrl={api.fetchAdminArtifactRawObjectUrl}
+                    pendingFlush={false}
+                    useLocalPreview={false}
+                  />
+                ) : (
+                  <pre className="text-xs text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words font-mono">
+                    {displayedContent}
+                  </pre>
+                )
               ) : (
                 <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
                   加载版本内容中…
