@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime
 import json
+import os
 import time
 
 import pytest
@@ -134,6 +135,38 @@ class TestSiteNotificationsCrud:
         assert datetime.fromisoformat(saved["starts_at"]).tzinfo is not None
         assert datetime.fromisoformat(saved["ends_at"]).tzinfo is not None
         assert json.loads((tmp_path / "notifications.json").read_text())[0] == saved
+
+    async def test_naive_datetime_uses_target_date_dst_offset(self):
+        if not hasattr(time, "tzset"):
+            pytest.skip("time.tzset is unavailable on this platform")
+
+        old_tz = os.environ.get("TZ")
+        os.environ["TZ"] = "America/New_York"
+        time.tzset()
+        try:
+            winter = SiteNotification(
+                id="winter",
+                severity="info",
+                title="Winter",
+                body="B",
+                starts_at="2026-01-15 12:00",
+            )
+            summer = SiteNotification(
+                id="summer",
+                severity="info",
+                title="Summer",
+                body="B",
+                starts_at="2026-07-15 12:00",
+            )
+
+            assert winter.starts_at == "2026-01-15T12:00:00-05:00"
+            assert summer.starts_at == "2026-07-15T12:00:00-04:00"
+        finally:
+            if old_tz is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = old_tz
+            time.tzset()
 
     async def test_mixed_datetime_window_error_is_422(
         self,

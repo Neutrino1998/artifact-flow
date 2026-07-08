@@ -17,10 +17,10 @@ def _parse_iso_datetime(value: str) -> datetime:
     """Accept ISO8601 strings including trailing-Z and local naive forms."""
     dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if dt.tzinfo is None or dt.utcoffset() is None:
-        local_tz = datetime.now().astimezone().tzinfo
-        if local_tz is None:
-            raise ValueError("server local timezone is unavailable")
-        dt = dt.replace(tzinfo=local_tz)
+        # Naive admin-entered datetimes mean "server local time". Let Python
+        # resolve the local timezone for the target date, so DST deployments
+        # use winter/summer offsets correctly instead of reusing today's offset.
+        dt = dt.astimezone()
     return dt
 
 
