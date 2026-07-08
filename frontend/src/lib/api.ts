@@ -457,8 +457,12 @@ export async function bulkDeleteConversations(ids: string[]) {
   return res;
 }
 
+type ActiveStreamResponse =
+  | { active: true; conversation_id: string; message_id: string; stream_url: string }
+  | { active: false; conversation_id: string; message_id: null; stream_url: null };
+
 export async function getActiveStream(conversationId: string) {
-  return request<{ conversation_id: string; message_id: string; stream_url: string }>(
+  return request<ActiveStreamResponse>(
     `/api/v1/chat/${conversationId}/active-stream`
   );
 }

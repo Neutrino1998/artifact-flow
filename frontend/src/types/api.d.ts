@@ -109,7 +109,7 @@ export interface paths {
         };
         /**
          * Get Active Stream
-         * @description 查询会话是否有活跃的执行流，用于断线重连
+         * @description 查询会话是否有活跃的执行流，用于断线重连。无活跃流是正常空状态。
          */
         get: operations["get_active_stream_api_v1_chat__conv_id__active_stream_get"];
         put?: never;
@@ -1358,6 +1358,32 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * ActiveStreamResponse
+         * @description GET /api/v1/chat/{conv_id}/active-stream response
+         */
+        ActiveStreamResponse: {
+            /**
+             * Active
+             * @description Whether the conversation has a reconnectable live stream
+             */
+            active: boolean;
+            /**
+             * Conversation Id
+             * @description Conversation ID
+             */
+            conversation_id: string;
+            /**
+             * Message Id
+             * @description Active execution message ID, when active
+             */
+            message_id: string | null;
+            /**
+             * Stream Url
+             * @description SSE endpoint URL, when active
+             */
+            stream_url: string | null;
+        };
         /**
          * AdminConversationEventsResponse
          * @description GET /api/v1/admin/conversations/{conv_id}/events response
@@ -3444,7 +3470,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ActiveStreamResponse"];
                 };
             };
             /** @description Validation Error */

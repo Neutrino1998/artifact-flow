@@ -572,6 +572,7 @@ export function useSSE() {
         try {
           const active = await api.getActiveStream(conversationId);
           if (_sharedAbortController !== ownerController || ownerController.signal.aborted) return;
+          if (!active.active) continue;
 
           // Execution still active — reconnect with lastEventId
           setReconnecting(false);
@@ -618,7 +619,7 @@ export function useSSE() {
           );
           return; // SSE connection initiated (handlers take over)
         } catch {
-          // getActiveStream failed (404 or network error) — try next attempt
+          // getActiveStream failed (network/server error) — try next attempt
           continue;
         }
       }
@@ -706,13 +707,14 @@ export function useSSE() {
     async (conversationId: string) => {
       try {
         const active = await api.getActiveStream(conversationId);
+        if (!active.active) return;
         // The probe is async and switchConversation can fire several in
         // quick succession (e.g. B → C). A late-resolving probe for B must
         // not steal the SSE connection from the now-active C.
         if (useConversationStore.getState().current?.id !== conversationId) return;
         connect(active.stream_url, conversationId, active.message_id);
       } catch {
-        // 404 (no active execution) / 410 (stream expired) — nothing live to attach to
+        // Network/server error — nothing live to attach to for now.
       }
     },
     [connect]

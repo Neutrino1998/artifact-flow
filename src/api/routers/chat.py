@@ -34,6 +34,7 @@ from api.schemas.chat import (
     CancelResponse,
     ChatRequest,
     ChatResponse,
+    ActiveStreamResponse,
     InjectRequest,
     InjectResponse,
     ResumeRequest,
@@ -242,7 +243,7 @@ async def send_message(
     )
 
 
-@router.get("/{conv_id}/active-stream")
+@router.get("/{conv_id}/active-stream", response_model=ActiveStreamResponse)
 async def get_active_stream(
     conv_id: str,
     current_user: TokenPayload = Depends(get_current_user),
@@ -250,22 +251,23 @@ async def get_active_stream(
     stream_transport: StreamTransport = Depends(get_stream_transport),
     runner: ExecutionRunner = Depends(get_execution_runner),
 ):
-    """查询会话是否有活跃的执行流，用于断线重连"""
+    """查询会话是否有活跃的执行流，用于断线重连。无活跃流是正常空状态。"""
     await _verify_ownership(conv_id, current_user, conversation_manager)
 
     message_id = await runner.store.get_leased_message_id(conv_id)
     if not message_id:
-        raise HTTPException(status_code=404, detail="No active execution")
+        return ActiveStreamResponse(active=False, conversation_id=conv_id)
 
     # 校验 stream 是否仍存活（meta key 未过期）
     if not await stream_transport.is_stream_alive(message_id):
-        raise HTTPException(status_code=410, detail="Stream expired")
+        return ActiveStreamResponse(active=False, conversation_id=conv_id)
 
-    return {
-        "conversation_id": conv_id,
-        "message_id": message_id,
-        "stream_url": f"/api/v1/stream/{message_id}",
-    }
+    return ActiveStreamResponse(
+        active=True,
+        conversation_id=conv_id,
+        message_id=message_id,
+        stream_url=f"/api/v1/stream/{message_id}",
+    )
 
 
 @router.post("/{conv_id}/inject", response_model=InjectResponse)
@@ -623,5 +625,4 @@ async def resume_execution(
     return ResumeResponse(
         stream_url=f"/api/v1/stream/{message_id}"
     )
-
 

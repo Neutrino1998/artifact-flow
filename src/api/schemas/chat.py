@@ -89,6 +89,14 @@ class ChatResponse(BaseModel):
     stream_url: str = Field(..., description="SSE endpoint URL for streaming")
 
 
+class ActiveStreamResponse(BaseModel):
+    """GET /api/v1/chat/{conv_id}/active-stream response"""
+    active: bool = Field(..., description="Whether the conversation has a reconnectable live stream")
+    conversation_id: str = Field(..., description="Conversation ID")
+    message_id: Optional[str] = Field(None, description="Active execution message ID, when active")
+    stream_url: Optional[str] = Field(None, description="SSE endpoint URL, when active")
+
+
 class ResumeResponse(BaseModel):
     """POST /api/v1/chat/{conv_id}/resume response"""
     stream_url: str = Field(..., description="New SSE endpoint URL")

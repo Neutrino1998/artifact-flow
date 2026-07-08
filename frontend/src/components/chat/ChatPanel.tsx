@@ -149,6 +149,7 @@ export default function ChatPanel() {
               alt=""
               width={578}
               height={316}
+              priority
               className="dark:hidden w-72 h-auto translate-y-6"
             />
             <Image
@@ -156,6 +157,7 @@ export default function ChatPanel() {
               alt=""
               width={578}
               height={316}
+              priority
               className="hidden dark:block w-72 h-auto translate-y-6"
             />
           </div>

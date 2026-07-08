@@ -93,6 +93,45 @@ async def conv_with_messages(
 
 
 # ============================================================
+# TestActiveStream
+# ============================================================
+
+
+class TestActiveStream:
+
+    async def test_no_active_stream_is_empty_state(
+        self, client: AsyncClient, conv_with_messages
+    ):
+        conv_id, _ = conv_with_messages
+        resp = await client.get(f"/api/v1/chat/{conv_id}/active-stream")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body == {
+            "active": False,
+            "conversation_id": conv_id,
+            "message_id": None,
+            "stream_url": None,
+        }
+
+    async def test_expired_stream_is_empty_state(
+        self, client: AsyncClient, app, conv_with_messages
+    ):
+        conv_id, msg_ids = conv_with_messages
+        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        assert await runner.store.try_acquire_lease(conv_id, msg_ids[0]) is None
+        try:
+            resp = await client.get(f"/api/v1/chat/{conv_id}/active-stream")
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["active"] is False
+            assert body["conversation_id"] == conv_id
+            assert body["message_id"] is None
+            assert body["stream_url"] is None
+        finally:
+            await runner.store.release_lease(conv_id, msg_ids[0])
+
+
+# ============================================================
 # TestInject
 # ============================================================
 
