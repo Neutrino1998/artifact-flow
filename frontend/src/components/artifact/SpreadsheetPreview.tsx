@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { fetchArtifactRawBlob } from '@/lib/api';
 import { useArtifactStore } from '@/stores/artifactStore';
 import BinaryFilePreview from './BinaryFilePreview';
@@ -47,6 +47,7 @@ export default function SpreadsheetPreview({
   const [activeSheet, setActiveSheet] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
     if (pendingFlush) return;
@@ -116,7 +117,8 @@ export default function SpreadsheetPreview({
     );
   }
 
-  const sheet = sheets[Math.min(activeSheet, Math.max(0, sheets.length - 1))];
+  const activeIndex = Math.min(activeSheet, Math.max(0, sheets.length - 1));
+  const sheet = sheets[activeIndex];
   if (!sheet) {
     return (
       <BinaryFilePreview
@@ -132,6 +134,28 @@ export default function SpreadsheetPreview({
   const columnCount = Math.max(1, ...sheet.rows.map((row) => row.length));
   const header = sheet.rows[0] ?? [];
   const bodyRows = sheet.rows.slice(1);
+  const tabId = (idx: number) => `spreadsheet-sheet-tab-${artifactId}-${idx}`;
+  const panelId = (idx: number) => `spreadsheet-sheet-panel-${artifactId}-${idx}`;
+  const selectSheet = (idx: number, focusTab = false) => {
+    if (sheets.length === 0) return;
+    const nextIndex = (idx + sheets.length) % sheets.length;
+    setActiveSheet(nextIndex);
+    if (focusTab) {
+      requestAnimationFrame(() => tabRefs.current[nextIndex]?.focus());
+    }
+  };
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, idx: number) => {
+    let nextIndex: number | null = null;
+
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = idx + 1;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = idx - 1;
+    if (event.key === 'Home') nextIndex = 0;
+    if (event.key === 'End') nextIndex = sheets.length - 1;
+
+    if (nextIndex === null) return;
+    event.preventDefault();
+    selectSheet(nextIndex, true);
+  };
 
   return (
     <div className="h-full min-h-0 flex flex-col bg-white dark:bg-surface-dark">
@@ -143,13 +167,20 @@ export default function SpreadsheetPreview({
         {sheets.map((item, idx) => (
           <button
             key={`${item.name}-${idx}`}
+            ref={(node) => {
+              tabRefs.current[idx] = node;
+            }}
             type="button"
             role="tab"
-            aria-selected={idx === activeSheet}
-            onClick={() => setActiveSheet(idx)}
-            className={`-mb-px shrink-0 rounded-t-md border px-3 py-1.5 text-xs font-medium transition-colors ${
-              idx === activeSheet
-                ? 'border-border border-b-white bg-white text-text-primary shadow-sm dark:border-border-dark dark:border-b-surface-dark dark:bg-surface-dark dark:text-text-primary-dark'
+            id={tabId(idx)}
+            aria-controls={panelId(idx)}
+            aria-selected={idx === activeIndex}
+            tabIndex={idx === activeIndex ? 0 : -1}
+            onClick={() => selectSheet(idx)}
+            onKeyDown={(event) => handleTabKeyDown(event, idx)}
+            className={`relative -mb-px shrink-0 rounded-t-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+              idx === activeIndex
+                ? 'z-10 border-border border-b-white bg-white text-text-primary shadow-sm dark:border-border-dark dark:border-b-surface-dark dark:bg-surface-dark dark:text-text-primary-dark'
                 : 'border-transparent bg-panel-accent text-text-secondary hover:border-border hover:bg-white hover:text-text-primary dark:bg-panel-accent-dark dark:text-text-secondary-dark dark:hover:border-border-dark dark:hover:bg-surface-dark dark:hover:text-text-primary-dark'
             }`}
           >
@@ -157,51 +188,66 @@ export default function SpreadsheetPreview({
           </button>
         ))}
       </div>
-      <div className="flex items-center gap-3 px-4 py-2 border-b border-border dark:border-border-dark text-xs text-text-tertiary dark:text-text-tertiary-dark">
-        <span>{sheet.totalRows} 行</span>
-        <span>{sheet.totalColumns} 列</span>
-        {(sheet.truncatedRows || sheet.truncatedColumns || sheets.length === MAX_SHEETS) && (
-          <span>预览前 {MAX_ROWS} 行 / {MAX_COLUMNS} 列 / {MAX_SHEETS} 个工作表</span>
-        )}
-      </div>
-      <div className="flex-1 overflow-auto">
-        <table className="min-w-full border-collapse text-xs">
-          <thead className="sticky top-0 z-10 bg-bg dark:bg-bg-dark">
-            <tr>
-              <th className="sticky left-0 z-20 w-12 border-b border-r border-border dark:border-border-dark bg-bg dark:bg-bg-dark px-2 py-1 text-right font-mono text-text-tertiary dark:text-text-tertiary-dark">
-                #
-              </th>
-              {Array.from({ length: columnCount }).map((_, idx) => (
-                <th
-                  key={idx}
-                  className="max-w-72 border-b border-r border-border dark:border-border-dark px-3 py-1.5 text-left font-semibold text-text-primary dark:text-text-primary-dark"
-                  title={header[idx] ?? ''}
-                >
-                  <span className="block truncate">{displayCell(header[idx] ?? `列 ${idx + 1}`)}</span>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {bodyRows.map((row, rowIdx) => (
-              <tr key={rowIdx} className="hover:bg-bg dark:hover:bg-bg-dark">
-                <td className="sticky left-0 w-12 border-b border-r border-border dark:border-border-dark bg-white dark:bg-surface-dark px-2 py-1 text-right font-mono text-text-tertiary dark:text-text-tertiary-dark">
-                  {rowIdx + 2}
-                </td>
-                {Array.from({ length: columnCount }).map((_, colIdx) => (
-                  <td
-                    key={colIdx}
-                    className="max-w-72 border-b border-r border-border dark:border-border-dark px-3 py-1.5 align-top text-text-primary dark:text-text-primary-dark"
-                    title={row[colIdx] ?? ''}
-                  >
-                    <span className="block truncate">{displayCell(row[colIdx]) || '\u00A0'}</span>
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {sheets.map((item, idx) => (
+        <div
+          key={`${item.name}-${idx}-panel`}
+          id={panelId(idx)}
+          role="tabpanel"
+          aria-labelledby={tabId(idx)}
+          hidden={idx !== activeIndex}
+          className="flex min-h-0 flex-1 flex-col bg-white dark:bg-surface-dark"
+        >
+          {idx === activeIndex && (
+            <>
+              <div className="flex items-center gap-3 px-4 py-2 border-b border-border dark:border-border-dark text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                <span>{sheet.totalRows} 行</span>
+                <span>{sheet.totalColumns} 列</span>
+                {(sheet.truncatedRows || sheet.truncatedColumns || sheets.length === MAX_SHEETS) && (
+                  <span>预览前 {MAX_ROWS} 行 / {MAX_COLUMNS} 列 / {MAX_SHEETS} 个工作表</span>
+                )}
+              </div>
+              <div className="flex-1 overflow-auto">
+                <table className="min-w-full border-collapse text-xs">
+                  <thead className="sticky top-0 z-10 bg-bg dark:bg-bg-dark">
+                    <tr>
+                      <th className="sticky left-0 z-20 w-12 border-b border-r border-border dark:border-border-dark bg-bg dark:bg-bg-dark px-2 py-1 text-right font-mono text-text-tertiary dark:text-text-tertiary-dark">
+                        #
+                      </th>
+                      {Array.from({ length: columnCount }).map((_, colIdx) => (
+                        <th
+                          key={colIdx}
+                          className="max-w-72 border-b border-r border-border dark:border-border-dark px-3 py-1.5 text-left font-semibold text-text-primary dark:text-text-primary-dark"
+                          title={header[colIdx] ?? ''}
+                        >
+                          <span className="block truncate">{displayCell(header[colIdx] ?? `列 ${colIdx + 1}`)}</span>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bodyRows.map((row, rowIdx) => (
+                      <tr key={rowIdx} className="hover:bg-bg dark:hover:bg-bg-dark">
+                        <td className="sticky left-0 w-12 border-b border-r border-border dark:border-border-dark bg-white dark:bg-surface-dark px-2 py-1 text-right font-mono text-text-tertiary dark:text-text-tertiary-dark">
+                          {rowIdx + 2}
+                        </td>
+                        {Array.from({ length: columnCount }).map((_, colIdx) => (
+                          <td
+                            key={colIdx}
+                            className="max-w-72 border-b border-r border-border dark:border-border-dark px-3 py-1.5 align-top text-text-primary dark:text-text-primary-dark"
+                            title={row[colIdx] ?? ''}
+                          >
+                            <span className="block truncate">{displayCell(row[colIdx]) || '\u00A0'}</span>
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
