@@ -150,8 +150,9 @@ sandbox_scratch_root() {
 }
 
 verify_adjacent_sha() {
-  local file="$1" sha="$file.sha256"
-  [[ -f "$sha" ]] || return 0
+  local file="$1"
+  local sha="$file.sha256"
+  [[ -f "$sha" ]] || { echo "missing checksum file: $sha" >&2; return 1; }
   ( cd "$(dirname "$file")" && sha256sum -c "$(basename "$sha")" )
 }
 

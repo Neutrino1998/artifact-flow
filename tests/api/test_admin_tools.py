@@ -499,6 +499,22 @@ endpoint: https://api.example.com/weather
             data[data_offset] ^= 0xFF
         return bytes(data)
 
+    @staticmethod
+    def _unsupported_compression_zip():
+        data = bytearray(TestSeedImportExport._zip_with({
+            "tools/weather.md": b"""---
+name: weather
+type: http
+endpoint: https://api.example.com/weather
+---
+""",
+        }))
+        for signature, method_offset in ((b"PK\x03\x04", 8), (b"PK\x01\x02", 10)):
+            pos = data.find(signature)
+            assert pos >= 0
+            data[pos + method_offset:pos + method_offset + 2] = (99).to_bytes(2, "little")
+        return bytes(data)
+
     async def test_export_dynamic_seed_bundle_masks_credentials(
         self, admin_client: AsyncClient, key
     ):
@@ -619,6 +635,23 @@ default_permission: confirm
         resp = await admin_client.post(
             "/api/v1/admin/tools/units/import",
             files={"file": ("broken.zip", self._corrupt_member_zip(), "application/zip")},
+        )
+
+        assert resp.status_code == 400
+        assert "extract" in resp.json()["detail"]
+
+    async def test_import_unsupported_zip_compression_returns_400(
+        self, admin_client: AsyncClient
+    ):
+        resp = await admin_client.post(
+            "/api/v1/admin/tools/units/import",
+            files={
+                "file": (
+                    "unsupported-compression.zip",
+                    self._unsupported_compression_zip(),
+                    "application/zip",
+                )
+            },
         )
 
         assert resp.status_code == 400

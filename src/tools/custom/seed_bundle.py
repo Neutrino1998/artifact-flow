@@ -299,7 +299,13 @@ def _extract_seed_zip(root: Path, blob: bytes) -> None:
             try:
                 with zf.open(info) as src, open(target, "wb") as dst:
                     shutil.copyfileobj(src, dst, length=64 * 1024)
-            except (zipfile.BadZipFile, zlib.error, RuntimeError, OSError) as e:
+            except (
+                zipfile.BadZipFile,
+                zlib.error,
+                RuntimeError,
+                NotImplementedError,
+                OSError,
+            ) as e:
                 raise ToolSeedBundleError(
                     f"failed to extract seed bundle file '{info.filename}'"
                 ) from e

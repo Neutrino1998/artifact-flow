@@ -25,7 +25,7 @@ from utils.skill_validator import validate_skill_zip
 ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = ROOT / "config" / "skills-src"
 ZIP_DIR = ROOT / "config" / "skills"
-PREINSTALLED = ["docx", "pdf", "pptx", "skill-creator", "xlsx"]
+PREINSTALLED = ["dataviz", "docx", "pdf", "pptx", "skill-creator", "xlsx"]
 # 纯散文预装(SKILL.md-only 目录源码;入库时也会生成单文件 zip bundle)
 PREINSTALLED_PROSE = ["html-artifact-design"]
 
