@@ -20,13 +20,34 @@
  * Interactive (JS-running) HTML is deliberately NOT this component — that needs
  * a harder boundary (separate origin / allow-scripts sandbox) and is deferred.
  */
+const SRCDOC_BASE_TAG = '<base href="about:srcdoc" />';
+
+export function withSrcdocBase(content: string): string {
+  const headOpen = /<head(?:\s[^>]*)?>/i;
+  if (headOpen.test(content)) {
+    return content.replace(headOpen, (match) => `${match}\n${SRCDOC_BASE_TAG}`);
+  }
+
+  const htmlOpen = /<html(?:\s[^>]*)?>/i;
+  if (htmlOpen.test(content)) {
+    return content.replace(htmlOpen, (match) => `${match}\n<head>${SRCDOC_BASE_TAG}</head>`);
+  }
+
+  const doctype = /<!doctype html[^>]*>/i;
+  if (doctype.test(content)) {
+    return content.replace(doctype, (match) => `${match}\n<head>${SRCDOC_BASE_TAG}</head>`);
+  }
+
+  return `<head>${SRCDOC_BASE_TAG}</head>\n${content}`;
+}
+
 export default function HtmlPreview({ content }: { content: string }) {
   return (
     <iframe
       title="HTML preview"
       sandbox=""
       referrerPolicy="no-referrer"
-      srcDoc={content}
+      srcDoc={withSrcdocBase(content)}
       className="block w-full h-full border-0 bg-white"
     />
   );
