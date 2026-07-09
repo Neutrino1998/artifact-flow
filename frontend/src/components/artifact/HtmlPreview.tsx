@@ -39,6 +39,8 @@ const PREVIEW_CSP_META = `<meta http-equiv="Content-Security-Policy" content="${
   PREVIEW_CSP
 )}">`;
 
+export const HTML_PREVIEW_SANDBOX = 'allow-same-origin';
+
 function escapeAttribute(value: string): string {
   return value
     .replaceAll('&', '&amp;')
@@ -77,12 +79,16 @@ export default function HtmlPreview({ content }: { content: string }) {
     return () => URL.revokeObjectURL(url);
   }, [content]);
 
+  if (!previewUrl) {
+    return <div className="block w-full h-full border-0 bg-white" />;
+  }
+
   return (
     <iframe
       title="HTML preview"
-      sandbox="allow-same-origin"
+      sandbox={HTML_PREVIEW_SANDBOX}
       referrerPolicy="no-referrer"
-      src={previewUrl ?? 'about:blank'}
+      src={previewUrl}
       className="block w-full h-full border-0 bg-white"
     />
   );

@@ -1,6 +1,5 @@
-import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import HtmlPreview, { withPreviewCsp } from './HtmlPreview';
+import { HTML_PREVIEW_SANDBOX, withPreviewCsp } from './HtmlPreview';
 
 describe('withPreviewCsp', () => {
   it('inserts the preview CSP first inside an existing head', () => {
@@ -32,8 +31,6 @@ describe('withPreviewCsp', () => {
   });
 
   it('keeps same-origin sandboxing so blob fragment links can scroll natively', () => {
-    const html = renderToStaticMarkup(<HtmlPreview content={'<a href="#slide-4">4</a>'} />);
-
-    expect(html).toContain('sandbox="allow-same-origin"');
+    expect(HTML_PREVIEW_SANDBOX).toBe('allow-same-origin');
   });
 });
