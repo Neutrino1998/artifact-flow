@@ -26,6 +26,7 @@ describe('withPreviewCsp', () => {
 
     const preview = parsePreview(html);
 
+    expect(preview.compatMode).toBe('BackCompat');
     expect(previewCspMeta(preview)?.content).toContain("default-src 'none'");
     expect(preview.body.querySelector('a')?.getAttribute('href')).toBe('#slide-4');
   });

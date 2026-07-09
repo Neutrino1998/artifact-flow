@@ -44,8 +44,8 @@ function makePreviewCspMeta(document: Document): HTMLMetaElement {
   return meta;
 }
 
-function serializeDoctype(doctype: DocumentType | null): string {
-  if (!doctype) return '<!doctype html>';
+function serializeDoctype(doctype: DocumentType | null): string | null {
+  if (!doctype) return null;
 
   if (doctype.publicId) {
     const systemId = doctype.systemId ? ` "${doctype.systemId}"` : '';
@@ -62,7 +62,8 @@ function serializeDoctype(doctype: DocumentType | null): string {
 export function withPreviewCsp(content: string): string {
   const document = new DOMParser().parseFromString(content, 'text/html');
   document.head.prepend(makePreviewCspMeta(document));
-  return `${serializeDoctype(document.doctype)}\n${document.documentElement.outerHTML}`;
+  const doctype = serializeDoctype(document.doctype);
+  return doctype ? `${doctype}\n${document.documentElement.outerHTML}` : document.documentElement.outerHTML;
 }
 
 export default function HtmlPreview({ content }: { content: string }) {
