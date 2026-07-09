@@ -35,37 +35,34 @@ const PREVIEW_CSP = [
   "form-action 'none'",
 ].join('; ');
 
-const PREVIEW_CSP_META = `<meta http-equiv="Content-Security-Policy" content="${escapeAttribute(
-  PREVIEW_CSP
-)}">`;
-
 export const HTML_PREVIEW_SANDBOX = 'allow-same-origin';
 
-function escapeAttribute(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('"', '&quot;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;');
+function makePreviewCspMeta(document: Document): HTMLMetaElement {
+  const meta = document.createElement('meta');
+  meta.httpEquiv = 'Content-Security-Policy';
+  meta.content = PREVIEW_CSP;
+  return meta;
+}
+
+function serializeDoctype(doctype: DocumentType | null): string {
+  if (!doctype) return '<!doctype html>';
+
+  if (doctype.publicId) {
+    const systemId = doctype.systemId ? ` "${doctype.systemId}"` : '';
+    return `<!doctype ${doctype.name} PUBLIC "${doctype.publicId}"${systemId}>`;
+  }
+
+  if (doctype.systemId) {
+    return `<!doctype ${doctype.name} SYSTEM "${doctype.systemId}">`;
+  }
+
+  return `<!doctype ${doctype.name}>`;
 }
 
 export function withPreviewCsp(content: string): string {
-  const headOpen = /<head(?:\s[^>]*)?>/i;
-  if (headOpen.test(content)) {
-    return content.replace(headOpen, (match) => `${match}\n${PREVIEW_CSP_META}`);
-  }
-
-  const htmlOpen = /<html(?:\s[^>]*)?>/i;
-  if (htmlOpen.test(content)) {
-    return content.replace(htmlOpen, (match) => `${match}\n<head>${PREVIEW_CSP_META}</head>`);
-  }
-
-  const doctype = /<!doctype html[^>]*>/i;
-  if (doctype.test(content)) {
-    return content.replace(doctype, (match) => `${match}\n<head>${PREVIEW_CSP_META}</head>`);
-  }
-
-  return `<head>${PREVIEW_CSP_META}</head>\n${content}`;
+  const document = new DOMParser().parseFromString(content, 'text/html');
+  document.head.prepend(makePreviewCspMeta(document));
+  return `${serializeDoctype(document.doctype)}\n${document.documentElement.outerHTML}`;
 }
 
 export default function HtmlPreview({ content }: { content: string }) {
