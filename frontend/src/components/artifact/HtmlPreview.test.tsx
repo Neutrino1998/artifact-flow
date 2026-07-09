@@ -1,5 +1,6 @@
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { withPreviewCsp } from './HtmlPreview';
+import HtmlPreview, { withPreviewCsp } from './HtmlPreview';
 
 describe('withPreviewCsp', () => {
   it('inserts the preview CSP first inside an existing head', () => {
@@ -28,5 +29,11 @@ describe('withPreviewCsp', () => {
 
     expect(preview).toContain('<head><meta http-equiv="Content-Security-Policy"');
     expect(preview).toContain("</head>\n<a href=\"#slide-4\">4</a><section id=\"slide-4\">Slide</section>");
+  });
+
+  it('keeps same-origin sandboxing so blob fragment links can scroll natively', () => {
+    const html = renderToStaticMarkup(<HtmlPreview content={'<a href="#slide-4">4</a>'} />);
+
+    expect(html).toContain('sandbox="allow-same-origin"');
   });
 });

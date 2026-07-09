@@ -6,10 +6,10 @@ import { useEffect, useState } from 'react';
  * Static preview for `text/html` artifacts.
  *
  * Security model — two orthogonal gates, both shut to the minimum:
- *  1. `sandbox=""` (empty = ALL restrictions on): NO script execution, opaque
- *     origin (can't reach parent token/localStorage/DOM), no form submit, no
- *     top-navigation, no popups. The whole token-theft / same-origin-XSS class
- *     simply has no execution body here.
+ *  1. `sandbox="allow-same-origin"`: NO script execution, no form submit, no
+ *     top-navigation, no popups. Keeping the blob document's origin is needed
+ *     for native `href="#section"` scrolling; script execution remains the
+ *     active boundary for parent token/localStorage/DOM access.
  *  2. Preview CSP: the blob document starts with a restrictive meta CSP that
  *     keeps scripts, connections, forms, frames, and external resources closed.
  *     Inline CSS and data/blob images are allowed for static authored previews.
@@ -80,7 +80,7 @@ export default function HtmlPreview({ content }: { content: string }) {
   return (
     <iframe
       title="HTML preview"
-      sandbox=""
+      sandbox="allow-same-origin"
       referrerPolicy="no-referrer"
       src={previewUrl ?? 'about:blank'}
       className="block w-full h-full border-0 bg-white"
