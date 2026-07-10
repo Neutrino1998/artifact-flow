@@ -130,6 +130,21 @@ check_postgres_infra_keys() {
   (( missing == 0 )) && ok "deploy/.env bundled Postgres values are set"
 }
 
+validate_fernet_key() {
+  local key="$1"
+  command -v python3 >/dev/null 2>&1 || return 2
+  python3 - "$key" <<'PY' >/dev/null 2>&1
+import base64
+import sys
+
+try:
+    raw = base64.urlsafe_b64decode(sys.argv[1].encode())
+except Exception:
+    sys.exit(1)
+sys.exit(0 if len(raw) == 32 else 1)
+PY
+}
+
 warn_unused_postgres_placeholders() {
   local key value
   for key in POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD; do
@@ -222,6 +237,15 @@ cmd_check() {
       elif [[ "$value" == *CHANGE_ME* ]]; then
         bad "deploy/.env required value still contains CHANGE_ME: $key"
         missing=1
+      elif [[ "$key" == "ARTIFACTFLOW_CREDENTIAL_KEY" ]]; then
+        if validate_fernet_key "$value"; then
+          ok "deploy/.env ARTIFACTFLOW_CREDENTIAL_KEY is a valid Fernet key"
+        else
+          case "$?" in
+            2) info "python3 not found; skipping Fernet key format check" ;;
+            *) bad "deploy/.env ARTIFACTFLOW_CREDENTIAL_KEY is not a valid Fernet key" ;;
+          esac
+        fi
       fi
     done
     (( missing == 0 )) && ok "deploy/.env common required values are set"

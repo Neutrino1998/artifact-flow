@@ -10,11 +10,12 @@ set -euo pipefail
 #
 # Usage:
 #   sandbox/gvisor-pkg/fetch-and-package.sh
-#   GVISOR_VERSION=20260504.0 ARCH=x86_64 sandbox/gvisor-pkg/fetch-and-package.sh
+#   GVISOR_VERSION=20260706.0 ARCH=x86_64 sandbox/gvisor-pkg/fetch-and-package.sh
 #
-# Version pinned to the one validated in the eval doc (§3): release-20260504.0.
+# Version pinned to the 2026-07-09 ARM intranet deployment download result.
+# The older 20260504.0 point-release URL was not reachable from the build host.
 
-GVISOR_VERSION="${GVISOR_VERSION:-20260504.0}"
+GVISOR_VERSION="${GVISOR_VERSION:-20260706.0}"
 ARCH="${ARCH:-x86_64}"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -166,6 +166,87 @@ env_file_value() {
   printf '%s\n' "$value"
 }
 
+env_file_set() {
+  local env_file="$1" key="$2" value="$3" tmp
+  tmp="${env_file}.tmp"
+  awk -v key="$key" -v value="$value" '
+    BEGIN { done = 0 }
+    $0 ~ "^" key "=" {
+      print key "=" value
+      done = 1
+      next
+    }
+    { print }
+    END {
+      if (!done) print key "=" value
+    }
+  ' "$env_file" > "$tmp" && mv "$tmp" "$env_file"
+}
+
+gen_urlsafe_secret() {
+  local bytes="${1:-32}" keep_padding="${2:-0}"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$bytes" "$keep_padding" <<'PY'
+import base64
+import os
+import secrets
+import sys
+
+size = int(sys.argv[1])
+keep_padding = sys.argv[2] == "1"
+if keep_padding:
+    print(base64.urlsafe_b64encode(os.urandom(size)).decode())
+else:
+    print(secrets.token_urlsafe(size))
+PY
+  elif command -v openssl >/dev/null 2>&1; then
+    if [[ "$keep_padding" == 1 ]]; then
+      openssl rand -base64 "$bytes" | tr '+/' '-_' | tr -d '\n'
+    else
+      openssl rand -base64 "$bytes" | tr '+/' '-_' | tr -d '=\n'
+    fi
+  else
+    die "cannot generate secrets: need python3 or openssl"
+  fi
+}
+
+seed_env_generated_values() {
+  local env_file="$1" jwt credential pg_password pg_user pg_db db_url generated=0
+  [[ -f "$env_file" ]] || return 0
+
+  jwt="$(env_file_value "$env_file" ARTIFACTFLOW_JWT_SECRET || true)"
+  if [[ -z "$jwt" || "$jwt" == *CHANGE_ME* ]]; then
+    env_file_set "$env_file" ARTIFACTFLOW_JWT_SECRET "$(gen_urlsafe_secret 32 0)"
+    generated=$((generated + 1))
+  fi
+
+  credential="$(env_file_value "$env_file" ARTIFACTFLOW_CREDENTIAL_KEY || true)"
+  if [[ -z "$credential" || "$credential" == *CHANGE_ME* ]]; then
+    # Fernet key = urlsafe-base64 encoding of exactly 32 random bytes, padding kept.
+    env_file_set "$env_file" ARTIFACTFLOW_CREDENTIAL_KEY "$(gen_urlsafe_secret 32 1)"
+    generated=$((generated + 1))
+  fi
+
+  pg_password="$(env_file_value "$env_file" POSTGRES_PASSWORD || true)"
+  if [[ -z "$pg_password" || "$pg_password" == *CHANGE_ME* ]]; then
+    pg_password="$(gen_urlsafe_secret 24 0)"
+    pg_user="$(env_file_value "$env_file" POSTGRES_USER || true)"
+    pg_db="$(env_file_value "$env_file" POSTGRES_DB || true)"
+    pg_user="${pg_user:-artifactflow}"
+    pg_db="${pg_db:-artifactflow}"
+    env_file_set "$env_file" POSTGRES_PASSWORD "$pg_password"
+    db_url="$(env_file_value "$env_file" ARTIFACTFLOW_DATABASE_URL || true)"
+    if [[ -z "$db_url" || "$db_url" == *CHANGE_ME* || "$db_url" == *@postgres:* ]]; then
+      env_file_set "$env_file" ARTIFACTFLOW_DATABASE_URL "postgresql+asyncpg://${pg_user}:${pg_password}@postgres:5432/${pg_db}"
+    fi
+    generated=$((generated + 1))
+  fi
+
+  if (( generated > 0 )); then
+    ok "generated first-run secrets in $env_file (existing files are never overwritten)"
+  fi
+}
+
 sandbox_scratch_root_local() {
   local root=""
   root="$(env_file_value "$DEPLOY_DIR/.env" ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT || true)"
@@ -475,6 +556,7 @@ EOF
   elif [[ -f "$DEPLOY_DIR/.env.intranet.example" ]]; then
     cp "$DEPLOY_DIR/.env.intranet.example" "$DEPLOY_DIR/.env" || die "failed to seed deploy/.env"
     ok "seeded $DEPLOY_DIR/.env from .env.intranet.example"
+    seed_env_generated_values "$DEPLOY_DIR/.env"
   else
     info "$DEPLOY_DIR/.env.intranet.example not found; create $DEPLOY_DIR/.env manually"
   fi
