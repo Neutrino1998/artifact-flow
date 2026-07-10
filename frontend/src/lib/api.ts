@@ -190,7 +190,7 @@ export function login(body: LoginRequest) {
       const requestId = res.headers.get('X-Request-ID') ?? undefined;
       throw new ApiError(
         res.status,
-        formatApiError(res.status, text),
+        formatApiError(res.status, text, res.status >= 500 ? requestId : undefined),
         undefined,
         requestId,
       );

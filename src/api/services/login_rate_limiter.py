@@ -32,6 +32,29 @@ end
 return n
 """
 
+_LUA_RETRY_AFTER = """
+local n = redis.call('GET', KEYS[1])
+if not n or tonumber(n) < tonumber(ARGV[1]) then
+  return nil
+end
+return redis.call('PTTL', KEYS[1])
+"""
+
+
+def _seconds_from_pttl(pttl: Optional[int], window_sec: int) -> Optional[int]:
+    if pttl is None:
+        return None
+    pttl = int(pttl)
+    if pttl > 0:
+        return max(1, math.ceil(pttl / 1000))
+    if pttl == 0:
+        return 1
+    if pttl == -2:
+        return None
+    # -1 means the key exists without an expiry. That should not be produced by
+    # record_failure, so fail closed with the configured window.
+    return window_sec
+
 
 class RedisLoginRateLimiter:
     """Redis 实现 —— 多 worker 共享失败计数。"""
@@ -43,6 +66,7 @@ class RedisLoginRateLimiter:
         self._prefix = key_prefix
         # register_script 自动处理 NOSCRIPT 重试(与 redis_runtime_store 同模式)
         self._incr = redis.register_script(_LUA_INCR_FAILURE)
+        self._retry_after = redis.register_script(_LUA_RETRY_AFTER)
 
     def _k(self, key: str) -> str:
         base = f"login:fail:{key}"
@@ -53,16 +77,8 @@ class RedisLoginRateLimiter:
         return n is not None and int(n) >= self._max
 
     async def retry_after(self, key: str) -> Optional[int]:
-        redis_key = self._k(key)
-        n = await self._redis.get(redis_key)
-        if n is None or int(n) < self._max:
-            return None
-        ttl = await self._redis.ttl(redis_key)
-        if ttl is not None and int(ttl) > 0:
-            return int(ttl)
-        # Should not happen for keys created by record_failure, but fail closed
-        # with the configured window so the caller can still show useful UX.
-        return self._window
+        pttl = await self._retry_after(keys=[self._k(key)], args=[self._max])
+        return _seconds_from_pttl(pttl, self._window)
 
     async def record_failure(self, key: str) -> None:
         await self._incr(keys=[self._k(key)], args=[self._window])
