@@ -407,25 +407,33 @@ bundle 内容覆盖。
 | `config/agents/*.md` / `config/tools/*.md` / `config/skills/`（DB seeded registry） | 推荐重新打 config release 并 `fleet deploy`；紧急热修才直接编辑宿主机文件 | 跑一次 release/reconcile gate 后再重建 backend；compose flags 必须与当前部署一致（启用沙盒时也带 `-f deploy/docker-compose.sandbox.yml`） |
 | `config/site/notifications.json`（左栏通知） | 管理员菜单「通知管理」或直接编辑宿主机文件，schema 见 `config/site/README.md` | **无需 restart** — backend 只写 `config/site` 挂载目录，frontend 只读服务同一目录；前端 60s 轮询自动重拉（标签回前台时立即重拉） |
 | `config/site/welcome_tips.json` / `branding.json`（欢迎页提示 / 版权页脚） | 直接编辑宿主机文件；`branding.json` 首次启用需 `cp branding.example.json branding.json` 再填值（仓库 `.gitignore` 排除真实文件） | **无需 restart**，但**只在挂载时拉一次、不轮询**——改完需用户刷新页面才看到。文件缺失 / schema 错位 → 对应 UI 自动隐藏或回落默认（fail-closed）。 |
-| `deploy/.env`（任何 `ARTIFACTFLOW_*` 变量） | 直接编辑 | **`up -d backend`**（restart 不会重读 .env，up 会检测 env 变化重建容器） |
+| `deploy/.env`（任何 `ARTIFACTFLOW_*` 变量） | 直接编辑 | 用当前 compose flags 执行 `AF_VERSION="$VERSION" ... up -d backend`（restart 不会重读 .env，up 会检测 env 变化重建容器） |
 | `deploy/caddy/`（Caddyfile.intranet / common.caddy） | 直接编辑（或 tar 覆盖） | `docker compose -f deploy/docker-compose.intranet.yml exec caddy caddy reload --config /etc/caddy/conf/Caddyfile.intranet --adapter caddyfile`（零停机；`restart caddy` 也行） |
 | `deploy/certs/`（换证书） | 覆盖 `server.crt` / `server.key` | 同上 — `caddy reload` |
 | `deploy/docker-compose.intranet.yml`（端口、profile 等） | 直接编辑 | `up -d` |
 
 > **关键区别：** `models.yaml` 是 backend 进程直接读文件，改完 restart backend；
 > agents/tools/skills 会 reconcile 进 DB registry，改文件后必须重新跑 release/reconcile
-> gate。改 `.env` 用 `up -d`（让 compose 重建容器注入环境变量）。`config/site/`
-> 是例外：同一个宿主目录只读挂在 frontend、可写挂在 backend 的通知管理入口，无需重启；
-> 其中 `notifications.json` 前端轮询自动重拉，`welcome_tips.json` / `branding.json`
-> 只在页面加载时读取，运维改完需用户刷新。
+> gate。改 `.env` 用 `up -d`（让 compose 重建容器注入环境变量）；手动
+> `run release` / `up -d backend` 都必须显式传当前 `AF_VERSION`，否则 compose 会回落到
+> `${AF_VERSION:-latest}`。`config/site/` 是例外：同一个宿主目录只读挂在 frontend、
+> 可写挂在 backend 的通知管理入口，无需重启；其中 `notifications.json` 前端轮询
+> 自动重拉，`welcome_tips.json` / `branding.json` 只在页面加载时读取，运维改完需用户刷新。
 
-紧急热修 seeded registry 的命令形状如下（沙盒部署把 `COMPOSE` 加上
-`-f deploy/docker-compose.sandbox.yml`）：
+紧急热修 seeded registry 的命令形状如下；`VERSION` 填当前正在运行的镜像版本。
+Mode 3A（本机 PG/Redis）才追加 `--profile infra`，Mode 3B（外部 PG/Redis）不要加。
+沙盒部署还要把 `COMPOSE` 加上 `-f deploy/docker-compose.sandbox.yml`：
 
 ```bash
+VERSION=2026.07.09-intranet.1  # current running version
 COMPOSE="docker compose -f deploy/docker-compose.intranet.yml"
-$COMPOSE --profile infra run --rm release
-$COMPOSE up -d backend
+# Mode 3A only:
+# COMPOSE="$COMPOSE --profile infra"
+# Sandbox deployment only:
+# COMPOSE="$COMPOSE -f deploy/docker-compose.sandbox.yml"
+
+AF_VERSION="$VERSION" $COMPOSE run --rm release
+AF_VERSION="$VERSION" $COMPOSE up -d backend
 ```
 
 ### 仅推送 config 更新（不动镜像）
@@ -913,7 +921,7 @@ docker compose -f deploy/docker-compose.intranet.yml restart backend
 > 调 prompt / 工具 / skills 时不要只 restart backend；这些配置会 reconcile 进 DB，
 > 需要跑 release/reconcile gate，或者重新打 config release 后走 `fleet deploy`。
 >
-> **注意：** `.env` 变更不能走 `restart`——`docker compose restart` 不会重读 `.env` interpolation，容器还在用旧值。需要改环境变量时，请走 `pause.sh → 改 .env → resume.sh`（resume 内部 `up -d` 会重建容器并注入新环境变量），或者短维护窗口下手动 `maintenance.sh on → up -d backend → maintenance.sh off`。
+> **注意：** `.env` 变更不能走 `restart`——`docker compose restart` 不会重读 `.env` interpolation，容器还在用旧值。需要改环境变量时，请走 `pause.sh → 改 .env → resume.sh`（resume 内部 `up -d` 会重建容器并注入新环境变量），或者短维护窗口下手动 `maintenance.sh on → AF_VERSION="$VERSION" docker compose ... up -d backend → maintenance.sh off`。
 
 ### 健康检查
 
