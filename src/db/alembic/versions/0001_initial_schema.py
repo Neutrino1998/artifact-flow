@@ -100,14 +100,7 @@ def upgrade() -> None:
         sa.Column('created_at', sa.DateTime(), server_default=sa.func.now(), nullable=False),
         sa.Column('metadata', sa.JSON(), nullable=True),
         sa.ForeignKeyConstraint(['conversation_id'], ['conversations.id'], ondelete='CASCADE'),
-        sa.ForeignKeyConstraint(
-            ['conversation_id', 'parent_id'],
-            ['messages.conversation_id', 'messages.id'],
-            name='fk_messages_parent_same_conversation',
-            ondelete='CASCADE',
-        ),
-        sa.PrimaryKeyConstraint('id'),
-        sa.UniqueConstraint('conversation_id', 'id', name='uq_messages_conversation_id_id')
+        sa.PrimaryKeyConstraint('id')
     )
     op.create_index('ix_messages_conv_created', 'messages', ['conversation_id', 'created_at'], unique=False)
     op.create_index(op.f('ix_messages_conversation_id'), 'messages', ['conversation_id'], unique=False)
