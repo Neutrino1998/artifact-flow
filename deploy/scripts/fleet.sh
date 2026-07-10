@@ -166,10 +166,17 @@ env_file_value() {
   printf '%s\n' "$value"
 }
 
+secure_env_file() {
+  local env_file="$1"
+  [[ -f "$env_file" ]] || return 0
+  chmod 600 "$env_file" || die "failed to chmod 600 $env_file"
+}
+
 env_file_set() {
   local env_file="$1" key="$2" value="$3" tmp
-  tmp="${env_file}.tmp"
-  awk -v key="$key" -v value="$value" '
+  tmp="$(mktemp "${env_file}.tmp.XXXXXX")" || die "failed to create temp env file"
+  chmod 600 "$tmp" || die "failed to chmod 600 $tmp"
+  if awk -v key="$key" -v value="$value" '
     BEGIN { done = 0 }
     $0 ~ "^" key "=" {
       print key "=" value
@@ -180,7 +187,13 @@ env_file_set() {
     END {
       if (!done) print key "=" value
     }
-  ' "$env_file" > "$tmp" && mv "$tmp" "$env_file"
+  ' "$env_file" > "$tmp"; then
+    mv "$tmp" "$env_file" || die "failed to update $env_file"
+    secure_env_file "$env_file"
+  else
+    rm -f "$tmp"
+    die "failed to update $env_file"
+  fi
 }
 
 gen_urlsafe_secret() {
@@ -213,6 +226,7 @@ PY
 seed_env_generated_values() {
   local env_file="$1" jwt credential pg_password pg_user pg_db db_url generated=0
   [[ -f "$env_file" ]] || return 0
+  secure_env_file "$env_file"
 
   jwt="$(env_file_value "$env_file" ARTIFACTFLOW_JWT_SECRET || true)"
   if [[ -z "$jwt" || "$jwt" == *CHANGE_ME* ]]; then
@@ -245,6 +259,7 @@ seed_env_generated_values() {
   if (( generated > 0 )); then
     ok "generated first-run secrets in $env_file (existing files are never overwritten)"
   fi
+  secure_env_file "$env_file"
 }
 
 sandbox_scratch_root_local() {
@@ -552,9 +567,11 @@ EOF
   fi
 
   if [[ -f "$DEPLOY_DIR/.env" ]]; then
+    secure_env_file "$DEPLOY_DIR/.env"
     info "$DEPLOY_DIR/.env already exists"
   elif [[ -f "$DEPLOY_DIR/.env.intranet.example" ]]; then
     cp "$DEPLOY_DIR/.env.intranet.example" "$DEPLOY_DIR/.env" || die "failed to seed deploy/.env"
+    secure_env_file "$DEPLOY_DIR/.env"
     ok "seeded $DEPLOY_DIR/.env from .env.intranet.example"
     seed_env_generated_values "$DEPLOY_DIR/.env"
   else

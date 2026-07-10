@@ -662,7 +662,7 @@ else
 fi
 if [[ $WITH_ANALYST_TOOLS == 1 ]]; then
   ANALYST_ARTIFACTS=$'\n  #   artifactflow-analyst-tools-'"${ANALYST_SLUG}"$'.tar.gz{,.sha256}'
-  ANALYST_RECIPE=$'\n    tar xzf artifactflow-analyst-tools-'"${ANALYST_SLUG}"$'.tar.gz   # → ./analyst-tools/\n    # Offline wheels: install on the machine running observability_report.py.\n    pip install --no-index --find-links analyst-tools/wheels pandas'
+  ANALYST_RECIPE=$'\n    tar xzf "$BUNDLE/artifactflow-analyst-tools-'"${ANALYST_SLUG}"$'.tar.gz"   # → ./analyst-tools/\n    # Offline wheels: install on the machine running observability_report.py.\n    pip install --no-index --find-links analyst-tools/wheels pandas'
   ANALYST_FOOTER=""
 else
   ANALYST_ARTIFACTS=""
