@@ -406,6 +406,26 @@ async def test_mcp_outer_cancel_still_propagates():
         await task
 
 
+async def test_mcp_outer_cancel_with_cleanup_error_still_propagates():
+    entered = asyncio.Event()
+
+    async def fake_list(_url, _headers, _timeout):
+        entered.set()
+        try:
+            await asyncio.sleep(60)
+        finally:
+            await asyncio.sleep(0)
+            raise RuntimeError("cleanup failed")
+
+    manager = McpClientManager(list_callable=fake_list)
+    task = asyncio.create_task(manager.list_tools("inventory", _provider_config()))
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
 async def test_sdk_session_accepts_streamable_http_triple_and_uses_timedelta_timeout():
     seen = {}
 
@@ -483,6 +503,42 @@ async def test_sdk_session_suppresses_nonfatal_transport_cleanup_error():
         "initialized": True,
         "inside": True,
     }
+
+
+async def test_sdk_session_outer_cancel_with_cleanup_error_still_propagates():
+    @asynccontextmanager
+    async def fake_transport(_url, *, http_client):
+        try:
+            yield "read-stream", "write-stream", lambda: "session-id"
+        finally:
+            raise RuntimeError("Attempted to exit cancel scope in a different task")
+
+    class FakeSession:
+        def __init__(self, _read_stream, _write_stream, *, read_timeout_seconds):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            return None
+
+        async def initialize(self):
+            pass
+
+    async def use_session():
+        async with _McpSessionContext(
+            "https://mcp.example.com/inventory",
+            {},
+            15,
+            FakeSession,
+            fake_transport,
+        ):
+            asyncio.current_task().cancel()
+            await asyncio.sleep(0)
+
+    with pytest.raises(asyncio.CancelledError):
+        await use_session()
 
 
 async def test_sdk_call_reads_camel_case_result_fields_and_uses_timedelta_timeout():

@@ -206,15 +206,19 @@ class McpClientManager:
         try:
             return await task
         except asyncio.CancelledError as exc:
-            if parent is not None and parent.cancelling():
+            if _task_is_cancelling(parent):
                 task.cancel()
                 raise
             raise McpClientError("MCP request failed: could not reach the server") from exc
         except BaseExceptionGroup as exc:
             if _should_propagate_mcp_base_exception(exc):
                 raise
+            _raise_cancel_if_requested(parent)
             logger.warning("MCP server %r %s cleanup failed: %s", unit_name, operation, exc)
             raise McpClientError("MCP request failed: could not reach the server") from exc
+        except Exception:
+            _raise_cancel_if_requested(parent)
+            raise
 
     async def _list_tools_via_sdk(
         self, url: str, headers: dict[str, str], timeout: int
@@ -302,6 +306,7 @@ class _McpSessionContext:
         except BaseException as exc:
             if _should_propagate_mcp_base_exception(exc):
                 raise
+            _raise_cancel_if_requested()
             logger.warning("MCP SDK session cleanup failed: %s", exc)
             return False
 
@@ -326,14 +331,28 @@ def _get_sdk_attr(value: Any, *names: str, default: Any) -> Any:
 
 
 def _should_propagate_mcp_base_exception(exc: BaseException) -> bool:
+    if _contains_process_exit(exc):
+        return True
+    return False
+
+
+def _contains_process_exit(exc: BaseException) -> bool:
     if isinstance(exc, (KeyboardInterrupt, SystemExit)):
         return True
-    task = asyncio.current_task()
-    if task is not None and task.cancelling():
-        return True
     if isinstance(exc, BaseExceptionGroup):
-        return any(_should_propagate_mcp_base_exception(child) for child in exc.exceptions)
+        return any(_contains_process_exit(child) for child in exc.exceptions)
     return False
+
+
+def _task_is_cancelling(task: Optional[asyncio.Task] = None) -> bool:
+    if task is None:
+        task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
+
+
+def _raise_cancel_if_requested(task: Optional[asyncio.Task] = None) -> None:
+    if _task_is_cancelling(task):
+        raise asyncio.CancelledError()
 
 
 def _to_plain_dict(value: Any) -> dict[str, Any]:
