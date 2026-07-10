@@ -1,6 +1,7 @@
 # gVisor offline package
 
-`runsc` + `containerd-shim-runsc-v1` (gVisor `release-20260504.0`, x86_64) plus
+`runsc` + `containerd-shim-runsc-v1` (gVisor `release-20260706.0` by default,
+architecture selected by `ARCH`) plus
 install / smoke / uninstall scripts, for installing gVisor as a Docker runtime
 on an air-gapped Kylin node.
 
@@ -8,7 +9,7 @@ The binaries (~46MB) are **not** in git. Reproduce the install tar on a
 networked build host:
 
 ```bash
-sandbox/gvisor-pkg/fetch-and-package.sh          # → dist/sandbox-gvisor-<date>.tar.gz (+ .sha256)
+ARCH=aarch64 sandbox/gvisor-pkg/fetch-and-package.sh  # → dist/sandbox-gvisor-<date>-aarch64.tar.gz (+ .sha256)
 ```
 
 On the intranet node (as root):

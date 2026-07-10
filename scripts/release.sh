@@ -166,6 +166,7 @@ fi
 
 phase_forced() {
   local phase="$1" forced
+  [[ ${#FORCE_PHASES[@]} -gt 0 ]] || return 1
   for forced in "${FORCE_PHASES[@]}"; do
     [[ "$forced" == "$phase" || "$forced" == "all" ]] && return 0
   done
@@ -204,7 +205,7 @@ phase_input() {
       printf '%s|%s|%s|%s|%s|%s\n' "$phase" "$PLATFORM" "$CADDY_TAG" "$POSTGRES_TAG" "$REDIS_TAG" "$INFRA_SLUG"
       ;;
     gvisor)
-      printf '%s|download|%s|%s\n' "$phase" "${GVISOR_VERSION:-20260504.0}" "$GVISOR_ARCH"
+      printf '%s|download|%s|%s\n' "$phase" "${GVISOR_VERSION:-20260706.0}" "$GVISOR_ARCH"
       ;;
     analyst-tools)
       printf '%s|%s|%s|%s|%s\n' "$phase" "$PANDAS_VERSION" "$NUMPY_VERSION" "$ANALYST_PYTHON" "$ANALYST_PLATFORM"
@@ -246,7 +247,8 @@ phase_done() {
 write_phase_stamp() {
   local phase="$1" input="$2"; shift 2
   mkdir -p "$STATE_DIR"
-  local stamp="$STATE_DIR/$phase.stamp" tmp="$stamp.tmp"
+  local stamp="$STATE_DIR/$phase.stamp"
+  local tmp="$stamp.tmp"
   {
     printf 'phase=%s\n' "$phase"
     printf 'version=%s\n' "$VERSION"
@@ -262,7 +264,9 @@ write_phase_stamp() {
 }
 
 phase_outputs() {
-  local phase="$1" stamp="$STATE_DIR/$phase.stamp" rel
+  local phase="$1"
+  local stamp="$STATE_DIR/$phase.stamp"
+  local rel
   [[ -f "$stamp" ]] || return 1
   while IFS= read -r rel; do
     [[ -n "$rel" ]] || continue
@@ -645,8 +649,8 @@ else
 fi
 if [[ $WITH_SANDBOX == 1 ]]; then
   SANDBOX_ARTIFACTS=$'\n  #   artifactflow-sandbox-'"${VERSION}-${ARCH_TAG}"$'.tar.gz{,.sha256}\n  #   artifactflow-sandbox-verify-'"${VERSION}"$'.tar.gz{,.sha256}\n  #   '"$(basename "$SANDBOX_GVISOR_ARCHIVE")"$'{,.sha256}'
-  SANDBOX_PREP_LOCAL=$'\n    # Requires root: installs/registers runsc and mounts the sandbox scratch loop.\n    sudo env AF_BUNDLE_VERSION='"${VERSION}"$' AF_SANDBOX_POOL_SIZE=8G deploy/scripts/fleet.sh prepare-sandbox .'
-  SANDBOX_PREP_TMP=$'\n    # Requires root: refreshes runsc/sandbox image/scratch prerequisites from this bundle.\n    sudo env AF_BUNDLE_VERSION='"${VERSION}"$' AF_SANDBOX_POOL_SIZE=8G ./deploy/scripts/fleet.sh prepare-sandbox tmp'
+  SANDBOX_PREP_LOCAL=$'\n    # Requires root: installs/registers runsc and mounts the sandbox scratch loop.\n    sudo env AF_BUNDLE_VERSION='"${VERSION}"$' \\\n      AF_SANDBOX_POOL=/data/artifactflow/sandbox-pool.img \\\n      AF_SANDBOX_SCRATCH_ROOT=/data/artifactflow/sandbox-scratch \\\n      AF_SANDBOX_POOL_SIZE=80G \\\n      deploy/scripts/fleet.sh prepare-sandbox "$BUNDLE"'
+  SANDBOX_PREP_TMP=$'\n    # Requires root: refreshes runsc/sandbox image/scratch prerequisites from this bundle.\n    sudo env AF_BUNDLE_VERSION='"${VERSION}"$' \\\n      AF_SANDBOX_POOL=/data/artifactflow/sandbox-pool.img \\\n      AF_SANDBOX_SCRATCH_ROOT=/data/artifactflow/sandbox-scratch \\\n      AF_SANDBOX_POOL_SIZE=80G \\\n      ./deploy/scripts/fleet.sh prepare-sandbox "$BUNDLE"'
   SANDBOX_UP_PREFIX="AF_ENABLE_SANDBOX=1 "
   SANDBOX_FOOTER=""
 else
@@ -676,37 +680,44 @@ To deploy on air-gapped host:
 $INFRA_FOOTER
 $SANDBOX_FOOTER
 $ANALYST_FOOTER
-  # Target bundle directory: /opt/artifactflow/
+  # Target bundle directory: /root/workspace/tmp/${VERSION}/
   # Required files for this build:
   #   artifactflow-{app,config,deploy}-${VERSION}.tar.gz{,.sha256}${INFRA_ARTIFACTS}${SANDBOX_ARTIFACTS}${ANALYST_ARTIFACTS}
   #   artifactflow-${VERSION}.manifest.txt
 
   # On the target host:
-    cd /opt/artifactflow
-    tar xzf artifactflow-deploy-${VERSION}.tar.gz
-    deploy/scripts/verify-bundle.sh .
-    deploy/scripts/fleet.sh init-local --scale 1
+    VERSION=${VERSION}
+    BUNDLE=/root/workspace/tmp/\$VERSION
+    APP=/root/workspace/artifactflow
+    mkdir -p "\$BUNDLE" "\$APP"
+    cd "\$APP"
+    tar xzf "\$BUNDLE/artifactflow-deploy-${VERSION}.tar.gz"
+    deploy/scripts/verify-bundle.sh "\$BUNDLE"
+    deploy/scripts/fleet.sh init-local --scale 2
     vi deploy/.env
     vi deploy/fleet.conf
 ${SANDBOX_PREP_LOCAL}
-    ${SANDBOX_UP_PREFIX}AF_BUNDLE_VERSION=${VERSION} deploy/scripts/fleet.sh deploy .
+    ${SANDBOX_UP_PREFIX}AF_BUNDLE_VERSION=${VERSION} deploy/scripts/fleet.sh deploy "\$BUNDLE"
     ${ANALYST_RECIPE}
     # No pause/resume here — there's nothing running to pause.
     # Preflight pass 2 — after \`up\`, now verifies py-spy lives in the image.
     ./deploy/scripts/preflight.sh
 
   # ---- Roll-update (no infra, no analyst-tools re-ship) ----
-  # Target bundle directory: /opt/artifactflow/tmp/
+  # Target bundle directory: /root/workspace/tmp/${VERSION}/
   # Required files for this build:
   #   artifactflow-{app,config,deploy}-${VERSION}.tar.gz{,.sha256}${SANDBOX_ARTIFACTS}
   #   artifactflow-${VERSION}.manifest.txt
 
   # On the target host:
-    cd /opt/artifactflow
-    ./deploy/scripts/verify-bundle.sh tmp
+    VERSION=${VERSION}
+    BUNDLE=/root/workspace/tmp/\$VERSION
+    APP=/root/workspace/artifactflow
+    cd "\$APP"
+    ./deploy/scripts/verify-bundle.sh "\$BUNDLE"
     # Self-bootstrap deploy scripts before invoking fleet: older fleet.sh
     # versions do not know how to extract deploy/config from the bundle.
-    tar xzf tmp/artifactflow-deploy-${VERSION}.tar.gz
+    tar xzf "\$BUNDLE/artifactflow-deploy-${VERSION}.tar.gz"
 ${SANDBOX_PREP_TMP}
     # ─── compose infra changes (rare) ────────────────────────────
     # If this version changed compose \`caddy\` / \`postgres\` / \`redis\` service
@@ -725,5 +736,5 @@ ${SANDBOX_PREP_TMP}
     # ─────────────────────────────────────────────────────────────
     # Fleet deploy is a direct compose up. For a maintenance-page window instead,
     # run maintenance.sh on before deploy and maintenance.sh off after it succeeds.
-    ${SANDBOX_UP_PREFIX}AF_BUNDLE_VERSION=${VERSION} ./deploy/scripts/fleet.sh deploy tmp
+    ${SANDBOX_UP_PREFIX}AF_BUNDLE_VERSION=${VERSION} ./deploy/scripts/fleet.sh deploy "\$BUNDLE"
 EOF

@@ -226,35 +226,55 @@ docker compose -f docker-compose.prod.yml up -d
 
 ### 首次部署（在目标内网机器上）
 
+推荐把**发布包目录**和**运行目录**分开：发布 tar 保持原样放在 bundle
+目录，运行目录只放解出的 `deploy/`、`config/`、`.env`、证书和 fleet 状态。
+
 ```bash
-# 1. 用现场批准的介质/流程把发布文件放到 /opt/artifactflow/
+VERSION=1.0.0
+BUNDLE=/root/workspace/tmp/$VERSION
+APP=/root/workspace/artifactflow
+
+# 1. 用现场批准的介质/流程把发布文件放到 $BUNDLE/
 #    必备：
-#      artifactflow-{app,config,deploy}-1.0.0.tar.gz{,.sha256}
-#      artifactflow-1.0.0.manifest.txt
+#      artifactflow-{app,config,deploy}-$VERSION.tar.gz{,.sha256}
+#      artifactflow-$VERSION.manifest.txt
 #    首次部署 / infra 镜像变更时还需要：
 #      artifactflow-infra-caddy2.10-pg16-redis7.tar.gz{,.sha256}
 #    启用 sandbox 时还需要 sandbox image / verify / gVisor 三件套及其 .sha256。
+mkdir -p "$BUNDLE" "$APP"
 
-# 2. 先解 deploy/，拿到 fleet/verify 脚本
-cd /opt/artifactflow
-tar xzf artifactflow-deploy-1.0.0.tar.gz
-deploy/scripts/verify-bundle.sh .
+# 2. 先只解 deploy/ 到运行目录，拿到 fleet/verify 脚本。
+cd "$APP"
+tar xzf "$BUNDLE/artifactflow-deploy-$VERSION.tar.gz"
+deploy/scripts/verify-bundle.sh "$BUNDLE"
 
-# 3. 初始化单机拓扑和 .env，然后编辑密码/API Keys
-deploy/scripts/fleet.sh init-local --scale 1
-vi deploy/.env
-vi deploy/fleet.conf
+# 3. 初始化单机拓扑和 .env。
+#    init-local 首次创建 deploy/.env 时会自动填充 JWT secret、Fernet
+#    credential key、Postgres password，并同步 DATABASE_URL；已有 .env 不覆盖。
+deploy/scripts/fleet.sh init-local --scale 2
+vi deploy/.env        # 填 API keys / CORS / 并发等部署专属值
+vi deploy/fleet.conf  # app local scale=N 即 docker compose --scale backend=N
 
-# 4. 内网 LLM（如需）：编辑 config/models/models.yaml，把 base_url 指向内部推理端点
+# 4. 内网 LLM（如需）：编辑 config/models/models.yaml，把 base_url 指向内部推理端点。
+#    注意:config/ 由 fleet deploy 从 bundle 解出；若要在首次 deploy 前改，
+#    可以先 tar xzf "$BUNDLE/artifactflow-config-$VERSION.tar.gz" -C "$APP"。
 
-# 5. 启动（fleet 会校验 bundle、解 config/deploy、load 镜像、跑 release gate、等待健康）
-AF_BUNDLE_VERSION=1.0.0 deploy/scripts/fleet.sh deploy .
-# 启用沙盒时，先以 root 准备 runsc / sandbox 镜像 / scratch 根，再 deploy：
-# sudo env AF_BUNDLE_VERSION=1.0.0 AF_SANDBOX_POOL_SIZE=80G deploy/scripts/fleet.sh prepare-sandbox .
-# AF_ENABLE_SANDBOX=1 AF_BUNDLE_VERSION=1.0.0 deploy/scripts/fleet.sh deploy .
+# 5. 启用沙盒时，先以 root 准备 runsc / sandbox 镜像 / scratch 根。
+#    生产不要用 8G starter；按并发 × SANDBOX_WORKSPACE_QUOTA_MB 估算。
+sudo env \
+  AF_BUNDLE_VERSION="$VERSION" \
+  AF_SANDBOX_POOL=/data/artifactflow/sandbox-pool.img \
+  AF_SANDBOX_SCRATCH_ROOT=/data/artifactflow/sandbox-scratch \
+  AF_SANDBOX_POOL_SIZE=80G \
+  deploy/scripts/fleet.sh prepare-sandbox "$BUNDLE"
 
-# 6. 创建管理员
-docker compose -f deploy/docker-compose.intranet.yml exec backend \
+# 6. 启动。fleet 会校验 bundle、解 config/deploy、load 镜像、跑 release gate、等待健康。
+AF_ENABLE_SANDBOX=1 \
+AF_BUNDLE_VERSION="$VERSION" \
+deploy/scripts/fleet.sh deploy "$BUNDLE"
+
+# 7. 创建管理员
+docker compose -f deploy/docker-compose.intranet.yml -f deploy/docker-compose.sandbox.yml exec backend \
   python scripts/create_admin.py admin --password <your-password>
 ```
 
@@ -300,25 +320,33 @@ deploy/scripts/fleet.sh rollback             # 回退到上一个成功版本
 新版本到位后，`fleet deploy` 接管校验、解包、加载镜像、起服务和探活；需要维护页窗口时，用 `maintenance.sh on|off` 包住它。
 
 ```bash
-# 在内网机（假设新 release 文件已通过现场介质放到 ./tmp/ 下，typically 不含 infra）
-cd /opt/artifactflow
+VERSION=1.0.1
+BUNDLE=/root/workspace/tmp/$VERSION
+APP=/root/workspace/artifactflow
+
+# 在内网机（假设新 release 文件已通过现场介质放到 $BUNDLE/ 下，typically 不含 infra）
+cd "$APP"
 
 # 1. 校验（不影响在跑容器，可在维护开始前做）
-./deploy/scripts/verify-bundle.sh tmp    # 一次性校验 tmp/ 下所有 tar
+./deploy/scripts/verify-bundle.sh "$BUNDLE"    # 一次性校验 bundle 下所有 tar
 
 # 1b. 自举新版 deploy 脚本。旧版 fleet.sh 不知道如何从 bundle 解 deploy/config，
 #     所以调用 fleet deploy 前，必须先让新版 fleet.sh 落盘。
-tar xzf tmp/artifactflow-deploy-1.0.1.tar.gz
+tar xzf "$BUNDLE/artifactflow-deploy-$VERSION.tar.gz"
 
 # 如本次 bundle 带 sandbox 且要刷新 sandbox 前置，先以 root 执行：
-# 8G 是 starter；32 路沙盒按默认 2G workspace 估算应准备 80G 级别池子。
-# sudo env AF_BUNDLE_VERSION=1.0.1 AF_SANDBOX_POOL_SIZE=80G ./deploy/scripts/fleet.sh prepare-sandbox tmp
+# 32 路沙盒按默认 2G workspace 估算应准备 80G 级别池子。
+# sudo env AF_BUNDLE_VERSION="$VERSION" \
+#   AF_SANDBOX_POOL=/data/artifactflow/sandbox-pool.img \
+#   AF_SANDBOX_SCRATCH_ROOT=/data/artifactflow/sandbox-scratch \
+#   AF_SANDBOX_POOL_SIZE=80G \
+#   ./deploy/scripts/fleet.sh prepare-sandbox "$BUNDLE"
 
 # 2. 进维护窗口（可选；fleet deploy 本身是直接 up）
-./deploy/scripts/maintenance.sh on "升级到 v1.0.1"
+./deploy/scripts/maintenance.sh on "升级到 $VERSION"
 
 # 3. fleet 接管解包 + docker load + compose up + 健康检查；成功后关闭维护页
-AF_BUNDLE_VERSION=1.0.1 ./deploy/scripts/fleet.sh deploy tmp && \
+AF_ENABLE_SANDBOX=1 AF_BUNDLE_VERSION="$VERSION" ./deploy/scripts/fleet.sh deploy "$BUNDLE" && \
   ./deploy/scripts/maintenance.sh off
 ```
 
@@ -384,17 +412,77 @@ AF_BUNDLE_VERSION=1.0.1 ./deploy/scripts/fleet.sh deploy tmp && \
 
 ### 仅推送 config 更新（不动镜像）
 
-```bash
-# 在构建机上重新打包（或手工 tar）
-tar czf artifactflow-config-1.0.1.tar.gz config/
+推荐仍然走 release bundle + fleet，让 `config/` 的来源、校验和版本记录保持一致。
+如果只是现场临时改 `config/models/models.yaml` 这类文件，可以按上表直接重启
+backend；如果要把配置变更固化成一次发布，按下面流程。
 
-# 通过现场介质放到目标机 /opt/artifactflow/ 后，在目标机执行：
-cd /opt/artifactflow
-tar xzf artifactflow-config-1.0.1.tar.gz
-docker compose -f deploy/docker-compose.intranet.yml restart backend
+```bash
+# 构建机：轻量手工包 config + deploy。
+# deploy tar 用来让目标机先自举到新版 fleet/verify 脚本。
+VERSION=1.0.1
+tar czf artifactflow-config-1.0.1.tar.gz config/
+tar czf artifactflow-deploy-1.0.1.tar.gz deploy/
+sha256sum artifactflow-config-1.0.1.tar.gz > artifactflow-config-1.0.1.tar.gz.sha256
+sha256sum artifactflow-deploy-1.0.1.tar.gz > artifactflow-deploy-1.0.1.tar.gz.sha256
+```
+
+目标机：
+
+```bash
+VERSION=1.0.1
+BUNDLE=/root/workspace/tmp/$VERSION
+APP=/root/workspace/artifactflow
+
+cd "$APP"
+tar xzf "$BUNDLE/artifactflow-deploy-$VERSION.tar.gz"
+deploy/scripts/verify-bundle.sh "$BUNDLE"
+tar xzf "$BUNDLE/artifactflow-config-$VERSION.tar.gz" -C "$APP"
+
+# config/agents、config/models、config/tools 需要 backend 进程重读文件。
+docker compose -f deploy/docker-compose.intranet.yml -f deploy/docker-compose.sandbox.yml restart backend
 ```
 
 > 上面的 `restart backend` 是给 `config/agents/`、`config/models/`、`config/tools/` 用的。如果**只**改了 `config/site/*.json`，不需要任何 docker 命令；其中 `notifications.json` 前端 60s 轮询自己生效，`welcome_tips.json` / `branding.json` 只在挂载时拉一次，需要用户刷新页面才看到。
+
+### 更新 backend / frontend 镜像（app tar）
+
+后端代码或前端代码变化时重新打 app release。通常不需要重传 infra；如果没有改
+sandbox 镜像，也不需要重传 sandbox/gVisor。
+
+```bash
+# 构建机
+VERSION=1.0.1
+./scripts/release.sh "$VERSION" --platform linux/arm64
+```
+
+把这些文件放到目标机 `$BUNDLE/`：
+
+```text
+artifactflow-app-$VERSION.tar.gz{,.sha256}
+artifactflow-config-$VERSION.tar.gz{,.sha256}
+artifactflow-deploy-$VERSION.tar.gz{,.sha256}
+artifactflow-$VERSION.manifest.txt
+```
+
+目标机：
+
+```bash
+VERSION=1.0.1
+BUNDLE=/root/workspace/tmp/$VERSION
+APP=/root/workspace/artifactflow
+
+cd "$APP"
+tar xzf "$BUNDLE/artifactflow-deploy-$VERSION.tar.gz"
+deploy/scripts/verify-bundle.sh "$BUNDLE"
+
+AF_ENABLE_SANDBOX=1 \
+AF_BUNDLE_VERSION="$VERSION" \
+deploy/scripts/fleet.sh deploy "$BUNDLE"
+```
+
+`fleet deploy` 会解出新的 `config/` / `deploy/`、`docker load` 新 backend +
+frontend 镜像、跑一次 release gate，然后按 `deploy/fleet.conf` 里的 `scale=N`
+重新 `up`。这是更新 backend/frontend 镜像的主路径。
 
 ---
 
