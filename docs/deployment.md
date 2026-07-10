@@ -255,26 +255,26 @@ deploy/scripts/fleet.sh init-local --scale 2
 vi deploy/.env        # 填 API keys / CORS / 并发等部署专属值
 vi deploy/fleet.conf  # app local scale=N 即 docker compose --scale backend=N
 
-# 4. 内网 LLM（如需）：编辑 config/models/models.yaml，把 base_url 指向内部推理端点。
-#    注意:config/ 由 fleet deploy 从 bundle 解出；若要在首次 deploy 前改，
-#    可以先 tar xzf "$BUNDLE/artifactflow-config-$VERSION.tar.gz" -C "$APP"。
+# 4. 正式配置应在构建机改 config/ 后再 release。
+#    不要在目标机先解 config/、改完再 fleet deploy：deploy 会重新从 bundle 解 config，
+#    覆盖这些现场修改。模型 endpoint 临时热修见下方「运行时配置变更」。
 
 # 5. 启用沙盒时，先以 root 准备 runsc / sandbox 镜像 / scratch 根。
+#    仅当 release bundle 用 --with-sandbox 构建、且本部署要启用沙盒时执行本步。
 #    生产不要用 8G starter；按并发 × SANDBOX_WORKSPACE_QUOTA_MB 估算。
-sudo env \
-  AF_BUNDLE_VERSION="$VERSION" \
-  AF_SANDBOX_POOL=/data/artifactflow/sandbox-pool.img \
-  AF_SANDBOX_SCRATCH_ROOT=/data/artifactflow/sandbox-scratch \
-  AF_SANDBOX_POOL_SIZE=80G \
-  deploy/scripts/fleet.sh prepare-sandbox "$BUNDLE"
+# sudo env \
+#   AF_BUNDLE_VERSION="$VERSION" \
+#   AF_SANDBOX_POOL=/data/artifactflow/sandbox-pool.img \
+#   AF_SANDBOX_SCRATCH_ROOT=/data/artifactflow/sandbox-scratch \
+#   AF_SANDBOX_POOL_SIZE=80G \
+#   deploy/scripts/fleet.sh prepare-sandbox "$BUNDLE"
 
 # 6. 启动。fleet 会校验 bundle、解 config/deploy、load 镜像、跑 release gate、等待健康。
-AF_ENABLE_SANDBOX=1 \
-AF_BUNDLE_VERSION="$VERSION" \
-deploy/scripts/fleet.sh deploy "$BUNDLE"
+#    启用沙盒时在命令前追加 AF_ENABLE_SANDBOX=1。
+AF_BUNDLE_VERSION="$VERSION" deploy/scripts/fleet.sh deploy "$BUNDLE"
 
 # 7. 创建管理员
-docker compose -f deploy/docker-compose.intranet.yml -f deploy/docker-compose.sandbox.yml exec backend \
+docker compose -f deploy/docker-compose.intranet.yml exec backend \
   python scripts/create_admin.py admin --password <your-password>
 ```
 
@@ -346,7 +346,8 @@ tar xzf "$BUNDLE/artifactflow-deploy-$VERSION.tar.gz"
 ./deploy/scripts/maintenance.sh on "升级到 $VERSION"
 
 # 3. fleet 接管解包 + docker load + compose up + 健康检查；成功后关闭维护页
-AF_ENABLE_SANDBOX=1 AF_BUNDLE_VERSION="$VERSION" ./deploy/scripts/fleet.sh deploy "$BUNDLE" && \
+#    启用沙盒时在命令前追加 AF_ENABLE_SANDBOX=1。
+AF_BUNDLE_VERSION="$VERSION" ./deploy/scripts/fleet.sh deploy "$BUNDLE" && \
   ./deploy/scripts/maintenance.sh off
 ```
 
@@ -396,11 +397,14 @@ AF_ENABLE_SANDBOX=1 AF_BUNDLE_VERSION="$VERSION" ./deploy/scripts/fleet.sh deplo
 
 ### 运行时配置变更（无需 rebuild / 重新传镜像）
 
+正式发布的 `config/` 变更应先在构建机改好、提交、再 release；`fleet deploy`
+会从 bundle 覆盖目标机上的 `config/`。下表适合现场临时热修，下一次 deploy 会被
+bundle 内容覆盖。
+
 | 变更类型 | 操作 | 生效命令 |
 |---------|------|---------|
-| `config/agents/*.md`（agent prompt） | 直接编辑宿主机文件 | `docker compose -f deploy/docker-compose.intranet.yml restart backend` |
-| `config/models/models.yaml`（模型 / base_url） | 直接编辑宿主机文件 | 同上 — `restart backend` |
-| `config/tools/*.md`（自定义工具） | 直接编辑宿主机文件 | 同上 — `restart backend` |
+| `config/models/models.yaml`（模型 / base_url） | 直接编辑宿主机文件 | `docker compose -f deploy/docker-compose.intranet.yml restart backend` |
+| `config/agents/*.md` / `config/tools/*.md` / `config/skills/`（DB seeded registry） | 推荐重新打 config release 并 `fleet deploy`；紧急热修才直接编辑宿主机文件 | 跑一次 release/reconcile gate 后再重建 backend；compose flags 必须与当前部署一致（启用沙盒时也带 `-f deploy/docker-compose.sandbox.yml`） |
 | `config/site/notifications.json`（左栏通知） | 管理员菜单「通知管理」或直接编辑宿主机文件，schema 见 `config/site/README.md` | **无需 restart** — backend 只写 `config/site` 挂载目录，frontend 只读服务同一目录；前端 60s 轮询自动重拉（标签回前台时立即重拉） |
 | `config/site/welcome_tips.json` / `branding.json`（欢迎页提示 / 版权页脚） | 直接编辑宿主机文件；`branding.json` 首次启用需 `cp branding.example.json branding.json` 再填值（仓库 `.gitignore` 排除真实文件） | **无需 restart**，但**只在挂载时拉一次、不轮询**——改完需用户刷新页面才看到。文件缺失 / schema 错位 → 对应 UI 自动隐藏或回落默认（fail-closed）。 |
 | `deploy/.env`（任何 `ARTIFACTFLOW_*` 变量） | 直接编辑 | **`up -d backend`**（restart 不会重读 .env，up 会检测 env 变化重建容器） |
@@ -408,7 +412,21 @@ AF_ENABLE_SANDBOX=1 AF_BUNDLE_VERSION="$VERSION" ./deploy/scripts/fleet.sh deplo
 | `deploy/certs/`（换证书） | 覆盖 `server.crt` / `server.key` | 同上 — `caddy reload` |
 | `deploy/docker-compose.intranet.yml`（端口、profile 等） | 直接编辑 | `up -d` |
 
-> **关键区别：** 改 `config/*` 用 `restart backend`（让进程重读文件），改 `.env` 用 `up -d`（让 compose 重建容器注入环境变量）。`config/site/` 是例外：同一个宿主目录只读挂在 frontend、可写挂在 backend 的通知管理入口，无需重启；其中 `notifications.json` 前端轮询自动重拉，`welcome_tips.json` / `branding.json` 只在页面加载时读取，运维改完需用户刷新。
+> **关键区别：** `models.yaml` 是 backend 进程直接读文件，改完 restart backend；
+> agents/tools/skills 会 reconcile 进 DB registry，改文件后必须重新跑 release/reconcile
+> gate。改 `.env` 用 `up -d`（让 compose 重建容器注入环境变量）。`config/site/`
+> 是例外：同一个宿主目录只读挂在 frontend、可写挂在 backend 的通知管理入口，无需重启；
+> 其中 `notifications.json` 前端轮询自动重拉，`welcome_tips.json` / `branding.json`
+> 只在页面加载时读取，运维改完需用户刷新。
+
+紧急热修 seeded registry 的命令形状如下（沙盒部署把 `COMPOSE` 加上
+`-f deploy/docker-compose.sandbox.yml`）：
+
+```bash
+COMPOSE="docker compose -f deploy/docker-compose.intranet.yml"
+$COMPOSE --profile infra run --rm release
+$COMPOSE up -d backend
+```
 
 ### 仅推送 config 更新（不动镜像）
 
@@ -438,11 +456,15 @@ tar xzf "$BUNDLE/artifactflow-deploy-$VERSION.tar.gz"
 deploy/scripts/verify-bundle.sh "$BUNDLE"
 tar xzf "$BUNDLE/artifactflow-config-$VERSION.tar.gz" -C "$APP"
 
-# config/agents、config/models、config/tools 需要 backend 进程重读文件。
-docker compose -f deploy/docker-compose.intranet.yml -f deploy/docker-compose.sandbox.yml restart backend
+# models.yaml 只需 backend 进程重读；agents/tools/skills 需要跑 release/reconcile gate。
+docker compose -f deploy/docker-compose.intranet.yml restart backend
 ```
 
-> 上面的 `restart backend` 是给 `config/agents/`、`config/models/`、`config/tools/` 用的。如果**只**改了 `config/site/*.json`，不需要任何 docker 命令；其中 `notifications.json` 前端 60s 轮询自己生效，`welcome_tips.json` / `branding.json` 只在挂载时拉一次，需要用户刷新页面才看到。
+> 如果这次 config-only bundle 改了 `config/agents/`、`config/tools/` 或
+> `config/skills/`，用上方「运行时配置变更」里的 release/reconcile gate 命令替代
+> 直接 restart。只改 `config/site/*.json` 时不需要任何 docker 命令；其中
+> `notifications.json` 前端 60s 轮询自己生效，`welcome_tips.json` /
+> `branding.json` 只在挂载时拉一次，需要用户刷新页面才看到。
 
 ### 更新 backend / frontend 镜像（app tar）
 
@@ -475,9 +497,8 @@ cd "$APP"
 tar xzf "$BUNDLE/artifactflow-deploy-$VERSION.tar.gz"
 deploy/scripts/verify-bundle.sh "$BUNDLE"
 
-AF_ENABLE_SANDBOX=1 \
-AF_BUNDLE_VERSION="$VERSION" \
-deploy/scripts/fleet.sh deploy "$BUNDLE"
+# 启用沙盒时在命令前追加 AF_ENABLE_SANDBOX=1。
+AF_BUNDLE_VERSION="$VERSION" deploy/scripts/fleet.sh deploy "$BUNDLE"
 ```
 
 `fleet deploy` 会解出新的 `config/` / `deploy/`、`docker load` 新 backend +
@@ -877,17 +898,21 @@ tar xzf tmp/artifactflow-config-v2.3.0.tar.gz   # 如果 config 也变了
 > ```
 > 最小允许值 10s（再小就会比容器 healthcheck 的 `start_period=15s` 还短，必假阴性）。
 
-**Config-only 变更 —— 直接 `maintenance.sh`：**
+**Config-only 热修 —— 直接 `maintenance.sh`：**
 
-只调 prompt / `models.yaml` 这种 `restart backend` 就能生效的场景，不需要 `pause.sh` 那种"停服务"操作，开关 flag 的同时 `restart backend` 就够：
+只调 `models.yaml` 这种 restart backend 就能生效的场景，不需要 `pause.sh`
+那种"停服务"操作，开关 flag 的同时 `restart backend` 就够：
 
 ```bash
-./deploy/scripts/maintenance.sh on "调整 agent 配置，约 1 分钟"
-vim config/agents/lead_agent.md
+./deploy/scripts/maintenance.sh on "调整模型配置，约 1 分钟"
+vim config/models/models.yaml
 docker compose -f deploy/docker-compose.intranet.yml restart backend
 ./deploy/scripts/maintenance.sh off
 ```
 
+> 调 prompt / 工具 / skills 时不要只 restart backend；这些配置会 reconcile 进 DB，
+> 需要跑 release/reconcile gate，或者重新打 config release 后走 `fleet deploy`。
+>
 > **注意：** `.env` 变更不能走 `restart`——`docker compose restart` 不会重读 `.env` interpolation，容器还在用旧值。需要改环境变量时，请走 `pause.sh → 改 .env → resume.sh`（resume 内部 `up -d` 会重建容器并注入新环境变量），或者短维护窗口下手动 `maintenance.sh on → up -d backend → maintenance.sh off`。
 
 ### 健康检查
