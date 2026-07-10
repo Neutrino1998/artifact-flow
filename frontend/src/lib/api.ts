@@ -187,7 +187,13 @@ export function login(body: LoginRequest) {
   }).then(async (res) => {
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new Error(`Login failed: ${text}`);
+      const requestId = res.headers.get('X-Request-ID') ?? undefined;
+      throw new ApiError(
+        res.status,
+        formatApiError(res.status, text),
+        undefined,
+        requestId,
+      );
     }
     return res.json() as Promise<LoginResponse>;
   });

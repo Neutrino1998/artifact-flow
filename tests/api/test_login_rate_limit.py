@@ -30,6 +30,7 @@ class TestLoginRateLimit:
         )
         assert r.status_code == 429
         assert "Retry-After" in r.headers
+        assert "15 minutes" in r.json()["detail"]
 
     async def test_ip_lock_blocks_other_username(
         self, anon_client: AsyncClient, test_user: User

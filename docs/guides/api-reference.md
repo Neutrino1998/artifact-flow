@@ -64,7 +64,7 @@ POST /api/v1/auth/login
 ```
 
 - 失败统一返回 **401**（用户不存在 / 密码错 / 账号禁用），不区分原因；用户不存在时也对固定假 hash 跑一次 bcrypt，使两条分支耗时恒定，避免时序枚举用户名
-- **登录频控**：每次失败对 `user:{username}` 与 `ip:{client_ip}` 两个 key 各 +1；任一在 `LOGIN_FAILURE_WINDOW_SEC`（默认 900s）窗口内累计达 `LOGIN_MAX_FAILURES`（默认 5）→ 锁定窗口内一律 **429**（带 `Retry-After`），连正确密码也拒。per-username 是主防线，per-IP 补抓"同 IP 喷多个用户名"。per-IP 的 `client_ip` 只读反向代理（Caddy）覆写的 `X-Real-IP`（**刻意不读可伪造的 `X-Forwarded-For`**），dev 无反代时回落 `request.client.host`
+- **登录频控**：每次失败对 `user:{username}` 与 `ip:{client_ip}` 两个 key 各 +1；任一在 `LOGIN_FAILURE_WINDOW_SEC`（默认 900s）窗口内累计达 `LOGIN_MAX_FAILURES`（默认 5）→ 锁定窗口内一律 **429**，连正确密码也拒。429 会带真实剩余秒数的 `Retry-After`，`detail` 会提示还需等待约多少分钟。per-username 是主防线，per-IP 补抓"同 IP 喷多个用户名"。per-IP 的 `client_ip` 只读反向代理（Caddy）覆写的 `X-Real-IP`（**刻意不读可伪造的 `X-Forwarded-For`**），dev 无反代时回落 `request.client.host`
 - **无 `/refresh` 端点**：token 过期后客户端需重新 login
 
 ### 强制改密闸门

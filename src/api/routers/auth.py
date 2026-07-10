@@ -13,6 +13,7 @@ Auth Router
 
 import asyncio
 from datetime import timedelta
+import math
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -72,6 +73,12 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def _login_retry_detail(seconds: int) -> str:
+    minutes = max(1, math.ceil(seconds / 60))
+    unit = "minute" if minutes == 1 else "minutes"
+    return f"Too many failed login attempts. Please try again in {minutes} {unit}."
+
+
 async def _resolve_dept_path(
     department_id: Optional[str],
     dept_repo: DepartmentRepository,
@@ -106,11 +113,19 @@ async def login(
 
     # 频控预检(ACC-01):任一 key 失败累计超阈 → 锁定窗口内一律 429,连正确
     # 密码也拒(锁定本身就是目的)。per-username 主防线 + per-IP 二级。
-    if await rate_limiter.is_locked(user_key) or await rate_limiter.is_locked(ip_key):
+    user_retry_after, ip_retry_after = await asyncio.gather(
+        rate_limiter.retry_after(user_key),
+        rate_limiter.retry_after(ip_key),
+    )
+    retry_after = max(
+        (s for s in (user_retry_after, ip_retry_after) if s is not None),
+        default=None,
+    )
+    if retry_after is not None:
         raise HTTPException(
             status_code=429,
-            detail="Too many failed login attempts. Please try again later.",
-            headers={"Retry-After": str(config.LOGIN_FAILURE_WINDOW_SEC)},
+            detail=_login_retry_detail(retry_after),
+            headers={"Retry-After": str(retry_after)},
         )
 
     user = await user_repo.get_by_username(username)

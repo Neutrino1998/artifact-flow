@@ -13,10 +13,12 @@ worker 共享计数),否则 InMemory(单进程,够用于 dev / 单机)。
 
 窗口语义:固定窗口 —— 第一次失败时设 TTL=window;窗口内累计,到 max 即锁;
 窗口过期 key 消失、计数清零。锁定时长 ≈ 距首次失败的剩余窗口。
+retry_after 只在 key 已锁时返回剩余秒数,供 HTTP Retry-After / UX 文案使用。
 """
 
 from __future__ import annotations
 
+import math
 import time
 from typing import Optional
 
@@ -50,6 +52,18 @@ class RedisLoginRateLimiter:
         n = await self._redis.get(self._k(key))
         return n is not None and int(n) >= self._max
 
+    async def retry_after(self, key: str) -> Optional[int]:
+        redis_key = self._k(key)
+        n = await self._redis.get(redis_key)
+        if n is None or int(n) < self._max:
+            return None
+        ttl = await self._redis.ttl(redis_key)
+        if ttl is not None and int(ttl) > 0:
+            return int(ttl)
+        # Should not happen for keys created by record_failure, but fail closed
+        # with the configured window so the caller can still show useful UX.
+        return self._window
+
     async def record_failure(self, key: str) -> None:
         await self._incr(keys=[self._k(key)], args=[self._window])
 
@@ -65,7 +79,7 @@ class InMemoryLoginRateLimiter:
         self._window = window_sec
         self._store: dict[str, tuple[int, float]] = {}  # key -> (count, reset_at_monotonic)
 
-    def _live_count(self, key: str) -> Optional[int]:
+    def _live_record(self, key: str) -> Optional[tuple[int, float]]:
         rec = self._store.get(key)
         if rec is None:
             return None
@@ -73,11 +87,21 @@ class InMemoryLoginRateLimiter:
         if time.monotonic() >= reset_at:
             self._store.pop(key, None)
             return None
-        return count
+        return rec
+
+    def _live_count(self, key: str) -> Optional[int]:
+        rec = self._live_record(key)
+        return rec[0] if rec is not None else None
 
     async def is_locked(self, key: str) -> bool:
         count = self._live_count(key)
         return count is not None and count >= self._max
+
+    async def retry_after(self, key: str) -> Optional[int]:
+        rec = self._live_record(key)
+        if rec is None or rec[0] < self._max:
+            return None
+        return max(1, math.ceil(rec[1] - time.monotonic()))
 
     async def record_failure(self, key: str) -> None:
         now = time.monotonic()
