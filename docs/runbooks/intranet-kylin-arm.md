@@ -46,10 +46,12 @@ important constraint was `/var` at about 8G while Docker's data-root lived
 there, with essentially no free VG space to reshuffle. That is enough for a
 short smoke test, not for Postgres, images, and sandbox scratch.
 
-Before production, each host needs a new 100-200G data disk mounted at `/data`.
+Before production, each host needs a new data disk mounted at `/data`. The
+2026-07 deployment used a 500G disk because the stock 100G `vda` was split
+across many small filesystems and `/var` was only about 8G.
 Use it for:
 
-- Docker data-root, before loading images
+- Docker data-root (`/data/docker`), before loading images
 - sandbox loop pool and scratch root
 - bundled Postgres storage, either through Docker's moved data-root or an
   explicit `/data` bind if the deployment chooses that layout
@@ -61,6 +63,16 @@ Recommended target paths:
 /data/artifactflow/sandbox-pool.img
 /data/artifactflow/sandbox-scratch
 /data/artifactflow/postgres
+```
+
+Check and set Docker's data-root before loading release images:
+
+```bash
+docker info | grep -i 'Docker Root Dir'
+# /etc/docker/daemon.json should include:
+#   "data-root": "/data/docker"
+sudo systemctl restart docker
+docker info | grep -i 'Docker Root Dir'   # expect /data/docker
 ```
 
 ## Build Media
@@ -130,15 +142,35 @@ sudo ./smoke-test.sh
 
 ## Sandbox Preparation
 
-Prefer the release helper after the release bundle is extracted on the host:
+Prefer the release helper after the release deploy tar is extracted on the host.
+The 2026-07 single-host layout keeps transfer bundles and runtime files
+separate:
 
 ```bash
-cd /opt/artifactflow
+/root/workspace/tmp/<version>     # release tar/.sha256/manifest bundle
+/root/workspace/artifactflow      # extracted deploy/config, .env, certs, state
+```
+
+For a two-backend deployment on a 16c / 32G host, start with total engine
+concurrency around 32 by setting per-backend concurrency to 16 in `deploy/.env`:
+
+```bash
+ARTIFACTFLOW_MAX_CONCURRENT_TASKS=16
+ARTIFACTFLOW_REDIS_MAX_CONNECTIONS=32
+ARTIFACTFLOW_DATABASE_POOL_SIZE=5
+ARTIFACTFLOW_DATABASE_MAX_OVERFLOW=10
+```
+
+Prepare sandbox from the bundle directory:
+
+```bash
+cd /root/workspace/artifactflow
 sudo env \
+  AF_BUNDLE_VERSION=<version> \
   AF_SANDBOX_POOL=/data/artifactflow/sandbox-pool.img \
   AF_SANDBOX_SCRATCH_ROOT=/data/artifactflow/sandbox-scratch \
-  AF_SANDBOX_POOL_SIZE=20G \
-  deploy/scripts/fleet.sh prepare-sandbox .
+  AF_SANDBOX_POOL_SIZE=80G \
+  deploy/scripts/fleet.sh prepare-sandbox /root/workspace/tmp/<version>
 ```
 
 This prepares `runsc`, loads the sandbox image, creates the fixed-size scratch

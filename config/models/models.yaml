@@ -34,7 +34,7 @@ models:
 
   qwen3.6-27b-vision:
     model: openai/qwen3.6-27b
-    base_url: http://27.192.67.54/v1
+    base_url: http://172.22.3.54/v1
     api_key_env: GPUSTACK_VISION_API_KEY
     vision: true
 
