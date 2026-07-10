@@ -754,8 +754,11 @@ export function useSSE() {
         // not steal the SSE connection from the now-active C.
         const current = useConversationStore.getState().current;
         if (current?.id !== conversationId) return;
-        const activeMessage = current.messages.find((m) => m.id === active.message_id);
-        useStreamStore.getState().setStreamParentId(activeMessage?.parent_id ?? null);
+        // Reconnect attaches to a message that getConversation() has already
+        // loaded into the persisted branchPath. Leave the parent marker in the
+        // "normal persisted path" state; otherwise MessageList would trim the
+        // active user message out and, with no local pending bubble, hide it.
+        useStreamStore.getState().setStreamParentId(undefined);
         connect(active.stream_url, conversationId, active.message_id);
       } catch {
         // Network/server error — nothing live to attach to for now.
