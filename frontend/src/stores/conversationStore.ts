@@ -40,6 +40,15 @@ interface ConversationState {
   setCurrentLoading: (loading: boolean) => void;
   setActiveBranch: (messageId: string | null) => void;
   updateMessages: (messages: MessageResponse[]) => void;
+  applyTerminalMessageSnapshot: (snapshot: {
+    conversationId: string;
+    messageId: string;
+    parentId: string | null;
+    userInput: string;
+    response: string;
+    executionMetrics?: Record<string, unknown> | null;
+    uploadedFiles?: { filename: string }[] | null;
+  }) => void;
   removeConversation: (id: string) => void;
   /** Optimistically set the cached active_message_id for a conv. Called by
    *  sendMessage after the server responds with a fresh message_id so the
@@ -110,6 +119,56 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       nodeMap,
       branchPath,
     }));
+  },
+
+  applyTerminalMessageSnapshot: ({
+    conversationId,
+    messageId,
+    parentId,
+    userInput,
+    response,
+    executionMetrics,
+    uploadedFiles,
+  }) => {
+    const now = new Date().toISOString();
+    const state = get();
+    const current = state.current;
+    const existing = current?.id === conversationId ? current : null;
+    const messages = existing ? [...existing.messages] : [];
+    const idx = messages.findIndex((m) => m.id === messageId);
+    const uploaded = uploadedFiles?.map((f) => ({ id: f.filename, filename: f.filename }));
+
+    if (idx >= 0) {
+      messages[idx] = {
+        ...messages[idx],
+        response,
+        execution_metrics: executionMetrics ?? messages[idx].execution_metrics ?? null,
+        uploaded_files: uploaded ?? messages[idx].uploaded_files,
+      };
+    } else {
+      messages.push({
+        id: messageId,
+        parent_id: parentId,
+        user_input: userInput,
+        response,
+        created_at: now,
+        children: [],
+        execution_metrics: executionMetrics ?? null,
+        uploaded_files: uploaded,
+        active_skills: undefined,
+      });
+    }
+
+    const title = existing?.title || userInput.trim().split('\n')[0].trim() || 'Untitled';
+    get().setCurrent({
+      id: conversationId,
+      title,
+      active_branch: messageId,
+      messages,
+      session_id: conversationId,
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    });
   },
 
   removeConversation: (id) =>

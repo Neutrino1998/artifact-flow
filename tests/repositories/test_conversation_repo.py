@@ -445,6 +445,25 @@ class TestRetryIdempotency:
 
         assert await conversation_repo.get_message(msg_id) is not None
 
+    async def test_add_message_async_blank_root_title_falls_back(
+        self, conversation_repo: ConversationRepository, test_user: User
+    ):
+        from core.conversation_manager import ConversationManager
+        mgr = ConversationManager(conversation_repo)
+        conv_id = f"conv-{uuid.uuid4().hex}"
+        msg_id = f"msg-{uuid.uuid4().hex}"
+
+        await mgr.add_message_async(
+            conv_id=conv_id,
+            message_id=msg_id,
+            user_input="",
+            parent_id=None,
+        )
+
+        conv = await conversation_repo.get_conversation(conv_id)
+        assert conv is not None
+        assert conv.title == "Untitled"
+
     async def test_start_conversation_async_idempotent_on_same_id(
         self, conversation_repo: ConversationRepository, test_user: User
     ):

@@ -70,6 +70,8 @@ class ConversationManager:
             生成的标题
         """
         first_line = content.strip().split('\n')[0].strip()
+        if not first_line:
+            return "Untitled"
         if len(first_line) > TITLE_MAX_LENGTH:
             return first_line[:TITLE_MAX_LENGTH] + "..."
         return first_line
