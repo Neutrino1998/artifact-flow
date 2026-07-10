@@ -355,6 +355,13 @@ class Message(Base):
     )
 
     __table_args__ = (
+        UniqueConstraint("conversation_id", "id", name="uq_messages_conversation_id_id"),
+        ForeignKeyConstraint(
+            ["conversation_id", "parent_id"],
+            ["messages.conversation_id", "messages.id"],
+            name="fk_messages_parent_same_conversation",
+            ondelete="CASCADE",
+        ),
         Index("ix_messages_conv_created", "conversation_id", "created_at"),
     )
 

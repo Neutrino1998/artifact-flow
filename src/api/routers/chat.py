@@ -68,6 +68,24 @@ async def _verify_ownership(
         raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
 
 
+async def _verify_parent_message(
+    conv_id: str,
+    parent_message_id: str,
+    conversation_manager: ConversationManager,
+) -> None:
+    """校验显式 parent_message_id 属于当前 conversation，避免写出悬空消息树。"""
+    parent = await conversation_manager.get_message(parent_message_id)
+    if not parent or parent.conversation_id != conv_id:
+        logger.warning(
+            "Chat rejected (422): invalid parent_message_id for conversation "
+            f"(conv={conv_id}, parent={parent_message_id})"
+        )
+        raise HTTPException(
+            status_code=422,
+            detail="parent_message_id does not belong to this conversation",
+        )
+
+
 @router.post("", response_model=ChatResponse)
 async def send_message(
     payload: str = Form(...),
@@ -133,6 +151,14 @@ async def send_message(
     # 已有会话：校验归属（只读检查，尽早拒绝；不在此创建任何行）
     if request.conversation_id:
         await _verify_ownership(conversation_id, current_user, conversation_manager)
+
+    if (
+        "parent_message_id" in request.model_fields_set
+        and request.parent_message_id is not None
+    ):
+        await _verify_parent_message(
+            conversation_id, request.parent_message_id, conversation_manager
+        )
 
     # 附件:相一 **纯转换**（bytes → 文本），不碰 DB、不 commit 任何 artifact。任一附件
     # 格式不支持 / 无法解码 / 转换失败 → 在此抛 422/500，此时 conversation 与 artifact 都
@@ -625,4 +651,3 @@ async def resume_execution(
     return ResumeResponse(
         stream_url=f"/api/v1/stream/{message_id}"
     )
-

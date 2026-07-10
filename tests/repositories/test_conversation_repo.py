@@ -282,6 +282,36 @@ class TestMessageCRUD:
                 sample_conversation.id, msg_id, "duplicate"
             )
 
+    async def test_add_message_rejects_missing_parent(
+        self, conversation_repo: ConversationRepository, sample_conversation: Conversation
+    ):
+        with pytest.raises(NotFoundError):
+            await conversation_repo.add_message(
+                sample_conversation.id,
+                f"msg-{uuid.uuid4().hex}",
+                "child",
+                parent_id="msg-does-not-exist",
+            )
+
+    async def test_add_message_rejects_parent_from_other_conversation(
+        self, conversation_repo: ConversationRepository, test_user: User
+    ):
+        conv_a = f"conv-{uuid.uuid4().hex}"
+        conv_b = f"conv-{uuid.uuid4().hex}"
+        await conversation_repo.create_conversation(conv_a, user_id=test_user.id)
+        await conversation_repo.create_conversation(conv_b, user_id=test_user.id)
+
+        parent_id = f"msg-{uuid.uuid4().hex}"
+        await conversation_repo.add_message(conv_a, parent_id, "parent")
+
+        with pytest.raises(NotFoundError):
+            await conversation_repo.add_message(
+                conv_b,
+                f"msg-{uuid.uuid4().hex}",
+                "child",
+                parent_id=parent_id,
+            )
+
     async def test_get_message_and_or_raise(
         self, conversation_repo: ConversationRepository, sample_conversation: Conversation
     ):
@@ -426,4 +456,3 @@ class TestRetryIdempotency:
 
         assert await mgr.start_conversation_async(conv_id) == conv_id
         assert await mgr.start_conversation_async(conv_id) == conv_id
-

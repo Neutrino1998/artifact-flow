@@ -87,11 +87,17 @@ export function useChat() {
         if (activateSkills && activateSkills.length) body.activate_skills = activateSkills;
 
         if (parentMessageId === undefined) {
-          // Default: use last message in current branch
-          if (lastMessageId) body.parent_message_id = lastMessageId;
+          // Default: use last message in current branch. Only attach a parent
+          // when continuing a persisted conversation; a new conversation must
+          // start root even if a stale closure still holds an old branch id.
+          if (current?.id && lastMessageId) body.parent_message_id = lastMessageId;
         } else {
-          // Explicit: null (root) or string (specific parent)
-          body.parent_message_id = parentMessageId;
+          // Explicit: null (root) or string (specific parent). A string parent
+          // is meaningful only inside an existing conversation; dropping it for
+          // new-chat avoids creating a rootless tree from stale UI state.
+          body.parent_message_id = current?.id || parentMessageId === null
+            ? parentMessageId
+            : null;
         }
 
         const isNew = !current?.id;
