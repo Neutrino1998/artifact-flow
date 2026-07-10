@@ -97,7 +97,11 @@ class McpClientManager:
                 return McpListResult(tools=list(cached[2]))
 
         try:
-            raw_tools = await self._list_callable(url, headers, timeout)
+            raw_tools = await self._run_sdk_request(
+                unit_name,
+                "tools/list",
+                self._list_callable(url, headers, timeout),
+            )
             tools = [_coerce_tool_definition(t) for t in raw_tools]
         except Exception as exc:
             logger.warning("MCP server %r tools/list failed: %s", unit_name, exc)
@@ -124,7 +128,11 @@ class McpClientManager:
             unit_name, provider_config, credential_resolver=credential_resolver
         )
         try:
-            result = await self._call_callable(url, headers, timeout, tool_name, arguments)
+            result = await self._run_sdk_request(
+                unit_name,
+                f"tools/call {tool_name!r}",
+                self._call_callable(url, headers, timeout, tool_name, arguments),
+            )
             if result.is_error:
                 await self.invalidate(unit_name)
             return result
@@ -184,6 +192,30 @@ class McpClientManager:
         fingerprint = _fingerprint(url, normalized_headers, timeout)
         return url, normalized_headers, timeout, fingerprint
 
+    async def _run_sdk_request(self, unit_name: str, operation: str, awaitable):
+        """Run one MCP SDK request without letting SDK-internal cancellation escape.
+
+        The MCP streamable-http client uses anyio task groups internally. When a
+        remote server is down, its cleanup path can raise CancelledError or a
+        BaseExceptionGroup from inside the SDK even though the ArtifactFlow turn
+        itself was not cancelled. Treat that as this MCP server being
+        unavailable; a real outer cancellation still propagates.
+        """
+        parent = asyncio.current_task()
+        task = asyncio.create_task(awaitable, name=f"mcp-{unit_name}-{operation}")
+        try:
+            return await task
+        except asyncio.CancelledError as exc:
+            if parent is not None and parent.cancelling():
+                task.cancel()
+                raise
+            raise McpClientError("MCP request failed: could not reach the server") from exc
+        except BaseExceptionGroup as exc:
+            if _should_propagate_mcp_base_exception(exc):
+                raise
+            logger.warning("MCP server %r %s cleanup failed: %s", unit_name, operation, exc)
+            raise McpClientError("MCP request failed: could not reach the server") from exc
+
     async def _list_tools_via_sdk(
         self, url: str, headers: dict[str, str], timeout: int
     ) -> list[Any]:
@@ -237,28 +269,41 @@ class _McpSessionContext:
         from contextlib import AsyncExitStack
 
         self._stack = AsyncExitStack()
-        http_client = httpx.AsyncClient(
-            headers=self._headers,
-            timeout=float(self._timeout),
-            trust_env=False,
-        )
-        await self._stack.enter_async_context(http_client)
-        read_stream, write_stream, _get_session_id = await self._stack.enter_async_context(
-            self._transport_factory(self._url, http_client=http_client)
-        )
-        self._session = await self._stack.enter_async_context(
-            self._session_cls(
-                read_stream,
-                write_stream,
-                read_timeout_seconds=timedelta(seconds=self._timeout),
+        try:
+            http_client = httpx.AsyncClient(
+                headers=self._headers,
+                timeout=float(self._timeout),
+                trust_env=False,
             )
-        )
-        await self._session.initialize()
-        return self._session
+            await self._stack.enter_async_context(http_client)
+            read_stream, write_stream, _get_session_id = await self._stack.enter_async_context(
+                self._transport_factory(self._url, http_client=http_client)
+            )
+            self._session = await self._stack.enter_async_context(
+                self._session_cls(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(seconds=self._timeout),
+                )
+            )
+            await self._session.initialize()
+            return self._session
+        except BaseException:
+            await self._safe_stack_exit(None, None, None)
+            raise
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
+        return await self._safe_stack_exit(exc_type, exc_val, exc_tb)
+
+    async def _safe_stack_exit(self, exc_type, exc_val, exc_tb):
         assert self._stack is not None
-        return await self._stack.__aexit__(exc_type, exc_val, exc_tb)
+        try:
+            return await self._stack.__aexit__(exc_type, exc_val, exc_tb)
+        except BaseException as exc:
+            if _should_propagate_mcp_base_exception(exc):
+                raise
+            logger.warning("MCP SDK session cleanup failed: %s", exc)
+            return False
 
 
 def _coerce_tool_definition(raw: Any) -> McpToolDefinition:
@@ -278,6 +323,17 @@ def _get_sdk_attr(value: Any, *names: str, default: Any) -> Any:
         if hasattr(value, name):
             return getattr(value, name)
     return default
+
+
+def _should_propagate_mcp_base_exception(exc: BaseException) -> bool:
+    if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+        return True
+    task = asyncio.current_task()
+    if task is not None and task.cancelling():
+        return True
+    if isinstance(exc, BaseExceptionGroup):
+        return any(_should_propagate_mcp_base_exception(child) for child in exc.exceptions)
+    return False
 
 
 def _to_plain_dict(value: Any) -> dict[str, Any]:
