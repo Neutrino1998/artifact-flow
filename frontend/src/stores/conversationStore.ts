@@ -143,7 +143,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         ...messages[idx],
         response,
         execution_metrics: executionMetrics ?? messages[idx].execution_metrics ?? null,
-        uploaded_files: uploaded ?? messages[idx].uploaded_files,
+        uploaded_files: uploaded ?? messages[idx].uploaded_files ?? null,
       };
     } else {
       messages.push({
@@ -154,8 +154,8 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         created_at: now,
         children: [],
         execution_metrics: executionMetrics ?? null,
-        uploaded_files: uploaded,
-        active_skills: undefined,
+        uploaded_files: uploaded ?? null,
+        active_skills: null,
       });
     }
 

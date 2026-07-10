@@ -81,6 +81,8 @@ describe('conversationStore — active_message_id CAS', () => {
         created_at: '2026-05-19T00:00:00',
         children: [],
         execution_metrics: null,
+        uploaded_files: null,
+        active_skills: null,
       }],
     });
 
@@ -116,6 +118,8 @@ describe('conversationStore — active_message_id CAS', () => {
         created_at: '2026-05-19T00:00:00',
         children: [],
         execution_metrics: null,
+        uploaded_files: null,
+        active_skills: null,
       }],
     });
 

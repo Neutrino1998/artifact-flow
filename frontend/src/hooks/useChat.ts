@@ -86,18 +86,23 @@ export function useChat() {
         // compact, an activation-only send (empty text) is allowed.
         if (activateSkills && activateSkills.length) body.activate_skills = activateSkills;
 
+        let resolvedParentMessageId: string | null = null;
         if (parentMessageId === undefined) {
           // Default: use last message in current branch. Only attach a parent
           // when continuing a persisted conversation; a new conversation must
           // start root even if a stale closure still holds an old branch id.
-          if (current?.id && lastMessageId) body.parent_message_id = lastMessageId;
+          if (current?.id && lastMessageId) {
+            body.parent_message_id = lastMessageId;
+            resolvedParentMessageId = lastMessageId;
+          }
         } else {
           // Explicit: null (root) or string (specific parent). A string parent
           // is meaningful only inside an existing conversation; dropping it for
           // new-chat avoids creating a rootless tree from stale UI state.
-          body.parent_message_id = current?.id || parentMessageId === null
+          resolvedParentMessageId = (current?.id || parentMessageId === null)
             ? parentMessageId
             : null;
+          body.parent_message_id = resolvedParentMessageId;
         }
 
         const isNew = !current?.id;
@@ -144,10 +149,10 @@ export function useChat() {
         // Always set (null when no files) so a follow-up text-only send doesn't
         // inherit the previous turn's attachment chips on its live bubble.
         setPendingUserFiles(files && files.length > 0 ? files.map((f) => f.name) : null);
-        // Track rerun/edit parent for branchPath truncation
-        if (parentMessageId !== undefined) {
-          setStreamParentId(parentMessageId);
-        }
+        // Track the exact parent sent to the backend for live truncation and
+        // terminal snapshots. This must be stable even if the user switches
+        // branches while the turn is running.
+        setStreamParentId(resolvedParentMessageId);
 
         // connect() now also flips streamStore into streaming state, so
         // sendMessage no longer needs to call startStream itself.

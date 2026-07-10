@@ -93,16 +93,10 @@ export function useSSE() {
     (conversationId: string, messageId: string | null, response: string | undefined, metrics: unknown) => {
       if (!messageId || !response) return;
       const streamState = useStreamStore.getState();
-      const conversationState = useConversationStore.getState();
-      const inferredParentId = conversationState.current?.id === conversationId
-        ? conversationState.branchPath[conversationState.branchPath.length - 1]?.id ?? null
-        : null;
       applyTerminalMessageSnapshot({
         conversationId,
         messageId,
-        parentId: streamState.streamParentId !== undefined
-          ? streamState.streamParentId
-          : inferredParentId,
+        parentId: streamState.streamParentId ?? null,
         userInput: streamState.pendingUserMessage ?? '',
         response,
         executionMetrics: (metrics && typeof metrics === 'object')
@@ -758,7 +752,10 @@ export function useSSE() {
         // The probe is async and switchConversation can fire several in
         // quick succession (e.g. B → C). A late-resolving probe for B must
         // not steal the SSE connection from the now-active C.
-        if (useConversationStore.getState().current?.id !== conversationId) return;
+        const current = useConversationStore.getState().current;
+        if (current?.id !== conversationId) return;
+        const activeMessage = current.messages.find((m) => m.id === active.message_id);
+        useStreamStore.getState().setStreamParentId(activeMessage?.parent_id ?? null);
         connect(active.stream_url, conversationId, active.message_id);
       } catch {
         // Network/server error — nothing live to attach to for now.
