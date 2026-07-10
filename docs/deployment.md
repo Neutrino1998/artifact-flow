@@ -293,6 +293,11 @@ deploy/scripts/fleet.sh status               # 各机器 compose ps + LB 健康
 deploy/scripts/fleet.sh rollback             # 回退到上一个成功版本
 ```
 
+计划性更新 `config/`、`deploy/` 或 backend/frontend 镜像时，主路径都是重新生成
+release bundle 后跑 `fleet deploy <bundle-dir>`。单机路径会从 bundle 解出
+`artifactflow-{config,deploy}-*.tar.gz`，加载 `artifactflow-app-*.tar.gz` 里的
+backend/frontend 镜像，再跑 release gate 和 compose up；下面的手工命令只用于现场热修。
+
 拓扑写在 `deploy/fleet.conf`（从 `fleet.conf.example` 复制，gitignored），单机场景下四个角色
 （`infra`/`release`/`app`/`lb`）都填 `local`；`app` 行的 `scale=N` 就是 `--scale backend=N`
 的等价物。完整命令、多机时序、以及 TLS 证书自动兜底（`up` 前自动跑
@@ -404,7 +409,7 @@ bundle 内容覆盖。
 | 变更类型 | 操作 | 生效命令 |
 |---------|------|---------|
 | `config/models/models.yaml`（模型 / base_url） | 直接编辑宿主机文件 | `docker compose -f deploy/docker-compose.intranet.yml restart backend` |
-| `config/agents/*.md` / `config/tools/*.md` / `config/skills/`（DB seeded registry） | 推荐重新打 config release 并 `fleet deploy`；紧急热修才直接编辑宿主机文件 | 跑一次 release/reconcile gate 后再重建 backend；compose flags 必须与当前部署一致（启用沙盒时也带 `-f deploy/docker-compose.sandbox.yml`） |
+| `config/agents/*.md` / `config/tools/*.md` / `config/skills/`（DB seeded registry） | 推荐重新打 config release 并 `fleet deploy`；紧急热修才直接编辑宿主机文件 | 跑一次 release/reconcile gate 后再重启 backend 进程；compose flags 必须与当前部署一致（启用沙盒时也带 `-f deploy/docker-compose.sandbox.yml`） |
 | `config/site/notifications.json`（左栏通知） | 管理员菜单「通知管理」或直接编辑宿主机文件，schema 见 `config/site/README.md` | **无需 restart** — backend 只写 `config/site` 挂载目录，frontend 只读服务同一目录；前端 60s 轮询自动重拉（标签回前台时立即重拉） |
 | `config/site/welcome_tips.json` / `branding.json`（欢迎页提示 / 版权页脚） | 直接编辑宿主机文件；`branding.json` 首次启用需 `cp branding.example.json branding.json` 再填值（仓库 `.gitignore` 排除真实文件） | **无需 restart**，但**只在挂载时拉一次、不轮询**——改完需用户刷新页面才看到。文件缺失 / schema 错位 → 对应 UI 自动隐藏或回落默认（fail-closed）。 |
 | `deploy/.env`（任何 `ARTIFACTFLOW_*` 变量） | 直接编辑 | 用当前 compose flags 执行 `AF_VERSION="$VERSION" ... up -d backend`（restart 不会重读 .env，up 会检测 env 变化重建容器） |
@@ -433,7 +438,7 @@ COMPOSE="docker compose -f deploy/docker-compose.intranet.yml"
 # COMPOSE="$COMPOSE -f deploy/docker-compose.sandbox.yml"
 
 AF_VERSION="$VERSION" $COMPOSE run --rm release
-AF_VERSION="$VERSION" $COMPOSE up -d backend
+AF_VERSION="$VERSION" $COMPOSE restart backend
 ```
 
 ### 仅推送 config 更新（不动镜像）
