@@ -714,25 +714,13 @@ function SkillImportCard({
         </div>
       )}
 
-      {(error || rejectFindings) && (
-        <StatusNotice
-          tone="error"
-          title={rejectFindings ? '技能包未通过校验' : '导入失败'}
-        >
-          {rejectFindings ? (
-            <div className="space-y-1">
-              <div>请修复后重新打包上传：</div>
-              {rejectFindings.map((finding, index) => (
-                <div key={index} className="break-words">
-                  {finding.message}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="break-words">{error}</div>
-          )}
+      {rejectFindings ? (
+        <SkillValidationNotices findings={rejectFindings} />
+      ) : error ? (
+        <StatusNotice tone="error" title="导入失败">
+          <div className="break-words">{error}</div>
         </StatusNotice>
-      )}
+      ) : null}
 
       <div className="flex justify-end gap-2">
         <button
@@ -757,6 +745,44 @@ function SkillImportCard({
         </button>
       </div>
     </div>
+  );
+}
+
+export function SkillValidationNotices({
+  findings,
+}: {
+  findings: SkillFindingItem[];
+}) {
+  const errors = findings.filter((finding) => finding.severity === 'error');
+  const warnings = findings.filter((finding) => finding.severity === 'warning');
+
+  return (
+    <>
+      {errors.length > 0 && (
+        <StatusNotice tone="error" title="技能包未通过校验">
+          <div className="space-y-1">
+            <div>请修复以下阻断问题后重新打包上传：</div>
+            {errors.map((finding, index) => (
+              <div key={`${finding.rule}-${index}`} className="break-words">
+                {finding.message}
+              </div>
+            ))}
+          </div>
+        </StatusNotice>
+      )}
+      {warnings.length > 0 && (
+        <StatusNotice tone="warning" title="其他校验提示">
+          <div className="space-y-1">
+            <div>以下问题不阻断导入，仅供修包参考。</div>
+            {warnings.map((finding, index) => (
+              <div key={`${finding.rule}-${index}`} className="break-words">
+                {finding.message}
+              </div>
+            ))}
+          </div>
+        </StatusNotice>
+      )}
+    </>
   );
 }
 
