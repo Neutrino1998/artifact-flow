@@ -6,8 +6,8 @@
 # ArtifactFlow sandbox image — gVisor (runsc) functional verification (plan §B).
 #
 # This is the "tier-1 baked environment" (plan 原则 7): interpreter +
-# scientific/document stack + LibreOffice + text-edit + pandoc + ripgrep + zip + git. It runs untrusted
-# LLM-generated code under runsc.
+# scientific/document stack + LibreOffice + text-edit + merman-cli + pandoc +
+# ripgrep + zip + git. It runs untrusted LLM-generated code under runsc.
 # DECOUPLED from the backend image / requirements.lock — the sandbox is its own
 # runtime, not the app. Python deps are pinned in sandbox/requirements.txt.
 #
@@ -15,6 +15,22 @@
 # Air-gap: everything is fetched HERE on the networked build host and baked in;
 # the intranet test node only `docker load`s the saved tar and runs it under
 # --runtime=runsc --network=none with ZERO network (plan 原则 7).
+
+# merman-cli is a headless Mermaid renderer. Build the same pinned source on
+# both target architectures instead of carrying Chromium/Node or mixing
+# architecture-specific binary sources. Cargo.lock fixes the Rust dependency
+# graph; the compiler version follows upstream's rust-toolchain.toml.
+FROM rust:1.95.0-slim-bookworm AS merman-builder
+
+ADD --checksum=sha256:e1d787154be74bca8262cc9c83ee3cb3f7e0c13dd4b8eb65c41cb2e42d3b5092 \
+    https://github.com/Latias94/merman/archive/refs/tags/v0.7.0.tar.gz \
+    /tmp/merman.tar.gz
+RUN mkdir -p /tmp/merman /opt/merman/licenses && \
+    tar -xzf /tmp/merman.tar.gz --strip-components=1 -C /tmp/merman && \
+    cargo install --locked --path /tmp/merman/crates/merman-cli --root /opt/merman && \
+    strip /opt/merman/bin/merman-cli && \
+    cp /tmp/merman/LICENSE /tmp/merman/LICENSE-APACHE /tmp/merman/LICENSE-MIT \
+       /opt/merman/licenses/
 
 FROM python:3.11-slim
 
@@ -123,6 +139,14 @@ RUN pip wheel --no-deps -w /opt/stub-wheels /tmp/stub-pkg && rm -rf /tmp/stub-pk
 # concrete owner to assert against on the host side.
 RUN useradd --create-home --uid 1000 sandbox && \
     mkdir -p /work && chown sandbox:sandbox /work
+
+# Semantic diagrams without a browser runtime. Keep this late in the final
+# stage so merman upgrades do not invalidate the much larger Office/Python
+# layers. Raster limits are enforced by merman-cli itself; skills must not
+# disable them with --raster-unbounded.
+COPY --from=merman-builder /opt/merman/bin/merman-cli /usr/local/bin/merman-cli
+COPY --from=merman-builder /opt/merman/licenses/ /usr/share/licenses/merman-cli/
+
 USER sandbox
 WORKDIR /work
 

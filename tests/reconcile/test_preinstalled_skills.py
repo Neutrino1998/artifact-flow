@@ -28,7 +28,9 @@ from utils.skill_validator import validate_skill_zip
 ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = ROOT / "config" / "skills-src"
 ZIP_DIR = ROOT / "config" / "skills"
-PREINSTALLED = ["dataviz", "docx", "pdf", "pptx", "skill-creator", "xlsx"]
+PREINSTALLED = ["dataviz", "diagram", "docx", "pdf", "pptx", "skill-creator", "xlsx"]
+# skills-src 内的 SKILL.md-only 预装包。仍产 zip 供下载，has_extra_files=False。
+PREINSTALLED_SINGLE_FILE = {"diagram"}
 # 纯散文预装(SKILL.md-only 目录源码;入库时也会生成单文件 zip bundle)
 PREINSTALLED_PROSE = ["html-artifact-design"]
 
@@ -100,9 +102,9 @@ def test_seed_parse_clean_and_defaults():
         seed = by_slug[slug]
         assert seed.visibility == "public"
         assert seed.default_enabled is True
-        is_prose = slug in PREINSTALLED_PROSE
+        is_single_file = slug in PREINSTALLED_PROSE or slug in PREINSTALLED_SINGLE_FILE
         assert seed.bundle is not None
-        assert seed.has_extra_files is (not is_prose)
+        assert seed.has_extra_files is (not is_single_file)
         assert _zip_manifest(seed.bundle)
         assert seed.skill_md.strip()
 

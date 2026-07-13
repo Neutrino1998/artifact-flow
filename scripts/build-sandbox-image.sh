@@ -68,6 +68,7 @@ PANDOC_VER=$(docker run --rm "${IMAGE}" pandoc --version | head -1)
 OFFICE_VER=$(docker run --rm "${IMAGE}" soffice --version | head -1)
 OFFICE_CLI_VER=$(docker run --rm "${IMAGE}" artifactflow-office --version)
 TEXT_EDIT_VER=$(docker run --rm "${IMAGE}" text-edit --version)
+MERMAN_VER=$(docker run --rm "${IMAGE}" merman-cli --version)
 RG_VER=$(docker run --rm "${IMAGE}" rg --version | head -1)
 ZIP_VER=$(docker run --rm "${IMAGE}" sh -c "zip -v | grep -m1 'This is Zip'")
 GIT_VER=$(docker run --rm "${IMAGE}" git --version)
@@ -110,6 +111,7 @@ Tools:
   ${OFFICE_VER}
   ${OFFICE_CLI_VER}
   ${TEXT_EDIT_VER}
+  ${MERMAN_VER}
   ${PANDOC_VER}
   ${RG_VER}
   ${ZIP_VER}

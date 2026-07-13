@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 LibreOffice、python-pptx、Pillow、matplotlib、RapidFuzz。
 metadata:
-  version: "2.1.1"
+  version: "2.1.2"
 ---
 
 # 演示文稿
@@ -71,7 +71,8 @@ python "$SKILL/scripts/replace_text.py" 输入.pptx /workspace/修改稿.pptx \
 python "$SKILL/scripts/build_deck.py" deck.json /workspace/输出.pptx
 ```
 
-JSON 支持的版式见脚本头部 docstring。图表用 matplotlib 生成 PNG 后放入 image 版式。
+JSON 支持的版式见脚本头部 docstring。定量数据图用 `dataviz`/matplotlib；流程、架构、时序等
+语义图按 `diagram` skill 渲染为 PNG，再放入 image 版式。
 `build_deck.py` 是快速生成器，不是模板编辑器；已有模板时不要无故重做。
 
 ## 质检与导出

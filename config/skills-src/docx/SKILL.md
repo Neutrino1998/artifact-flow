@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 LibreOffice、Pandoc、python-docx、lxml、RapidFuzz。
 metadata:
-  version: "2.1.1"
+  version: "2.1.2"
 ---
 
 # Word 文档
@@ -66,6 +66,7 @@ pandoc content.md \
 
 复杂表格、分节、题注或精确图片尺寸用 python-docx。Pandoc 适合语义内容和统一样式，
 python-docx 适合逐元素控制；不要一开始就拆 OOXML。
+流程、架构、时序等语义图按 `diagram` skill 渲染为 PNG 后插入；定量数据图用 `dataviz`/matplotlib。
 
 ## 批量修订
 

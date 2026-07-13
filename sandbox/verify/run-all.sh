@@ -34,6 +34,7 @@ incontainer "ENOSYS (in-container)"          python3 verify-enosys.py
 incontainer "pandoc canary (in-container)"   bash    verify-pandoc.sh
 incontainer "Office CLI (in-container)"      python3 verify-office.py
 incontainer "text-edit (in-container)"       python3 verify-text-edit.py
+incontainer "merman-cli (in-container)"      bash    verify-merman.sh
 incontainer "git local repo (in-container)"  bash    verify-git.sh
 incontainer "offline install (in-container)" bash    verify-offline-install.sh
 

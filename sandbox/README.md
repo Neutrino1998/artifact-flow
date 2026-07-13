@@ -7,7 +7,7 @@ intranet trip**, then withdraw. Background + decisions:
 
 ```
 sandbox/
-├── Dockerfile              tier-1 sandbox image (py3.11 + sci/doc stack + LibreOffice + text-edit + pandoc + ripgrep + zip + git,
+├── Dockerfile              tier-1 sandbox image (py3.11 + sci/doc stack + LibreOffice + text-edit + merman-cli + pandoc + ripgrep + zip + git,
 │                           non-root uid1000, baked offline-install stub wheel)
 ├── office_cli.py           artifactflow-office: isolated-profile convert/render/recalc wrapper
 ├── text_edit.py            text-edit: checked file-based exact/normalized/fuzzy replacement
@@ -28,6 +28,7 @@ scripts/build-sandbox-image.sh   build + docker-save the image tar (mirrors rele
 | `verify-pandoc.sh` | in-container | docx/html↔md round trip (self-generated fixtures) |
 | `verify-office.py` | in-container | `libreoffice-core`/`libreoffice-writer`/`libreoffice-calc`/`libreoffice-impress` via `artifactflow-office`: DOCX→PDF, PPTX→PNG, XLSX formula recalc; Office-compatible `fonts-liberation2`/`fonts-crosextra-carlito`/`fonts-crosextra-caladea` are baked alongside |
 | `verify-text-edit.py` | in-container | file operands, unique exact replacement, ambiguity failure without writes, and bounded fuzzy prose lookup |
+| `verify-merman.sh` | in-container | headless `merman-cli`: Chinese flowchart to SVG/PNG, bounded nonblank raster output, and loud parse failure |
 | `verify-git.sh` | in-container | local repo lifecycle (init/add/commit/diff/log) + baked `--system` identity + `safe.directory='*'` presence; clone/fetch dead under `--network=none` by design |
 | `verify-offline-install.sh` | in-container | `pip install --no-index --find-links` survives Sentry (tier-2/3 delivery path) |
 | `verify-bindmount.sh` | host | container writes → host reads back, uid mapping, ripgrep over the gofer mount, git on a root-owned mounted repo (dubious-ownership waiver) |
@@ -60,6 +61,9 @@ own tar.
 Arch note: `build-sandbox-image.sh` builds `linux/arm64` NATIVE on Apple Silicon
 (fast); `linux/amd64` is QEMU-emulated (slow — a mid-build SSL/EOF is usually the
 build-host proxy flapping, not the Dockerfile; just re-run, layer cache is fast).
+`merman-cli` is compiled in a Rust slim build stage: its cold download/compile
+cost stays on the networked build host and is cached; only the stripped binary
+and licenses enter the delivered sandbox image.
 Local rehearsal off-Kylin: build native arch + run with `RUNTIME=runc` (validates
 everything except gVisor-specific syscall behavior; on macOS, virtiofs also maps
 bind-mount ownership to the accessing uid, so the bindmount git/uid checks can't

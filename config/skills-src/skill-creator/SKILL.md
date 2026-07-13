@@ -8,7 +8,7 @@ description: >
 license: Apache-2.0
 compatibility: 需要沙盒(bash/mount/persist)。体检与实测在真实运行环境中进行。
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 ---
 
 # 技能创建与体检
