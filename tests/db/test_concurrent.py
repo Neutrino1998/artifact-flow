@@ -6,18 +6,24 @@ and uses asyncio.Barrier + asyncio.gather to exercise concurrent access.
 No sleep-based synchronization.
 """
 
-import uuid
 import asyncio
+import io
+import uuid
+import zipfile
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
+from config import config
+from core.skill_manager import SkillCountLimitError, SkillManager
 from db.database import DatabaseManager
-from db.models import User
+from db.models import Skill, User
 from repositories.user_repo import UserRepository
 from repositories.conversation_repo import ConversationRepository
 from repositories.artifact_repo import ArtifactRepository
 from repositories.base import DuplicateError
+from repositories.skill_repo import SkillRepository
 from api.services.auth import hash_password
 
 
@@ -80,6 +86,16 @@ async def _create_test_artifact(
             content="initial content",
         )
         return artifact_id
+
+
+def _skill_zip(slug: str) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(
+            "SKILL.md",
+            f"---\nname: {slug}\ndescription: concurrent test\n---\n# {slug}\n",
+        )
+    return buf.getvalue()
 
 
 # ============================================================
@@ -185,6 +201,75 @@ class TestConcurrent:
         errors = [r for r in results if r[0] == "error"]
         assert len(successes) == 1
         assert len(errors) == 1
+
+    async def test_private_skill_count_limit_serializes_sqlite_imports(
+        self,
+        file_db: DatabaseManager,
+        monkeypatch,
+    ):
+        """Two distinct slugs cannot consume the same final private-skill slot."""
+        user = await _create_test_user(file_db)
+        monkeypatch.setattr(config, "SKILL_USER_MAX_PRIVATE_COUNT", 1)
+        monkeypatch.setattr(config, "ARTIFACT_USER_QUOTA_BYTES", 0)
+
+        start = asyncio.Barrier(2)
+        both_counted = asyncio.Event()
+        count_calls = 0
+        original_count = SkillRepository.count_owned_skills
+
+        async def synchronize_stale_count(
+            repo: SkillRepository,
+            user_id: str,
+        ) -> int:
+            nonlocal count_calls
+            count = await original_count(repo, user_id)
+            count_calls += 1
+            if count_calls == 2:
+                both_counted.set()
+            try:
+                await asyncio.wait_for(both_counted.wait(), timeout=0.1)
+            except TimeoutError:
+                # With a working lock, request two cannot count until request one
+                # commits. Let request one finish so request two can observe it.
+                pass
+            return count
+
+        monkeypatch.setattr(
+            SkillRepository,
+            "count_owned_skills",
+            synchronize_stale_count,
+        )
+
+        async def import_one(slug: str):
+            async with file_db.session() as session:
+                # Mirror get_current_user's request-session read before import.
+                assert (await session.execute(
+                    select(User.id).where(User.id == user.id)
+                )).scalar_one() == user.id
+                await start.wait()
+                return await SkillManager(session).import_zip(
+                    user.id,
+                    _skill_zip(slug),
+                    f"{slug}.zip",
+                    audience="private",
+                )
+
+        results = await asyncio.gather(
+            import_one("concurrent-a"),
+            import_one("concurrent-b"),
+            return_exceptions=True,
+        )
+
+        assert sum(isinstance(result, dict) for result in results) == 1
+        assert sum(
+            isinstance(result, SkillCountLimitError) for result in results
+        ) == 1
+        assert count_calls == 2
+        async with file_db.session() as session:
+            owned_count = (await session.execute(
+                select(func.count(Skill.slug)).where(Skill.owner_user_id == user.id)
+            )).scalar_one()
+        assert owned_count == 1
 
     async def test_read_during_write_sees_committed(
         self, file_db: DatabaseManager

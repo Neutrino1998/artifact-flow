@@ -6,7 +6,7 @@ plain dict / set)。可见性解析(EffectiveSkillSet)、CRUD 编排在上层 Ma
 
 from typing import Dict, Optional
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -81,7 +81,18 @@ class SkillRepository:
 
         Distinct users remain independent. The stable parent row also gives an empty
         collection something to lock, unlike locking the user's existing skill rows.
+
+        SQLite ignores ``FOR UPDATE``. A no-op write acquires its single-writer lock
+        before the count, serializing the later count-and-insert across connections.
+        Raw SQL intentionally bypasses ``User.updated_at``'s SQLAlchemy ``onupdate``.
         """
+        if self._session.get_bind().dialect.name == "sqlite":
+            result = await self._session.execute(
+                text("UPDATE users SET id = id WHERE id = :user_id"),
+                {"user_id": user_id},
+            )
+            return result.rowcount == 1
+
         return (
             await self._session.execute(
                 select(User.id).where(User.id == user_id).with_for_update()
