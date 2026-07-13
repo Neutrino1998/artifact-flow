@@ -39,8 +39,7 @@ function StatusIcon({ tone }: { tone: StatusNoticeTone }) {
   if (tone === 'error') {
     return (
       <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="8" cy="8" r="6" />
-        <path d="M10 6 6 10M6 6l4 4" />
+        <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" />
       </svg>
     );
   }
@@ -48,8 +47,8 @@ function StatusIcon({ tone }: { tone: StatusNoticeTone }) {
   if (tone === 'warning') {
     return (
       <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M8 2.5 14 13H2L8 2.5Z" />
-        <path d="M8 6v3M8 11h.01" />
+        <path d="M8 2.25v5.75" strokeWidth="2.25" />
+        <circle cx="8" cy="12.25" r="1.5" fill="currentColor" stroke="none" />
       </svg>
     );
   }

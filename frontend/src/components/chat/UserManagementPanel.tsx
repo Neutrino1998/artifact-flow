@@ -9,6 +9,7 @@ import { useUIStore } from '@/stores/uiStore';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 import Checkbox from '@/components/forms/Checkbox';
 import { PillBadge } from '@/components/ui/PillBadge';
+import { StatusNotice } from '@/components/ui/StatusNotice';
 import PanelSearchBar from './PanelSearchBar';
 import Pagination from './Pagination';
 
@@ -203,9 +204,9 @@ export default function UserManagementPanel() {
         <div className="max-w-3xl mx-auto pt-3">
           {/* Error */}
           {error && (
-            <div className="mb-3 px-3 py-2 text-status-error bg-status-error/10 rounded-lg">
+            <StatusNotice tone="error" className="mb-3">
               {error}
-            </div>
+            </StatusNotice>
           )}
 
           {/* Selection toolbar — shown only in selection mode. The top-level

@@ -9,6 +9,7 @@ import { useUIStore } from '@/stores/uiStore';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 import { SourceBadge } from '@/components/forms/ToolUnitBadges';
 import { PillBadge } from '@/components/ui/PillBadge';
+import { StatusNotice } from '@/components/ui/StatusNotice';
 import DangerConfirmModal, { DangerConfirmTarget } from '@/components/layout/DangerConfirmModal';
 import PanelSearchBar from './PanelSearchBar';
 
@@ -119,15 +120,15 @@ export default function ToolUnitManagementPanel() {
       <div className="flex-1 overflow-y-auto px-4 pb-4">
         <div className="max-w-3xl mx-auto pt-3 space-y-2">
           {error && (
-            <div className="px-3 py-2 text-status-error bg-status-error/10 rounded-lg">
+            <StatusNotice tone="error">
               {error}
-            </div>
+            </StatusNotice>
           )}
 
           {rowError && (
-            <div className="px-3 py-2 text-xs text-status-error bg-status-error/10 rounded-lg">
+            <StatusNotice tone="error" onDismiss={() => setRowError(null)}>
               {rowError}
-            </div>
+            </StatusNotice>
           )}
 
           {loading && units.length === 0 ? (
