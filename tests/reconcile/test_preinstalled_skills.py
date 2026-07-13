@@ -117,8 +117,10 @@ def test_render_mermaid_routing_contract():
         encoding="utf-8"
     )
 
-    assert "仅要求聊天内图示或 Mermaid 源码时不要激活" in skill_md
+    assert "仅在聊天中展示 Mermaid 且未要求文件时不激活" in skill_md
     assert "不调用 `bash`、`mount` 或 `persist`" in skill_md
+    assert "只交付 `.mmd`" in skill_md
+    assert "只 `persist` 源文件" in skill_md
     assert "```mermaid fenced code block" in lead_md
 
 
