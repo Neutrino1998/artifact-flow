@@ -1,3 +1,4 @@
+import builtins
 import importlib.util
 import subprocess
 from pathlib import Path
@@ -25,6 +26,27 @@ def test_parse_pages_is_strict_and_bounded(office_cli, monkeypatch):
         office_cli._parse_pages(None, 3)
     with pytest.raises(office_cli.OfficeError, match="render at most 2"):
         office_cli._parse_pages("1-3", 3)
+
+
+def test_parse_pages_rejects_huge_range_before_materializing(office_cli, monkeypatch):
+    real_range = builtins.range
+
+    def guarded_range(*args):
+        candidate = real_range(*args)
+        assert len(candidate) <= office_cli.MAX_RENDER_PAGES, "range materialized before limit check"
+        return candidate
+
+    monkeypatch.setattr(office_cli, "range", guarded_range, raising=False)
+    with pytest.raises(office_cli.OfficeError, match="within 1-10"):
+        office_cli._parse_pages("1-999999999", 10)
+    with pytest.raises(office_cli.OfficeError, match="render at most 100"):
+        office_cli._parse_pages("1-999999999", 999999999)
+
+
+def test_html_is_not_a_single_file_conversion(office_cli):
+    assert ".html" not in office_cli._CONVERT_FILTERS
+    with pytest.raises(office_cli.OfficeError, match="unsupported output extension"):
+        office_cli._conversion_spec(".html")
 
 
 def test_convert_writes_the_explicit_target(office_cli, monkeypatch, tmp_path):

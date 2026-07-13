@@ -40,7 +40,6 @@ _CONVERT_FILTERS = {
     ".xlsx": 'xlsx:Calc MS Excel 2007 XML',
     ".ods": "ods:calc8",
     ".pdf": "pdf",
-    ".html": "html",
     ".txt": "txt:Text",
     ".csv": "csv:Text - txt - csv (StarCalc)",
 }
@@ -192,6 +191,19 @@ def _parse_pages(expr: str | None, page_count: int) -> list[int]:
             )
         return list(range(page_count))
     selected: set[int] = set()
+
+    def add_page(number: int) -> None:
+        if number < 1 or number > page_count:
+            raise OfficeError(f"page selection must be within 1-{page_count}")
+        if number in selected:
+            return
+        if len(selected) >= MAX_RENDER_PAGES:
+            raise OfficeError(
+                f"requested more than {MAX_RENDER_PAGES} pages; "
+                f"render at most {MAX_RENDER_PAGES} pages per call"
+            )
+        selected.add(number)
+
     for raw_part in expr.split(","):
         part = raw_part.strip()
         if not part:
@@ -201,17 +213,22 @@ def _parse_pages(expr: str | None, page_count: int) -> list[int]:
                 start, end = (int(value) for value in part.split("-", 1))
                 if start > end:
                     raise ValueError
-                selected.update(range(start, end + 1))
+                if start < 1 or end > page_count:
+                    raise OfficeError(f"page selection must be within 1-{page_count}")
+                span = end - start + 1
+                if span > MAX_RENDER_PAGES:
+                    raise OfficeError(
+                        f"requested range contains {span} pages; "
+                        f"render at most {MAX_RENDER_PAGES} pages per call"
+                    )
+                for number in range(start, end + 1):
+                    add_page(number)
             else:
-                selected.add(int(part))
+                add_page(int(part))
         except ValueError as exc:
             raise OfficeError(f"invalid page selection: {part!r}") from exc
-    if not selected or min(selected) < 1 or max(selected) > page_count:
+    if not selected:
         raise OfficeError(f"page selection must be within 1-{page_count}")
-    if len(selected) > MAX_RENDER_PAGES:
-        raise OfficeError(
-            f"requested {len(selected)} pages; render at most {MAX_RENDER_PAGES} pages per call"
-        )
     return [number - 1 for number in sorted(selected)]
 
 
