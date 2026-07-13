@@ -90,6 +90,14 @@ class TestAdversarialComplexity:
         self._assert_within_budget(started, "CDATA masking")
         assert masked == content
 
+    def test_many_unclosed_name_tags_stay_linear(self):
+        text = "<tool_call>" + "<name>" * 10_000 + "<payload><![CDATA["
+        started = perf_counter()
+        tc = parse_tool_calls(text)[0]
+        self._assert_within_budget(started, "incomplete-call name extraction")
+        assert tc.name == "__incomplete__"
+        assert tc.error is not None
+
     def test_splitter_with_many_closed_cdata_blocks_stays_linear(self):
         text = (
             "<tool_call><name>x</name><params><payload>"
@@ -123,6 +131,19 @@ class TestAdversarialComplexity:
         self._assert_within_budget(started, "duplicate parameter detection")
         assert tc.error is not None
         assert "duplicate parameter" in tc.error
+
+    def test_many_tag_equals_repairs_stay_linear(self):
+        text = (
+            "<tool_call><name=x</name><params>"
+            + "<a=x</a>" * 80_000
+            + "</params></tool_call>"
+        )
+        started = perf_counter()
+        tc = parse_tool_calls(text)[0]
+        self._assert_within_budget(started, "tag-equals repair")
+        assert tc.error is not None
+        assert "duplicate parameter" in tc.error
+        assert tc.warnings
 
 
 # ============================================================

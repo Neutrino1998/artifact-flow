@@ -56,7 +56,6 @@ class XMLToolCallParser:
     # tool_call 开/闭标签大小写不敏感（沿用旧行为）；CDATA 定界符按 XML 规范大小写敏感。
     _OPEN_RE = re.compile(r'<tool_call>', re.IGNORECASE)
     _CLOSE_RE = re.compile(r'</tool_call>', re.IGNORECASE)
-    _NAME_RE = re.compile(r'<name>\s*(.*?)\s*</name>', re.DOTALL)
     _CDATA_OPEN = '<![CDATA['
     _CDATA_CLOSE = ']]>'
 
@@ -450,21 +449,27 @@ class XMLToolCallParser:
         修复为：
             <name>call_subagent</name>
 
-        CDATA-aware：匹配只在遮蔽 CDATA 的 masked 串上找（span 与 content 1:1），按 span 逆序
-        改写 content —— 否则 CDATA 内的字面 <a=b</a>（如 reason/content 里的代码示例）会被误重写、
-        污染参数值。
+        CDATA-aware：匹配只在遮蔽 CDATA 的 masked 串上找（span 与 content 1:1），真实值
+        从 content 切取。按正序收集未改动片段和 replacement，最后只 join 一次，避免每个匹配
+        都重建整个响应。CDATA 内的字面 <a=b</a> 不会被重写。
         """
         masked = XMLToolCallParser._mask_cdata(content)
-        matches = list(re.finditer(r'<(\w+)=([^<>]+)</\1>', masked))
-        if not matches:
-            return content
-
-        # 逆序按 span 改写，避免前面的替换位移后面的偏移；value 真实文本切自 content
-        result = content
-        for m in reversed(matches):
+        parts = []
+        cursor = 0
+        matched = False
+        for m in re.finditer(r'<(\w+)=([^<>]+)</\1>', masked):
+            matched = True
             tag = m.group(1)
             value = content[m.start(2):m.end(2)]
-            result = result[:m.start()] + f'<{tag}>{value}</{tag}>' + result[m.end():]
+            parts.append(content[cursor:m.start()])
+            parts.append(f'<{tag}>{value}</{tag}>')
+            cursor = m.end()
+
+        if not matched:
+            return content
+
+        parts.append(content[cursor:])
+        result = ''.join(parts)
 
         warnings.append(
             "Used '=' inside tag opening (e.g., <name=foo</name>). "
@@ -579,13 +584,24 @@ class XMLToolCallParser:
 
     @staticmethod
     def _extract_name_outside_cdata(content: str) -> Optional[str]:
-        """线性提取 CDATA 外的 <name>，仅用于失败事件的 observability 归类。"""
+        """线性提取 CDATA 外的 <name>，仅用于失败事件的 observability 归类。
+
+        只检查每个区间的第一个 opener；若其没有对应 closer 就放弃 best-effort
+        提取。不尝试后续 opener，避免对 malformed 后缀反复扫描。
+        """
+        open_tag = '<name>'
+        close_tag = '</name>'
         for is_cdata, start, end, _ in XMLToolCallParser._iter_cdata_regions(content):
             if is_cdata:
                 continue
-            match = XMLToolCallParser._NAME_RE.search(content, start, end)
-            if match:
-                return content[match.start(1):match.end(1)].strip() or None
+            open_start = content.find(open_tag, start, end)
+            if open_start == -1:
+                continue
+            value_start = open_start + len(open_tag)
+            close_start = content.find(close_tag, value_start, end)
+            if close_start == -1:
+                return None
+            return content[value_start:close_start].strip() or None
         return None
 
     @staticmethod
