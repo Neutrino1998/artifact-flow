@@ -39,7 +39,8 @@ LLM 可以在单次响应中包含多个 `<tool_call>` 块，引擎会按顺序�
 第一步拆分是 **CDATA-aware** 的：扫描 `</tool_call>` 终止符时跳过 `<![CDATA[...]]>` 区，所以
 artifact 正文里出现字面 `</tool_call>` / `</params>` 不会把一个完整调用误拆。**修复策略本身也
 对 CDATA 盲区免疫**——raw-string repair 的结构判定在「遮蔽 CDATA 的副本」上做，绝不把内容里的
-字面标签当结构；well-formed XML 的 tool-call grammar 则由 ElementTree 的层级结果校验。
+字面标签当结构；well-formed XML 的 tool-call grammar 则由 ElementTree 的层级结果校验。CDATA
+拆分、遮蔽、尾部检测和失败归类共用同一个游标单向前进的分段器；对模型输出的所有扫描都必须与响应长度线性相关。
 
 仅对意图可唯一确定的常见问题做兼容修复：
 

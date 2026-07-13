@@ -5,7 +5,7 @@ XML工具调用解析器
 
 import xml.etree.ElementTree as ET
 import re
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Iterator
 from dataclasses import dataclass, field
 
 from tools.xml_protocol import STRUCTURAL_TAGS, TOOL_CALL_EXAMPLE
@@ -56,8 +56,44 @@ class XMLToolCallParser:
     # tool_call 开/闭标签大小写不敏感（沿用旧行为）；CDATA 定界符按 XML 规范大小写敏感。
     _OPEN_RE = re.compile(r'<tool_call>', re.IGNORECASE)
     _CLOSE_RE = re.compile(r'</tool_call>', re.IGNORECASE)
+    _NAME_RE = re.compile(r'<name>\s*(.*?)\s*</name>', re.DOTALL)
     _CDATA_OPEN = '<![CDATA['
     _CDATA_CLOSE = ']]>'
+
+    @staticmethod
+    def _iter_cdata_regions(text: str, start: int = 0) -> Iterator[tuple[bool, int, int, bool]]:
+        """Yield ``(is_cdata, start, end, is_complete)`` regions in one forward pass.
+
+        Regions cover ``text[start:]`` without overlap. Once a CDATA opener is found, only
+        its first following ``]]>`` can close it; nested opener-shaped text is literal CDATA
+        content. Every search therefore starts after the previous consumed region, keeping
+        all CDATA-aware parser paths linear in the response length.
+        """
+        limit = len(text)
+        pos = start
+        open_len = len(XMLToolCallParser._CDATA_OPEN)
+        close_len = len(XMLToolCallParser._CDATA_CLOSE)
+
+        while pos < limit:
+            cdata_start = text.find(XMLToolCallParser._CDATA_OPEN, pos)
+            if cdata_start == -1:
+                yield False, pos, limit, True
+                return
+
+            if cdata_start > pos:
+                yield False, pos, cdata_start, True
+
+            close_start = text.find(
+                XMLToolCallParser._CDATA_CLOSE,
+                cdata_start + open_len,
+            )
+            if close_start == -1:
+                yield True, cdata_start, limit, False
+                return
+
+            cdata_end = close_start + close_len
+            yield True, cdata_start, cdata_end, True
+            pos = cdata_end
 
     @staticmethod
     def _split_tool_calls(text: str) -> List[tuple]:
@@ -76,22 +112,23 @@ class XMLToolCallParser:
                 break
             block_start, inner_start = m_open.start(), m_open.end()
 
-            # 从 inner_start 起扫描，跳过 CDATA 区，找 CDATA 外的 </tool_call>
-            scan = inner_start
+            # 在不重叠的 CDATA 外区间各搜索一次 </tool_call>。
             close_m = None
-            while scan < len(text):
-                ci = text.find(XMLToolCallParser._CDATA_OPEN, scan)
-                cm = XMLToolCallParser._CLOSE_RE.search(text, scan)
-                cm_idx = cm.start() if cm else -1
-                if ci != -1 and (cm_idx == -1 or ci < cm_idx):
-                    # 先遇 CDATA 开始 → 跳到其 ]]> 之后；无 ]]> 则 CDATA 一直到 EOF
-                    end = text.find(XMLToolCallParser._CDATA_CLOSE, ci + len(XMLToolCallParser._CDATA_OPEN))
-                    if end == -1:
+            for is_cdata, region_start, region_end, is_complete in (
+                XMLToolCallParser._iter_cdata_regions(text, inner_start)
+            ):
+                if is_cdata:
+                    if not is_complete:
                         break
-                    scan = end + len(XMLToolCallParser._CDATA_CLOSE)
                     continue
-                close_m = cm  # 可能为 None（再无 CDATA 外的 </tool_call>）
-                break
+
+                close_m = XMLToolCallParser._CLOSE_RE.search(
+                    text,
+                    region_start,
+                    region_end,
+                )
+                if close_m is not None:
+                    break
 
             if close_m is not None:
                 out.append((text[inner_start:close_m.start()],
@@ -211,10 +248,9 @@ class XMLToolCallParser:
         """构造统一的模型可恢复错误：规范格式始终存在，分支只追加可观测事实。"""
         name = fallback_name
         if extract_name:
-            masked = XMLToolCallParser._mask_cdata(content)
-            nm = re.search(r'<name>\s*(.*?)\s*</name>', masked, re.DOTALL)
-            if nm:
-                name = content[nm.start(1):nm.end(1)].strip()
+            extracted_name = XMLToolCallParser._extract_name_outside_cdata(content)
+            if extracted_name:
+                name = extracted_name
         return ToolCall(
             name=name,
             params={},
@@ -325,15 +361,23 @@ class XMLToolCallParser:
                 "Found text between parameter elements; keep values inside their own elements."
             )
 
-        param_names = [child.tag for child in params_elem]
-        duplicates = sorted({name for name in param_names if param_names.count(name) > 1})
+        seen = set()
+        duplicates = set()
+        nested = []
+        for child in params_elem:
+            if child.tag in seen:
+                duplicates.add(child.tag)
+            else:
+                seen.add(child.tag)
+            if len(child):
+                nested.append(child.tag)
+
         if duplicates:
-            names = ", ".join(f"<{name}>" for name in duplicates)
+            names = ", ".join(f"<{name}>" for name in sorted(duplicates))
             raise ToolCallProtocolError(
                 f"Found duplicate parameter element(s) {names}; emit each parameter once."
             )
 
-        nested = [child.tag for child in params_elem if list(child)]
         if nested:
             names = ", ".join(f"<{name}>" for name in nested)
             raise ToolCallProtocolError(
@@ -441,42 +485,29 @@ class XMLToolCallParser:
         排除 params / tool_call（结构标签，由拆分层 / 其他 repair 负责）。
         """
         stack: List[tuple] = []  # 未闭合标签栈：(tag_name, open_start_pos)
-        pos = 0
-        cdata_open_at_eof = False
         last_tag_event_pos = -1  # 最后一次见到 tag-shape 内容的位置
 
         tag_re = re.compile(r'<(/?)(\w+)\s*>')
 
-        while pos < len(content):
-            cdata_idx = content.find('<![CDATA[', pos)
-            tag_match = tag_re.search(content, pos)
-            tag_idx = tag_match.start() if tag_match else -1
-
-            # 选最早的事件
-            if cdata_idx != -1 and (tag_idx == -1 or cdata_idx < tag_idx):
-                cdata_end = content.find(']]>', cdata_idx + 9)
-                if cdata_end == -1:
-                    cdata_open_at_eof = True  # 案例 A
-                    break
-                pos = cdata_end + 3
+        for is_cdata, region_start, region_end, is_complete in (
+            XMLToolCallParser._iter_cdata_regions(content)
+        ):
+            if is_cdata:
+                if not is_complete:
+                    return True  # 案例 A
                 continue
 
-            if tag_idx == -1:
-                break
-
-            last_tag_event_pos = tag_idx
-            is_close = tag_match.group(1) == '/'
-            tag_name = tag_match.group(2)
-            if is_close:
-                if stack and stack[-1][0] == tag_name:
-                    stack.pop()
-                # 不匹配的关闭标签忽略
-            else:
-                stack.append((tag_name, tag_idx))
-            pos = tag_match.end()
-
-        if cdata_open_at_eof:
-            return True
+            for tag_match in tag_re.finditer(content, region_start, region_end):
+                tag_idx = tag_match.start()
+                last_tag_event_pos = tag_idx
+                is_close = tag_match.group(1) == '/'
+                tag_name = tag_match.group(2)
+                if is_close:
+                    if stack and stack[-1][0] == tag_name:
+                        stack.pop()
+                    # 不匹配的关闭标签忽略
+                else:
+                    stack.append((tag_name, tag_idx))
 
         # 案例 B/C：末尾未闭合字段标签 == 最后一个 tag 事件
         field_stack = [(n, p) for n, p in stack if n.lower() not in ('params', 'tool_call')]
@@ -530,18 +561,32 @@ class XMLToolCallParser:
 
         占位字符（私有区 \\uE000）不含 < > / → 结构正则在 masked 串上跑，不会被 CDATA **内容里
         的字面标签**（</tool_call> / </params> / <div> 等）骗；长度不变，故 masked 上 match 的
-        span 可直接切回 content 取真实文本。只遮蔽**已闭合**的 CDATA（未闭合 = 截断，已由
-        _detect_incomplete_tail 在更早处短路，走不到这些 repair）。
+        span 可直接切回 content 取真实文本。只遮蔽**已闭合**的 CDATA；未闭合区域保留原文
+        并线性结束，函数本身不依赖上游必须先短路。
 
         **不变量**：凡是在 raw 内容上做结构判定的 repair（找标签 / 判早退 / 切 span）都必须先经此
         遮蔽，否则会被 CDATA 内字面标签骗。
         """
-        return re.sub(
-            r'<!\[CDATA\[.*?\]\]>',
-            lambda m: '' * len(m.group(0)),
-            content,
-            flags=re.DOTALL,
-        )
+        parts = []
+        changed = False
+        for is_cdata, start, end, is_complete in XMLToolCallParser._iter_cdata_regions(content):
+            if is_cdata and is_complete:
+                parts.append('\uE000' * (end - start))
+                changed = True
+            else:
+                parts.append(content[start:end])
+        return ''.join(parts) if changed else content
+
+    @staticmethod
+    def _extract_name_outside_cdata(content: str) -> Optional[str]:
+        """线性提取 CDATA 外的 <name>，仅用于失败事件的 observability 归类。"""
+        for is_cdata, start, end, _ in XMLToolCallParser._iter_cdata_regions(content):
+            if is_cdata:
+                continue
+            match = XMLToolCallParser._NAME_RE.search(content, start, end)
+            if match:
+                return content[match.start(1):match.end(1)].strip() or None
+        return None
 
     @staticmethod
     def _repair_missing_closing_tags(content: str, warnings: List[str]) -> str:

@@ -5,15 +5,22 @@ Tests for src/tools/xml_parser.py
 - CDATA-aware 拆分：内容含字面 </tool_call>/</params> 不再误拆/误修（Issue 1）
 - 尾部不完整调用：不 salvage、不猜测 max_tokens，且只影响最后一个块
 - 违反 grammar 的多 params / 散落参数 / 重复参数统一拒绝
+- 对抗性大输入：CDATA 拆分/遮蔽/尾部检测与重复参数校验保持线性
 - string 参数保留 XML 解码后的原始空白
 - 现有 repair 触发时登记 warning（祈使句、指明正确写法）
 - 废弃 lossy _fallback_parse 后：救不活即诚实 __malformed__，不捏造残缺参数
 - 正常解析路径不带 warning
 """
 
-import pytest
+from time import perf_counter
 
-from tools.xml_parser import parse_tool_calls
+from tools.xml_parser import XMLToolCallParser, parse_tool_calls
+
+
+# Intentionally broad: old quadratic paths take >1s on these inputs, while the
+# linear scanner finishes in milliseconds. This distinguishes complexity without
+# turning normal CI scheduling noise into a micro-benchmark failure.
+_ADVERSARIAL_PARSE_BUDGET_SECONDS = 1.0
 
 
 # ============================================================
@@ -50,6 +57,72 @@ class TestNormalParse:
         tc = parse_tool_calls(text)[0]
         assert tc.params["old_str"] == "\n  indented line\n"
         assert tc.params["new_str"] == " replacement "
+
+
+# ============================================================
+# Adversarial complexity - every model-response scan stays linear
+# ============================================================
+
+class TestAdversarialComplexity:
+    @staticmethod
+    def _assert_within_budget(started: float, case: str) -> None:
+        elapsed = perf_counter() - started
+        assert elapsed < _ADVERSARIAL_PARSE_BUDGET_SECONDS, (
+            f"{case} took {elapsed:.3f}s; parser likely regressed from linear scanning"
+        )
+
+    def test_many_openers_inside_unclosed_cdata_stay_linear(self):
+        text = (
+            "<tool_call><reason><![CDATA[mention <name>fake</name>]]></reason>"
+            "<name>bash</name><params><command><![CDATA["
+            + "<![CDATA[" * 10_000
+        )
+        started = perf_counter()
+        tc = parse_tool_calls(text)[0]
+        self._assert_within_budget(started, "unclosed CDATA")
+        assert tc.name == "bash"
+        assert tc.error is not None
+
+    def test_mask_with_many_openers_inside_unclosed_cdata_stays_linear(self):
+        content = "<payload><![CDATA[" + "<![CDATA[" * 10_000
+        started = perf_counter()
+        masked = XMLToolCallParser._mask_cdata(content)
+        self._assert_within_budget(started, "CDATA masking")
+        assert masked == content
+
+    def test_splitter_with_many_closed_cdata_blocks_stays_linear(self):
+        text = (
+            "<tool_call><name>x</name><params><payload>"
+            + "<![CDATA[x]]>" * 30_000
+            + "</payload></params></tool_call>"
+        )
+        started = perf_counter()
+        blocks = XMLToolCallParser._split_tool_calls(text)
+        self._assert_within_budget(started, "CDATA-aware tool-call split")
+        assert len(blocks) == 1
+        assert blocks[0][2] is False
+
+    def test_tail_detection_with_many_closed_cdata_blocks_stays_linear(self):
+        content = (
+            "<name>x</name><params><payload>"
+            + "<![CDATA[x]]>" * 10_000
+        )
+        started = perf_counter()
+        is_incomplete = XMLToolCallParser._detect_incomplete_tail(content)
+        self._assert_within_budget(started, "incomplete-tail detection")
+        assert is_incomplete is True
+
+    def test_duplicate_parameter_detection_stays_linear(self):
+        text = (
+            "<tool_call><name>x</name><params>"
+            + "<a></a>" * 70_000
+            + "</params></tool_call>"
+        )
+        started = perf_counter()
+        tc = parse_tool_calls(text)[0]
+        self._assert_within_budget(started, "duplicate parameter detection")
+        assert tc.error is not None
+        assert "duplicate parameter" in tc.error
 
 
 # ============================================================
