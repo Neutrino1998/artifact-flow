@@ -83,8 +83,8 @@ class StreamContext:
         next_id: 单调递增的事件 id 计数器。
         new_event: 新事件信号；push 后 set，consume 在 drain 干净后 wait。
         created_at: 创建时间。
-        status: pending(等待连接) / streaming(正在推送) / closed(已关闭)。
-        ttl_task: TTL 清理任务。
+        status: open(producer 仍可写) / closed(producer 已封存)。
+        ttl_task: producer 异常丢失时的运行期兜底清理任务。
         cancelled: 取消事件，通知 consumer 退出。
         owner_user_id: 创建此 stream 的用户 ID（消费时校验）。
     """
@@ -92,7 +92,7 @@ class StreamContext:
     next_id: int = 0
     new_event: asyncio.Event = field(default_factory=asyncio.Event)
     created_at: datetime = field(default_factory=utc_now)
-    status: Literal["pending", "streaming", "closed"] = "pending"
+    status: Literal["open", "closed"] = "open"
     ttl_task: Optional[asyncio.Task] = None
     cleanup_task: Optional[asyncio.Task] = None
     cancelled: asyncio.Event = field(default_factory=asyncio.Event)
@@ -111,9 +111,18 @@ class InMemoryStreamTransport:
       使 dev (InMemory) 与 prod (Redis) 行为一致。
     """
 
-    def __init__(self, ttl_seconds: int = 30, max_history: int = DEFAULT_MAX_HISTORY):
+    def __init__(
+        self,
+        ttl_seconds: int = 30,
+        max_history: int = DEFAULT_MAX_HISTORY,
+        cleanup_ttl: float = 5.0,
+    ):
         self.streams: Dict[str, StreamContext] = {}
+        # OPEN 阶段的安全上限：只用来清理 producer 异常退出后的孤儿。
+        # observer 连接/断开绝不修改这个计时器。
         self.ttl_seconds = ttl_seconds
+        # producer 正常 close 后的回放窗口。
+        self.cleanup_ttl = cleanup_ttl
         self.max_history = max_history
         self._lock = asyncio.Lock()
         self._closed_streams: set = set()
@@ -157,8 +166,11 @@ class InMemoryStreamTransport:
 
             async with self._lock:
                 context = self.streams.get(message_id)
-                if context and context.status == "pending":
-                    logger.warning(f"Stream {message_id} expired (TTL={self.ttl_seconds}s, status=pending)")
+                if context and context.status == "open":
+                    logger.warning(
+                        f"Open stream {message_id} exceeded safety TTL "
+                        f"({self.ttl_seconds}s); closing orphaned transport"
+                    )
                     await self._close_stream_internal(message_id)
         except asyncio.CancelledError:
             raise
@@ -207,12 +219,10 @@ class InMemoryStreamTransport:
             if context.owner_user_id and user_id and context.owner_user_id != user_id:
                 raise StreamNotFoundError(message_id)
 
-            if context.ttl_task:
-                context.ttl_task.cancel()
-                context.ttl_task = None
-
-            context.status = "streaming"
-            logger.debug(f"Stream {message_id} started consuming")
+            # Observer 仅持有自己的 cursor，不改写 stream 的共享生命周期。
+            # 这使用户、admin、多标签页能同时读取，任一 observer
+            # 断开都不会缩短 producer 的 OPEN 窗口。
+            logger.debug(f"Stream {message_id} observer connected")
 
         # Cursor: only events with id > cursor are yielded. -1 means "from
         # the very start", so an absent Last-Event-ID replays everything
@@ -293,17 +303,7 @@ class InMemoryStreamTransport:
                 else:
                     await context.new_event.wait()
         finally:
-            # Consumer 断连：回退到 pending（与 RedisStreamTransport 语义对齐）。
-            # close_stream() 由 producer 在执行结束后调用，consumer 不应关闭 stream。
-            # 重新启动 TTL 防止 producer 挂掉后 stream 永久驻留内存。
-            async with self._lock:
-                context = self.streams.get(message_id)
-                if context and context.status == "streaming":
-                    context.status = "pending"
-                    context.ttl_task = asyncio.create_task(
-                        self._ttl_cleanup(message_id)
-                    )
-                    logger.debug(f"Stream {message_id} reverted to pending (consumer disconnect)")
+            logger.debug(f"Stream {message_id} observer disconnected")
 
     async def close_stream(self, message_id: str) -> bool:
         async with self._lock:
@@ -322,7 +322,7 @@ class InMemoryStreamTransport:
             context.ttl_task = None
 
         context.cleanup_task = asyncio.create_task(
-            self._delayed_cleanup(message_id, delay=5.0)
+            self._delayed_cleanup(message_id, delay=self.cleanup_ttl)
         )
 
         logger.debug(f"Stream {message_id} closed (delayed cleanup scheduled)")

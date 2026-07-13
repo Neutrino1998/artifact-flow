@@ -153,7 +153,7 @@ class TestCrossInstance:
 
 class TestLastEventId:
     async def test_resume_from_last_event_id(self, transport):
-        """Consumer disconnect reverts to pending; reconnect with last_event_id resumes."""
+        """Consumer disconnect leaves the producer-owned stream open; cursor resumes."""
         stream_id = "test_stream_resume"
         await transport.create_stream(stream_id)
 
@@ -182,9 +182,9 @@ class TestLastEventId:
         assert len(event_ids) >= 2
         last_id = event_ids[1]
 
-        # After consumer disconnect, stream should revert to pending (not closed)
+        # Observer disconnect does not change the producer-owned lifecycle.
         status = await transport.get_stream_status(stream_id)
-        assert status == "pending"
+        assert status == "open"
 
         # Producer can still push events (stream NOT closed)
         assert await transport.push_event(stream_id, {"type": "complete", "data": {}})
@@ -205,7 +205,7 @@ class TestLastEventId:
 
 class TestConsumerDisconnect:
     async def test_consumer_disconnect_does_not_close_stream(self, transport):
-        """Consumer breaking out of consume_events should revert to pending, not close."""
+        """Consumer breaking out leaves the producer-owned stream open."""
         stream_id = "test_stream_disconnect"
         await transport.create_stream(stream_id)
         await transport.push_event(stream_id, {"type": "metadata", "data": {}})
@@ -217,12 +217,43 @@ class TestConsumerDisconnect:
                 break
         await gen.aclose()
 
-        # Stream should be pending, not closed
+        # Stream remains open; observer presence is not shared state.
         status = await transport.get_stream_status(stream_id)
-        assert status == "pending"
+        assert status == "open"
 
         # Producer can still push
         assert await transport.push_event(stream_id, {"type": "complete", "data": {}})
+
+    async def test_two_observers_are_independent(self, transport):
+        stream_id = "test_stream_two_observers"
+        await transport.create_stream(stream_id)
+        await transport.push_event(stream_id, {"type": "agent_start", "data": {}})
+
+        first = transport.consume_events(stream_id, heartbeat_interval=0.3)
+        second = transport.consume_events(stream_id, heartbeat_interval=0.3)
+        assert (await anext(first))["type"] == "agent_start"
+        assert (await anext(second))["type"] == "agent_start"
+
+        await first.aclose()
+        assert await transport.get_stream_status(stream_id) == "open"
+
+        await transport.push_event(stream_id, {"type": "complete", "data": {}})
+        assert (await anext(second))["type"] == "complete"
+        await second.aclose()
+
+    async def test_legacy_observer_status_does_not_block_new_producer(
+        self, transport, redis_client
+    ):
+        """Rolling deploy: old observers may still write streaming/pending."""
+        stream_id = "test_stream_legacy_observer"
+        await transport.create_stream(stream_id)
+        meta_key = transport._meta_key(stream_id)
+
+        await redis_client.hset(meta_key, "status", "streaming")
+        assert await transport.push_event(stream_id, {"type": "agent_start"}) is True
+
+        await redis_client.hset(meta_key, "status", "pending")
+        assert await transport.push_event(stream_id, {"type": "complete"}) is True
 
     async def test_consumer_disconnect_after_producer_close(self, transport, redis_client):
         """If producer already closed, consumer disconnect should not revert to pending."""

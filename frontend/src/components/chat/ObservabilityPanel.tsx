@@ -24,6 +24,8 @@ import type {
 import type { ArtifactSummary, ArtifactDetail, VersionDetail } from '@/types';
 import { useUIStore } from '@/stores/uiStore';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
+import { connectSSE } from '@/lib/sse';
+import { ADMIN_TERMINAL_EVENTS, appendAdminLiveEvent } from '@/lib/adminLiveEvents';
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -368,6 +370,94 @@ export default function ObservabilityPanel() {
     });
     return () => { cancelled = true; };
   }, [selectedConvId, refreshTick]);
+
+  const activeMessageId = eventsData?.active_message_id ?? null;
+  const activeMessageHasPersistedTerminal = useMemo(() => {
+    if (!eventsData || !activeMessageId) return false;
+    const group = eventsData.messages.find((message) => message.message_id === activeMessageId);
+    return group?.events.some(
+      (event) => event.id >= 0 && ADMIN_TERMINAL_EVENTS.has(event.event_type),
+    ) ?? false;
+  }, [eventsData, activeMessageId]);
+
+  // The DB response is the durable snapshot.  While its active message is still
+  // running, project semantic SSE events into that one group using temporary
+  // negative ids.  A terminal event triggers a fresh DB read that replaces the
+  // projection wholesale, so live/replay ids can never be confused or duplicated.
+  // Unexpected disconnect is best-effort: fall back to DB; manual refresh/reopen
+  // establishes a fresh from-start subscription without admin-only retry state.
+  useEffect(() => {
+    if (!selectedConvId || !activeMessageId || activeMessageHasPersistedTerminal) return;
+
+    const controller = new AbortController();
+    let temporaryId = -1;
+    let sawTerminal = false;
+
+    const refreshAuthoritative = async (terminalMessageId: string | null) => {
+      try {
+        const fresh = await api.getAdminConversationEvents(selectedConvId);
+        if (controller.signal.aborted) return;
+
+        // The terminal SSE is the execution boundary, while lease cleanup runs
+        // immediately afterwards.  Avoid briefly reconnecting to the same sealed
+        // message if this GET raced that cleanup.  A genuinely newer message id is
+        // preserved and the effect will subscribe to it next.
+        if (terminalMessageId && fresh.active_message_id === terminalMessageId) {
+          setEventsData({ ...fresh, is_active: false, active_message_id: null });
+        } else {
+          setEventsData(fresh);
+        }
+        setSelectedEvent(null);
+        setSelectedMsgId(null);
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          console.error('Failed to refresh admin events after live stream:', err);
+        }
+      }
+    };
+
+    connectSSE(
+      api.getAdminConversationStreamUrl(selectedConvId),
+      {
+        onEvent: (event) => {
+          if (controller.signal.aborted) return;
+          const isTransportError = event.type === 'error'
+            && event.data?.message_id !== activeMessageId;
+          setEventsData((current) => {
+            if (!current || current.active_message_id !== activeMessageId) return current;
+            return appendAdminLiveEvent(current, activeMessageId, event, temporaryId--);
+          });
+
+          // Transport-generated errors (expired stream / lost lease) deliberately
+          // have no message_id and are not execution terminals.  Only the
+          // controller's ERROR for this message is authoritative terminal state.
+          const isExecutionTerminal = ADMIN_TERMINAL_EVENTS.has(String(event.type))
+            && !isTransportError;
+          if (isExecutionTerminal) {
+            sawTerminal = true;
+            void refreshAuthoritative(activeMessageId);
+          }
+        },
+        onError: (err) => {
+          if (controller.signal.aborted) return;
+          console.error('Admin live stream failed:', err);
+          void refreshAuthoritative(null);
+        },
+        onClose: () => {
+          if (!controller.signal.aborted && !sawTerminal) {
+            void refreshAuthoritative(null);
+          }
+        },
+      },
+      controller.signal,
+    );
+
+    return () => controller.abort();
+  }, [
+    selectedConvId,
+    activeMessageId,
+    activeMessageHasPersistedTerminal,
+  ]);
 
   const toggleMessageCollapse = useCallback((msgId: string) => {
     setCollapsedMessages((prev) => {
@@ -898,6 +988,7 @@ function MessageGroupView({
                 {event.agent_name != null ? (
                   <PillBadge tone="accent">{event.agent_name.replace('_agent', '')}</PillBadge>
                 ) : null}
+                {event.id < 0 ? <PillBadge tone="accent">LIVE</PillBadge> : null}
                 {tone != null ? (
                   <PillBadge tone={tone}>{tone === 'error' ? 'ERROR' : 'FAIL'}</PillBadge>
                 ) : null}

@@ -22,11 +22,11 @@ from api.services.stream_transport import (
 
 class TestCreateStream:
 
-    async def test_create_returns_pending(self):
+    async def test_create_returns_open(self):
         sm = InMemoryStreamTransport(ttl_seconds=10)
         ctx = await sm.create_stream("msg-1")
-        assert ctx.status == "pending"
-        assert await sm.get_stream_status("msg-1") == "pending"
+        assert ctx.status == "open"
+        assert await sm.get_stream_status("msg-1") == "open"
         await sm.close_stream("msg-1")
 
     async def test_duplicate_raises(self):
@@ -45,7 +45,7 @@ class TestCreateStream:
 
         # Should not raise
         ctx = await sm.create_stream("msg-1")
-        assert ctx.status == "pending"
+        assert ctx.status == "open"
         await sm.close_stream("msg-1")
 
 
@@ -155,24 +155,26 @@ class TestConsumeEvents:
             async for _ in sm.consume_events("msg-1", user_id="user-b"):
                 pass
 
-    async def test_consume_cancels_ttl(self):
+    async def test_consume_does_not_change_safety_ttl(self):
         sm = InMemoryStreamTransport(ttl_seconds=0.1)
         ctx = await sm.create_stream("msg-1")
-        assert ctx.ttl_task is not None
+        ttl_task = ctx.ttl_task
+        assert ttl_task is not None
 
         # Push a terminal event so consume completes quickly
         await sm.push_event("msg-1", {"type": "complete"})
 
         async for _ in sm.consume_events("msg-1"):
-            # Inside consume, TTL task should be cancelled
-            assert ctx.ttl_task is None
+            assert ctx.ttl_task is ttl_task
+            assert ctx.status == "open"
             break
 
-    async def test_consumer_disconnect_rearms_ttl(self):
-        """Consumer disconnect reverts to pending and re-arms TTL cleanup."""
-        sm = InMemoryStreamTransport(ttl_seconds=0.1)
+    async def test_consumer_disconnect_does_not_change_stream_lifecycle(self):
+        sm = InMemoryStreamTransport(ttl_seconds=10)
         await sm.create_stream("msg-1")
         await sm.push_event("msg-1", {"type": "metadata", "data": {}})
+        ctx = sm.streams["msg-1"]
+        ttl_task = ctx.ttl_task
 
         gen = sm.consume_events("msg-1", heartbeat_interval=0.05)
         async for event in gen:
@@ -180,14 +182,9 @@ class TestConsumeEvents:
                 break
         await gen.aclose()
 
-        # Should be pending with TTL re-armed
-        ctx = sm.streams["msg-1"]
-        assert ctx.status == "pending"
-        assert ctx.ttl_task is not None
-
-        # TTL should fire and close the stream
-        await asyncio.sleep(0.2)
-        assert await sm.get_stream_status("msg-1") == "closed"
+        assert ctx.status == "open"
+        assert ctx.ttl_task is ttl_task
+        assert await sm.push_event("msg-1", {"type": "complete"}) is True
 
     async def test_heartbeat_emits_ping(self):
         sm = InMemoryStreamTransport(ttl_seconds=10)
@@ -216,30 +213,31 @@ class TestConsumeEvents:
 
 class TestTTL:
 
-    async def test_pending_ttl_expires(self):
+    async def test_open_safety_ttl_expires(self):
         sm = InMemoryStreamTransport(ttl_seconds=0.1)
         await sm.create_stream("msg-1")
-        assert await sm.get_stream_status("msg-1") == "pending"
+        assert await sm.get_stream_status("msg-1") == "open"
 
         await asyncio.sleep(0.2)
         assert await sm.get_stream_status("msg-1") == "closed"
 
-    async def test_streaming_not_cleaned_by_ttl(self):
-        sm = InMemoryStreamTransport(ttl_seconds=0.1)
+    async def test_two_observers_are_independent(self):
+        sm = InMemoryStreamTransport(ttl_seconds=10)
         await sm.create_stream("msg-1")
-
-        # Push terminal event and start consuming (sets status to streaming)
         await sm.push_event("msg-1", {"type": "agent_start"})
 
-        # Manually set to streaming to test TTL doesn't fire
-        ctx = sm.streams["msg-1"]
-        if ctx.ttl_task:
-            ctx.ttl_task.cancel()
-            ctx.ttl_task = None
-        ctx.status = "streaming"
+        first = sm.consume_events("msg-1", heartbeat_interval=0.05)
+        second = sm.consume_events("msg-1", heartbeat_interval=0.05)
+        assert (await anext(first))["type"] == "agent_start"
+        assert (await anext(second))["type"] == "agent_start"
 
-        await asyncio.sleep(0.15)
-        assert await sm.get_stream_status("msg-1") == "streaming"
+        await first.aclose()
+        assert await sm.get_stream_status("msg-1") == "open"
+
+        await sm.push_event("msg-1", {"type": "complete"})
+        assert (await anext(second))["type"] == "complete"
+        await second.aclose()
+
         await sm.close_stream("msg-1")
 
 
@@ -269,7 +267,7 @@ class TestCloseAndStatus:
         assert await sm.get_stream_status("msg-x") is None
 
         await sm.create_stream("msg-1")
-        assert await sm.get_stream_status("msg-1") == "pending"
+        assert await sm.get_stream_status("msg-1") == "open"
         await sm.close_stream("msg-1")
         assert await sm.get_stream_status("msg-1") == "closed"
 

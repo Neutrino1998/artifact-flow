@@ -582,6 +582,7 @@ export interface AdminConversationSummary {
   user_display_name: string | null;
   message_count: number;
   is_active: boolean;
+  active_message_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -627,6 +628,7 @@ export interface AdminConversationEventsResponse {
   user_display_name: string | null;
   active_branch: string | null;
   is_active: boolean;
+  active_message_id: string | null;
   created_at: string;
   updated_at: string;
   messages: AdminMessageGroup[];
@@ -648,6 +650,10 @@ export function getAdminConversationEvents(convId: string) {
   return request<AdminConversationEventsResponse>(
     `/api/v1/admin/conversations/${convId}/events`
   );
+}
+
+export function getAdminConversationStreamUrl(convId: string) {
+  return `/api/v1/admin/conversations/${encodeURIComponent(convId)}/stream`;
 }
 
 // ── Fleet instances (Phase C) ──

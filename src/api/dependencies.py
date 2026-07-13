@@ -153,7 +153,10 @@ async def init_globals() -> None:
         from api.services.stream_transport import InMemoryStreamTransport
         from api.services.runtime_store import InMemoryRuntimeStore
 
-        _stream_transport = InMemoryStreamTransport(ttl_seconds=config.STREAM_CLEANUP_TTL)
+        _stream_transport = InMemoryStreamTransport(
+            ttl_seconds=config.EXECUTION_TIMEOUT + config.STREAM_TTL_GRACE,
+            cleanup_ttl=config.STREAM_CLEANUP_TTL,
+        )
         _execution_runner = ExecutionRunner(
             max_concurrent=config.MAX_CONCURRENT_TASKS,
             store=InMemoryRuntimeStore(),

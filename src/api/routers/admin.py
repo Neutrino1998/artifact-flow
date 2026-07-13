@@ -4,6 +4,7 @@ Admin Router
 Admin-only endpoints for observability and monitoring:
 - GET /api/v1/admin/conversations — list all conversations with active status
 - GET /api/v1/admin/conversations/{conv_id}/events — event timeline grouped by message
+- GET /api/v1/admin/conversations/{conv_id}/stream — live active-execution events
 - GET /api/v1/admin/conversations/{conv_id}/artifacts — flushed artifact list (no in-memory overlay)
 - GET /api/v1/admin/conversations/{conv_id}/artifacts/{artifact_id} — current content + version list
 - GET /api/v1/admin/conversations/{conv_id}/artifacts/{artifact_id}/raw — raw blob bytes
@@ -13,17 +14,22 @@ Admin-only endpoints for observability and monitoring:
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
+from starlette.responses import StreamingResponse
 
 from api.artifact_raw_response import RAW_ARTIFACT_RESPONSES, build_artifact_blob_response
 from api.dependencies import (
     get_artifact_service,
     get_conversation_manager,
-    get_runtime_store,
+    get_execution_runner,
+    get_stream_transport,
     require_admin,
 )
 from api.services.auth import TokenPayload
+from api.services.execution_runner import ExecutionRunner
+from api.services.stream_transport import StreamTransport
+from api.routers.stream import SSE_OPENAPI_RESPONSES, build_stream_response
 from api.schemas.admin import (
     AdminConversationSummary,
     AdminConversationListResponse,
@@ -56,10 +62,10 @@ async def list_admin_conversations(
     user_id: Optional[str] = Query(default=None, max_length=64),
     _admin: TokenPayload = Depends(require_admin),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
+    runner: ExecutionRunner = Depends(get_execution_runner),
 ):
     """List all conversations (admin view) with active execution status."""
-    store = get_runtime_store()
-    active_conv_ids = set(await store.list_active_conversations())
+    active_executions = await runner.store.list_active_executions()
 
     conversations, total, user_names = await conversation_manager.list_admin_conversations(
         limit=limit,
@@ -75,7 +81,8 @@ async def list_admin_conversations(
             user_id=conv.user_id,
             user_display_name=user_names.get(conv.user_id) if conv.user_id else None,
             message_count=len(conv.messages) if conv.messages else 0,
-            is_active=conv.id in active_conv_ids,
+            is_active=conv.id in active_executions,
+            active_message_id=active_executions.get(conv.id),
             created_at=conv.created_at,
             updated_at=conv.updated_at,
         )
@@ -97,6 +104,7 @@ async def get_admin_conversation_events(
     conv_id: str,
     _admin: TokenPayload = Depends(require_admin),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
+    runner: ExecutionRunner = Depends(get_execution_runner),
 ):
     """Get all events for a conversation, grouped by message."""
     result = await conversation_manager.get_admin_conversation_events(conv_id)
@@ -104,8 +112,7 @@ async def get_admin_conversation_events(
         raise HTTPException(status_code=404, detail="Conversation not found")
     conv, messages, all_events, owner_display_name = result
 
-    store = get_runtime_store()
-    is_active = conv_id in set(await store.list_active_conversations())
+    active_message_id = await runner.store.get_leased_message_id(conv_id)
 
     # Group events by message_id
     events_by_msg: dict[str, list] = {}
@@ -146,10 +153,44 @@ async def get_admin_conversation_events(
         user_id=conv.user_id,
         user_display_name=owner_display_name,
         active_branch=conv.active_branch,
-        is_active=is_active,
+        is_active=active_message_id is not None,
+        active_message_id=active_message_id,
         created_at=conv.created_at,
         updated_at=conv.updated_at,
         messages=groups,
+    )
+
+
+@router.get(
+    "/conversations/{conv_id}/stream",
+    response_class=StreamingResponse,
+    responses=SSE_OPENAPI_RESPONSES,
+)
+async def stream_admin_conversation(
+    conv_id: str,
+    request: Request,
+    _admin: TokenPayload = Depends(require_admin),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
+    stream_transport: StreamTransport = Depends(get_stream_transport),
+    runner: ExecutionRunner = Depends(get_execution_runner),
+) -> StreamingResponse:
+    """Observe the active execution for one conversation (admin read-only)."""
+    conv = await conversation_manager.get_conversation_detail(conv_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    message_id = await runner.store.get_leased_message_id(conv_id)
+    if message_id is None or not await stream_transport.is_stream_alive(message_id):
+        raise HTTPException(status_code=404, detail="No active stream for conversation")
+
+    # Reuse the owner's stream authorization after the admin-only conversation
+    # lookup.  This keeps owner validation enabled inside both transports instead
+    # of introducing an accidental user_id=None bypass.
+    return build_stream_response(
+        stream_id=message_id,
+        stream_transport=stream_transport,
+        user_id=conv.user_id,
+        last_event_id=request.headers.get("Last-Event-ID"),
     )
 
 

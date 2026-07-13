@@ -17,6 +17,7 @@ class AdminConversationSummary(BaseModel):
     user_display_name: Optional[str] = None
     message_count: int = 0
     is_active: bool = False
+    active_message_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -71,6 +72,7 @@ class AdminConversationEventsResponse(BaseModel):
     user_display_name: Optional[str] = None
     active_branch: Optional[str] = None
     is_active: bool = False
+    active_message_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     messages: List[AdminMessageGroup]

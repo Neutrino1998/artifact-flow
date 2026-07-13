@@ -970,7 +970,7 @@
           "stream"
         ],
         "summary": "Stream Events",
-        "description": "SSE \u7aef\u70b9\uff0c\u8ba2\u9605\u6267\u884c\u8fc7\u7a0b\n\n\u524d\u7aef\u901a\u8fc7 EventSource \u8fde\u63a5\u6b64\u7aef\u70b9\uff0c\u63a5\u6536\u5b9e\u65f6\u4e8b\u4ef6\u6d41\u3002\nstream_id \u5373 message_id\uff08\u6d88\u606f\u4e0e\u6267\u884c 1:1\uff09\u3002\n\n\u4e8b\u4ef6\u683c\u5f0f\uff08\u4f7f\u7528\u6807\u51c6 SSE event: \u5b57\u6bb5\u533a\u5206\u4e8b\u4ef6\u7c7b\u578b\uff09\uff1a\n    event: metadata\n    data: {\"type\": \"metadata\", \"timestamp\": \"...\", \"data\": {...}}\n\n    event: llm_chunk\n    data: {\"type\": \"llm_chunk\", \"timestamp\": \"...\", \"agent\": \"lead_agent\", \"data\": {\"content\": \"...\"}}\n\n    event: complete\n    data: {\"type\": \"complete\", \"timestamp\": \"...\", \"data\": {...}}\n\n\u8fde\u63a5\u751f\u547d\u5468\u671f\uff1a\n    - \u6536\u5230 complete/error \u4e8b\u4ef6\u540e\uff0c\u670d\u52a1\u7aef\u4e3b\u52a8\u5173\u95ed\u8fde\u63a5\n    - \u524d\u7aef\u5e94\u9500\u6bc1 EventSource \u5b9e\u4f8b",
+        "description": "SSE \u7aef\u70b9\uff0c\u8ba2\u9605\u6267\u884c\u8fc7\u7a0b\n\n\u524d\u7aef\u901a\u8fc7 fetch + ReadableStream \u8fde\u63a5\u6b64\u7aef\u70b9\uff0c\u63a5\u6536\u5b9e\u65f6\u4e8b\u4ef6\u6d41\u3002\nstream_id \u5373 message_id\uff08\u6d88\u606f\u4e0e\u6267\u884c 1:1\uff09\u3002\n\n\u4e8b\u4ef6\u683c\u5f0f\uff08\u4f7f\u7528\u6807\u51c6 SSE event: \u5b57\u6bb5\u533a\u5206\u4e8b\u4ef6\u7c7b\u578b\uff09\uff1a\n    event: metadata\n    data: {\"type\": \"metadata\", \"timestamp\": \"...\", \"data\": {...}}\n\n    event: llm_chunk\n    data: {\"type\": \"llm_chunk\", \"timestamp\": \"...\", \"agent\": \"lead_agent\", \"data\": {\"content\": \"...\"}}\n\n    event: complete\n    data: {\"type\": \"complete\", \"timestamp\": \"...\", \"data\": {...}}\n\n\u8fde\u63a5\u751f\u547d\u5468\u671f\uff1a\n    - \u6536\u5230 complete/cancelled/timed_out/error \u4e8b\u4ef6\u540e\uff0c\u670d\u52a1\u7aef\u4e3b\u52a8\u5173\u95ed\u8fde\u63a5\n    - \u524d\u7aef\u5e94\u91ca\u653e\u5f53\u524d\u8bfb\u6d41\u7684 AbortController",
         "operationId": "stream_events_api_v1_stream__stream_id__get",
         "security": [
           {
@@ -990,10 +990,12 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "Server-Sent Events stream",
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -1137,6 +1139,54 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AdminConversationEventsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/conversations/{conv_id}/stream": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Stream Admin Conversation",
+        "description": "Observe the active execution for one conversation (admin read-only).",
+        "operationId": "stream_admin_conversation_api_v1_admin_conversations__conv_id__stream_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conv_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conv Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -3843,6 +3893,17 @@
             "title": "Is Active",
             "default": false
           },
+          "active_message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Message Id"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -3869,6 +3930,7 @@
           "user_display_name",
           "active_branch",
           "is_active",
+          "active_message_id",
           "created_at",
           "updated_at",
           "messages"
@@ -3952,6 +4014,17 @@
             "title": "Is Active",
             "default": false
           },
+          "active_message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Message Id"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -3971,6 +4044,7 @@
           "user_display_name",
           "message_count",
           "is_active",
+          "active_message_id",
           "created_at",
           "updated_at"
         ],
@@ -5058,7 +5132,7 @@
           "max_upload_size": {
             "type": "integer",
             "title": "Max Upload Size",
-            "description": "Per-file upload byte limit (MAX_UPLOAD_SIZE). The composer uses it to pre-reject an oversize file with instant feedback instead of staging + POSTing it for a backend 422. Backend stays authoritative; the batch TOTAL is capped separately at the proxy layer (not surfaced here \u2014 it lives in nginx/Caddy config, outside src/config.py)."
+            "description": "Per-file upload byte limit (MAX_UPLOAD_SIZE). The composer uses it to pre-reject an oversize file with instant feedback instead of staging + POSTing it for a backend 422. Backend stays authoritative; the batch TOTAL is capped separately at the proxy layer (not surfaced here \u2014 it lives in Caddy config, outside src/config.py)."
           }
         },
         "type": "object",

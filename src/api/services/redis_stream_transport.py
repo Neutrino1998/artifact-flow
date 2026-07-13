@@ -14,8 +14,7 @@ Key 设计（{prefix:id} 为 hash tag，确保同 entity 同 slot）：
 
 import asyncio
 import json
-import os
-from typing import Any, AsyncGenerator, Dict, Literal, Optional
+from typing import Any, AsyncGenerator, Dict, Optional
 
 import redis.asyncio as aioredis
 
@@ -27,23 +26,6 @@ logger = get_logger("ArtifactFlow")
 # 终结事件类型(consumer 见到即 return)。本地副本——传输层不依赖执行语义;
 # 与 core.events.TERMINAL_EVENT_TYPES 的一致性由 tests/core/test_terminal_event_sync.py 守护。
 _TERMINAL_EVENTS = frozenset(("complete", "cancelled", "timed_out", "error"))
-
-# Lua CAS: 仅当 consumer_id 匹配 且 status 仍为 streaming 时回退到 pending。
-# 不缩短 TTL — stream 生命周期由 stream TTL（EXECUTION_TIMEOUT+STREAM_TTL_GRACE）决定，consumer 断连不影响。
-# 双重条件防止两类竞态：
-#   - consumer_id 不匹配 → 新 consumer 已接管，旧 finally 不动
-#   - status != streaming → producer 已 close，consumer finally 不动
-# 单 key 操作（KEYS[1]=meta_key），避免 Redis Cluster CROSSSLOT。
-# KEYS[1]=meta_key, ARGV[1]=consumer_id
-_LUA_REVERT_TO_PENDING = """
-local cid = redis.call('HGET', KEYS[1], 'consumer_id')
-local status = redis.call('HGET', KEYS[1], 'status')
-if cid == ARGV[1] and status == 'streaming' then
-    redis.call('HSET', KEYS[1], 'status', 'pending', 'consumer_id', '')
-    return 1
-end
-return 0
-"""
 
 # XADD + 首次 EXPIRE 原子合一。pipeline(transaction=False) 只是批量发送、非原子：
 # 半包只送到 XADD 而没送到 EXPIRE（连接中途断/failover）会留下无 TTL 的孤儿
@@ -80,14 +62,10 @@ class RedisStreamTransport:
         # post-processing(终态在那时才 push)。不要用裸 execution_timeout 当 key TTL。
         self._stream_ttl = execution_timeout + ttl_grace
         self._prefix = key_prefix
-        self._script_revert_to_pending = None
         self._script_xadd_with_ttl = None
 
     def init_scripts(self) -> None:
         """注册 Lua 脚本（register_script 是同步方法，自动处理 NOSCRIPT 重试）"""
-        self._script_revert_to_pending = self._redis.register_script(
-            _LUA_REVERT_TO_PENDING
-        )
         self._script_xadd_with_ttl = self._redis.register_script(
             _LUA_XADD_WITH_TTL
         )
@@ -113,7 +91,7 @@ class RedisStreamTransport:
         # 创建元数据 (带 TTL，前端不连接时自动清理)
         await self._redis.hset(meta_key, mapping={
             "owner": owner_user_id or "",
-            "status": "pending",
+            "status": "open",
             "lease_check_key": lease_check_key or "",
             "lease_expected_owner": lease_expected_owner or "",
         })
@@ -132,6 +110,11 @@ class RedisStreamTransport:
         # 2. 即使未来引入外部强制关闭，孤儿事件有 TTL 自动清理
         # 3. events 已通过 _persist_events 持久化到 DB，stream 只是 SSE 传输通道
         status = await self._redis.hget(meta_key, "status")
+        # During a rolling deploy, an old-version observer may still rewrite a
+        # newly-created `open` stream to legacy `streaming` / `pending`.  Treat
+        # every non-closed value as writable so mixed-version observers cannot
+        # stop a new producer.  Once old pods drain, only `open` is created and
+        # observers no longer mutate it.
         if status is None or status == "closed":
             return False
 
@@ -173,15 +156,6 @@ class RedisStreamTransport:
         owner = await self._redis.hget(meta_key, "owner")
         if owner and user_id and owner != user_id:
             raise StreamNotFoundError(stream_id)
-
-        # 生成 consumer_id，标记为 streaming
-        # 不移除 TTL — stream 生命周期由 stream TTL（EXECUTION_TIMEOUT+STREAM_TTL_GRACE）决定，
-        # 如果 producer crash 未调 close_stream，不会产生永久孤儿 key
-        consumer_id = os.urandom(8).hex()
-        await self._redis.hset(meta_key, mapping={
-            "status": "streaming",
-            "consumer_id": consumer_id,
-        })
 
         # 起始 ID
         cursor = last_event_id if last_event_id else "0-0"
@@ -254,16 +228,9 @@ class RedisStreamTransport:
                         if event.get("type") in _TERMINAL_EVENTS:
                             return
         finally:
-            # Consumer 断连：CAS 回退 meta 到 pending（单 key Lua，Cluster 安全）。
-            # 仅当 consumer_id 仍匹配（说明没有新 consumer 接管）时才回退，
-            # 避免覆盖新 consumer 的 streaming 或 producer 的 closed。
-            # 不缩短 TTL — stream 生命周期由 stream TTL（EXECUTION_TIMEOUT+STREAM_TTL_GRACE）决定。
-            # 注意：break 退出 async for 不会自动触发 aclose()，调用方需显式
-            # await gen.aclose() 以确保此 finally 块执行。
-            await self._script_revert_to_pending(
-                keys=[meta_key],
-                args=[consumer_id],
-            )
+            # Observer 无共享生命周期状态；断开只结束自己的 XREAD cursor。
+            # OPEN/CLOSED 只由 producer 的 create/push/close 路径改写。
+            pass
 
     async def close_stream(self, stream_id: str) -> bool:
         meta_key = self._meta_key(stream_id)
