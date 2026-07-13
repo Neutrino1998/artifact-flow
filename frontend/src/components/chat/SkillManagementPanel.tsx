@@ -227,13 +227,13 @@ export default function SkillManagementPanel() {
     maxPrivateSkills,
   );
   const privateAllowanceText = privateAllowance.kind === 'disabled'
-    ? '个人技能导入已关闭，请联系管理员发布共享技能'
+    ? '个人技能导入已关闭'
     : privateAllowance.kind === 'unlimited'
-      ? `个人技能 ${privateAllowance.used} / 不限`
+      ? `个人技能容量 ${privateAllowance.used}/不限`
       : privateAllowance.kind === 'limited'
         ? privateAllowance.canImport
-          ? `个人技能 ${privateAllowance.used} / ${privateAllowance.limit}，剩余 ${privateAllowance.remaining} 个`
-          : `个人技能 ${privateAllowance.used} / ${privateAllowance.limit}，额度已用完`
+          ? `个人技能容量 ${privateAllowance.used}/${privateAllowance.limit}，剩余 ${privateAllowance.remaining} 个`
+          : `个人技能容量 ${privateAllowance.used}/${privateAllowance.limit}，额度已用完`
         : `个人技能 ${privateAllowance.used}`;
   const personalEntryDisabled = !isAdmin && !privateAllowance.canImport;
 
@@ -251,17 +251,12 @@ export default function SkillManagementPanel() {
         <div className="max-w-3xl mx-auto space-y-2">
           <p className="px-1 text-xs text-text-tertiary dark:text-text-tertiary-dark">
             关闭的技能不会自动进入对话，也不会出现在输入框的激活选择器里；随时可以重新开启。
+            {!loading && !error && (
+              <span className="inline-block whitespace-nowrap text-accent">
+                {privateAllowanceText}
+              </span>
+            )}
           </p>
-          {!loading && !error && (
-            <p className={`px-1 text-xs ${
-              privateAllowance.canImport
-                ? 'text-text-tertiary dark:text-text-tertiary-dark'
-                : 'text-status-warning'
-            }`}>
-              {privateAllowanceText}
-            </p>
-          )}
-
           {/* 导入入口 + 内联导入卡片(中间面板接管,不动右面板) */}
           <button
             type="button"
@@ -279,11 +274,7 @@ export default function SkillManagementPanel() {
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M7 2v10M2 7h10" />
             </svg>
-            {personalEntryDisabled
-              ? privateAllowance.kind === 'disabled'
-                ? '个人技能导入已关闭'
-                : '个人技能额度已用完'
-              : '导入技能'}
+            导入技能
           </button>
 
           {importOpen && (
