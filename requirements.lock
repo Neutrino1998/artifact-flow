@@ -210,9 +210,7 @@ regex==2026.5.9
 requests==2.34.2
     # via tiktoken
 rich==15.0.0
-    # via
-    #   -r requirements.txt
-    #   typer
+    # via typer
 rpds-py==0.30.0
     # via
     #   jsonschema
@@ -244,9 +242,7 @@ tqdm==4.67.3
     #   huggingface-hub
     #   openai
 typer==0.25.1
-    # via
-    #   -r requirements.txt
-    #   huggingface-hub
+    # via huggingface-hub
 typing-extensions==4.15.0
     # via
     #   aiohttp

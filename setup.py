@@ -21,9 +21,4 @@ setup(
     package_dir={"": "src"},
     python_requires=">=3.11",
     install_requires=parse_requirements("requirements.txt"),
-    entry_points={
-        "console_scripts": [
-            "artifact-flow=cli.main:app",
-        ],
-    },
 )
