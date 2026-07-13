@@ -38,23 +38,23 @@ LLM 可以在单次响应中包含多个 `<tool_call>` 块，引擎会按顺序�
 
 第一步拆分是 **CDATA-aware** 的：扫描 `</tool_call>` 终止符时跳过 `<![CDATA[...]]>` 区，所以
 artifact 正文里出现字面 `</tool_call>` / `</params>` 不会把一个完整调用误拆。**修复策略本身也
-对 CDATA 盲区免疫**——结构判定（缺 `</params>`、散落参数等）在「遮蔽 CDATA 的副本」上做，绝不
-把内容里的字面标签当结构。
+对 CDATA 盲区免疫**——raw-string repair 的结构判定在「遮蔽 CDATA 的副本」上做，绝不把内容里的
+字面标签当结构；well-formed XML 的 tool-call grammar 则由 ElementTree 的层级结果校验。
 
-修复策略覆盖以下常见问题：
+仅对意图可唯一确定的常见问题做兼容修复：
 
 | 问题 | 示例 | 修复方式 |
 |------|------|---------|
 | 工具名作为标签 | `<web_fetch><params>...` | 提取为 `<name>web_fetch</name>` |
 | 标签等号语法 | `<name=call_subagent</name>` | 转为 `<name>call_subagent</name>` |
 | CDATA 后缺闭合标签 | `<content><![CDATA[...]]>` 后无 `</content>` | 补全闭合标签 |
-| 散落的参数标签 | 参数出现在 `<params>` 外部或多个 `<params>` 块 | 合并收集到单个 `<params>` 中 |
 | 缺失 `</params>` | 没有 params 闭合标签 | 追加闭合标签 |
 
-**截断（输出撞 max_tokens）单独处理**：截断只可能命中输出流尾部那一个未终止的 `<tool_call>`，
-拆分层据此识别。尾部块若是真截断（CDATA 未闭合 / 末尾字段未闭合）→ 直接返回**清晰的截断错误
-ToolCall**（不再 salvage 残缺内容，因为残缺的 `new_str` 之类无法可靠应用），提示模型缩小单次输出
-或分多次写入。仅漏了 `</tool_call>` 但字段都完整的尾部块，仍正常解析。
+**尾部不完整调用单独处理**：未闭合 CDATA / 末尾字段可能是 provider cutoff，也可能只是
+模型漏写闭合符；parser 不从文本猜测根因，也不 salvage 残缺参数。多个 `<params>`、顶层散落参数、
+重复参数名同样直接拒绝，因为合并/覆盖语义不唯一。所有解析失败都返回同一份完整 tool-call 格式，
+分支只追加中性的 `Observed issue`。仅漏 `</tool_call>` 但字段完整的尾部块仍正常解析。
+规范单次调用示例定义在 `tools/xml_protocol.py`，system prompt 和 parser 错误共用，避免协议漂移。
 
 所有解析手段均失败时，返回 `ToolCall(name="__malformed__", error=...)`（**不**用正则 fallback 去
 捏造残缺参数）而非静默忽略，确保 engine 将解析错误反馈给 agent。
@@ -113,7 +113,7 @@ XML parser 返回的值统一为字符串，需要根据 `ToolParameter.type` �
 
 | 目标类型 | 转换规则 |
 |---------|---------|
-| `string` | 保持原值 |
+| `string` | 保持 XML 解码后的原值（不做 `strip`） |
 | `integer` | `int(value)` |
 | `boolean` | `true/1/yes` → `True`，`false/0/no` → `False` |
 | `number` | `float(value)` |

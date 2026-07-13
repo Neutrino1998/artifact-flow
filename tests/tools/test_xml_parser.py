@@ -3,7 +3,9 @@ Tests for src/tools/xml_parser.py
 
 覆盖：
 - CDATA-aware 拆分：内容含字面 </tool_call>/</params> 不再误拆/误修（Issue 1）
-- 方案1 截断处理：尾部截断块一律报清晰截断错（不 salvage、不存 partial），且只影响最后一个块
+- 尾部不完整调用：不 salvage、不猜测 max_tokens，且只影响最后一个块
+- 违反 grammar 的多 params / 散落参数 / 重复参数统一拒绝
+- string 参数保留 XML 解码后的原始空白
 - 现有 repair 触发时登记 warning（祈使句、指明正确写法）
 - 废弃 lossy _fallback_parse 后：救不活即诚实 __malformed__，不捏造残缺参数
 - 正常解析路径不带 warning
@@ -35,18 +37,34 @@ class TestNormalParse:
         assert tc.error is None
         assert tc.warnings == []
 
+    def test_string_params_preserve_whitespace(self):
+        text = """<tool_call>
+<name>update_artifact</name>
+<params>
+<old_str><![CDATA[
+  indented line
+]]></old_str>
+<new_str><![CDATA[ replacement ]]></new_str>
+</params>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.params["old_str"] == "\n  indented line\n"
+        assert tc.params["new_str"] == " replacement "
+
 
 # ============================================================
 # Truncation repairs (the original bug)
 # ============================================================
 
 class TestTruncationRepair:
-    """方案1：尾部截断块一律报清晰截断错（不再 salvage / 不存 partial）。截断只可能命中
-    拆分层判定的 trailing 块；complete 块（有 CDATA 外的 </tool_call>）永不按截断处理。"""
+    """尾部不完整块一律失败（不 salvage / 不存 partial），只影响 trailing 块。"""
 
     def _assert_truncation_error(self, tc, name):
         assert tc.error is not None
-        assert "truncat" in tc.error.lower() or "incomplete" in tc.error.lower()
+        assert "appears unfinished" in tc.error
+        assert "<reason><![CDATA[" in tc.error
+        assert "<name>tool_name</name>" in tc.error
+        assert "likely max_tokens" not in tc.error
         assert tc.params == {}, f"截断块不得抠出半套参数, got: {tc.params}"
         assert tc.name == name, f"工具名应保留以便 observability 归类, got: {tc.name}"
 
@@ -189,8 +207,7 @@ class TestCdataAwareSplit:
         assert results[0].name == "read_artifact" and results[0].error is None
         assert results[0].params == {"id": "a"}
         assert results[1].name == "create_artifact" and results[1].error is not None
-        assert ("truncat" in results[1].error.lower()
-                or "incomplete" in results[1].error.lower())
+        assert "appears unfinished" in results[1].error
 
     def test_non_cdata_special_chars_fail_malformed_not_fabricated(self):
         """废弃 _fallback_parse 后：不用 CDATA 且含 & < 的内容，etree 解析失败、repair 也救不了
@@ -279,7 +296,7 @@ class TestRepairWarnings:
         assert tc.params == {"id": "doc_xxx", "content": "Body."}
         assert any("</params>" in w for w in tc.warnings)
 
-    def test_scattered_params_registers_warning(self):
+    def test_scattered_params_are_rejected(self):
         text = """<tool_call>
 <name>create_artifact</name>
 <id><![CDATA[doc_xxx]]></id>
@@ -288,8 +305,34 @@ class TestRepairWarnings:
         results = parse_tool_calls(text)
         assert len(results) == 1
         tc = results[0]
-        assert tc.params == {"id": "doc_xxx", "content": "Body."}
-        assert any("params" in w.lower() and "single" in w.lower() for w in tc.warnings)
+        assert tc.params == {}
+        assert tc.error is not None
+        assert "outside <params>" in tc.error
+        assert "<reason><![CDATA[" in tc.error
+
+    def test_multiple_params_blocks_are_rejected(self):
+        text = """<tool_call>
+<name>create_artifact</name>
+<params><id><![CDATA[doc_xxx]]></id></params>
+<params><content><![CDATA[Body.]]></content></params>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.params == {}
+        assert tc.error is not None
+        assert "multiple top-level <params>" in tc.error
+
+    def test_duplicate_param_elements_are_rejected(self):
+        text = """<tool_call>
+<name>read_artifact</name>
+<params>
+<id><![CDATA[first]]></id>
+<id><![CDATA[second]]></id>
+</params>
+</tool_call>"""
+        tc = parse_tool_calls(text)[0]
+        assert tc.params == {}
+        assert tc.error is not None
+        assert "duplicate parameter" in tc.error
 
     def test_unclosed_cdata_with_following_tag_registers_warning(self):
         """<content><![CDATA[X]]> 后没 </content> 但后面紧跟其他标签。"""
@@ -315,6 +358,8 @@ class TestRepairWarnings:
 
 class TestMalformed:
     def test_unparseable_block_returns_malformed(self):
+        from tools.xml_protocol import TOOL_CALL_EXAMPLE
+
         text = """<tool_call>
 just random text not even XML at all
 </tool_call>"""
@@ -323,6 +368,7 @@ just random text not even XML at all
         tc = results[0]
         assert tc.name == "__malformed__"
         assert tc.error is not None
+        assert TOOL_CALL_EXAMPLE in tc.error
 
 
 # ============================================================
@@ -337,7 +383,7 @@ class TestFormatResultWarnings:
             "success": True,
             "data": "Artifact 'doc_xxx' v1 created.",
             "parser_warnings": [
-                "Output truncated mid-content (likely max_tokens hit). Use update_artifact to continue.",
+                "The call appeared incomplete. Retry with a complete tool-call block.",
                 "Missing </params> closing tag. Always close <params> explicitly.",
             ],
         })
@@ -348,7 +394,7 @@ class TestFormatResultWarnings:
         di = out.index("<data>")
         assert wi < di, f"parser_warnings should precede <data>; got:\n{out}"
         # 警告以 bullet 形式列出
-        assert "- Output truncated" in out
+        assert "- The call appeared incomplete" in out
         assert "- Missing </params>" in out
 
     def test_no_warnings_omits_parser_warnings_block(self):
@@ -441,8 +487,7 @@ class TestReasonExtraction:
         assert tc.params == {"id": "req_1", "reason": "材料不全"}
 
     def test_reason_survives_repair_path(self):
-        """reason 在 repair 之前剥离 → 即便触发 repair（这里缺 </params>），reason 仍保留、
-        params 仍救回，且 reason 不会被 _repair_scattered_params 误并进 params。"""
+        """缺 </params> 的 repair 不影响顶层 reason，也不会把它当成参数。"""
         text = """<tool_call>
 <reason><![CDATA[建任务计划]]></reason>
 <name>create_artifact</name>
@@ -543,10 +588,8 @@ class TestReasonExtraction:
         assert tc.reason is None
         assert tc.params == {"query": "ai"}
 
-    def test_top_level_reason_with_scattered_params(self):
-        """复合场景：顶层 reason（意图）+ 真实触发 scattered-params 重组（name= 语法使 etree 失败、
-        重复 params 块 + 孤立参数）。散落参数被 _repair_scattered_params 收进 <params>，而顶层
-        <reason> 作为结构性兄弟（与 <name> 同类）原位保留、不被并入 params。"""
+    def test_repair_does_not_merge_scattered_params(self):
+        """Even after an unambiguous name= repair, ambiguous params stay rejected."""
         text = """<tool_call>
 <reason><![CDATA[创建文档]]></reason>
 <name=create_artifact</name>
@@ -558,7 +601,7 @@ class TestReasonExtraction:
 </params>
 </tool_call>"""
         tc = parse_tool_calls(text)[0]
-        assert tc.reason == "创建文档"
-        assert "reason" not in tc.params
-        assert tc.params == {"content_type": "text/markdown", "id": "doc_1", "content": "# Body"}
-        assert tc.warnings  # 触发了 name=/scattered-params 重组
+        assert tc.params == {}
+        assert tc.error is not None
+        assert "multiple top-level <params>" in tc.error
+        assert tc.warnings  # name= was repaired before protocol validation failed

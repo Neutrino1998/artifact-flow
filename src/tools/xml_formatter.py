@@ -9,24 +9,19 @@ from typing import List, Dict, Any
 
 from config import config
 from tools.base import BaseTool
+from tools.xml_protocol import TOOL_CALL_EXAMPLE
 
 
 # 工具调用协议语法块 —— 对所有 agent / 所有轮恒等,是理想的 prompt-cache 可缓存前缀。
 # per-tool 描述不在此(B-3 渐进式披露):描述挪到 <available_tools> 动态 reminder,
 # 故 catalog 变化只失效消息尾部、这段语法前缀恒稳。
-_TOOL_GRAMMAR_BODY = """<format>
+_TOOL_GRAMMAR_BODY = f"""<format>
 You may make one or more tool calls per turn. They execute sequentially.
 Inside <params>, emit one element per parameter whose tag is that parameter's own name (from the tool's Parameters list) and wrap EVERY value in <![CDATA[...]]>.
 
 Every tool call must include a <reason> sibling before <name>: one short sentence, in the user's language, saying why you are making THIS call. It is shown to the user (and is what they read when a tool needs their approval). <reason> is NOT a parameter — it goes outside <params>, never inside it.
 
-<tool_call>
-  <reason><![CDATA[why you are making this call]]></reason>
-  <name>tool_name</name>
-  <params>
-    <replace_with_param_name><![CDATA[value]]></replace_with_param_name>
-  </params>
-</tool_call>
+{TOOL_CALL_EXAMPLE}
 
 For multiple calls, emit each <tool_call> block one after another — there is NO wrapping container tag:
 <tool_call>
