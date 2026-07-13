@@ -578,7 +578,7 @@ if ! phase_done manifest "$manifest_input" "$MANIFEST"; then
     echo "  target:  deploy/scripts/fleet.sh prepare-sandbox <bundle-dir>, then"
     echo "           AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy <bundle-dir>"
     if [[ -f "$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt" ]]; then
-      image_id=$(awk -F': *' '/^Image id:/{print $2}' "$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt")
+      image_id=$(awk '/^Image id:/ {sub(/^Image id:[[:space:]]*/, ""); print; exit}' "$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt")
       [[ -n "$image_id" ]] && echo "  image id: $image_id"
     fi
   else

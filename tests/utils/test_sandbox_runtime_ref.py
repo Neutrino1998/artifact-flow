@@ -1,4 +1,5 @@
 import importlib.util
+import platform
 import re
 import subprocess
 import sys
@@ -60,3 +61,50 @@ def test_runtime_inputs_cover_every_file_copied_into_the_image():
         "sandbox/text_edit.py",
         "src/utils/text_match.py",
     } <= inputs
+
+
+def test_prepare_sandbox_dry_run_preserves_full_image_ref(tmp_path):
+    machine = platform.machine().lower()
+    if machine in {"x86_64", "amd64"}:
+        image_arch = "amd64"
+        gvisor_arch = "x86_64"
+    elif machine in {"arm64", "aarch64"}:
+        image_arch = "arm64"
+        gvisor_arch = "aarch64"
+    else:
+        raise AssertionError(f"unsupported test architecture: {machine}")
+
+    version = "manifest-parser-test"
+    image_ref = f"artifactflow-sandbox:0123456789abcdef-{image_arch}"
+    manifest = tmp_path / f"artifactflow-{version}.manifest.txt"
+    manifest.write_text(
+        "\n".join([
+            f"ArtifactFlow Release {version}",
+            f"Platform:     linux/{image_arch}",
+            f"Sandbox image required: {image_ref}",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    for name in (
+        f"artifactflow-app-{version}.tar.gz",
+        f"artifactflow-sandbox-{version}-{image_arch}.tar.gz",
+        f"artifactflow-sandbox-verify-{version}.tar.gz",
+        f"sandbox-gvisor-{version}-{gvisor_arch}.tar.gz",
+    ):
+        (tmp_path / name).touch()
+
+    result = subprocess.run(
+        [
+            "bash",
+            str(ROOT / "deploy" / "scripts" / "fleet.sh"),
+            "prepare-sandbox",
+            "--dry-run",
+            str(tmp_path),
+        ],
+        cwd=ROOT,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    assert f"AF_SANDBOX_IMAGE_REF={image_ref}" in result.stdout

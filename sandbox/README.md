@@ -91,7 +91,7 @@ tar xzf artifactflow-sandbox-verify-<date>.tar.gz                  # → ./verif
 
 # 3. one-shot verification. Read the exact content tag from the sidecar
 #    manifest. Add PROBE_HOST/PROBE_NAME to exercise network checks, else skip.
-IMAGE=$(awk -F': *' '/^Image ref:/{print $2}' artifactflow-sandbox-<date>-<arch>.manifest.txt)
+IMAGE=$(awk '/^Image ref:/ {sub(/^Image ref:[[:space:]]*/, ""); print; exit}' artifactflow-sandbox-<date>-<arch>.manifest.txt)
 IMAGE="$IMAGE" \
 PROBE_HOST=<internal-ip:port> PROBE_NAME=<internal.hostname> \
   bash verify/run-all.sh

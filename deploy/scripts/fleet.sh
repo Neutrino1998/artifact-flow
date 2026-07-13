@@ -309,6 +309,18 @@ is_release_manifest() {
   [[ "$header" == ArtifactFlow\ Release\ * ]]
 }
 
+manifest_value() {  # manifest_value <file> <key>
+  local file="$1" key="$2"
+  awk -v prefix="${key}:" '
+    index($0, prefix) == 1 {
+      value = substr($0, length(prefix) + 1)
+      sub(/^[[:space:]]*/, "", value)
+      print value
+      exit
+    }
+  ' "$file"
+}
+
 load_bundle_meta() {
   BUNDLE="$1"
   [[ -d "$BUNDLE" ]] || die "bundle dir not found: $BUNDLE"
@@ -330,8 +342,8 @@ load_bundle_meta() {
     mf="${manifests[0]}"
   fi
   BUNDLE_VER="$(awk 'NR==1{print $NF}' "$mf")"
-  BUNDLE_PLATFORM="$(awk -F': *' '/^Platform:/{print $2}' "$mf")"
-  BUNDLE_SANDBOX_IMAGE="$(awk -F': *' '/^Sandbox image required:/{print $2}' "$mf")"
+  BUNDLE_PLATFORM="$(manifest_value "$mf" "Platform")"
+  BUNDLE_SANDBOX_IMAGE="$(manifest_value "$mf" "Sandbox image required")"
   [[ -n "$BUNDLE_VER" ]] || die "cannot read version from manifest $mf"
   [[ "$BUNDLE_SANDBOX_IMAGE" =~ ^artifactflow-sandbox:[0-9a-f]{16}-(amd64|arm64)$ ]] \
     || die "manifest has invalid or missing immutable sandbox image reference: $mf"
