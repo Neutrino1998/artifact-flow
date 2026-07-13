@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 LibreOffice、Pandoc、python-docx、lxml、RapidFuzz。
 metadata:
-  version: "2.1.0"
+  version: "2.1.1"
 ---
 
 # Word 文档
@@ -118,7 +118,8 @@ plan 中相对文件路径以 plan 所在目录为基准；UTF-8 文本文件会
 `--replace-file/--with-file`、`--delete-file`、`--insert-after-file/--text-file`。
 
 脚本只编辑 `word/document.xml` 中单段落的普通直接 run，不处理跨段、页眉页脚、文本框、
-超链接、字段或已有修订内部。超出边界时先缩小需求或用 python-docx；确实必须保留复杂结构时，
+超链接、字段或已有修订内部；这些不可编辑节点会切断匹配，绝不拼接两侧 run。超出边界时先缩小
+需求或用 python-docx；确实必须保留复杂结构时，
 才使用 `unpack.py`/`pack.py` 并阅读[修订标记参考](references/redlines.md)。不要在转换失败后
 临时手搓 OOXML。
 

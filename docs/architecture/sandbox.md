@@ -73,6 +73,8 @@ controller_factory（每 turn）
 
 **依赖因此全离线投递、绝不靠出网**，分三层（同一套 `pip --no-index --find-links` 机制、不同生命周期）：① 烤进镜像（python / 科学栈 / 文档栈 / LibreOffice / `text-edit` / pandoc / ripgrep / zip / git，环境定义级）；② 离线 wheel bundle 挂固定位（常驻 extras）；③ skill 自带 asset（场景 specific 长尾，随 skill 激活按需挂）。依赖 ≠ artifact——artifact 是用户拥有的数据（走 mount / persist），依赖是执行环境（走镜像 / bundle）。
 
+**生产镜像按 runtime input 内容寻址，不跟随 app release 版本，也不解析 `:latest`。** `sandbox/Dockerfile`、沙盒 requirements、模型可调用 CLI 与共享 matcher 的路径和字节共同生成短 hash tag；release manifest 无论是否携带沙盒 tar 都声明这个精确引用，backend 发布镜像也把同一引用烤入 `ARTIFACTFLOW_SANDBOX_IMAGE`。所以普通 config/app 发布可复用已加载的同 tag 镜像，而沙盒能力一旦变化就得到新 tag；目标没有它时 fleet 在 compose 前 loud-fail，要求重新带 `--with-sandbox`，不会把新 skill 配给旧 `:latest`。
+
 其余容器硬约束：`ReadonlyRootfs`（rootfs 只读）、非 root（uid 1000）、`SANDBOX_MEM_LIMIT_MB` 内存上限（MemorySwap 设同值 = 禁 swap）、`SANDBOX_CPU_LIMIT` CPU 核数、`SANDBOX_PIDS_LIMIT` fork 炸弹闸。
 
 ### bash 的 CONFIRM 是同意闸，不是 containment
@@ -138,7 +140,7 @@ bind mount 无界之外，容器 rootfs overlay upper 同样无界（容器内 `
 
 | 常量 | 默认 | 含义 |
 |------|------|------|
-| `SANDBOX_IMAGE` | `artifactflow-sandbox:latest` | 沙盒镜像（与 backend 镜像 / requirements.lock 解耦，自己的 runtime） |
+| `SANDBOX_IMAGE` | 本地源码默认 `artifactflow-sandbox:latest`；生产由 backend 镜像内嵌内容 tag | 沙盒镜像（与 backend requirements.lock 解耦，自己的 runtime） |
 | `SANDBOX_RUNTIME` | `""` | Docker runtime；`""` = daemon 默认（dev=runc），prod=`runsc` |
 | `SANDBOX_SCRATCH_ROOT` | `/tmp/artifactflow-sandbox` | scratch 根；prod 挂成定容 loop 文件系统 |
 | `SANDBOX_COMMAND_TIMEOUT` | `300` | 单条命令秒上限（容器内 `timeout --signal=KILL`）。曾=120 兼任最坏 cancel 延迟上界；cancel-interrupt（工具 await 期可被打断，见 execution-lifecycle.md）落地后只剩 runaway 一职，放宽 |

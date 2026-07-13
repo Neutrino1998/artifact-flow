@@ -86,27 +86,50 @@ def _inside_tracked_change(run, paragraph) -> bool:
     return False
 
 
-def _run_text(run) -> str:
-    return "".join(t.text or "" for t in run.findall(W + "t"))
+def _editable_run_text(run) -> str | None:
+    """Return plain run text, or None when the run has non-text content."""
+    parts = []
+    for child in run:
+        if child.tag == W + "rPr":
+            continue
+        if child.tag != W + "t":
+            return None
+        parts.append(child.text or "")
+    return "".join(parts)
 
 
-def _direct_text_runs(paragraph):
-    runs = []
+def _direct_text_run_groups(paragraph):
+    """Yield contiguous editable runs without bridging unsupported OOXML."""
+    groups = []
+    current = []
     offset = 0
+
+    def flush() -> None:
+        nonlocal current, offset
+        if current:
+            groups.append((current, "".join(item["text"] for item in current)))
+        current = []
+        offset = 0
+
     for child in paragraph:
         if child.tag != W + "r" or _inside_tracked_change(child, paragraph):
+            flush()
             continue
-        text = _run_text(child)
+        text = _editable_run_text(child)
+        if text is None:
+            flush()
+            continue
         if not text:
             continue
-        runs.append({
+        current.append({
             "run": child,
             "start": offset,
             "end": offset + len(text),
             "text": text,
         })
         offset += len(text)
-    return runs, "".join(item["text"] for item in runs)
+    flush()
+    return groups
 
 
 def _text_el(tag: str, text: str):
@@ -241,9 +264,8 @@ def _apply_inline_change(
 def _find_unique_editable_match(root, needle: str, match_mode: str):
     entries = []
     for paragraph in root.iter(W + "p"):
-        runs, full_text = _direct_text_runs(paragraph)
-        if full_text:
-            entries.append((paragraph, runs, full_text))
+        for runs, text in _direct_text_run_groups(paragraph):
+            entries.append((paragraph, runs, text))
 
     result = find_unique_in_segments(
         [entry[2] for entry in entries], needle, mode=match_mode
@@ -299,10 +321,15 @@ def _find_and_apply(
     for paragraph in root.iter(W + "p"):
         # Recompute after each edit because the paragraph tree changes.
         while True:
-            runs, full_text = _direct_text_runs(paragraph)
-            pos = full_text.find(needle)
-            if pos < 0:
+            found = None
+            for runs, text in _direct_text_run_groups(paragraph):
+                pos = text.find(needle)
+                if pos >= 0:
+                    found = (runs, pos)
+                    break
+            if found is None:
                 break
+            runs, pos = found
             start, end = pos, pos + len(needle)
             _apply_inline_change(
                 paragraph,
@@ -330,7 +357,11 @@ def _count_matches(root, needle: str) -> int:
         raise RedlineError("anchor text must not be empty")
     if "\n" in needle:
         raise RedlineError("multi-line matches are not supported")
-    return sum(_direct_text_runs(paragraph)[1].count(needle) for paragraph in root.iter(W + "p"))
+    return sum(
+        text.count(needle)
+        for paragraph in root.iter(W + "p")
+        for _, text in _direct_text_run_groups(paragraph)
+    )
 
 
 def _load_docx(src: Path):

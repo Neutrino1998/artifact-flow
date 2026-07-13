@@ -35,8 +35,9 @@ scripts/build-sandbox-image.sh   build + docker-save the image tar (mirrors rele
 
 ## Build (networked build host — Mac)
 
-Both arches build the same way; pass `ARCH` / `PLATFORM`. Output names carry the
-arch (`-amd64` / `-arm64` / `-aarch64`) so the two sets coexist in `dist/`.
+Both arches build the same way; pass `ARCH` / `PLATFORM`. Archive names carry
+the app release/date plus arch so transfer units coexist in `dist/`; the image
+inside uses a runtime-input content tag recorded as `Image ref` in its manifest.
 
 ```bash
 # x86_64 (default)
@@ -85,18 +86,19 @@ tar xzf sandbox-gvisor-<date>-<arch>.tar.gz && cd sandbox-gvisor-<date>-<arch>
 sudo ./install.sh && sudo systemctl reload docker && sudo ./smoke-test.sh; cd ..
 
 # 2. sandbox image + verify probes
-gunzip -c artifactflow-sandbox-<date>-<arch>.tar.gz | docker load  # → artifactflow-sandbox:<date>-<arch>
+gunzip -c artifactflow-sandbox-<date>-<arch>.tar.gz | docker load  # → artifactflow-sandbox:<runtime-hash>-<arch>
 tar xzf artifactflow-sandbox-verify-<date>.tar.gz                  # → ./verify/  (arch-agnostic)
 
-# 3. one-shot verification. Pass the arch'd tag explicitly. Add PROBE_HOST/
-#    PROBE_NAME to exercise the network checks, else those skip.
-IMAGE=artifactflow-sandbox:<date>-<arch> \
+# 3. one-shot verification. Read the exact content tag from the sidecar
+#    manifest. Add PROBE_HOST/PROBE_NAME to exercise network checks, else skip.
+IMAGE=$(awk -F': *' '/^Image ref:/{print $2}' artifactflow-sandbox-<date>-<arch>.manifest.txt)
+IMAGE="$IMAGE" \
 PROBE_HOST=<internal-ip:port> PROBE_NAME=<internal.hostname> \
   bash verify/run-all.sh
 
 # 4. withdraw
 cd sandbox-gvisor-<date>-<arch> && sudo ./uninstall.sh && sudo systemctl reload docker; cd ..
-docker rmi artifactflow-sandbox:<date>-<arch>
+docker rmi "$IMAGE"
 # on a node provisioned just for this: also remove docker
 cd docker-offline-<date>-<arch> && sudo PURGE=1 ./uninstall.sh
 ```

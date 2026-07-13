@@ -17,6 +17,7 @@
 #   AF_SANDBOX_SCRATCH_ROOT    default /var/lib/artifactflow/sandbox-scratch
 #   AF_SANDBOX_POOL            default /var/lib/artifactflow/sandbox-pool.img
 #   AF_SANDBOX_IMAGE           default: newest artifactflow-sandbox-*.tar.gz in cwd
+#   AF_SANDBOX_IMAGE_REF       immutable image required by the release manifest
 #   AF_SANDBOX_VERIFY          default: newest artifactflow-sandbox-verify-*.tar.gz in cwd
 #   AF_GVISOR_PACKAGE          default: newest sandbox-gvisor-*.tar.gz in cwd
 
@@ -266,6 +267,14 @@ cmd_check() {
       warn_unused_postgres_placeholders
     fi
 
+    if [[ "${AF_ENABLE_SANDBOX:-0}" == 1 ]]; then
+      local sandbox_override
+      sandbox_override="$(deploy_env_value ARTIFACTFLOW_SANDBOX_IMAGE || true)"
+      if [[ -n "$sandbox_override" ]]; then
+        bad "deploy/.env must not override ARTIFACTFLOW_SANDBOX_IMAGE; the backend release image pins its sandbox runtime"
+      fi
+    fi
+
     local optional_blanks
     optional_blanks="$(
       grep -n '^[A-Z0-9_][A-Z0-9_]*=$' "$ROOT/deploy/.env" \
@@ -300,7 +309,12 @@ cmd_check() {
     scratch="$(sandbox_scratch_root)"
     findmnt -rn "$scratch" >/dev/null \
       && ok "sandbox scratch root mounted: $scratch" || bad "sandbox scratch root not mounted: $scratch"
-    docker image inspect artifactflow-sandbox:latest >/dev/null 2>&1 && ok "artifactflow-sandbox:latest loaded" || bad "artifactflow-sandbox:latest not loaded"
+    if [[ -n "${AF_SANDBOX_IMAGE_REF:-}" ]]; then
+      docker image inspect "$AF_SANDBOX_IMAGE_REF" >/dev/null 2>&1 \
+        && ok "$AF_SANDBOX_IMAGE_REF loaded" || bad "$AF_SANDBOX_IMAGE_REF not loaded"
+    else
+      info "sandbox image identity is checked against the release manifest during deploy"
+    fi
   fi
 
   echo
@@ -336,21 +350,32 @@ cmd_sandbox() {
   "$gvisor_dir/install.sh" || die "gVisor install failed"
   systemctl reload docker || die "docker reload failed"
 
-  local load_output loaded_tag loaded_latest
+  local load_output loaded_tag loaded_latest image_ref expected_ref
+  expected_ref="${AF_SANDBOX_IMAGE_REF:-}"
   load_output="$(docker load -i "$image")" || die "sandbox docker load failed"
   printf '%s\n' "$load_output" | sed 's/^/  /'
-  loaded_latest="$(printf '%s\n' "$load_output" | awk '$0 == "Loaded image: artifactflow-sandbox:latest" {print; exit}')"
-  loaded_tag="$(printf '%s\n' "$load_output" | awk -F': ' '/^Loaded image: artifactflow-sandbox:/ && $2 !~ /:latest$/ {print $2; exit}')"
-  if [[ -n "$loaded_latest" ]]; then
-    ok "artifactflow-sandbox:latest loaded from $(basename "$image")"
-  elif [[ -n "$loaded_tag" ]]; then
-    docker tag "$loaded_tag" artifactflow-sandbox:latest || die "failed to tag $loaded_tag as artifactflow-sandbox:latest"
-    ok "tagged $loaded_tag as artifactflow-sandbox:latest"
+  if [[ -n "$expected_ref" ]]; then
+    docker image inspect "$expected_ref" >/dev/null 2>&1 \
+      || die "sandbox archive does not contain required image $expected_ref"
+    image_ref="$expected_ref"
+    ok "$image_ref loaded from $(basename "$image")"
   else
-    die "loaded sandbox image tag not found in docker load output"
+    loaded_latest="$(printf '%s\n' "$load_output" | awk '$0 == "Loaded image: artifactflow-sandbox:latest" {print; exit}')"
+    loaded_tag="$(printf '%s\n' "$load_output" | awk -F': ' '/^Loaded image: artifactflow-sandbox:/ && $2 !~ /:latest$/ {print $2; exit}')"
+    if [[ -n "$loaded_latest" ]]; then
+      image_ref="artifactflow-sandbox:latest"
+      ok "$image_ref loaded from $(basename "$image")"
+    elif [[ -n "$loaded_tag" ]]; then
+      docker tag "$loaded_tag" artifactflow-sandbox:latest \
+        || die "failed to tag $loaded_tag as artifactflow-sandbox:latest"
+      image_ref="artifactflow-sandbox:latest"
+      ok "tagged $loaded_tag as $image_ref for standalone use"
+    else
+      die "loaded sandbox image tag not found in docker load output"
+    fi
   fi
 
-  "$gvisor_dir/smoke-test.sh" artifactflow-sandbox:latest || die "gVisor smoke failed"
+  "$gvisor_dir/smoke-test.sh" "$image_ref" || die "gVisor smoke failed"
 
   local pool root size
   pool="${AF_SANDBOX_POOL:-/var/lib/artifactflow/sandbox-pool.img}"
@@ -374,7 +399,7 @@ cmd_sandbox() {
 
   step "sandbox verify probes"
   tar xzf "$verify" -C "$ROOT" || die "failed to extract $verify"
-  ( cd "$ROOT" && IMAGE=artifactflow-sandbox:latest bash verify/run-all.sh ) || die "sandbox verify failed"
+  ( cd "$ROOT" && IMAGE="$image_ref" bash verify/run-all.sh ) || die "sandbox verify failed"
 
   if [[ -f "$ROOT/deploy/.env" ]]; then
     step "write deploy/.env sandbox settings"

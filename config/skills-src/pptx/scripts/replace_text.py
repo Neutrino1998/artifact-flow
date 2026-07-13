@@ -35,6 +35,7 @@ except ModuleNotFoundError as exc:
 
 
 MAX_SELECTED_SLIDES = 1000
+NS_A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
 
 
 def _structured_replacement(item: dict, index: int) -> dict:
@@ -143,16 +144,56 @@ def _text_frames(shape):
                 yield cell.text_frame
 
 
-def _paragraph_text(paragraph) -> str:
-    return "".join(run.text for run in paragraph.runs)
+def _editable_run_text(run) -> str | None:
+    parts = []
+    for child in run._r:
+        if child.tag == NS_A + "rPr":
+            continue
+        if child.tag != NS_A + "t":
+            return None
+        parts.append(child.text or "")
+    return "".join(parts)
 
 
-def _replace_span(paragraph, start: int, end: int, new: str) -> int:
+def _editable_run_groups(paragraph):
+    """Return contiguous a:r groups without bridging fields or line breaks."""
+    groups = []
+    current = []
+    offset = 0
+
+    def flush() -> None:
+        nonlocal current, offset
+        if current:
+            groups.append((current, "".join(item[3] for item in current)))
+        current = []
+        offset = 0
+
+    run_iter = iter(paragraph.runs)
+    for child in paragraph._p:
+        if child.tag != NS_A + "r":
+            flush()
+            continue
+        run = next(run_iter)
+        text = _editable_run_text(run)
+        if text is None:
+            flush()
+            continue
+        if not text:
+            continue
+        current.append((run, offset, offset + len(text), text))
+        offset += len(text)
+    flush()
+    return groups
+
+
+def _replace_span(group, start: int, end: int, new: str) -> int:
+    run_objects = [item[0] for item in group]
     runs = []
     offset = 0
-    for run in paragraph.runs:
+    for run in run_objects:
         text = run.text
-        runs.append((run, offset, offset + len(text), text))
+        if text:
+            runs.append((run, offset, offset + len(text), text))
         offset += len(text)
     affected = [item for item in runs if item[1] < end and item[2] > start]
     if not affected:
@@ -163,10 +204,10 @@ def _replace_span(paragraph, start: int, end: int, new: str) -> int:
         run.text = text[:start - run_start] + new + text[end - run_start:]
         return 0
 
-    full = "".join(item[3] for item in runs)
+    full = "".join(run.text for run in run_objects)
     rewritten = full[:start] + new + full[end:]
-    runs[0][0].text = rewritten
-    for run, _, _, _ in runs[1:]:
+    run_objects[0].text = rewritten
+    for run in run_objects[1:]:
         run.text = ""
     return 1
 
@@ -190,9 +231,8 @@ def _paragraph_entries(prs, slides: set[int] | None):
         for shape in _iter_shapes(slide.shapes):
             for text_frame in _text_frames(shape):
                 for paragraph in text_frame.paragraphs:
-                    text = _paragraph_text(paragraph)
-                    if text:
-                        entries.append((slide_idx, paragraph, text))
+                    for runs, text in _editable_run_groups(paragraph):
+                        entries.append((slide_idx, runs, text))
     return entries
 
 
@@ -276,15 +316,14 @@ def replace_text(
                 raise ValueError(
                     f"expected 1 editable match for {old!r}: {located.message}"
                 )
-            _, paragraph, _ = entries[located.segment_index]
-            matches = [(paragraph, located.start, located.end)]
+            matches = [(located.segment_index, located.start, located.end)]
             match_type = located.match_type
             similarity = located.similarity
             matched_text = located.matched_text
         else:
-            for _, paragraph, text in entries:
+            for entry_index, (_, _, text) in enumerate(entries):
                 matches.extend(
-                    (paragraph, start, end)
+                    (entry_index, start, end)
                     for start, end in _exact_spans(text, old)
                 )
             if expect is not None and len(matches) != expect:
@@ -294,12 +333,13 @@ def replace_text(
 
         hits = len(matches)
         rewrites = 0
-        by_paragraph = {}
-        for paragraph, start, end in matches:
-            by_paragraph.setdefault(paragraph, []).append((start, end))
-        for paragraph, spans in by_paragraph.items():
+        by_entry = {}
+        for entry_index, start, end in matches:
+            by_entry.setdefault(entry_index, []).append((start, end))
+        for entry_index, spans in by_entry.items():
+            _, runs, _ = entries[entry_index]
             for start, end in sorted(spans, reverse=True):
-                rewrites += _replace_span(paragraph, start, end, new)
+                rewrites += _replace_span(runs, start, end, new)
         summary["replacements"].append({
             "find": old,
             "replace": new,

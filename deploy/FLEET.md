@@ -20,7 +20,8 @@ a bundle includes the sandbox image, verify probes, and gVisor package; it runs
 the same bootstrap as `deploy/scripts/prepare-host.sh sandbox`. When
 `AF_ENABLE_SANDBOX=1`, `deploy` / `preflight` / `status` / `rollback` append
 `deploy/docker-compose.sandbox.yml` and make runsc,
-`artifactflow-sandbox:latest`, and the mounted scratch root hard requirements.
+the manifest's exact content-derived sandbox image, and the mounted scratch root
+hard requirements. `:latest` is only a local-development alias.
 
 `preflight` delegates to `deploy/scripts/prepare-host.sh check` when `deploy/`
 is already present on a host, so the same single entry point catches missing
@@ -90,9 +91,11 @@ wrong tar.
 4. **load** — `docker load` the app tar (backend + frontend images live in it),
    plus the infra tar if present and an `infra` role is declared.
 5. **sandbox check** — when `AF_ENABLE_SANDBOX=1`, require runsc,
-   `artifactflow-sandbox:latest`, and the scratch loop filesystem to already be
-   prepared. Use `prepare-sandbox <bundle-dir>` first when the bundle carries
-   sandbox transfer units.
+   the exact `Sandbox image required:` reference from the release manifest, and
+   the scratch loop filesystem to already be prepared. Use `prepare-sandbox
+   <bundle-dir>` first when the bundle carries sandbox transfer units. A
+   config/app-only release may reuse an already-loaded matching image, but can
+   never silently fall through to an older `:latest` image.
 6. **host check** — run `prepare-host.sh check` with the selected version and
    infra/sandbox flags.
 7. **up** — see single vs multi below.

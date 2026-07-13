@@ -231,7 +231,9 @@ class Settings(BaseSettings):
     # 沙盒（C 阶段;隐藏常量,operator 经 env 可调,模型不可见）。
     # DooD:镜像 / 挂载 / runtime 全部固定在代码侧 —— 容器创建参数绝不可被模型
     # 生成内容污染(backend 持 docker.sock = host root,这是硬安全边界)。
-    SANDBOX_IMAGE: str = "artifactflow-sandbox:latest"  # scripts/build-sandbox-image.sh 产物
+    # 本地源码运行默认 :latest；release 构建会把 runtime-input 内容 tag 作为
+    # ARTIFACTFLOW_SANDBOX_IMAGE 烤进 backend 镜像，生产不解析 :latest。
+    SANDBOX_IMAGE: str = "artifactflow-sandbox:latest"
     SANDBOX_RUNTIME: str = ""        # Docker runtime;"" = daemon 默认(本机 dev=runc),prod="runsc"(gVisor)
     # 宿主侧 scratch 工作区根目录。DooD 下 bind-mount 源路径在 **daemon 那台机**解析:
     # backend 容器化部署时必须把同一宿主路径以**相同路径**挂进 backend 容器(经典

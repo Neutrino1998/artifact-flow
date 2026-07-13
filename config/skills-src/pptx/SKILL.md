@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 LibreOffice、python-pptx、Pillow、matplotlib、RapidFuzz。
 metadata:
-  version: "2.1.0"
+  version: "2.1.1"
 ---
 
 # 演示文稿
@@ -58,6 +58,7 @@ python "$SKILL/scripts/replace_text.py" 输入.pptx /workspace/修改稿.pptx \
 要求唯一；多个候选或找不到锚点都失败。可用 `match: exact|normalized|auto` 收紧策略，
 `expect > 1` 只允许 exact。不要用 `--allow-missing` 掩盖计划未命中。输出里的
 `paragraph_rewrites` 表示匹配跨 run，格式可能被合并，必须重点查看对应页面。
+字段、显式换行和其他非普通文本节点会切断匹配，脚本不会跨过它们替换两侧 run。
 源内容超出槽位时优先缩短或拆页，不要靠持续缩小字号硬塞。复杂成组对象、母版和 SmartArt
 不要临时拆 XML；保守编辑做不到时，明确采用 best-effort 重建。
 

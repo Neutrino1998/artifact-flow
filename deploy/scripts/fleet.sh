@@ -147,13 +147,14 @@ copy_to() {  # copy_to <host> <local-src> <dst-path>
 }
 
 run_prepare_host_check() {  # run_prepare_host_check <host>
-  local host="$1" dir with_infra=0 version_env="" expected_version=""
+  local host="$1" dir with_infra=0 version_env="" sandbox_env="" expected_version=""
   dir="$(target_dir "$host")"
   host_has_role "$host" infra && with_infra=1
   expected_version="${BUNDLE_VER:-${AF_BUNDLE_VERSION:-}}"
   [[ -n "$expected_version" ]] && version_env="AF_VERSION='$expected_version' "
+  [[ -n "${BUNDLE_SANDBOX_IMAGE:-}" ]] && sandbox_env="AF_SANDBOX_IMAGE_REF='$BUNDLE_SANDBOX_IMAGE' "
 
-  run_on "$host" "if [ -d '$dir' ]; then cd '$dir'; else echo '  ℹ prepare-host check skipped ($dir not created yet)'; exit 0; fi; if [ -x deploy/scripts/prepare-host.sh ]; then AF_WITH_INFRA='$with_infra' AF_ENABLE_SANDBOX='$ENABLE_SANDBOX' ${version_env}deploy/scripts/prepare-host.sh check; else echo '  ℹ prepare-host check skipped (deploy/scripts/prepare-host.sh not found yet)'; fi"
+  run_on "$host" "if [ -d '$dir' ]; then cd '$dir'; else echo '  ℹ prepare-host check skipped ($dir not created yet)'; exit 0; fi; if [ -x deploy/scripts/prepare-host.sh ]; then AF_WITH_INFRA='$with_infra' AF_ENABLE_SANDBOX='$ENABLE_SANDBOX' ${version_env}${sandbox_env}deploy/scripts/prepare-host.sh check; else echo '  ℹ prepare-host check skipped (deploy/scripts/prepare-host.sh not found yet)'; fi"
 }
 
 env_file_value() {
@@ -300,7 +301,7 @@ compose_on() {  # compose_on <host> <version> <compose-args...>
 }
 
 # ── bundle introspection (manifest is source of truth) ──────────────
-BUNDLE=""; BUNDLE_VER=""; BUNDLE_PLATFORM=""; APP_TAR=""
+BUNDLE=""; BUNDLE_VER=""; BUNDLE_PLATFORM=""; BUNDLE_SANDBOX_IMAGE=""; APP_TAR=""
 SANDBOX_TAR=""; SANDBOX_VERIFY_TAR=""; SANDBOX_GVISOR_TAR=""
 is_release_manifest() {
   local header
@@ -330,7 +331,10 @@ load_bundle_meta() {
   fi
   BUNDLE_VER="$(awk 'NR==1{print $NF}' "$mf")"
   BUNDLE_PLATFORM="$(awk -F': *' '/^Platform:/{print $2}' "$mf")"
+  BUNDLE_SANDBOX_IMAGE="$(awk -F': *' '/^Sandbox image required:/{print $2}' "$mf")"
   [[ -n "$BUNDLE_VER" ]] || die "cannot read version from manifest $mf"
+  [[ "$BUNDLE_SANDBOX_IMAGE" =~ ^artifactflow-sandbox:[0-9a-f]{16}-(amd64|arm64)$ ]] \
+    || die "manifest has invalid or missing immutable sandbox image reference: $mf"
   # Select the app tar by the manifest version, NOT a glob head -1 — keeps the
   # loaded image locked to the AF_VERSION compose resolves at `up` even if a dir
   # ever holds two versions' tars (release.sh writes one version per dist/, so
@@ -421,9 +425,10 @@ prepare_sandbox_single_local() {
 
   step "prepare sandbox host prerequisites"
   if (( DRY )); then
-    info "would: AF_SANDBOX_IMAGE=$SANDBOX_TAR AF_SANDBOX_VERIFY=$SANDBOX_VERIFY_TAR AF_GVISOR_PACKAGE=$SANDBOX_GVISOR_TAR deploy/scripts/prepare-host.sh sandbox"
+    info "would: AF_SANDBOX_IMAGE=$SANDBOX_TAR AF_SANDBOX_IMAGE_REF=$BUNDLE_SANDBOX_IMAGE AF_SANDBOX_VERIFY=$SANDBOX_VERIFY_TAR AF_GVISOR_PACKAGE=$SANDBOX_GVISOR_TAR deploy/scripts/prepare-host.sh sandbox"
   else
     AF_SANDBOX_IMAGE="$SANDBOX_TAR" \
+    AF_SANDBOX_IMAGE_REF="$BUNDLE_SANDBOX_IMAGE" \
     AF_SANDBOX_VERIFY="$SANDBOX_VERIFY_TAR" \
     AF_GVISOR_PACKAGE="$SANDBOX_GVISOR_TAR" \
       "$SCRIPT_DIR/prepare-host.sh" sandbox || die "sandbox preparation failed"
@@ -441,10 +446,22 @@ sandbox_bundle_has_any_unit() {
 sandbox_ready_local() {
   command -v runsc >/dev/null 2>&1 || return 1
   docker info 2>/dev/null | grep -q runsc || return 1
-  docker image inspect artifactflow-sandbox:latest >/dev/null 2>&1 || return 1
+  [[ -n "$BUNDLE_SANDBOX_IMAGE" ]] || return 1
+  docker image inspect "$BUNDLE_SANDBOX_IMAGE" >/dev/null 2>&1 || return 1
   local scratch
   scratch="$(sandbox_scratch_root_local)"
   findmnt -rn "$scratch" >/dev/null || return 1
+}
+
+assert_app_sandbox_image_local() {
+  local actual
+  actual="$(
+    docker image inspect "artifactflow:$BUNDLE_VER" \
+      --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+      | awk -F= '$1 == "ARTIFACTFLOW_SANDBOX_IMAGE" {sub(/^[^=]*=/, ""); print; exit}'
+  )"
+  [[ "$actual" == "$BUNDLE_SANDBOX_IMAGE" ]] \
+    || die "backend image sandbox reference mismatch: manifest=$BUNDLE_SANDBOX_IMAGE image=${actual:-<missing>}"
 }
 
 require_sandbox_ready_single_local() {
@@ -615,8 +632,13 @@ cmd_preflight() {
           || { bad "runsc missing but AF_ENABLE_SANDBOX=1"; fail=1; }
         run_on "$host" 'docker info 2>/dev/null | grep -q runsc' && ok "docker runtime runsc registered" \
           || { bad "docker runtime runsc not registered but AF_ENABLE_SANDBOX=1"; fail=1; }
-        run_on "$host" 'docker image inspect artifactflow-sandbox:latest >/dev/null 2>&1' && ok "artifactflow-sandbox:latest loaded" \
-          || { bad "artifactflow-sandbox:latest missing but AF_ENABLE_SANDBOX=1"; fail=1; }
+        if [[ -n "${AF_SANDBOX_IMAGE_REF:-}" ]]; then
+          run_on "$host" "docker image inspect '$AF_SANDBOX_IMAGE_REF' >/dev/null 2>&1" \
+            && ok "$AF_SANDBOX_IMAGE_REF loaded" \
+            || { bad "$AF_SANDBOX_IMAGE_REF missing but AF_ENABLE_SANDBOX=1"; fail=1; }
+        else
+          info "sandbox image identity is checked against the release manifest during deploy"
+        fi
         local scratch_cmd; scratch_cmd="$(sandbox_scratch_check_cmd "$(target_dir "$host")")"
         run_on "$host" "$scratch_cmd" \
           && ok "sandbox scratch root mounted" \
@@ -710,6 +732,13 @@ deploy_single_local() {
   step "load app images ($(basename "$APP_TAR"))"
   if (( DRY )); then info "would: docker load -i $APP_TAR"; else docker load -i "$APP_TAR" || die "docker load failed"; ok "images loaded"; fi
 
+  if (( DRY )); then
+    info "would verify artifactflow:$BUNDLE_VER embeds $BUNDLE_SANDBOX_IMAGE"
+  else
+    assert_app_sandbox_image_local
+    ok "backend image pins $BUNDLE_SANDBOX_IMAGE"
+  fi
+
   if has_infra; then
     local infra_tar; infra_tar="$(ls "$BUNDLE"/artifactflow-infra-*.tar.gz 2>/dev/null | head -1 || true)"
     if [[ -n "$infra_tar" ]]; then
@@ -749,11 +778,12 @@ deploy_single_local() {
   if [[ "$ENABLE_SANDBOX" == 1 ]]; then
     [[ -f "$SANDBOX_COMPOSE_FILE" ]] || die "AF_ENABLE_SANDBOX=1 but $SANDBOX_COMPOSE_FILE is missing"
     if (( DRY )); then
-      info "would require: runsc registered, artifactflow-sandbox:latest loaded, scratch root mounted"
+      info "would require: runsc registered, $BUNDLE_SANDBOX_IMAGE loaded, scratch root mounted"
     else
       command -v runsc >/dev/null 2>&1 || die "AF_ENABLE_SANDBOX=1 but runsc is missing; run fleet.sh prepare-sandbox <bundle-dir> or deploy/scripts/prepare-host.sh sandbox"
       docker info 2>/dev/null | grep -q runsc || die "AF_ENABLE_SANDBOX=1 but Docker runtime 'runsc' is not registered"
-      docker image inspect artifactflow-sandbox:latest >/dev/null 2>&1 || die "AF_ENABLE_SANDBOX=1 but artifactflow-sandbox:latest is not loaded"
+      docker image inspect "$BUNDLE_SANDBOX_IMAGE" >/dev/null 2>&1 \
+        || die "required sandbox image $BUNDLE_SANDBOX_IMAGE is not loaded; rerun release with --with-sandbox or prepare that exact image"
       local scratch; scratch="$(sandbox_scratch_root_local)"
       findmnt -rn "$scratch" >/dev/null || die "AF_ENABLE_SANDBOX=1 but scratch root is not mounted: $scratch"
     fi

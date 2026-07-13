@@ -41,10 +41,10 @@ case "$PLATFORM" in
   *)              ARCH_TAG="${PLATFORM##*/}" ;;
 esac
 
-# Arch-suffixed names so amd64 + arm64 artifacts coexist in dist/ (a Kylin box is
-# single-arch — loading one tar is unambiguous). The verify tar is arch-AGNOSTIC
-# (Python/bash probes) → shared, no suffix.
-IMAGE="artifactflow-sandbox:${VERSION}-${ARCH_TAG}"
+# The production image identity is derived from runtime inputs, not the app
+# release version. Unrelated app/config releases therefore reuse the same image,
+# while any actual sandbox runtime change produces a new immutable reference.
+IMAGE="$(python3 "$ROOT/scripts/sandbox_runtime_ref.py" --arch "$ARCH_TAG")"
 ARCHIVE="$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.tar.gz"
 VERIFY_ARCHIVE="$OUTDIR/artifactflow-sandbox-verify-${VERSION}.tar.gz"
 LOCK="$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.wheels.lock"
@@ -76,10 +76,9 @@ GIT_VER=$(docker run --rm "${IMAGE}" git --version)
 IMAGE_ID=$(docker image inspect "${IMAGE}" --format '{{.Id}}')
 
 echo "Saving image to ${ARCHIVE}..."
-# Save BOTH the versioned tag AND :latest so that after `docker load` on the
-# target, the default tag in smoke-test.sh / run-all.sh (:latest) resolves —
-# otherwise the loaded image only has :<VERSION> and the defaults miss it.
-docker save "${IMAGE}" artifactflow-sandbox:latest | gzip > "$ARCHIVE"
+# The release tar carries only the immutable reference. :latest remains a local
+# build convenience and is never selected by production deployment.
+docker save "${IMAGE}" | gzip > "$ARCHIVE"
 # Checksum with a bare filename (run inside dist/) so `sha256sum -c` works from
 # that dir — same convention as release.sh / verify-bundle.sh.
 ( cd "$OUTDIR" && sha256sum "$(basename "$ARCHIVE")" > "$(basename "$ARCHIVE").sha256" )
@@ -103,6 +102,7 @@ cat > "$MANIFEST" <<EOF
 ArtifactFlow sandbox image — ${VERSION}
 Built (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)
 Platform:    ${PLATFORM}
+Image ref:   ${IMAGE}
 Image id:    ${IMAGE_ID}
 
 Tools:

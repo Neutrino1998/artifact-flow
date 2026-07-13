@@ -273,6 +273,46 @@ def test_docx_apply_redline_auto_rejects_duplicate_segments(tmp_path):
     assert not out.exists()
 
 
+def test_docx_apply_redline_does_not_bridge_hyperlinks(tmp_path):
+    docx = pytest.importorskip("docx")
+    oxml = pytest.importorskip("docx.oxml")
+    ns = pytest.importorskip("docx.oxml.ns")
+    mod = _load_skill_script("docx", "scripts/apply_redline.py")
+
+    prefix = "This is a long editable prefix with enough context before the "
+    suffix = " and enough editable context after the unsupported node."
+    src = tmp_path / "hyperlink.docx"
+    out = tmp_path / "must-not-exist.docx"
+    document = docx.Document()
+    paragraph = document.add_paragraph()
+    paragraph.add_run(prefix)
+    hyperlink = oxml.OxmlElement("w:hyperlink")
+    hyperlink.set(ns.qn("r:id"), "rId999")
+    run = oxml.OxmlElement("w:r")
+    text = oxml.OxmlElement("w:t")
+    text.text = "LINK"
+    run.append(text)
+    hyperlink.append(run)
+    paragraph._p.append(hyperlink)
+    paragraph.add_run(suffix)
+    document.save(src)
+
+    with pytest.raises(mod.RedlineError, match="matching failed"):
+        mod.apply_plan(
+            src,
+            out,
+            author="Review",
+            changes=[{
+                "op": "replace",
+                "find": prefix + "LINK" + suffix,
+                "replace": "REPLACED",
+                "expect": 1,
+                "match": "auto",
+            }],
+        )
+    assert not out.exists()
+
+
 def test_docx_default_reference_does_not_leak_template_media(tmp_path):
     pandoc = shutil.which("pandoc")
     if not pandoc:
@@ -420,7 +460,78 @@ def test_pptx_replace_text_auto_and_ambiguity_are_atomic(tmp_path):
     assert not duplicate_out.exists()
 
 
+def test_pptx_replace_text_does_not_bridge_fields(tmp_path):
+    pptx = pytest.importorskip("pptx")
+    util = pytest.importorskip("pptx.util")
+    xmlchemy = pytest.importorskip("pptx.oxml.xmlchemy")
+    mod = _load_skill_script("pptx", "scripts/replace_text.py")
+
+    prefix = "This is a long editable prefix with enough context before field "
+    suffix = " and enough editable context after the unsupported field node."
+    src = tmp_path / "field.pptx"
+    out = tmp_path / "must-not-exist.pptx"
+    prs = pptx.Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    box = slide.shapes.add_textbox(
+        util.Inches(1), util.Inches(1), util.Inches(8), util.Inches(2)
+    )
+    paragraph = box.text_frame.paragraphs[0]
+    paragraph.add_run().text = prefix
+    field = xmlchemy.OxmlElement("a:fld")
+    field.set("id", "{00000000-0000-0000-0000-000000000001}")
+    field.set("type", "slidenum")
+    field.append(xmlchemy.OxmlElement("a:rPr"))
+    field_text = xmlchemy.OxmlElement("a:t")
+    field_text.text = "42"
+    field.append(field_text)
+    paragraph._p.append(field)
+    paragraph.add_run().text = suffix
+    prs.save(src)
+
+    with pytest.raises(ValueError, match="expected 1 editable match"):
+        mod.replace_text(
+            src,
+            out,
+            [{
+                "find": prefix + "42" + suffix,
+                "replace": "REPLACED",
+                "expect": 1,
+                "match": "auto",
+            }],
+            slides=None,
+            allow_missing=False,
+        )
+    assert not out.exists()
+
+
 def test_pptx_slide_range_rejects_huge_materialization():
     mod = _load_skill_script("pptx", "scripts/replace_text.py")
     with pytest.raises(SystemExit, match="select at most"):
         mod._parse_slides("1-999999999")
+
+
+def test_pptx_exact_multiple_matches_in_one_run_group(tmp_path):
+    pptx = pytest.importorskip("pptx")
+    util = pytest.importorskip("pptx.util")
+    mod = _load_skill_script("pptx", "scripts/replace_text.py")
+
+    src = tmp_path / "multiple.pptx"
+    out = tmp_path / "multiple-out.pptx"
+    prs = pptx.Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    box = slide.shapes.add_textbox(
+        util.Inches(1), util.Inches(1), util.Inches(6), util.Inches(1)
+    )
+    box.text = "old middle old"
+    prs.save(src)
+
+    summary = mod.replace_text(
+        src,
+        out,
+        [{"find": "old", "replace": "NEW", "expect": 2, "match": "exact"}],
+        slides=None,
+        allow_missing=False,
+    )
+    assert summary["total_hits"] == 2
+    reopened = pptx.Presentation(str(out))
+    assert reopened.slides[0].shapes[0].text == "NEW middle NEW"
