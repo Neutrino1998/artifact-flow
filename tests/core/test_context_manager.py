@@ -653,7 +653,8 @@ class TestAvailableTools:
         assert "platform tools" in block
         assert "never put them inside bash.command" in block
         assert "separate copies with no automatic sync" in block
-        assert "mount -> bash -> persist" in block
+        assert "edit an existing artifact with mount -> bash -> persist" in block
+        assert "create a new file with bash -> persist" in block
         assert block.index("<tool_boundaries>") < block.index('<tool name="bash">')
 
     def test_bash_without_stage_tools_omits_data_boundary(self):

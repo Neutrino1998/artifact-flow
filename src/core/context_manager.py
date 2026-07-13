@@ -330,8 +330,9 @@ class ContextManager:
             ):
                 lines.append(
                     "Artifacts and /workspace files are separate copies with no automatic "
-                    "sync. Use artifact tools for stored text artifacts; use "
-                    "mount -> bash -> persist for sandbox file editing."
+                    "sync. Use artifact tools for stored text artifacts. When sandbox "
+                    "processing is needed, edit an existing artifact with "
+                    "mount -> bash -> persist; create a new file with bash -> persist."
                 )
             lines.append('</tool_boundaries>')
         if full_doc_tools:
