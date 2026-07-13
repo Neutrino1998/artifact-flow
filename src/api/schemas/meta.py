@@ -37,3 +37,12 @@ class ClientConfigResponse(BaseModel):
             "lives in Caddy config, outside src/config.py)."
         ),
     )
+    max_private_skills: int = Field(
+        ...,
+        ge=-1,
+        description=(
+            "Maximum number of private skills a user may own. -1 means unlimited, "
+            "0 disables personal skill imports, and a positive value is the limit. "
+            "Shared/admin-imported skills do not count."
+        ),
+    )

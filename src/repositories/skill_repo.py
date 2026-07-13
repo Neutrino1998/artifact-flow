@@ -76,6 +76,36 @@ class SkillRepository:
             )
         ).scalar_one())
 
+    async def lock_user_for_private_import(self, user_id: str) -> bool:
+        """Lock one user's row for the private-skill count-and-insert transaction.
+
+        Distinct users remain independent. The stable parent row also gives an empty
+        collection something to lock, unlike locking the user's existing skill rows.
+        """
+        return (
+            await self._session.execute(
+                select(User.id).where(User.id == user_id).with_for_update()
+            )
+        ).scalar_one_or_none() is not None
+
+    async def count_owned_skills(self, user_id: str) -> int:
+        """Count one user's private skills using a locking/current read.
+
+        `get_current_user` already performed a normal read in this request session. On
+        MySQL REPEATABLE READ, a later plain COUNT could therefore retain a snapshot
+        from before a competing import committed, even after the user-row lock waited.
+        Selecting the owned rows FOR UPDATE forces a current read on MySQL/PostgreSQL;
+        the collection is deliberately tiny because this is the configured count cap.
+        """
+        rows = (
+            await self._session.execute(
+                select(Skill.slug)
+                .where(Skill.owner_user_id == user_id)
+                .with_for_update()
+            )
+        ).scalars().all()
+        return len(rows)
+
     async def get_skill_row_meta(self, slug: str) -> Optional[dict]:
         """slug → 行级元数据(admin 删除路径用,绕过可见性;不存在 → None)。"""
         row = (

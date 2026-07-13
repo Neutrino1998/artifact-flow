@@ -679,6 +679,7 @@ MCP 单元的现有 `provider_config.timeout`（默认 `60`）继续表示 per-s
 |------|--------|------|
 | `ARTIFACTFLOW_MAX_CONCURRENT_TASKS` | `32` | 最大并发引擎执行数 |
 | `ARTIFACTFLOW_MAX_UPLOAD_SIZE` | `209715200` | 单文件上传大小限制（字节，默认 200MB）；批量总字节由代理层独立封顶（约 200MiB 内容 + multipart 开销）。注：文本转换另有更低的独立闸 20MB——超闸**不 422、落为二进制 blob artifact**（可下载、可 mount 进沙盒处理） |
+| `ARTIFACTFLOW_SKILL_USER_MAX_PRIVATE_COUNT` | `3` | 每个用户可拥有的私有 Skill 数量；`-1` 不限，`0` 关闭个人导入，正数为上限。Admin 导入的共享 Skill 不计入。 |
 | `ARTIFACTFLOW_DEFAULT_PAGE_SIZE` | `20` | 分页默认每页条数 |
 | `ARTIFACTFLOW_MAX_PAGE_SIZE` | `100` | 分页最大每页条数 |
 

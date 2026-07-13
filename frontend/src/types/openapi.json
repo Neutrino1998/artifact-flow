@@ -3570,7 +3570,7 @@
           "skills"
         ],
         "summary": "Import Skill",
-        "description": "\u5bfc\u5165\u79c1\u6709 skill zip(owner=\u672c\u4eba,\u7acb\u5373\u8fdb\u81ea\u5df1\u7684 L1)\u3002\u786c\u95e8\u62d2\u6536 \u2192 422 \u7ed3\u6784\u5316\nfindings;\u8d85\u5355\u5305\u4e0a\u9650 \u2192 422;\u8d85\u5b58\u50a8\u914d\u989d \u2192 413;slug \u649e\u540d \u2192 409\u3002",
+        "description": "\u5bfc\u5165\u79c1\u6709 skill zip(owner=\u672c\u4eba,\u7acb\u5373\u8fdb\u81ea\u5df1\u7684 L1)\u3002\u786c\u95e8\u62d2\u6536 \u2192 422 \u7ed3\u6784\u5316\nfindings;\u8d85\u5355\u5305\u4e0a\u9650 \u2192 422;\u8d85\u5b58\u50a8\u914d\u989d \u2192 413;\u4e2a\u4eba\u6570\u91cf\u8fbe\u4e0a\u9650\u6216 slug \u649e\u540d \u2192 409\u3002",
         "operationId": "import_skill_api_v1_skills_import_post",
         "requestBody": {
           "content": {
@@ -5149,13 +5149,20 @@
             "type": "integer",
             "title": "Max Upload Size",
             "description": "Per-file upload byte limit (MAX_UPLOAD_SIZE). The composer uses it to pre-reject an oversize file with instant feedback instead of staging + POSTing it for a backend 422. Backend stays authoritative; the batch TOTAL is capped separately at the proxy layer (not surfaced here \u2014 it lives in Caddy config, outside src/config.py)."
+          },
+          "max_private_skills": {
+            "type": "integer",
+            "minimum": -1.0,
+            "title": "Max Private Skills",
+            "description": "Maximum number of private skills a user may own. -1 means unlimited, 0 disables personal skill imports, and a positive value is the limit. Shared/admin-imported skills do not count."
           }
         },
         "type": "object",
         "required": [
           "compaction_token_threshold",
           "lead_agent_model",
-          "max_upload_size"
+          "max_upload_size",
+          "max_private_skills"
         ],
         "title": "ClientConfigResponse",
         "description": "GET /api/v1/meta response \u2014 runtime constants for the frontend."

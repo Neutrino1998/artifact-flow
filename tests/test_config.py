@@ -7,8 +7,9 @@ turning an env misconfig into "any site may read authenticated responses".
 
 import pytest
 from cryptography.fernet import Fernet
+from pydantic import ValidationError
 
-from config import config, validate_config
+from config import Settings, config, validate_config
 
 
 @pytest.fixture
@@ -57,3 +58,13 @@ def test_wildcard_origin_without_credentials_is_allowed(_valid_prereqs, monkeypa
     monkeypatch.setattr(config, "CORS_ALLOW_CREDENTIALS", False)
     monkeypatch.setattr(config, "CORS_ORIGINS", ["*"])
     validate_config()  # must not raise
+
+
+@pytest.mark.parametrize("limit", [-1, 0, 3])
+def test_private_skill_count_limit_accepts_three_supported_states(limit):
+    assert Settings(SKILL_USER_MAX_PRIVATE_COUNT=limit).SKILL_USER_MAX_PRIVATE_COUNT == limit
+
+
+def test_private_skill_count_limit_rejects_values_below_minus_one():
+    with pytest.raises(ValidationError, match="SKILL_USER_MAX_PRIVATE_COUNT"):
+        Settings(SKILL_USER_MAX_PRIVATE_COUNT=-2)

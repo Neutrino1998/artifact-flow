@@ -217,8 +217,12 @@ class Settings(BaseSettings):
     # 宿主侧只读 namelist + SKILL.md 一个成员,全包解压归沙盒 —— 这组上限是 bomb 预拒,
     # 沙盒 watchdog 仍是真兜底。单 zip 字节上限刻意 ≤ 代理层 request_body max_size,
     # 别声明一个过不了边缘的数(deploy/caddy)。
-    # 用户 skill 总量不设独立配额:bundle 字节计入 ARTIFACT_USER_QUOTA_BYTES 同一池
-    # (原则 7③;记账在 ConversationManager.get_user_upload_bytes,413 闸与存储条同口径)。
+    # 用户私有 skill 同时受数量与字节两道独立限制。数量按 skills.owner_user_id
+    # 实时 COUNT,不在 User 上存同步计数器；-1 = 不限，0 = 关闭个人导入，正数 = 上限。
+    # admin shared skill(owner=NULL)不计数。ge=-1 让非法负数在 Settings 构造期 loud-fail。
+    SKILL_USER_MAX_PRIVATE_COUNT: int = Field(default=3, ge=-1)
+    # bundle 字节仍计入 ARTIFACT_USER_QUOTA_BYTES 共用池(原则 7③;记账在
+    # ConversationManager.get_user_upload_bytes,413 闸与存储条同口径)。
     SKILL_BUNDLE_MAX_BYTES: int = 200 * 1024 * 1024     # 单个 skill zip 上限,对齐 MAX_UPLOAD_SIZE
                                                         # 的「单文件 200MB」口径(边缘 210MiB 放得下)。
                                                         # 执行点 = E-2 导入端点(非 validator:按信任

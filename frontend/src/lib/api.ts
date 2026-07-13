@@ -232,7 +232,7 @@ export function setSkillEnabled(slug: string, enabled: boolean) {
  * 错误（detail 由 SkillManager 结构化产出）：
  * - 422 + dict detail（`{message, findings[]}`）→ 硬门拒收，ApiError.body 给 UI
  *   逐条渲染 rule/severity/message
- * - 413 → 超存储配额；409 → slug 撞名（改 name 重打包）
+ * - 413 → 超存储配额；409 → slug 撞名或个人技能数量达到上限
  */
 export async function importSkill(
   file: File,

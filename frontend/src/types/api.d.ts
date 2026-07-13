@@ -1325,7 +1325,7 @@ export interface paths {
         /**
          * Import Skill
          * @description 导入私有 skill zip(owner=本人,立即进自己的 L1)。硬门拒收 → 422 结构化
-         *     findings;超单包上限 → 422;超存储配额 → 413;slug 撞名 → 409。
+         *     findings;超单包上限 → 422;超存储配额 → 413;个人数量达上限或 slug 撞名 → 409。
          */
         post: operations["import_skill_api_v1_skills_import_post"];
         delete?: never;
@@ -2173,6 +2173,11 @@ export interface components {
              * @description Per-file upload byte limit (MAX_UPLOAD_SIZE). The composer uses it to pre-reject an oversize file with instant feedback instead of staging + POSTing it for a backend 422. Backend stays authoritative; the batch TOTAL is capped separately at the proxy layer (not surfaced here — it lives in Caddy config, outside src/config.py).
              */
             max_upload_size: number;
+            /**
+             * Max Private Skills
+             * @description Maximum number of private skills a user may own. -1 means unlimited, 0 disables personal skill imports, and a positive value is the limit. Shared/admin-imported skills do not count.
+             */
+            max_private_skills: number;
         };
         /**
          * ConversationDetailResponse

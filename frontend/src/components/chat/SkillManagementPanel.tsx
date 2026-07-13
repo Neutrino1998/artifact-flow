@@ -13,6 +13,7 @@ import {
   ApiError,
 } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
+import { useConfigStore } from '@/stores/configStore';
 import { useUIStore } from '@/stores/uiStore';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
 import { triggerBlobDownload } from '@/lib/download';
@@ -22,6 +23,7 @@ import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
 import { StatusNotice } from '@/components/ui/StatusNotice';
 import DangerConfirmModal, { DangerConfirmTarget } from '@/components/layout/DangerConfirmModal';
 import PanelSearchBar from './PanelSearchBar';
+import { resolvePrivateSkillAllowance } from '@/lib/privateSkillLimit';
 import type {
   AdminSkillItem,
   AdminSkillUpdateRequest,
@@ -93,6 +95,8 @@ export default function SkillManagementPanel() {
 
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === 'admin';
+  const maxPrivateSkills = useConfigStore((s) => s.maxPrivateSkills);
+  const fetchConfig = useConfigStore((s) => s.fetchConfig);
   const setActiveMode = useUIStore((s) => s.setActiveMode);
 
   const fetchSkills = useCallback(async () => {
@@ -113,6 +117,10 @@ export default function SkillManagementPanel() {
   useEffect(() => {
     fetchSkills();
   }, [fetchSkills]);
+
+  useEffect(() => {
+    fetchConfig();
+  }, [fetchConfig]);
 
   const handleToggle = useCallback(async (slug: string, next: boolean) => {
     // 乐观更新 + 失败回滚。pending 期禁开关避免连点。
@@ -213,6 +221,21 @@ export default function SkillManagementPanel() {
           (s.description ?? '').toLowerCase().includes(q),
       )
     : skills;
+  const privateSkillCount = skills.filter((skill) => skill.is_owner).length;
+  const privateAllowance = resolvePrivateSkillAllowance(
+    privateSkillCount,
+    maxPrivateSkills,
+  );
+  const privateAllowanceText = privateAllowance.kind === 'disabled'
+    ? '个人技能导入已关闭，请联系管理员发布共享技能'
+    : privateAllowance.kind === 'unlimited'
+      ? `个人技能 ${privateAllowance.used} / 不限`
+      : privateAllowance.kind === 'limited'
+        ? privateAllowance.canImport
+          ? `个人技能 ${privateAllowance.used} / ${privateAllowance.limit}，剩余 ${privateAllowance.remaining} 个`
+          : `个人技能 ${privateAllowance.used} / ${privateAllowance.limit}，额度已用完`
+        : `个人技能 ${privateAllowance.used}`;
+  const personalEntryDisabled = !isAdmin && !privateAllowance.canImport;
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
@@ -229,14 +252,25 @@ export default function SkillManagementPanel() {
           <p className="px-1 text-xs text-text-tertiary dark:text-text-tertiary-dark">
             关闭的技能不会自动进入对话，也不会出现在输入框的激活选择器里；随时可以重新开启。
           </p>
+          {!loading && !error && (
+            <p className={`px-1 text-xs ${
+              privateAllowance.canImport
+                ? 'text-text-tertiary dark:text-text-tertiary-dark'
+                : 'text-status-warning'
+            }`}>
+              {privateAllowanceText}
+            </p>
+          )}
 
           {/* 导入入口 + 内联导入卡片(中间面板接管,不动右面板) */}
           <button
+            type="button"
+            disabled={personalEntryDisabled}
             onClick={() => {
               setImportNotice(null);
               setImportOpen((v) => !v);
             }}
-            className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border font-medium transition-colors ${
+            className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
               importOpen
                 ? 'text-accent border-accent bg-bg dark:bg-bg-dark'
                 : 'text-accent border-border dark:border-border-dark bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark'
@@ -245,12 +279,17 @@ export default function SkillManagementPanel() {
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M7 2v10M2 7h10" />
             </svg>
-            导入技能
+            {personalEntryDisabled
+              ? privateAllowance.kind === 'disabled'
+                ? '个人技能导入已关闭'
+                : '个人技能额度已用完'
+              : '导入技能'}
           </button>
 
           {importOpen && (
             <SkillImportCard
               isAdmin={isAdmin}
+              personalImportAvailable={privateAllowance.canImport}
               onImported={(data) => {
                 setImportNotice(data);
                 setImportOpen(false);
@@ -476,16 +515,20 @@ type ImportStage =
 
 function SkillImportCard({
   isAdmin,
+  personalImportAvailable,
   onImported,
   onClose,
 }: {
   isAdmin: boolean;
+  personalImportAvailable: boolean;
   onImported: (data: SkillImportResponse) => void;
   onClose: () => void;
 }) {
   const [stage, setStage] = useState<ImportStage>({ kind: 'pick' });
   const [file, setFile] = useState<File | null>(null);
-  const [marketplace, setMarketplace] = useState(false);
+  const [marketplace, setMarketplace] = useState(
+    isAdmin && !personalImportAvailable,
+  );
   const [sharedVisibility, setSharedVisibility] = useState<SharedVisibility>('public');
   const [sharedDefaultEnabled, setSharedDefaultEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -498,6 +541,10 @@ function SkillImportCard({
   const clearNativeInput = useCallback(() => {
     if (inputRef.current) inputRef.current.value = '';
   }, []);
+
+  useEffect(() => {
+    if (isAdmin && !personalImportAvailable) setMarketplace(true);
+  }, [isAdmin, personalImportAvailable]);
 
   const handleFile = useCallback((f: File | null) => {
     setError(null);
@@ -516,7 +563,7 @@ function SkillImportCard({
   }, [clearNativeInput]);
 
   const submit = useCallback(async () => {
-    if (!file) return;
+    if (!file || (!marketplace && !personalImportAvailable)) return;
     setStage({ kind: 'submitting' });
     setError(null);
     setRejectFindings(null);
@@ -557,6 +604,7 @@ function SkillImportCard({
     marketplace,
     sharedDefaultEnabled,
     sharedVisibility,
+    personalImportAvailable,
     onImported,
     clearNativeInput,
   ]);
@@ -629,8 +677,9 @@ function SkillImportCard({
             role="switch"
             aria-checked={marketplace}
             aria-label="导入为共享技能"
+            disabled={!personalImportAvailable}
             onClick={() => setMarketplace((v) => !v)}
-            className={`flex w-full items-center justify-between gap-3 rounded-lg border bg-chat dark:bg-chat-dark px-3 py-2 text-left transition-colors ${
+            className={`flex w-full items-center justify-between gap-3 rounded-lg border bg-chat dark:bg-chat-dark px-3 py-2 text-left transition-colors disabled:cursor-not-allowed ${
               marketplace
                 ? 'border-accent/60'
                 : 'border-border dark:border-border-dark hover:border-accent/40 dark:hover:border-accent/50'
@@ -641,7 +690,9 @@ function SkillImportCard({
                 导入为共享技能
               </span>
               <span className="block text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                管理员可配置公开或部门可见
+                {personalImportAvailable
+                  ? '管理员可配置公开或部门可见'
+                  : '个人导入不可用，本次将发布为共享技能'}
               </span>
             </span>
             <SwitchTrack checked={marketplace} />
@@ -684,7 +735,11 @@ function SkillImportCard({
         </button>
         <button
           onClick={submit}
-          disabled={!file || stage.kind === 'submitting'}
+          disabled={
+            !file ||
+            stage.kind === 'submitting' ||
+            (!marketplace && !personalImportAvailable)
+          }
           type="button"
           className={`${BUTTON_PRIMARY} rounded-lg px-4 py-1.5 text-sm`}
         >

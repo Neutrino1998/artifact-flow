@@ -14,6 +14,9 @@ interface ConfigState {
   // the composer's size pre-gate skips when null (best-effort; backend 422s
   // anyway), so we never block a file on a not-yet-loaded limit.
   maxUploadSize: number | null;
+  // Per-user private skill count: -1 unlimited, 0 personal imports disabled,
+  // positive = limit. null until /meta loads; backend remains authoritative.
+  maxPrivateSkills: number | null;
   fetched: boolean;
   fetchConfig: () => Promise<void>;
 }
@@ -22,6 +25,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
   compactionThreshold: null,
   leadAgentModel: null,
   maxUploadSize: null,
+  maxPrivateSkills: null,
   fetched: false,
   fetchConfig: async () => {
     if (get().fetched) return;
@@ -31,6 +35,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
         compactionThreshold: cfg.compaction_token_threshold,
         leadAgentModel: cfg.lead_agent_model,
         maxUploadSize: cfg.max_upload_size,
+        maxPrivateSkills: cfg.max_private_skills,
         fetched: true,
       });
     } catch (err) {
