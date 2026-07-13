@@ -426,13 +426,18 @@ async def test_mcp_outer_cancel_with_cleanup_error_still_propagates():
         await task
 
 
-async def test_sdk_session_accepts_streamable_http_triple_and_uses_timedelta_timeout():
+async def test_sdk_session_accepts_streamable_http_triple_and_uses_granular_timeouts(monkeypatch):
     seen = {}
+
+    monkeypatch.setattr(config, "MCP_CONNECT_TIMEOUT", 3.0)
+    monkeypatch.setattr(config, "MCP_WRITE_TIMEOUT", 40.0)
+    monkeypatch.setattr(config, "MCP_POOL_TIMEOUT", 2.0)
 
     @asynccontextmanager
     async def fake_transport(url, *, http_client):
         seen["url"] = url
         seen["headers"] = dict(http_client.headers)
+        seen["http_timeout"] = http_client.timeout
         yield "read-stream", "write-stream", lambda: "session-id"
 
     class FakeSession:
@@ -463,6 +468,10 @@ async def test_sdk_session_accepts_streamable_http_triple_and_uses_timedelta_tim
     assert seen["read_stream"] == "read-stream"
     assert seen["write_stream"] == "write-stream"
     assert seen["read_timeout_seconds"] == timedelta(seconds=15)
+    assert seen["http_timeout"].connect == 3.0
+    assert seen["http_timeout"].read == 15.0
+    assert seen["http_timeout"].write == 40.0
+    assert seen["http_timeout"].pool == 2.0
     assert seen["initialized"] is True
 
 

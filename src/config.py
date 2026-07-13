@@ -2,7 +2,7 @@
 
 from typing import Dict, List
 from pydantic_settings import BaseSettings
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 
 
 class Settings(BaseSettings):
@@ -41,6 +41,22 @@ class Settings(BaseSettings):
     STREAM_TTL_GRACE: int = 300
     PERMISSION_TIMEOUT: int = 300  # 秒，单次 permission 等待超时
     CANCEL_CHECK_INTERVAL: float = 0.5  # 秒，LLM 流式输出期间轮询 cancel 的最小间隔（避免每 chunk 一次 Redis GET）
+
+    # LLM provider HTTP 超时分层。LiteLLM 的单一 float timeout 会同时放大
+    # connect/read/write/pool：为容纳私有 reasoning 模型的长 TTFT 而给 read 600s
+    # 时，错 IP 也会跟着等 600s。在这里构造 httpx.Timeout 把网络建连与
+    # 模型等待拆开；models.yaml 里显式的 params.timeout 仍只覆盖 read。
+    LLM_CONNECT_TIMEOUT: float = Field(default=5.0, gt=0)
+    LLM_READ_TIMEOUT: float = Field(default=600.0, gt=0)
+    LLM_WRITE_TIMEOUT: float = Field(default=60.0, gt=0)
+    LLM_POOL_TIMEOUT: float = Field(default=5.0, gt=0)
+
+    # MCP provider_config.timeout 仍是 per-server 的 read / MCP request 上限。
+    # 下列全局值只拆出 HTTP 建连/写入/连接池，重点让每轮 tools/list
+    # discovery 遇到错 IP 时快速失败，不改长任务 tools/call 的 read 语义。
+    MCP_CONNECT_TIMEOUT: float = Field(default=5.0, gt=0)
+    MCP_WRITE_TIMEOUT: float = Field(default=60.0, gt=0)
+    MCP_POOL_TIMEOUT: float = Field(default=5.0, gt=0)
 
     # Compaction / Context 配置
     COMPACTION_TOKEN_THRESHOLD: int = 100000  # tokens, LLM 单次调用 input+output 超此值触发引擎内 compaction

@@ -276,7 +276,12 @@ class _McpSessionContext:
         try:
             http_client = httpx.AsyncClient(
                 headers=self._headers,
-                timeout=float(self._timeout),
+                timeout=httpx.Timeout(
+                    connect=config.MCP_CONNECT_TIMEOUT,
+                    read=float(self._timeout),
+                    write=config.MCP_WRITE_TIMEOUT,
+                    pool=config.MCP_POOL_TIMEOUT,
+                ),
                 trust_env=False,
             )
             await self._stack.enter_async_context(http_client)

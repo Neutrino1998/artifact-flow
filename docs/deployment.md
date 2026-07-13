@@ -638,6 +638,20 @@ AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy .
 | `ARTIFACTFLOW_STREAM_CLEANUP_TTL` | `60` | 执行结束后 stream 清理窗口（秒） |
 | `ARTIFACTFLOW_PERMISSION_TIMEOUT` | `300` | 单次权限等待超时（秒） |
 
+### LLM 与 MCP HTTP 分阶段超时
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `ARTIFACTFLOW_LLM_CONNECT_TIMEOUT` | `5` | LLM provider DNS/TCP/TLS 建连超时（秒） |
+| `ARTIFACTFLOW_LLM_READ_TIMEOUT` | `600` | LLM 首个/下一个响应 chunk 等待超时（秒）；`models.yaml` 的 `params.timeout` 只覆盖此 read 值 |
+| `ARTIFACTFLOW_LLM_WRITE_TIMEOUT` | `60` | LLM 请求体写入超时（秒） |
+| `ARTIFACTFLOW_LLM_POOL_TIMEOUT` | `5` | LLM HTTP 连接池等待超时（秒） |
+| `ARTIFACTFLOW_MCP_CONNECT_TIMEOUT` | `5` | MCP `tools/list` discovery 与 `tools/call` 的 DNS/TCP/TLS 建连超时（秒） |
+| `ARTIFACTFLOW_MCP_WRITE_TIMEOUT` | `60` | MCP 请求体写入超时（秒） |
+| `ARTIFACTFLOW_MCP_POOL_TIMEOUT` | `5` | MCP HTTP 连接池等待超时（秒） |
+
+MCP 单元的现有 `provider_config.timeout`（默认 `60`）继续表示 per-server read / MCP request 等待上限。这些分阶段变量把错 IP 的建连等待与合法的长 TTFT/长任务等待拆开；流式 read timeout 表示“连续多久没有新数据”，整个 turn 仍由 `ARTIFACTFLOW_EXECUTION_TIMEOUT` 封顶。
+
 ### Compaction 与上下文
 
 | 变量 | 默认值 | 说明 |

@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 from typing import Optional, Dict, Any, AsyncIterator
 
+import httpx
 import yaml
 from dotenv import load_dotenv
 
@@ -30,6 +31,7 @@ from litellm.exceptions import (
 
 load_dotenv()
 
+from config import config as settings
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -140,6 +142,26 @@ def _resolve_model_params(
 
     if api_key:
         params["api_key"] = api_key
+
+    # timeout 语义分层：模型/defaults 里的数字 timeout 继续表示
+    # “等待模型响应数据”（read），connect/write/pool 由服务级隐藏配置
+    # 控制。不直接使用 LiteLLM 的单 float 默认：它会把为长 TTFT 留的
+    # read 上限同时套到错 IP 的 TCP connect 上。
+    raw_read_timeout = params.get("timeout", settings.LLM_READ_TIMEOUT)
+    if (
+        not isinstance(raw_read_timeout, (int, float))
+        or isinstance(raw_read_timeout, bool)
+        or raw_read_timeout <= 0
+    ):
+        raise ValueError(
+            f"Model '{model}' timeout must be a positive number of seconds"
+        )
+    params["timeout"] = httpx.Timeout(
+        connect=settings.LLM_CONNECT_TIMEOUT,
+        read=float(raw_read_timeout),
+        write=settings.LLM_WRITE_TIMEOUT,
+        pool=settings.LLM_POOL_TIMEOUT,
+    )
 
     return params
 
