@@ -18,7 +18,11 @@ from typing import Any, AsyncGenerator, Dict, Optional
 
 import redis.asyncio as aioredis
 
-from api.services.stream_transport import StreamAlreadyExistsError, StreamNotFoundError
+from api.services.stream_transport import (
+    StreamAlreadyExistsError,
+    StreamNotFoundError,
+    replay_snapshot_key,
+)
 from utils.logger import get_logger, get_request_id
 
 logger = get_logger("ArtifactFlow")
@@ -32,14 +36,28 @@ _TERMINAL_EVENTS = frozenset(("complete", "cancelled", "timed_out", "error"))
 # stream key（永不自愈）。Lua 整段原子执行 → 要么 XADD+EXPIRE 都发生、要么键根本没创建。
 # 判据 TTL==-1（键在但无过期）才设 TTL：既识别首推，又自愈任何历史遗留的无 TTL 键，
 # 且保留「后续推送不刷新 TTL」（不延长 stream 寿命）。
-# 单 key 操作（KEYS[1]=stream_key），Cluster 安全。
-# 与 meta_key 剩余 TTL 的精确对齐是 best-effort 之外的目标，留给 PR-C 的生命周期重构。
-# KEYS[1]=stream_key, ARGV[1]=event_type, ARGV[2]=event_json, ARGV[3]=ttl
+# 累计式 llm_chunk 是可替换的回放快照：每个 agent/channel 只保留最新 entry，
+# 避免 1000 个累计字符串形成 O(snapshot_count × final_length) 的 Redis 占用。
+# 当前 live observer 仍会被每次 XADD 唤醒；慢 observer 可能跳过已由下一累计
+# 快照覆盖的中间态。这里只 XDEL 上一份回放快照。
+#
+# KEYS[1]=stream_key 与 KEYS[2]=meta_key 共享 {prefix:id} hash tag，双 key Lua
+# 在 Redis Cluster 中仍落同一 slot。meta 不存在时不 HSET，避免 TTL 边界竞态把
+# 已过期 meta 重新创建成无 TTL key。
+# ARGV[1]=event_type, ARGV[2]=event_json, ARGV[3]=ttl,
+# ARGV[4]=snapshot_field（非可替换事件传空字符串）
 _LUA_XADD_WITH_TTL = """
 local id = redis.call('XADD', KEYS[1], 'MAXLEN', '~', '1000', '*',
                       'type', ARGV[1], 'data', ARGV[2])
 if redis.call('TTL', KEYS[1]) == -1 then
     redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
+end
+if ARGV[4] ~= '' and redis.call('EXISTS', KEYS[2]) == 1 then
+    local previous_id = redis.call('HGET', KEYS[2], ARGV[4])
+    if previous_id then
+        redis.call('XDEL', KEYS[1], previous_id)
+    end
+    redis.call('HSET', KEYS[2], ARGV[4], id)
 end
 return id
 """
@@ -121,15 +139,17 @@ class RedisStreamTransport:
         stream_key = self._stream_key(stream_id)
         event_json = json.dumps(event, ensure_ascii=False, default=str)
         event_type = event.get("type", "")
+        snapshot_field = replay_snapshot_key(event) or ""
 
-        # XADD + 首推 EXPIRE 原子合一（单 key Lua）。脚本内 TTL==-1 判据负责首推
+        # XADD + 首推 EXPIRE + 可选快照替换原子合一。脚本内 TTL==-1 判据负责首推
         # 检测，省去单独的 exists 预查，并消除 XADD 与 EXPIRE 之间的孤儿窗口。
+        # stream/meta 两个 key 共享 stream_id hash tag，Cluster 下是同 slot 操作。
         # best-effort 契约：stream key 必带 TTL（= EXECUTION_TIMEOUT + STREAM_TTL_GRACE，
         # 覆盖 post-processing）；与 meta_key 剩余 TTL 的精确对齐留给 PR-C（届时
         # create_stream / TTL bump 移到 RUNNING，时钟起点统一）。
         entry_id = await self._script_xadd_with_ttl(
-            keys=[stream_key],
-            args=[event_type, event_json, self._stream_ttl],
+            keys=[stream_key, meta_key],
+            args=[event_type, event_json, self._stream_ttl, snapshot_field],
         )
 
         # 注入 _stream_id 到原始 event dict（供 SSE 层使用）

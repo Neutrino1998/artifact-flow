@@ -25,7 +25,11 @@ import type { ArtifactSummary, ArtifactDetail, VersionDetail } from '@/types';
 import { useUIStore } from '@/stores/uiStore';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 import { connectSSE } from '@/lib/sse';
-import { ADMIN_TERMINAL_EVENTS, appendAdminLiveEvent } from '@/lib/adminLiveEvents';
+import {
+  ADMIN_TERMINAL_EVENTS,
+  appendAdminLiveEvent,
+  isAdminMessageOffActiveBranch,
+} from '@/lib/adminLiveEvents';
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -597,7 +601,12 @@ export default function ObservabilityPanel() {
                     group={msg}
                     collapsed={collapsedMessages.has(msg.message_id)}
                     onToggle={() => toggleMessageCollapse(msg.message_id)}
-                    offActiveBranch={hasBranches && !activePathIds.has(msg.message_id)}
+                    offActiveBranch={isAdminMessageOffActiveBranch(
+                      msg.message_id,
+                      activeMessageId,
+                      hasBranches,
+                      activePathIds,
+                    )}
                     issuesOnly={issuesOnly}
                     selectedEventId={selectedEvent?.id ?? null}
                     onSelectEvent={(e, msgId) => { setSelectedEvent(e); setSelectedMsgId(msgId); }}

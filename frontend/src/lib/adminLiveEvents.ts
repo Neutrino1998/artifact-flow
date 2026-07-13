@@ -17,6 +17,21 @@ export const ADMIN_TERMINAL_EVENTS = new Set([
   'error',
 ]);
 
+export function isAdminMessageOffActiveBranch(
+  messageId: string,
+  activeMessageId: string | null,
+  hasBranches: boolean,
+  activePathIds: Set<string>,
+): boolean {
+  // The lease/stream exists while a queued message is not yet in the DB, so
+  // its temporary live group has no authoritative parent. Never call the
+  // currently executing message a side branch; terminal refresh replaces it
+  // with the durable message and its real parent relationship.
+  return messageId !== activeMessageId
+    && hasBranches
+    && !activePathIds.has(messageId);
+}
+
 export function appendAdminLiveEvent(
   snapshot: AdminConversationEventsResponse,
   messageId: string,

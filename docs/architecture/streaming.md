@@ -156,7 +156,7 @@ Stream 的共享生命周期只有 `open / closed`，且只由 producer 改写�
 
 | 机制 | 实现 |
 |------|------|
-| 缓冲 | 每 stream 一份有界 `history` list（默认最多 1000 条） |
+| 缓冲 | 每 stream 一份有界 ordered history（默认最多 1000 条普通事件；`llm_chunk` 见下） |
 | 状态 | `open / closed`（producer-owned） |
 | 生产者→观察者 | append history + `asyncio.Event.set()` 唤醒所有独立 cursor |
 | 心跳 | `asyncio.wait_for(new_event.wait(), timeout=heartbeat_interval)` 超时即 yield `{"type": "__ping__"}` |
@@ -165,6 +165,14 @@ Stream 的共享生命周期只有 `open / closed`，且只由 producer 改写�
 | 终止清理 | `close_stream()` 后保留 `STREAM_CLEANUP_TTL`（默认 60s）再删除 context |
 
 InMemory 和 Redis 现在共享同一多观察者契约：新 observer 可从头回放有界历史，断开只丢弃自己的 cursor，不影响 producer 或其他 observer。
+
+### Live 节流与回放快照是两层机制
+
+Engine 的 `llm_chunk` 是累计内容，不是 delta。Producer 继续保留 80ms coalescing：每个 token 只更新 pending，最多每 80ms 才 `push_event()`，从而限制 Redis 写入、observer 唤醒和 SSE 网络频率。
+
+Transport 收到 coalesced chunk 后，再把它作为**可替换回放快照**处理：每个 `(agent, content/reasoning_content)` 只保留最新 entry，普通语义事件仍 append-only。跟得上的在线 observer 最多每 80ms 收到一次更新；慢 observer 可以跳过已被下一累计快照完全覆盖的中间态，晚到或重连的 observer 也直接拿最新累计快照。旧快照删除后 event ID 会出现空洞，但 Last-Event-ID 仍按单调 ID 读取所有更大 entry，不影响续传。
+
+两层不能互相替代：只做 80ms 节流仍会在长输出中累积大量完整字符串；只做快照替换则会让每个模型 token 都触发 Transport/Redis/SSE。
 
 ## RedisStreamTransport（分布式）
 
@@ -175,13 +183,14 @@ InMemory 和 Redis 现在共享同一多观察者契约：新 observer 可从头
 | Key | 类型 | TTL | 用途 |
 |-----|------|-----|------|
 | `{af:msg_id}:stream` | Stream (XADD) | `EXECUTION_TIMEOUT + STREAM_TTL_GRACE`（1800s + 300s） | 事件主体 |
-| `{af:msg_id}:stream_meta` | Hash | 同上 | owner、status（open/closed）、lease_check_key、lease_expected_owner |
+| `{af:msg_id}:stream_meta` | Hash | 同上 | owner、status、lease locator，以及各 llm replay slot 的最新 entry ID |
 
 > TTL 含 `STREAM_TTL_GRACE`：key 必须活过引擎 deadline 之后的 post-processing —— 终态（含 `TIMED_OUT`）在那时才推上 stream。这是 liveness 轴的 **accepted best-effort 固定近似**；心跳续期是 deferred 非目标（见 [execution-lifecycle.md → 三条正交的时间轴](execution-lifecycle.md)）。结束时 `close_stream` 把 TTL 重置为 `STREAM_CLEANUP_TTL`。
 
 **写入**：
 
-- `XADD ... MAXLEN ~ 1000` — 近似裁剪，限制单 stream 最大事件数（长任务超过会丢最旧事件，前端须在终止前消费完）
+- 同一个 Lua 原子执行 `XADD`、首次 `EXPIRE`，并对 `llm_chunk` `XDEL` 该 agent/channel 的上一快照；stream/meta 共享 `{prefix:id}` hash tag，Redis Cluster 下落同一 slot
+- `XADD ... MAXLEN ~ 1000` — 对剩余普通事件做近似裁剪（长任务超过会丢最旧事件，前端须在终止前消费完）
 - `_stream_id` 字段注入到事件 dict，携带 Redis entry ID（形如 `1710000000000-0`），作为 SSE `id:` 行输出
 
 **消费**：
@@ -314,5 +323,5 @@ Streaming 与 RuntimeStore 是两个独立系统，但在三处握手：
 
 - Pub/Sub 是 fire-and-forget — 消费者晚到就丢事件，无法支持重连续传
 - Redis Stream 自带持久化缓冲 + entry ID，天然匹配 `Last-Event-ID` 语义
-- `XADD MAXLEN ~ 1000` 限制内存占用，一次 30 分钟内的执行产生的事件远低于此
+- `llm_chunk` 先按 agent/channel 替换累计快照，避免事件数虽有界但字符串总字节近似二次增长；`XADD MAXLEN ~ 1000` 再给普通事件数提供兜底上限
 - 代价：XREAD BLOCK 轮询比 Pub/Sub 推送延迟略高，但 15s 心跳节奏下不敏感

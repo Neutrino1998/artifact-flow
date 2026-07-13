@@ -202,6 +202,70 @@ class TestLastEventId:
         assert len(events) >= 1
         assert events[-1]["type"] == "complete"
 
+    async def test_cumulative_chunks_replace_replay_snapshots(
+        self, transport, redis_client
+    ):
+        """Redis retains one cumulative snapshot per agent/content channel."""
+        stream_id = "test_stream_snapshot_replace"
+        await transport.create_stream(stream_id)
+
+        for i in range(1, 11):
+            await transport.push_event(stream_id, {
+                "type": "llm_chunk",
+                "agent": "lead_agent",
+                "data": {"content": "x" * i},
+            })
+        await transport.push_event(stream_id, {
+            "type": "llm_chunk",
+            "agent": "lead_agent",
+            "data": {"reasoning_content": "reasoning"},
+        })
+        await transport.push_event(stream_id, {
+            "type": "llm_chunk",
+            "agent": "research_agent",
+            "data": {"content": "research"},
+        })
+
+        assert await redis_client.xlen(transport._stream_key(stream_id)) == 3
+
+        await transport.push_event(stream_id, {"type": "complete"})
+        events = [event async for event in transport.consume_events(stream_id)]
+        assert [event["type"] for event in events] == [
+            "llm_chunk",
+            "llm_chunk",
+            "llm_chunk",
+            "complete",
+        ]
+        assert events[0]["data"]["content"] == "x" * 10
+
+    async def test_resume_from_deleted_snapshot_id_gets_latest(self, transport):
+        """XDEL of the old snapshot does not break Redis ID-based resume."""
+        stream_id = "test_stream_snapshot_resume"
+        await transport.create_stream(stream_id)
+
+        old = {
+            "type": "llm_chunk",
+            "agent": "lead_agent",
+            "data": {"content": "old"},
+        }
+        latest = {
+            "type": "llm_chunk",
+            "agent": "lead_agent",
+            "data": {"content": "latest"},
+        }
+        await transport.push_event(stream_id, old)
+        await transport.push_event(stream_id, latest)
+        await transport.push_event(stream_id, {"type": "complete"})
+
+        events = [
+            event
+            async for event in transport.consume_events(
+                stream_id, last_event_id=old["_stream_id"]
+            )
+        ]
+        assert [event["type"] for event in events] == ["llm_chunk", "complete"]
+        assert events[0]["data"]["content"] == "latest"
+
 
 class TestConsumerDisconnect:
     async def test_consumer_disconnect_does_not_close_stream(self, transport):
@@ -293,7 +357,7 @@ class TestOrphanKeyFix:
         assert exists == 0
 
         # After first push, stream key should exist with TTL set atomically with
-        # the XADD (single-key Lua → no orphan window between XADD and EXPIRE).
+        # the XADD (same-slot Lua → no orphan window between XADD and EXPIRE).
         await transport.push_event(stream_id, {"type": "metadata", "data": {}})
         exists = await redis_client.exists(stream_key)
         assert exists == 1

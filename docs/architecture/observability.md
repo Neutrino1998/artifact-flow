@@ -223,7 +223,7 @@ Live stream 中的 ERROR 目前已在 producer 推入 transport 前按用户面�
 
 - **对话浏览器**：分页 + title 搜索 + 活跃标记（绿点），使用 `/admin/conversations`
 - **事件时间线**：按 `message_id` 折叠，事件类型色彩编码（LLM 紫 / Tool 蓝 / Permission 橙 / Error 红）
-- **Live 投影**：打开的 conversation 若返回 `active_message_id`，面板按需订阅 admin stream，用负数临时 id 追加语义事件并标记 `LIVE`。`llm_chunk` 与 artifact 正文投影不塞入高频时间线；收到终态后重拉 events API，用 DB 权威快照整体替换临时 live 数据。这是人工查看的 best-effort 状态：异常断线时回落 DB，手动刷新/重新打开再从头订阅，不为 glance data 另建重试状态机
+- **Live 投影**：打开的 conversation 若返回 `active_message_id`，面板按需订阅 admin stream，用负数临时 id 追加语义事件并标记 `LIVE`。排队时 lease/stream 早于 Message DB 行，临时组没有权威 parent，因此当前 `active_message_id` 在终态刷新前不参与“旁支”判定；不能用旧 `active_branch` 猜 parent（显式分支可能指向其他节点或新根）。`llm_chunk` 与 artifact 正文投影不塞入高频时间线；收到终态后重拉 events API，用 DB 权威快照整体替换临时 live 数据。这是人工查看的 best-effort 状态：异常断线时回落 DB，手动刷新/重新打开再从头订阅，不为 glance data 另建重试状态机
 - **事件详情面板**：按 `event_type` 分派渲染
   - `llm_complete` → token / model / duration 仪表
   - `tool_complete` → params / result / error

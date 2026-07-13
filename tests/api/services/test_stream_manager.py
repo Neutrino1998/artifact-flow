@@ -388,6 +388,80 @@ class TestReplay:
         # remain alongside complete). Tolerate either bound interpretation:
         assert events[-1]["type"] == "complete"
 
+    async def test_cumulative_llm_chunks_replace_replay_snapshot(self):
+        """Replay memory stays linear in final output, not snapshot count."""
+        sm = InMemoryStreamTransport(ttl_seconds=10)
+        ctx = await sm.create_stream("msg-1")
+
+        # Model a 50k cumulative answer flushed 200 times. Only the newest
+        # content snapshot for this agent/channel may remain in replay history.
+        final_content = ""
+        for i in range(1, 201):
+            final_content = "x" * (i * 250)
+            await sm.push_event("msg-1", {
+                "type": "llm_chunk",
+                "agent": "lead_agent",
+                "data": {"content": final_content},
+            })
+
+        await sm.push_event("msg-1", {
+            "type": "llm_chunk",
+            "agent": "lead_agent",
+            "data": {"reasoning_content": "latest reasoning"},
+        })
+        await sm.push_event("msg-1", {
+            "type": "llm_chunk",
+            "agent": "research_agent",
+            "data": {"content": "subagent snapshot"},
+        })
+
+        retained = list(ctx.history.values())
+        assert len(retained) == 3
+        assert sum(
+            len(value)
+            for event in retained
+            for value in event.get("data", {}).values()
+            if isinstance(value, str)
+        ) == len(final_content) + len("latest reasoning") + len("subagent snapshot")
+
+        await sm.push_event("msg-1", {"type": "complete"})
+        events = [event async for event in sm.consume_events("msg-1")]
+        assert [event["type"] for event in events] == [
+            "llm_chunk",
+            "llm_chunk",
+            "llm_chunk",
+            "complete",
+        ]
+        assert events[0]["data"]["content"] == final_content
+
+    async def test_resume_from_replaced_snapshot_id_gets_newer_snapshot(self):
+        """Deleting an old snapshot keeps Last-Event-ID continuity by ID order."""
+        sm = InMemoryStreamTransport(ttl_seconds=10)
+        await sm.create_stream("msg-1")
+
+        old = {
+            "type": "llm_chunk",
+            "agent": "lead_agent",
+            "data": {"content": "old"},
+        }
+        latest = {
+            "type": "llm_chunk",
+            "agent": "lead_agent",
+            "data": {"content": "latest"},
+        }
+        await sm.push_event("msg-1", old)
+        await sm.push_event("msg-1", latest)
+        await sm.push_event("msg-1", {"type": "complete"})
+
+        events = [
+            event
+            async for event in sm.consume_events(
+                "msg-1", last_event_id=old["_stream_id"]
+            )
+        ]
+        assert [event["type"] for event in events] == ["llm_chunk", "complete"]
+        assert events[0]["data"]["content"] == "latest"
+
     async def test_invalid_last_event_id_falls_back_to_start(self):
         """A garbled Last-Event-ID must not raise; behave like no ID."""
         sm = InMemoryStreamTransport(ttl_seconds=10)

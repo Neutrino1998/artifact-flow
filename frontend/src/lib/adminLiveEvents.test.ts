@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { appendAdminLiveEvent } from './adminLiveEvents';
+import { appendAdminLiveEvent, isAdminMessageOffActiveBranch } from './adminLiveEvents';
 import type { AdminConversationEventsResponse } from './api';
 
 function snapshot(): AdminConversationEventsResponse {
@@ -51,5 +51,29 @@ describe('appendAdminLiveEvent', () => {
     }, -1);
 
     expect(next).toBe(original);
+  });
+});
+
+describe('isAdminMessageOffActiveBranch', () => {
+  test('never marks the current live message as a side branch', () => {
+    const activePathIds = new Set(['persisted-parent']);
+
+    expect(isAdminMessageOffActiveBranch(
+      'msg-live',
+      'msg-live',
+      true,
+      activePathIds,
+    )).toBe(false);
+  });
+
+  test('still marks a persisted message outside the active path', () => {
+    const activePathIds = new Set(['active-leaf', 'active-parent']);
+
+    expect(isAdminMessageOffActiveBranch(
+      'old-side-branch',
+      'msg-live',
+      true,
+      activePathIds,
+    )).toBe(true);
   });
 });

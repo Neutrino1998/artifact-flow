@@ -7,7 +7,8 @@ RedisStreamTransport 是兄弟实现（多 worker / 持久化）。
 """
 
 import asyncio
-from typing import Protocol, runtime_checkable, Optional, Dict, Any, AsyncGenerator, Literal, List, Tuple
+from collections import OrderedDict
+from typing import Protocol, runtime_checkable, Optional, Dict, Any, AsyncGenerator, Literal
 from datetime import datetime
 from dataclasses import dataclass, field
 
@@ -25,6 +26,32 @@ DEFAULT_MAX_HISTORY = 1000
 # Local copy — the transport stays execution-semantics-free; kept in sync with
 # core.events.TERMINAL_EVENT_TYPES by tests/core/test_terminal_event_sync.py.
 _TERMINAL_EVENTS = ("complete", "cancelled", "timed_out", "error")
+
+
+def replay_snapshot_key(event: Dict[str, Any]) -> Optional[str]:
+    """Return the replaceable replay slot for a cumulative ``llm_chunk``.
+
+    The engine deliberately emits cumulative content so a consumer can render
+    any snapshot without applying deltas.  Keeping every cumulative snapshot in
+    replay history would amplify one response quadratically, however.  Live
+    observers are woken for every coalesced push; a slow observer may skip a
+    stale intermediate snapshot, whose content is subsumed by the next one.
+    Only the retained replay copy is replaced per agent and channel.
+    """
+    if event.get("type") != "llm_chunk":
+        return None
+
+    data = event.get("data")
+    if not isinstance(data, dict):
+        return None
+    if "reasoning_content" in data:
+        channel = "reasoning_content"
+    elif "content" in data:
+        channel = "content"
+    else:
+        return None
+
+    return f"llm_chunk:{event.get('agent') or ''}:{channel}"
 
 
 class StreamNotFoundError(Exception):
@@ -78,8 +105,10 @@ class StreamContext:
     整轮事件，与 RedisStreamTransport 的 XREAD `0-0` 行为对齐。
 
     Attributes:
-        history: (event_id, event) 列表，append-only，超过 max_history
-                 后从头部丢弃（与 Redis MAXLEN 语义一致）。
+        history: event_id → event 的有序映射。普通事件 append-only；累计式
+                 llm_chunk 按 agent/channel O(1) 替换旧回放快照。超过
+                 max_history 后从头部丢弃（与 Redis MAXLEN 语义一致）。
+        replay_snapshot_ids: 可替换回放槽 → 当前 event_id 的 O(1) 索引。
         next_id: 单调递增的事件 id 计数器。
         new_event: 新事件信号；push 后 set，consume 在 drain 干净后 wait。
         created_at: 创建时间。
@@ -88,7 +117,8 @@ class StreamContext:
         cancelled: 取消事件，通知 consumer 退出。
         owner_user_id: 创建此 stream 的用户 ID（消费时校验）。
     """
-    history: List[Tuple[int, Dict[str, Any]]] = field(default_factory=list)
+    history: "OrderedDict[int, Dict[str, Any]]" = field(default_factory=OrderedDict)
+    replay_snapshot_ids: Dict[str, int] = field(default_factory=dict)
     next_id: int = 0
     new_event: asyncio.Event = field(default_factory=asyncio.Event)
     created_at: datetime = field(default_factory=utc_now)
@@ -101,7 +131,7 @@ class StreamContext:
 
 class InMemoryStreamTransport:
     """
-    基于内存的事件缓冲实现（history list + asyncio.Event 信号）。
+    基于内存的事件缓冲实现（ordered history + asyncio.Event 信号）。
 
     职责：
     - 为每个 message_id 维护一个有界的事件历史 buffer。
@@ -192,13 +222,28 @@ class InMemoryStreamTransport:
         context.next_id += 1
         event["_stream_id"] = str(eid)
 
-        # Append to bounded history. Trim from head once full (Redis MAXLEN
-        # ~ 1000 equivalent). A consumer whose cursor is older than the
-        # oldest retained entry will silently miss those events — same loss
-        # model as Redis; for normal turns 1000 events is more than enough.
-        context.history.append((eid, event))
-        if len(context.history) > self.max_history:
-            context.history.pop(0)
+        # Ordinary events are append-only. Cumulative llm_chunk events are
+        # replaceable replay snapshots: observers are woken for every coalesced
+        # push, but a slow observer may skip a stale intermediate snapshot whose
+        # cumulative content is already contained in the next one. Reconnect
+        # history retains only the newest value per agent/content channel.
+        # OrderedDict + the slot index keeps replacement and trimming O(1).
+        snapshot_key = replay_snapshot_key(event)
+        if snapshot_key is not None:
+            previous_eid = context.replay_snapshot_ids.get(snapshot_key)
+            if previous_eid is not None:
+                context.history.pop(previous_eid, None)
+            context.replay_snapshot_ids[snapshot_key] = eid
+
+        context.history[eid] = event
+        while len(context.history) > self.max_history:
+            dropped_eid, dropped_event = context.history.popitem(last=False)
+            dropped_key = replay_snapshot_key(dropped_event)
+            if (
+                dropped_key is not None
+                and context.replay_snapshot_ids.get(dropped_key) == dropped_eid
+            ):
+                del context.replay_snapshot_ids[dropped_key]
 
         # Wake any consumer waiting on new events. set() is idempotent.
         context.new_event.set()
@@ -249,7 +294,7 @@ class InMemoryStreamTransport:
                 # normally-closed streams; cancelled-without-terminal is
                 # only checked when we run out of history to drain.
                 drained_any = False
-                for eid, event in list(context.history):
+                for eid, event in list(context.history.items()):
                     if eid > cursor:
                         cursor = eid
                         drained_any = True
@@ -283,7 +328,7 @@ class InMemoryStreamTransport:
                 # the loop and drain immediately; if it hasn't, our wait
                 # will be woken by the eventual set().
                 context.new_event.clear()
-                if any(eid > cursor for eid, _ in context.history):
+                if any(eid > cursor for eid in context.history):
                     continue
 
                 if heartbeat_interval is not None:
