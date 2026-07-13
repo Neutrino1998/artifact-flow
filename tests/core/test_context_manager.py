@@ -636,6 +636,39 @@ class TestAvailableTools:
         # 完整 doc 含参数
         assert "param q" in block
         assert 'disclosure="deferred"' not in block
+        assert "<tool_boundaries>" not in block
+
+    def test_bash_renders_platform_and_data_boundaries(self):
+        from core.context_manager import ContextManager
+        from core.effective_toolset import EffectiveToolset
+        from tools.base import ToolPermission
+
+        names = ("bash", "mount", "persist", "update_artifact")
+        tools = {name: self._tool(name, f"{name} description") for name in names}
+        eff = EffectiveToolset({name: ToolPermission.AUTO for name in names})
+
+        block = ContextManager._build_available_tools(eff, tools)
+
+        assert "<tool_boundaries>" in block
+        assert "platform tools" in block
+        assert "never put them inside bash.command" in block
+        assert "separate copies with no automatic sync" in block
+        assert "mount -> bash -> persist" in block
+        assert block.index("<tool_boundaries>") < block.index('<tool name="bash">')
+
+    def test_bash_without_stage_tools_omits_data_boundary(self):
+        from core.context_manager import ContextManager
+        from core.effective_toolset import EffectiveToolset
+        from tools.base import ToolPermission
+
+        tools = {"bash": self._tool("bash", "Run shell commands")}
+        eff = EffectiveToolset({"bash": ToolPermission.AUTO})
+
+        block = ContextManager._build_available_tools(eff, tools)
+
+        assert "<tool_boundaries>" in block
+        assert "platform tools" in block
+        assert "separate copies with no automatic sync" not in block
 
     def test_deferred_unit_renders_index_line_only(self):
         from core.context_manager import ContextManager
