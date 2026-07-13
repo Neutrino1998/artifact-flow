@@ -3,6 +3,8 @@
 import { useEffect, useId, useRef, useState, useCallback } from 'react';
 import { useUIStore } from '@/stores/uiStore';
 import { triggerBlobDownload } from '@/lib/download';
+import { useCopyFeedback } from '@/hooks/useCopyFeedback';
+import { CopyIcon } from '@/components/ui/CopyIcon';
 import ErrorFlowBlock from '@/components/chat/ErrorFlowBlock';
 
 interface MermaidBlockProps {
@@ -43,6 +45,7 @@ function constrainSize(svg: string): string {
 export default function MermaidBlock({ code }: MermaidBlockProps) {
   const theme = useUIStore((s) => s.theme);
   const isDark = theme === 'dark';
+  const { copied, copy } = useCopyFeedback();
   const containerRef = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -83,6 +86,10 @@ export default function MermaidBlock({ code }: MermaidBlockProps) {
     return () => { cancelled = true; };
   }, [code, isDark, renderId]);
 
+  const copySource = useCallback(() => {
+    copy(code);
+  }, [code, copy]);
+
   const downloadSvg = useCallback(() => {
     const svgEl = containerRef.current?.querySelector('svg');
     if (!svgEl) return;
@@ -116,18 +123,30 @@ export default function MermaidBlock({ code }: MermaidBlockProps) {
         dangerouslySetInnerHTML={{ __html: svg }}
       />
       {svg && (
-        <button
-          onClick={downloadSvg}
-          className="absolute top-2 right-2 p-1.5 rounded-md opacity-0 group-hover/mermaid:opacity-100 focus:opacity-100 [@media(pointer:coarse)]:opacity-100 transition-opacity bg-surface/80 dark:bg-surface-dark/80 text-text-tertiary dark:text-text-tertiary-dark hover:text-text-primary dark:hover:text-text-primary-dark"
-          aria-label="Download SVG"
-          title="下载 SVG"
-        >
-          <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <path d="M7 10l5 5 5-5" />
-            <path d="M12 15V3" />
-          </svg>
-        </button>
+        <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover/mermaid:opacity-100 focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100 transition-opacity">
+          <button
+            type="button"
+            onClick={copySource}
+            className="p-1.5 rounded-md bg-surface/80 dark:bg-surface-dark/80 text-text-tertiary dark:text-text-tertiary-dark hover:text-text-primary dark:hover:text-text-primary-dark"
+            aria-label="Copy Mermaid source"
+            title={copied ? '已复制' : '复制 Mermaid 源码'}
+          >
+            <CopyIcon copied={copied} />
+          </button>
+          <button
+            type="button"
+            onClick={downloadSvg}
+            className="p-1.5 rounded-md bg-surface/80 dark:bg-surface-dark/80 text-text-tertiary dark:text-text-tertiary-dark hover:text-text-primary dark:hover:text-text-primary-dark"
+            aria-label="Download SVG"
+            title="下载 SVG"
+          >
+            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <path d="M7 10l5 5 5-5" />
+              <path d="M12 15V3" />
+            </svg>
+          </button>
+        </div>
       )}
     </div>
   );
