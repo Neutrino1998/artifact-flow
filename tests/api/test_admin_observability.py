@@ -29,6 +29,11 @@ async def observed_conversation(
             conversation_id=conv_id,
             message_id=message_id,
             user_input="watch me",
+            metadata={
+                "uploaded_files": [
+                    {"id": "brief.docx", "filename": "Brief.docx"},
+                ],
+            },
         )
     return conv_id, message_id
 
@@ -66,6 +71,9 @@ class TestAdminConversationActivity:
             assert detail.status_code == 200
             assert detail.json()["is_active"] is True
             assert detail.json()["active_message_id"] == message_id
+            assert detail.json()["messages"][0]["uploaded_files"] == [
+                {"id": "brief.docx", "filename": "Brief.docx"},
+            ]
         finally:
             await transport.close_stream(message_id)
             await runner.store.release_lease(conv_id, message_id)

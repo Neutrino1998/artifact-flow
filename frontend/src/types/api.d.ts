@@ -1588,6 +1588,11 @@ export interface components {
             execution_metrics: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Uploaded Files
+             * @description Files attached to this turn, from Message.metadata_['uploaded_files']. Display-only and best-effort until the terminal DB refresh.
+             */
+            uploaded_files: components["schemas"]["UploadedFileRef"][] | null;
         };
         /**
          * AdminPromptReconstructResponse

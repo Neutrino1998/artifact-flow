@@ -4168,6 +4168,21 @@
               }
             ],
             "title": "Execution Metrics"
+          },
+          "uploaded_files": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/UploadedFileRef"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uploaded Files",
+            "description": "Files attached to this turn, from Message.metadata_['uploaded_files']. Display-only and best-effort until the terminal DB refresh."
           }
         },
         "type": "object",
@@ -4178,7 +4193,8 @@
           "response",
           "created_at",
           "events",
-          "execution_metrics"
+          "execution_metrics",
+          "uploaded_files"
         ],
         "title": "AdminMessageGroup",
         "description": "Events grouped by message"

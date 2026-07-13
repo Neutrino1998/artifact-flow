@@ -145,6 +145,7 @@ async def get_admin_conversation_events(
                 for e in msg_events
             ],
             execution_metrics=execution_metrics,
+            uploaded_files=meta.get("uploaded_files"),
         ))
 
     return AdminConversationEventsResponse(

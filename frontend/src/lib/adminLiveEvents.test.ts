@@ -52,6 +52,26 @@ describe('appendAdminLiveEvent', () => {
 
     expect(next).toBe(original);
   });
+
+  test('projects message text and attachment filenames from metadata without adding an event', () => {
+    const next = appendAdminLiveEvent(snapshot(), 'msg-1', {
+      type: 'metadata',
+      timestamp: '2026-07-13T00:00:01',
+      data: {
+        conversation_id: 'conv-1',
+        message_id: 'msg-1',
+        user_input: 'review these files',
+        uploaded_files: [{ filename: 'brief.docx' }, { filename: 'data.csv' }],
+      },
+    }, -1);
+
+    expect(next.messages[0].user_input).toBe('review these files');
+    expect(next.messages[0].uploaded_files).toEqual([
+      { filename: 'brief.docx' },
+      { filename: 'data.csv' },
+    ]);
+    expect(next.messages[0].events).toEqual([]);
+  });
 });
 
 describe('isAdminMessageOffActiveBranch', () => {

@@ -203,6 +203,14 @@ class ExecutionController:
             "data": {
                 "conversation_id": conversation_id,
                 "message_id": message_id,
+                # Display-only live preview for observers. The authoritative
+                # terminal snapshot remains Message.user_input +
+                # Message.metadata_['uploaded_files']; never put file content here.
+                "user_input": user_input,
+                "uploaded_files": [
+                    {"filename": f["filename"]}
+                    for f in (uploaded_files or [])
+                ],
             }
         }
 

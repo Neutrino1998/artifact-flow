@@ -610,6 +610,7 @@ export interface AdminMessageGroup {
   created_at: string;
   events: AdminEventItem[];
   execution_metrics: Record<string, unknown> | null;
+  uploaded_files: { id?: string; filename: string }[] | null;
 }
 
 export interface AdminPromptReconstructResponse {

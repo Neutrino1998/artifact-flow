@@ -922,7 +922,9 @@ function MessageGroupView({
   selectedEventId: number | null;
   onSelectEvent: (e: AdminEventItem, messageId: string) => void;
 }) {
-  const inputPreview = group.user_input.slice(0, 80) + (group.user_input.length > 80 ? '...' : '');
+  const inputPreview = group.user_input
+    ? group.user_input.slice(0, 80) + (group.user_input.length > 80 ? '...' : '')
+    : '仅附件';
   const issues = groupIssueCounts(group);
   const hasHardError = issues.errors > 0;
   const hasIssues = Object.values(issues).some((n) => n > 0);
@@ -971,6 +973,24 @@ function MessageGroupView({
           {issuesOnly ? `${visibleEvents.length}/${group.events.length} events` : `${group.events.length} events`}
         </span>
       </button>
+
+      {group.uploaded_files && group.uploaded_files.length > 0 ? (
+        <div className="ml-6 mt-1 flex flex-wrap gap-1.5">
+          {group.uploaded_files.map((file, index) => (
+            <span
+              key={`${file.id ?? file.filename}-${index}`}
+              className="inline-flex min-w-0 max-w-[16rem] items-center gap-1 rounded-lg bg-panel-accent px-2 py-1 text-xs text-text-secondary dark:bg-surface-dark dark:text-text-secondary-dark"
+              title={file.filename}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <path d="M14 2v6h6" />
+              </svg>
+              <span className="min-w-0 truncate">{file.filename}</span>
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       {/* Events */}
       {!collapsed && (

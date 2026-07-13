@@ -38,10 +38,30 @@ export function appendAdminLiveEvent(
   event: SSEEvent,
   temporaryId: number,
 ): AdminConversationEventsResponse {
-  if (ADMIN_TIMELINE_IGNORED.has(String(event.type))) return snapshot;
-
   const createdAt = event.timestamp || new Date().toISOString();
-  const item: AdminEventItem = {
+  const groupIndex = snapshot.messages.findIndex((group) => group.message_id === messageId);
+  const liveInput = event.type === 'metadata' && typeof event.data?.user_input === 'string'
+    ? event.data.user_input
+    : event.type === 'user_input' && typeof event.data?.content === 'string'
+      ? event.data.content
+      : null;
+  const rawFiles = event.type === 'metadata' && Array.isArray(event.data?.uploaded_files)
+    ? event.data.uploaded_files
+    : null;
+  const liveFiles = rawFiles == null
+    ? null
+    : rawFiles.flatMap((file) => {
+      if (typeof file !== 'object' || file == null || !('filename' in file)) return [];
+      const filename = file.filename;
+      return typeof filename === 'string' ? [{ filename }] : [];
+    });
+  const ignored = ADMIN_TIMELINE_IGNORED.has(String(event.type));
+
+  // Ignored events stay out of the event list, but the one-shot metadata event
+  // may still improve the best-effort live message preview.
+  if (ignored && liveInput == null && liveFiles == null) return snapshot;
+
+  const item: AdminEventItem | null = ignored ? null : {
     id: temporaryId,
     event_id: null,
     event_type: String(event.type),
@@ -50,11 +70,6 @@ export function appendAdminLiveEvent(
     created_at: createdAt,
   };
 
-  const groupIndex = snapshot.messages.findIndex((group) => group.message_id === messageId);
-  const liveInput = event.type === 'user_input' && typeof event.data?.content === 'string'
-    ? event.data.content
-    : null;
-
   if (groupIndex < 0) {
     const group: AdminMessageGroup = {
       message_id: messageId,
@@ -62,8 +77,9 @@ export function appendAdminLiveEvent(
       user_input: liveInput ?? '执行中…',
       response: null,
       created_at: createdAt,
-      events: [item],
+      events: item == null ? [] : [item],
       execution_metrics: null,
+      uploaded_files: liveFiles,
     };
     return { ...snapshot, messages: [...snapshot.messages, group] };
   }
@@ -73,7 +89,8 @@ export function appendAdminLiveEvent(
   messages[groupIndex] = {
     ...current,
     user_input: liveInput ?? current.user_input,
-    events: [...current.events, item],
+    uploaded_files: liveFiles ?? current.uploaded_files,
+    events: item == null ? current.events : [...current.events, item],
   };
   return { ...snapshot, messages };
 }
