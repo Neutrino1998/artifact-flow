@@ -28,9 +28,11 @@ from utils.skill_validator import validate_skill_zip
 ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = ROOT / "config" / "skills-src"
 ZIP_DIR = ROOT / "config" / "skills"
-PREINSTALLED = ["dataviz", "diagram", "docx", "pdf", "pptx", "skill-creator", "xlsx"]
+PREINSTALLED = [
+    "dataviz", "docx", "pdf", "pptx", "render-mermaid", "skill-creator", "xlsx",
+]
 # skills-src 内的 SKILL.md-only 预装包。仍产 zip 供下载，has_extra_files=False。
-PREINSTALLED_SINGLE_FILE = {"diagram"}
+PREINSTALLED_SINGLE_FILE = {"render-mermaid"}
 # 纯散文预装(SKILL.md-only 目录源码;入库时也会生成单文件 zip bundle)
 PREINSTALLED_PROSE = ["html-artifact-design"]
 
@@ -107,6 +109,17 @@ def test_seed_parse_clean_and_defaults():
         assert seed.has_extra_files is (not is_single_file)
         assert _zip_manifest(seed.bundle)
         assert seed.skill_md.strip()
+
+
+def test_render_mermaid_routing_contract():
+    skill_md = (SRC_DIR / "render-mermaid" / "SKILL.md").read_text(encoding="utf-8")
+    lead_md = (ROOT / "config" / "agents" / "lead_agent.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "仅要求聊天内图示或 Mermaid 源码时不要激活" in skill_md
+    assert "不调用 `bash`、`mount` 或 `persist`" in skill_md
+    assert "```mermaid fenced code block" in lead_md
 
 
 def test_preinstalled_skill_scripts_are_syntax_valid():

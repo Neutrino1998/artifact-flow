@@ -72,7 +72,7 @@ python "$SKILL/scripts/build_deck.py" deck.json /workspace/输出.pptx
 ```
 
 JSON 支持的版式见脚本头部 docstring。定量数据图用 `dataviz`/matplotlib；流程、架构、时序等
-语义图按 `diagram` skill 渲染为 PNG，再放入 image 版式。
+语义图按 `render-mermaid` skill 渲染为临时 PNG，再放入 image 版式；默认只持久化最终演示文稿。
 `build_deck.py` 是快速生成器，不是模板编辑器；已有模板时不要无故重做。
 
 ## 质检与导出
