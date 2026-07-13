@@ -29,10 +29,10 @@ ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = ROOT / "config" / "skills-src"
 ZIP_DIR = ROOT / "config" / "skills"
 PREINSTALLED = [
-    "dataviz", "docx", "pdf", "pptx", "render-mermaid", "skill-creator", "xlsx",
+    "dataviz", "docx", "mermaid-to-png", "pdf", "pptx", "skill-creator", "xlsx",
 ]
 # skills-src 内的 SKILL.md-only 预装包。仍产 zip 供下载，has_extra_files=False。
-PREINSTALLED_SINGLE_FILE = {"render-mermaid"}
+PREINSTALLED_SINGLE_FILE = {"mermaid-to-png"}
 # 纯散文预装(SKILL.md-only 目录源码;入库时也会生成单文件 zip bundle)
 PREINSTALLED_PROSE = ["html-artifact-design"]
 
@@ -111,16 +111,19 @@ def test_seed_parse_clean_and_defaults():
         assert seed.skill_md.strip()
 
 
-def test_render_mermaid_routing_contract():
-    skill_md = (SRC_DIR / "render-mermaid" / "SKILL.md").read_text(encoding="utf-8")
+def test_mermaid_to_png_routing_contract():
+    skill_md = (SRC_DIR / "mermaid-to-png" / "SKILL.md").read_text(encoding="utf-8")
     lead_md = (ROOT / "config" / "agents" / "lead_agent.md").read_text(
         encoding="utf-8"
     )
 
-    assert "仅在聊天中展示 Mermaid 且未要求文件时不激活" in skill_md
+    assert "仅在需要 PNG 文件时激活" in skill_md
+    assert "Mermaid 源码和 SVG 下载不激活" in skill_md
+    assert "本技能只负责生成 PNG" in skill_md
     assert "不调用 `bash`、`mount` 或 `persist`" in skill_md
-    assert "只交付 `.mmd`" in skill_md
-    assert "只 `persist` 源文件" in skill_md
+    assert "`.mmd` 是 `/workspace` 中的临时渲染输入" in skill_md
+    assert "不要 `persist`" in skill_md
+    assert "`persist` 源" not in skill_md
     assert "```mermaid fenced code block" in lead_md
 
 

@@ -20,8 +20,8 @@ pandas、Noto Sans CJK 字体；无 node/npm。HTML artifact 不执行 script。
 
 ## 工作流
 
-本技能处理定量数据图。流程图、架构图、时序图、状态图、ER 图等需要文件输出的语义图改用
-`render-mermaid` skill；仅在回复中展示 Mermaid 时直接输出 fenced code block。
+本技能处理定量数据图。流程图、架构图、时序图、状态图、ER 图需要 PNG 时改用
+`mermaid-to-png` skill；仅在回复中展示 Mermaid 时直接输出 fenced code block。
 
 1. **先定图形，不先选颜色。** 判断读者要比较大小、看趋势、识别系列、看目标偏差、
    看构成，还是只需要一个数字。细则见 [chart-selection.md](references/chart-selection.md)。

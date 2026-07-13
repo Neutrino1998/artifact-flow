@@ -66,7 +66,7 @@ pandoc content.md \
 
 复杂表格、分节、题注或精确图片尺寸用 python-docx。Pandoc 适合语义内容和统一样式，
 python-docx 适合逐元素控制；不要一开始就拆 OOXML。
-流程、架构、时序等语义图按 `render-mermaid` skill 渲染为临时 PNG 后插入；默认只持久化最终
+流程、架构、时序等语义图按 `mermaid-to-png` skill 渲染为临时 PNG 后插入；默认只持久化最终
 文档。定量数据图用 `dataviz`/matplotlib。
 
 ## 批量修订

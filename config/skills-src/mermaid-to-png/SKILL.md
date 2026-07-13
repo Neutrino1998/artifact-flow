@@ -1,27 +1,27 @@
 ---
-name: render-mermaid
+name: mermaid-to-png
 description: >
-  创建或渲染可下载的 Mermaid .mmd/PNG/SVG/PDF 文件，或将图嵌入 DOCX/PPTX/PDF/HTML。
-  用户要求文件交付、渲染或文档嵌入时激活；仅在聊天中展示 Mermaid 且未要求文件时不激活。
+  将 Mermaid 图在无浏览器沙盒中渲染为 PNG，供用户下载或插入 DOCX/PPTX。
+  仅在需要 PNG 文件时激活；聊天展示、Mermaid 源码和 SVG 下载不激活。
 license: Apache-2.0
 compatibility: 需要沙盒(bash/mount/persist)；镜像已烤 merman-cli 和 Noto Sans CJK SC 字体。
 metadata:
-  version: "0.2.1"
+  version: "1.0.0"
 ---
 
-# Mermaid 文件渲染
+# Mermaid 转 PNG
 
-本技能处理以文件形式交付的 Mermaid。仅在聊天回复中展示 Mermaid、且用户未要求文件或
-artifact 时，直接输出 Mermaid fenced code block，不调用 `bash`、`mount` 或 `persist`。
+本技能只负责生成 PNG。聊天中展示图、提供 Mermaid 源码或下载 SVG 时，直接输出 Mermaid
+fenced code block，由前端渲染和提供 SVG 下载，不调用 `bash`、`mount` 或 `persist`。
+
+`.mmd` 是 `/workspace` 中的临时渲染输入，不是交付物，不要 `persist`。
 
 ## 路线选择
 
-- 只交付 `.mmd`：写入源码并临时渲染做校验，只 `persist` 源文件。
-- 同时交付 `.mmd` 和 PNG/SVG/PDF：渲染后 `persist` 两者。
-- 只交付 PNG/SVG/PDF：把 `.mmd` 作为中间文件，只 `persist` 渲染结果。
-- 渲染或修改已有 `.mmd` artifact：先 `mount`，再按用户要求 `persist` 源码或渲染结果。
-- 嵌入 DOCX/PPTX/PDF/HTML：在父文档工作流中把 `.mmd` 和渲染结果作为 `/workspace`
-  中间文件，插入后只 `persist` 最终文档；用户另行要求源码或图片时才单独持久化。
+- 下载独立 PNG：临时写入 `.mmd`，渲染后只 `persist` PNG。
+- 把图插入 DOCX/PPTX：在父文档工作流中临时生成 `.mmd` 和 PNG，插入后只 `persist`
+  最终文档；用户同时明确要求独立 PNG 时才额外持久化 PNG。
+- 把已有 `.mmd` 转成 PNG：先 `mount` 源文件，渲染后只 `persist` PNG，不回写源码。
 - 柱线饼、散点、热力、分布等定量数据图：用 `dataviz` skill + matplotlib，不用
   Mermaid 的 `xychart`。
 - 自由排版的信息图或插画不适合 Mermaid；改用文档/演示文稿自身的形状与图像流程。
@@ -42,9 +42,7 @@ merman-cli -i /workspace/system-flow.mmd \
   -o /workspace/system-flow.png --raster-fit-width 1600 -b white
 ```
 
-- Office 嵌入优先 PNG；静态 HTML 优先 SVG；需要单独交付可直接输出 PDF。
 - 节点文字含标点、括号或空格时使用 `A["文字"]` 这类引号标签；节点 ID 保持简短 ASCII。
-- 直接修改 `.mmd` 并重新渲染，不编辑已生成的 SVG XML；按上面的交付路线持久化文件。
 - 不使用 `--raster-unbounded`、`--suppress-errors` 或在无网沙盒中加载远程 icon pack。解析失败应修正
   源文件，不交付错误占位图。
 
