@@ -20,9 +20,6 @@ temp/
 cache/
 checkpoints/
 
-# 旧版 CLI 状态文件可能含明文 JWT；CLI 删除后仍需防止升级用户误提交
-.cli_state
-
 # Claude Code（整个目录不入库:本地设置 + 运行时锁）
 .claude/
 
