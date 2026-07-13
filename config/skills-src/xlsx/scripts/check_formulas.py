@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""工作簿公式静态体检 —— 本环境不能重算公式,这是写完公式后唯一的自动检查。
+"""工作簿公式静态体检 —— 写入前后及 LibreOffice 重算后均可运行。
 
 用法:
     python check_formulas.py 文件.xlsx
@@ -7,10 +7,9 @@
 检查项(输出 JSON,issues 非空 → 退出码 1):
   broken_ref    公式文本里已有 #REF!(引用在编辑中被破坏)
   unknown_sheet 公式引用了不存在的工作表
-  cached_error  单元格缓存值是 Excel 错误(#DIV/0! 等 —— 仅对 Excel 算过的
-                文件有意义;本环境新写的公式没有缓存值,查不到属正常)
+  cached_error  单元格缓存值是表格计算错误(#DIV/0! 等;仅对已重算文件有意义)
 
-查不出的:循环引用、类型错误、逻辑错误 —— 公式正确性最终以 Excel 打开重算为准。
+查不出的:循环引用、类型错误、逻辑错误。LibreOffice 与 Excel 的新函数语义也可能不同。
 """
 
 import json

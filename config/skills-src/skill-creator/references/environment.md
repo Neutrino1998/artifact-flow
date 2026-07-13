@@ -14,13 +14,16 @@
 
 ## 已烤入镜像
 
-**系统工具(apt)**:`pandoc`(3.x,md↔docx/html 转换)、`ripgrep`、`zip`、`git`(仅本地
-操作)、Noto Sans CJK SC 字体(matplotlib 中文已全局配置,画图直接写中文)。
+**系统工具(apt)**:`libreoffice-core`、`libreoffice-writer`、`libreoffice-calc`、
+`libreoffice-impress`(统一用 `artifactflow-office` 做 Office 转换/渲染/重算)、
+`fonts-liberation2`、`fonts-crosextra-carlito`、`fonts-crosextra-caladea`、
+`pandoc`(md↔docx/html 转换)、`ripgrep`、`zip`、`git`(仅本地操作);另有
+Noto Sans CJK SC 字体(matplotlib 中文已全局配置,画图直接写中文)。
 
 **Python 包(pip)**:numpy、pandas、matplotlib、Pillow、openpyxl、pypdf、
 python-docx、python-pptx、lxml、pdfplumber、pypdfium2(及其传递依赖;
 `pip list` 可查全量)。**没有**:requests(无网也无用)、PyYAML、reportlab、
-node/npm、LibreOffice、tesseract。
+node/npm、tesseract。
 
 ## 依赖超出烤入集怎么办
 

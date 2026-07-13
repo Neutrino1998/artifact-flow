@@ -169,6 +169,50 @@ def test_docx_apply_redline_smoke(tmp_path):
     ]
 
 
+def test_docx_apply_redline_plan_is_atomic(tmp_path):
+    docx = pytest.importorskip("docx")
+    etree = pytest.importorskip("lxml.etree")
+    mod = _load_skill_script("docx", "scripts/apply_redline.py")
+
+    src = tmp_path / "in.docx"
+    out = tmp_path / "out.docx"
+    document = docx.Document()
+    document.add_paragraph("Alpha old; Beta remove; Gamma anchor.")
+    document.save(src)
+
+    summary = mod.apply_plan(
+        src,
+        out,
+        author="Review",
+        changes=[
+            {"op": "replace", "find": "old", "replace": "new", "expect": 1},
+            {"op": "delete", "find": "remove", "expect": 1},
+            {"op": "insert_after", "find": "anchor", "text": " added", "expect": 1},
+        ],
+    )
+    assert summary["total_changes"] == 3
+    with zipfile.ZipFile(out) as zf:
+        root = etree.fromstring(zf.read("word/document.xml"))
+    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    assert root.xpath(".//w:del//w:delText[text()='old']", namespaces=ns)
+    assert root.xpath(".//w:ins//w:t[text()='new']", namespaces=ns)
+    assert root.xpath(".//w:del//w:delText[text()='remove']", namespaces=ns)
+    assert root.xpath(".//w:ins//w:t[text()=' added']", namespaces=ns)
+
+    failed = tmp_path / "must-not-exist.docx"
+    with pytest.raises(mod.RedlineError, match="expected 1 editable match"):
+        mod.apply_plan(
+            src,
+            failed,
+            author="Review",
+            changes=[
+                {"op": "replace", "find": "old", "replace": "new", "expect": 1},
+                {"op": "delete", "find": "missing", "expect": 1},
+            ],
+        )
+    assert not failed.exists()
+
+
 def test_docx_default_reference_does_not_leak_template_media(tmp_path):
     pandoc = shutil.which("pandoc")
     if not pandoc:

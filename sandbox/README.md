@@ -7,8 +7,9 @@ intranet trip**, then withdraw. Background + decisions:
 
 ```
 sandbox/
-├── Dockerfile              tier-1 sandbox image (py3.11 + sci/doc stack + pandoc + ripgrep + zip + git,
+├── Dockerfile              tier-1 sandbox image (py3.11 + sci/doc stack + LibreOffice + pandoc + ripgrep + zip + git,
 │                           non-root uid1000, baked offline-install stub wheel)
+├── office_cli.py           artifactflow-office: isolated-profile convert/render/recalc wrapper
 ├── requirements.txt        sandbox python deps — DECOUPLED from backend requirements.lock
 ├── stub-pkg/               trivial pure-Python pkg → baked wheel for the offline-install probe
 ├── docker-pkg/             offline Docker Engine + compose (static) for a BARE node (see its README)
@@ -24,6 +25,7 @@ scripts/build-sandbox-image.sh   build + docker-save the image tar (mirrors rele
 |---|---|---|
 | `verify-enosys.py` | in-container | numpy/pandas/matplotlib(PNG+PDF)/Pillow/openpyxl/pypdf — the real ENOSYS gamble; C-ext failure = Firecracker-fallback signal |
 | `verify-pandoc.sh` | in-container | docx/html↔md round trip (self-generated fixtures) |
+| `verify-office.py` | in-container | `libreoffice-core`/`libreoffice-writer`/`libreoffice-calc`/`libreoffice-impress` via `artifactflow-office`: DOCX→PDF, PPTX→PNG, XLSX formula recalc; Office-compatible `fonts-liberation2`/`fonts-crosextra-carlito`/`fonts-crosextra-caladea` are baked alongside |
 | `verify-git.sh` | in-container | local repo lifecycle (init/add/commit/diff/log) + baked `--system` identity + `safe.directory='*'` presence; clone/fetch dead under `--network=none` by design |
 | `verify-offline-install.sh` | in-container | `pip install --no-index --find-links` survives Sentry (tier-2/3 delivery path) |
 | `verify-bindmount.sh` | host | container writes → host reads back, uid mapping, ripgrep over the gofer mount, git on a root-owned mounted repo (dubious-ownership waiver) |

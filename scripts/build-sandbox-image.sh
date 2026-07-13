@@ -64,6 +64,8 @@ echo "Extracting baked wheels.lock + tool versions..."
 docker run --rm -u 0 "${IMAGE}" cat /opt/sandbox-wheels.lock.txt > "$LOCK"
 PY_VER=$(docker run --rm "${IMAGE}" python3 --version)
 PANDOC_VER=$(docker run --rm "${IMAGE}" pandoc --version | head -1)
+OFFICE_VER=$(docker run --rm "${IMAGE}" soffice --version | head -1)
+OFFICE_CLI_VER=$(docker run --rm "${IMAGE}" artifactflow-office --version)
 RG_VER=$(docker run --rm "${IMAGE}" rg --version | head -1)
 ZIP_VER=$(docker run --rm "${IMAGE}" sh -c "zip -v | grep -m1 'This is Zip'")
 GIT_VER=$(docker run --rm "${IMAGE}" git --version)
@@ -103,6 +105,8 @@ Image id:    ${IMAGE_ID}
 
 Tools:
   ${PY_VER}
+  ${OFFICE_VER}
+  ${OFFICE_CLI_VER}
   ${PANDOC_VER}
   ${RG_VER}
   ${ZIP_VER}

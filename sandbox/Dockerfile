@@ -6,7 +6,7 @@
 # ArtifactFlow sandbox image — gVisor (runsc) functional verification (plan §B).
 #
 # This is the "tier-1 baked environment" (plan 原则 7): interpreter +
-# scientific/document stack + pandoc + ripgrep + zip + git. It runs untrusted
+# scientific/document stack + LibreOffice + pandoc + ripgrep + zip + git. It runs untrusted
 # LLM-generated code under runsc.
 # DECOUPLED from the backend image / requirements.lock — the sandbox is its own
 # runtime, not the app. Python deps are pinned in sandbox/requirements.txt.
@@ -31,6 +31,9 @@ ENV PYTHONUNBUFFERED=1 \
     MPLBACKEND=Agg
 
 # System tools baked into tier-1:
+#   libreoffice — shared Office conversion/render/recalculation engine. Writer,
+#             Calc, and Impress cover the common docx/xlsx/pptx workflows; each
+#             call uses an isolated profile through artifactflow-office.
 #   pandoc  — docx/html↔md canary + doc-conversion driver scenario (C). Debian's
 #             pandoc is older than upstream but fine for the md↔docx canary
 #             (PDF output needs LaTeX, out-of-scope this phase).
@@ -43,6 +46,13 @@ ENV PYTHONUNBUFFERED=1 \
 #             design. Tier-1 because it's generic + environment-definition and
 #             can't be installed at runtime with zero network.
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    libreoffice-core \
+    libreoffice-writer \
+    libreoffice-calc \
+    libreoffice-impress \
+    fonts-liberation2 \
+    fonts-crosextra-carlito \
+    fonts-crosextra-caladea \
     pandoc \
     ripgrep \
     zip \
@@ -84,6 +94,12 @@ RUN git config --system user.name "sandbox" && \
 # Scientific stack — the real ENOSYS workload under runsc (plan §B "验什么").
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt && rm /tmp/requirements.txt
+
+# Stable model-facing Office interface. Keep orchestration here instead of in
+# each skill bundle: the executable is part of the sandbox runtime, while the
+# skills only explain format-specific intent and QA.
+COPY office_cli.py /usr/local/bin/artifactflow-office
+RUN chmod 755 /usr/local/bin/artifactflow-office
 
 # Freeze the resolved (transitive) pip set into the image — the sandbox analog
 # of release.sh's wheels.lock.txt. build-sandbox-image.sh extracts this into a
