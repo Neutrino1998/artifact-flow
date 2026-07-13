@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'vitest';
-import { appendAdminLiveEvent, isAdminMessageOffActiveBranch } from './adminLiveEvents';
+import {
+  appendAdminLiveEvent,
+  formatAdminInputPreview,
+  isAdminMessageOffActiveBranch,
+} from './adminLiveEvents';
 import type { AdminConversationEventsResponse } from './api';
 
 function snapshot(): AdminConversationEventsResponse {
@@ -71,6 +75,18 @@ describe('appendAdminLiveEvent', () => {
       { filename: 'data.csv' },
     ]);
     expect(next.messages[0].events).toEqual([]);
+  });
+});
+
+describe('formatAdminInputPreview', () => {
+  test('uses one neutral label for empty and whitespace-only input', () => {
+    expect(formatAdminInputPreview('')).toBe('无文本输入');
+    expect(formatAdminInputPreview('  \n\t ')).toBe('无文本输入');
+  });
+
+  test('trims and truncates textual input', () => {
+    expect(formatAdminInputPreview('  hello  ')).toBe('hello');
+    expect(formatAdminInputPreview('abcdef', 4)).toBe('abcd...');
   });
 });
 

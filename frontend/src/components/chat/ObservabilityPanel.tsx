@@ -28,6 +28,7 @@ import { connectSSE } from '@/lib/sse';
 import {
   ADMIN_TERMINAL_EVENTS,
   appendAdminLiveEvent,
+  formatAdminInputPreview,
   isAdminMessageOffActiveBranch,
 } from '@/lib/adminLiveEvents';
 
@@ -922,9 +923,7 @@ function MessageGroupView({
   selectedEventId: number | null;
   onSelectEvent: (e: AdminEventItem, messageId: string) => void;
 }) {
-  const inputPreview = group.user_input
-    ? group.user_input.slice(0, 80) + (group.user_input.length > 80 ? '...' : '')
-    : '仅附件';
+  const inputPreview = formatAdminInputPreview(group.user_input);
   const issues = groupIssueCounts(group);
   const hasHardError = issues.errors > 0;
   const hasIssues = Object.values(issues).some((n) => n > 0);

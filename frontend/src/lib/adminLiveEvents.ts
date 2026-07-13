@@ -17,6 +17,12 @@ export const ADMIN_TERMINAL_EVENTS = new Set([
   'error',
 ]);
 
+export function formatAdminInputPreview(userInput: string, maxLength = 80): string {
+  const trimmed = userInput.trim();
+  if (!trimmed) return '无文本输入';
+  return trimmed.slice(0, maxLength) + (trimmed.length > maxLength ? '...' : '');
+}
+
 export function isAdminMessageOffActiveBranch(
   messageId: string,
   activeMessageId: string | null,
