@@ -213,6 +213,66 @@ def test_docx_apply_redline_plan_is_atomic(tmp_path):
     assert not failed.exists()
 
 
+def test_docx_apply_redline_auto_matches_typo_uniquely(tmp_path):
+    docx = pytest.importorskip("docx")
+    etree = pytest.importorskip("lxml.etree")
+    mod = _load_skill_script("docx", "scripts/apply_redline.py")
+
+    src = tmp_path / "in.docx"
+    out = tmp_path / "out.docx"
+    document = docx.Document()
+    paragraph = document.add_paragraph()
+    paragraph.add_run("关于人工智能")
+    paragraph.add_run("技术的详细介绍。")
+    document.save(src)
+
+    summary = mod.apply_plan(
+        src,
+        out,
+        author="Review",
+        changes=[{
+            "op": "replace",
+            "find": "关于人工智能枝术的详细介绍",
+            "replace": "已更新",
+            "expect": 1,
+            "match": "auto",
+        }],
+    )
+    assert summary["changes"][0]["match_type"] == "fuzzy"
+    with zipfile.ZipFile(out) as zf:
+        root = etree.fromstring(zf.read("word/document.xml"))
+    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    deleted = "".join(root.xpath(".//w:del//w:delText/text()", namespaces=ns))
+    assert deleted == "关于人工智能技术的详细介绍"
+    assert root.xpath(".//w:ins//w:t[text()='已更新']", namespaces=ns)
+
+
+def test_docx_apply_redline_auto_rejects_duplicate_segments(tmp_path):
+    docx = pytest.importorskip("docx")
+    mod = _load_skill_script("docx", "scripts/apply_redline.py")
+
+    src = tmp_path / "in.docx"
+    out = tmp_path / "must-not-exist.docx"
+    document = docx.Document()
+    document.add_paragraph("Repeated unique-looking target")
+    document.add_paragraph("Repeated unique-looking target")
+    document.save(src)
+
+    with pytest.raises(mod.RedlineError, match="appears multiple times"):
+        mod.apply_plan(
+            src,
+            out,
+            author="Review",
+            changes=[{
+                "op": "replace",
+                "find": "Repeated unique-looking target",
+                "replace": "new",
+                "expect": 1,
+            }],
+        )
+    assert not out.exists()
+
+
 def test_docx_default_reference_does_not_leak_template_media(tmp_path):
     pandoc = shutil.which("pandoc")
     if not pandoc:
@@ -299,3 +359,68 @@ def test_pptx_inspect_and_replace_text_smoke(tmp_path):
 
     geometry = check_mod.check_geometry(str(out))
     assert geometry["issues"] == []
+
+
+def test_pptx_replace_text_auto_and_ambiguity_are_atomic(tmp_path):
+    pptx = pytest.importorskip("pptx")
+    util = pytest.importorskip("pptx.util")
+    mod = _load_skill_script("pptx", "scripts/replace_text.py")
+
+    src = tmp_path / "in.pptx"
+    out = tmp_path / "out.pptx"
+    prs = pptx.Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    box = slide.shapes.add_textbox(
+        util.Inches(1), util.Inches(1), util.Inches(6), util.Inches(1)
+    )
+    paragraph = box.text_frame.paragraphs[0]
+    paragraph.add_run().text = "关于人工智能"
+    paragraph.add_run().text = "技术的详细介绍"
+    prs.save(src)
+
+    summary = mod.replace_text(
+        src,
+        out,
+        [{
+            "find": "关于人工智能枝术的详细介绍",
+            "replace": "已更新",
+            "expect": 1,
+            "match": "auto",
+        }],
+        slides=None,
+        allow_missing=False,
+    )
+    assert summary["replacements"][0]["match_type"] == "fuzzy"
+    assert summary["paragraph_rewrites"] == 1
+    reopened = pptx.Presentation(str(out))
+    assert reopened.slides[0].shapes[0].text == "已更新"
+
+    duplicate_src = tmp_path / "duplicate.pptx"
+    duplicate_out = tmp_path / "must-not-exist.pptx"
+    prs = pptx.Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    for top in (1, 2):
+        shape = slide.shapes.add_textbox(
+            util.Inches(1), util.Inches(top), util.Inches(6), util.Inches(1)
+        )
+        shape.text = "Repeated unique-looking target"
+    prs.save(duplicate_src)
+    with pytest.raises(ValueError, match="multiple times"):
+        mod.replace_text(
+            duplicate_src,
+            duplicate_out,
+            [{
+                "find": "Repeated unique-looking target",
+                "replace": "new",
+                "expect": 1,
+            }],
+            slides=None,
+            allow_missing=False,
+        )
+    assert not duplicate_out.exists()
+
+
+def test_pptx_slide_range_rejects_huge_materialization():
+    mod = _load_skill_script("pptx", "scripts/replace_text.py")
+    with pytest.raises(SystemExit, match="select at most"):
+        mod._parse_slides("1-999999999")

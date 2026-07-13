@@ -9,8 +9,8 @@
 # compiler and the intranet load needs zero network.
 #
 # The headline ENOSYS gamble under runsc is the C-extension set
-# (numpy/pandas/matplotlib/Pillow); openpyxl/pypdf are pure-Python (low risk,
-# verified anyway because xlsx/pdf are core upload scenarios).
+# (numpy/pandas/matplotlib/Pillow/RapidFuzz); openpyxl/pypdf are pure-Python
+# (low risk, verified anyway because xlsx/pdf are core upload scenarios).
 
 numpy==1.26.4
 pandas==2.2.3
@@ -18,6 +18,7 @@ matplotlib==3.9.2
 Pillow==12.3.0        # 10.4.0→12.3.0:pdfplumber 0.11.10 要求 >=12.2(matplotlib 只要 >=8)
 openpyxl==3.1.5
 pypdf==4.3.1
+RapidFuzz==3.14.5     # text-edit / Office skill 的有界模糊定位(C-ext,与后端同版)
 
 # 文档 skill 层(Phase E-4 预装集):docx/pptx/pdf 的读写栈,全部离线 wheel。
 # 取舍纪律:不为单一功能引依赖 —— defusedxml 不进(脚本跑在沙盒内,沙盒即隔离

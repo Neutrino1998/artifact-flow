@@ -5,9 +5,9 @@ description: >
   页面渲染和导出 PDF。用户提供演示文稿或要求交付 PPT/PDF 时激活。
   工作在无网络沙盒中，编辑用 python-pptx，渲染与转换用 LibreOffice。
 license: Apache-2.0
-compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 LibreOffice、python-pptx、Pillow、matplotlib。
+compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 LibreOffice、python-pptx、Pillow、matplotlib、RapidFuzz。
 metadata:
-  version: "2.0.0"
+  version: "2.1.0"
 ---
 
 # 演示文稿
@@ -45,8 +45,8 @@ artifactflow-office convert 输入.ppt /workspace/输入.pptx
 ```bash
 cat > /workspace/replacements.json <<'JSON'
 [
-  {"find": "旧标题", "replace": "新标题"},
-  {"find": "旧要点", "replace": "新的较长要点"}
+  {"find": "旧标题", "replace": "新标题", "match": "auto", "expect": 1},
+  {"find": "旧要点", "replace": "新的较长要点", "match": "auto", "expect": 1}
 ]
 JSON
 
@@ -54,7 +54,9 @@ python "$SKILL/scripts/replace_text.py" 输入.pptx /workspace/修改稿.pptx \
   --map /workspace/replacements.json
 ```
 
-找不到锚点时默认失败；不要用 `--allow-missing` 掩盖计划未命中。输出里的
+数组中的单处替换默认按 exact → Unicode/标点归一化 → 有界 fuzzy 定位，并在整个选定页面中
+要求唯一；多个候选或找不到锚点都失败。可用 `match: exact|normalized|auto` 收紧策略，
+`expect > 1` 只允许 exact。不要用 `--allow-missing` 掩盖计划未命中。输出里的
 `paragraph_rewrites` 表示匹配跨 run，格式可能被合并，必须重点查看对应页面。
 源内容超出槽位时优先缩短或拆页，不要靠持续缩小字号硬塞。复杂成组对象、母版和 SmartArt
 不要临时拆 XML；保守编辑做不到时，明确采用 best-effort 重建。

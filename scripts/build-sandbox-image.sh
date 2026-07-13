@@ -23,7 +23,8 @@ set -euo pipefail
 # under --runtime=runsc --network=none with ZERO network (plan 原则 7).
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CTX="$ROOT/sandbox"
+CTX="$ROOT"
+DOCKERFILE="$ROOT/sandbox/Dockerfile"
 OUTDIR="$ROOT/dist"
 
 VERSION="${1:-$(date +%Y%m%d)}"
@@ -55,7 +56,7 @@ echo "=== ArtifactFlow sandbox image: ${VERSION} (platform: ${PLATFORM}, tag: ${
 echo "Building ${IMAGE} (native if build-host arch == ${ARCH_TAG}, else QEMU — be patient)..."
 docker buildx build --platform "${PLATFORM}" \
   -t "${IMAGE}" -t artifactflow-sandbox:latest \
-  --load "$CTX"
+  -f "$DOCKERFILE" --load "$CTX"
 
 # Pull the frozen pip set + tool versions OUT of the built image so ops can
 # inspect/diff without loading the (large) tar. -u 0 reads /opt regardless of
@@ -66,6 +67,7 @@ PY_VER=$(docker run --rm "${IMAGE}" python3 --version)
 PANDOC_VER=$(docker run --rm "${IMAGE}" pandoc --version | head -1)
 OFFICE_VER=$(docker run --rm "${IMAGE}" soffice --version | head -1)
 OFFICE_CLI_VER=$(docker run --rm "${IMAGE}" artifactflow-office --version)
+TEXT_EDIT_VER=$(docker run --rm "${IMAGE}" text-edit --version)
 RG_VER=$(docker run --rm "${IMAGE}" rg --version | head -1)
 ZIP_VER=$(docker run --rm "${IMAGE}" sh -c "zip -v | grep -m1 'This is Zip'")
 GIT_VER=$(docker run --rm "${IMAGE}" git --version)
@@ -107,6 +109,7 @@ Tools:
   ${PY_VER}
   ${OFFICE_VER}
   ${OFFICE_CLI_VER}
+  ${TEXT_EDIT_VER}
   ${PANDOC_VER}
   ${RG_VER}
   ${ZIP_VER}

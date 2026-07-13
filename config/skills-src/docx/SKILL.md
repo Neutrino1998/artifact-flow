@@ -5,9 +5,9 @@ description: >
   批注、接受或拒绝修订、渲染质检及导出 PDF。需要处理 Word 文件或交付 docx/PDF 时激活。
   工作在无网络沙盒中，优先使用稳定脚本，OOXML 仅作最后手段。
 license: Apache-2.0
-compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 LibreOffice、Pandoc、python-docx、lxml。
+compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 LibreOffice、Pandoc、python-docx、lxml、RapidFuzz。
 metadata:
-  version: "2.0.0"
+  version: "2.1.0"
 ---
 
 # Word 文档
@@ -89,6 +89,7 @@ cat > /workspace/redline-plan.json <<'JSON'
       "op": "replace",
       "find_file": "old.txt",
       "replace_file": "new.txt",
+      "match": "auto",
       "expect": 1
     },
     {
@@ -111,7 +112,9 @@ python "$SKILL/scripts/apply_redline.py" 输入.docx /workspace/修订稿.docx \
 ```
 
 plan 中相对文件路径以 plan 所在目录为基准；UTF-8 文本文件会去掉一个 heredoc 末尾换行。
-每项默认 `expect: 1`，命中数不符或任一项失败时不写输出。单处操作也可用
+每项默认 `expect: 1`，并按 exact → Unicode/标点归一化 → 有界 fuzzy 定位；多个候选一律失败。
+可用 `match: exact|normalized|auto` 收紧策略，`expect > 1` 只允许 exact。命中数不符或任一项失败
+时不写输出。单处操作也可用
 `--replace-file/--with-file`、`--delete-file`、`--insert-after-file/--text-file`。
 
 脚本只编辑 `word/document.xml` 中单段落的普通直接 run，不处理跨段、页眉页脚、文本框、

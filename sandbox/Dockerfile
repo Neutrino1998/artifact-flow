@@ -6,7 +6,7 @@
 # ArtifactFlow sandbox image — gVisor (runsc) functional verification (plan §B).
 #
 # This is the "tier-1 baked environment" (plan 原则 7): interpreter +
-# scientific/document stack + LibreOffice + pandoc + ripgrep + zip + git. It runs untrusted
+# scientific/document stack + LibreOffice + text-edit + pandoc + ripgrep + zip + git. It runs untrusted
 # LLM-generated code under runsc.
 # DECOUPLED from the backend image / requirements.lock — the sandbox is its own
 # runtime, not the app. Python deps are pinned in sandbox/requirements.txt.
@@ -28,7 +28,8 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    MPLBACKEND=Agg
+    MPLBACKEND=Agg \
+    PYTHONPATH=/opt/sandbox/lib
 
 # System tools baked into tier-1:
 #   libreoffice — shared Office conversion/render/recalculation engine. Writer,
@@ -92,14 +93,17 @@ RUN git config --system user.name "sandbox" && \
     git config --system safe.directory '*'
 
 # Scientific stack — the real ENOSYS workload under runsc (plan §B "验什么").
-COPY requirements.txt /tmp/requirements.txt
+COPY sandbox/requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
-# Stable model-facing Office interface. Keep orchestration here instead of in
-# each skill bundle: the executable is part of the sandbox runtime, while the
-# skills only explain format-specific intent and QA.
-COPY office_cli.py /usr/local/bin/artifactflow-office
-RUN chmod 755 /usr/local/bin/artifactflow-office
+# One pure matching implementation is shared with the backend. text-edit is the
+# model-facing checked UTF-8 editor; Office skill scripts import text_match
+# directly so they keep ownership of OOXML/run-level mutations.
+RUN ! command -v text-edit
+COPY src/utils/text_match.py /opt/sandbox/lib/text_match.py
+COPY sandbox/text_edit.py /usr/local/bin/text-edit
+COPY sandbox/office_cli.py /usr/local/bin/artifactflow-office
+RUN chmod 755 /usr/local/bin/text-edit /usr/local/bin/artifactflow-office
 
 # Freeze the resolved (transitive) pip set into the image — the sandbox analog
 # of release.sh's wheels.lock.txt. build-sandbox-image.sh extracts this into a
@@ -111,7 +115,7 @@ RUN pip freeze > /opt/sandbox-wheels.lock.txt
 # into /opt/stub-wheels so the in-sandbox probe can:
 #   pip install --no-index --find-links /opt/stub-wheels af-sandbox-stub
 # with zero network — proving offline `pip install` survives Sentry.
-COPY stub-pkg /tmp/stub-pkg
+COPY sandbox/stub-pkg /tmp/stub-pkg
 RUN pip wheel --no-deps -w /opt/stub-wheels /tmp/stub-pkg && rm -rf /tmp/stub-pkg
 
 # Non-root: untrusted code must not run as root inside the sandbox. Fixed uid

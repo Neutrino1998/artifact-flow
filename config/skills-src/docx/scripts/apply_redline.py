@@ -11,7 +11,8 @@ Usage:
 
 Plan format:
     {"changes": [
-      {"op": "replace", "find_file": "old.txt", "replace_file": "new.txt", "expect": 1},
+      {"op": "replace", "find_file": "old.txt", "replace_file": "new.txt",
+       "match": "auto", "expect": 1},
       {"op": "delete", "find": "obsolete text", "expect": 1},
       {"op": "insert_after", "find": "anchor", "text_file": "addition.txt", "expect": 1}
     ]}
@@ -20,6 +21,9 @@ Paths inside a plan are resolved relative to the plan file. Text files are
 UTF-8; one final line ending is stripped so quoted heredocs are convenient.
 The whole plan is atomic: all changes must match their expected counts before
 the output file is replaced.
+
+Single matches default to exact -> normalized -> bounded fuzzy lookup. Multiple
+matches require exact mode; ambiguity always fails.
 
 Scope is intentionally narrow: the match must be visible text inside one
 paragraph and plain direct runs. Existing tracked changes, hyperlinks, fields,
@@ -40,6 +44,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from lxml import etree
+try:
+    from text_match import find_unique_in_segments
+except ModuleNotFoundError as exc:
+    if exc.name != "text_match":
+        raise
+    from utils.text_match import find_unique_in_segments
 
 NS_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 NS_XML = "http://www.w3.org/XML/1998/namespace"
@@ -228,7 +238,32 @@ def _apply_inline_change(
                 parent.remove(item["run"])
 
 
-def _find_and_apply(root, *, needle: str, mode: str, new_text: str, author: str, all_matches: bool):
+def _find_unique_editable_match(root, needle: str, match_mode: str):
+    entries = []
+    for paragraph in root.iter(W + "p"):
+        runs, full_text = _direct_text_runs(paragraph)
+        if full_text:
+            entries.append((paragraph, runs, full_text))
+
+    result = find_unique_in_segments(
+        [entry[2] for entry in entries], needle, mode=match_mode
+    )
+    if not result.success or result.segment_index is None:
+        raise RedlineError(result.message)
+    paragraph, runs, _ = entries[result.segment_index]
+    return paragraph, runs, result
+
+
+def _find_and_apply(
+    root,
+    *,
+    needle: str,
+    mode: str,
+    new_text: str,
+    author: str,
+    all_matches: bool,
+    match_mode: str,
+):
     if not needle:
         raise RedlineError("anchor text must not be empty")
     if "\n" in needle or "\n" in new_text:
@@ -237,6 +272,30 @@ def _find_and_apply(root, *, needle: str, mode: str, new_text: str, author: str,
     change_id = _next_id(root)
     applied = 0
 
+    if not all_matches:
+        paragraph, runs, result = _find_unique_editable_match(
+            root, needle, match_mode
+        )
+        _apply_inline_change(
+            paragraph,
+            runs,
+            result.start,
+            result.end,
+            mode=mode,
+            new_text=new_text,
+            author=author,
+            change_id=change_id,
+            date=date,
+        )
+        return {
+            "applied": 1,
+            "match_type": result.match_type,
+            "similarity": result.similarity,
+            "matched_text": result.matched_text,
+        }
+
+    if match_mode != "exact":
+        raise RedlineError("multi-match operations require match='exact'")
     for paragraph in root.iter(W + "p"):
         # Recompute after each edit because the paragraph tree changes.
         while True:
@@ -258,9 +317,12 @@ def _find_and_apply(root, *, needle: str, mode: str, new_text: str, author: str,
             )
             applied += 1
             change_id += 2
-            if not all_matches:
-                return applied
-    return applied
+    return {
+        "applied": applied,
+        "match_type": "exact",
+        "similarity": 1.0,
+        "matched_text": needle,
+    }
 
 
 def _count_matches(root, needle: str) -> int:
@@ -325,29 +387,54 @@ def _apply_plan_changes(root, changes: list[dict], *, author: str) -> list[dict]
         if mode.startswith("insert-") and expect != 1:
             raise RedlineError(f"change {index}: insert operations require expect=1")
 
-        found = _count_matches(root, needle)
-        if found != expect:
+        match_mode = change.get("match", "auto" if expect == 1 else "exact")
+        if match_mode not in {"exact", "normalized", "auto"}:
             raise RedlineError(
-                f"change {index}: expected {expect} editable match(es), found {found}: "
-                f"{_preview(needle)!r}"
+                f"change {index}: match must be exact, normalized, or auto"
             )
-        applied = _find_and_apply(
-            root,
-            needle=needle,
-            mode=mode,
-            new_text=new_text,
-            author=author,
-            all_matches=expect > 1,
-        )
-        if applied != expect:
-            raise RedlineError(f"change {index}: applied {applied}, expected {expect}")
-        summaries.append({
+        if expect > 1 and match_mode != "exact":
+            raise RedlineError(
+                f"change {index}: expect > 1 requires match='exact'"
+            )
+
+        if expect > 1:
+            found = _count_matches(root, needle)
+            if found != expect:
+                raise RedlineError(
+                    f"change {index}: expected {expect} editable match(es), found {found}: "
+                    f"{_preview(needle)!r}"
+                )
+        try:
+            result = _find_and_apply(
+                root,
+                needle=needle,
+                mode=mode,
+                new_text=new_text,
+                author=author,
+                all_matches=expect > 1,
+                match_mode=match_mode,
+            )
+        except RedlineError as exc:
+            raise RedlineError(
+                f"change {index}: expected {expect} editable match(es), "
+                f"matching failed: {exc}: {_preview(needle)!r}"
+            ) from exc
+        if result["applied"] != expect:
+            raise RedlineError(
+                f"change {index}: applied {result['applied']}, expected {expect}"
+            )
+        summary = {
             "index": index,
             "op": mode,
             "find": _preview(needle),
             "find_chars": len(needle),
-            "applied": applied,
-        })
+            "applied": result["applied"],
+            "match_type": result["match_type"],
+            "similarity": result["similarity"],
+        }
+        if result["match_type"] != "exact":
+            summary["matched_text"] = _preview(result["matched_text"] or "")
+        summaries.append(summary)
     return summaries
 
 
@@ -370,8 +457,13 @@ def apply_redline(src: Path, out: Path, *, needle: str, mode: str, new_text: str
     summary = apply_plan(
         src,
         out,
-        changes=[{"op": mode, "find": needle, "replace" if mode == "replace" else "text": new_text,
-                  "expect": expected}],
+        changes=[{
+            "op": mode,
+            "find": needle,
+            "replace" if mode == "replace" else "text": new_text,
+            "expect": expected,
+            "match": "exact" if all_matches else "auto",
+        }],
         author=author,
     )
     return {
