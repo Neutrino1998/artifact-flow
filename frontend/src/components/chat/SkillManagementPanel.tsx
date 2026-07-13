@@ -375,7 +375,10 @@ export default function SkillManagementPanel() {
                     )}
                   </div>
                   {skill.description && (
-                    <p className="mt-0.5 text-xs text-text-secondary dark:text-text-secondary-dark line-clamp-2">
+                    <p
+                      className="mt-0.5 text-xs text-text-secondary dark:text-text-secondary-dark line-clamp-2"
+                      title={skill.description}
+                    >
                       {skill.description}
                     </p>
                   )}
