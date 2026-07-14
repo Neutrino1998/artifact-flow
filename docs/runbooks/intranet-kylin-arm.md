@@ -77,10 +77,19 @@ docker info | grep -i 'Docker Root Dir'   # expect /data/docker
 
 ## Build Media
 
-Build the app release for ARM:
+Build a normal app + sandbox image update for an already-provisioned ARM host.
+This reuses the installed runsc and existing infra images:
 
 ```bash
-./scripts/release.sh <version> --platform linux/arm64 --with-infra --with-sandbox
+./scripts/release.sh <version> --platform linux/arm64 --app-only --with-sandbox
+```
+
+For a first deployment, or an explicit gVisor runtime/security upgrade, add the
+independent host-runtime unit:
+
+```bash
+./scripts/release.sh <version> --platform linux/arm64 \
+  --with-infra --with-sandbox --with-gvisor
 ```
 
 For a bare Kylin host with no Docker installed, also build and transfer the
@@ -97,8 +106,10 @@ package:
 sandbox/kernel-4k-pkg/fetch-and-package.sh
 ```
 
-The gVisor package and sandbox image are architecture-specific. Use `aarch64`
-for gVisor / Docker packages and `linux/arm64` for image builds.
+The optional gVisor package and sandbox image are architecture-specific. Use
+`aarch64` for gVisor / Docker packages and `linux/arm64` for image builds. The
+gVisor tar is named by pinned runtime version + architecture and can be reused
+across app releases.
 
 ## Host Preflight
 
@@ -134,7 +145,7 @@ cd docker-offline-<date>-aarch64
 sudo ./install.sh
 docker compose version
 
-cd ../sandbox-gvisor-<date>-aarch64
+cd ../sandbox-gvisor-release-<version>-aarch64
 sudo ./install.sh
 sudo systemctl reload docker
 sudo ./smoke-test.sh
