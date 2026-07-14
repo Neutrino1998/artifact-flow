@@ -1,6 +1,8 @@
 import importlib.util
+import os
 import platform
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -52,6 +54,8 @@ def test_runtime_ref_cli_and_release_wiring_use_exact_tag():
     assert "Sandbox image required: ${SANDBOX_IMAGE_REF}" in release
     assert "--with-gvisor" in release
     assert "\\n+      AF_SANDBOX_" not in release
+    assert "SANDBOX_UP_PREFIX" not in release
+    assert "AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy" not in release
     assert 'docker image inspect "$BUNDLE_SANDBOX_IMAGE"' in fleet
 
 
@@ -81,12 +85,14 @@ def test_prepare_sandbox_dry_run_preserves_full_image_ref(tmp_path, include_gvis
 
     version = "manifest-parser-test"
     image_ref = f"artifactflow-sandbox:0123456789abcdef-{image_arch}"
+    gvisor_name = f"sandbox-gvisor-release-20260706.0-{gvisor_arch}.tar.gz"
     manifest = tmp_path / f"artifactflow-{version}.manifest.txt"
     manifest.write_text(
         "\n".join([
             f"ArtifactFlow Release {version}",
             f"Platform:     linux/{image_arch}",
             f"Sandbox image required: {image_ref}",
+            f"gVisor host runtime: {gvisor_name if include_gvisor else 'skipped — target must already have runsc registered.'}",
             "",
         ]),
         encoding="utf-8",
@@ -97,7 +103,9 @@ def test_prepare_sandbox_dry_run_preserves_full_image_ref(tmp_path, include_gvis
         f"artifactflow-sandbox-verify-{version}.tar.gz",
     ]
     if include_gvisor:
-        names.append(f"sandbox-gvisor-release-20260706.0-{gvisor_arch}.tar.gz")
+        names.append(gvisor_name)
+    stale_gvisor = f"sandbox-gvisor-release-20260504.0-{gvisor_arch}.tar.gz"
+    names.append(stale_gvisor)
     for name in names:
         (tmp_path / name).touch()
 
@@ -117,9 +125,54 @@ def test_prepare_sandbox_dry_run_preserves_full_image_ref(tmp_path, include_gvis
     assert f"AF_SANDBOX_IMAGE_REF={image_ref}" in result.stdout
     if include_gvisor:
         assert "would install/update runsc" in result.stdout
+        assert f"AF_GVISOR_PACKAGE={tmp_path / gvisor_name}" in result.stdout
+        assert stale_gvisor not in result.stdout
     else:
         assert "would require existing runsc registration" in result.stdout
         assert "AF_GVISOR_PACKAGE= deploy/scripts/prepare-host.sh sandbox" in result.stdout
+        assert stale_gvisor not in result.stdout
+
+
+def test_prepare_sandbox_rejects_missing_manifest_declared_gvisor(tmp_path):
+    machine = platform.machine().lower()
+    if machine in {"x86_64", "amd64"}:
+        image_arch = "amd64"
+        gvisor_arch = "x86_64"
+    elif machine in {"arm64", "aarch64"}:
+        image_arch = "arm64"
+        gvisor_arch = "aarch64"
+    else:
+        raise AssertionError(f"unsupported test architecture: {machine}")
+
+    version = "missing-gvisor-test"
+    gvisor_name = f"sandbox-gvisor-release-20260706.0-{gvisor_arch}.tar.gz"
+    (tmp_path / f"artifactflow-{version}.manifest.txt").write_text(
+        "\n".join([
+            f"ArtifactFlow Release {version}",
+            f"Platform:     linux/{image_arch}",
+            f"Sandbox image required: artifactflow-sandbox:0123456789abcdef-{image_arch}",
+            f"gVisor host runtime: {gvisor_name}",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    (tmp_path / f"artifactflow-app-{version}.tar.gz").touch()
+
+    result = subprocess.run(
+        [
+            "bash",
+            str(ROOT / "deploy" / "scripts" / "fleet.sh"),
+            "prepare-sandbox",
+            "--dry-run",
+            str(tmp_path),
+        ],
+        cwd=ROOT,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "manifest-declared gVisor package not found" in result.stderr
 
 
 def test_prepare_sandbox_rejects_unpaired_image_and_verify(tmp_path):
@@ -138,6 +191,7 @@ def test_prepare_sandbox_rejects_unpaired_image_and_verify(tmp_path):
             f"ArtifactFlow Release {version}",
             f"Platform:     linux/{image_arch}",
             f"Sandbox image required: {image_ref}",
+            "gVisor host runtime: none",
             "",
         ]),
         encoding="utf-8",
@@ -160,3 +214,66 @@ def test_prepare_sandbox_rejects_unpaired_image_and_verify(tmp_path):
     )
     assert result.returncode != 0
     assert "sandbox image + verify tars must be paired" in result.stderr
+
+
+def _fleet_dry_run_from_env_file(tmp_path, sandbox_policy):
+    root = tmp_path / f"root-{sandbox_policy}"
+    scripts = root / "deploy" / "scripts"
+    scripts.mkdir(parents=True)
+    shutil.copy2(ROOT / "deploy" / "scripts" / "fleet.sh", scripts / "fleet.sh")
+    (root / "deploy" / "docker-compose.intranet.yml").touch()
+    (root / "deploy" / "docker-compose.sandbox.yml").touch()
+    (root / "deploy" / ".env").write_text(
+        f"AF_ENABLE_SANDBOX={sandbox_policy}\n",
+        encoding="utf-8",
+    )
+    (root / "deploy" / "fleet.conf").write_text(
+        "infra local\nrelease local\napp local scale=1\nlb local\n",
+        encoding="utf-8",
+    )
+
+    machine = platform.machine().lower()
+    image_arch = "arm64" if machine in {"arm64", "aarch64"} else "amd64"
+    version = f"env-policy-{sandbox_policy}"
+    bundle = tmp_path / f"bundle-{sandbox_policy}"
+    bundle.mkdir()
+    (bundle / f"artifactflow-{version}.manifest.txt").write_text(
+        "\n".join([
+            f"ArtifactFlow Release {version}",
+            f"Platform:     linux/{image_arch}",
+            f"Sandbox image required: artifactflow-sandbox:0123456789abcdef-{image_arch}",
+            "gVisor host runtime: none",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    for kind in ("app", "config", "deploy"):
+        (bundle / f"artifactflow-{kind}-{version}.tar.gz").touch()
+
+    env = os.environ.copy()
+    env.pop("AF_ENABLE_SANDBOX", None)
+    return subprocess.run(
+        ["bash", str(scripts / "fleet.sh"), "deploy", "--dry-run", str(bundle)],
+        cwd=root,
+        env=env,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+
+@pytest.mark.parametrize("sandbox_policy", ["0", "1"])
+def test_fleet_reads_persistent_sandbox_policy_from_deploy_env(tmp_path, sandbox_policy):
+    result = _fleet_dry_run_from_env_file(tmp_path, sandbox_policy)
+    assert result.returncode == 0, result.stderr
+    assert f"sandbox={sandbox_policy}" in result.stdout
+    if sandbox_policy == "1":
+        assert "docker-compose.sandbox.yml" in result.stdout
+    else:
+        assert "docker-compose.sandbox.yml" not in result.stdout
+
+
+def test_fleet_rejects_missing_sandbox_policy_before_deploy(tmp_path):
+    result = _fleet_dry_run_from_env_file(tmp_path, "")
+    assert result.returncode != 0
+    assert "AF_ENABLE_SANDBOX is not configured" in result.stderr

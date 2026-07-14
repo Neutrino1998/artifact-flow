@@ -258,7 +258,7 @@ deploy/scripts/verify-bundle.sh "$BUNDLE"
 #    init-local 首次创建 deploy/.env 时会自动填充 JWT secret、Fernet
 #    credential key、Postgres password，并同步 DATABASE_URL；已有 .env 不覆盖。
 deploy/scripts/fleet.sh init-local --scale 2
-vi deploy/.env        # 填 API keys / CORS / 并发等部署专属值
+vi deploy/.env        # 填 API keys / CORS / 并发；沙盒部署把 AF_ENABLE_SANDBOX 改为 1
 vi deploy/fleet.conf  # app local scale=N 即 docker compose --scale backend=N
 
 # 4. 正式配置应在构建机改 config/ 后再 release。
@@ -275,8 +275,8 @@ vi deploy/fleet.conf  # app local scale=N 即 docker compose --scale backend=N
 #   AF_SANDBOX_POOL_SIZE=80G \
 #   deploy/scripts/fleet.sh prepare-sandbox "$BUNDLE"
 
-# 6. 启动。fleet 会校验 bundle、解 config/deploy、load 镜像、跑 release gate、等待健康。
-#    启用沙盒时在命令前追加 AF_ENABLE_SANDBOX=1。
+# 6. 启动。fleet 从 deploy/.env 读取必填的 AF_ENABLE_SANDBOX=0|1，再校验
+#    bundle、解 config/deploy、load 镜像、跑 release gate、等待健康。
 AF_BUNDLE_VERSION="$VERSION" deploy/scripts/fleet.sh deploy "$BUNDLE"
 
 # 7. 创建管理员
@@ -315,8 +315,9 @@ backend/frontend 镜像，再跑 release gate 和 compose up；下面的手工�
 > `--scale`；跨机负载均衡 / 多机数据库 URL 等留在文档里作为**已设计未验证**的路径。
 >
 > `fleet.sh` 默认只包装 `deploy/docker-compose.intranet.yml`（Mode 3 基础栈）。
-> 如果 bundle 带 sandbox 且要启用 `bash` / `mount` / `persist`，设置
-> `AF_ENABLE_SANDBOX=1`；但宿主前置是 root 级操作，需先显式运行
+> `deploy/.env` 必须持久声明 `AF_ENABLE_SANDBOX=0|1`；已有 sandbox 部署升级到
+> 这一版 Fleet 前先补 `AF_ENABLE_SANDBOX=1`。它描述目标能力，与 bundle 本次是否
+> 携带 sandbox/gVisor 介质无关。宿主前置是 root 级操作，需先显式运行
 > `sudo env ... deploy/scripts/fleet.sh prepare-sandbox <bundle-dir>`，再 deploy。
 > deploy/preflight 会追加 `deploy/docker-compose.sandbox.yml` overlay，并把 runsc /
 > sandbox 镜像 / scratch root 缺失视为 blocker。
@@ -345,6 +346,10 @@ cd "$APP"
 #     所以调用 fleet deploy 前，必须先让新版 fleet.sh 落盘。
 tar xzf "$BUNDLE/artifactflow-deploy-$VERSION.tar.gz"
 
+# 新版 Fleet 要求目标策略持久化；已有沙盒部署填 1，未启用沙盒填 0。
+# 只编辑 .env 不会重启或重建当前容器。
+vi deploy/.env  # 确认存在 AF_ENABLE_SANDBOX=0|1
+
 # 如本次 bundle 带 sandbox 且要刷新 sandbox 前置，先以 root 执行：
 # 32 路沙盒按默认 2G workspace 估算应准备 80G 级别池子。
 # sudo env AF_BUNDLE_VERSION="$VERSION" \
@@ -356,8 +361,8 @@ tar xzf "$BUNDLE/artifactflow-deploy-$VERSION.tar.gz"
 # 2. 进维护窗口（可选；fleet deploy 本身是直接 up）
 ./deploy/scripts/maintenance.sh on "升级到 $VERSION"
 
-# 3. fleet 接管解包 + docker load + compose up + 健康检查；成功后关闭维护页
-#    启用沙盒时在命令前追加 AF_ENABLE_SANDBOX=1。
+# 3. fleet 按 deploy/.env 的 sandbox 策略接管解包 + docker load + compose up +
+#    健康检查；成功后关闭维护页。
 AF_BUNDLE_VERSION="$VERSION" ./deploy/scripts/fleet.sh deploy "$BUNDLE" && \
   ./deploy/scripts/maintenance.sh off
 ```
@@ -516,7 +521,7 @@ cd "$APP"
 tar xzf "$BUNDLE/artifactflow-deploy-$VERSION.tar.gz"
 deploy/scripts/verify-bundle.sh "$BUNDLE"
 
-# 启用沙盒时在命令前追加 AF_ENABLE_SANDBOX=1。
+# deploy/.env 必须已有 AF_ENABLE_SANDBOX=0|1。
 AF_BUNDLE_VERSION="$VERSION" deploy/scripts/fleet.sh deploy "$BUNDLE"
 ```
 
@@ -572,6 +577,7 @@ sudo env AF_SANDBOX_POOL_SIZE=80G deploy/scripts/fleet.sh prepare-sandbox .
 `deploy/.env` 增加（**路径必须与宿主一致**——overlay 把 scratch 根以同一绝对路径挂进 backend 容器，因为 backend 把工作区路径作为 bind source 传给 daemon、daemon 按宿主路径解析；改路径只改这一处 env，compose 两侧与应用配置同步取值）：
 
 ```bash
+AF_ENABLE_SANDBOX=1
 ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT=/var/lib/artifactflow/sandbox-scratch
 # ARTIFACTFLOW_SANDBOX_RUNTIME 默认 runsc(overlay 内兜底),无需显式写
 ```
@@ -583,9 +589,9 @@ AF_VERSION=1.0.0 docker compose -f deploy/docker-compose.intranet.yml \
 
 # 使用 fleet 单机入口:
 sudo env AF_SANDBOX_POOL_SIZE=80G deploy/scripts/fleet.sh prepare-sandbox .
-AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy .
+deploy/scripts/fleet.sh deploy .
 # 如需 deploy 前单独检查，先准备再 preflight：
-# AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh preflight
+# deploy/scripts/fleet.sh preflight
 ```
 
 > **安全提醒**：overlay 把 `/var/run/docker.sock` 挂进 backend 容器（等同宿主 root）。这是 DooD 架构的固有前提，防线是代码侧纪律——容器创建参数全为 backend 常量、绝不被模型内容污染（见架构文档「隔离边界」）。不要把这个 overlay 用在不需要沙盒的部署上。

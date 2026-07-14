@@ -579,7 +579,7 @@ if ! phase_done manifest "$manifest_input" "$MANIFEST"; then
     echo "  image:   $(basename "$SANDBOX_ARCHIVE")"
     echo "  verify:  $(basename "$SANDBOX_VERIFY_ARCHIVE")"
     echo "  target:  deploy/scripts/fleet.sh prepare-sandbox <bundle-dir>, then"
-    echo "           AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy <bundle-dir>"
+    echo "           set AF_ENABLE_SANDBOX=1 in deploy/.env and run fleet.sh deploy"
     if [[ -f "$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt" ]]; then
       image_id=$(awk '/^Image id:/ {sub(/^Image id:[[:space:]]*/, ""); print; exit}' "$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt")
       [[ -n "$image_id" ]] && echo "  image id: $image_id"
@@ -594,7 +594,8 @@ if ! phase_done manifest "$manifest_input" "$MANIFEST"; then
     echo "gVisor host runtime: $(basename "$SANDBOX_GVISOR_ARCHIVE")"
     echo "  pinned: release-${GVISOR_VERSION} (${GVISOR_ARCH})"
   else
-    echo "gVisor host runtime: skipped — target must already have runsc registered."
+    echo "gVisor host runtime: none"
+    echo "  target must already have runsc registered."
     echo "  Use --with-gvisor only for a new host or an explicit runtime update."
   fi
   echo ""
@@ -666,11 +667,9 @@ else
 fi
 if [[ $WITH_SANDBOX == 1 ]]; then
   SANDBOX_ARTIFACTS=$'\n  #   artifactflow-sandbox-'"${VERSION}-${ARCH_TAG}"$'.tar.gz{,.sha256}\n  #   artifactflow-sandbox-verify-'"${VERSION}"$'.tar.gz{,.sha256}'
-  SANDBOX_UP_PREFIX="AF_ENABLE_SANDBOX=1 "
   SANDBOX_FOOTER=""
 else
   SANDBOX_ARTIFACTS=""
-  SANDBOX_UP_PREFIX=""
   SANDBOX_FOOTER="  # (sandbox image omitted — re-run release with --with-sandbox to ship the image + verify probes)"
 fi
 if [[ $WITH_GVISOR == 1 ]]; then
@@ -722,10 +721,10 @@ $ANALYST_FOOTER
     tar xzf "\$BUNDLE/artifactflow-deploy-${VERSION}.tar.gz"
     deploy/scripts/verify-bundle.sh "\$BUNDLE"
     deploy/scripts/fleet.sh init-local --scale 2
-    vi deploy/.env
+    vi deploy/.env        # Set persistent AF_ENABLE_SANDBOX=1 if this target enables sandbox tools; otherwise keep 0.
     vi deploy/fleet.conf
 ${SANDBOX_PREP_LOCAL}
-    ${SANDBOX_UP_PREFIX}AF_BUNDLE_VERSION=${VERSION} deploy/scripts/fleet.sh deploy "\$BUNDLE"
+    AF_BUNDLE_VERSION=${VERSION} deploy/scripts/fleet.sh deploy "\$BUNDLE"
     ${ANALYST_RECIPE}
     # No pause/resume here — there's nothing running to pause.
     # Preflight pass 2 — after \`up\`, now verifies py-spy lives in the image.
@@ -746,6 +745,8 @@ ${SANDBOX_PREP_LOCAL}
     # Self-bootstrap deploy scripts before invoking fleet: older fleet.sh
     # versions do not know how to extract deploy/config from the bundle.
     tar xzf "\$BUNDLE/artifactflow-deploy-${VERSION}.tar.gz"
+    # Existing deployments must declare their persistent target policy before
+    # the first deploy with this Fleet version: AF_ENABLE_SANDBOX=0 or 1 in deploy/.env.
 ${SANDBOX_PREP_TMP}
     # ─── compose infra changes (rare) ────────────────────────────
     # If this version changed compose \`caddy\` / \`postgres\` / \`redis\` service
@@ -764,5 +765,5 @@ ${SANDBOX_PREP_TMP}
     # ─────────────────────────────────────────────────────────────
     # Fleet deploy is a direct compose up. For a maintenance-page window instead,
     # run maintenance.sh on before deploy and maintenance.sh off after it succeeds.
-    ${SANDBOX_UP_PREFIX}AF_BUNDLE_VERSION=${VERSION} ./deploy/scripts/fleet.sh deploy "\$BUNDLE"
+    AF_BUNDLE_VERSION=${VERSION} ./deploy/scripts/fleet.sh deploy "\$BUNDLE"
 EOF
