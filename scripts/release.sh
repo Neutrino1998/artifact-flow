@@ -7,7 +7,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 #
 # Usage:
 #   ./scripts/release.sh [VERSION] [--with-infra | --app-only]
-#                        [--with-sandbox] [--with-analyst-tools]
+#                        [--with-sandbox] [--with-gvisor]
+#                        [--with-analyst-tools]
 #                        [--platform linux/amd64|linux/arm64]
 #                        [--resume] [--force PHASE]
 #
@@ -25,7 +26,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 #                                                  addressed by base image tags).
 #   artifactflow-sandbox-<VERSION>-<arch>.tar.gz  ONLY if --with-sandbox
 #   artifactflow-sandbox-verify-<VERSION>.tar.gz  ONLY if --with-sandbox
-#   sandbox-gvisor-<date>-<arch>.tar.gz           ONLY if --with-sandbox
+#   sandbox-gvisor-release-<version>-<arch>.tar.gz ONLY if --with-gvisor
 #   artifactflow-analyst-tools-<slug>.tar.gz      ONLY if --with-analyst-tools
 #                                                  (slug encodes pandas + numpy +
 #                                                  python versions, NECESSARY for
@@ -54,6 +55,7 @@ show_help() {
 VERSION=""
 WITH_INFRA=0
 WITH_SANDBOX=0
+WITH_GVISOR=0
 WITH_ANALYST_TOOLS=0
 PLATFORM_ARG=""
 RESUME=0
@@ -64,6 +66,7 @@ while [[ $# -gt 0 ]]; do
     --with-infra)         WITH_INFRA=1 ;;
     --app-only)           WITH_INFRA=0 ;;
     --with-sandbox)       WITH_SANDBOX=1 ;;
+    --with-gvisor)        WITH_GVISOR=1 ;;
     --with-analyst-tools) WITH_ANALYST_TOOLS=1 ;;
     --resume)             RESUME=1 ;;
     --force)
@@ -150,14 +153,17 @@ ANALYST_SLUG="pandas${PANDAS_VERSION}-numpy${NUMPY_VERSION}-py${ANALYST_PYTHON}"
 ANALYST_ARCHIVE="$OUTDIR/artifactflow-analyst-tools-${ANALYST_SLUG}.tar.gz"
 SANDBOX_ARCHIVE="$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.tar.gz"
 SANDBOX_VERIFY_ARCHIVE="$OUTDIR/artifactflow-sandbox-verify-${VERSION}.tar.gz"
+GVISOR_VERSION="${GVISOR_VERSION:-20260706.0}"
+GVISOR_ARCHIVE="$OUTDIR/sandbox-gvisor-release-${GVISOR_VERSION}-${GVISOR_ARCH}.tar.gz"
 SANDBOX_GVISOR_ARCHIVE=""
 CHECKSUM_INPUTS=()
 CHECKSUM_OUTPUTS=()
 
 INFRA_DESC=$([[ $WITH_INFRA == 1 ]] && echo "included" || echo "skipped (--app-only)")
 SANDBOX_DESC=$([[ $WITH_SANDBOX == 1 ]] && echo "included" || echo "skipped")
+GVISOR_DESC=$([[ $WITH_GVISOR == 1 ]] && echo "included" || echo "skipped")
 ANALYST_DESC=$([[ $WITH_ANALYST_TOOLS == 1 ]] && echo "included" || echo "skipped")
-echo "=== ArtifactFlow Release: ${VERSION} (platform: ${PLATFORM}, infra: ${INFRA_DESC}, sandbox: ${SANDBOX_DESC}, analyst-tools: ${ANALYST_DESC}) ==="
+echo "=== ArtifactFlow Release: ${VERSION} (platform: ${PLATFORM}, infra: ${INFRA_DESC}, sandbox: ${SANDBOX_DESC}, gVisor: ${GVISOR_DESC}, analyst-tools: ${ANALYST_DESC}) ==="
 
 mkdir -p "$OUTDIR"
 
@@ -176,6 +182,18 @@ phase_forced() {
 
 file_sha() {
   shasum -a 256 "$1" | awk '{print $1}'
+}
+
+gvisor_recipe_digest() {
+  local file
+  for file in \
+    "$ROOT/sandbox/gvisor-pkg/fetch-and-package.sh" \
+    "$ROOT/sandbox/gvisor-pkg/install.sh" \
+    "$ROOT/sandbox/gvisor-pkg/smoke-test.sh" \
+    "$ROOT/sandbox/gvisor-pkg/uninstall.sh" \
+    "$ROOT/sandbox/gvisor-pkg/README.md"; do
+    printf '%s|%s\n' "$(basename "$file")" "$(file_sha "$file")"
+  done | shasum -a 256 | awk '{print $1}'
 }
 
 artifact_inputs_digest() {
@@ -206,7 +224,7 @@ phase_input() {
       printf '%s|%s|%s|%s|%s|%s\n' "$phase" "$PLATFORM" "$CADDY_TAG" "$POSTGRES_TAG" "$REDIS_TAG" "$INFRA_SLUG"
       ;;
     gvisor)
-      printf '%s|download|%s|%s\n' "$phase" "${GVISOR_VERSION:-20260706.0}" "$GVISOR_ARCH"
+      printf '%s|download|%s|%s|%s\n' "$phase" "$GVISOR_VERSION" "$GVISOR_ARCH" "$(gvisor_recipe_digest)"
       ;;
     analyst-tools)
       printf '%s|%s|%s|%s|%s\n' "$phase" "$PANDAS_VERSION" "$NUMPY_VERSION" "$ANALYST_PYTHON" "$ANALYST_PLATFORM"
@@ -215,7 +233,7 @@ phase_input() {
       printf '%s|%s\n' "$phase" "$(artifact_inputs_digest)"
       ;;
     manifest)
-      printf '%s|%s|%s|%s|%s|%s|%s|%s\n' "$phase" "$VERSION" "$PLATFORM" "$WITH_INFRA" "$WITH_SANDBOX" "$WITH_ANALYST_TOOLS" "${SANDBOX_GVISOR_ARCHIVE:-}" "$(artifact_inputs_digest)"
+      printf '%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$phase" "$VERSION" "$PLATFORM" "$WITH_INFRA" "$WITH_SANDBOX" "$WITH_GVISOR" "$WITH_ANALYST_TOOLS" "${SANDBOX_GVISOR_ARCHIVE:-}" "$(artifact_inputs_digest)"
       ;;
     *)
       printf '%s|%s|%s\n' "$phase" "$VERSION" "$PLATFORM"
@@ -262,25 +280,6 @@ write_phase_stamp() {
     done
   } > "$tmp"
   mv -f "$tmp" "$stamp"
-}
-
-phase_outputs() {
-  local phase="$1"
-  local stamp="$STATE_DIR/$phase.stamp"
-  local rel
-  [[ -f "$stamp" ]] || return 1
-  while IFS= read -r rel; do
-    [[ -n "$rel" ]] || continue
-    if [[ "$rel" = /* ]]; then
-      printf '%s\n' "$rel"
-    else
-      printf '%s/%s\n' "$ROOT" "$rel"
-    fi
-  done < <(awk -F'[=|]' '/^output=/{print $2}' "$stamp")
-}
-
-first_phase_output() {
-  phase_outputs "$1" | head -1
 }
 
 REPO_FINGERPRINT="$(repo_fingerprint)"
@@ -346,16 +345,19 @@ if [[ $WITH_SANDBOX == 1 ]]; then
     write_phase_stamp sandbox-image "$sandbox_input" "$SANDBOX_ARCHIVE" "$SANDBOX_VERIFY_ARCHIVE"
   fi
 
+fi
+
+# gVisor is a host-level OCI runtime, not part of the sandbox image. Package it
+# only for first-time host provisioning or an explicit runtime/security update.
+# The version+arch name is reusable across application releases.
+if [[ $WITH_GVISOR == 1 ]]; then
+  SANDBOX_GVISOR_ARCHIVE="$GVISOR_ARCHIVE"
   gvisor_input="$(phase_input gvisor)"
-  previous_gvisor_output="$(first_phase_output gvisor || true)"
-  if [[ -n "$previous_gvisor_output" ]] && phase_done gvisor "$gvisor_input" "$previous_gvisor_output"; then
-    SANDBOX_GVISOR_ARCHIVE="$previous_gvisor_output"
-  else
+  if ! phase_done gvisor "$gvisor_input" "$SANDBOX_GVISOR_ARCHIVE"; then
     echo "Packaging gVisor offline installer (${GVISOR_ARCH})..."
-    ARCH="$GVISOR_ARCH" "$ROOT/sandbox/gvisor-pkg/fetch-and-package.sh"
-    SANDBOX_GVISOR_ARCHIVE="$(find "$OUTDIR" -maxdepth 1 -type f -name "sandbox-gvisor-*-${GVISOR_ARCH}.tar.gz" -print | sort | tail -1)"
-    [[ -n "$SANDBOX_GVISOR_ARCHIVE" && -f "$SANDBOX_GVISOR_ARCHIVE" ]] || {
-      echo "Expected gVisor archive missing for arch ${GVISOR_ARCH}" >&2
+    GVISOR_VERSION="$GVISOR_VERSION" ARCH="$GVISOR_ARCH" "$ROOT/sandbox/gvisor-pkg/fetch-and-package.sh"
+    [[ -f "$SANDBOX_GVISOR_ARCHIVE" ]] || {
+      echo "Expected gVisor archive missing: ${SANDBOX_GVISOR_ARCHIVE}" >&2
       exit 1
     }
     write_phase_stamp gvisor "$gvisor_input" "$SANDBOX_GVISOR_ARCHIVE"
@@ -506,8 +508,9 @@ fi
 CHECKSUM_INPUTS=("$APP_ARCHIVE" "$CONFIG_ARCHIVE" "$DEPLOY_ARCHIVE")
 [[ $WITH_INFRA == 1 ]] && CHECKSUM_INPUTS+=("$INFRA_ARCHIVE")
 if [[ $WITH_SANDBOX == 1 ]]; then
-  CHECKSUM_INPUTS+=("$SANDBOX_ARCHIVE" "$SANDBOX_VERIFY_ARCHIVE" "$SANDBOX_GVISOR_ARCHIVE")
+  CHECKSUM_INPUTS+=("$SANDBOX_ARCHIVE" "$SANDBOX_VERIFY_ARCHIVE")
 fi
+[[ $WITH_GVISOR == 1 ]] && CHECKSUM_INPUTS+=("$SANDBOX_GVISOR_ARCHIVE")
 [[ $WITH_ANALYST_TOOLS == 1 ]] && CHECKSUM_INPUTS+=("$ANALYST_ARCHIVE")
 
 CHECKSUM_OUTPUTS=()
@@ -544,6 +547,7 @@ if ! phase_done manifest "$manifest_input" "$MANIFEST"; then
   LAYOUT_DESC="app + config + deploy"
   [[ $WITH_INFRA == 1 ]] && LAYOUT_DESC+=" + infra"
   [[ $WITH_SANDBOX == 1 ]] && LAYOUT_DESC+=" + sandbox"
+  [[ $WITH_GVISOR == 1 ]] && LAYOUT_DESC+=" + gVisor runtime"
   [[ $WITH_ANALYST_TOOLS == 1 ]] && LAYOUT_DESC+=" + analyst-tools"
   echo "Layout:       $LAYOUT_DESC"
   echo ""
@@ -570,11 +574,10 @@ if ! phase_done manifest "$manifest_input" "$MANIFEST"; then
   fi
   echo ""
   if [[ $WITH_SANDBOX == 1 ]]; then
-    echo "Sandbox bundle:"
+    echo "Sandbox image bundle:"
     echo "  required: ${SANDBOX_IMAGE_REF}"
     echo "  image:   $(basename "$SANDBOX_ARCHIVE")"
     echo "  verify:  $(basename "$SANDBOX_VERIFY_ARCHIVE")"
-    echo "  gVisor:  $(basename "$SANDBOX_GVISOR_ARCHIVE")"
     echo "  target:  deploy/scripts/fleet.sh prepare-sandbox <bundle-dir>, then"
     echo "           AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy <bundle-dir>"
     if [[ -f "$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt" ]]; then
@@ -582,9 +585,17 @@ if ! phase_done manifest "$manifest_input" "$MANIFEST"; then
       [[ -n "$image_id" ]] && echo "  image id: $image_id"
     fi
   else
-    echo "Sandbox bundle: skipped — target must already have runsc +"
+    echo "Sandbox image bundle: skipped — target must already have"
     echo "  ${SANDBOX_IMAGE_REF} + scratch root, or re-run release with"
     echo "  --with-sandbox to ship the required immutable sandbox image."
+  fi
+  echo ""
+  if [[ $WITH_GVISOR == 1 ]]; then
+    echo "gVisor host runtime: $(basename "$SANDBOX_GVISOR_ARCHIVE")"
+    echo "  pinned: release-${GVISOR_VERSION} (${GVISOR_ARCH})"
+  else
+    echo "gVisor host runtime: skipped — target must already have runsc registered."
+    echo "  Use --with-gvisor only for a new host or an explicit runtime update."
   fi
   echo ""
   echo "Config tar highlights:"
@@ -630,8 +641,10 @@ if [[ $WITH_INFRA == 1 ]]; then
 fi
 if [[ $WITH_SANDBOX == 1 ]]; then
   ls -lh "$SANDBOX_ARCHIVE" "$SANDBOX_ARCHIVE.sha256" \
-         "$SANDBOX_VERIFY_ARCHIVE" "$SANDBOX_VERIFY_ARCHIVE.sha256" \
-         "$SANDBOX_GVISOR_ARCHIVE" "$SANDBOX_GVISOR_ARCHIVE.sha256"
+         "$SANDBOX_VERIFY_ARCHIVE" "$SANDBOX_VERIFY_ARCHIVE.sha256"
+fi
+if [[ $WITH_GVISOR == 1 ]]; then
+  ls -lh "$SANDBOX_GVISOR_ARCHIVE" "$SANDBOX_GVISOR_ARCHIVE.sha256"
 fi
 if [[ $WITH_ANALYST_TOOLS == 1 ]]; then
   ls -lh "$ANALYST_ARCHIVE" "$ANALYST_ARCHIVE.sha256"
@@ -652,17 +665,27 @@ else
   INFRA_FOOTER="  # (infra tar omitted — re-run release with --with-infra to ship caddy/postgres/redis images)"
 fi
 if [[ $WITH_SANDBOX == 1 ]]; then
-  SANDBOX_ARTIFACTS=$'\n  #   artifactflow-sandbox-'"${VERSION}-${ARCH_TAG}"$'.tar.gz{,.sha256}\n  #   artifactflow-sandbox-verify-'"${VERSION}"$'.tar.gz{,.sha256}\n  #   '"$(basename "$SANDBOX_GVISOR_ARCHIVE")"$'{,.sha256}'
-  SANDBOX_PREP_LOCAL=$'\n    # Requires root: installs/registers runsc and mounts the sandbox scratch loop.\n    sudo env AF_BUNDLE_VERSION='"${VERSION}"$' \\\n      AF_SANDBOX_POOL=/data/artifactflow/sandbox-pool.img \\\n      AF_SANDBOX_SCRATCH_ROOT=/data/artifactflow/sandbox-scratch \\\n      AF_SANDBOX_POOL_SIZE=80G \\\n      deploy/scripts/fleet.sh prepare-sandbox "$BUNDLE"'
-  SANDBOX_PREP_TMP=$'\n    # Requires root: refreshes runsc/sandbox image/scratch prerequisites from this bundle.\n    sudo env AF_BUNDLE_VERSION='"${VERSION}"$' \\\n      AF_SANDBOX_POOL=/data/artifactflow/sandbox-pool.img \\\n      AF_SANDBOX_SCRATCH_ROOT=/data/artifactflow/sandbox-scratch \\\n      AF_SANDBOX_POOL_SIZE=80G \\\n      ./deploy/scripts/fleet.sh prepare-sandbox "$BUNDLE"'
+  SANDBOX_ARTIFACTS=$'\n  #   artifactflow-sandbox-'"${VERSION}-${ARCH_TAG}"$'.tar.gz{,.sha256}\n  #   artifactflow-sandbox-verify-'"${VERSION}"$'.tar.gz{,.sha256}'
   SANDBOX_UP_PREFIX="AF_ENABLE_SANDBOX=1 "
   SANDBOX_FOOTER=""
 else
   SANDBOX_ARTIFACTS=""
+  SANDBOX_UP_PREFIX=""
+  SANDBOX_FOOTER="  # (sandbox image omitted — re-run release with --with-sandbox to ship the image + verify probes)"
+fi
+if [[ $WITH_GVISOR == 1 ]]; then
+  GVISOR_ARTIFACTS=$'\n  #   '"$(basename "$SANDBOX_GVISOR_ARCHIVE")"$'{,.sha256}'
+  GVISOR_FOOTER=""
+else
+  GVISOR_ARTIFACTS=""
+  GVISOR_FOOTER="  # (gVisor omitted — target must already have runsc; use --with-gvisor for provisioning/update)"
+fi
+if [[ $WITH_SANDBOX == 1 || $WITH_GVISOR == 1 ]]; then
+  SANDBOX_PREP_LOCAL=$'\n    # Requires root: loads sandbox units and reuses runsc unless a gVisor package is present.\n    sudo env AF_BUNDLE_VERSION='"${VERSION}"$' \\\n+      AF_SANDBOX_POOL=/data/artifactflow/sandbox-pool.img \\\n+      AF_SANDBOX_SCRATCH_ROOT=/data/artifactflow/sandbox-scratch \\\n+      AF_SANDBOX_POOL_SIZE=80G \\\n+      deploy/scripts/fleet.sh prepare-sandbox "$BUNDLE"'
+  SANDBOX_PREP_TMP=$'\n    # Requires root: refreshes the sandbox units present in this bundle.\n    sudo env AF_BUNDLE_VERSION='"${VERSION}"$' \\\n+      AF_SANDBOX_POOL=/data/artifactflow/sandbox-pool.img \\\n+      AF_SANDBOX_SCRATCH_ROOT=/data/artifactflow/sandbox-scratch \\\n+      AF_SANDBOX_POOL_SIZE=80G \\\n+      ./deploy/scripts/fleet.sh prepare-sandbox "$BUNDLE"'
+else
   SANDBOX_PREP_LOCAL=""
   SANDBOX_PREP_TMP=""
-  SANDBOX_UP_PREFIX=""
-  SANDBOX_FOOTER="  # (sandbox bundle omitted — re-run release with --with-sandbox to ship runsc + sandbox image + verify probes)"
 fi
 if [[ $WITH_ANALYST_TOOLS == 1 ]]; then
   ANALYST_ARTIFACTS=$'\n  #   artifactflow-analyst-tools-'"${ANALYST_SLUG}"$'.tar.gz{,.sha256}'
@@ -683,10 +706,11 @@ To deploy on air-gapped host:
   # ---- First-time deployment ----
 $INFRA_FOOTER
 $SANDBOX_FOOTER
+$GVISOR_FOOTER
 $ANALYST_FOOTER
   # Target bundle directory: /root/workspace/tmp/${VERSION}/
   # Required files for this build:
-  #   artifactflow-{app,config,deploy}-${VERSION}.tar.gz{,.sha256}${INFRA_ARTIFACTS}${SANDBOX_ARTIFACTS}${ANALYST_ARTIFACTS}
+  #   artifactflow-{app,config,deploy}-${VERSION}.tar.gz{,.sha256}${INFRA_ARTIFACTS}${SANDBOX_ARTIFACTS}${GVISOR_ARTIFACTS}${ANALYST_ARTIFACTS}
   #   artifactflow-${VERSION}.manifest.txt
 
   # On the target host:
@@ -710,7 +734,7 @@ ${SANDBOX_PREP_LOCAL}
   # ---- Roll-update (no infra, no analyst-tools re-ship) ----
   # Target bundle directory: /root/workspace/tmp/${VERSION}/
   # Required files for this build:
-  #   artifactflow-{app,config,deploy}-${VERSION}.tar.gz{,.sha256}${SANDBOX_ARTIFACTS}
+  #   artifactflow-{app,config,deploy}-${VERSION}.tar.gz{,.sha256}${SANDBOX_ARTIFACTS}${GVISOR_ARTIFACTS}
   #   artifactflow-${VERSION}.manifest.txt
 
   # On the target host:

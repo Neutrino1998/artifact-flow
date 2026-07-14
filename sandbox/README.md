@@ -42,12 +42,12 @@ inside uses a runtime-input content tag recorded as `Image ref` in its manifest.
 
 ```bash
 # x86_64 (default)
-sandbox/gvisor-pkg/fetch-and-package.sh                  # → dist/sandbox-gvisor-<date>-x86_64.tar.gz
+sandbox/gvisor-pkg/fetch-and-package.sh                  # → dist/sandbox-gvisor-release-20260706.0-x86_64.tar.gz
 ./scripts/build-sandbox-image.sh                         # → dist/artifactflow-sandbox-<date>-amd64.tar.gz (image)
 
 # arm64 / Kunpeng (Kylin arm) — arm64 builds NATIVE on Apple Silicon (fast)
 ARCH=aarch64 sandbox/docker-pkg/fetch-and-package.sh     # → dist/docker-offline-<date>-aarch64.tar.gz  (bare node!)
-ARCH=aarch64 sandbox/gvisor-pkg/fetch-and-package.sh     # → dist/sandbox-gvisor-<date>-aarch64.tar.gz
+ARCH=aarch64 sandbox/gvisor-pkg/fetch-and-package.sh     # → dist/sandbox-gvisor-release-20260706.0-aarch64.tar.gz
 PLATFORM=linux/arm64 ./scripts/build-sandbox-image.sh    # → dist/artifactflow-sandbox-<date>-arm64.tar.gz (image)
 # verify tar is arch-agnostic (shared): dist/artifactflow-sandbox-verify-<date>.tar.gz
 ```
@@ -86,7 +86,7 @@ tar xzf docker-offline-<date>-<arch>.tar.gz && cd docker-offline-<date>-<arch>
 sudo ./install.sh && docker info | grep -i 'server version'; cd ..
 
 # 1. gVisor (as root)
-tar xzf sandbox-gvisor-<date>-<arch>.tar.gz && cd sandbox-gvisor-<date>-<arch>
+tar xzf sandbox-gvisor-release-<version>-<arch>.tar.gz && cd sandbox-gvisor-release-<version>-<arch>
 sudo ./install.sh && sudo systemctl reload docker && sudo ./smoke-test.sh; cd ..
 
 # 2. sandbox image + verify probes
@@ -101,7 +101,7 @@ PROBE_HOST=<internal-ip:port> PROBE_NAME=<internal.hostname> \
   bash verify/run-all.sh
 
 # 4. withdraw
-cd sandbox-gvisor-<date>-<arch> && sudo ./uninstall.sh && sudo systemctl reload docker; cd ..
+cd sandbox-gvisor-release-<version>-<arch> && sudo ./uninstall.sh && sudo systemctl reload docker; cd ..
 docker rmi "$IMAGE"
 # on a node provisioned just for this: also remove docker
 cd docker-offline-<date>-<arch> && sudo PURGE=1 ./uninstall.sh

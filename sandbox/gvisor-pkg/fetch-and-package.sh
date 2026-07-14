@@ -13,7 +13,8 @@ set -euo pipefail
 #   GVISOR_VERSION=20260706.0 ARCH=x86_64 sandbox/gvisor-pkg/fetch-and-package.sh
 #
 # Version pinned to the 2026-07-09 ARM intranet deployment download result.
-# The older 20260504.0 point-release URL was not reachable from the build host.
+# The package name is version+arch addressed so the same verified runtime bundle
+# is reused across application releases instead of being downloaded each time.
 
 GVISOR_VERSION="${GVISOR_VERSION:-20260706.0}"
 ARCH="${ARCH:-x86_64}"
@@ -22,12 +23,29 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 OUTDIR="$ROOT/dist"
 BASEURL="https://storage.googleapis.com/gvisor/releases/release/${GVISOR_VERSION}/${ARCH}"
-STAMP="$(date +%Y%m%d)"
 # arch in the name so x86_64 + aarch64 packages coexist in dist/ (a target node
 # is single-arch — the gVisor binary is arch-specific, unlike the verify probes).
-STAGE="$OUTDIR/sandbox-gvisor-${STAMP}-${ARCH}"
-TAR="$OUTDIR/sandbox-gvisor-${STAMP}-${ARCH}.tar.gz"
+PACKAGE="sandbox-gvisor-release-${GVISOR_VERSION}-${ARCH}"
+STAGE="$OUTDIR/$PACKAGE"
+TAR="$OUTDIR/$PACKAGE.tar.gz"
+RECIPE_SHA="$({
+  for source in "$HERE/fetch-and-package.sh" "$HERE/install.sh" "$HERE/smoke-test.sh" "$HERE/uninstall.sh" "$HERE/README.md"; do
+    shasum -a 256 "$source"
+  done
+} | shasum -a 256 | awk '{print $1}')"
+PACKAGED_RECIPE_SHA=""
+if [[ -f "$TAR" ]]; then
+  PACKAGED_RECIPE_SHA="$(tar -xOf "$TAR" "$PACKAGE/PACKAGE-RECIPE.sha256" 2>/dev/null || true)"
+fi
 
+if [[ -f "$TAR" && -f "$TAR.sha256" ]] \
+    && [[ "$PACKAGED_RECIPE_SHA" == "$RECIPE_SHA" ]] \
+    && ( cd "$OUTDIR" && sha256sum -c "$(basename "$TAR").sha256" >/dev/null 2>&1 ); then
+  echo "✓ reusing verified $TAR"
+  exit 0
+fi
+
+rm -rf "$STAGE"
 mkdir -p "$STAGE/bin"
 
 echo "=== gVisor offline package: release-${GVISOR_VERSION} (${ARCH}) ==="
@@ -44,8 +62,9 @@ echo "→ assembling package (scripts from repo)..."
 cp "$HERE/install.sh" "$HERE/smoke-test.sh" "$HERE/uninstall.sh" "$HERE/README.md" "$STAGE/"
 chmod +x "$STAGE"/*.sh
 echo "release-${GVISOR_VERSION}, ${ARCH}" > "$STAGE/VERSION"
+echo "$RECIPE_SHA" > "$STAGE/PACKAGE-RECIPE.sha256"
 
-tar -czf "$TAR" -C "$OUTDIR" "sandbox-gvisor-${STAMP}-${ARCH}"
+tar -czf "$TAR" -C "$OUTDIR" "$PACKAGE"
 ( cd "$OUTDIR" && sha256sum "$(basename "$TAR")" > "$(basename "$TAR").sha256" )
 rm -rf "$STAGE"
 
@@ -53,4 +72,4 @@ echo
 echo "✓ $TAR"
 echo "✓ $TAR.sha256"
 echo
-echo "Carry to the intranet node, then: tar xzf $(basename "$TAR") && cd sandbox-gvisor-${STAMP}-${ARCH} && sudo ./install.sh"
+echo "Carry to the intranet node, then: tar xzf $(basename "$TAR") && cd $PACKAGE && sudo ./install.sh"

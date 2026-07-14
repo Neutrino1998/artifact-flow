@@ -16,7 +16,7 @@
 #   fleet.sh preflight                 per-host docker/compose/disk/clock + deploy/.env checks
 #   fleet.sh deploy <bundle-dir>       verify → extract → load → release gate → (rolling) up → LB → smoke
 #   fleet.sh deploy --dry-run <dir>    print the plan, touch nothing
-#   fleet.sh prepare-sandbox <dir>     install runsc + load sandbox image from bundle
+#   fleet.sh prepare-sandbox <dir>     load sandbox image; install runsc only when bundled
 #   fleet.sh status                    per-host `compose ps` + /health/ready probe
 #   fleet.sh rollback                  re-up the previously-deployed version (images kept)
 #   fleet.sh rollback --dry-run        print the rollback plan
@@ -433,10 +433,16 @@ prepare_sandbox_single_local() {
     info "no sandbox transfer units in bundle — assuming host sandbox prerequisites are already prepared"
     return 0
   fi
-  (( has_image && has_verify && has_gvisor )) || die "incomplete sandbox bundle in $BUNDLE (need image + verify + gVisor tars)"
+  (( has_image == has_verify )) \
+    || die "incomplete sandbox bundle in $BUNDLE (sandbox image + verify tars must be paired; gVisor is optional)"
 
   step "prepare sandbox host prerequisites"
   if (( DRY )); then
+    if (( has_gvisor )); then
+      info "gVisor package present — would install/update runsc"
+    else
+      info "gVisor package absent — would require existing runsc registration"
+    fi
     info "would: AF_SANDBOX_IMAGE=$SANDBOX_TAR AF_SANDBOX_IMAGE_REF=$BUNDLE_SANDBOX_IMAGE AF_SANDBOX_VERIFY=$SANDBOX_VERIFY_TAR AF_GVISOR_PACKAGE=$SANDBOX_GVISOR_TAR deploy/scripts/prepare-host.sh sandbox"
   else
     AF_SANDBOX_IMAGE="$SANDBOX_TAR" \

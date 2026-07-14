@@ -19,7 +19,8 @@
 #   AF_SANDBOX_IMAGE           default: newest artifactflow-sandbox-*.tar.gz in cwd
 #   AF_SANDBOX_IMAGE_REF       immutable image required by the release manifest
 #   AF_SANDBOX_VERIFY          default: newest artifactflow-sandbox-verify-*.tar.gz in cwd
-#   AF_GVISOR_PACKAGE          default: newest sandbox-gvisor-*.tar.gz in cwd
+#   AF_GVISOR_PACKAGE          optional gVisor installer; empty means reuse runsc
+#                              (unset: auto-detect newest package for direct use)
 
 set -uo pipefail
 
@@ -326,56 +327,95 @@ cmd_sandbox() {
   step "sandbox bootstrap"
 
   local gvisor image verify
-  gvisor="${AF_GVISOR_PACKAGE:-$(newest 'sandbox-gvisor-*.tar.gz')}"
-  image="${AF_SANDBOX_IMAGE:-$(newest_sandbox_image)}"
-  verify="${AF_SANDBOX_VERIFY:-$(newest 'artifactflow-sandbox-verify-*.tar.gz')}"
-
-  [[ -n "$gvisor" && -f "$gvisor" ]] || die "gVisor package not found (expected sandbox-gvisor-*.tar.gz or AF_GVISOR_PACKAGE)"
-  [[ -n "$image" && -f "$image" ]] || die "sandbox image tar not found (expected artifactflow-sandbox-*.tar.gz or AF_SANDBOX_IMAGE)"
-  [[ -n "$verify" && -f "$verify" ]] || die "sandbox verify tar not found (expected artifactflow-sandbox-verify-*.tar.gz or AF_SANDBOX_VERIFY)"
-
-  if [[ -f "$gvisor.sha256" || -f "$image.sha256" || -f "$verify.sha256" ]]; then
-    step "verify sandbox transfer units"
-    verify_adjacent_sha "$gvisor" && verify_adjacent_sha "$image" && verify_adjacent_sha "$verify" \
-      && ok "sandbox checksums OK" || die "sandbox checksum verification failed"
-  fi
-
-  local gvisor_dir
-  gvisor_dir="$ROOT/$(basename "$gvisor" .tar.gz)"
-  if [[ ! -d "$gvisor_dir" ]]; then
-    tar xzf "$gvisor" -C "$ROOT" || die "failed to extract $gvisor"
-  fi
-  [[ -x "$gvisor_dir/install.sh" ]] || die "missing $gvisor_dir/install.sh"
-
-  "$gvisor_dir/install.sh" || die "gVisor install failed"
-  systemctl reload docker || die "docker reload failed"
-
-  local load_output loaded_tag loaded_latest image_ref expected_ref
-  expected_ref="${AF_SANDBOX_IMAGE_REF:-}"
-  load_output="$(docker load -i "$image")" || die "sandbox docker load failed"
-  printf '%s\n' "$load_output" | sed 's/^/  /'
-  if [[ -n "$expected_ref" ]]; then
-    docker image inspect "$expected_ref" >/dev/null 2>&1 \
-      || die "sandbox archive does not contain required image $expected_ref"
-    image_ref="$expected_ref"
-    ok "$image_ref loaded from $(basename "$image")"
+  if [[ ${AF_GVISOR_PACKAGE+x} ]]; then
+    gvisor="$AF_GVISOR_PACKAGE"
   else
-    loaded_latest="$(printf '%s\n' "$load_output" | awk '$0 == "Loaded image: artifactflow-sandbox:latest" {print; exit}')"
-    loaded_tag="$(printf '%s\n' "$load_output" | awk -F': ' '/^Loaded image: artifactflow-sandbox:/ && $2 !~ /:latest$/ {print $2; exit}')"
-    if [[ -n "$loaded_latest" ]]; then
-      image_ref="artifactflow-sandbox:latest"
-      ok "$image_ref loaded from $(basename "$image")"
-    elif [[ -n "$loaded_tag" ]]; then
-      docker tag "$loaded_tag" artifactflow-sandbox:latest \
-        || die "failed to tag $loaded_tag as artifactflow-sandbox:latest"
-      image_ref="artifactflow-sandbox:latest"
-      ok "tagged $loaded_tag as $image_ref for standalone use"
-    else
-      die "loaded sandbox image tag not found in docker load output"
-    fi
+    gvisor="$(newest 'sandbox-gvisor-*.tar.gz')"
+  fi
+  if [[ ${AF_SANDBOX_IMAGE+x} ]]; then
+    image="$AF_SANDBOX_IMAGE"
+  else
+    image="$(newest_sandbox_image)"
+  fi
+  if [[ ${AF_SANDBOX_VERIFY+x} ]]; then
+    verify="$AF_SANDBOX_VERIFY"
+  else
+    verify="$(newest 'artifactflow-sandbox-verify-*.tar.gz')"
   fi
 
-  "$gvisor_dir/smoke-test.sh" "$image_ref" || die "gVisor smoke failed"
+  [[ -z "$gvisor" || -f "$gvisor" ]] || die "gVisor package not found: $gvisor"
+  [[ -z "$image" || -f "$image" ]] || die "sandbox image tar not found: $image"
+  [[ -z "$verify" || -f "$verify" ]] || die "sandbox verify tar not found: $verify"
+  [[ -n "$image" && -n "$verify" || -z "$image" && -z "$verify" ]] \
+    || die "sandbox image + verify tars must be supplied together"
+  [[ -n "$gvisor" || -n "$image" ]] \
+    || die "no sandbox transfer units supplied (need image + verify and/or optional gVisor package)"
+
+  local unit any_checksum=0
+  for unit in "$gvisor" "$image" "$verify"; do
+    [[ -n "$unit" && -f "$unit.sha256" ]] && any_checksum=1
+  done
+  if (( any_checksum )); then
+    step "verify sandbox transfer units"
+    for unit in "$gvisor" "$image" "$verify"; do
+      [[ -z "$unit" ]] && continue
+      verify_adjacent_sha "$unit" || die "sandbox checksum verification failed"
+    done
+    ok "sandbox checksums OK"
+  fi
+
+  local gvisor_dir=""
+  if [[ -n "$gvisor" ]]; then
+    step "install/update gVisor host runtime"
+    gvisor_dir="$ROOT/$(basename "$gvisor" .tar.gz)"
+    tar xzf "$gvisor" -C "$ROOT" || die "failed to extract $gvisor"
+    [[ -x "$gvisor_dir/install.sh" ]] || die "missing $gvisor_dir/install.sh"
+
+    "$gvisor_dir/install.sh" || die "gVisor install failed"
+    systemctl reload docker || die "docker reload failed"
+  else
+    info "gVisor package not supplied; reusing host runsc"
+  fi
+  command -v runsc >/dev/null 2>&1 \
+    || die "runsc is missing; rebuild the release with --with-gvisor for host provisioning"
+  docker info 2>/dev/null | grep -q runsc \
+    || die "Docker runtime runsc is not registered; rebuild with --with-gvisor or repair /etc/docker/daemon.json"
+
+  local load_output="" loaded_tag="" loaded_latest="" image_ref expected_ref
+  expected_ref="${AF_SANDBOX_IMAGE_REF:-}"
+  if [[ -n "$image" ]]; then
+    load_output="$(docker load -i "$image")" || die "sandbox docker load failed"
+    printf '%s\n' "$load_output" | sed 's/^/  /'
+    if [[ -n "$expected_ref" ]]; then
+      docker image inspect "$expected_ref" >/dev/null 2>&1 \
+        || die "sandbox archive does not contain required image $expected_ref"
+      image_ref="$expected_ref"
+      ok "$image_ref loaded from $(basename "$image")"
+    else
+      loaded_latest="$(printf '%s\n' "$load_output" | awk '$0 == "Loaded image: artifactflow-sandbox:latest" {print; exit}')"
+      loaded_tag="$(printf '%s\n' "$load_output" | awk -F': ' '/^Loaded image: artifactflow-sandbox:/ && $2 !~ /:latest$/ {print $2; exit}')"
+      if [[ -n "$loaded_latest" ]]; then
+        image_ref="artifactflow-sandbox:latest"
+        ok "$image_ref loaded from $(basename "$image")"
+      elif [[ -n "$loaded_tag" ]]; then
+        docker tag "$loaded_tag" artifactflow-sandbox:latest \
+          || die "failed to tag $loaded_tag as artifactflow-sandbox:latest"
+        image_ref="artifactflow-sandbox:latest"
+        ok "tagged $loaded_tag as $image_ref for standalone use"
+      else
+        die "loaded sandbox image tag not found in docker load output"
+      fi
+    fi
+  else
+    image_ref="${expected_ref:-artifactflow-sandbox:latest}"
+    docker image inspect "$image_ref" >/dev/null 2>&1 \
+      || die "required sandbox image $image_ref is not loaded; include --with-sandbox"
+    ok "reusing loaded $image_ref"
+  fi
+
+  if [[ -n "$gvisor_dir" ]]; then
+    "$gvisor_dir/smoke-test.sh" "$image_ref" || die "gVisor smoke failed"
+  fi
 
   local pool root size
   pool="${AF_SANDBOX_POOL:-/var/lib/artifactflow/sandbox-pool.img}"
@@ -397,9 +437,11 @@ cmd_sandbox() {
   fi
   df -h "$root" | sed 's/^/  /'
 
-  step "sandbox verify probes"
-  tar xzf "$verify" -C "$ROOT" || die "failed to extract $verify"
-  ( cd "$ROOT" && IMAGE="$image_ref" bash verify/run-all.sh ) || die "sandbox verify failed"
+  if [[ -n "$verify" ]]; then
+    step "sandbox verify probes"
+    tar xzf "$verify" -C "$ROOT" || die "failed to extract $verify"
+    ( cd "$ROOT" && IMAGE="$image_ref" bash verify/run-all.sh ) || die "sandbox verify failed"
+  fi
 
   if [[ -f "$ROOT/deploy/.env" ]]; then
     step "write deploy/.env sandbox settings"
