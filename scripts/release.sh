@@ -681,8 +681,8 @@ else
   GVISOR_FOOTER="  # (gVisor omitted — target must already have runsc; use --with-gvisor for provisioning/update)"
 fi
 if [[ $WITH_SANDBOX == 1 || $WITH_GVISOR == 1 ]]; then
-  SANDBOX_PREP_LOCAL=$'\n    # Requires root: loads sandbox units and reuses runsc unless a gVisor package is present.\n    sudo env AF_BUNDLE_VERSION='"${VERSION}"$' \\\n+      AF_SANDBOX_POOL=/data/artifactflow/sandbox-pool.img \\\n+      AF_SANDBOX_SCRATCH_ROOT=/data/artifactflow/sandbox-scratch \\\n+      AF_SANDBOX_POOL_SIZE=80G \\\n+      deploy/scripts/fleet.sh prepare-sandbox "$BUNDLE"'
-  SANDBOX_PREP_TMP=$'\n    # Requires root: refreshes the sandbox units present in this bundle.\n    sudo env AF_BUNDLE_VERSION='"${VERSION}"$' \\\n+      AF_SANDBOX_POOL=/data/artifactflow/sandbox-pool.img \\\n+      AF_SANDBOX_SCRATCH_ROOT=/data/artifactflow/sandbox-scratch \\\n+      AF_SANDBOX_POOL_SIZE=80G \\\n+      ./deploy/scripts/fleet.sh prepare-sandbox "$BUNDLE"'
+  SANDBOX_PREP_LOCAL=$'\n    # Requires root: loads sandbox units and reuses runsc unless a gVisor package is present.\n    sudo env AF_BUNDLE_VERSION='"${VERSION}"$' \\\n      AF_SANDBOX_POOL=/data/artifactflow/sandbox-pool.img \\\n      AF_SANDBOX_SCRATCH_ROOT=/data/artifactflow/sandbox-scratch \\\n      AF_SANDBOX_POOL_SIZE=80G \\\n      deploy/scripts/fleet.sh prepare-sandbox "$BUNDLE"'
+  SANDBOX_PREP_TMP=$'\n    # Requires root: refreshes the sandbox units present in this bundle.\n    sudo env AF_BUNDLE_VERSION='"${VERSION}"$' \\\n      AF_SANDBOX_POOL=/data/artifactflow/sandbox-pool.img \\\n      AF_SANDBOX_SCRATCH_ROOT=/data/artifactflow/sandbox-scratch \\\n      AF_SANDBOX_POOL_SIZE=80G \\\n      ./deploy/scripts/fleet.sh prepare-sandbox "$BUNDLE"'
 else
   SANDBOX_PREP_LOCAL=""
   SANDBOX_PREP_TMP=""

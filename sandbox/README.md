@@ -52,11 +52,11 @@ PLATFORM=linux/arm64 ./scripts/build-sandbox-image.sh    # → dist/artifactflow
 # verify tar is arch-agnostic (shared): dist/artifactflow-sandbox-verify-<date>.tar.gz
 ```
 
-**Transfer units** to the air-gapped node: the **image** tar, the **verify** tar
-(shared), the **gVisor package** tar — plus, on a *bare* node, the **docker
-offline** tar (engine+compose, since nothing is installed). The probes are NOT
-baked into the image (the host-side ones run on the host), so they ride their
-own tar.
+**Transfer units** for a normal sandbox update: the **image** tar and the
+**verify** tar (shared). Add the **gVisor package** only for a new host or an
+explicit runsc upgrade; on a *bare* node also add the **docker offline** tar
+(engine+compose, since nothing is installed). The probes are NOT baked into the
+image (the host-side ones run on the host), so they ride their own tar.
 
 Arch note: `build-sandbox-image.sh` builds `linux/arm64` NATIVE on Apple Silicon
 (fast); `linux/amd64` is QEMU-emulated (slow — a mid-build SSL/EOF is usually the
