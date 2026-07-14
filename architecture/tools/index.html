@@ -1781,9 +1781,10 @@
 <p><strong>CDATA-aware 拆分</strong> → <strong>标准解析</strong> → <strong>修复后重试</strong> → <strong>诚实错误 ToolCall</strong></p>
 <p>第一步拆分是 <strong>CDATA-aware</strong> 的：扫描 <code>&lt;/tool_call&gt;</code> 终止符时跳过 <code>&lt;![CDATA[...]]&gt;</code> 区，所以
 artifact 正文里出现字面 <code>&lt;/tool_call&gt;</code> / <code>&lt;/params&gt;</code> 不会把一个完整调用误拆。<strong>修复策略本身也
-对 CDATA 盲区免疫</strong>——结构判定（缺 <code>&lt;/params&gt;</code>、散落参数等）在「遮蔽 CDATA 的副本」上做，绝不
-把内容里的字面标签当结构。</p>
-<p>修复策略覆盖以下常见问题：</p>
+对 CDATA 盲区免疫</strong>——raw-string repair 的结构判定在「遮蔽 CDATA 的副本」上做，绝不把内容里的
+字面标签当结构；well-formed XML 的 tool-call grammar 则由 ElementTree 的层级结果校验。CDATA
+拆分、遮蔽、尾部检测和失败归类共用同一个游标单向前进的分段器；对模型输出的所有扫描都必须与响应长度线性相关。</p>
+<p>仅对意图可唯一确定的常见问题做兼容修复：</p>
 <table>
 <thead>
 <tr>
@@ -1809,21 +1810,17 @@ artifact 正文里出现字面 <code>&lt;/tool_call&gt;</code> / <code>&lt;/para
 <td>补全闭合标签</td>
 </tr>
 <tr>
-<td>散落的参数标签</td>
-<td>参数出现在 <code>&lt;params&gt;</code> 外部或多个 <code>&lt;params&gt;</code> 块</td>
-<td>合并收集到单个 <code>&lt;params&gt;</code> 中</td>
-</tr>
-<tr>
 <td>缺失 <code>&lt;/params&gt;</code></td>
 <td>没有 params 闭合标签</td>
 <td>追加闭合标签</td>
 </tr>
 </tbody>
 </table>
-<p><strong>截断（输出撞 max_tokens）单独处理</strong>：截断只可能命中输出流尾部那一个未终止的 <code>&lt;tool_call&gt;</code>，
-拆分层据此识别。尾部块若是真截断（CDATA 未闭合 / 末尾字段未闭合）→ 直接返回<strong>清晰的截断错误
-ToolCall</strong>（不再 salvage 残缺内容，因为残缺的 <code>new_str</code> 之类无法可靠应用），提示模型缩小单次输出
-或分多次写入。仅漏了 <code>&lt;/tool_call&gt;</code> 但字段都完整的尾部块，仍正常解析。</p>
+<p><strong>尾部不完整调用单独处理</strong>：未闭合 CDATA / 末尾字段可能是 provider cutoff，也可能只是
+模型漏写闭合符；parser 不从文本猜测根因，也不 salvage 残缺参数。多个 <code>&lt;params&gt;</code>、顶层散落参数、
+重复参数名同样直接拒绝，因为合并/覆盖语义不唯一。所有解析失败都返回同一份完整 tool-call 格式，
+分支只追加中性的 <code>Observed issue</code>。仅漏 <code>&lt;/tool_call&gt;</code> 但字段完整的尾部块仍正常解析。
+规范单次调用示例定义在 <code>tools/xml_protocol.py</code>，system prompt 和 parser 错误共用，避免协议漂移。</p>
 <p>所有解析手段均失败时，返回 <code>ToolCall(name="__malformed__", error=...)</code>（<strong>不</strong>用正则 fallback 去
 捏造残缺参数）而非静默忽略，确保 engine 将解析错误反馈给 agent。</p>
 <h2 id="权限模型">权限模型</h2>
@@ -1873,7 +1870,7 @@ ToolCall</strong>（不再 salvage 残缺内容，因为残缺的 <code>new_str<
 <tbody>
 <tr>
 <td><code>string</code></td>
-<td>保持原值</td>
+<td>保持 XML 解码后的原值（不做 <code>strip</code>）</td>
 </tr>
 <tr>
 <td><code>integer</code></td>

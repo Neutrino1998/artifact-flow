@@ -821,6 +821,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#llm-与-mcp-http-分阶段超时" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LLM 与 MCP HTTP 分阶段超时
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#compaction-与上下文" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2133,6 +2144,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#llm-与-mcp-http-分阶段超时" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LLM 与 MCP HTTP 分阶段超时
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#compaction-与上下文" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2606,24 +2628,29 @@
 <a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="c1">#   artifactflow-infra-caddy2.10-pg16-redis7.tar.gz  (~130MB)</span>
 <a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="c1"># 文件名按 base image 版本内容寻址 —— 目标机已有同名 tar 就可跳过传输</span>
 <a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>
-<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="c1"># 首次部署且要启用 bash/mount/persist 沙盒工具 —— 再加 sandbox 宿主前置包</span>
-<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>./scripts/release.sh<span class="w"> </span><span class="m">1</span>.0.0<span class="w"> </span>--with-infra<span class="w"> </span>--with-sandbox
-<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a><span class="c1"># 额外产出：</span>
-<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a><span class="c1">#   artifactflow-sandbox-1.0.0-amd64.tar.gz       sandbox 运行镜像</span>
-<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a><span class="c1">#   artifactflow-sandbox-verify-1.0.0.tar.gz      gVisor 验证探针</span>
-<a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a><span class="c1">#   sandbox-gvisor-&lt;date&gt;-x86_64.tar.gz           runsc 离线安装包</span>
-<a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a>
-<a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a><span class="c1"># release 是阶段化的；如果网络在后段下载 gVisor / wheels 时抖掉，</span>
-<a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a><span class="c1"># 修复网络后用 --resume 重跑，会跳过已完成且输入未变的 app/infra/sandbox-image 等阶段。</span>
-<a id="__codelineno-8-25" name="__codelineno-8-25" href="#__codelineno-8-25"></a>./scripts/release.sh<span class="w"> </span><span class="m">1</span>.0.0<span class="w"> </span>--with-infra<span class="w"> </span>--with-sandbox<span class="w"> </span>--resume
-<a id="__codelineno-8-26" name="__codelineno-8-26" href="#__codelineno-8-26"></a><span class="c1"># 如需强制重跑某一阶段：</span>
-<a id="__codelineno-8-27" name="__codelineno-8-27" href="#__codelineno-8-27"></a>./scripts/release.sh<span class="w"> </span><span class="m">1</span>.0.0<span class="w"> </span>--with-infra<span class="w"> </span>--with-sandbox<span class="w"> </span>--resume<span class="w"> </span>--force<span class="w"> </span>gvisor
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="c1"># 首次部署且要启用 bash/mount/persist 沙盒工具：sandbox 镜像每次按内容更新，</span>
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="c1"># gVisor 是宿主机运行时，只在新机器初始化或显式升级时携带。</span>
+<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>./scripts/release.sh<span class="w"> </span><span class="m">1</span>.0.0<span class="w"> </span>--with-infra<span class="w"> </span>--with-sandbox<span class="w"> </span>--with-gvisor
+<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a><span class="c1"># 额外产出：</span>
+<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a><span class="c1">#   artifactflow-sandbox-1.0.0-amd64.tar.gz       sandbox 运行镜像</span>
+<a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a><span class="c1">#   artifactflow-sandbox-verify-1.0.0.tar.gz      sandbox 集成验证探针</span>
+<a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a><span class="c1">#   sandbox-gvisor-release-20260706.0-x86_64.tar.gz  runsc 离线安装包</span>
+<a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a>
+<a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a><span class="c1"># 已装 runsc 的机器更新 sandbox 镜像时不加 --with-gvisor，不访问 gVisor 下载站点：</span>
+<a id="__codelineno-8-25" name="__codelineno-8-25" href="#__codelineno-8-25"></a>./scripts/release.sh<span class="w"> </span><span class="m">1</span>.0.1<span class="w"> </span>--with-sandbox
+<a id="__codelineno-8-26" name="__codelineno-8-26" href="#__codelineno-8-26"></a>
+<a id="__codelineno-8-27" name="__codelineno-8-27" href="#__codelineno-8-27"></a><span class="c1"># release 是阶段化的；如果显式下载 gVisor / wheels 时网络抖掉，</span>
+<a id="__codelineno-8-28" name="__codelineno-8-28" href="#__codelineno-8-28"></a><span class="c1"># 修复网络后用 --resume 重跑，会跳过已完成且输入未变的 app/infra/sandbox-image 等阶段。</span>
+<a id="__codelineno-8-29" name="__codelineno-8-29" href="#__codelineno-8-29"></a>./scripts/release.sh<span class="w"> </span><span class="m">1</span>.0.0<span class="w"> </span>--with-infra<span class="w"> </span>--with-sandbox<span class="w"> </span>--with-gvisor<span class="w"> </span>--resume
+<a id="__codelineno-8-30" name="__codelineno-8-30" href="#__codelineno-8-30"></a><span class="c1"># 如需强制重跑某一阶段：</span>
+<a id="__codelineno-8-31" name="__codelineno-8-31" href="#__codelineno-8-31"></a>./scripts/release.sh<span class="w"> </span><span class="m">1</span>.0.0<span class="w"> </span>--with-infra<span class="w"> </span>--with-sandbox<span class="w"> </span>--with-gvisor<span class="w"> </span>--resume<span class="w"> </span>--force<span class="w"> </span>gvisor
 </code></pre></div>
 <blockquote>
-<p><strong>拆 4 tar 按变更频率分层：</strong>
+<p><strong>发布介质按变更频率分层：</strong>
 - <code>config</code> / <code>deploy</code> 是 bind-mount 进容器的,改 prompt / Caddyfile / scripts 重传对应 tar 即可,不动镜像。
 - <code>app</code> 是 backend + frontend,几乎每次发版都改。
-- <code>infra</code> 是 caddy / postgres / redis 三个 base image,版本动得极少（半年一次量级）,默认<strong>不打</strong>,显式 <code>--with-infra</code> 才生成。命名带 base image 版本号方便目标机一眼看出"我已经有这个 infra tar 了"。</p>
+- <code>infra</code> 是 caddy / postgres / redis 三个 base image,版本动得极少（半年一次量级）,默认<strong>不打</strong>,显式 <code>--with-infra</code> 才生成。命名带 base image 版本号方便目标机一眼看出"我已经有这个 infra tar 了"。
+- <code>gVisor</code> 是宿主机 OCI runtime，不跟随 sandbox 镜像更新。默认<strong>不打</strong>，仅新机器或显式 runtime/security 升级时用 <code>--with-gvisor</code>；包名按固定版本 + 架构寻址，可跨 app release 复用。</p>
 <p><strong>目标平台默认 <code>linux/amd64</code>。</strong> Apple Silicon 上跑 <code>release.sh</code> 会自动通过 buildx + QEMU 交叉编译，省得装到 x86_64 服务器后撞 <code>exec format error</code>。要构建 arm64 目标，用 <code>./scripts/release.sh 1.0.0 --platform linux/arm64</code>（或继续传 <code>PLATFORM=linux/arm64</code>）。一次 release 只产出一个目标架构的 bundle。</p>
 </blockquote>
 <h3 id="首次部署在目标内网机器上">首次部署（在目标内网机器上）</h3>
@@ -2639,42 +2666,43 @@
 <a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="c1">#      artifactflow-$VERSION.manifest.txt</span>
 <a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="c1">#    首次部署 / infra 镜像变更时还需要：</span>
 <a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="c1">#      artifactflow-infra-caddy2.10-pg16-redis7.tar.gz{,.sha256}</span>
-<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="c1">#    启用 sandbox 时还需要 sandbox image / verify / gVisor 三件套及其 .sha256。</span>
-<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BUNDLE</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$APP</span><span class="s2">&quot;</span>
-<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>
-<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="c1"># 2. 先只解 deploy/ 到运行目录，拿到 fleet/verify 脚本。</span>
-<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$APP</span><span class="s2">&quot;</span>
-<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>tar<span class="w"> </span>xzf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BUNDLE</span><span class="s2">/artifactflow-deploy-</span><span class="nv">$VERSION</span><span class="s2">.tar.gz&quot;</span>
-<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a>deploy/scripts/verify-bundle.sh<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BUNDLE</span><span class="s2">&quot;</span>
-<a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>
-<a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a><span class="c1"># 3. 初始化单机拓扑和 .env。</span>
-<a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a><span class="c1">#    init-local 首次创建 deploy/.env 时会自动填充 JWT secret、Fernet</span>
-<a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a><span class="c1">#    credential key、Postgres password，并同步 DATABASE_URL；已有 .env 不覆盖。</span>
-<a id="__codelineno-9-22" name="__codelineno-9-22" href="#__codelineno-9-22"></a>deploy/scripts/fleet.sh<span class="w"> </span>init-local<span class="w"> </span>--scale<span class="w"> </span><span class="m">2</span>
-<a id="__codelineno-9-23" name="__codelineno-9-23" href="#__codelineno-9-23"></a>vi<span class="w"> </span>deploy/.env<span class="w">        </span><span class="c1"># 填 API keys / CORS / 并发等部署专属值</span>
-<a id="__codelineno-9-24" name="__codelineno-9-24" href="#__codelineno-9-24"></a>vi<span class="w"> </span>deploy/fleet.conf<span class="w">  </span><span class="c1"># app local scale=N 即 docker compose --scale backend=N</span>
-<a id="__codelineno-9-25" name="__codelineno-9-25" href="#__codelineno-9-25"></a>
-<a id="__codelineno-9-26" name="__codelineno-9-26" href="#__codelineno-9-26"></a><span class="c1"># 4. 正式配置应在构建机改 config/ 后再 release。</span>
-<a id="__codelineno-9-27" name="__codelineno-9-27" href="#__codelineno-9-27"></a><span class="c1">#    不要在目标机先解 config/、改完再 fleet deploy：deploy 会重新从 bundle 解 config，</span>
-<a id="__codelineno-9-28" name="__codelineno-9-28" href="#__codelineno-9-28"></a><span class="c1">#    覆盖这些现场修改。模型 endpoint 临时热修见下方「运行时配置变更」。</span>
-<a id="__codelineno-9-29" name="__codelineno-9-29" href="#__codelineno-9-29"></a>
-<a id="__codelineno-9-30" name="__codelineno-9-30" href="#__codelineno-9-30"></a><span class="c1"># 5. 启用沙盒时，先以 root 准备 runsc / sandbox 镜像 / scratch 根。</span>
-<a id="__codelineno-9-31" name="__codelineno-9-31" href="#__codelineno-9-31"></a><span class="c1">#    仅当 release bundle 用 --with-sandbox 构建、且本部署要启用沙盒时执行本步。</span>
-<a id="__codelineno-9-32" name="__codelineno-9-32" href="#__codelineno-9-32"></a><span class="c1">#    生产不要用 8G starter；按并发 × SANDBOX_WORKSPACE_QUOTA_MB 估算。</span>
-<a id="__codelineno-9-33" name="__codelineno-9-33" href="#__codelineno-9-33"></a><span class="c1"># sudo env \</span>
-<a id="__codelineno-9-34" name="__codelineno-9-34" href="#__codelineno-9-34"></a><span class="c1">#   AF_BUNDLE_VERSION=&quot;$VERSION&quot; \</span>
-<a id="__codelineno-9-35" name="__codelineno-9-35" href="#__codelineno-9-35"></a><span class="c1">#   AF_SANDBOX_POOL=/data/artifactflow/sandbox-pool.img \</span>
-<a id="__codelineno-9-36" name="__codelineno-9-36" href="#__codelineno-9-36"></a><span class="c1">#   AF_SANDBOX_SCRATCH_ROOT=/data/artifactflow/sandbox-scratch \</span>
-<a id="__codelineno-9-37" name="__codelineno-9-37" href="#__codelineno-9-37"></a><span class="c1">#   AF_SANDBOX_POOL_SIZE=80G \</span>
-<a id="__codelineno-9-38" name="__codelineno-9-38" href="#__codelineno-9-38"></a><span class="c1">#   deploy/scripts/fleet.sh prepare-sandbox &quot;$BUNDLE&quot;</span>
-<a id="__codelineno-9-39" name="__codelineno-9-39" href="#__codelineno-9-39"></a>
-<a id="__codelineno-9-40" name="__codelineno-9-40" href="#__codelineno-9-40"></a><span class="c1"># 6. 启动。fleet 会校验 bundle、解 config/deploy、load 镜像、跑 release gate、等待健康。</span>
-<a id="__codelineno-9-41" name="__codelineno-9-41" href="#__codelineno-9-41"></a><span class="c1">#    启用沙盒时在命令前追加 AF_ENABLE_SANDBOX=1。</span>
-<a id="__codelineno-9-42" name="__codelineno-9-42" href="#__codelineno-9-42"></a><span class="nv">AF_BUNDLE_VERSION</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$VERSION</span><span class="s2">&quot;</span><span class="w"> </span>deploy/scripts/fleet.sh<span class="w"> </span>deploy<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BUNDLE</span><span class="s2">&quot;</span>
-<a id="__codelineno-9-43" name="__codelineno-9-43" href="#__codelineno-9-43"></a>
-<a id="__codelineno-9-44" name="__codelineno-9-44" href="#__codelineno-9-44"></a><span class="c1"># 7. 创建管理员</span>
-<a id="__codelineno-9-45" name="__codelineno-9-45" href="#__codelineno-9-45"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>backend<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-46" name="__codelineno-9-46" href="#__codelineno-9-46"></a><span class="w">  </span>python<span class="w"> </span>scripts/create_admin.py<span class="w"> </span>admin<span class="w"> </span>--password<span class="w"> </span>&lt;your-password&gt;
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="c1">#    启用 sandbox 时需要 sandbox image + verify 及其 .sha256；只有目标机尚未</span>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="c1">#    安装 runsc 或本次显式升级 gVisor 时，才额外携带 gVisor 包。</span>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BUNDLE</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$APP</span><span class="s2">&quot;</span>
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="c1"># 2. 先只解 deploy/ 到运行目录，拿到 fleet/verify 脚本。</span>
+<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$APP</span><span class="s2">&quot;</span>
+<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a>tar<span class="w"> </span>xzf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BUNDLE</span><span class="s2">/artifactflow-deploy-</span><span class="nv">$VERSION</span><span class="s2">.tar.gz&quot;</span>
+<a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>deploy/scripts/verify-bundle.sh<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BUNDLE</span><span class="s2">&quot;</span>
+<a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a>
+<a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a><span class="c1"># 3. 初始化单机拓扑和 .env。</span>
+<a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a><span class="c1">#    init-local 首次创建 deploy/.env 时会自动填充 JWT secret、Fernet</span>
+<a id="__codelineno-9-22" name="__codelineno-9-22" href="#__codelineno-9-22"></a><span class="c1">#    credential key、Postgres password，并同步 DATABASE_URL；已有 .env 不覆盖。</span>
+<a id="__codelineno-9-23" name="__codelineno-9-23" href="#__codelineno-9-23"></a>deploy/scripts/fleet.sh<span class="w"> </span>init-local<span class="w"> </span>--scale<span class="w"> </span><span class="m">2</span>
+<a id="__codelineno-9-24" name="__codelineno-9-24" href="#__codelineno-9-24"></a>vi<span class="w"> </span>deploy/.env<span class="w">        </span><span class="c1"># 填 API keys / CORS / 并发；沙盒部署把 AF_ENABLE_SANDBOX 改为 1</span>
+<a id="__codelineno-9-25" name="__codelineno-9-25" href="#__codelineno-9-25"></a>vi<span class="w"> </span>deploy/fleet.conf<span class="w">  </span><span class="c1"># app local scale=N 即 docker compose --scale backend=N</span>
+<a id="__codelineno-9-26" name="__codelineno-9-26" href="#__codelineno-9-26"></a>
+<a id="__codelineno-9-27" name="__codelineno-9-27" href="#__codelineno-9-27"></a><span class="c1"># 4. 正式配置应在构建机改 config/ 后再 release。</span>
+<a id="__codelineno-9-28" name="__codelineno-9-28" href="#__codelineno-9-28"></a><span class="c1">#    不要在目标机先解 config/、改完再 fleet deploy：deploy 会重新从 bundle 解 config，</span>
+<a id="__codelineno-9-29" name="__codelineno-9-29" href="#__codelineno-9-29"></a><span class="c1">#    覆盖这些现场修改。模型 endpoint 临时热修见下方「运行时配置变更」。</span>
+<a id="__codelineno-9-30" name="__codelineno-9-30" href="#__codelineno-9-30"></a>
+<a id="__codelineno-9-31" name="__codelineno-9-31" href="#__codelineno-9-31"></a><span class="c1"># 5. 启用沙盒时，先以 root 准备 sandbox 镜像 / scratch 根。</span>
+<a id="__codelineno-9-32" name="__codelineno-9-32" href="#__codelineno-9-32"></a><span class="c1">#    bundle 有 gVisor 包时会安装/升级；没有时校验并复用宿主机现有 runsc。</span>
+<a id="__codelineno-9-33" name="__codelineno-9-33" href="#__codelineno-9-33"></a><span class="c1">#    生产不要用 8G starter；按并发 × SANDBOX_WORKSPACE_QUOTA_MB 估算。</span>
+<a id="__codelineno-9-34" name="__codelineno-9-34" href="#__codelineno-9-34"></a><span class="c1"># sudo env \</span>
+<a id="__codelineno-9-35" name="__codelineno-9-35" href="#__codelineno-9-35"></a><span class="c1">#   AF_BUNDLE_VERSION=&quot;$VERSION&quot; \</span>
+<a id="__codelineno-9-36" name="__codelineno-9-36" href="#__codelineno-9-36"></a><span class="c1">#   AF_SANDBOX_POOL=/data/artifactflow/sandbox-pool.img \</span>
+<a id="__codelineno-9-37" name="__codelineno-9-37" href="#__codelineno-9-37"></a><span class="c1">#   AF_SANDBOX_SCRATCH_ROOT=/data/artifactflow/sandbox-scratch \</span>
+<a id="__codelineno-9-38" name="__codelineno-9-38" href="#__codelineno-9-38"></a><span class="c1">#   AF_SANDBOX_POOL_SIZE=80G \</span>
+<a id="__codelineno-9-39" name="__codelineno-9-39" href="#__codelineno-9-39"></a><span class="c1">#   deploy/scripts/fleet.sh prepare-sandbox &quot;$BUNDLE&quot;</span>
+<a id="__codelineno-9-40" name="__codelineno-9-40" href="#__codelineno-9-40"></a>
+<a id="__codelineno-9-41" name="__codelineno-9-41" href="#__codelineno-9-41"></a><span class="c1"># 6. 启动。fleet 从 deploy/.env 读取必填的 AF_ENABLE_SANDBOX=0|1，再校验</span>
+<a id="__codelineno-9-42" name="__codelineno-9-42" href="#__codelineno-9-42"></a><span class="c1">#    bundle、解 config/deploy、load 镜像、跑 release gate、等待健康。</span>
+<a id="__codelineno-9-43" name="__codelineno-9-43" href="#__codelineno-9-43"></a><span class="nv">AF_BUNDLE_VERSION</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$VERSION</span><span class="s2">&quot;</span><span class="w"> </span>deploy/scripts/fleet.sh<span class="w"> </span>deploy<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BUNDLE</span><span class="s2">&quot;</span>
+<a id="__codelineno-9-44" name="__codelineno-9-44" href="#__codelineno-9-44"></a>
+<a id="__codelineno-9-45" name="__codelineno-9-45" href="#__codelineno-9-45"></a><span class="c1"># 7. 创建管理员</span>
+<a id="__codelineno-9-46" name="__codelineno-9-46" href="#__codelineno-9-46"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>backend<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-9-47" name="__codelineno-9-47" href="#__codelineno-9-47"></a><span class="w">  </span>python<span class="w"> </span>scripts/create_admin.py<span class="w"> </span>admin<span class="w"> </span>--password<span class="w"> </span>&lt;your-password&gt;
 </code></pre></div>
 <h3 id="扩缩容与多机发布fleetsh">扩缩容与多机发布（fleet.sh）</h3>
 <p><code>deploy/scripts/fleet.sh</code> 是从「一台机器」到「多台机器」的统一发布入口，把上面「校验 + 解包 + 加载 + 启动 + 探活」
@@ -2701,8 +2729,9 @@ backend/frontend 镜像，再跑 release gate 和 compose up；下面的手工�
 详见 FLEET.md「Multi-host: unexercised seams」。多机到位前，扩容仍只能在单机上
 <code>--scale</code>；跨机负载均衡 / 多机数据库 URL 等留在文档里作为<strong>已设计未验证</strong>的路径。</p>
 <p><code>fleet.sh</code> 默认只包装 <code>deploy/docker-compose.intranet.yml</code>（Mode 3 基础栈）。
-如果 bundle 带 sandbox 且要启用 <code>bash</code> / <code>mount</code> / <code>persist</code>，设置
-<code>AF_ENABLE_SANDBOX=1</code>；但宿主前置是 root 级操作，需先显式运行
+<code>deploy/.env</code> 必须持久声明 <code>AF_ENABLE_SANDBOX=0|1</code>；已有 sandbox 部署升级到
+这一版 Fleet 前先补 <code>AF_ENABLE_SANDBOX=1</code>。它描述目标能力，与 bundle 本次是否
+携带 sandbox/gVisor 介质无关。宿主前置是 root 级操作，需先显式运行
 <code>sudo env ... deploy/scripts/fleet.sh prepare-sandbox &lt;bundle-dir&gt;</code>，再 deploy。
 deploy/preflight 会追加 <code>deploy/docker-compose.sandbox.yml</code> overlay，并把 runsc /
 sandbox 镜像 / scratch root 缺失视为 blocker。
@@ -2727,21 +2756,25 @@ Mode 2（公网）扩缩容仍用上面 Mode 2A「扩缩容」小节里的裸 <c
 <a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="c1">#     所以调用 fleet deploy 前，必须先让新版 fleet.sh 落盘。</span>
 <a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>tar<span class="w"> </span>xzf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BUNDLE</span><span class="s2">/artifactflow-deploy-</span><span class="nv">$VERSION</span><span class="s2">.tar.gz&quot;</span>
 <a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>
-<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a><span class="c1"># 如本次 bundle 带 sandbox 且要刷新 sandbox 前置，先以 root 执行：</span>
-<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a><span class="c1"># 32 路沙盒按默认 2G workspace 估算应准备 80G 级别池子。</span>
-<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a><span class="c1"># sudo env AF_BUNDLE_VERSION=&quot;$VERSION&quot; \</span>
-<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a><span class="c1">#   AF_SANDBOX_POOL=/data/artifactflow/sandbox-pool.img \</span>
-<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a><span class="c1">#   AF_SANDBOX_SCRATCH_ROOT=/data/artifactflow/sandbox-scratch \</span>
-<a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a><span class="c1">#   AF_SANDBOX_POOL_SIZE=80G \</span>
-<a id="__codelineno-11-21" name="__codelineno-11-21" href="#__codelineno-11-21"></a><span class="c1">#   ./deploy/scripts/fleet.sh prepare-sandbox &quot;$BUNDLE&quot;</span>
-<a id="__codelineno-11-22" name="__codelineno-11-22" href="#__codelineno-11-22"></a>
-<a id="__codelineno-11-23" name="__codelineno-11-23" href="#__codelineno-11-23"></a><span class="c1"># 2. 进维护窗口（可选；fleet deploy 本身是直接 up）</span>
-<a id="__codelineno-11-24" name="__codelineno-11-24" href="#__codelineno-11-24"></a>./deploy/scripts/maintenance.sh<span class="w"> </span>on<span class="w"> </span><span class="s2">&quot;升级到 </span><span class="nv">$VERSION</span><span class="s2">&quot;</span>
-<a id="__codelineno-11-25" name="__codelineno-11-25" href="#__codelineno-11-25"></a>
-<a id="__codelineno-11-26" name="__codelineno-11-26" href="#__codelineno-11-26"></a><span class="c1"># 3. fleet 接管解包 + docker load + compose up + 健康检查；成功后关闭维护页</span>
-<a id="__codelineno-11-27" name="__codelineno-11-27" href="#__codelineno-11-27"></a><span class="c1">#    启用沙盒时在命令前追加 AF_ENABLE_SANDBOX=1。</span>
-<a id="__codelineno-11-28" name="__codelineno-11-28" href="#__codelineno-11-28"></a><span class="nv">AF_BUNDLE_VERSION</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$VERSION</span><span class="s2">&quot;</span><span class="w"> </span>./deploy/scripts/fleet.sh<span class="w"> </span>deploy<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BUNDLE</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-11-29" name="__codelineno-11-29" href="#__codelineno-11-29"></a><span class="w">  </span>./deploy/scripts/maintenance.sh<span class="w"> </span>off
+<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a><span class="c1"># 新版 Fleet 要求目标策略持久化；已有沙盒部署填 1，未启用沙盒填 0。</span>
+<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a><span class="c1"># 只编辑 .env 不会重启或重建当前容器。</span>
+<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>vi<span class="w"> </span>deploy/.env<span class="w">  </span><span class="c1"># 确认存在 AF_ENABLE_SANDBOX=0|1</span>
+<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a>
+<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a><span class="c1"># 如本次 bundle 带 sandbox 且要刷新 sandbox 前置，先以 root 执行：</span>
+<a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a><span class="c1"># 32 路沙盒按默认 2G workspace 估算应准备 80G 级别池子。</span>
+<a id="__codelineno-11-21" name="__codelineno-11-21" href="#__codelineno-11-21"></a><span class="c1"># sudo env AF_BUNDLE_VERSION=&quot;$VERSION&quot; \</span>
+<a id="__codelineno-11-22" name="__codelineno-11-22" href="#__codelineno-11-22"></a><span class="c1">#   AF_SANDBOX_POOL=/data/artifactflow/sandbox-pool.img \</span>
+<a id="__codelineno-11-23" name="__codelineno-11-23" href="#__codelineno-11-23"></a><span class="c1">#   AF_SANDBOX_SCRATCH_ROOT=/data/artifactflow/sandbox-scratch \</span>
+<a id="__codelineno-11-24" name="__codelineno-11-24" href="#__codelineno-11-24"></a><span class="c1">#   AF_SANDBOX_POOL_SIZE=80G \</span>
+<a id="__codelineno-11-25" name="__codelineno-11-25" href="#__codelineno-11-25"></a><span class="c1">#   ./deploy/scripts/fleet.sh prepare-sandbox &quot;$BUNDLE&quot;</span>
+<a id="__codelineno-11-26" name="__codelineno-11-26" href="#__codelineno-11-26"></a>
+<a id="__codelineno-11-27" name="__codelineno-11-27" href="#__codelineno-11-27"></a><span class="c1"># 2. 进维护窗口（可选；fleet deploy 本身是直接 up）</span>
+<a id="__codelineno-11-28" name="__codelineno-11-28" href="#__codelineno-11-28"></a>./deploy/scripts/maintenance.sh<span class="w"> </span>on<span class="w"> </span><span class="s2">&quot;升级到 </span><span class="nv">$VERSION</span><span class="s2">&quot;</span>
+<a id="__codelineno-11-29" name="__codelineno-11-29" href="#__codelineno-11-29"></a>
+<a id="__codelineno-11-30" name="__codelineno-11-30" href="#__codelineno-11-30"></a><span class="c1"># 3. fleet 按 deploy/.env 的 sandbox 策略接管解包 + docker load + compose up +</span>
+<a id="__codelineno-11-31" name="__codelineno-11-31" href="#__codelineno-11-31"></a><span class="c1">#    健康检查；成功后关闭维护页。</span>
+<a id="__codelineno-11-32" name="__codelineno-11-32" href="#__codelineno-11-32"></a><span class="nv">AF_BUNDLE_VERSION</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$VERSION</span><span class="s2">&quot;</span><span class="w"> </span>./deploy/scripts/fleet.sh<span class="w"> </span>deploy<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BUNDLE</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-11-33" name="__codelineno-11-33" href="#__codelineno-11-33"></a><span class="w">  </span>./deploy/scripts/maintenance.sh<span class="w"> </span>off
 </code></pre></div>
 <blockquote>
 <p><strong>nginx→Caddy 一次性切换（既有内网部署首次升到 Caddy 版）：</strong> 新 compose 里反向代理服务从 <code>nginx</code> 换成了 <code>caddy</code>，<code>up -d</code> 不会自动移除旧服务的容器。切换步骤：证书就位（<code>deploy/certs/server.crt</code> + <code>server.key</code>，完整链，见该目录 README）→ 常规 prep（verify-bundle / docker load / tar xzf deploy+config）→ <code>docker compose -f deploy/docker-compose.intranet.yml --profile infra down</code> → <code>AF_VERSION=&lt;版本&gt; ... up -d</code>（infra 服务定义变更走 down/up，不走 pause/resume）。防火墙记得放行 HTTPS 端口（默认 443，<code>AF_HTTPS_PORT</code> 可改）。切换后旧的 <code>nginx:*</code> 镜像可 <code>docker rmi</code> 回收。</p>
@@ -2927,7 +2960,7 @@ sandbox 镜像，也不需要重传 sandbox/gVisor。</p>
 <a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>tar<span class="w"> </span>xzf<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BUNDLE</span><span class="s2">/artifactflow-deploy-</span><span class="nv">$VERSION</span><span class="s2">.tar.gz&quot;</span>
 <a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a>deploy/scripts/verify-bundle.sh<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BUNDLE</span><span class="s2">&quot;</span>
 <a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a>
-<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a><span class="c1"># 启用沙盒时在命令前追加 AF_ENABLE_SANDBOX=1。</span>
+<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a><span class="c1"># deploy/.env 必须已有 AF_ENABLE_SANDBOX=0|1。</span>
 <a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a><span class="nv">AF_BUNDLE_VERSION</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$VERSION</span><span class="s2">&quot;</span><span class="w"> </span>deploy/scripts/fleet.sh<span class="w"> </span>deploy<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BUNDLE</span><span class="s2">&quot;</span>
 </code></pre></div>
 <p><code>fleet deploy</code> 会解出新的 <code>config/</code> / <code>deploy/</code>、<code>docker load</code> 新 backend +
@@ -2936,11 +2969,11 @@ frontend 镜像、跑一次 release gate，然后按 <code>deploy/fleet.conf</co
 <hr />
 <h2 id="沙盒执行环境可选-overlay">沙盒执行环境（可选 overlay）</h2>
 <p><code>bash</code> / <code>mount</code> / <code>persist</code> 三个沙盒工具需要宿主侧前置 + 一个 compose overlay。<strong>没有沙盒需求的部署跳过本节</strong>——基础 compose 不挂 <code>docker.sock</code>，没有这个暴露面。架构与全部 <code>SANDBOX_*</code> 旋钮见 <a href="../architecture/sandbox/">架构 · 沙盒执行</a>。</p>
-<p>随发布包额外携带三个传输单元（与应用包同一构建机产出）：<strong>沙盒镜像</strong> tar（<code>scripts/build-sandbox-image.sh</code>，注意按目标机选 <code>PLATFORM</code>）、<strong>verify 探针</strong> tar（同脚本产出，arch 无关）、<strong>gVisor 包</strong> tar（<code>sandbox/gvisor-pkg/fetch-and-package.sh</code>）。</p>
+<p>常规 sandbox 更新携带两个成对传输单元（与应用包同一构建机产出）：<strong>沙盒镜像</strong> tar（<code>scripts/build-sandbox-image.sh</code>，注意按目标机选 <code>PLATFORM</code>）和 <strong>verify 探针</strong> tar（同脚本产出，arch 无关）。<strong>gVisor 包</strong>是独立的宿主机 runtime 单元，仅在新机器初始化或显式升级时通过 <code>--with-gvisor</code> 生成；固定版本 + 架构的包可跨应用 release 复用。</p>
 <h3 id="宿主前置一次性">宿主前置（一次性）</h3>
-<p>先显式运行 <code>prepare-sandbox</code> 从 release bundle 完成宿主前置。这个步骤会安装/注册
-runsc、写 <code>/etc/fstab</code> 并挂载 scratch loop，所以需要 root；排障时也可以直接跑
-同一套底层动作（安装 gVisor、加载 sandbox 镜像、
+<p>先显式运行 <code>prepare-sandbox</code> 从 release bundle 完成宿主前置。这个步骤会在包存在时安装/注册
+runsc，否则检查宿主机现有 runsc；随后写 <code>/etc/fstab</code> 并挂载 scratch loop，所以需要 root。排障时也可以直接跑
+同一套底层动作（可选安装 gVisor、加载 sandbox 镜像、
 创建 scratch loop、跑 smoke/verify，并把 <code>ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT</code> /
 <code>ARTIFACTFLOW_SANDBOX_RUNTIME</code> 写入 <code>deploy/.env</code>）：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="c1"># 默认 scratch pool 为 8G starter；可按并发 × ARTIFACTFLOW_SANDBOX_WORKSPACE_QUOTA_MB 调大。</span>
@@ -2951,7 +2984,7 @@ runsc、写 <code>/etc/fstab</code> 并挂载 scratch loop，所以需要 root�
 </code></pre></div>
 <p>它等价于以下手工步骤，保留在这里便于排障：</p>
 <ol>
-<li><strong>gVisor（runsc）</strong>：解开 gVisor 包，<code>sudo ./install.sh &amp;&amp; sudo systemctl reload docker &amp;&amp; sudo ./smoke-test.sh</code>（内含 <code>unshare -U</code> 预检）。arm / 鲲鹏注意：Kylin V10 arm 默认 64K 页内核，gVisor 拒启——先用 <code>sandbox/kernel-4k-pkg/</code> 换 4K 内核再装（x86 跳过）。</li>
+<li><strong>gVisor（runsc，仅首次/升级）</strong>：解开 gVisor 包，<code>sudo ./install.sh &amp;&amp; sudo systemctl reload docker &amp;&amp; sudo ./smoke-test.sh</code>（内含 <code>unshare -U</code> 预检）。日常 sandbox 镜像更新跳过安装，只检查 <code>runsc</code> 已存在且 Docker 已注册。arm / 鲲鹏注意：Kylin V10 arm 默认 64K 页内核，gVisor 拒启——先用 <code>sandbox/kernel-4k-pkg/</code> 换 4K 内核再装（x86 跳过）。</li>
 <li><strong>沙盒镜像</strong>：<code>gunzip -c artifactflow-sandbox-&lt;ver&gt;-&lt;arch&gt;.tar.gz | docker load</code>。</li>
 <li><strong>scratch 根 = 定容 loop 文件系统</strong>（磁盘配额的硬墙层：watchdog race 窗口内写穿也只是池子满，宿主盘无恙；独立 inode 表顺带兜住海量小文件）：</li>
 </ol>
@@ -2967,8 +3000,9 @@ runsc、写 <code>/etc/fstab</code> 并挂载 scratch loop，所以需要 root�
 4. <strong>验证</strong>：<code>tar xzf artifactflow-sandbox-verify-&lt;ver&gt;.tar.gz</code>，<code>IMAGE=artifactflow-sandbox:&lt;ver&gt;-&lt;arch&gt; bash verify/run-all.sh</code>，全绿后记录 manifest 里的 image id 作为本部署的冻结锚点。</p>
 <h3 id="启动_2">启动</h3>
 <p><code>deploy/.env</code> 增加（<strong>路径必须与宿主一致</strong>——overlay 把 scratch 根以同一绝对路径挂进 backend 容器，因为 backend 把工作区路径作为 bind source 传给 daemon、daemon 按宿主路径解析；改路径只改这一处 env，compose 两侧与应用配置同步取值）：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="nv">ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT</span><span class="o">=</span>/var/lib/artifactflow/sandbox-scratch
-<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="c1"># ARTIFACTFLOW_SANDBOX_RUNTIME 默认 runsc(overlay 内兜底),无需显式写</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="nv">AF_ENABLE_SANDBOX</span><span class="o">=</span><span class="m">1</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="nv">ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT</span><span class="o">=</span>/var/lib/artifactflow/sandbox-scratch
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="c1"># ARTIFACTFLOW_SANDBOX_RUNTIME 默认 runsc(overlay 内兜底),无需显式写</span>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="nv">AF_VERSION</span><span class="o">=</span><span class="m">1</span>.0.0<span class="w"> </span>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.intranet.yml<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="w">                              </span>-f<span class="w"> </span>deploy/docker-compose.sandbox.yml<span class="w"> </span><span class="se">\</span>
@@ -2976,9 +3010,9 @@ runsc、写 <code>/etc/fstab</code> 并挂载 scratch loop，所以需要 root�
 <a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a>
 <a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="c1"># 使用 fleet 单机入口:</span>
 <a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>sudo<span class="w"> </span>env<span class="w"> </span><span class="nv">AF_SANDBOX_POOL_SIZE</span><span class="o">=</span>80G<span class="w"> </span>deploy/scripts/fleet.sh<span class="w"> </span>prepare-sandbox<span class="w"> </span>.
-<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a><span class="nv">AF_ENABLE_SANDBOX</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>deploy/scripts/fleet.sh<span class="w"> </span>deploy<span class="w"> </span>.
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a>deploy/scripts/fleet.sh<span class="w"> </span>deploy<span class="w"> </span>.
 <a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a><span class="c1"># 如需 deploy 前单独检查，先准备再 preflight：</span>
-<a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a><span class="c1"># AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh preflight</span>
+<a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a><span class="c1"># deploy/scripts/fleet.sh preflight</span>
 </code></pre></div>
 <blockquote>
 <p><strong>安全提醒</strong>：overlay 把 <code>/var/run/docker.sock</code> 挂进 backend 容器（等同宿主 root）。这是 DooD 架构的固有前提，防线是代码侧纪律——容器创建参数全为 backend 常量、绝不被模型内容污染（见架构文档「隔离边界」）。不要把这个 overlay 用在不需要沙盒的部署上。</p>
@@ -3128,7 +3162,7 @@ runsc、写 <code>/etc/fstab</code> 并挂载 scratch loop，所以需要 root�
 </tr>
 <tr>
 <td><code>ARTIFACTFLOW_EXECUTION_TIMEOUT</code></td>
-<td><code>1800</code></td>
+<td><code>3600</code></td>
 <td>总执行上限（秒），含 permission 等待</td>
 </tr>
 <tr>
@@ -3143,6 +3177,54 @@ runsc、写 <code>/etc/fstab</code> 并挂载 scratch loop，所以需要 root�
 </tr>
 </tbody>
 </table>
+<h3 id="llm-与-mcp-http-分阶段超时">LLM 与 MCP HTTP 分阶段超时</h3>
+<table>
+<thead>
+<tr>
+<th>变量</th>
+<th>默认值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ARTIFACTFLOW_LLM_CONNECT_TIMEOUT</code></td>
+<td><code>5</code></td>
+<td>LLM provider DNS/TCP/TLS 建连超时（秒）</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_LLM_READ_TIMEOUT</code></td>
+<td><code>600</code></td>
+<td>LLM 首个/下一个响应 chunk 等待超时（秒）；<code>models.yaml</code> 的 <code>params.timeout</code> 只覆盖此 read 值</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_LLM_WRITE_TIMEOUT</code></td>
+<td><code>60</code></td>
+<td>LLM 请求体写入超时（秒）</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_LLM_POOL_TIMEOUT</code></td>
+<td><code>5</code></td>
+<td>LLM HTTP 连接池等待超时（秒）</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_MCP_CONNECT_TIMEOUT</code></td>
+<td><code>5</code></td>
+<td>MCP <code>tools/list</code> discovery 与 <code>tools/call</code> 的 DNS/TCP/TLS 建连超时（秒）</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_MCP_WRITE_TIMEOUT</code></td>
+<td><code>60</code></td>
+<td>MCP 请求体写入超时（秒）</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_MCP_POOL_TIMEOUT</code></td>
+<td><code>5</code></td>
+<td>MCP HTTP 连接池等待超时（秒）</td>
+</tr>
+</tbody>
+</table>
+<p>MCP 单元的现有 <code>provider_config.timeout</code>（默认 <code>60</code>）继续表示 per-server read / MCP request 等待上限。这些分阶段变量把错 IP 的建连等待与合法的长 TTFT/长任务等待拆开；流式 read timeout 表示“连续多久没有新数据”，整个 turn 仍由 <code>ARTIFACTFLOW_EXECUTION_TIMEOUT</code> 封顶。</p>
 <h3 id="compaction-与上下文">Compaction 与上下文</h3>
 <table>
 <thead>
@@ -3227,6 +3309,11 @@ runsc、写 <code>/etc/fstab</code> 并挂载 scratch loop，所以需要 root�
 <td><code>ARTIFACTFLOW_MAX_UPLOAD_SIZE</code></td>
 <td><code>209715200</code></td>
 <td>单文件上传大小限制（字节，默认 200MB）；批量总字节由代理层独立封顶（约 200MiB 内容 + multipart 开销）。注：文本转换另有更低的独立闸 20MB——超闸<strong>不 422、落为二进制 blob artifact</strong>（可下载、可 mount 进沙盒处理）</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_SKILL_USER_MAX_PRIVATE_COUNT</code></td>
+<td><code>3</code></td>
+<td>每个用户可拥有的私有 Skill 数量；<code>-1</code> 不限，<code>0</code> 关闭个人导入，正数为上限。Admin 导入的共享 Skill 不计入。</td>
 </tr>
 <tr>
 <td><code>ARTIFACTFLOW_DEFAULT_PAGE_SIZE</code></td>

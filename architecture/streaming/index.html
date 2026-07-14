@@ -826,6 +826,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="StreamTransport Protocol">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#producer-owned-生命周期" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Producer-owned 生命周期
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -836,6 +853,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="InMemoryStreamTransport（单进程）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#live-节流与回放快照是两层机制" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Live 节流与回放快照是两层机制
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1412,6 +1446,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="StreamTransport Protocol">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#producer-owned-生命周期" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Producer-owned 生命周期
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1422,6 +1473,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="InMemoryStreamTransport（单进程）">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#live-节流与回放快照是两层机制" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Live 节流与回放快照是两层机制
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1698,6 +1766,15 @@
 <a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">is_stream_alive</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stream_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span> <span class="o">...</span>
 </code></pre></div>
 <p>Protocol 方法全部 async — 即使 InMemory 实现实际是同步 dict 操作，也保留 async 以兼容 Redis 实现。</p>
+<h3 id="producer-owned-生命周期">Producer-owned 生命周期</h3>
+<p>Stream 的共享生命周期只有 <code>open / closed</code>，且只由 producer 改写：</p>
+<ol>
+<li>ExecutionRunner 取得 conversation lease 后 <code>create_stream()</code> → <code>open</code>。</li>
+<li>Controller 运行期间 <code>push_event()</code>；用户、admin、多标签页可用各自 cursor 同时读取。</li>
+<li>任一 observer 连接/断开都不改 status、不取消/重启 TTL。</li>
+<li>Producer 推入终态后 <code>close_stream()</code> → <code>closed</code>，并把保留期重置为 <code>STREAM_CLEANUP_TTL</code> 供断线重连回放。</li>
+</ol>
+<p><code>open</code> 期间仍有 <code>EXECUTION_TIMEOUT + STREAM_TTL_GRACE</code> 的安全 TTL，但它只是 producer/worker 崩溃后的孤儿清理兜底，不是“无人订阅超时”。因此不需要 <code>subscriber_count</code> 及其心跳/补偿机械。</p>
 <h2 id="inmemorystreamtransport单进程">InMemoryStreamTransport（单进程）</h2>
 <p><code>src/api/services/stream_transport.py</code> — 开发与单实例部署使用。</p>
 <table>
@@ -1710,35 +1787,39 @@
 <tbody>
 <tr>
 <td>缓冲</td>
-<td><code>asyncio.Queue</code> per stream</td>
+<td>每 stream 一份有界 ordered history（默认最多 1000 条普通事件；<code>llm_chunk</code> 见下）</td>
 </tr>
 <tr>
 <td>状态</td>
-<td><code>pending / streaming / closed</code></td>
+<td><code>open / closed</code>（producer-owned）</td>
 </tr>
 <tr>
-<td>生产者→消费者</td>
-<td><code>Queue.put</code> / <code>Queue.get</code>，无背压</td>
+<td>生产者→观察者</td>
+<td>append history + <code>asyncio.Event.set()</code> 唤醒所有独立 cursor</td>
 </tr>
 <tr>
 <td>心跳</td>
-<td><code>asyncio.wait_for(queue.get, timeout=heartbeat_interval)</code> 超时即 yield <code>{"type": "__ping__"}</code></td>
+<td><code>asyncio.wait_for(new_event.wait(), timeout=heartbeat_interval)</code> 超时即 yield <code>{"type": "__ping__"}</code></td>
 </tr>
 <tr>
 <td>Last-Event-ID 续传</td>
-<td><strong>不支持</strong>（无持久化游标）</td>
+<td>支持；每个 observer 只读取整数 id 大于自己 cursor 的事件</td>
 </tr>
 <tr>
-<td>TTL</td>
-<td>未被消费者接上的 stream 30s 自动清理</td>
+<td>OPEN 安全 TTL</td>
+<td>应用组装时传入 <code>EXECUTION_TIMEOUT + STREAM_TTL_GRACE</code></td>
 </tr>
 <tr>
 <td>终止清理</td>
-<td><code>close_stream()</code> 后延迟 5s 再删除 context（给 in-flight consumer 留窗口）</td>
+<td><code>close_stream()</code> 后保留 <code>STREAM_CLEANUP_TTL</code>（默认 60s）再删除 context</td>
 </tr>
 </tbody>
 </table>
-<p>消费者断线但 stream 未终止时，<code>consume_events</code> 的 finally 块把状态从 <code>streaming</code> 回退到 <code>pending</code> 并重启 TTL，允许短时间内重连（但 InMemory 没有游标，重连只能从当前时刻往后，之前错过的事件丢失）。这是 InMemory 与 Redis 的核心差别。</p>
+<p>InMemory 和 Redis 现在共享同一多观察者契约：新 observer 可从头回放有界历史，断开只丢弃自己的 cursor，不影响 producer 或其他 observer。</p>
+<h3 id="live-节流与回放快照是两层机制">Live 节流与回放快照是两层机制</h3>
+<p>Engine 的 <code>llm_chunk</code> 是累计内容，不是 delta。Producer 继续保留 80ms coalescing：每个 token 只更新 pending，最多每 80ms 才 <code>push_event()</code>，从而限制 Redis 写入、observer 唤醒和 SSE 网络频率。</p>
+<p>Transport 收到 coalesced chunk 后，再把它作为<strong>可替换回放快照</strong>处理：每个 <code>(agent, content/reasoning_content)</code> 只保留最新 entry，普通语义事件仍 append-only。跟得上的在线 observer 最多每 80ms 收到一次更新；慢 observer 可以跳过已被下一累计快照完全覆盖的中间态，晚到或重连的 observer 也直接拿最新累计快照。旧快照删除后 event ID 会出现空洞，但 Last-Event-ID 仍按单调 ID 读取所有更大 entry，不影响续传。</p>
+<p>两层不能互相替代：只做 80ms 节流仍会在长输出中累积大量完整字符串；只做快照替换则会让每个模型 token 都触发 Transport/Redis/SSE。</p>
 <h2 id="redisstreamtransport分布式">RedisStreamTransport（分布式）</h2>
 <p><code>src/api/services/redis_stream_transport.py</code> — 多 Worker / 多 Pod 生产部署。</p>
 <p><strong>Key 设计</strong>（hash tag 保证 Cluster 下同 stream 的 key 落同一 slot）：</p>
@@ -1755,14 +1836,14 @@
 <tr>
 <td><code>{af:msg_id}:stream</code></td>
 <td>Stream (XADD)</td>
-<td><code>EXECUTION_TIMEOUT + STREAM_TTL_GRACE</code>（1800s + 300s）</td>
+<td><code>EXECUTION_TIMEOUT + STREAM_TTL_GRACE</code>（3600s + 300s）</td>
 <td>事件主体</td>
 </tr>
 <tr>
 <td><code>{af:msg_id}:stream_meta</code></td>
 <td>Hash</td>
 <td>同上</td>
-<td>owner、status、consumer_id、lease_check_key、lease_expected_owner</td>
+<td>owner、status、lease locator，以及各 llm replay slot 的最新 entry ID</td>
 </tr>
 </tbody>
 </table>
@@ -1771,7 +1852,8 @@
 </blockquote>
 <p><strong>写入</strong>：</p>
 <ul>
-<li><code>XADD ... MAXLEN ~ 1000</code> — 近似裁剪，限制单 stream 最大事件数（长任务超过会丢最旧事件，前端须在终止前消费完）</li>
+<li>同一个 Lua 原子执行 <code>XADD</code>、首次 <code>EXPIRE</code>，并对 <code>llm_chunk</code> <code>XDEL</code> 该 agent/channel 的上一快照；stream/meta 共享 <code>{prefix:id}</code> hash tag，Redis Cluster 下落同一 slot</li>
+<li><code>XADD ... MAXLEN ~ 1000</code> — 对剩余普通事件做近似裁剪（长任务超过会丢最旧事件，前端须在终止前消费完）</li>
 <li><code>_stream_id</code> 字段注入到事件 dict，携带 Redis entry ID（形如 <code>1710000000000-0</code>），作为 SSE <code>id:</code> 行输出</li>
 </ul>
 <p><strong>消费</strong>：</p>
@@ -1780,7 +1862,7 @@
 <ul>
 <li><code>cursor</code> 初始化为 <code>last_event_id</code>（客户端带来）或 <code>"0-0"</code>（从头）</li>
 <li><code>block_ms</code> 取 <code>heartbeat_interval</code>（默认 15s）；XREAD 返回空即超时 → yield <code>__ping__</code></li>
-<li>Consumer 在接管前生成 <code>consumer_id</code>（8-byte hex），写入 meta Hash；finally 块用 Lua CAS 把 status 回退到 <code>pending</code>，但仅当 <code>consumer_id</code> 仍是自己（防止踢掉已接管的新消费者）</li>
+<li>每个 observer 直接持有自己的 XREAD cursor；不写 meta，断开时也不修改共享 status/TTL</li>
 </ul>
 <p><strong>Lease 感知</strong>（可选）：</p>
 <p>若 <code>create_stream</code> 传入 <code>lease_check_key</code> 和 <code>lease_expected_owner</code>，每次 XREAD 超时时 consumer 会检查 lease 是否仍归预期 owner。Lease 被抢或释放（见 <a href="../concurrency/#心跳续租">concurrency.md → 心跳续租</a>）意味着生产者已退出，此时 consumer 主动发送 error 事件并终止，避免僵尸 SSE 连接挂到 <code>EXECUTION_TIMEOUT</code> 才断。</p>
@@ -1804,8 +1886,9 @@
 <li><code>X-Accel-Buffering: no</code>（nginx 不缓冲）</li>
 <li><code>media_type: text/event-stream</code></li>
 <li><strong>心跳</strong>：<code>config.SSE_PING_INTERVAL</code>（默认 15s）传给 transport 作为超时阈值；收到 <code>__ping__</code> 转为 SSE comment <code>: ping\n\n</code></li>
-<li><strong>终止检测</strong>：收到 <code>complete / cancelled / error</code> 后关闭连接；客户端 <code>CancelledError</code> 不视为 deny，仅调用 <code>consumer.aclose()</code> 归还 context</li>
+<li><strong>终止检测</strong>：收到 <code>complete / cancelled / timed_out / error</code> 后关闭这一 observer 连接；客户端 <code>CancelledError</code> 不视为 deny，仅 <code>aclose()</code> 自己的 cursor</li>
 </ul>
+<p>Admin 的 <code>GET /api/v1/admin/conversations/{conv_id}/stream</code> 复用同一 builder 和同一底层 stream。路由先 <code>require_admin</code>、解析 conversation 当前 lease 对应的 message，再使用 conversation owner id 执行 transport 内的 owner 校验；不通过 <code>user_id=None</code> 绕过校验，也不双写第二条 admin stream。</p>
 <h2 id="sse-格式">SSE 格式</h2>
 <p><code>src/api/utils/sse.py</code> 负责字节序列化：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">format_sse_event</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">event</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="nb">id</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">retry</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
@@ -1906,7 +1989,7 @@
 <ul>
 <li>Pub/Sub 是 fire-and-forget — 消费者晚到就丢事件，无法支持重连续传</li>
 <li>Redis Stream 自带持久化缓冲 + entry ID，天然匹配 <code>Last-Event-ID</code> 语义</li>
-<li><code>XADD MAXLEN ~ 1000</code> 限制内存占用，一次 30 分钟内的执行产生的事件远低于此</li>
+<li><code>llm_chunk</code> 先按 agent/channel 替换累计快照，避免事件数虽有界但字符串总字节近似二次增长；<code>XADD MAXLEN ~ 1000</code> 再给普通事件数提供兜底上限</li>
 <li>代价：XREAD BLOCK 轮询比 Pub/Sub 推送延迟略高，但 15s 心跳节奏下不敏感</li>
 </ul>
 
