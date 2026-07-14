@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     # SSE 配置
     SSE_PING_INTERVAL: int = 15  # 秒，保持连接活跃
-    EXECUTION_TIMEOUT: int = 1800   # 秒，引擎循环执行上限（含 permission 等待）；超时 → TIMED_OUT 终态
+    EXECUTION_TIMEOUT: int = 3600   # 秒，引擎循环执行上限（含 permission 等待）；超时 → TIMED_OUT 终态
     STREAM_CLEANUP_TTL: int = 60    # 秒，执行结束后 consumer 读取剩余事件的清理窗口
     # Redis stream/meta key 寿命 = EXECUTION_TIMEOUT + 此余量。必须覆盖引擎 deadline
     # 之后的 post-processing —— 终态(含 TIMED_OUT)在引擎超时后才由 post-processing

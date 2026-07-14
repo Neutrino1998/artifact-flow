@@ -58,7 +58,7 @@ docker compose exec backend python scripts/create_admin.py admin --password <you
 | `ARTIFACTFLOW_REDIS_URL` | 否 | `""` (InMemory) | Redis 连接串，生产环境建议配置 |
 | `ARTIFACTFLOW_REDIS_KEY_PREFIX` | 启用 Redis 时必填 | `""` | Redis key 命名空间前缀 |
 | `ARTIFACTFLOW_DEBUG` | 否 | `false` | 开启调试日志、详细错误信息和 Swagger 文档 |
-| `ARTIFACTFLOW_EXECUTION_TIMEOUT` | 否 | `1800` | 总执行超时（秒） |
+| `ARTIFACTFLOW_EXECUTION_TIMEOUT` | 否 | `3600` | 总执行超时（秒） |
 | `ARTIFACTFLOW_PERMISSION_TIMEOUT` | 否 | `300` | 单次权限等待超时（秒） |
 | `ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD` | 否 | `100000` | 触发上下文压缩的 token 阈值 |
 | `ARTIFACTFLOW_MAX_CONCURRENT_TASKS` | 否 | `32` | 最大并发引擎执行数 |

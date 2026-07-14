@@ -12,6 +12,11 @@ from pydantic import ValidationError
 from config import Settings, config, validate_config
 
 
+def test_execution_timeout_defaults_to_sixty_minutes(monkeypatch):
+    monkeypatch.delenv("ARTIFACTFLOW_EXECUTION_TIMEOUT", raising=False)
+    assert Settings().EXECUTION_TIMEOUT == 60 * 60
+
+
 @pytest.fixture
 def _valid_prereqs(monkeypatch):
     """Satisfy the non-CORS checks so validate_config() reaches the CORS guard."""

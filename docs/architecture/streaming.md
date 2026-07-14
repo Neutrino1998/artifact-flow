@@ -182,7 +182,7 @@ Transport 收到 coalesced chunk 后，再把它作为**可替换回放快照**�
 
 | Key | 类型 | TTL | 用途 |
 |-----|------|-----|------|
-| `{af:msg_id}:stream` | Stream (XADD) | `EXECUTION_TIMEOUT + STREAM_TTL_GRACE`（1800s + 300s） | 事件主体 |
+| `{af:msg_id}:stream` | Stream (XADD) | `EXECUTION_TIMEOUT + STREAM_TTL_GRACE`（3600s + 300s） | 事件主体 |
 | `{af:msg_id}:stream_meta` | Hash | 同上 | owner、status、lease locator，以及各 llm replay slot 的最新 entry ID |
 
 > TTL 含 `STREAM_TTL_GRACE`：key 必须活过引擎 deadline 之后的 post-processing —— 终态（含 `TIMED_OUT`）在那时才推上 stream。这是 liveness 轴的 **accepted best-effort 固定近似**；心跳续期是 deferred 非目标（见 [execution-lifecycle.md → 三条正交的时间轴](execution-lifecycle.md)）。结束时 `close_stream` 把 TTL 重置为 `STREAM_CLEANUP_TTL`。

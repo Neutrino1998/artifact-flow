@@ -634,7 +634,7 @@ AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy .
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `ARTIFACTFLOW_SSE_PING_INTERVAL` | `15` | 心跳间隔（秒），保持连接活跃 |
-| `ARTIFACTFLOW_EXECUTION_TIMEOUT` | `1800` | 总执行上限（秒），含 permission 等待 |
+| `ARTIFACTFLOW_EXECUTION_TIMEOUT` | `3600` | 总执行上限（秒），含 permission 等待 |
 | `ARTIFACTFLOW_STREAM_CLEANUP_TTL` | `60` | 执行结束后 stream 清理窗口（秒） |
 | `ARTIFACTFLOW_PERMISSION_TIMEOUT` | `300` | 单次权限等待超时（秒） |
 
