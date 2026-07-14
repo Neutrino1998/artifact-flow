@@ -2,9 +2,9 @@
 # 在该模型 params 里显式声明;未声明的参数交给 provider/模型默认决定(OpenAI/DeepSeek
 # 默认 1.0、vLLM 用 max_model_len 兜 max_tokens 等)。详见 src/models/llm.py 注释。
 
-# 模型配置（内网部署：vLLM @ 172.25.16.129:8005）
-# 服务端启动需带 --reasoning-parser deepseek_v3 才会回填 reasoning_content 字段；
-# thinking 通过 extra_body.chat_template_kwargs.thinking 切换（V3.1 系默认关）。
+# 模型配置（内网部署：GPUStack OpenAI-compatible API @ 172.25.16.129:85/v1）
+# 后端推理服务需回填 reasoning_content；thinking 通过
+# extra_body.chat_template_kwargs.thinking 切换（V3.1 系默认关）。
 models:
   # 温度 0.8 = DeepSeek 官方推荐 1.0 与 agent/XML 工具调用稳定性的折中。
   # 之前两条用 0.6/0.7 是从 Qwen3.6 preset 不假思索抄来的 —— Qwen 那套 RL 训练评测
@@ -12,8 +12,8 @@ models:
   # 参数),没有 thinking-需要-低温 这个差异。两边对称,后续做评测才有干净的对照。
   deepseek-v4-flash:
     model: openai/deepseek-v4-flash
-    base_url: http://172.25.16.129:8005/v1
-    api_key: dummy   # vLLM 不验,litellm 客户端要求非空占位
+    base_url: http://172.25.16.129:85/v1
+    api_key_env: GPUSTACK_DEEPSEEK_API_KEY
     params:
       temperature: 0.8
       top_p: 0.95
@@ -23,8 +23,8 @@ models:
 
   deepseek-v4-flash-no-thinking:
     model: openai/deepseek-v4-flash
-    base_url: http://172.25.16.129:8005/v1
-    api_key: dummy
+    base_url: http://172.25.16.129:85/v1
+    api_key_env: GPUSTACK_DEEPSEEK_API_KEY
     params:
       temperature: 0.8
       top_p: 0.95
