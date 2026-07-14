@@ -2,12 +2,12 @@
 name: dataviz
 description: >
   数据可视化与看板图表设计指导。用户要求创建、修改或评审图表、统计卡、KPI 行、
-  仪表盘、HTML/SVG artifact 或 matplotlib 图时激活；用于选择合适图形、确定颜色
+  仪表盘、数据驱动的 HTML/SVG artifact 或 matplotlib 图时激活；用于选择合适图形、确定颜色
   编码、检查可访问性与深浅色，并用沙盒内 Python validator 校验分类/有序调色板。
   适配 ArtifactFlow 静态 HTML artifact 和无网络 sandbox。
 license: Apache-2.0
 metadata:
-  version: "0.1.0"
+  version: "0.1.1"
 ---
 
 # 数据可视化
@@ -19,6 +19,9 @@ metadata:
 pandas、Noto Sans CJK 字体；无 node/npm。HTML artifact 不执行 script。
 
 ## 工作流
+
+本技能处理定量数据图。流程图、架构图、时序图、状态图、ER 图需要 PNG 时改用
+`mermaid-to-png` skill；仅在回复中展示 Mermaid 时直接输出 fenced code block。
 
 1. **先定图形，不先选颜色。** 判断读者要比较大小、看趋势、识别系列、看目标偏差、
    看构成，还是只需要一个数字。细则见 [chart-selection.md](references/chart-selection.md)。

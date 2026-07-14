@@ -46,6 +46,9 @@ export enum StreamEventType {
 export interface MetadataData {
   conversation_id: string;
   message_id: string;
+  /** Best-effort observer preview; terminal conversation detail is authoritative. */
+  user_input?: string;
+  uploaded_files?: { filename: string }[];
 }
 
 export interface AgentStartData {

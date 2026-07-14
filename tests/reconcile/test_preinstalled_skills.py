@@ -28,7 +28,11 @@ from utils.skill_validator import validate_skill_zip
 ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = ROOT / "config" / "skills-src"
 ZIP_DIR = ROOT / "config" / "skills"
-PREINSTALLED = ["dataviz", "docx", "pdf", "pptx", "skill-creator", "xlsx"]
+PREINSTALLED = [
+    "dataviz", "docx", "mermaid-to-png", "pdf", "pptx", "skill-creator", "xlsx",
+]
+# skills-src 内的 SKILL.md-only 预装包。仍产 zip 供下载，has_extra_files=False。
+PREINSTALLED_SINGLE_FILE = {"mermaid-to-png"}
 # 纯散文预装(SKILL.md-only 目录源码;入库时也会生成单文件 zip bundle)
 PREINSTALLED_PROSE = ["html-artifact-design"]
 
@@ -100,11 +104,27 @@ def test_seed_parse_clean_and_defaults():
         seed = by_slug[slug]
         assert seed.visibility == "public"
         assert seed.default_enabled is True
-        is_prose = slug in PREINSTALLED_PROSE
+        is_single_file = slug in PREINSTALLED_PROSE or slug in PREINSTALLED_SINGLE_FILE
         assert seed.bundle is not None
-        assert seed.has_extra_files is (not is_prose)
+        assert seed.has_extra_files is (not is_single_file)
         assert _zip_manifest(seed.bundle)
         assert seed.skill_md.strip()
+
+
+def test_mermaid_to_png_routing_contract():
+    skill_md = (SRC_DIR / "mermaid-to-png" / "SKILL.md").read_text(encoding="utf-8")
+    lead_md = (ROOT / "config" / "agents" / "lead_agent.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "仅在需要 PNG 文件时激活" in skill_md
+    assert "Mermaid 源码和 SVG 下载不激活" in skill_md
+    assert "本技能只负责生成 PNG" in skill_md
+    assert "不调用 `bash`、`mount` 或 `persist`" in skill_md
+    assert "`.mmd` 是 `/workspace` 中的临时渲染输入" in skill_md
+    assert "不要 `persist`" in skill_md
+    assert "`persist` 源" not in skill_md
+    assert "```mermaid fenced code block" in lead_md
 
 
 def test_preinstalled_skill_scripts_are_syntax_valid():
@@ -167,6 +187,150 @@ def test_docx_apply_redline_smoke(tmp_path):
         ("ins", " NEW"),
         ("text", " world"),
     ]
+
+
+def test_docx_apply_redline_plan_is_atomic(tmp_path):
+    docx = pytest.importorskip("docx")
+    etree = pytest.importorskip("lxml.etree")
+    mod = _load_skill_script("docx", "scripts/apply_redline.py")
+
+    src = tmp_path / "in.docx"
+    out = tmp_path / "out.docx"
+    document = docx.Document()
+    document.add_paragraph("Alpha old; Beta remove; Gamma anchor.")
+    document.save(src)
+
+    summary = mod.apply_plan(
+        src,
+        out,
+        author="Review",
+        changes=[
+            {"op": "replace", "find": "old", "replace": "new", "expect": 1},
+            {"op": "delete", "find": "remove", "expect": 1},
+            {"op": "insert_after", "find": "anchor", "text": " added", "expect": 1},
+        ],
+    )
+    assert summary["total_changes"] == 3
+    with zipfile.ZipFile(out) as zf:
+        root = etree.fromstring(zf.read("word/document.xml"))
+    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    assert root.xpath(".//w:del//w:delText[text()='old']", namespaces=ns)
+    assert root.xpath(".//w:ins//w:t[text()='new']", namespaces=ns)
+    assert root.xpath(".//w:del//w:delText[text()='remove']", namespaces=ns)
+    assert root.xpath(".//w:ins//w:t[text()=' added']", namespaces=ns)
+
+    failed = tmp_path / "must-not-exist.docx"
+    with pytest.raises(mod.RedlineError, match="expected 1 editable match"):
+        mod.apply_plan(
+            src,
+            failed,
+            author="Review",
+            changes=[
+                {"op": "replace", "find": "old", "replace": "new", "expect": 1},
+                {"op": "delete", "find": "missing", "expect": 1},
+            ],
+        )
+    assert not failed.exists()
+
+
+def test_docx_apply_redline_auto_matches_typo_uniquely(tmp_path):
+    docx = pytest.importorskip("docx")
+    etree = pytest.importorskip("lxml.etree")
+    mod = _load_skill_script("docx", "scripts/apply_redline.py")
+
+    src = tmp_path / "in.docx"
+    out = tmp_path / "out.docx"
+    document = docx.Document()
+    paragraph = document.add_paragraph()
+    paragraph.add_run("关于人工智能")
+    paragraph.add_run("技术的详细介绍。")
+    document.save(src)
+
+    summary = mod.apply_plan(
+        src,
+        out,
+        author="Review",
+        changes=[{
+            "op": "replace",
+            "find": "关于人工智能枝术的详细介绍",
+            "replace": "已更新",
+            "expect": 1,
+            "match": "auto",
+        }],
+    )
+    assert summary["changes"][0]["match_type"] == "fuzzy"
+    with zipfile.ZipFile(out) as zf:
+        root = etree.fromstring(zf.read("word/document.xml"))
+    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    deleted = "".join(root.xpath(".//w:del//w:delText/text()", namespaces=ns))
+    assert deleted == "关于人工智能技术的详细介绍"
+    assert root.xpath(".//w:ins//w:t[text()='已更新']", namespaces=ns)
+
+
+def test_docx_apply_redline_auto_rejects_duplicate_segments(tmp_path):
+    docx = pytest.importorskip("docx")
+    mod = _load_skill_script("docx", "scripts/apply_redline.py")
+
+    src = tmp_path / "in.docx"
+    out = tmp_path / "must-not-exist.docx"
+    document = docx.Document()
+    document.add_paragraph("Repeated unique-looking target")
+    document.add_paragraph("Repeated unique-looking target")
+    document.save(src)
+
+    with pytest.raises(mod.RedlineError, match="appears multiple times"):
+        mod.apply_plan(
+            src,
+            out,
+            author="Review",
+            changes=[{
+                "op": "replace",
+                "find": "Repeated unique-looking target",
+                "replace": "new",
+                "expect": 1,
+            }],
+        )
+    assert not out.exists()
+
+
+def test_docx_apply_redline_does_not_bridge_hyperlinks(tmp_path):
+    docx = pytest.importorskip("docx")
+    oxml = pytest.importorskip("docx.oxml")
+    ns = pytest.importorskip("docx.oxml.ns")
+    mod = _load_skill_script("docx", "scripts/apply_redline.py")
+
+    prefix = "This is a long editable prefix with enough context before the "
+    suffix = " and enough editable context after the unsupported node."
+    src = tmp_path / "hyperlink.docx"
+    out = tmp_path / "must-not-exist.docx"
+    document = docx.Document()
+    paragraph = document.add_paragraph()
+    paragraph.add_run(prefix)
+    hyperlink = oxml.OxmlElement("w:hyperlink")
+    hyperlink.set(ns.qn("r:id"), "rId999")
+    run = oxml.OxmlElement("w:r")
+    text = oxml.OxmlElement("w:t")
+    text.text = "LINK"
+    run.append(text)
+    hyperlink.append(run)
+    paragraph._p.append(hyperlink)
+    paragraph.add_run(suffix)
+    document.save(src)
+
+    with pytest.raises(mod.RedlineError, match="matching failed"):
+        mod.apply_plan(
+            src,
+            out,
+            author="Review",
+            changes=[{
+                "op": "replace",
+                "find": prefix + "LINK" + suffix,
+                "replace": "REPLACED",
+                "expect": 1,
+                "match": "auto",
+            }],
+        )
+    assert not out.exists()
 
 
 def test_docx_default_reference_does_not_leak_template_media(tmp_path):
@@ -255,3 +419,139 @@ def test_pptx_inspect_and_replace_text_smoke(tmp_path):
 
     geometry = check_mod.check_geometry(str(out))
     assert geometry["issues"] == []
+
+
+def test_pptx_replace_text_auto_and_ambiguity_are_atomic(tmp_path):
+    pptx = pytest.importorskip("pptx")
+    util = pytest.importorskip("pptx.util")
+    mod = _load_skill_script("pptx", "scripts/replace_text.py")
+
+    src = tmp_path / "in.pptx"
+    out = tmp_path / "out.pptx"
+    prs = pptx.Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    box = slide.shapes.add_textbox(
+        util.Inches(1), util.Inches(1), util.Inches(6), util.Inches(1)
+    )
+    paragraph = box.text_frame.paragraphs[0]
+    paragraph.add_run().text = "关于人工智能"
+    paragraph.add_run().text = "技术的详细介绍"
+    prs.save(src)
+
+    summary = mod.replace_text(
+        src,
+        out,
+        [{
+            "find": "关于人工智能枝术的详细介绍",
+            "replace": "已更新",
+            "expect": 1,
+            "match": "auto",
+        }],
+        slides=None,
+        allow_missing=False,
+    )
+    assert summary["replacements"][0]["match_type"] == "fuzzy"
+    assert summary["paragraph_rewrites"] == 1
+    reopened = pptx.Presentation(str(out))
+    assert reopened.slides[0].shapes[0].text == "已更新"
+
+    duplicate_src = tmp_path / "duplicate.pptx"
+    duplicate_out = tmp_path / "must-not-exist.pptx"
+    prs = pptx.Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    for top in (1, 2):
+        shape = slide.shapes.add_textbox(
+            util.Inches(1), util.Inches(top), util.Inches(6), util.Inches(1)
+        )
+        shape.text = "Repeated unique-looking target"
+    prs.save(duplicate_src)
+    with pytest.raises(ValueError, match="multiple times"):
+        mod.replace_text(
+            duplicate_src,
+            duplicate_out,
+            [{
+                "find": "Repeated unique-looking target",
+                "replace": "new",
+                "expect": 1,
+            }],
+            slides=None,
+            allow_missing=False,
+        )
+    assert not duplicate_out.exists()
+
+
+def test_pptx_replace_text_does_not_bridge_fields(tmp_path):
+    pptx = pytest.importorskip("pptx")
+    util = pytest.importorskip("pptx.util")
+    xmlchemy = pytest.importorskip("pptx.oxml.xmlchemy")
+    mod = _load_skill_script("pptx", "scripts/replace_text.py")
+
+    prefix = "This is a long editable prefix with enough context before field "
+    suffix = " and enough editable context after the unsupported field node."
+    src = tmp_path / "field.pptx"
+    out = tmp_path / "must-not-exist.pptx"
+    prs = pptx.Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    box = slide.shapes.add_textbox(
+        util.Inches(1), util.Inches(1), util.Inches(8), util.Inches(2)
+    )
+    paragraph = box.text_frame.paragraphs[0]
+    paragraph.add_run().text = prefix
+    field = xmlchemy.OxmlElement("a:fld")
+    field.set("id", "{00000000-0000-0000-0000-000000000001}")
+    field.set("type", "slidenum")
+    field.append(xmlchemy.OxmlElement("a:rPr"))
+    field_text = xmlchemy.OxmlElement("a:t")
+    field_text.text = "42"
+    field.append(field_text)
+    paragraph._p.append(field)
+    paragraph.add_run().text = suffix
+    prs.save(src)
+
+    with pytest.raises(ValueError, match="expected 1 editable match"):
+        mod.replace_text(
+            src,
+            out,
+            [{
+                "find": prefix + "42" + suffix,
+                "replace": "REPLACED",
+                "expect": 1,
+                "match": "auto",
+            }],
+            slides=None,
+            allow_missing=False,
+        )
+    assert not out.exists()
+
+
+def test_pptx_slide_range_rejects_huge_materialization():
+    mod = _load_skill_script("pptx", "scripts/replace_text.py")
+    with pytest.raises(SystemExit, match="select at most"):
+        mod._parse_slides("1-999999999")
+
+
+def test_pptx_exact_multiple_matches_in_one_run_group(tmp_path):
+    pptx = pytest.importorskip("pptx")
+    util = pytest.importorskip("pptx.util")
+    mod = _load_skill_script("pptx", "scripts/replace_text.py")
+
+    src = tmp_path / "multiple.pptx"
+    out = tmp_path / "multiple-out.pptx"
+    prs = pptx.Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    box = slide.shapes.add_textbox(
+        util.Inches(1), util.Inches(1), util.Inches(6), util.Inches(1)
+    )
+    box.text = "old middle old"
+    prs.save(src)
+
+    summary = mod.replace_text(
+        src,
+        out,
+        [{"find": "old", "replace": "NEW", "expect": 2, "match": "exact"}],
+        slides=None,
+        allow_missing=False,
+    )
+    assert summary["total_hits"] == 2
+    reopened = pptx.Presentation(str(out))
+    assert reopened.slides[0].shapes[0].text == "NEW middle NEW"

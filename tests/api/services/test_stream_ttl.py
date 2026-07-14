@@ -31,13 +31,13 @@ def _make_transport(execution_timeout: int, ttl_grace: int) -> RedisStreamTransp
 
 def test_stream_ttl_includes_grace():
     """key TTL = deadline + grace,而非裸 deadline。"""
-    t = _make_transport(execution_timeout=1800, ttl_grace=300)
-    assert t._stream_ttl == 2100
+    t = _make_transport(execution_timeout=3600, ttl_grace=300)
+    assert t._stream_ttl == 3900
 
 
 def test_stream_ttl_default_grace_zero_is_backwards_compatible():
-    t = _make_transport(execution_timeout=1800, ttl_grace=0)
-    assert t._stream_ttl == 1800
+    t = _make_transport(execution_timeout=3600, ttl_grace=0)
+    assert t._stream_ttl == 3600
 
 
 @pytest.mark.asyncio

@@ -13,10 +13,12 @@ worker 共享计数),否则 InMemory(单进程,够用于 dev / 单机)。
 
 窗口语义:固定窗口 —— 第一次失败时设 TTL=window;窗口内累计,到 max 即锁;
 窗口过期 key 消失、计数清零。锁定时长 ≈ 距首次失败的剩余窗口。
+retry_after 只在 key 已锁时返回剩余秒数,供 HTTP Retry-After / UX 文案使用。
 """
 
 from __future__ import annotations
 
+import math
 import time
 from typing import Optional
 
@@ -30,6 +32,29 @@ end
 return n
 """
 
+_LUA_RETRY_AFTER = """
+local n = redis.call('GET', KEYS[1])
+if not n or tonumber(n) < tonumber(ARGV[1]) then
+  return nil
+end
+return redis.call('PTTL', KEYS[1])
+"""
+
+
+def _seconds_from_pttl(pttl: Optional[int], window_sec: int) -> Optional[int]:
+    if pttl is None:
+        return None
+    pttl = int(pttl)
+    if pttl > 0:
+        return max(1, math.ceil(pttl / 1000))
+    if pttl == 0:
+        return 1
+    if pttl == -2:
+        return None
+    # -1 means the key exists without an expiry. That should not be produced by
+    # record_failure, so fail closed with the configured window.
+    return window_sec
+
 
 class RedisLoginRateLimiter:
     """Redis 实现 —— 多 worker 共享失败计数。"""
@@ -41,6 +66,7 @@ class RedisLoginRateLimiter:
         self._prefix = key_prefix
         # register_script 自动处理 NOSCRIPT 重试(与 redis_runtime_store 同模式)
         self._incr = redis.register_script(_LUA_INCR_FAILURE)
+        self._retry_after = redis.register_script(_LUA_RETRY_AFTER)
 
     def _k(self, key: str) -> str:
         base = f"login:fail:{key}"
@@ -49,6 +75,10 @@ class RedisLoginRateLimiter:
     async def is_locked(self, key: str) -> bool:
         n = await self._redis.get(self._k(key))
         return n is not None and int(n) >= self._max
+
+    async def retry_after(self, key: str) -> Optional[int]:
+        pttl = await self._retry_after(keys=[self._k(key)], args=[self._max])
+        return _seconds_from_pttl(pttl, self._window)
 
     async def record_failure(self, key: str) -> None:
         await self._incr(keys=[self._k(key)], args=[self._window])
@@ -65,7 +95,7 @@ class InMemoryLoginRateLimiter:
         self._window = window_sec
         self._store: dict[str, tuple[int, float]] = {}  # key -> (count, reset_at_monotonic)
 
-    def _live_count(self, key: str) -> Optional[int]:
+    def _live_record(self, key: str) -> Optional[tuple[int, float]]:
         rec = self._store.get(key)
         if rec is None:
             return None
@@ -73,11 +103,21 @@ class InMemoryLoginRateLimiter:
         if time.monotonic() >= reset_at:
             self._store.pop(key, None)
             return None
-        return count
+        return rec
+
+    def _live_count(self, key: str) -> Optional[int]:
+        rec = self._live_record(key)
+        return rec[0] if rec is not None else None
 
     async def is_locked(self, key: str) -> bool:
         count = self._live_count(key)
         return count is not None and count >= self._max
+
+    async def retry_after(self, key: str) -> Optional[int]:
+        rec = self._live_record(key)
+        if rec is None or rec[0] < self._max:
+            return None
+        return max(1, math.ceil(rec[1] - time.monotonic()))
 
     async def record_failure(self, key: str) -> None:
         now = time.monotonic()

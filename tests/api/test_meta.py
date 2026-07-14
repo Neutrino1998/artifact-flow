@@ -72,3 +72,8 @@ async def test_meta_returns_full_shape(client: AsyncClient):
     assert "max_upload_size" in data
     assert isinstance(data["max_upload_size"], int)
     assert data["max_upload_size"] == config.MAX_UPLOAD_SIZE
+
+    # max_private_skills — personal skill allowance (-1 unlimited / 0 closed)
+    assert "max_private_skills" in data
+    assert isinstance(data["max_private_skills"], int)
+    assert data["max_private_skills"] == config.SKILL_USER_MAX_PRIVATE_COUNT

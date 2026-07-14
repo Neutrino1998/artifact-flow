@@ -5,10 +5,53 @@
 用唯一 X-Real-IP 可把 per-IP 锁排除,单独验 per-username 行为。
 """
 
+import pytest
 from httpx import AsyncClient
 
+from api.services.login_rate_limiter import RedisLoginRateLimiter
 from config import config
 from db.models import User
+
+
+class _FakeRedis:
+    def __init__(self, retry_pttl):
+        self.retry_pttl = retry_pttl
+        self._script_count = 0
+
+    def register_script(self, _script):
+        self._script_count += 1
+        script_index = self._script_count
+
+        async def run(*, keys, args):
+            assert len(keys) == 1
+            assert args
+            if script_index == 2:
+                return self.retry_pttl
+            return 1
+
+        return run
+
+
+class TestRedisLoginRateLimiter:
+    @pytest.mark.parametrize(
+        ("pttl", "expected"),
+        [
+            (None, None),
+            (1001, 2),
+            (999, 1),
+            (0, 1),
+            (-2, None),
+            (-1, config.LOGIN_FAILURE_WINDOW_SEC),
+        ],
+    )
+    async def test_retry_after_maps_pttl_boundaries(self, pttl, expected):
+        limiter = RedisLoginRateLimiter(
+            _FakeRedis(pttl),
+            max_failures=config.LOGIN_MAX_FAILURES,
+            window_sec=config.LOGIN_FAILURE_WINDOW_SEC,
+        )
+
+        assert await limiter.retry_after("user:alice") == expected
 
 
 class TestLoginRateLimit:
@@ -30,6 +73,7 @@ class TestLoginRateLimit:
         )
         assert r.status_code == 429
         assert "Retry-After" in r.headers
+        assert "15 minutes" in r.json()["detail"]
 
     async def test_ip_lock_blocks_other_username(
         self, anon_client: AsyncClient, test_user: User

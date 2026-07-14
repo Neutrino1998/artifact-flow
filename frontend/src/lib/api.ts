@@ -187,7 +187,13 @@ export function login(body: LoginRequest) {
   }).then(async (res) => {
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new Error(`Login failed: ${text}`);
+      const requestId = res.headers.get('X-Request-ID') ?? undefined;
+      throw new ApiError(
+        res.status,
+        formatApiError(res.status, text, res.status >= 500 ? requestId : undefined),
+        undefined,
+        requestId,
+      );
     }
     return res.json() as Promise<LoginResponse>;
   });
@@ -226,7 +232,7 @@ export function setSkillEnabled(slug: string, enabled: boolean) {
  * 错误（detail 由 SkillManager 结构化产出）：
  * - 422 + dict detail（`{message, findings[]}`）→ 硬门拒收，ApiError.body 给 UI
  *   逐条渲染 rule/severity/message
- * - 413 → 超存储配额；409 → slug 撞名（改 name 重打包）
+ * - 413 → 超存储配额；409 → slug 撞名或个人技能数量达到上限
  */
 export async function importSkill(
   file: File,
@@ -576,6 +582,7 @@ export interface AdminConversationSummary {
   user_display_name: string | null;
   message_count: number;
   is_active: boolean;
+  active_message_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -603,6 +610,7 @@ export interface AdminMessageGroup {
   created_at: string;
   events: AdminEventItem[];
   execution_metrics: Record<string, unknown> | null;
+  uploaded_files: { id?: string; filename: string }[] | null;
 }
 
 export interface AdminPromptReconstructResponse {
@@ -621,6 +629,7 @@ export interface AdminConversationEventsResponse {
   user_display_name: string | null;
   active_branch: string | null;
   is_active: boolean;
+  active_message_id: string | null;
   created_at: string;
   updated_at: string;
   messages: AdminMessageGroup[];
@@ -642,6 +651,10 @@ export function getAdminConversationEvents(convId: string) {
   return request<AdminConversationEventsResponse>(
     `/api/v1/admin/conversations/${convId}/events`
   );
+}
+
+export function getAdminConversationStreamUrl(convId: string) {
+  return `/api/v1/admin/conversations/${encodeURIComponent(convId)}/stream`;
 }
 
 // ── Fleet instances (Phase C) ──

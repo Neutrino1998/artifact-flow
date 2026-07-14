@@ -23,7 +23,8 @@ set -euo pipefail
 # under --runtime=runsc --network=none with ZERO network (plan 原则 7).
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CTX="$ROOT/sandbox"
+CTX="$ROOT"
+DOCKERFILE="$ROOT/sandbox/Dockerfile"
 OUTDIR="$ROOT/dist"
 
 VERSION="${1:-$(date +%Y%m%d)}"
@@ -40,10 +41,10 @@ case "$PLATFORM" in
   *)              ARCH_TAG="${PLATFORM##*/}" ;;
 esac
 
-# Arch-suffixed names so amd64 + arm64 artifacts coexist in dist/ (a Kylin box is
-# single-arch — loading one tar is unambiguous). The verify tar is arch-AGNOSTIC
-# (Python/bash probes) → shared, no suffix.
-IMAGE="artifactflow-sandbox:${VERSION}-${ARCH_TAG}"
+# The production image identity is derived from runtime inputs, not the app
+# release version. Unrelated app/config releases therefore reuse the same image,
+# while any actual sandbox runtime change produces a new immutable reference.
+IMAGE="$(python3 "$ROOT/scripts/sandbox_runtime_ref.py" --arch "$ARCH_TAG")"
 ARCHIVE="$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.tar.gz"
 VERIFY_ARCHIVE="$OUTDIR/artifactflow-sandbox-verify-${VERSION}.tar.gz"
 LOCK="$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.wheels.lock"
@@ -55,7 +56,7 @@ echo "=== ArtifactFlow sandbox image: ${VERSION} (platform: ${PLATFORM}, tag: ${
 echo "Building ${IMAGE} (native if build-host arch == ${ARCH_TAG}, else QEMU — be patient)..."
 docker buildx build --platform "${PLATFORM}" \
   -t "${IMAGE}" -t artifactflow-sandbox:latest \
-  --load "$CTX"
+  -f "$DOCKERFILE" --load "$CTX"
 
 # Pull the frozen pip set + tool versions OUT of the built image so ops can
 # inspect/diff without loading the (large) tar. -u 0 reads /opt regardless of
@@ -64,6 +65,10 @@ echo "Extracting baked wheels.lock + tool versions..."
 docker run --rm -u 0 "${IMAGE}" cat /opt/sandbox-wheels.lock.txt > "$LOCK"
 PY_VER=$(docker run --rm "${IMAGE}" python3 --version)
 PANDOC_VER=$(docker run --rm "${IMAGE}" pandoc --version | head -1)
+OFFICE_VER=$(docker run --rm "${IMAGE}" soffice --version | head -1)
+OFFICE_CLI_VER=$(docker run --rm "${IMAGE}" artifactflow-office --version)
+TEXT_EDIT_VER=$(docker run --rm "${IMAGE}" text-edit --version)
+MERMAN_VER=$(docker run --rm "${IMAGE}" merman-cli --version)
 RG_VER=$(docker run --rm "${IMAGE}" rg --version | head -1)
 ZIP_VER=$(docker run --rm "${IMAGE}" sh -c "zip -v | grep -m1 'This is Zip'")
 GIT_VER=$(docker run --rm "${IMAGE}" git --version)
@@ -72,10 +77,9 @@ GIT_VER=$(docker run --rm "${IMAGE}" git --version)
 IMAGE_ID=$(docker image inspect "${IMAGE}" --format '{{.Id}}')
 
 echo "Saving image to ${ARCHIVE}..."
-# Save BOTH the versioned tag AND :latest so that after `docker load` on the
-# target, the default tag in smoke-test.sh / run-all.sh (:latest) resolves —
-# otherwise the loaded image only has :<VERSION> and the defaults miss it.
-docker save "${IMAGE}" artifactflow-sandbox:latest | gzip > "$ARCHIVE"
+# The release tar carries only the immutable reference. :latest remains a local
+# build convenience and is never selected by production deployment.
+docker save "${IMAGE}" | gzip > "$ARCHIVE"
 # Checksum with a bare filename (run inside dist/) so `sha256sum -c` works from
 # that dir — same convention as release.sh / verify-bundle.sh.
 ( cd "$OUTDIR" && sha256sum "$(basename "$ARCHIVE")" > "$(basename "$ARCHIVE").sha256" )
@@ -99,10 +103,15 @@ cat > "$MANIFEST" <<EOF
 ArtifactFlow sandbox image — ${VERSION}
 Built (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)
 Platform:    ${PLATFORM}
+Image ref:   ${IMAGE}
 Image id:    ${IMAGE_ID}
 
 Tools:
   ${PY_VER}
+  ${OFFICE_VER}
+  ${OFFICE_CLI_VER}
+  ${TEXT_EDIT_VER}
+  ${MERMAN_VER}
   ${PANDOC_VER}
   ${RG_VER}
   ${ZIP_VER}

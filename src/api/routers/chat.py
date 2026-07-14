@@ -17,8 +17,6 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from pydantic import ValidationError
 
 from config import config
-from utils.time import utc_now
-
 from api.dependencies import (
     get_conversation_manager,
     get_current_user,
@@ -45,7 +43,7 @@ from api.schemas.chat import (
     MessageResponse,
     StorageUsageResponse,
 )
-from api.services.controller_factory import create_controller, run_and_push, sanitize_error_event
+from api.services.execution_launcher import ExecutionLauncher, ExecutionSpec
 from api.services.stream_transport import StreamTransport
 from api.services.execution_runner import ConflictError, ExecutionRunner
 from api.services.runtime_store import InjectQueueFull
@@ -53,7 +51,7 @@ from api.routers.artifacts import convert_uploaded_file
 from core.conversation_manager import ConversationManager
 from core.events import StreamEventType
 from repositories.base import NotFoundError
-from utils.logger import get_logger, set_request_context
+from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
 
@@ -66,6 +64,24 @@ async def _verify_ownership(
     """校验 conversation 归属当前用户，不匹配返回 404"""
     if not await conversation_manager.verify_ownership(conv_id, user.user_id):
         raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
+
+
+async def _verify_parent_message(
+    conv_id: str,
+    parent_message_id: str,
+    conversation_manager: ConversationManager,
+) -> None:
+    """校验显式 parent_message_id 属于当前 conversation，避免写出悬空消息树。"""
+    parent = await conversation_manager.get_message(parent_message_id)
+    if not parent or parent.conversation_id != conv_id:
+        logger.warning(
+            "Chat rejected (422): invalid parent_message_id for conversation "
+            f"(conv={conv_id}, parent={parent_message_id})"
+        )
+        raise HTTPException(
+            status_code=422,
+            detail="parent_message_id does not belong to this conversation",
+        )
 
 
 @router.post("", response_model=ChatResponse)
@@ -134,6 +150,14 @@ async def send_message(
     if request.conversation_id:
         await _verify_ownership(conversation_id, current_user, conversation_manager)
 
+    if (
+        "parent_message_id" in request.model_fields_set
+        and request.parent_message_id is not None
+    ):
+        await _verify_parent_message(
+            conversation_id, request.parent_message_id, conversation_manager
+        )
+
     # 附件:相一 **纯转换**（bytes → 文本），不碰 DB、不 commit 任何 artifact。任一附件
     # 格式不支持 / 无法解码 / 转换失败 → 在此抛 422/500，此时 conversation 与 artifact 都
     # 未创建，批次「全有或全无」。转换后的内容 closure-carry 进控制器，由 execute_loop 在
@@ -191,44 +215,25 @@ async def send_message(
         for c in converted
     ]
 
-    # 设置请求上下文
-    set_request_context(message_id=message_id, conv_id=conversation_id)
-
-    # 构造执行闭包
-    async def execute_and_push():
-        try:
-            async with create_controller(conversation_id, message_id, user_id) as ctrl:
-                parent_kwargs = {}
-                if 'parent_message_id' in request.model_fields_set:
-                    parent_kwargs['parent_message_id'] = request.parent_message_id
-                await run_and_push(
-                    stream_transport,
-                    message_id,
-                    ctrl.stream_execute(
-                        user_input=request.user_input,
-                        conversation_id=conversation_id,
-                        message_id=message_id,
-                        uploaded_files=uploaded_files,
-                        force_compact=request.force_compact,
-                        activate_skills=request.activate_skills,
-                        **parent_kwargs,
-                    ),
-                )
-        except Exception as e:
-            logger.exception(f"Failed to initialize execution: {e}")
-            await stream_transport.push_event(message_id, sanitize_error_event({
-                "type": "error",
-                "timestamp": utc_now().isoformat(),
-                "data": {"success": False, "error": str(e)}
-            }))
-            await stream_transport.close_stream(message_id)
-
-    # submit 内部处理 lease + interactive + stream 编排
+    # Launcher 只收拢现有 create_controller → run_and_push → runner.submit
+    # 调用链；conversation 准备、上传转换和配额闸仍归本用例。
+    spec_kwargs = {}
+    if "parent_message_id" in request.model_fields_set:
+        # 保留 omit/null/id 三态：omit 让 controller 自动取 active branch；显式
+        # null 从根分支；id 从指定父消息分支。
+        spec_kwargs["parent_message_id"] = request.parent_message_id
+    launcher = ExecutionLauncher(runner, stream_transport)
     try:
-        await runner.submit(
-            conversation_id, message_id, execute_and_push,
-            user_id=user_id, stream_transport=stream_transport,
-        )
+        handle = await launcher.submit(ExecutionSpec(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            user_input=request.user_input,
+            uploaded_files=uploaded_files,
+            force_compact=request.force_compact,
+            activate_skills=request.activate_skills,
+            **spec_kwargs,
+        ))
     except ConflictError:
         raise HTTPException(
             status_code=409,
@@ -237,9 +242,9 @@ async def send_message(
         )
 
     return ChatResponse(
-        conversation_id=conversation_id,
-        message_id=message_id,
-        stream_url=f"/api/v1/stream/{message_id}"
+        conversation_id=handle.conversation_id,
+        message_id=handle.message_id,
+        stream_url=handle.stream_url,
     )
 
 
@@ -625,4 +630,3 @@ async def resume_execution(
     return ResumeResponse(
         stream_url=f"/api/v1/stream/{message_id}"
     )
-

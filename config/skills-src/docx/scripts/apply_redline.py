@@ -3,9 +3,27 @@
 
 Usage:
     python apply_redline.py input.docx output.docx --replace OLD --with NEW --author Reviewer
+    python apply_redline.py input.docx output.docx --replace-file old.txt --with-file new.txt
     python apply_redline.py input.docx output.docx --delete OLD --author Reviewer
     python apply_redline.py input.docx output.docx --insert-after ANCHOR --text NEW --author Reviewer
     python apply_redline.py input.docx output.docx --insert-before ANCHOR --text NEW --author Reviewer
+    python apply_redline.py input.docx output.docx --plan changes.json --author Reviewer
+
+Plan format:
+    {"changes": [
+      {"op": "replace", "find_file": "old.txt", "replace_file": "new.txt",
+       "match": "auto", "expect": 1},
+      {"op": "delete", "find": "obsolete text", "expect": 1},
+      {"op": "insert_after", "find": "anchor", "text_file": "addition.txt", "expect": 1}
+    ]}
+
+Paths inside a plan are resolved relative to the plan file. Text files are
+UTF-8; one final line ending is stripped so quoted heredocs are convenient.
+The whole plan is atomic: all changes must match their expected counts before
+the output file is replaced.
+
+Single matches default to exact -> normalized -> bounded fuzzy lookup. Multiple
+matches require exact mode; ambiguity always fails.
 
 Scope is intentionally narrow: the match must be visible text inside one
 paragraph and plain direct runs. Existing tracked changes, hyperlinks, fields,
@@ -18,12 +36,20 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import os
 import sys
+import tempfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 from lxml import etree
+try:
+    from text_match import find_unique_in_segments
+except ModuleNotFoundError as exc:
+    if exc.name != "text_match":
+        raise
+    from utils.text_match import find_unique_in_segments
 
 NS_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 NS_XML = "http://www.w3.org/XML/1998/namespace"
@@ -33,6 +59,10 @@ XML_SPACE = "{%s}space" % NS_XML
 
 class RedlineError(Exception):
     pass
+
+
+def _preview(text: str, limit: int = 120) -> str:
+    return text if len(text) <= limit else text[:limit] + "..."
 
 
 def _now() -> str:
@@ -56,27 +86,50 @@ def _inside_tracked_change(run, paragraph) -> bool:
     return False
 
 
-def _run_text(run) -> str:
-    return "".join(t.text or "" for t in run.findall(W + "t"))
+def _editable_run_text(run) -> str | None:
+    """Return plain run text, or None when the run has non-text content."""
+    parts = []
+    for child in run:
+        if child.tag == W + "rPr":
+            continue
+        if child.tag != W + "t":
+            return None
+        parts.append(child.text or "")
+    return "".join(parts)
 
 
-def _direct_text_runs(paragraph):
-    runs = []
+def _direct_text_run_groups(paragraph):
+    """Yield contiguous editable runs without bridging unsupported OOXML."""
+    groups = []
+    current = []
     offset = 0
+
+    def flush() -> None:
+        nonlocal current, offset
+        if current:
+            groups.append((current, "".join(item["text"] for item in current)))
+        current = []
+        offset = 0
+
     for child in paragraph:
         if child.tag != W + "r" or _inside_tracked_change(child, paragraph):
+            flush()
             continue
-        text = _run_text(child)
+        text = _editable_run_text(child)
+        if text is None:
+            flush()
+            continue
         if not text:
             continue
-        runs.append({
+        current.append({
             "run": child,
             "start": offset,
             "end": offset + len(text),
             "text": text,
         })
         offset += len(text)
-    return runs, "".join(item["text"] for item in runs)
+    flush()
+    return groups
 
 
 def _text_el(tag: str, text: str):
@@ -208,20 +261,75 @@ def _apply_inline_change(
                 parent.remove(item["run"])
 
 
-def _find_and_apply(root, *, needle: str, mode: str, new_text: str, author: str, all_matches: bool):
+def _find_unique_editable_match(root, needle: str, match_mode: str):
+    entries = []
+    for paragraph in root.iter(W + "p"):
+        for runs, text in _direct_text_run_groups(paragraph):
+            entries.append((paragraph, runs, text))
+
+    result = find_unique_in_segments(
+        [entry[2] for entry in entries], needle, mode=match_mode
+    )
+    if not result.success or result.segment_index is None:
+        raise RedlineError(result.message)
+    paragraph, runs, _ = entries[result.segment_index]
+    return paragraph, runs, result
+
+
+def _find_and_apply(
+    root,
+    *,
+    needle: str,
+    mode: str,
+    new_text: str,
+    author: str,
+    all_matches: bool,
+    match_mode: str,
+):
+    if not needle:
+        raise RedlineError("anchor text must not be empty")
     if "\n" in needle or "\n" in new_text:
         raise RedlineError("multi-line matches/new text are not supported")
     date = _now()
     change_id = _next_id(root)
     applied = 0
 
+    if not all_matches:
+        paragraph, runs, result = _find_unique_editable_match(
+            root, needle, match_mode
+        )
+        _apply_inline_change(
+            paragraph,
+            runs,
+            result.start,
+            result.end,
+            mode=mode,
+            new_text=new_text,
+            author=author,
+            change_id=change_id,
+            date=date,
+        )
+        return {
+            "applied": 1,
+            "match_type": result.match_type,
+            "similarity": result.similarity,
+            "matched_text": result.matched_text,
+        }
+
+    if match_mode != "exact":
+        raise RedlineError("multi-match operations require match='exact'")
     for paragraph in root.iter(W + "p"):
         # Recompute after each edit because the paragraph tree changes.
         while True:
-            runs, full_text = _direct_text_runs(paragraph)
-            pos = full_text.find(needle)
-            if pos < 0:
+            found = None
+            for runs, text in _direct_text_run_groups(paragraph):
+                pos = text.find(needle)
+                if pos >= 0:
+                    found = (runs, pos)
+                    break
+            if found is None:
                 break
+            runs, pos = found
             start, end = pos, pos + len(needle)
             _apply_inline_change(
                 paragraph,
@@ -236,37 +344,228 @@ def _find_and_apply(root, *, needle: str, mode: str, new_text: str, author: str,
             )
             applied += 1
             change_id += 2
-            if not all_matches:
-                return applied
-    return applied
+    return {
+        "applied": applied,
+        "match_type": "exact",
+        "similarity": 1.0,
+        "matched_text": needle,
+    }
 
 
-def apply_redline(src: Path, out: Path, *, needle: str, mode: str, new_text: str, author: str, all_matches: bool):
+def _count_matches(root, needle: str) -> int:
+    if not needle:
+        raise RedlineError("anchor text must not be empty")
+    if "\n" in needle:
+        raise RedlineError("multi-line matches are not supported")
+    return sum(
+        text.count(needle)
+        for paragraph in root.iter(W + "p")
+        for _, text in _direct_text_run_groups(paragraph)
+    )
+
+
+def _load_docx(src: Path):
     with zipfile.ZipFile(src) as zin:
         members = [(info, zin.read(info.filename)) for info in zin.infolist()]
-
-    updated = []
-    applied = 0
-    for info, blob in members:
+    for index, (info, blob) in enumerate(members):
         if info.filename == "word/document.xml":
-            root = etree.fromstring(blob)
-            applied = _find_and_apply(
+            return members, index, etree.fromstring(blob)
+    raise RedlineError("word/document.xml is missing")
+
+
+def _write_docx(members, document_index: int, root, out: Path) -> None:
+    blob = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+    info, _ = members[document_index]
+    members[document_index] = (info, blob)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=f".{out.name}.", suffix=".tmp", dir=out.parent)
+    os.close(fd)
+    temp_path = Path(temp_name)
+    try:
+        with zipfile.ZipFile(temp_path, "w", zipfile.ZIP_DEFLATED) as zout:
+            for member_info, member_blob in members:
+                zout.writestr(member_info, member_blob)
+        os.chmod(temp_path, 0o644)
+        os.replace(temp_path, out)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def _apply_plan_changes(root, changes: list[dict], *, author: str) -> list[dict]:
+    if not changes:
+        raise RedlineError("plan changes must not be empty")
+    summaries = []
+    for index, change in enumerate(changes, 1):
+        mode = str(change.get("op", "")).replace("_", "-")
+        if mode not in {"replace", "delete", "insert-before", "insert-after"}:
+            raise RedlineError(f"change {index}: unsupported op {mode!r}")
+        needle = change.get("find")
+        if not isinstance(needle, str):
+            raise RedlineError(f"change {index}: find must be a string")
+        if mode == "replace":
+            new_text = change.get("replace")
+        elif mode.startswith("insert-"):
+            new_text = change.get("text")
+        else:
+            new_text = ""
+        if not isinstance(new_text, str):
+            raise RedlineError(f"change {index}: replacement text must be a string")
+        if mode != "delete" and not new_text:
+            raise RedlineError(f"change {index}: replacement text must not be empty")
+        expect = change.get("expect", 1)
+        if not isinstance(expect, int) or isinstance(expect, bool) or expect < 1:
+            raise RedlineError(f"change {index}: expect must be a positive integer")
+        if mode.startswith("insert-") and expect != 1:
+            raise RedlineError(f"change {index}: insert operations require expect=1")
+
+        match_mode = change.get("match", "auto" if expect == 1 else "exact")
+        if match_mode not in {"exact", "normalized", "auto"}:
+            raise RedlineError(
+                f"change {index}: match must be exact, normalized, or auto"
+            )
+        if expect > 1 and match_mode != "exact":
+            raise RedlineError(
+                f"change {index}: expect > 1 requires match='exact'"
+            )
+
+        if expect > 1:
+            found = _count_matches(root, needle)
+            if found != expect:
+                raise RedlineError(
+                    f"change {index}: expected {expect} editable match(es), found {found}: "
+                    f"{_preview(needle)!r}"
+                )
+        try:
+            result = _find_and_apply(
                 root,
                 needle=needle,
                 mode=mode,
                 new_text=new_text,
                 author=author,
-                all_matches=all_matches,
+                all_matches=expect > 1,
+                match_mode=match_mode,
             )
-            if applied == 0:
-                raise RedlineError(f"anchor text not found in editable document body: {needle!r}")
-            blob = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
-        updated.append((info, blob))
+        except RedlineError as exc:
+            raise RedlineError(
+                f"change {index}: expected {expect} editable match(es), "
+                f"matching failed: {exc}: {_preview(needle)!r}"
+            ) from exc
+        if result["applied"] != expect:
+            raise RedlineError(
+                f"change {index}: applied {result['applied']}, expected {expect}"
+            )
+        summary = {
+            "index": index,
+            "op": mode,
+            "find": _preview(needle),
+            "find_chars": len(needle),
+            "applied": result["applied"],
+            "match_type": result["match_type"],
+            "similarity": result["similarity"],
+        }
+        if result["match_type"] != "exact":
+            summary["matched_text"] = _preview(result["matched_text"] or "")
+        summaries.append(summary)
+    return summaries
 
-    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
-        for info, blob in updated:
-            zout.writestr(info.filename, blob)
-    return {"mode": mode, "anchor": needle, "author": author, "changes": applied, "out": str(out)}
+
+def apply_plan(src: Path, out: Path, *, changes: list[dict], author: str) -> dict:
+    if src.resolve() == out.resolve():
+        raise RedlineError("input and output must be different paths")
+    members, document_index, root = _load_docx(src)
+    summaries = _apply_plan_changes(root, changes, author=author)
+    _write_docx(members, document_index, root, out)
+    return {
+        "author": author,
+        "changes": summaries,
+        "total_changes": sum(item["applied"] for item in summaries),
+        "out": str(out),
+    }
+
+
+def apply_redline(src: Path, out: Path, *, needle: str, mode: str, new_text: str, author: str, all_matches: bool):
+    expected = _count_matches(_load_docx(src)[2], needle) if all_matches else 1
+    summary = apply_plan(
+        src,
+        out,
+        changes=[{
+            "op": mode,
+            "find": needle,
+            "replace" if mode == "replace" else "text": new_text,
+            "expect": expected,
+            "match": "exact" if all_matches else "auto",
+        }],
+        author=author,
+    )
+    return {
+        "mode": mode,
+        "anchor": _preview(needle),
+        "anchor_chars": len(needle),
+        "author": author,
+        "changes": summary["total_changes"],
+        "out": str(out),
+    }
+
+
+def _read_text_file(path: Path) -> str:
+    text = path.read_text(encoding="utf-8")
+    if text.endswith("\r\n"):
+        return text[:-2]
+    if text.endswith("\n"):
+        return text[:-1]
+    return text
+
+
+def _resolve_plan_text(change: dict, *, direct_key: str, file_key: str, base: Path, index: int) -> str:
+    direct = change.get(direct_key)
+    file_name = change.get(file_key)
+    if direct is not None and file_name is not None:
+        raise RedlineError(f"change {index}: use only {direct_key} or {file_key}")
+    if file_name is not None:
+        if not isinstance(file_name, str) or not file_name:
+            raise RedlineError(f"change {index}: {file_key} must be a path string")
+        return _read_text_file(base / file_name)
+    if not isinstance(direct, str):
+        raise RedlineError(f"change {index}: missing {direct_key}/{file_key}")
+    return direct
+
+
+def _load_plan(path: Path) -> tuple[list[dict], str | None]:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or not isinstance(raw.get("changes"), list):
+        raise RedlineError("plan must be an object with a changes array")
+    resolved = []
+    for index, original in enumerate(raw["changes"], 1):
+        if not isinstance(original, dict):
+            raise RedlineError(f"change {index}: must be an object")
+        change = dict(original)
+        change["find"] = _resolve_plan_text(
+            change, direct_key="find", file_key="find_file", base=path.parent, index=index
+        )
+        mode = str(change.get("op", "")).replace("_", "-")
+        if mode == "replace":
+            change["replace"] = _resolve_plan_text(
+                change, direct_key="replace", file_key="replace_file", base=path.parent, index=index
+            )
+        elif mode.startswith("insert-"):
+            change["text"] = _resolve_plan_text(
+                change, direct_key="text", file_key="text_file", base=path.parent, index=index
+            )
+        resolved.append(change)
+    plan_author = raw.get("author")
+    if plan_author is not None and not isinstance(plan_author, str):
+        raise RedlineError("plan author must be a string")
+    return resolved, plan_author
+
+
+def _choose_text(direct: str | None, file_name: str | None, label: str) -> str:
+    if direct is not None and file_name is not None:
+        raise RedlineError(f"use only --{label} or --{label}-file")
+    if file_name is not None:
+        return _read_text_file(Path(file_name))
+    if direct is None:
+        raise RedlineError(f"missing --{label} or --{label}-file")
+    return direct
 
 
 def main() -> None:
@@ -274,44 +573,56 @@ def main() -> None:
     parser.add_argument("input")
     parser.add_argument("output")
     group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--plan", help="JSON batch plan; text may come from UTF-8 files")
     group.add_argument("--replace", dest="replace_text")
+    group.add_argument("--replace-file")
     group.add_argument("--delete")
+    group.add_argument("--delete-file")
     group.add_argument("--insert-before")
+    group.add_argument("--insert-before-file")
     group.add_argument("--insert-after")
-    parser.add_argument("--with", dest="with_text", default="")
-    parser.add_argument("--text", default="")
-    parser.add_argument("--author", default="ArtifactFlow")
+    group.add_argument("--insert-after-file")
+    parser.add_argument("--with", dest="with_text")
+    parser.add_argument("--with-file")
+    parser.add_argument("--text")
+    parser.add_argument("--text-file")
+    parser.add_argument("--author")
     parser.add_argument("--all", action="store_true", help="apply to all matching paragraphs")
     args = parser.parse_args()
 
-    if args.replace_text is not None:
-        mode, needle, new_text = "replace", args.replace_text, args.with_text
-        if not new_text:
-            raise SystemExit("error: --replace requires --with NEW")
-    elif args.delete is not None:
-        mode, needle, new_text = "delete", args.delete, ""
-    elif args.insert_before is not None:
-        mode, needle, new_text = "insert-before", args.insert_before, args.text
-        if not new_text:
-            raise SystemExit("error: --insert-before requires --text NEW")
-    else:
-        mode, needle, new_text = "insert-after", args.insert_after, args.text
-        if not new_text:
-            raise SystemExit("error: --insert-after requires --text NEW")
-    if args.all and mode in ("insert-before", "insert-after"):
-        raise SystemExit("error: --all is only supported for --replace and --delete")
-
     try:
-        summary = apply_redline(
-            Path(args.input),
-            Path(args.output),
-            needle=needle,
-            mode=mode,
-            new_text=new_text,
-            author=args.author,
-            all_matches=args.all,
-        )
-    except (OSError, zipfile.BadZipFile, etree.XMLSyntaxError, RedlineError) as e:
+        if args.plan:
+            if args.all:
+                raise RedlineError("--all cannot be used with --plan; set expect per change")
+            changes, plan_author = _load_plan(Path(args.plan))
+            summary = apply_plan(
+                Path(args.input), Path(args.output), changes=changes,
+                author=args.author or plan_author or "ArtifactFlow",
+            )
+        else:
+            if args.replace_text is not None or args.replace_file is not None:
+                mode = "replace"
+                needle = _choose_text(args.replace_text, args.replace_file, "replace")
+                new_text = _choose_text(args.with_text, args.with_file, "with")
+            elif args.delete is not None or args.delete_file is not None:
+                mode = "delete"
+                needle = _choose_text(args.delete, args.delete_file, "delete")
+                new_text = ""
+            elif args.insert_before is not None or args.insert_before_file is not None:
+                mode = "insert-before"
+                needle = _choose_text(args.insert_before, args.insert_before_file, "insert-before")
+                new_text = _choose_text(args.text, args.text_file, "text")
+            else:
+                mode = "insert-after"
+                needle = _choose_text(args.insert_after, args.insert_after_file, "insert-after")
+                new_text = _choose_text(args.text, args.text_file, "text")
+            if args.all and mode in ("insert-before", "insert-after"):
+                raise RedlineError("--all is only supported for replace and delete")
+            summary = apply_redline(
+                Path(args.input), Path(args.output), needle=needle, mode=mode,
+                new_text=new_text, author=args.author or "ArtifactFlow", all_matches=args.all,
+            )
+    except (OSError, json.JSONDecodeError, zipfile.BadZipFile, etree.XMLSyntaxError, RedlineError) as e:
         print(f"error: {e}", file=sys.stderr)
         sys.exit(1)
     print(json.dumps(summary, ensure_ascii=False))

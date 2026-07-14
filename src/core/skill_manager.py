@@ -70,6 +70,15 @@ class SkillQuotaError(SkillManagerError):
     status_code = 413
 
 
+class SkillCountLimitError(SkillManagerError):
+    """Personal skill collection is at its configured limit."""
+    status_code = 409
+
+
+class SkillInternalError(SkillManagerError):
+    status_code = 500
+
+
 class SkillValidationError(SkillManagerError):
     """硬门拒收(E-1 validator error 级 / slug 派生失败 / 单 zip 超限)。findings 结构化
     透出给 router → 422 detail,前端逐条渲染。"""
@@ -254,9 +263,11 @@ class SkillManager:
         "marketplace"(admin 通道,共享、配额豁免)。
 
         管线:单 zip 字节上限(仅 private —— 信任分层,同 SKILL_BUNDLE_MAX_BYTES 注释)
-        → 配额闸(仅 private)→ E-1 硬门 → slug 派生+校验 → allowed-tools 存在性 warn
-        → 撞名闸 → 建行 commit。全部拒收路径 logger.warning 落原因(req-id ↔ 拒因,
-        否则 grep 只见一条 4xx)。
+        → 数量闸的配置关闭态(仅 private)→ 字节配额闸(仅 private)
+        → E-1 硬门 → slug 派生+校验 → allowed-tools 存在性 warn
+        → 个人数量锁+计数(仅 private,临近插入)→ 撞名闸
+        → 建行 commit。全部拒收路径 logger.warning 落原因(req-id ↔ 拒因,否则 grep
+        只见一条 4xx)。
         """
         where = filename or "upload.zip"
         is_private = audience == "private"
@@ -284,6 +295,19 @@ class SkillManager:
             )
             logger.warning("Skill import rejected (422): user=%s %s", user_id, f.message)
             raise SkillValidationError(f.message, [f])
+
+        # -1 = unlimited; 0 = closed without touching the DB. Positive limits enter
+        # the lock/count critical section after validation, immediately before insert.
+        private_count_limit = config.SKILL_USER_MAX_PRIVATE_COUNT
+        if is_private and private_count_limit == 0:
+            logger.warning(
+                "Skill import rejected (409): user=%s private skill imports disabled "
+                "limit=0",
+                user_id,
+            )
+            raise SkillCountLimitError(
+                "个人技能导入已关闭，请联系管理员将技能发布为共享技能"
+            )
 
         # 配额:bundle 字节与 artifact blob 共用一个池,口径单点在
         # ConversationManager.get_user_upload_bytes(已含 skill 字节)。软上限,挡量级。
@@ -353,6 +377,33 @@ class SkillManager:
                     "(builtin / external unit / <unit>__<tool>) — kept as-is, "
                     "resolved at runtime",
                 ))
+
+        # Lock the stable user row and hold it through INSERT+commit. SQLite's
+        # repository branch acquires the database writer lock; PG/MySQL lock only
+        # this user row. A plain COUNT→INSERT lets concurrent uploads share the
+        # same stale count and consume the last slot more than once.
+        if is_private and private_count_limit > 0:
+            user_exists = await self._repo.lock_user_for_private_import(user_id)
+            if not user_exists:
+                # Authenticated call paths guarantee this row. Treat disappearance as
+                # a server-side failure, not a user-facing "quota" outcome.
+                logger.error(
+                    "Skill import failed: authenticated user row missing, user=%s",
+                    user_id,
+                )
+                raise SkillInternalError("无法读取当前用户的技能额度")
+            owned_count = await self._repo.count_owned_skills(user_id)
+            if owned_count >= private_count_limit:
+                logger.warning(
+                    "Skill import rejected (409): user=%s private skill limit reached "
+                    "count=%d limit=%d",
+                    user_id, owned_count, private_count_limit,
+                )
+                raise SkillCountLimitError(
+                    f"你最多可以保留 {private_count_limit} 个个人技能"
+                    f"（当前已有 {owned_count} 个）。请删除一个已有技能，"
+                    "或联系管理员将技能发布为共享技能。"
+                )
 
         if await self._repo.slug_exists(slug):
             logger.warning(

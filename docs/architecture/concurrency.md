@@ -309,7 +309,7 @@ Controller 启动后台任务每 `LEASE_TTL / 3 = 30s` 调用 `renew_lease()`：
 
 | 参数 | 默认 | 作用 |
 |------|------|------|
-| `EXECUTION_TIMEOUT` | 1800s (30min) | 总执行上限，同时作为 stream lifetime 上限 |
+| `EXECUTION_TIMEOUT` | 3600s (60min) | 总执行上限，同时作为 stream lifetime 上限 |
 | `PERMISSION_TIMEOUT` | 300s (5min) | 单次 permission 等待上限 |
 | `LEASE_TTL` | 90s | Lease 存活时长（心跳每 30s 续） |
 | `COMPACTION_TIMEOUT` | 300s | 单次 compact LLM 调用超时（引擎内同步触发；thinking 模型压 ~100k token 输入 TTFT 长，120s 偏紧） |

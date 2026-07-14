@@ -7,6 +7,7 @@ import { useUIStore } from '@/stores/uiStore';
 import { BUTTON_DANGER_OUTLINE, BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
 import DepartmentCascader from '@/components/forms/DepartmentCascader';
 import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
+import { StatusNotice } from '@/components/ui/StatusNotice';
 import type { BulkActionResponse, BulkImpactResponse } from '@/types';
 
 type ActionMode = 'idle' | 'set-department' | 'confirm-delete';
@@ -127,13 +128,22 @@ export default function BulkActionPanel() {
         </p>
 
         {error && (
-          <div role="alert" className="mb-4 px-3 py-2 text-sm text-status-error bg-status-error/10 border border-status-error/30 rounded-lg">
+          <StatusNotice
+            tone="error"
+            onDismiss={() => setError(null)}
+            className="mb-4"
+          >
             {error}
-          </div>
+          </StatusNotice>
         )}
 
         {lastResult && (
-          <div className="mb-4 px-3 py-2 text-sm rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark">
+          <StatusNotice
+            tone={lastResult.failed.length > 0 ? 'warning' : 'success'}
+            title="批量操作完成"
+            onDismiss={() => setLastResult(null)}
+            className="mb-4"
+          >
             <div className="text-text-primary dark:text-text-primary-dark">
               成功 <span className="font-medium text-status-success dark:text-status-success-dark">{lastResult.succeeded.length}</span>
               {lastResult.failed.length > 0 && (
@@ -152,7 +162,7 @@ export default function BulkActionPanel() {
                 ))}
               </ul>
             )}
-          </div>
+          </StatusNotice>
         )}
 
         {mode === 'idle' && (

@@ -634,9 +634,23 @@ AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy .
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `ARTIFACTFLOW_SSE_PING_INTERVAL` | `15` | 心跳间隔（秒），保持连接活跃 |
-| `ARTIFACTFLOW_EXECUTION_TIMEOUT` | `1800` | 总执行上限（秒），含 permission 等待 |
+| `ARTIFACTFLOW_EXECUTION_TIMEOUT` | `3600` | 总执行上限（秒），含 permission 等待 |
 | `ARTIFACTFLOW_STREAM_CLEANUP_TTL` | `60` | 执行结束后 stream 清理窗口（秒） |
 | `ARTIFACTFLOW_PERMISSION_TIMEOUT` | `300` | 单次权限等待超时（秒） |
+
+### LLM 与 MCP HTTP 分阶段超时
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `ARTIFACTFLOW_LLM_CONNECT_TIMEOUT` | `5` | LLM provider DNS/TCP/TLS 建连超时（秒） |
+| `ARTIFACTFLOW_LLM_READ_TIMEOUT` | `600` | LLM 首个/下一个响应 chunk 等待超时（秒）；`models.yaml` 的 `params.timeout` 只覆盖此 read 值 |
+| `ARTIFACTFLOW_LLM_WRITE_TIMEOUT` | `60` | LLM 请求体写入超时（秒） |
+| `ARTIFACTFLOW_LLM_POOL_TIMEOUT` | `5` | LLM HTTP 连接池等待超时（秒） |
+| `ARTIFACTFLOW_MCP_CONNECT_TIMEOUT` | `5` | MCP `tools/list` discovery 与 `tools/call` 的 DNS/TCP/TLS 建连超时（秒） |
+| `ARTIFACTFLOW_MCP_WRITE_TIMEOUT` | `60` | MCP 请求体写入超时（秒） |
+| `ARTIFACTFLOW_MCP_POOL_TIMEOUT` | `5` | MCP HTTP 连接池等待超时（秒） |
+
+MCP 单元的现有 `provider_config.timeout`（默认 `60`）继续表示 per-server read / MCP request 等待上限。这些分阶段变量把错 IP 的建连等待与合法的长 TTFT/长任务等待拆开；流式 read timeout 表示“连续多久没有新数据”，整个 turn 仍由 `ARTIFACTFLOW_EXECUTION_TIMEOUT` 封顶。
 
 ### Compaction 与上下文
 
@@ -665,6 +679,7 @@ AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy .
 |------|--------|------|
 | `ARTIFACTFLOW_MAX_CONCURRENT_TASKS` | `32` | 最大并发引擎执行数 |
 | `ARTIFACTFLOW_MAX_UPLOAD_SIZE` | `209715200` | 单文件上传大小限制（字节，默认 200MB）；批量总字节由代理层独立封顶（约 200MiB 内容 + multipart 开销）。注：文本转换另有更低的独立闸 20MB——超闸**不 422、落为二进制 blob artifact**（可下载、可 mount 进沙盒处理） |
+| `ARTIFACTFLOW_SKILL_USER_MAX_PRIVATE_COUNT` | `3` | 每个用户可拥有的私有 Skill 数量；`-1` 不限，`0` 关闭个人导入，正数为上限。Admin 导入的共享 Skill 不计入。 |
 | `ARTIFACTFLOW_DEFAULT_PAGE_SIZE` | `20` | 分页默认每页条数 |
 | `ARTIFACTFLOW_MAX_PAGE_SIZE` | `100` | 分页最大每页条数 |
 

@@ -5,6 +5,7 @@ import { ApiError } from '@/lib/api';
 import { BUTTON_DANGER, BUTTON_SECONDARY } from '@/lib/styles';
 import Checkbox from '@/components/forms/Checkbox';
 import InlineMarkdown from '@/components/markdown/InlineMarkdown';
+import { StatusNotice } from '@/components/ui/StatusNotice';
 import DialogShell from './DialogShell';
 
 const IRREVERSIBLE_MESSAGE = '操作不可恢复。';
@@ -182,12 +183,9 @@ export default function DangerConfirmModal({
       )}
 
       {error && (
-        <div
-          role="alert"
-          className="mb-4 px-3 py-2 text-sm text-status-error bg-status-error/10 border border-status-error/30 rounded-lg"
-        >
+        <StatusNotice tone="error" className="mb-4">
           {error}
-        </div>
+        </StatusNotice>
       )}
     </DialogShell>
   );

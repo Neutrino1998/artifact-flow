@@ -6,8 +6,8 @@
 # ArtifactFlow sandbox image — gVisor (runsc) functional verification (plan §B).
 #
 # This is the "tier-1 baked environment" (plan 原则 7): interpreter +
-# scientific/document stack + pandoc + ripgrep + zip + git. It runs untrusted
-# LLM-generated code under runsc.
+# scientific/document stack + LibreOffice + text-edit + merman-cli + pandoc +
+# ripgrep + zip + git. It runs untrusted LLM-generated code under runsc.
 # DECOUPLED from the backend image / requirements.lock — the sandbox is its own
 # runtime, not the app. Python deps are pinned in sandbox/requirements.txt.
 #
@@ -15,6 +15,22 @@
 # Air-gap: everything is fetched HERE on the networked build host and baked in;
 # the intranet test node only `docker load`s the saved tar and runs it under
 # --runtime=runsc --network=none with ZERO network (plan 原则 7).
+
+# merman-cli is a headless Mermaid renderer. Build the same pinned source on
+# both target architectures instead of carrying Chromium/Node or mixing
+# architecture-specific binary sources. Cargo.lock fixes the Rust dependency
+# graph; the compiler version follows upstream's rust-toolchain.toml.
+FROM rust:1.95.0-slim-bookworm AS merman-builder
+
+ADD --checksum=sha256:e1d787154be74bca8262cc9c83ee3cb3f7e0c13dd4b8eb65c41cb2e42d3b5092 \
+    https://github.com/Latias94/merman/archive/refs/tags/v0.7.0.tar.gz \
+    /tmp/merman.tar.gz
+RUN mkdir -p /tmp/merman /opt/merman/licenses && \
+    tar -xzf /tmp/merman.tar.gz --strip-components=1 -C /tmp/merman && \
+    cargo install --locked --path /tmp/merman/crates/merman-cli --root /opt/merman && \
+    strip /opt/merman/bin/merman-cli && \
+    cp /tmp/merman/LICENSE /tmp/merman/LICENSE-APACHE /tmp/merman/LICENSE-MIT \
+       /opt/merman/licenses/
 
 FROM python:3.11-slim
 
@@ -28,9 +44,13 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    MPLBACKEND=Agg
+    MPLBACKEND=Agg \
+    PYTHONPATH=/opt/sandbox/lib
 
 # System tools baked into tier-1:
+#   libreoffice — shared Office conversion/render/recalculation engine. Writer,
+#             Calc, and Impress cover the common docx/xlsx/pptx workflows; each
+#             call uses an isolated profile through artifactflow-office.
 #   pandoc  — docx/html↔md canary + doc-conversion driver scenario (C). Debian's
 #             pandoc is older than upstream but fine for the md↔docx canary
 #             (PDF output needs LaTeX, out-of-scope this phase).
@@ -43,6 +63,13 @@ ENV PYTHONUNBUFFERED=1 \
 #             design. Tier-1 because it's generic + environment-definition and
 #             can't be installed at runtime with zero network.
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    libreoffice-core \
+    libreoffice-writer \
+    libreoffice-calc \
+    libreoffice-impress \
+    fonts-liberation2 \
+    fonts-crosextra-carlito \
+    fonts-crosextra-caladea \
     pandoc \
     ripgrep \
     zip \
@@ -82,8 +109,17 @@ RUN git config --system user.name "sandbox" && \
     git config --system safe.directory '*'
 
 # Scientific stack — the real ENOSYS workload under runsc (plan §B "验什么").
-COPY requirements.txt /tmp/requirements.txt
+COPY sandbox/requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt && rm /tmp/requirements.txt
+
+# One pure matching implementation is shared with the backend. text-edit is the
+# model-facing checked UTF-8 editor; Office skill scripts import text_match
+# directly so they keep ownership of OOXML/run-level mutations.
+RUN ! command -v text-edit
+COPY src/utils/text_match.py /opt/sandbox/lib/text_match.py
+COPY sandbox/text_edit.py /usr/local/bin/text-edit
+COPY sandbox/office_cli.py /usr/local/bin/artifactflow-office
+RUN chmod 755 /usr/local/bin/text-edit /usr/local/bin/artifactflow-office
 
 # Freeze the resolved (transitive) pip set into the image — the sandbox analog
 # of release.sh's wheels.lock.txt. build-sandbox-image.sh extracts this into a
@@ -95,7 +131,7 @@ RUN pip freeze > /opt/sandbox-wheels.lock.txt
 # into /opt/stub-wheels so the in-sandbox probe can:
 #   pip install --no-index --find-links /opt/stub-wheels af-sandbox-stub
 # with zero network — proving offline `pip install` survives Sentry.
-COPY stub-pkg /tmp/stub-pkg
+COPY sandbox/stub-pkg /tmp/stub-pkg
 RUN pip wheel --no-deps -w /opt/stub-wheels /tmp/stub-pkg && rm -rf /tmp/stub-pkg
 
 # Non-root: untrusted code must not run as root inside the sandbox. Fixed uid
@@ -103,6 +139,14 @@ RUN pip wheel --no-deps -w /opt/stub-wheels /tmp/stub-pkg && rm -rf /tmp/stub-pk
 # concrete owner to assert against on the host side.
 RUN useradd --create-home --uid 1000 sandbox && \
     mkdir -p /work && chown sandbox:sandbox /work
+
+# Semantic diagrams without a browser runtime. Keep this late in the final
+# stage so merman upgrades do not invalidate the much larger Office/Python
+# layers. Raster limits are enforced by merman-cli itself; skills must not
+# disable them with --raster-unbounded.
+COPY --from=merman-builder /opt/merman/bin/merman-cli /usr/local/bin/merman-cli
+COPY --from=merman-builder /opt/merman/licenses/ /usr/share/licenses/merman-cli/
+
 USER sandbox
 WORKDIR /work
 

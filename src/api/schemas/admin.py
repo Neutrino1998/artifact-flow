@@ -8,6 +8,8 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
 
+from api.schemas.chat import UploadedFileRef
+
 
 class AdminConversationSummary(BaseModel):
     """Conversation summary for admin view"""
@@ -17,6 +19,7 @@ class AdminConversationSummary(BaseModel):
     user_display_name: Optional[str] = None
     message_count: int = 0
     is_active: bool = False
+    active_message_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -47,6 +50,13 @@ class AdminMessageGroup(BaseModel):
     created_at: datetime
     events: List[AdminEventItem]
     execution_metrics: Optional[Dict[str, Any]] = None
+    uploaded_files: Optional[List[UploadedFileRef]] = Field(
+        None,
+        description=(
+            "Files attached to this turn, from Message.metadata_['uploaded_files']. "
+            "Display-only and best-effort until the terminal DB refresh."
+        ),
+    )
 
 
 class AdminPromptReconstructResponse(BaseModel):
@@ -71,6 +81,7 @@ class AdminConversationEventsResponse(BaseModel):
     user_display_name: Optional[str] = None
     active_branch: Optional[str] = None
     is_active: bool = False
+    active_message_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     messages: List[AdminMessageGroup]

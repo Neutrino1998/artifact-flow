@@ -7,6 +7,7 @@ import { useUIStore } from '@/stores/uiStore';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
 import { triggerBlobDownload } from '@/lib/download';
 import PanelShell from '@/components/layout/PanelShell';
+import { StatusNotice } from '@/components/ui/StatusNotice';
 import type { BulkImportResponse, BulkImportFailedRow } from '@/types';
 
 type Stage =
@@ -126,7 +127,6 @@ export default function BulkImportForm() {
             (detail as { duplicate_rows: Array<{ row: number; username: string }> })
               .duplicate_rows,
           );
-          setError('CSV 文件内 username 重复，请先在源文件去重再上传');
           return;
         }
       }
@@ -348,21 +348,24 @@ function UploadStage({
         />
       </div>
 
-      {error && (
-        <div className="text-status-error text-sm">{error}</div>
-      )}
-
-      {duplicateRows && duplicateRows.length > 0 && (
-        <div className="rounded-lg border border-status-error/40 bg-status-error/5 p-3 text-xs">
-          <div className="font-medium text-status-error mb-2">
-            文件内重复（{duplicateRows.length} 行）：
-          </div>
-          <div className="max-h-32 overflow-y-auto font-mono text-text-secondary dark:text-text-secondary-dark space-y-0.5">
-            {duplicateRows.map((d, i) => (
-              <div key={i}>第 {d.row} 行：{d.username}</div>
-            ))}
-          </div>
-        </div>
+      {(error || duplicateRows) && (
+        <StatusNotice
+          tone="error"
+          title={duplicateRows ? 'CSV 文件内 username 重复' : '导入失败'}
+        >
+          {duplicateRows ? (
+            <div className="space-y-2">
+              <div>请先在源文件中去重，再重新上传。</div>
+              <div className="max-h-32 overflow-y-auto font-mono text-xs space-y-0.5">
+                {duplicateRows.map((d, i) => (
+                  <div key={i}>第 {d.row} 行：{d.username}</div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="break-words">{error}</div>
+          )}
+        </StatusNotice>
       )}
 
       {/* Format hint + template download */}
@@ -428,13 +431,13 @@ function ResultStage({
       </div>
 
       {data.warnings.length > 0 && (
-        <div className="rounded-lg bg-panel/40 dark:bg-panel-accent-dark/40 p-3 text-xs space-y-1">
-          {data.warnings.map((w, i) => (
-            <div key={i} className="text-text-secondary dark:text-text-secondary-dark">
-              · {w}
-            </div>
-          ))}
-        </div>
+        <StatusNotice tone="warning" title="导入提示">
+          <div className="space-y-1">
+            {data.warnings.map((w, i) => (
+              <div key={i}>{w}</div>
+            ))}
+          </div>
+        </StatusNotice>
       )}
 
       {data.skipped.length > 0 && (

@@ -38,10 +38,12 @@ FROM python:3.11-slim
 LABEL maintainer="1998neutrino@gmail.com"
 LABEL description="ArtifactFlow - Multi-Agent System"
 
+ARG ARTIFACTFLOW_SANDBOX_IMAGE=artifactflow-sandbox:latest
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    ARTIFACTFLOW_SANDBOX_IMAGE=${ARTIFACTFLOW_SANDBOX_IMAGE} \
     PATH=/root/.local/bin:$PATH
 
 # Runtime system deps (pandoc for docx convert, curl for healthcheck)

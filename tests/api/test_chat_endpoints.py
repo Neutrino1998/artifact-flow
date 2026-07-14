@@ -229,6 +229,27 @@ class TestSendMessageValidation:
         assert resp.status_code == 422
         assert "user_input must not be blank" in str(resp.json())
 
+    async def test_stale_parent_message_id_rejected_before_submit(
+        self, client: AsyncClient, conv_with_messages
+    ):
+        """显式 parent 必须属于当前 conversation，避免写出无 root 的消息树。"""
+        conv_id, _ = conv_with_messages
+        resp = await client.post(
+            "/api/v1/chat",
+            files={
+                "payload": (
+                    None,
+                    json.dumps({
+                        "user_input": "continue",
+                        "conversation_id": conv_id,
+                        "parent_message_id": "msg-does-not-exist",
+                    }),
+                ),
+            },
+        )
+        assert resp.status_code == 422
+        assert "parent_message_id does not belong" in str(resp.json())
+
 
 # ============================================================
 # TestCancel

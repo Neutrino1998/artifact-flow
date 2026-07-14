@@ -73,6 +73,7 @@ export function useSSE() {
   const setCurrent = useConversationStore((s) => s.setCurrent);
   const setConversations = useConversationStore((s) => s.setConversations);
   const clearConversationActiveIfMatch = useConversationStore((s) => s.clearConversationActiveIfMatch);
+  const applyTerminalMessageSnapshot = useConversationStore((s) => s.applyTerminalMessageSnapshot);
 
   // Artifact store
   const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
@@ -87,6 +88,25 @@ export function useSSE() {
 
   // UI store
   const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
+
+  const snapshotTerminalMessage = useCallback(
+    (conversationId: string, messageId: string | null, response: string | undefined, metrics: unknown) => {
+      if (!messageId || !response) return;
+      const streamState = useStreamStore.getState();
+      applyTerminalMessageSnapshot({
+        conversationId,
+        messageId,
+        parentId: streamState.streamParentId ?? null,
+        userInput: streamState.pendingUserMessage ?? '',
+        response,
+        executionMetrics: (metrics && typeof metrics === 'object')
+          ? metrics as Record<string, unknown>
+          : null,
+        uploadedFiles: streamState.pendingUserFiles?.map((filename) => ({ filename })) ?? null,
+      });
+    },
+    [applyTerminalMessageSnapshot],
+  );
 
   const refreshAfterComplete = useCallback(
     async (conversationId: string, terminalMessageId: string | null) => {
@@ -494,6 +514,7 @@ export function useSSE() {
           if (messageId) {
             snapshotSegments(messageId);
           }
+          snapshotTerminalMessage(conversationId, messageId, data?.response as string | undefined, metrics);
           setCancelled(true);
           endStream();
           refreshAfterComplete(conversationId, messageId);
@@ -507,6 +528,7 @@ export function useSSE() {
           if (messageId) {
             snapshotSegments(messageId);
           }
+          snapshotTerminalMessage(conversationId, messageId, data?.response as string | undefined, metrics);
           endStream();
           refreshAfterComplete(conversationId, messageId);
           break;
@@ -515,13 +537,14 @@ export function useSSE() {
         case StreamEventType.TIMED_OUT: {
           // 执行超时(后端 engine_task 的 asyncio.timeout → TIMED_OUT 终态)。
           // 终态外观复用 COMPLETE 的收尾(snapshot + endStream + refresh):气泡
-          // 文案来自刷新后的 Message.response(= TIMED_OUT_RESPONSE),无需单独标志。
+          // 先用 SSE 的 response 乐观落地,再由刷新后的 Message.response 对齐。
           const metrics = data?.execution_metrics;
           if (metrics) setExecutionMetrics(metrics as import('@/types/events').ExecutionMetrics);
           const messageId = useStreamStore.getState().messageId;
           if (messageId) {
             snapshotSegments(messageId);
           }
+          snapshotTerminalMessage(conversationId, messageId, data?.response as string | undefined, metrics);
           endStream();
           refreshAfterComplete(conversationId, messageId);
           break;
@@ -530,6 +553,8 @@ export function useSSE() {
         case StreamEventType.ERROR: {
           const errMsg = (data?.error as string) ?? 'Unknown error';
           const reqId = (data?.request_id as string | undefined) || undefined;
+          const metrics = data?.execution_metrics;
+          if (metrics) setExecutionMetrics(metrics as import('@/types/events').ExecutionMetrics);
           // Push as a flow block FIRST so snapshotSegments captures it into
           // completedNonAgentBlocks. Without this, AssistantMessage's
           // lazy-load gate (completedSegs !== undefined → skip refetch)
@@ -550,6 +575,7 @@ export function useSSE() {
           if (errMsgId) {
             snapshotSegments(errMsgId);
           }
+          snapshotTerminalMessage(conversationId, errMsgId, (data?.response as string | undefined) ?? errMsg, metrics);
           endStream();
           refreshAfterComplete(conversationId, errMsgId);
           break;
@@ -566,7 +592,7 @@ export function useSSE() {
       setArtifactSessionId,
       applyArtifactCreated, applyArtifactUpdated,
       pushNonAgentBlock, updateNonAgentBlock, confirmPendingInject, setExecutionMetrics, setCancelled,
-      setQueuedInfo,
+      setQueuedInfo, snapshotTerminalMessage,
     ]
   );
 
@@ -726,7 +752,13 @@ export function useSSE() {
         // The probe is async and switchConversation can fire several in
         // quick succession (e.g. B → C). A late-resolving probe for B must
         // not steal the SSE connection from the now-active C.
-        if (useConversationStore.getState().current?.id !== conversationId) return;
+        const current = useConversationStore.getState().current;
+        if (current?.id !== conversationId) return;
+        // Reconnect attaches to a message that getConversation() has already
+        // loaded into the persisted branchPath. Leave the parent marker in the
+        // "normal persisted path" state; otherwise MessageList would trim the
+        // active user message out and, with no local pending bubble, hide it.
+        useStreamStore.getState().setStreamParentId(undefined);
         connect(active.stream_url, conversationId, active.message_id);
       } catch {
         // Network/server error — nothing live to attach to for now.

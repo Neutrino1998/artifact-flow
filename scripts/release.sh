@@ -101,6 +101,7 @@ case "$PLATFORM_INPUT" in
   linux/arm64|linux/aarch64) PLATFORM=linux/arm64; ARCH_TAG=arm64; GVISOR_ARCH=aarch64 ;;
   *) echo "Unsupported platform '$PLATFORM_INPUT' (expected linux/amd64 or linux/arm64)" >&2; exit 2 ;;
 esac
+SANDBOX_IMAGE_REF="$(python3 "$ROOT/scripts/sandbox_runtime_ref.py" --arch "$ARCH_TAG")"
 
 OUTDIR="dist"
 APP_ARCHIVE="$OUTDIR/artifactflow-app-${VERSION}.tar.gz"
@@ -296,6 +297,7 @@ if ! phase_done app "$app_input" "$APP_ARCHIVE"; then
   echo "Building backend image..."
   docker buildx build --platform "${PLATFORM}" \
     -t "artifactflow:${VERSION}" -t artifactflow:latest \
+    --build-arg "ARTIFACTFLOW_SANDBOX_IMAGE=${SANDBOX_IMAGE_REF}" \
     --load .
 
   echo "Building frontend image..."
@@ -538,6 +540,7 @@ if ! phase_done manifest "$manifest_input" "$MANIFEST"; then
   echo "Built:        $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "Built from:   $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')@$(git rev-parse --short HEAD 2>/dev/null || echo '?')"
   echo "Platform:     ${PLATFORM}"
+  echo "Sandbox image required: ${SANDBOX_IMAGE_REF}"
   LAYOUT_DESC="app + config + deploy"
   [[ $WITH_INFRA == 1 ]] && LAYOUT_DESC+=" + infra"
   [[ $WITH_SANDBOX == 1 ]] && LAYOUT_DESC+=" + sandbox"
@@ -568,19 +571,20 @@ if ! phase_done manifest "$manifest_input" "$MANIFEST"; then
   echo ""
   if [[ $WITH_SANDBOX == 1 ]]; then
     echo "Sandbox bundle:"
+    echo "  required: ${SANDBOX_IMAGE_REF}"
     echo "  image:   $(basename "$SANDBOX_ARCHIVE")"
     echo "  verify:  $(basename "$SANDBOX_VERIFY_ARCHIVE")"
     echo "  gVisor:  $(basename "$SANDBOX_GVISOR_ARCHIVE")"
     echo "  target:  deploy/scripts/fleet.sh prepare-sandbox <bundle-dir>, then"
     echo "           AF_ENABLE_SANDBOX=1 deploy/scripts/fleet.sh deploy <bundle-dir>"
     if [[ -f "$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt" ]]; then
-      image_id=$(awk -F': *' '/^Image id:/{print $2}' "$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt")
+      image_id=$(awk '/^Image id:/ {sub(/^Image id:[[:space:]]*/, ""); print; exit}' "$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt")
       [[ -n "$image_id" ]] && echo "  image id: $image_id"
     fi
   else
     echo "Sandbox bundle: skipped — target must already have runsc +"
-    echo "  artifactflow-sandbox:latest + scratch root, or re-run release with"
-    echo "  --with-sandbox to ship offline sandbox prerequisites."
+    echo "  ${SANDBOX_IMAGE_REF} + scratch root, or re-run release with"
+    echo "  --with-sandbox to ship the required immutable sandbox image."
   fi
   echo ""
   echo "Config tar highlights:"

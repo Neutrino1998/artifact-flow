@@ -69,6 +69,12 @@ describe('extractBranchPath', () => {
     expect(extractBranchPath(map, null)).toEqual([]);
   });
 
+  test('activeBranch with missing parent → still renders active message', () => {
+    const map = buildMessageTree([msg('a', 'ghost')]);
+    const path = extractBranchPath(map, 'a');
+    expect(path.map(n => n.id)).toEqual(['a']);
+  });
+
   test('activeBranch found → traces back to root', () => {
     const map = buildMessageTree([msg('a'), msg('b', 'a'), msg('c', 'b')]);
     const path = extractBranchPath(map, 'c');

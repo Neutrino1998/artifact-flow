@@ -153,7 +153,7 @@ class TestCrossInstance:
 
 class TestLastEventId:
     async def test_resume_from_last_event_id(self, transport):
-        """Consumer disconnect reverts to pending; reconnect with last_event_id resumes."""
+        """Consumer disconnect leaves the producer-owned stream open; cursor resumes."""
         stream_id = "test_stream_resume"
         await transport.create_stream(stream_id)
 
@@ -182,9 +182,9 @@ class TestLastEventId:
         assert len(event_ids) >= 2
         last_id = event_ids[1]
 
-        # After consumer disconnect, stream should revert to pending (not closed)
+        # Observer disconnect does not change the producer-owned lifecycle.
         status = await transport.get_stream_status(stream_id)
-        assert status == "pending"
+        assert status == "open"
 
         # Producer can still push events (stream NOT closed)
         assert await transport.push_event(stream_id, {"type": "complete", "data": {}})
@@ -202,10 +202,74 @@ class TestLastEventId:
         assert len(events) >= 1
         assert events[-1]["type"] == "complete"
 
+    async def test_cumulative_chunks_replace_replay_snapshots(
+        self, transport, redis_client
+    ):
+        """Redis retains one cumulative snapshot per agent/content channel."""
+        stream_id = "test_stream_snapshot_replace"
+        await transport.create_stream(stream_id)
+
+        for i in range(1, 11):
+            await transport.push_event(stream_id, {
+                "type": "llm_chunk",
+                "agent": "lead_agent",
+                "data": {"content": "x" * i},
+            })
+        await transport.push_event(stream_id, {
+            "type": "llm_chunk",
+            "agent": "lead_agent",
+            "data": {"reasoning_content": "reasoning"},
+        })
+        await transport.push_event(stream_id, {
+            "type": "llm_chunk",
+            "agent": "research_agent",
+            "data": {"content": "research"},
+        })
+
+        assert await redis_client.xlen(transport._stream_key(stream_id)) == 3
+
+        await transport.push_event(stream_id, {"type": "complete"})
+        events = [event async for event in transport.consume_events(stream_id)]
+        assert [event["type"] for event in events] == [
+            "llm_chunk",
+            "llm_chunk",
+            "llm_chunk",
+            "complete",
+        ]
+        assert events[0]["data"]["content"] == "x" * 10
+
+    async def test_resume_from_deleted_snapshot_id_gets_latest(self, transport):
+        """XDEL of the old snapshot does not break Redis ID-based resume."""
+        stream_id = "test_stream_snapshot_resume"
+        await transport.create_stream(stream_id)
+
+        old = {
+            "type": "llm_chunk",
+            "agent": "lead_agent",
+            "data": {"content": "old"},
+        }
+        latest = {
+            "type": "llm_chunk",
+            "agent": "lead_agent",
+            "data": {"content": "latest"},
+        }
+        await transport.push_event(stream_id, old)
+        await transport.push_event(stream_id, latest)
+        await transport.push_event(stream_id, {"type": "complete"})
+
+        events = [
+            event
+            async for event in transport.consume_events(
+                stream_id, last_event_id=old["_stream_id"]
+            )
+        ]
+        assert [event["type"] for event in events] == ["llm_chunk", "complete"]
+        assert events[0]["data"]["content"] == "latest"
+
 
 class TestConsumerDisconnect:
     async def test_consumer_disconnect_does_not_close_stream(self, transport):
-        """Consumer breaking out of consume_events should revert to pending, not close."""
+        """Consumer breaking out leaves the producer-owned stream open."""
         stream_id = "test_stream_disconnect"
         await transport.create_stream(stream_id)
         await transport.push_event(stream_id, {"type": "metadata", "data": {}})
@@ -217,12 +281,43 @@ class TestConsumerDisconnect:
                 break
         await gen.aclose()
 
-        # Stream should be pending, not closed
+        # Stream remains open; observer presence is not shared state.
         status = await transport.get_stream_status(stream_id)
-        assert status == "pending"
+        assert status == "open"
 
         # Producer can still push
         assert await transport.push_event(stream_id, {"type": "complete", "data": {}})
+
+    async def test_two_observers_are_independent(self, transport):
+        stream_id = "test_stream_two_observers"
+        await transport.create_stream(stream_id)
+        await transport.push_event(stream_id, {"type": "agent_start", "data": {}})
+
+        first = transport.consume_events(stream_id, heartbeat_interval=0.3)
+        second = transport.consume_events(stream_id, heartbeat_interval=0.3)
+        assert (await anext(first))["type"] == "agent_start"
+        assert (await anext(second))["type"] == "agent_start"
+
+        await first.aclose()
+        assert await transport.get_stream_status(stream_id) == "open"
+
+        await transport.push_event(stream_id, {"type": "complete", "data": {}})
+        assert (await anext(second))["type"] == "complete"
+        await second.aclose()
+
+    async def test_legacy_observer_status_does_not_block_new_producer(
+        self, transport, redis_client
+    ):
+        """Rolling deploy: old observers may still write streaming/pending."""
+        stream_id = "test_stream_legacy_observer"
+        await transport.create_stream(stream_id)
+        meta_key = transport._meta_key(stream_id)
+
+        await redis_client.hset(meta_key, "status", "streaming")
+        assert await transport.push_event(stream_id, {"type": "agent_start"}) is True
+
+        await redis_client.hset(meta_key, "status", "pending")
+        assert await transport.push_event(stream_id, {"type": "complete"}) is True
 
     async def test_consumer_disconnect_after_producer_close(self, transport, redis_client):
         """If producer already closed, consumer disconnect should not revert to pending."""
@@ -262,7 +357,7 @@ class TestOrphanKeyFix:
         assert exists == 0
 
         # After first push, stream key should exist with TTL set atomically with
-        # the XADD (single-key Lua → no orphan window between XADD and EXPIRE).
+        # the XADD (same-slot Lua → no orphan window between XADD and EXPIRE).
         await transport.push_event(stream_id, {"type": "metadata", "data": {}})
         exists = await redis_client.exists(stream_key)
         assert exists == 1

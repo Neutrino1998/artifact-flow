@@ -18,6 +18,7 @@ import argparse
 import json
 import zipfile
 from datetime import datetime, timezone
+from pathlib import Path
 
 from lxml import etree
 
@@ -160,10 +161,19 @@ def main():
     ap.add_argument("src")
     ap.add_argument("out")
     ap.add_argument("--anchor", required=True)
-    ap.add_argument("--text", required=True)
+    text_group = ap.add_mutually_exclusive_group(required=True)
+    text_group.add_argument("--text")
+    text_group.add_argument("--text-file")
     ap.add_argument("--author", default="ArtifactFlow")
     ap.add_argument("--initials", default="AF")
     args = ap.parse_args()
+    comment_text = args.text
+    if args.text_file:
+        comment_text = Path(args.text_file).read_text(encoding="utf-8")
+        if comment_text.endswith("\r\n"):
+            comment_text = comment_text[:-2]
+        elif comment_text.endswith("\n"):
+            comment_text = comment_text[:-1]
 
     with zipfile.ZipFile(args.src) as zin:
         members = {i.filename: zin.read(i.filename) for i in zin.infolist()}
@@ -185,7 +195,7 @@ def main():
         doc_root, xml_declaration=True, encoding="UTF-8", standalone=True
     )
     members[_COMMENTS_PART] = _upsert_comment(
-        members.get(_COMMENTS_PART), cid, args.author, args.initials, date, args.text
+        members.get(_COMMENTS_PART), cid, args.author, args.initials, date, comment_text
     )
     members[_RELS_PART] = _ensure_rel(members[_RELS_PART])
     members[_CT_PART] = _ensure_content_type(members[_CT_PART])

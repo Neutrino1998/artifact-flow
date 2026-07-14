@@ -24,6 +24,13 @@ import type {
 import type { ArtifactSummary, ArtifactDetail, VersionDetail } from '@/types';
 import { useUIStore } from '@/stores/uiStore';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
+import { connectSSE } from '@/lib/sse';
+import {
+  ADMIN_TERMINAL_EVENTS,
+  appendAdminLiveEvent,
+  formatAdminInputPreview,
+  isAdminMessageOffActiveBranch,
+} from '@/lib/adminLiveEvents';
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -369,6 +376,94 @@ export default function ObservabilityPanel() {
     return () => { cancelled = true; };
   }, [selectedConvId, refreshTick]);
 
+  const activeMessageId = eventsData?.active_message_id ?? null;
+  const activeMessageHasPersistedTerminal = useMemo(() => {
+    if (!eventsData || !activeMessageId) return false;
+    const group = eventsData.messages.find((message) => message.message_id === activeMessageId);
+    return group?.events.some(
+      (event) => event.id >= 0 && ADMIN_TERMINAL_EVENTS.has(event.event_type),
+    ) ?? false;
+  }, [eventsData, activeMessageId]);
+
+  // The DB response is the durable snapshot.  While its active message is still
+  // running, project semantic SSE events into that one group using temporary
+  // negative ids.  A terminal event triggers a fresh DB read that replaces the
+  // projection wholesale, so live/replay ids can never be confused or duplicated.
+  // Unexpected disconnect is best-effort: fall back to DB; manual refresh/reopen
+  // establishes a fresh from-start subscription without admin-only retry state.
+  useEffect(() => {
+    if (!selectedConvId || !activeMessageId || activeMessageHasPersistedTerminal) return;
+
+    const controller = new AbortController();
+    let temporaryId = -1;
+    let sawTerminal = false;
+
+    const refreshAuthoritative = async (terminalMessageId: string | null) => {
+      try {
+        const fresh = await api.getAdminConversationEvents(selectedConvId);
+        if (controller.signal.aborted) return;
+
+        // The terminal SSE is the execution boundary, while lease cleanup runs
+        // immediately afterwards.  Avoid briefly reconnecting to the same sealed
+        // message if this GET raced that cleanup.  A genuinely newer message id is
+        // preserved and the effect will subscribe to it next.
+        if (terminalMessageId && fresh.active_message_id === terminalMessageId) {
+          setEventsData({ ...fresh, is_active: false, active_message_id: null });
+        } else {
+          setEventsData(fresh);
+        }
+        setSelectedEvent(null);
+        setSelectedMsgId(null);
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          console.error('Failed to refresh admin events after live stream:', err);
+        }
+      }
+    };
+
+    connectSSE(
+      api.getAdminConversationStreamUrl(selectedConvId),
+      {
+        onEvent: (event) => {
+          if (controller.signal.aborted) return;
+          const isTransportError = event.type === 'error'
+            && event.data?.message_id !== activeMessageId;
+          setEventsData((current) => {
+            if (!current || current.active_message_id !== activeMessageId) return current;
+            return appendAdminLiveEvent(current, activeMessageId, event, temporaryId--);
+          });
+
+          // Transport-generated errors (expired stream / lost lease) deliberately
+          // have no message_id and are not execution terminals.  Only the
+          // controller's ERROR for this message is authoritative terminal state.
+          const isExecutionTerminal = ADMIN_TERMINAL_EVENTS.has(String(event.type))
+            && !isTransportError;
+          if (isExecutionTerminal) {
+            sawTerminal = true;
+            void refreshAuthoritative(activeMessageId);
+          }
+        },
+        onError: (err) => {
+          if (controller.signal.aborted) return;
+          console.error('Admin live stream failed:', err);
+          void refreshAuthoritative(null);
+        },
+        onClose: () => {
+          if (!controller.signal.aborted && !sawTerminal) {
+            void refreshAuthoritative(null);
+          }
+        },
+      },
+      controller.signal,
+    );
+
+    return () => controller.abort();
+  }, [
+    selectedConvId,
+    activeMessageId,
+    activeMessageHasPersistedTerminal,
+  ]);
+
   const toggleMessageCollapse = useCallback((msgId: string) => {
     setCollapsedMessages((prev) => {
       const next = new Set(prev);
@@ -507,7 +602,12 @@ export default function ObservabilityPanel() {
                     group={msg}
                     collapsed={collapsedMessages.has(msg.message_id)}
                     onToggle={() => toggleMessageCollapse(msg.message_id)}
-                    offActiveBranch={hasBranches && !activePathIds.has(msg.message_id)}
+                    offActiveBranch={isAdminMessageOffActiveBranch(
+                      msg.message_id,
+                      activeMessageId,
+                      hasBranches,
+                      activePathIds,
+                    )}
                     issuesOnly={issuesOnly}
                     selectedEventId={selectedEvent?.id ?? null}
                     onSelectEvent={(e, msgId) => { setSelectedEvent(e); setSelectedMsgId(msgId); }}
@@ -823,7 +923,7 @@ function MessageGroupView({
   selectedEventId: number | null;
   onSelectEvent: (e: AdminEventItem, messageId: string) => void;
 }) {
-  const inputPreview = group.user_input.slice(0, 80) + (group.user_input.length > 80 ? '...' : '');
+  const inputPreview = formatAdminInputPreview(group.user_input);
   const issues = groupIssueCounts(group);
   const hasHardError = issues.errors > 0;
   const hasIssues = Object.values(issues).some((n) => n > 0);
@@ -873,6 +973,24 @@ function MessageGroupView({
         </span>
       </button>
 
+      {group.uploaded_files && group.uploaded_files.length > 0 ? (
+        <div className="ml-6 mt-1 flex flex-wrap gap-1.5">
+          {group.uploaded_files.map((file, index) => (
+            <span
+              key={`${file.id ?? file.filename}-${index}`}
+              className="inline-flex min-w-0 max-w-[16rem] items-center gap-1 rounded-lg bg-panel-accent px-2 py-1 text-xs text-text-secondary dark:bg-surface-dark dark:text-text-secondary-dark"
+              title={file.filename}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <path d="M14 2v6h6" />
+              </svg>
+              <span className="min-w-0 truncate">{file.filename}</span>
+            </span>
+          ))}
+        </div>
+      ) : null}
+
       {/* Events */}
       {!collapsed && (
         <div className="ml-4 mt-1 space-y-0.5">
@@ -898,6 +1016,7 @@ function MessageGroupView({
                 {event.agent_name != null ? (
                   <PillBadge tone="accent">{event.agent_name.replace('_agent', '')}</PillBadge>
                 ) : null}
+                {event.id < 0 ? <PillBadge tone="accent">LIVE</PillBadge> : null}
                 {tone != null ? (
                   <PillBadge tone={tone}>{tone === 'error' ? 'ERROR' : 'FAIL'}</PillBadge>
                 ) : null}

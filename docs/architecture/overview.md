@@ -196,7 +196,7 @@ ArtifactFlow 的执行引擎是一个朴素的 `while not completed` 循环，�
 三层划分的核心考量是**最小化每层的知识依赖**：
 
 - **Router 不知道 ORM** — 只处理 HTTP 协议，不导入 Repository。这使得 API 层可以独立测试
-- **Manager 不知道 HTTP** — 只处理业务用例。同一个 Manager 方法可以被 Router 调用，也可以被 CLI 脚本调用
+- **Manager 不知道 HTTP** — 只处理业务用例，使 API 协议变化不侵入业务层
 - **Repository 不知道业务** — 只做 CRUD + 事务控制。ORM 对象不逃出 session 作用域
 
 ### 404 not 403 安全策略

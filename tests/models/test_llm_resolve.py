@@ -7,6 +7,7 @@ _resolve_model_params — 模型名解析的 loud-fail 边界回归
 """
 
 import pytest
+import httpx
 
 from models.llm import (
     _resolve_model_params,
@@ -17,6 +18,66 @@ from models.llm import (
 
 def test_known_alias_resolves():
     assert _resolve_model_params("gpt-4o-mini")["model"] == "gpt-4o-mini"
+
+
+def test_default_timeout_is_split_by_http_phase(monkeypatch):
+    """Long model read/TTFT allowance must not also make bad-IP connect slow."""
+    monkeypatch.setattr("models.llm.settings.LLM_CONNECT_TIMEOUT", 3.0)
+    monkeypatch.setattr("models.llm.settings.LLM_READ_TIMEOUT", 420.0)
+    monkeypatch.setattr("models.llm.settings.LLM_WRITE_TIMEOUT", 45.0)
+    monkeypatch.setattr("models.llm.settings.LLM_POOL_TIMEOUT", 2.0)
+
+    timeout = _resolve_model_params("gpt-4o-mini")["timeout"]
+
+    assert isinstance(timeout, httpx.Timeout)
+    assert timeout.connect == 3.0
+    assert timeout.read == 420.0
+    assert timeout.write == 45.0
+    assert timeout.pool == 2.0
+
+
+def test_model_timeout_overrides_read_only(monkeypatch):
+    """Existing models.yaml params.timeout remains compatible as the read limit."""
+    monkeypatch.setattr("models.llm.settings.LLM_CONNECT_TIMEOUT", 4.0)
+    monkeypatch.setattr("models.llm.settings.LLM_WRITE_TIMEOUT", 50.0)
+    monkeypatch.setattr("models.llm.settings.LLM_POOL_TIMEOUT", 3.0)
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "defaults": {},
+            "models": {
+                "slow-private": {
+                    "model": "openai/slow-private",
+                    "params": {"timeout": 900},
+                }
+            },
+        },
+    )
+
+    timeout = _resolve_model_params("slow-private")["timeout"]
+
+    assert timeout.connect == 4.0
+    assert timeout.read == 900.0
+    assert timeout.write == 50.0
+    assert timeout.pool == 3.0
+
+
+def test_model_timeout_must_be_positive_number(monkeypatch):
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "defaults": {},
+            "models": {
+                "bad-timeout": {
+                    "model": "openai/bad-timeout",
+                    "params": {"timeout": 0},
+                }
+            },
+        },
+    )
+
+    with pytest.raises(ValueError, match="positive number"):
+        _resolve_model_params("bad-timeout")
 
 
 def test_provider_prefixed_passthrough():

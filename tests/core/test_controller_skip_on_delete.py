@@ -102,6 +102,39 @@ async def _consume(stream):
 # ============================================================
 
 
+class TestMetadataPreview:
+
+    async def test_exposes_only_attachment_filenames_for_live_observers(self):
+        cm = _make_mock_conversation_manager(exists_value=False)
+        am = _make_mock_artifact_service()
+        er = _make_mock_event_repo()
+        ctrl = _make_controller(cm, er, am)
+
+        async def fake_execute_loop(**kwargs):
+            return _make_engine_noop_state(kwargs["state"]["message_id"])
+
+        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+            events = await _consume(ctrl.stream_execute(
+                user_input="review this",
+                conversation_id="conv-test",
+                parent_message_id=None,
+                message_id="msg-test",
+                uploaded_files=[{
+                    "filename": "Brief.docx",
+                    "content": "must not enter the SSE preview",
+                    "content_type": "text/plain",
+                    "metadata": {},
+                    "blob": None,
+                }],
+            ))
+
+        metadata = events[0]
+        assert metadata["type"] == StreamEventType.METADATA.value
+        assert metadata["data"]["user_input"] == "review this"
+        assert metadata["data"]["uploaded_files"] == [{"filename": "Brief.docx"}]
+        assert "content" not in metadata["data"]["uploaded_files"][0]
+
+
 class TestPostProcessingSkipOnDelete:
 
     async def test_skips_when_conv_deleted_at_entry(self):

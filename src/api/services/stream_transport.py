@@ -7,7 +7,8 @@ RedisStreamTransport 是兄弟实现（多 worker / 持久化）。
 """
 
 import asyncio
-from typing import Protocol, runtime_checkable, Optional, Dict, Any, AsyncGenerator, Literal, List, Tuple
+from collections import OrderedDict
+from typing import Protocol, runtime_checkable, Optional, Dict, Any, AsyncGenerator, Literal
 from datetime import datetime
 from dataclasses import dataclass, field
 
@@ -25,6 +26,32 @@ DEFAULT_MAX_HISTORY = 1000
 # Local copy — the transport stays execution-semantics-free; kept in sync with
 # core.events.TERMINAL_EVENT_TYPES by tests/core/test_terminal_event_sync.py.
 _TERMINAL_EVENTS = ("complete", "cancelled", "timed_out", "error")
+
+
+def replay_snapshot_key(event: Dict[str, Any]) -> Optional[str]:
+    """Return the replaceable replay slot for a cumulative ``llm_chunk``.
+
+    The engine deliberately emits cumulative content so a consumer can render
+    any snapshot without applying deltas.  Keeping every cumulative snapshot in
+    replay history would amplify one response quadratically, however.  Live
+    observers are woken for every coalesced push; a slow observer may skip a
+    stale intermediate snapshot, whose content is subsumed by the next one.
+    Only the retained replay copy is replaced per agent and channel.
+    """
+    if event.get("type") != "llm_chunk":
+        return None
+
+    data = event.get("data")
+    if not isinstance(data, dict):
+        return None
+    if "reasoning_content" in data:
+        channel = "reasoning_content"
+    elif "content" in data:
+        channel = "content"
+    else:
+        return None
+
+    return f"llm_chunk:{event.get('agent') or ''}:{channel}"
 
 
 class StreamNotFoundError(Exception):
@@ -78,21 +105,24 @@ class StreamContext:
     整轮事件，与 RedisStreamTransport 的 XREAD `0-0` 行为对齐。
 
     Attributes:
-        history: (event_id, event) 列表，append-only，超过 max_history
-                 后从头部丢弃（与 Redis MAXLEN 语义一致）。
+        history: event_id → event 的有序映射。普通事件 append-only；累计式
+                 llm_chunk 按 agent/channel O(1) 替换旧回放快照。超过
+                 max_history 后从头部丢弃（与 Redis MAXLEN 语义一致）。
+        replay_snapshot_ids: 可替换回放槽 → 当前 event_id 的 O(1) 索引。
         next_id: 单调递增的事件 id 计数器。
         new_event: 新事件信号；push 后 set，consume 在 drain 干净后 wait。
         created_at: 创建时间。
-        status: pending(等待连接) / streaming(正在推送) / closed(已关闭)。
-        ttl_task: TTL 清理任务。
+        status: open(producer 仍可写) / closed(producer 已封存)。
+        ttl_task: producer 异常丢失时的运行期兜底清理任务。
         cancelled: 取消事件，通知 consumer 退出。
         owner_user_id: 创建此 stream 的用户 ID（消费时校验）。
     """
-    history: List[Tuple[int, Dict[str, Any]]] = field(default_factory=list)
+    history: "OrderedDict[int, Dict[str, Any]]" = field(default_factory=OrderedDict)
+    replay_snapshot_ids: Dict[str, int] = field(default_factory=dict)
     next_id: int = 0
     new_event: asyncio.Event = field(default_factory=asyncio.Event)
     created_at: datetime = field(default_factory=utc_now)
-    status: Literal["pending", "streaming", "closed"] = "pending"
+    status: Literal["open", "closed"] = "open"
     ttl_task: Optional[asyncio.Task] = None
     cleanup_task: Optional[asyncio.Task] = None
     cancelled: asyncio.Event = field(default_factory=asyncio.Event)
@@ -101,7 +131,7 @@ class StreamContext:
 
 class InMemoryStreamTransport:
     """
-    基于内存的事件缓冲实现（history list + asyncio.Event 信号）。
+    基于内存的事件缓冲实现（ordered history + asyncio.Event 信号）。
 
     职责：
     - 为每个 message_id 维护一个有界的事件历史 buffer。
@@ -111,9 +141,18 @@ class InMemoryStreamTransport:
       使 dev (InMemory) 与 prod (Redis) 行为一致。
     """
 
-    def __init__(self, ttl_seconds: int = 30, max_history: int = DEFAULT_MAX_HISTORY):
+    def __init__(
+        self,
+        ttl_seconds: int = 30,
+        max_history: int = DEFAULT_MAX_HISTORY,
+        cleanup_ttl: float = 5.0,
+    ):
         self.streams: Dict[str, StreamContext] = {}
+        # OPEN 阶段的安全上限：只用来清理 producer 异常退出后的孤儿。
+        # observer 连接/断开绝不修改这个计时器。
         self.ttl_seconds = ttl_seconds
+        # producer 正常 close 后的回放窗口。
+        self.cleanup_ttl = cleanup_ttl
         self.max_history = max_history
         self._lock = asyncio.Lock()
         self._closed_streams: set = set()
@@ -157,8 +196,11 @@ class InMemoryStreamTransport:
 
             async with self._lock:
                 context = self.streams.get(message_id)
-                if context and context.status == "pending":
-                    logger.warning(f"Stream {message_id} expired (TTL={self.ttl_seconds}s, status=pending)")
+                if context and context.status == "open":
+                    logger.warning(
+                        f"Open stream {message_id} exceeded safety TTL "
+                        f"({self.ttl_seconds}s); closing orphaned transport"
+                    )
                     await self._close_stream_internal(message_id)
         except asyncio.CancelledError:
             raise
@@ -180,13 +222,28 @@ class InMemoryStreamTransport:
         context.next_id += 1
         event["_stream_id"] = str(eid)
 
-        # Append to bounded history. Trim from head once full (Redis MAXLEN
-        # ~ 1000 equivalent). A consumer whose cursor is older than the
-        # oldest retained entry will silently miss those events — same loss
-        # model as Redis; for normal turns 1000 events is more than enough.
-        context.history.append((eid, event))
-        if len(context.history) > self.max_history:
-            context.history.pop(0)
+        # Ordinary events are append-only. Cumulative llm_chunk events are
+        # replaceable replay snapshots: observers are woken for every coalesced
+        # push, but a slow observer may skip a stale intermediate snapshot whose
+        # cumulative content is already contained in the next one. Reconnect
+        # history retains only the newest value per agent/content channel.
+        # OrderedDict + the slot index keeps replacement and trimming O(1).
+        snapshot_key = replay_snapshot_key(event)
+        if snapshot_key is not None:
+            previous_eid = context.replay_snapshot_ids.get(snapshot_key)
+            if previous_eid is not None:
+                context.history.pop(previous_eid, None)
+            context.replay_snapshot_ids[snapshot_key] = eid
+
+        context.history[eid] = event
+        while len(context.history) > self.max_history:
+            dropped_eid, dropped_event = context.history.popitem(last=False)
+            dropped_key = replay_snapshot_key(dropped_event)
+            if (
+                dropped_key is not None
+                and context.replay_snapshot_ids.get(dropped_key) == dropped_eid
+            ):
+                del context.replay_snapshot_ids[dropped_key]
 
         # Wake any consumer waiting on new events. set() is idempotent.
         context.new_event.set()
@@ -207,12 +264,10 @@ class InMemoryStreamTransport:
             if context.owner_user_id and user_id and context.owner_user_id != user_id:
                 raise StreamNotFoundError(message_id)
 
-            if context.ttl_task:
-                context.ttl_task.cancel()
-                context.ttl_task = None
-
-            context.status = "streaming"
-            logger.debug(f"Stream {message_id} started consuming")
+            # Observer 仅持有自己的 cursor，不改写 stream 的共享生命周期。
+            # 这使用户、admin、多标签页能同时读取，任一 observer
+            # 断开都不会缩短 producer 的 OPEN 窗口。
+            logger.debug(f"Stream {message_id} observer connected")
 
         # Cursor: only events with id > cursor are yielded. -1 means "from
         # the very start", so an absent Last-Event-ID replays everything
@@ -239,7 +294,7 @@ class InMemoryStreamTransport:
                 # normally-closed streams; cancelled-without-terminal is
                 # only checked when we run out of history to drain.
                 drained_any = False
-                for eid, event in list(context.history):
+                for eid, event in list(context.history.items()):
                     if eid > cursor:
                         cursor = eid
                         drained_any = True
@@ -273,7 +328,7 @@ class InMemoryStreamTransport:
                 # the loop and drain immediately; if it hasn't, our wait
                 # will be woken by the eventual set().
                 context.new_event.clear()
-                if any(eid > cursor for eid, _ in context.history):
+                if any(eid > cursor for eid in context.history):
                     continue
 
                 if heartbeat_interval is not None:
@@ -293,17 +348,7 @@ class InMemoryStreamTransport:
                 else:
                     await context.new_event.wait()
         finally:
-            # Consumer 断连：回退到 pending（与 RedisStreamTransport 语义对齐）。
-            # close_stream() 由 producer 在执行结束后调用，consumer 不应关闭 stream。
-            # 重新启动 TTL 防止 producer 挂掉后 stream 永久驻留内存。
-            async with self._lock:
-                context = self.streams.get(message_id)
-                if context and context.status == "streaming":
-                    context.status = "pending"
-                    context.ttl_task = asyncio.create_task(
-                        self._ttl_cleanup(message_id)
-                    )
-                    logger.debug(f"Stream {message_id} reverted to pending (consumer disconnect)")
+            logger.debug(f"Stream {message_id} observer disconnected")
 
     async def close_stream(self, message_id: str) -> bool:
         async with self._lock:
@@ -322,7 +367,7 @@ class InMemoryStreamTransport:
             context.ttl_task = None
 
         context.cleanup_task = asyncio.create_task(
-            self._delayed_cleanup(message_id, delay=5.0)
+            self._delayed_cleanup(message_id, delay=self.cleanup_ttl)
         )
 
         logger.debug(f"Stream {message_id} closed (delayed cleanup scheduled)")

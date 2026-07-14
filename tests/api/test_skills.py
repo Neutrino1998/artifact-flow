@@ -54,6 +54,11 @@ def _upload(blob: bytes, filename: str = "my-skill.zip") -> dict:
     return {"file": (filename, blob, "application/zip")}
 
 
+def _named_upload(slug: str) -> dict:
+    md = f"---\nname: {slug}\ndescription: d\n---\n# {slug}\n"
+    return _upload(_zip(md), filename=f"{slug}.zip")
+
+
 class TestListSkills:
     async def test_anon_blocked(self, anon_client: AsyncClient):
         assert (await anon_client.get("/api/v1/skills")).status_code == 401
@@ -201,6 +206,75 @@ class TestImportSkill:
         r = await client.post("/api/v1/skills/import", files=_upload(_zip()))
         assert r.status_code == 413
 
+    async def test_import_closed_when_private_limit_is_zero(
+        self, client: AsyncClient, db_session, monkeypatch
+    ):
+        monkeypatch.setattr(config, "SKILL_USER_MAX_PRIVATE_COUNT", 0)
+        r = await client.post(
+            "/api/v1/skills/import", files=_named_upload("closed-skill")
+        )
+        assert r.status_code == 409
+        assert "个人技能导入已关闭" in r.json()["detail"]
+        assert (await db_session.execute(
+            select(Skill).where(Skill.slug == "closed-skill")
+        )).scalar_one_or_none() is None
+
+    async def test_import_rejects_when_private_count_limit_is_reached(
+        self, client: AsyncClient, db_session, test_user: User, monkeypatch
+    ):
+        monkeypatch.setattr(config, "SKILL_USER_MAX_PRIVATE_COUNT", 1)
+        first = await client.post(
+            "/api/v1/skills/import", files=_named_upload("first-private")
+        )
+        assert first.status_code == 200
+
+        second = await client.post(
+            "/api/v1/skills/import", files=_named_upload("second-private")
+        )
+        assert second.status_code == 409
+        assert "最多可以保留 1 个个人技能" in second.json()["detail"]
+        owned = (await db_session.execute(
+            select(Skill.slug).where(Skill.owner_user_id == test_user.id)
+        )).scalars().all()
+        assert owned == ["first-private"]
+
+    async def test_delete_releases_private_skill_slot(
+        self, client: AsyncClient, monkeypatch
+    ):
+        monkeypatch.setattr(config, "SKILL_USER_MAX_PRIVATE_COUNT", 1)
+        assert (await client.post(
+            "/api/v1/skills/import", files=_named_upload("old-private")
+        )).status_code == 200
+        assert (await client.delete("/api/v1/skills/old-private")).status_code == 204
+        assert (await client.post(
+            "/api/v1/skills/import", files=_named_upload("new-private")
+        )).status_code == 200
+
+    async def test_shared_skills_do_not_consume_private_limit(
+        self, client: AsyncClient, db_session, monkeypatch
+    ):
+        monkeypatch.setattr(config, "SKILL_USER_MAX_PRIVATE_COUNT", 1)
+        await _seed_skill(db_session, "shared-a")
+        await _seed_skill(db_session, "shared-b", source="dynamic")
+        r = await client.post(
+            "/api/v1/skills/import", files=_named_upload("one-private")
+        )
+        assert r.status_code == 200
+
+    async def test_minus_one_allows_unlimited_private_imports(
+        self, client: AsyncClient, db_session, test_user: User, monkeypatch
+    ):
+        monkeypatch.setattr(config, "SKILL_USER_MAX_PRIVATE_COUNT", -1)
+        for slug in ("private-a", "private-b", "private-c", "private-d"):
+            r = await client.post(
+                "/api/v1/skills/import", files=_named_upload(slug)
+            )
+            assert r.status_code == 200, r.text
+        owned = (await db_session.execute(
+            select(Skill.slug).where(Skill.owner_user_id == test_user.id)
+        )).scalars().all()
+        assert set(owned) == {"private-a", "private-b", "private-c", "private-d"}
+
     async def test_bundle_bytes_count_into_storage(self, client: AsyncClient):
         blob = _zip()
         assert (await client.post(
@@ -262,6 +336,16 @@ class TestAdminImportSkill:
         monkeypatch.setattr(config, "ARTIFACT_USER_QUOTA_BYTES", 10)
         r = await admin_client.post("/api/v1/admin/skills/import", files=_upload(_zip()))
         assert r.status_code == 200
+
+    async def test_admin_shared_import_exempt_when_private_imports_closed(
+        self, admin_client: AsyncClient, monkeypatch
+    ):
+        monkeypatch.setattr(config, "SKILL_USER_MAX_PRIVATE_COUNT", 0)
+        r = await admin_client.post(
+            "/api/v1/admin/skills/import", files=_named_upload("shared-by-admin")
+        )
+        assert r.status_code == 200
+        assert r.json()["skill"]["is_owner"] is False
 
     async def test_non_admin_403(self, client: AsyncClient):
         r = await client.post("/api/v1/admin/skills/import", files=_upload(_zip()))

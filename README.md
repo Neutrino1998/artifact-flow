@@ -27,10 +27,6 @@ ArtifactFlow 是一个基于扁平 while loop 执行引擎的多 Agent 协作系
 
 ![Screenshot](docs/assets/screenshot.png)
 
-**CLI** — 终端交互模式，实时展示 Agent 协作过程和工具调用
-
-![CLI](docs/assets/cli_screenshot.png)
-
 ## 核心特性
 
 - **扁平 while loop 引擎** — 无框架依赖的 Pi-style 执行循环，call_llm → parse_tool_calls → execute → route，完全透明可调试
@@ -44,7 +40,7 @@ ArtifactFlow 是一个基于扁平 while loop 执行引擎的多 Agent 协作系
 
 ### 前置要求
 
-- Docker & Docker Compose（推荐方式）或 Python 3.11+
+- Docker & Docker Compose（推荐方式），或本地开发所需的 Python 3.11+ 与 Node.js 20+
 - 至少一个 LLM API Key（默认 Agent 配置使用 DashScope / 通义千问，可在 `config/agents/*.md` 中改用 `gpt-4o`、`deepseek-chat` 等内置 alias）
 - `BOCHA_API_KEY` — Web 搜索工具所需
 
@@ -95,16 +91,11 @@ echo "ARTIFACTFLOW_CREDENTIAL_KEY=$(python -c 'from cryptography.fernet import F
 # 编辑 .env 填入其余 API Keys
 
 python scripts/create_admin.py admin --password admin
-python run_server.py         # 加 --reload 开启热重载
+python run_server.py         # 终端 1；加 --reload 开启热重载
+(cd frontend && npm ci && npm run dev)  # 终端 2
 ```
 
-启动后 CLI 交互：
-
-```bash
-python run_cli.py login
-python run_cli.py chat                # 交互模式
-python run_cli.py chat "帮我调研一下 LLM Agent 框架"
-```
+启动后访问前端 http://localhost:3000；API 文档位于 http://localhost:8000/docs（需 `ARTIFACTFLOW_DEBUG=true`）。
 
 ## 环境变量
 
@@ -147,7 +138,6 @@ artifact-flow/
 │   ├── repositories/  # 数据访问层（Conversation / Artifact / User / MessageEvent）
 │   ├── models/        # LiteLLM 统一 LLM 接口
 │   └── api/           # FastAPI routers / schemas / services（SSE、RuntimeStore、JWT）
-├── cli/               # Typer + Rich CLI
 ├── frontend/          # Next.js 15 + Zustand + Tailwind
 ├── config/            # agents/ models/ tools/（运行时只读）
 ├── scripts/           # export_openapi / create_admin

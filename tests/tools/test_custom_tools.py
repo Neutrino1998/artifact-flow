@@ -513,8 +513,8 @@ class TestCoerceParams:
 
     def test_string_stays_string(self):
         tool = self.DummyTool(name="t", description="t")
-        result = tool._coerce_params({"text": "hello"})
-        assert result["text"] == "hello"
+        result = tool._coerce_params({"text": "  hello\n"})
+        assert result["text"] == "  hello\n"
         assert isinstance(result["text"], str)
 
     def test_integer_conversion(self):
@@ -540,6 +540,21 @@ class TestCoerceParams:
         for val in ["false", "False", "0", "no"]:
             result = tool._coerce_params({"flag": val})
             assert result["flag"] is False
+
+    def test_typed_scalars_ignore_surrounding_whitespace(self):
+        tool = self.DummyTool(name="t", description="t")
+        result = tool._coerce_params({
+            "count": "\n 42 ",
+            "rate": " 3.14\n",
+            "flag": " TRUE ",
+            "payload": "\n {\"ok\": true} ",
+        })
+        assert result == {
+            "count": 42,
+            "rate": 3.14,
+            "flag": True,
+            "payload": {"ok": True},
+        }
 
     def test_already_typed_passthrough(self):
         tool = self.DummyTool(name="t", description="t")

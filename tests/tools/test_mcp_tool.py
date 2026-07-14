@@ -1,9 +1,12 @@
 """MCP tool adapter tests(F-2M)."""
 
+import asyncio
 import base64
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from types import SimpleNamespace
+
+import pytest
 
 from config import config
 from tools.custom.mcp_client import McpClientManager, McpToolCallResult
@@ -350,13 +353,91 @@ async def test_mcp_call_error_invalidates_list_cache(monkeypatch):
     assert list_calls == 2
 
 
-async def test_sdk_session_accepts_streamable_http_triple_and_uses_timedelta_timeout():
+async def test_mcp_list_internal_cancel_degrades_to_unavailable():
+    async def fake_list(_url, _headers, _timeout):
+        raise asyncio.CancelledError()
+
+    manager = McpClientManager(list_callable=fake_list)
+
+    result = await manager.list_tools("inventory", _provider_config())
+
+    assert result.tools == []
+    assert result.error == "MCP server is unavailable"
+
+
+async def test_mcp_list_cleanup_exception_group_degrades_to_unavailable():
+    async def fake_list(_url, _headers, _timeout):
+        raise BaseExceptionGroup(
+            "stream cleanup failed",
+            [
+                RuntimeError("Attempted to exit cancel scope in a different task"),
+                GeneratorExit(),
+            ],
+        )
+
+    manager = McpClientManager(list_callable=fake_list)
+
+    result = await manager.list_tools("inventory", _provider_config())
+
+    assert result.tools == []
+    assert result.error == "MCP server is unavailable"
+
+
+async def test_mcp_call_internal_cancel_returns_tool_error():
+    async def fake_call(_url, _headers, _timeout, _tool_name, _arguments):
+        raise asyncio.CancelledError()
+
+    result = await _tool(McpClientManager(call_callable=fake_call))()
+
+    assert result.success is False
+    assert "could not reach the server" in result.error
+
+
+async def test_mcp_outer_cancel_still_propagates():
+    async def fake_list(_url, _headers, _timeout):
+        await asyncio.sleep(60)
+
+    manager = McpClientManager(list_callable=fake_list)
+    task = asyncio.create_task(manager.list_tools("inventory", _provider_config()))
+    await asyncio.sleep(0)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+async def test_mcp_outer_cancel_with_cleanup_error_still_propagates():
+    entered = asyncio.Event()
+
+    async def fake_list(_url, _headers, _timeout):
+        entered.set()
+        try:
+            await asyncio.sleep(60)
+        finally:
+            await asyncio.sleep(0)
+            raise RuntimeError("cleanup failed")
+
+    manager = McpClientManager(list_callable=fake_list)
+    task = asyncio.create_task(manager.list_tools("inventory", _provider_config()))
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+async def test_sdk_session_accepts_streamable_http_triple_and_uses_granular_timeouts(monkeypatch):
     seen = {}
+
+    monkeypatch.setattr(config, "MCP_CONNECT_TIMEOUT", 3.0)
+    monkeypatch.setattr(config, "MCP_WRITE_TIMEOUT", 40.0)
+    monkeypatch.setattr(config, "MCP_POOL_TIMEOUT", 2.0)
 
     @asynccontextmanager
     async def fake_transport(url, *, http_client):
         seen["url"] = url
         seen["headers"] = dict(http_client.headers)
+        seen["http_timeout"] = http_client.timeout
         yield "read-stream", "write-stream", lambda: "session-id"
 
     class FakeSession:
@@ -387,7 +468,86 @@ async def test_sdk_session_accepts_streamable_http_triple_and_uses_timedelta_tim
     assert seen["read_stream"] == "read-stream"
     assert seen["write_stream"] == "write-stream"
     assert seen["read_timeout_seconds"] == timedelta(seconds=15)
+    assert seen["http_timeout"].connect == 3.0
+    assert seen["http_timeout"].read == 15.0
+    assert seen["http_timeout"].write == 40.0
+    assert seen["http_timeout"].pool == 2.0
     assert seen["initialized"] is True
+
+
+async def test_sdk_session_suppresses_nonfatal_transport_cleanup_error():
+    seen = {}
+
+    @asynccontextmanager
+    async def fake_transport(_url, *, http_client):
+        try:
+            yield "read-stream", "write-stream", lambda: "session-id"
+        finally:
+            raise RuntimeError("Attempted to exit cancel scope in a different task")
+
+    class FakeSession:
+        def __init__(self, _read_stream, _write_stream, *, read_timeout_seconds):
+            seen["read_timeout_seconds"] = read_timeout_seconds
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            return None
+
+        async def initialize(self):
+            seen["initialized"] = True
+
+    async with _McpSessionContext(
+        "https://mcp.example.com/inventory",
+        {},
+        15,
+        FakeSession,
+        fake_transport,
+    ):
+        seen["inside"] = True
+
+    assert seen == {
+        "read_timeout_seconds": timedelta(seconds=15),
+        "initialized": True,
+        "inside": True,
+    }
+
+
+async def test_sdk_session_outer_cancel_with_cleanup_error_still_propagates():
+    @asynccontextmanager
+    async def fake_transport(_url, *, http_client):
+        try:
+            yield "read-stream", "write-stream", lambda: "session-id"
+        finally:
+            raise RuntimeError("Attempted to exit cancel scope in a different task")
+
+    class FakeSession:
+        def __init__(self, _read_stream, _write_stream, *, read_timeout_seconds):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            return None
+
+        async def initialize(self):
+            pass
+
+    async def use_session():
+        async with _McpSessionContext(
+            "https://mcp.example.com/inventory",
+            {},
+            15,
+            FakeSession,
+            fake_transport,
+        ):
+            asyncio.current_task().cancel()
+            await asyncio.sleep(0)
+
+    with pytest.raises(asyncio.CancelledError):
+        await use_session()
 
 
 async def test_sdk_call_reads_camel_case_result_fields_and_uses_timedelta_timeout():

@@ -313,6 +313,28 @@ class ContextManager:
             return ""
 
         lines = ['<available_tools>']
+        if "bash" in names:
+            lines.extend([
+                '<tool_boundaries>',
+                "Names in this catalog are platform tools. Invoke them with "
+                "<tool_call>; never put them inside bash.command. Bash can run only "
+                "executables and scripts available in the sandbox.",
+            ])
+            artifact_tool_names = {
+                "create_artifact", "update_artifact", "rewrite_artifact",
+                "read_artifact", "grep_artifact",
+            }
+            if (
+                {"mount", "persist"}.issubset(names)
+                and artifact_tool_names.intersection(names)
+            ):
+                lines.append(
+                    "Artifacts and /workspace files are separate copies with no automatic "
+                    "sync. Use artifact tools for stored text artifacts. When sandbox "
+                    "processing is needed, edit an existing artifact with "
+                    "mount -> bash -> persist; create a new file with bash -> persist."
+                )
+            lines.append('</tool_boundaries>')
         if full_doc_tools:
             lines.append(render_tool_docs(full_doc_tools))
         # deferred unit 索引行（按 unit 名稳定排序，避免提示词抖动）。unit.name/description

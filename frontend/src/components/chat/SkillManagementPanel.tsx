@@ -13,6 +13,7 @@ import {
   ApiError,
 } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
+import { useConfigStore } from '@/stores/configStore';
 import { useUIStore } from '@/stores/uiStore';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
 import { triggerBlobDownload } from '@/lib/download';
@@ -22,6 +23,7 @@ import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
 import { StatusNotice } from '@/components/ui/StatusNotice';
 import DangerConfirmModal, { DangerConfirmTarget } from '@/components/layout/DangerConfirmModal';
 import PanelSearchBar from './PanelSearchBar';
+import { resolvePrivateSkillAllowance } from '@/lib/privateSkillLimit';
 import type {
   AdminSkillItem,
   AdminSkillUpdateRequest,
@@ -93,6 +95,8 @@ export default function SkillManagementPanel() {
 
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === 'admin';
+  const maxPrivateSkills = useConfigStore((s) => s.maxPrivateSkills);
+  const fetchConfig = useConfigStore((s) => s.fetchConfig);
   const setActiveMode = useUIStore((s) => s.setActiveMode);
 
   const fetchSkills = useCallback(async () => {
@@ -113,6 +117,10 @@ export default function SkillManagementPanel() {
   useEffect(() => {
     fetchSkills();
   }, [fetchSkills]);
+
+  useEffect(() => {
+    fetchConfig();
+  }, [fetchConfig]);
 
   const handleToggle = useCallback(async (slug: string, next: boolean) => {
     // 乐观更新 + 失败回滚。pending 期禁开关避免连点。
@@ -213,6 +221,21 @@ export default function SkillManagementPanel() {
           (s.description ?? '').toLowerCase().includes(q),
       )
     : skills;
+  const privateSkillCount = skills.filter((skill) => skill.is_owner).length;
+  const privateAllowance = resolvePrivateSkillAllowance(
+    privateSkillCount,
+    maxPrivateSkills,
+  );
+  const privateAllowanceText = privateAllowance.kind === 'disabled'
+    ? '个人技能导入已关闭'
+    : privateAllowance.kind === 'unlimited'
+      ? `个人技能容量 ${privateAllowance.used}/不限`
+      : privateAllowance.kind === 'limited'
+        ? privateAllowance.canImport
+          ? `个人技能容量 ${privateAllowance.used}/${privateAllowance.limit}，剩余 ${privateAllowance.remaining} 个`
+          : `个人技能容量 ${privateAllowance.used}/${privateAllowance.limit}，额度已用完`
+        : `个人技能 ${privateAllowance.used}`;
+  const personalEntryDisabled = !isAdmin && !privateAllowance.canImport;
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
@@ -228,15 +251,21 @@ export default function SkillManagementPanel() {
         <div className="max-w-3xl mx-auto space-y-2">
           <p className="px-1 text-xs text-text-tertiary dark:text-text-tertiary-dark">
             关闭的技能不会自动进入对话，也不会出现在输入框的激活选择器里；随时可以重新开启。
+            {!loading && !error && (
+              <span className="inline-block whitespace-nowrap text-accent">
+                {privateAllowanceText}
+              </span>
+            )}
           </p>
-
           {/* 导入入口 + 内联导入卡片(中间面板接管,不动右面板) */}
           <button
+            type="button"
+            disabled={personalEntryDisabled}
             onClick={() => {
               setImportNotice(null);
               setImportOpen((v) => !v);
             }}
-            className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border font-medium transition-colors ${
+            className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
               importOpen
                 ? 'text-accent border-accent bg-bg dark:bg-bg-dark'
                 : 'text-accent border-border dark:border-border-dark bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark'
@@ -251,6 +280,7 @@ export default function SkillManagementPanel() {
           {importOpen && (
             <SkillImportCard
               isAdmin={isAdmin}
+              personalImportAvailable={privateAllowance.canImport}
               onImported={(data) => {
                 setImportNotice(data);
                 setImportOpen(false);
@@ -268,9 +298,9 @@ export default function SkillManagementPanel() {
           )}
 
           {rowError && (
-            <div className="px-3 py-2 text-xs text-status-error bg-status-error/10 rounded-lg">
+            <StatusNotice tone="error" onDismiss={() => setRowError(null)}>
               {rowError}
-            </div>
+            </StatusNotice>
           )}
 
           {loading && (
@@ -345,7 +375,10 @@ export default function SkillManagementPanel() {
                     )}
                   </div>
                   {skill.description && (
-                    <p className="mt-0.5 text-xs text-text-secondary dark:text-text-secondary-dark line-clamp-2">
+                    <p
+                      className="mt-0.5 text-xs text-text-secondary dark:text-text-secondary-dark line-clamp-2"
+                      title={skill.description}
+                    >
                       {skill.description}
                     </p>
                   )}
@@ -476,16 +509,20 @@ type ImportStage =
 
 function SkillImportCard({
   isAdmin,
+  personalImportAvailable,
   onImported,
   onClose,
 }: {
   isAdmin: boolean;
+  personalImportAvailable: boolean;
   onImported: (data: SkillImportResponse) => void;
   onClose: () => void;
 }) {
   const [stage, setStage] = useState<ImportStage>({ kind: 'pick' });
   const [file, setFile] = useState<File | null>(null);
-  const [marketplace, setMarketplace] = useState(false);
+  const [marketplace, setMarketplace] = useState(
+    isAdmin && !personalImportAvailable,
+  );
   const [sharedVisibility, setSharedVisibility] = useState<SharedVisibility>('public');
   const [sharedDefaultEnabled, setSharedDefaultEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -498,6 +535,10 @@ function SkillImportCard({
   const clearNativeInput = useCallback(() => {
     if (inputRef.current) inputRef.current.value = '';
   }, []);
+
+  useEffect(() => {
+    if (isAdmin && !personalImportAvailable) setMarketplace(true);
+  }, [isAdmin, personalImportAvailable]);
 
   const handleFile = useCallback((f: File | null) => {
     setError(null);
@@ -516,7 +557,7 @@ function SkillImportCard({
   }, [clearNativeInput]);
 
   const submit = useCallback(async () => {
-    if (!file) return;
+    if (!file || (!marketplace && !personalImportAvailable)) return;
     setStage({ kind: 'submitting' });
     setError(null);
     setRejectFindings(null);
@@ -546,7 +587,6 @@ function SkillImportCard({
           setRejectFindings(
             (detail as { findings: SkillFindingItem[] }).findings,
           );
-          setError('技能包未通过校验，请修复后重新打包上传：');
           return;
         }
       }
@@ -557,6 +597,7 @@ function SkillImportCard({
     marketplace,
     sharedDefaultEnabled,
     sharedVisibility,
+    personalImportAvailable,
     onImported,
     clearNativeInput,
   ]);
@@ -629,8 +670,9 @@ function SkillImportCard({
             role="switch"
             aria-checked={marketplace}
             aria-label="导入为共享技能"
+            disabled={!personalImportAvailable}
             onClick={() => setMarketplace((v) => !v)}
-            className={`flex w-full items-center justify-between gap-3 rounded-lg border bg-chat dark:bg-chat-dark px-3 py-2 text-left transition-colors ${
+            className={`flex w-full items-center justify-between gap-3 rounded-lg border bg-chat dark:bg-chat-dark px-3 py-2 text-left transition-colors disabled:cursor-not-allowed ${
               marketplace
                 ? 'border-accent/60'
                 : 'border-border dark:border-border-dark hover:border-accent/40 dark:hover:border-accent/50'
@@ -641,7 +683,9 @@ function SkillImportCard({
                 导入为共享技能
               </span>
               <span className="block text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                管理员可配置公开或部门可见
+                {personalImportAvailable
+                  ? '管理员可配置公开或部门可见'
+                  : '个人导入不可用，本次将发布为共享技能'}
               </span>
             </span>
             <SwitchTrack checked={marketplace} />
@@ -670,8 +714,13 @@ function SkillImportCard({
         </div>
       )}
 
-      {error && <div className="text-status-error text-xs">{error}</div>}
-      {rejectFindings && <FindingList findings={rejectFindings} />}
+      {rejectFindings ? (
+        <SkillValidationNotices findings={rejectFindings} />
+      ) : error ? (
+        <StatusNotice tone="error" title="导入失败">
+          <div className="break-words">{error}</div>
+        </StatusNotice>
+      ) : null}
 
       <div className="flex justify-end gap-2">
         <button
@@ -684,7 +733,11 @@ function SkillImportCard({
         </button>
         <button
           onClick={submit}
-          disabled={!file || stage.kind === 'submitting'}
+          disabled={
+            !file ||
+            stage.kind === 'submitting' ||
+            (!marketplace && !personalImportAvailable)
+          }
           type="button"
           className={`${BUTTON_PRIMARY} rounded-lg px-4 py-1.5 text-sm`}
         >
@@ -692,6 +745,44 @@ function SkillImportCard({
         </button>
       </div>
     </div>
+  );
+}
+
+export function SkillValidationNotices({
+  findings,
+}: {
+  findings: SkillFindingItem[];
+}) {
+  const errors = findings.filter((finding) => finding.severity === 'error');
+  const warnings = findings.filter((finding) => finding.severity === 'warning');
+
+  return (
+    <>
+      {errors.length > 0 && (
+        <StatusNotice tone="error" title="技能包未通过校验">
+          <div className="space-y-1">
+            <div>请修复以下阻断问题后重新打包上传：</div>
+            {errors.map((finding, index) => (
+              <div key={`${finding.rule}-${index}`} className="break-words">
+                {finding.message}
+              </div>
+            ))}
+          </div>
+        </StatusNotice>
+      )}
+      {warnings.length > 0 && (
+        <StatusNotice tone="warning" title="其他校验提示">
+          <div className="space-y-1">
+            <div>以下问题不阻断导入，仅供修包参考。</div>
+            {warnings.map((finding, index) => (
+              <div key={`${finding.rule}-${index}`} className="break-words">
+                {finding.message}
+              </div>
+            ))}
+          </div>
+        </StatusNotice>
+      )}
+    </>
   );
 }
 
@@ -711,12 +802,17 @@ function SkillImportNotice({
       : '公开';
 
   return (
-    <StatusNotice
-      tone="success"
-      title={
-        <>
-          <span>已导入</span>
-          <span>{skill.name}</span>
+    <>
+      <StatusNotice
+        tone="success"
+        title="已导入"
+        onDismiss={onDismiss}
+        dismissLabel="关闭导入成功提示"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium text-text-primary dark:text-text-primary-dark">
+            {skill.name}
+          </span>
           <PillBadge tone={isPrivate ? 'accent' : 'neutral'}>
             {visibilityLabel}
           </PillBadge>
@@ -727,43 +823,20 @@ function SkillImportNotice({
               {skill.default_enabled ? '默认开' : '默认关'}
             </PillBadge>
           )}
-        </>
-      }
-      onDismiss={onDismiss}
-      dismissLabel="关闭导入成功提示"
-    >
+        </div>
+      </StatusNotice>
       {findings.length > 0 && (
-        <div className="space-y-2">
-          <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-            校验提示（不阻断，仅供修包参考）
+        <StatusNotice tone="warning" title="校验提示">
+          <div className="space-y-1">
+            <div>不阻断导入，仅供修包参考。</div>
+            {findings.map((finding, index) => (
+              <div key={index} className="break-words">
+                {finding.message}
+              </div>
+            ))}
           </div>
-          <FindingList findings={findings} />
-        </div>
+        </StatusNotice>
       )}
-    </StatusNotice>
-  );
-}
-function FindingList({ findings }: { findings: SkillFindingItem[] }) {
-  return (
-    <div className="rounded-lg border border-border dark:border-border-dark divide-y divide-border dark:divide-border-dark max-h-48 overflow-y-auto">
-      {findings.map((f, i) => (
-        <div key={i} className="px-3 py-2 text-xs flex items-start gap-2">
-          <PillBadge
-            tone={f.severity === 'error' ? 'error' : 'warning'}
-            className="mt-px"
-          >
-            {f.severity === 'error' ? '错误' : '提示'}
-          </PillBadge>
-          <div className="min-w-0">
-            <span className="font-mono text-text-tertiary dark:text-text-tertiary-dark">
-              {f.rule}
-            </span>
-            <div className="text-text-secondary dark:text-text-secondary-dark mt-0.5 break-words">
-              {f.message}
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
+    </>
   );
 }

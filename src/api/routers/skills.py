@@ -53,7 +53,7 @@ async def import_skill(
     mgr: SkillManager = Depends(get_skill_manager),
 ) -> SkillImportResponse:
     """导入私有 skill zip(owner=本人,立即进自己的 L1)。硬门拒收 → 422 结构化
-    findings;超单包上限 → 422;超存储配额 → 413;slug 撞名 → 409。"""
+    findings;超单包上限 → 422;超存储配额 → 413;个人数量达上限或 slug 撞名 → 409。"""
     blob = await file.read()
     try:
         result = await mgr.import_zip(

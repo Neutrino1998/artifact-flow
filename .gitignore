@@ -20,9 +20,6 @@ temp/
 cache/
 checkpoints/
 
-# CLI 状态文件
-.cli_state
-
 # Claude Code（整个目录不入库:本地设置 + 运行时锁）
 .claude/
 

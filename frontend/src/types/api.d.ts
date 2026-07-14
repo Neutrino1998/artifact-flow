@@ -398,7 +398,7 @@ export interface paths {
          * Stream Events
          * @description SSE 端点，订阅执行过程
          *
-         *     前端通过 EventSource 连接此端点，接收实时事件流。
+         *     前端通过 fetch + ReadableStream 连接此端点，接收实时事件流。
          *     stream_id 即 message_id（消息与执行 1:1）。
          *
          *     事件格式（使用标准 SSE event: 字段区分事件类型）：
@@ -412,8 +412,8 @@ export interface paths {
          *         data: {"type": "complete", "timestamp": "...", "data": {...}}
          *
          *     连接生命周期：
-         *         - 收到 complete/error 事件后，服务端主动关闭连接
-         *         - 前端应销毁 EventSource 实例
+         *         - 收到 complete/cancelled/timed_out/error 事件后，服务端主动关闭连接
+         *         - 前端应释放当前读流的 AbortController
          */
         get: operations["stream_events_api_v1_stream__stream_id__get"];
         put?: never;
@@ -456,6 +456,26 @@ export interface paths {
          * @description Get all events for a conversation, grouped by message.
          */
         get: operations["get_admin_conversation_events_api_v1_admin_conversations__conv_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/conversations/{conv_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Admin Conversation
+         * @description Observe the active execution for one conversation (admin read-only).
+         */
+        get: operations["stream_admin_conversation_api_v1_admin_conversations__conv_id__stream_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1305,7 +1325,7 @@ export interface paths {
         /**
          * Import Skill
          * @description 导入私有 skill zip(owner=本人,立即进自己的 L1)。硬门拒收 → 422 结构化
-         *     findings;超单包上限 → 422;超存储配额 → 413;slug 撞名 → 409。
+         *     findings;超单包上限 → 422;超存储配额 → 413;个人数量达上限或 slug 撞名 → 409。
          */
         post: operations["import_skill_api_v1_skills_import_post"];
         delete?: never;
@@ -1458,6 +1478,8 @@ export interface components {
              * @default false
              */
             is_active: boolean;
+            /** Active Message Id */
+            active_message_id: string | null;
             /**
              * Created At
              * Format: date-time
@@ -1506,6 +1528,8 @@ export interface components {
              * @default false
              */
             is_active: boolean;
+            /** Active Message Id */
+            active_message_id: string | null;
             /**
              * Created At
              * Format: date-time
@@ -1564,6 +1588,11 @@ export interface components {
             execution_metrics: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Uploaded Files
+             * @description Files attached to this turn, from Message.metadata_['uploaded_files']. Display-only and best-effort until the terminal DB refresh.
+             */
+            uploaded_files: components["schemas"]["UploadedFileRef"][] | null;
         };
         /**
          * AdminPromptReconstructResponse
@@ -2141,9 +2170,14 @@ export interface components {
             lead_agent_model: string;
             /**
              * Max Upload Size
-             * @description Per-file upload byte limit (MAX_UPLOAD_SIZE). The composer uses it to pre-reject an oversize file with instant feedback instead of staging + POSTing it for a backend 422. Backend stays authoritative; the batch TOTAL is capped separately at the proxy layer (not surfaced here — it lives in nginx/Caddy config, outside src/config.py).
+             * @description Per-file upload byte limit (MAX_UPLOAD_SIZE). The composer uses it to pre-reject an oversize file with instant feedback instead of staging + POSTing it for a backend 422. Backend stays authoritative; the batch TOTAL is capped separately at the proxy layer (not surfaced here — it lives in Caddy config, outside src/config.py).
              */
             max_upload_size: number;
+            /**
+             * Max Private Skills
+             * @description Maximum number of private skills a user may own. -1 means unlimited, 0 disables personal skill imports, and a positive value is the limit. Shared/admin-imported skills do not count.
+             */
+            max_private_skills: number;
         };
         /**
          * ConversationDetailResponse
@@ -3941,13 +3975,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description Server-Sent Events stream */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "text/event-stream": string;
                 };
             };
             /** @description Validation Error */
@@ -4013,6 +4047,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminConversationEventsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_admin_conversation_api_v1_admin_conversations__conv_id__stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conv_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Server-Sent Events stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
                 };
             };
             /** @description Validation Error */

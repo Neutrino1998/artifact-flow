@@ -14,12 +14,15 @@ Key 设计（{prefix:id} 为 hash tag，确保同 entity 同 slot）：
 
 import asyncio
 import json
-import os
-from typing import Any, AsyncGenerator, Dict, Literal, Optional
+from typing import Any, AsyncGenerator, Dict, Optional
 
 import redis.asyncio as aioredis
 
-from api.services.stream_transport import StreamAlreadyExistsError, StreamNotFoundError
+from api.services.stream_transport import (
+    StreamAlreadyExistsError,
+    StreamNotFoundError,
+    replay_snapshot_key,
+)
 from utils.logger import get_logger, get_request_id
 
 logger = get_logger("ArtifactFlow")
@@ -28,36 +31,33 @@ logger = get_logger("ArtifactFlow")
 # 与 core.events.TERMINAL_EVENT_TYPES 的一致性由 tests/core/test_terminal_event_sync.py 守护。
 _TERMINAL_EVENTS = frozenset(("complete", "cancelled", "timed_out", "error"))
 
-# Lua CAS: 仅当 consumer_id 匹配 且 status 仍为 streaming 时回退到 pending。
-# 不缩短 TTL — stream 生命周期由 stream TTL（EXECUTION_TIMEOUT+STREAM_TTL_GRACE）决定，consumer 断连不影响。
-# 双重条件防止两类竞态：
-#   - consumer_id 不匹配 → 新 consumer 已接管，旧 finally 不动
-#   - status != streaming → producer 已 close，consumer finally 不动
-# 单 key 操作（KEYS[1]=meta_key），避免 Redis Cluster CROSSSLOT。
-# KEYS[1]=meta_key, ARGV[1]=consumer_id
-_LUA_REVERT_TO_PENDING = """
-local cid = redis.call('HGET', KEYS[1], 'consumer_id')
-local status = redis.call('HGET', KEYS[1], 'status')
-if cid == ARGV[1] and status == 'streaming' then
-    redis.call('HSET', KEYS[1], 'status', 'pending', 'consumer_id', '')
-    return 1
-end
-return 0
-"""
-
 # XADD + 首次 EXPIRE 原子合一。pipeline(transaction=False) 只是批量发送、非原子：
 # 半包只送到 XADD 而没送到 EXPIRE（连接中途断/failover）会留下无 TTL 的孤儿
 # stream key（永不自愈）。Lua 整段原子执行 → 要么 XADD+EXPIRE 都发生、要么键根本没创建。
 # 判据 TTL==-1（键在但无过期）才设 TTL：既识别首推，又自愈任何历史遗留的无 TTL 键，
 # 且保留「后续推送不刷新 TTL」（不延长 stream 寿命）。
-# 单 key 操作（KEYS[1]=stream_key），Cluster 安全。
-# 与 meta_key 剩余 TTL 的精确对齐是 best-effort 之外的目标，留给 PR-C 的生命周期重构。
-# KEYS[1]=stream_key, ARGV[1]=event_type, ARGV[2]=event_json, ARGV[3]=ttl
+# 累计式 llm_chunk 是可替换的回放快照：每个 agent/channel 只保留最新 entry，
+# 避免 1000 个累计字符串形成 O(snapshot_count × final_length) 的 Redis 占用。
+# 当前 live observer 仍会被每次 XADD 唤醒；慢 observer 可能跳过已由下一累计
+# 快照覆盖的中间态。这里只 XDEL 上一份回放快照。
+#
+# KEYS[1]=stream_key 与 KEYS[2]=meta_key 共享 {prefix:id} hash tag，双 key Lua
+# 在 Redis Cluster 中仍落同一 slot。meta 不存在时不 HSET，避免 TTL 边界竞态把
+# 已过期 meta 重新创建成无 TTL key。
+# ARGV[1]=event_type, ARGV[2]=event_json, ARGV[3]=ttl,
+# ARGV[4]=snapshot_field（非可替换事件传空字符串）
 _LUA_XADD_WITH_TTL = """
 local id = redis.call('XADD', KEYS[1], 'MAXLEN', '~', '1000', '*',
                       'type', ARGV[1], 'data', ARGV[2])
 if redis.call('TTL', KEYS[1]) == -1 then
     redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
+end
+if ARGV[4] ~= '' and redis.call('EXISTS', KEYS[2]) == 1 then
+    local previous_id = redis.call('HGET', KEYS[2], ARGV[4])
+    if previous_id then
+        redis.call('XDEL', KEYS[1], previous_id)
+    end
+    redis.call('HSET', KEYS[2], ARGV[4], id)
 end
 return id
 """
@@ -71,7 +71,7 @@ class RedisStreamTransport:
         redis_client: aioredis.Redis,
         key_prefix: str,
         cleanup_ttl: int = 60,
-        execution_timeout: int = 1800,
+        execution_timeout: int = 3600,
         ttl_grace: int = 0,
     ):
         self._redis = redis_client
@@ -80,14 +80,10 @@ class RedisStreamTransport:
         # post-processing(终态在那时才 push)。不要用裸 execution_timeout 当 key TTL。
         self._stream_ttl = execution_timeout + ttl_grace
         self._prefix = key_prefix
-        self._script_revert_to_pending = None
         self._script_xadd_with_ttl = None
 
     def init_scripts(self) -> None:
         """注册 Lua 脚本（register_script 是同步方法，自动处理 NOSCRIPT 重试）"""
-        self._script_revert_to_pending = self._redis.register_script(
-            _LUA_REVERT_TO_PENDING
-        )
         self._script_xadd_with_ttl = self._redis.register_script(
             _LUA_XADD_WITH_TTL
         )
@@ -113,7 +109,7 @@ class RedisStreamTransport:
         # 创建元数据 (带 TTL，前端不连接时自动清理)
         await self._redis.hset(meta_key, mapping={
             "owner": owner_user_id or "",
-            "status": "pending",
+            "status": "open",
             "lease_check_key": lease_check_key or "",
             "lease_expected_owner": lease_expected_owner or "",
         })
@@ -132,21 +128,28 @@ class RedisStreamTransport:
         # 2. 即使未来引入外部强制关闭，孤儿事件有 TTL 自动清理
         # 3. events 已通过 _persist_events 持久化到 DB，stream 只是 SSE 传输通道
         status = await self._redis.hget(meta_key, "status")
+        # During a rolling deploy, an old-version observer may still rewrite a
+        # newly-created `open` stream to legacy `streaming` / `pending`.  Treat
+        # every non-closed value as writable so mixed-version observers cannot
+        # stop a new producer.  Once old pods drain, only `open` is created and
+        # observers no longer mutate it.
         if status is None or status == "closed":
             return False
 
         stream_key = self._stream_key(stream_id)
         event_json = json.dumps(event, ensure_ascii=False, default=str)
         event_type = event.get("type", "")
+        snapshot_field = replay_snapshot_key(event) or ""
 
-        # XADD + 首推 EXPIRE 原子合一（单 key Lua）。脚本内 TTL==-1 判据负责首推
+        # XADD + 首推 EXPIRE + 可选快照替换原子合一。脚本内 TTL==-1 判据负责首推
         # 检测，省去单独的 exists 预查，并消除 XADD 与 EXPIRE 之间的孤儿窗口。
+        # stream/meta 两个 key 共享 stream_id hash tag，Cluster 下是同 slot 操作。
         # best-effort 契约：stream key 必带 TTL（= EXECUTION_TIMEOUT + STREAM_TTL_GRACE，
         # 覆盖 post-processing）；与 meta_key 剩余 TTL 的精确对齐留给 PR-C（届时
         # create_stream / TTL bump 移到 RUNNING，时钟起点统一）。
         entry_id = await self._script_xadd_with_ttl(
-            keys=[stream_key],
-            args=[event_type, event_json, self._stream_ttl],
+            keys=[stream_key, meta_key],
+            args=[event_type, event_json, self._stream_ttl, snapshot_field],
         )
 
         # 注入 _stream_id 到原始 event dict（供 SSE 层使用）
@@ -173,15 +176,6 @@ class RedisStreamTransport:
         owner = await self._redis.hget(meta_key, "owner")
         if owner and user_id and owner != user_id:
             raise StreamNotFoundError(stream_id)
-
-        # 生成 consumer_id，标记为 streaming
-        # 不移除 TTL — stream 生命周期由 stream TTL（EXECUTION_TIMEOUT+STREAM_TTL_GRACE）决定，
-        # 如果 producer crash 未调 close_stream，不会产生永久孤儿 key
-        consumer_id = os.urandom(8).hex()
-        await self._redis.hset(meta_key, mapping={
-            "status": "streaming",
-            "consumer_id": consumer_id,
-        })
 
         # 起始 ID
         cursor = last_event_id if last_event_id else "0-0"
@@ -254,16 +248,9 @@ class RedisStreamTransport:
                         if event.get("type") in _TERMINAL_EVENTS:
                             return
         finally:
-            # Consumer 断连：CAS 回退 meta 到 pending（单 key Lua，Cluster 安全）。
-            # 仅当 consumer_id 仍匹配（说明没有新 consumer 接管）时才回退，
-            # 避免覆盖新 consumer 的 streaming 或 producer 的 closed。
-            # 不缩短 TTL — stream 生命周期由 stream TTL（EXECUTION_TIMEOUT+STREAM_TTL_GRACE）决定。
-            # 注意：break 退出 async for 不会自动触发 aclose()，调用方需显式
-            # await gen.aclose() 以确保此 finally 块执行。
-            await self._script_revert_to_pending(
-                keys=[meta_key],
-                args=[consumer_id],
-            )
+            # Observer 无共享生命周期状态；断开只结束自己的 XREAD cursor。
+            # OPEN/CLOSED 只由 producer 的 create/push/close 路径改写。
+            pass
 
     async def close_stream(self, stream_id: str) -> bool:
         meta_key = self._meta_key(stream_id)

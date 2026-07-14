@@ -22,11 +22,11 @@ from api.services.stream_transport import (
 
 class TestCreateStream:
 
-    async def test_create_returns_pending(self):
+    async def test_create_returns_open(self):
         sm = InMemoryStreamTransport(ttl_seconds=10)
         ctx = await sm.create_stream("msg-1")
-        assert ctx.status == "pending"
-        assert await sm.get_stream_status("msg-1") == "pending"
+        assert ctx.status == "open"
+        assert await sm.get_stream_status("msg-1") == "open"
         await sm.close_stream("msg-1")
 
     async def test_duplicate_raises(self):
@@ -45,7 +45,7 @@ class TestCreateStream:
 
         # Should not raise
         ctx = await sm.create_stream("msg-1")
-        assert ctx.status == "pending"
+        assert ctx.status == "open"
         await sm.close_stream("msg-1")
 
 
@@ -155,24 +155,26 @@ class TestConsumeEvents:
             async for _ in sm.consume_events("msg-1", user_id="user-b"):
                 pass
 
-    async def test_consume_cancels_ttl(self):
+    async def test_consume_does_not_change_safety_ttl(self):
         sm = InMemoryStreamTransport(ttl_seconds=0.1)
         ctx = await sm.create_stream("msg-1")
-        assert ctx.ttl_task is not None
+        ttl_task = ctx.ttl_task
+        assert ttl_task is not None
 
         # Push a terminal event so consume completes quickly
         await sm.push_event("msg-1", {"type": "complete"})
 
         async for _ in sm.consume_events("msg-1"):
-            # Inside consume, TTL task should be cancelled
-            assert ctx.ttl_task is None
+            assert ctx.ttl_task is ttl_task
+            assert ctx.status == "open"
             break
 
-    async def test_consumer_disconnect_rearms_ttl(self):
-        """Consumer disconnect reverts to pending and re-arms TTL cleanup."""
-        sm = InMemoryStreamTransport(ttl_seconds=0.1)
+    async def test_consumer_disconnect_does_not_change_stream_lifecycle(self):
+        sm = InMemoryStreamTransport(ttl_seconds=10)
         await sm.create_stream("msg-1")
         await sm.push_event("msg-1", {"type": "metadata", "data": {}})
+        ctx = sm.streams["msg-1"]
+        ttl_task = ctx.ttl_task
 
         gen = sm.consume_events("msg-1", heartbeat_interval=0.05)
         async for event in gen:
@@ -180,14 +182,9 @@ class TestConsumeEvents:
                 break
         await gen.aclose()
 
-        # Should be pending with TTL re-armed
-        ctx = sm.streams["msg-1"]
-        assert ctx.status == "pending"
-        assert ctx.ttl_task is not None
-
-        # TTL should fire and close the stream
-        await asyncio.sleep(0.2)
-        assert await sm.get_stream_status("msg-1") == "closed"
+        assert ctx.status == "open"
+        assert ctx.ttl_task is ttl_task
+        assert await sm.push_event("msg-1", {"type": "complete"}) is True
 
     async def test_heartbeat_emits_ping(self):
         sm = InMemoryStreamTransport(ttl_seconds=10)
@@ -216,30 +213,31 @@ class TestConsumeEvents:
 
 class TestTTL:
 
-    async def test_pending_ttl_expires(self):
+    async def test_open_safety_ttl_expires(self):
         sm = InMemoryStreamTransport(ttl_seconds=0.1)
         await sm.create_stream("msg-1")
-        assert await sm.get_stream_status("msg-1") == "pending"
+        assert await sm.get_stream_status("msg-1") == "open"
 
         await asyncio.sleep(0.2)
         assert await sm.get_stream_status("msg-1") == "closed"
 
-    async def test_streaming_not_cleaned_by_ttl(self):
-        sm = InMemoryStreamTransport(ttl_seconds=0.1)
+    async def test_two_observers_are_independent(self):
+        sm = InMemoryStreamTransport(ttl_seconds=10)
         await sm.create_stream("msg-1")
-
-        # Push terminal event and start consuming (sets status to streaming)
         await sm.push_event("msg-1", {"type": "agent_start"})
 
-        # Manually set to streaming to test TTL doesn't fire
-        ctx = sm.streams["msg-1"]
-        if ctx.ttl_task:
-            ctx.ttl_task.cancel()
-            ctx.ttl_task = None
-        ctx.status = "streaming"
+        first = sm.consume_events("msg-1", heartbeat_interval=0.05)
+        second = sm.consume_events("msg-1", heartbeat_interval=0.05)
+        assert (await anext(first))["type"] == "agent_start"
+        assert (await anext(second))["type"] == "agent_start"
 
-        await asyncio.sleep(0.15)
-        assert await sm.get_stream_status("msg-1") == "streaming"
+        await first.aclose()
+        assert await sm.get_stream_status("msg-1") == "open"
+
+        await sm.push_event("msg-1", {"type": "complete"})
+        assert (await anext(second))["type"] == "complete"
+        await second.aclose()
+
         await sm.close_stream("msg-1")
 
 
@@ -269,7 +267,7 @@ class TestCloseAndStatus:
         assert await sm.get_stream_status("msg-x") is None
 
         await sm.create_stream("msg-1")
-        assert await sm.get_stream_status("msg-1") == "pending"
+        assert await sm.get_stream_status("msg-1") == "open"
         await sm.close_stream("msg-1")
         assert await sm.get_stream_status("msg-1") == "closed"
 
@@ -389,6 +387,80 @@ class TestReplay:
         # would drop i=2 first; but complete is added last so only i=3,4
         # remain alongside complete). Tolerate either bound interpretation:
         assert events[-1]["type"] == "complete"
+
+    async def test_cumulative_llm_chunks_replace_replay_snapshot(self):
+        """Replay memory stays linear in final output, not snapshot count."""
+        sm = InMemoryStreamTransport(ttl_seconds=10)
+        ctx = await sm.create_stream("msg-1")
+
+        # Model a 50k cumulative answer flushed 200 times. Only the newest
+        # content snapshot for this agent/channel may remain in replay history.
+        final_content = ""
+        for i in range(1, 201):
+            final_content = "x" * (i * 250)
+            await sm.push_event("msg-1", {
+                "type": "llm_chunk",
+                "agent": "lead_agent",
+                "data": {"content": final_content},
+            })
+
+        await sm.push_event("msg-1", {
+            "type": "llm_chunk",
+            "agent": "lead_agent",
+            "data": {"reasoning_content": "latest reasoning"},
+        })
+        await sm.push_event("msg-1", {
+            "type": "llm_chunk",
+            "agent": "research_agent",
+            "data": {"content": "subagent snapshot"},
+        })
+
+        retained = list(ctx.history.values())
+        assert len(retained) == 3
+        assert sum(
+            len(value)
+            for event in retained
+            for value in event.get("data", {}).values()
+            if isinstance(value, str)
+        ) == len(final_content) + len("latest reasoning") + len("subagent snapshot")
+
+        await sm.push_event("msg-1", {"type": "complete"})
+        events = [event async for event in sm.consume_events("msg-1")]
+        assert [event["type"] for event in events] == [
+            "llm_chunk",
+            "llm_chunk",
+            "llm_chunk",
+            "complete",
+        ]
+        assert events[0]["data"]["content"] == final_content
+
+    async def test_resume_from_replaced_snapshot_id_gets_newer_snapshot(self):
+        """Deleting an old snapshot keeps Last-Event-ID continuity by ID order."""
+        sm = InMemoryStreamTransport(ttl_seconds=10)
+        await sm.create_stream("msg-1")
+
+        old = {
+            "type": "llm_chunk",
+            "agent": "lead_agent",
+            "data": {"content": "old"},
+        }
+        latest = {
+            "type": "llm_chunk",
+            "agent": "lead_agent",
+            "data": {"content": "latest"},
+        }
+        await sm.push_event("msg-1", old)
+        await sm.push_event("msg-1", latest)
+        await sm.push_event("msg-1", {"type": "complete"})
+
+        events = [
+            event
+            async for event in sm.consume_events(
+                "msg-1", last_event_id=old["_stream_id"]
+            )
+        ]
+        assert [event["type"] for event in events] == ["llm_chunk", "complete"]
+        assert events[0]["data"]["content"] == "latest"
 
     async def test_invalid_last_event_id_falls_back_to_start(self):
         """A garbled Last-Event-ID must not raise; behave like no ID."""

@@ -222,19 +222,22 @@ class BaseTool(ABC):
 
             target_type = param_def.type.lower()
             try:
+                # String params are semantic payload and stay unchanged after XML decoding.
+                # Only typed scalar parsing may ignore surrounding XML formatting whitespace.
+                scalar_value = value.strip()
                 if target_type == "integer":
-                    result[name] = int(value)
+                    result[name] = int(scalar_value)
                 elif target_type == "boolean":
-                    lower = value.lower()
+                    lower = scalar_value.lower()
                     if lower in ("true", "1", "yes"):
                         result[name] = True
                     elif lower in ("false", "0", "no"):
                         result[name] = False
                     # 其他值保持原始字符串，由 validate_params 报错
                 elif target_type == "number":
-                    result[name] = float(value)
+                    result[name] = float(scalar_value)
                 elif target_type == "json":
-                    result[name] = json.loads(value)
+                    result[name] = json.loads(scalar_value)
                 # "string" stays as-is
             except (json.JSONDecodeError, ValueError, TypeError) as e:
                 # 转换失败保持原值，由 validate_params 报错

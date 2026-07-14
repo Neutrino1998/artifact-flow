@@ -7,8 +7,10 @@ intranet trip**, then withdraw. Background + decisions:
 
 ```
 sandbox/
-├── Dockerfile              tier-1 sandbox image (py3.11 + sci/doc stack + pandoc + ripgrep + zip + git,
+├── Dockerfile              tier-1 sandbox image (py3.11 + sci/doc stack + LibreOffice + text-edit + merman-cli + pandoc + ripgrep + zip + git,
 │                           non-root uid1000, baked offline-install stub wheel)
+├── office_cli.py           artifactflow-office: isolated-profile convert/render/recalc wrapper
+├── text_edit.py            text-edit: checked file-based exact/normalized/fuzzy replacement
 ├── requirements.txt        sandbox python deps — DECOUPLED from backend requirements.lock
 ├── stub-pkg/               trivial pure-Python pkg → baked wheel for the offline-install probe
 ├── docker-pkg/             offline Docker Engine + compose (static) for a BARE node (see its README)
@@ -24,6 +26,9 @@ scripts/build-sandbox-image.sh   build + docker-save the image tar (mirrors rele
 |---|---|---|
 | `verify-enosys.py` | in-container | numpy/pandas/matplotlib(PNG+PDF)/Pillow/openpyxl/pypdf — the real ENOSYS gamble; C-ext failure = Firecracker-fallback signal |
 | `verify-pandoc.sh` | in-container | docx/html↔md round trip (self-generated fixtures) |
+| `verify-office.py` | in-container | `libreoffice-core`/`libreoffice-writer`/`libreoffice-calc`/`libreoffice-impress` via `artifactflow-office`: DOCX→PDF, PPTX→PNG, XLSX formula recalc; Office-compatible `fonts-liberation2`/`fonts-crosextra-carlito`/`fonts-crosextra-caladea` are baked alongside |
+| `verify-text-edit.py` | in-container | file operands, unique exact replacement, ambiguity failure without writes, and bounded fuzzy prose lookup |
+| `verify-merman.sh` | in-container | headless `merman-cli`: Chinese flowchart to SVG/PNG, bounded nonblank raster output, and loud parse failure |
 | `verify-git.sh` | in-container | local repo lifecycle (init/add/commit/diff/log) + baked `--system` identity + `safe.directory='*'` presence; clone/fetch dead under `--network=none` by design |
 | `verify-offline-install.sh` | in-container | `pip install --no-index --find-links` survives Sentry (tier-2/3 delivery path) |
 | `verify-bindmount.sh` | host | container writes → host reads back, uid mapping, ripgrep over the gofer mount, git on a root-owned mounted repo (dubious-ownership waiver) |
@@ -31,8 +36,9 @@ scripts/build-sandbox-image.sh   build + docker-save the image tar (mirrors rele
 
 ## Build (networked build host — Mac)
 
-Both arches build the same way; pass `ARCH` / `PLATFORM`. Output names carry the
-arch (`-amd64` / `-arm64` / `-aarch64`) so the two sets coexist in `dist/`.
+Both arches build the same way; pass `ARCH` / `PLATFORM`. Archive names carry
+the app release/date plus arch so transfer units coexist in `dist/`; the image
+inside uses a runtime-input content tag recorded as `Image ref` in its manifest.
 
 ```bash
 # x86_64 (default)
@@ -55,6 +61,9 @@ own tar.
 Arch note: `build-sandbox-image.sh` builds `linux/arm64` NATIVE on Apple Silicon
 (fast); `linux/amd64` is QEMU-emulated (slow — a mid-build SSL/EOF is usually the
 build-host proxy flapping, not the Dockerfile; just re-run, layer cache is fast).
+`merman-cli` is compiled in a Rust slim build stage: its cold download/compile
+cost stays on the networked build host and is cached; only the stripped binary
+and licenses enter the delivered sandbox image.
 Local rehearsal off-Kylin: build native arch + run with `RUNTIME=runc` (validates
 everything except gVisor-specific syscall behavior; on macOS, virtiofs also maps
 bind-mount ownership to the accessing uid, so the bindmount git/uid checks can't
@@ -81,18 +90,19 @@ tar xzf sandbox-gvisor-<date>-<arch>.tar.gz && cd sandbox-gvisor-<date>-<arch>
 sudo ./install.sh && sudo systemctl reload docker && sudo ./smoke-test.sh; cd ..
 
 # 2. sandbox image + verify probes
-gunzip -c artifactflow-sandbox-<date>-<arch>.tar.gz | docker load  # → artifactflow-sandbox:<date>-<arch>
+gunzip -c artifactflow-sandbox-<date>-<arch>.tar.gz | docker load  # → artifactflow-sandbox:<runtime-hash>-<arch>
 tar xzf artifactflow-sandbox-verify-<date>.tar.gz                  # → ./verify/  (arch-agnostic)
 
-# 3. one-shot verification. Pass the arch'd tag explicitly. Add PROBE_HOST/
-#    PROBE_NAME to exercise the network checks, else those skip.
-IMAGE=artifactflow-sandbox:<date>-<arch> \
+# 3. one-shot verification. Read the exact content tag from the sidecar
+#    manifest. Add PROBE_HOST/PROBE_NAME to exercise network checks, else skip.
+IMAGE=$(awk '/^Image ref:/ {sub(/^Image ref:[[:space:]]*/, ""); print; exit}' artifactflow-sandbox-<date>-<arch>.manifest.txt)
+IMAGE="$IMAGE" \
 PROBE_HOST=<internal-ip:port> PROBE_NAME=<internal.hostname> \
   bash verify/run-all.sh
 
 # 4. withdraw
 cd sandbox-gvisor-<date>-<arch> && sudo ./uninstall.sh && sudo systemctl reload docker; cd ..
-docker rmi artifactflow-sandbox:<date>-<arch>
+docker rmi "$IMAGE"
 # on a node provisioned just for this: also remove docker
 cd docker-offline-<date>-<arch> && sudo PURGE=1 ./uninstall.sh
 ```

@@ -314,6 +314,11 @@ class ConversationRepository(BaseRepository[Conversation]):
         if existing_msg:
             raise DuplicateError("Message", message_id)
 
+        if parent_id:
+            parent = await self.get_message(parent_id)
+            if not parent or parent.conversation_id != conversation_id:
+                raise NotFoundError("Parent message", parent_id)
+
         # 创建消息
         message = Message(
             id=message_id,

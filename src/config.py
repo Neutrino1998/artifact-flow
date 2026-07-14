@@ -2,7 +2,7 @@
 
 from typing import Dict, List
 from pydantic_settings import BaseSettings
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 
 
 class Settings(BaseSettings):
@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     # SSE 配置
     SSE_PING_INTERVAL: int = 15  # 秒，保持连接活跃
-    EXECUTION_TIMEOUT: int = 1800   # 秒，引擎循环执行上限（含 permission 等待）；超时 → TIMED_OUT 终态
+    EXECUTION_TIMEOUT: int = 3600   # 秒，引擎循环执行上限（含 permission 等待）；超时 → TIMED_OUT 终态
     STREAM_CLEANUP_TTL: int = 60    # 秒，执行结束后 consumer 读取剩余事件的清理窗口
     # Redis stream/meta key 寿命 = EXECUTION_TIMEOUT + 此余量。必须覆盖引擎 deadline
     # 之后的 post-processing —— 终态(含 TIMED_OUT)在引擎超时后才由 post-processing
@@ -41,6 +41,22 @@ class Settings(BaseSettings):
     STREAM_TTL_GRACE: int = 300
     PERMISSION_TIMEOUT: int = 300  # 秒，单次 permission 等待超时
     CANCEL_CHECK_INTERVAL: float = 0.5  # 秒，LLM 流式输出期间轮询 cancel 的最小间隔（避免每 chunk 一次 Redis GET）
+
+    # LLM provider HTTP 超时分层。LiteLLM 的单一 float timeout 会同时放大
+    # connect/read/write/pool：为容纳私有 reasoning 模型的长 TTFT 而给 read 600s
+    # 时，错 IP 也会跟着等 600s。在这里构造 httpx.Timeout 把网络建连与
+    # 模型等待拆开；models.yaml 里显式的 params.timeout 仍只覆盖 read。
+    LLM_CONNECT_TIMEOUT: float = Field(default=5.0, gt=0)
+    LLM_READ_TIMEOUT: float = Field(default=600.0, gt=0)
+    LLM_WRITE_TIMEOUT: float = Field(default=60.0, gt=0)
+    LLM_POOL_TIMEOUT: float = Field(default=5.0, gt=0)
+
+    # MCP provider_config.timeout 仍是 per-server 的 read / MCP request 上限。
+    # 下列全局值只拆出 HTTP 建连/写入/连接池，重点让每轮 tools/list
+    # discovery 遇到错 IP 时快速失败，不改长任务 tools/call 的 read 语义。
+    MCP_CONNECT_TIMEOUT: float = Field(default=5.0, gt=0)
+    MCP_WRITE_TIMEOUT: float = Field(default=60.0, gt=0)
+    MCP_POOL_TIMEOUT: float = Field(default=5.0, gt=0)
 
     # Compaction / Context 配置
     COMPACTION_TOKEN_THRESHOLD: int = 100000  # tokens, LLM 单次调用 input+output 超此值触发引擎内 compaction
@@ -201,8 +217,12 @@ class Settings(BaseSettings):
     # 宿主侧只读 namelist + SKILL.md 一个成员,全包解压归沙盒 —— 这组上限是 bomb 预拒,
     # 沙盒 watchdog 仍是真兜底。单 zip 字节上限刻意 ≤ 代理层 request_body max_size,
     # 别声明一个过不了边缘的数(deploy/caddy)。
-    # 用户 skill 总量不设独立配额:bundle 字节计入 ARTIFACT_USER_QUOTA_BYTES 同一池
-    # (原则 7③;记账在 ConversationManager.get_user_upload_bytes,413 闸与存储条同口径)。
+    # 用户私有 skill 同时受数量与字节两道独立限制。数量按 skills.owner_user_id
+    # 实时 COUNT,不在 User 上存同步计数器；-1 = 不限，0 = 关闭个人导入，正数 = 上限。
+    # admin shared skill(owner=NULL)不计数。ge=-1 让非法负数在 Settings 构造期 loud-fail。
+    SKILL_USER_MAX_PRIVATE_COUNT: int = Field(default=3, ge=-1)
+    # bundle 字节仍计入 ARTIFACT_USER_QUOTA_BYTES 共用池(原则 7③;记账在
+    # ConversationManager.get_user_upload_bytes,413 闸与存储条同口径)。
     SKILL_BUNDLE_MAX_BYTES: int = 200 * 1024 * 1024     # 单个 skill zip 上限,对齐 MAX_UPLOAD_SIZE
                                                         # 的「单文件 200MB」口径(边缘 210MiB 放得下)。
                                                         # 执行点 = E-2 导入端点(非 validator:按信任
@@ -215,7 +235,9 @@ class Settings(BaseSettings):
     # 沙盒（C 阶段;隐藏常量,operator 经 env 可调,模型不可见）。
     # DooD:镜像 / 挂载 / runtime 全部固定在代码侧 —— 容器创建参数绝不可被模型
     # 生成内容污染(backend 持 docker.sock = host root,这是硬安全边界)。
-    SANDBOX_IMAGE: str = "artifactflow-sandbox:latest"  # scripts/build-sandbox-image.sh 产物
+    # 本地源码运行默认 :latest；release 构建会把 runtime-input 内容 tag 作为
+    # ARTIFACTFLOW_SANDBOX_IMAGE 烤进 backend 镜像，生产不解析 :latest。
+    SANDBOX_IMAGE: str = "artifactflow-sandbox:latest"
     SANDBOX_RUNTIME: str = ""        # Docker runtime;"" = daemon 默认(本机 dev=runc),prod="runsc"(gVisor)
     # 宿主侧 scratch 工作区根目录。DooD 下 bind-mount 源路径在 **daemon 那台机**解析:
     # backend 容器化部署时必须把同一宿主路径以**相同路径**挂进 backend 容器(经典

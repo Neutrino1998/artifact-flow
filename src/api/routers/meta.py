@@ -31,4 +31,5 @@ async def get_client_config(
         compaction_token_threshold=config.COMPACTION_TOKEN_THRESHOLD,
         lead_agent_model=lead_model,
         max_upload_size=config.MAX_UPLOAD_SIZE,
+        max_private_skills=config.SKILL_USER_MAX_PRIVATE_COUNT,
     )

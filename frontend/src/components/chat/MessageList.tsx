@@ -6,6 +6,7 @@ import { useStreamStore } from '@/stores/streamStore';
 import UserMessage from './UserMessage';
 import AssistantMessage from './AssistantMessage';
 import StreamingMessage from './StreamingMessage';
+import { resolveStreamingDisplayPath } from '@/lib/messageDisplayPath';
 
 export default function MessageList() {
   const branchPath = useConversationStore((s) => s.branchPath);
@@ -20,14 +21,8 @@ export default function MessageList() {
   const isStreamingHere = isStreaming && streamConversationId === currentId;
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // During rerun/edit streaming, truncate branchPath to show only
-  // messages up to (and including) the branch parent
   const displayPath = useMemo(() => {
-    if (!isStreamingHere || streamParentId === undefined) return branchPath;
-    if (streamParentId === null) return []; // root rerun: show nothing before
-    const idx = branchPath.findIndex((n) => n.id === streamParentId);
-    if (idx === -1) return branchPath;
-    return branchPath.slice(0, idx + 1);
+    return resolveStreamingDisplayPath(branchPath, isStreamingHere, streamParentId);
   }, [branchPath, isStreamingHere, streamParentId]);
 
   // Auto-scroll to bottom when conversation loads or new messages arrive

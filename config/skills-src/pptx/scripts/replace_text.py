@@ -5,49 +5,99 @@ Usage:
     python replace_text.py input.pptx output.pptx --find OLD --replace NEW
     python replace_text.py input.pptx output.pptx --map replacements.json
 
-`--map` accepts either {"old": "new"} or
-[{"find": "old", "replace": "new"}, ...].
+`--map` accepts either the legacy exact-all form {"old": "new"} or the checked
+form [{"find": "old", "replace": "new", "match": "auto", "expect": 1}, ...].
 
 The script first tries run-level replacement, preserving run formatting. If the
 match spans multiple runs inside one paragraph, it rewrites that paragraph into
 the first run and reports a `paragraph_rewrites` count. Missing find strings are
-a failure unless `--allow-missing` is set. `--find` requires `--replace`; pass
-`--replace ""` explicitly to delete matched text.
+a failure unless `--allow-missing` is set. Checked single replacements require
+one unique candidate across selected slides. `--find` requires `--replace`;
+pass `--replace ""` explicitly to delete matched text.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 from pptx import Presentation
+try:
+    from text_match import find_unique_in_segments
+except ModuleNotFoundError as exc:
+    if exc.name != "text_match":
+        raise
+    from utils.text_match import find_unique_in_segments
 
 
-def _load_replacements(args) -> list[tuple[str, str]]:
-    pairs: list[tuple[str, str]] = []
+MAX_SELECTED_SLIDES = 1000
+NS_A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+
+
+def _structured_replacement(item: dict, index: int) -> dict:
+    if "find" not in item or "replace" not in item:
+        raise ValueError(f"replacement {index} requires find and replace")
+    old = str(item["find"])
+    new = str(item["replace"])
+    if not old:
+        raise ValueError(f"replacement {index} find must not be empty")
+    expect = item.get("expect", 1)
+    if not isinstance(expect, int) or isinstance(expect, bool) or expect < 1:
+        raise ValueError(f"replacement {index} expect must be a positive integer")
+    match_mode = item.get("match", "auto" if expect == 1 else "exact")
+    if match_mode not in {"exact", "normalized", "auto"}:
+        raise ValueError(f"replacement {index} has unsupported match mode")
+    if expect > 1 and match_mode != "exact":
+        raise ValueError(f"replacement {index} expect > 1 requires exact matching")
+    return {
+        "find": old,
+        "replace": new,
+        "expect": expect,
+        "match": match_mode,
+    }
+
+
+def _load_replacements(args) -> list[dict]:
+    replacements: list[dict] = []
     if args.map:
         raw = json.loads(Path(args.map).read_text(encoding="utf-8"))
         if isinstance(raw, dict):
-            pairs.extend((str(k), str(v)) for k, v in raw.items())
+            replacements.extend({
+                "find": str(old),
+                "replace": str(new),
+                "expect": None,
+                "match": "exact",
+            } for old, new in raw.items())
         elif isinstance(raw, list):
-            for item in raw:
-                pairs.append((str(item["find"]), str(item["replace"])))
+            for index, item in enumerate(raw, 1):
+                if not isinstance(item, dict):
+                    raise SystemExit(f"error: replacement {index} must be an object")
+                try:
+                    replacements.append(_structured_replacement(item, index))
+                except ValueError as exc:
+                    raise SystemExit(f"error: {exc}") from exc
         else:
             raise SystemExit("error: --map must be a JSON object or list")
     if args.find is not None:
         if args.replace is None:
             raise SystemExit("error: --find requires --replace")
-        pairs.append((args.find, args.replace))
+        replacements.append({
+            "find": args.find,
+            "replace": args.replace,
+            "expect": None,
+            "match": "exact",
+        })
     elif args.replace is not None:
         raise SystemExit("error: --replace requires --find")
-    if not pairs:
+    if not replacements:
         raise SystemExit("error: provide --find/--replace or --map")
-    empty = [old for old, _ in pairs if old == ""]
-    if empty:
+    if any(item["find"] == "" for item in replacements):
         raise SystemExit("error: find strings must be non-empty")
-    return pairs
+    return replacements
 
 
 def _iter_shapes(shapes):
@@ -70,9 +120,18 @@ def _parse_slides(expr: str | None) -> set[int] | None:
             lo, hi = [int(x) for x in part.split("-", 1)]
             if lo > hi:
                 raise SystemExit(f"error: bad slide range {part!r}")
+            span = hi - lo + 1
+            if span > MAX_SELECTED_SLIDES or len(out) + span > MAX_SELECTED_SLIDES:
+                raise SystemExit(
+                    f"error: select at most {MAX_SELECTED_SLIDES} slides"
+                )
             out.update(range(lo, hi + 1))
         else:
             out.add(int(part))
+            if len(out) > MAX_SELECTED_SLIDES:
+                raise SystemExit(
+                    f"error: select at most {MAX_SELECTED_SLIDES} slides"
+                )
     return out
 
 
@@ -85,32 +144,146 @@ def _text_frames(shape):
                 yield cell.text_frame
 
 
-def _replace_in_paragraph(paragraph, old: str, new: str) -> tuple[int, int]:
-    run_hits = 0
-    for run in paragraph.runs:
-        if old in run.text:
-            run.text = run.text.replace(old, new)
-            run_hits += 1
-    if run_hits:
-        return run_hits, 0
+def _editable_run_text(run) -> str | None:
+    parts = []
+    for child in run._r:
+        if child.tag == NS_A + "rPr":
+            continue
+        if child.tag != NS_A + "t":
+            return None
+        parts.append(child.text or "")
+    return "".join(parts)
 
-    full = "".join(run.text for run in paragraph.runs)
-    if old not in full:
-        return 0, 0
-    rewritten = full.replace(old, new)
-    if paragraph.runs:
-        paragraph.runs[0].text = rewritten
-        for run in paragraph.runs[1:]:
-            run.text = ""
-    else:
-        paragraph.add_run().text = rewritten
-    return 1, 1
+
+def _editable_run_groups(paragraph):
+    """Return contiguous a:r groups without bridging fields or line breaks."""
+    groups = []
+    current = []
+    offset = 0
+
+    def flush() -> None:
+        nonlocal current, offset
+        if current:
+            groups.append((current, "".join(item[3] for item in current)))
+        current = []
+        offset = 0
+
+    run_iter = iter(paragraph.runs)
+    for child in paragraph._p:
+        if child.tag != NS_A + "r":
+            flush()
+            continue
+        run = next(run_iter)
+        text = _editable_run_text(run)
+        if text is None:
+            flush()
+            continue
+        if not text:
+            continue
+        current.append((run, offset, offset + len(text), text))
+        offset += len(text)
+    flush()
+    return groups
+
+
+def _replace_span(group, start: int, end: int, new: str) -> int:
+    run_objects = [item[0] for item in group]
+    runs = []
+    offset = 0
+    for run in run_objects:
+        text = run.text
+        if text:
+            runs.append((run, offset, offset + len(text), text))
+        offset += len(text)
+    affected = [item for item in runs if item[1] < end and item[2] > start]
+    if not affected:
+        raise RuntimeError("matched span is not backed by paragraph runs")
+
+    if len(affected) == 1:
+        run, run_start, _, text = affected[0]
+        run.text = text[:start - run_start] + new + text[end - run_start:]
+        return 0
+
+    full = "".join(run.text for run in run_objects)
+    rewritten = full[:start] + new + full[end:]
+    run_objects[0].text = rewritten
+    for run in run_objects[1:]:
+        run.text = ""
+    return 1
+
+
+def _exact_spans(text: str, old: str) -> list[tuple[int, int]]:
+    spans = []
+    offset = 0
+    while True:
+        start = text.find(old, offset)
+        if start < 0:
+            return spans
+        spans.append((start, start + len(old)))
+        offset = start + len(old)
+
+
+def _paragraph_entries(prs, slides: set[int] | None):
+    entries = []
+    for slide_idx, slide in enumerate(prs.slides, 1):
+        if slides is not None and slide_idx not in slides:
+            continue
+        for shape in _iter_shapes(slide.shapes):
+            for text_frame in _text_frames(shape):
+                for paragraph in text_frame.paragraphs:
+                    for runs, text in _editable_run_groups(paragraph):
+                        entries.append((slide_idx, runs, text))
+    return entries
+
+
+def _normalize_replacements(replacements) -> list[dict]:
+    normalized = []
+    for index, item in enumerate(replacements, 1):
+        if isinstance(item, dict):
+            if item.get("expect") is None:
+                old = str(item.get("find", ""))
+                if not old or "replace" not in item:
+                    raise ValueError(
+                        f"replacement {index} requires non-empty find and replace"
+                    )
+                normalized.append({
+                    "find": old,
+                    "replace": str(item["replace"]),
+                    "expect": None,
+                    "match": "exact",
+                })
+            else:
+                normalized.append(_structured_replacement(item, index))
+        else:
+            old, new = item
+            normalized.append({
+                "find": str(old),
+                "replace": str(new),
+                "expect": None,
+                "match": "exact",
+            })
+    return normalized
+
+
+def _save_atomic(prs, out: Path) -> None:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{out.name}.", suffix=".pptx", dir=out.parent
+    )
+    os.close(fd)
+    temp_path = Path(temp_name)
+    try:
+        prs.save(str(temp_path))
+        os.chmod(temp_path, 0o644)
+        os.replace(temp_path, out)
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def replace_text(
     src: Path,
     out: Path,
-    replacements: list[tuple[str, str]],
+    replacements,
     *,
     slides: set[int] | None,
     allow_missing: bool,
@@ -124,23 +297,57 @@ def replace_text(
         "paragraph_rewrites": 0,
     }
 
-    for old, new in replacements:
-        hits = 0
+    for replacement in _normalize_replacements(replacements):
+        old = replacement["find"]
+        new = replacement["replace"]
+        expect = replacement["expect"]
+        match_mode = replacement["match"]
+        entries = _paragraph_entries(prs, slides)
+        matches = []
+        match_type = "exact"
+        similarity = 1.0
+        matched_text = old
+
+        if expect == 1:
+            located = find_unique_in_segments(
+                [entry[2] for entry in entries], old, mode=match_mode
+            )
+            if not located.success or located.segment_index is None:
+                raise ValueError(
+                    f"expected 1 editable match for {old!r}: {located.message}"
+                )
+            matches = [(located.segment_index, located.start, located.end)]
+            match_type = located.match_type
+            similarity = located.similarity
+            matched_text = located.matched_text
+        else:
+            for entry_index, (_, _, text) in enumerate(entries):
+                matches.extend(
+                    (entry_index, start, end)
+                    for start, end in _exact_spans(text, old)
+                )
+            if expect is not None and len(matches) != expect:
+                raise ValueError(
+                    f"expected {expect} exact match(es) for {old!r}, found {len(matches)}"
+                )
+
+        hits = len(matches)
         rewrites = 0
-        for slide_idx, slide in enumerate(prs.slides, 1):
-            if slides is not None and slide_idx not in slides:
-                continue
-            for shape in _iter_shapes(slide.shapes):
-                for tf in _text_frames(shape):
-                    for paragraph in tf.paragraphs:
-                        h, r = _replace_in_paragraph(paragraph, old, new)
-                        hits += h
-                        rewrites += r
+        by_entry = {}
+        for entry_index, start, end in matches:
+            by_entry.setdefault(entry_index, []).append((start, end))
+        for entry_index, spans in by_entry.items():
+            _, runs, _ = entries[entry_index]
+            for start, end in sorted(spans, reverse=True):
+                rewrites += _replace_span(runs, start, end, new)
         summary["replacements"].append({
             "find": old,
             "replace": new,
             "hits": hits,
             "paragraph_rewrites": rewrites,
+            "match_type": match_type,
+            "similarity": similarity,
+            **({"matched_text": matched_text} if match_type != "exact" else {}),
         })
         summary["total_hits"] += hits
         summary["paragraph_rewrites"] += rewrites
@@ -150,7 +357,7 @@ def replace_text(
         print(json.dumps(summary, ensure_ascii=False, indent=2), file=sys.stderr)
         raise SystemExit(f"error: find string(s) not found: {missing}")
 
-    prs.save(str(out))
+    _save_atomic(prs, out)
     return summary
 
 
@@ -170,13 +377,16 @@ def main() -> None:
         raise SystemExit(f"error: not a file: {src}")
     replacements = _load_replacements(args)
     slide_set = _parse_slides(args.slides)
-    summary = replace_text(
-        src,
-        Path(args.output),
-        replacements,
-        slides=slide_set,
-        allow_missing=args.allow_missing,
-    )
+    try:
+        summary = replace_text(
+            src,
+            Path(args.output),
+            replacements,
+            slides=slide_set,
+            allow_missing=args.allow_missing,
+        )
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"error: {exc}") from exc
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
