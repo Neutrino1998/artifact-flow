@@ -10,15 +10,23 @@ deploy/scripts/fleet.sh init-local           # seed single-host fleet.conf + dep
 deploy/scripts/fleet.sh preflight            # per-host readiness + deploy/.env checks
 deploy/scripts/fleet.sh deploy <bundle-dir>  # verify → extract → load → release gate → up → LB → smoke
 deploy/scripts/fleet.sh deploy --dry-run <d> # print the plan, touch nothing
-deploy/scripts/fleet.sh prepare-sandbox <d>  # install runsc + load sandbox image from bundle
+deploy/scripts/fleet.sh prepare-sandbox <d>  # prepare image/verify and/or optional gVisor units
 deploy/scripts/fleet.sh status               # per-host `compose ps` + LB health
 deploy/scripts/fleet.sh rollback             # re-up the previous version
 ```
 
-Sandbox is opt-in. Run `prepare-sandbox <bundle-dir>` explicitly, as root, when
-a bundle includes the sandbox image, verify probes, and gVisor package; it runs
-the same bootstrap as `deploy/scripts/prepare-host.sh sandbox`. When
-`AF_ENABLE_SANDBOX=1`, `deploy` / `preflight` / `status` / `rollback` append
+Sandbox is opt-in. Its persistent target policy is the required
+`AF_ENABLE_SANDBOX=0|1` entry in `deploy/.env`; a process environment value may
+override it for one command. Existing deployments must add the entry before
+their first command with this Fleet version (`1` when the sandbox overlay is
+already in use). Bundle contents do not change that policy.
+
+Run `prepare-sandbox <bundle-dir>` explicitly, as root, when a bundle includes
+the paired sandbox image + verify probes, an optional gVisor package, or both.
+It runs the same bootstrap as `deploy/scripts/prepare-host.sh sandbox`: a
+manifest-declared gVisor package installs/updates runsc, while its absence
+reuses the registered host runtime. When `AF_ENABLE_SANDBOX=1`, `deploy` /
+`preflight` / `status` / `rollback` append
 `deploy/docker-compose.sandbox.yml` and make runsc,
 the manifest's exact content-derived sandbox image, and the mounted scratch root
 hard requirements. `:latest` is only a local-development alias.

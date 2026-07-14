@@ -29,7 +29,7 @@
 #   AF_REMOTE_DIR     install dir on remote hosts (default /opt/artifactflow)
 #   AF_READY_TIMEOUT  seconds to wait for /health/ready green (default 120)
 #   AF_HTTPS_PORT     LB HTTPS port for smoke (default 443)
-#   AF_ENABLE_SANDBOX add docker-compose.sandbox.yml overlay when set to 1
+#   AF_ENABLE_SANDBOX override deploy/.env's required 0/1 sandbox policy
 #   AF_BUNDLE_VERSION select a version when bundle dir contains many manifests
 #
 # Exit: 0 = success; non-zero = a step failed (message on stderr, sequence stops).
@@ -51,7 +51,7 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DEPLOY_DIR="$ROOT/deploy"
 COMPOSE_FILE="$DEPLOY_DIR/docker-compose.intranet.yml"
 SANDBOX_COMPOSE_FILE="$DEPLOY_DIR/docker-compose.sandbox.yml"
-ENABLE_SANDBOX="${AF_ENABLE_SANDBOX:-0}"
+ENABLE_SANDBOX=""
 
 FLEET_CONF="${AF_FLEET_CONF:-$DEPLOY_DIR/fleet.conf}"
 STATE_FILE="${AF_FLEET_STATE:-$DEPLOY_DIR/.fleet-state}"
@@ -165,6 +165,24 @@ env_file_value() {
   value="${line#*=}"
   value="${value%$'\r'}"
   printf '%s\n' "$value"
+}
+
+resolve_sandbox_enablement() {
+  local value="" source="deploy/.env"
+  if [[ ${AF_ENABLE_SANDBOX+x} ]]; then
+    value="$AF_ENABLE_SANDBOX"
+    source="AF_ENABLE_SANDBOX environment override"
+  else
+    value="$(env_file_value "$DEPLOY_DIR/.env" AF_ENABLE_SANDBOX || true)"
+  fi
+
+  case "$value" in
+    0|1) ENABLE_SANDBOX="$value" ;;
+    "")
+      die "AF_ENABLE_SANDBOX is not configured; add AF_ENABLE_SANDBOX=0 or 1 to $DEPLOY_DIR/.env (use 1 for existing sandbox-enabled deployments)"
+      ;;
+    *) die "$source must be exactly 0 or 1 (got: $value)" ;;
+  esac
 }
 
 secure_env_file() {
@@ -301,7 +319,7 @@ compose_on() {  # compose_on <host> <version> <compose-args...>
 }
 
 # ── bundle introspection (manifest is source of truth) ──────────────
-BUNDLE=""; BUNDLE_VER=""; BUNDLE_PLATFORM=""; BUNDLE_SANDBOX_IMAGE=""; APP_TAR=""
+BUNDLE=""; BUNDLE_VER=""; BUNDLE_PLATFORM=""; BUNDLE_SANDBOX_IMAGE=""; BUNDLE_GVISOR_PACKAGE=""; APP_TAR=""
 SANDBOX_TAR=""; SANDBOX_VERIFY_TAR=""; SANDBOX_GVISOR_TAR=""
 is_release_manifest() {
   local header
@@ -324,7 +342,7 @@ manifest_value() {  # manifest_value <file> <key>
 load_bundle_meta() {
   BUNDLE="$1"
   [[ -d "$BUNDLE" ]] || die "bundle dir not found: $BUNDLE"
-  local mf="" selected="${AF_BUNDLE_VERSION:-}"
+  local mf="" selected="${AF_BUNDLE_VERSION:-}" gvisor_arch=""
   if [[ -n "$selected" ]]; then
     mf="$BUNDLE/artifactflow-${selected}.manifest.txt"
     [[ -f "$mf" ]] || die "AF_BUNDLE_VERSION=$selected but manifest not found: $mf"
@@ -344,9 +362,21 @@ load_bundle_meta() {
   BUNDLE_VER="$(awk 'NR==1{print $NF}' "$mf")"
   BUNDLE_PLATFORM="$(manifest_value "$mf" "Platform")"
   BUNDLE_SANDBOX_IMAGE="$(manifest_value "$mf" "Sandbox image required")"
+  BUNDLE_GVISOR_PACKAGE="$(manifest_value "$mf" "gVisor host runtime")"
   [[ -n "$BUNDLE_VER" ]] || die "cannot read version from manifest $mf"
   [[ "$BUNDLE_SANDBOX_IMAGE" =~ ^artifactflow-sandbox:[0-9a-f]{16}-(amd64|arm64)$ ]] \
     || die "manifest has invalid or missing immutable sandbox image reference: $mf"
+  case "$BUNDLE_GVISOR_PACKAGE" in
+    ""|none|skipped*) BUNDLE_GVISOR_PACKAGE="" ;;
+    sandbox-gvisor-*.tar.gz)
+      gvisor_arch="$(bundle_gvisor_arch)"
+      [[ -n "$gvisor_arch" \
+         && "$BUNDLE_GVISOR_PACKAGE" != */* \
+         && "$BUNDLE_GVISOR_PACKAGE" =~ ^sandbox-gvisor-release-[0-9]{8}\.[0-9]+-${gvisor_arch}\.tar\.gz$ ]] \
+        || die "manifest gVisor package does not match Platform $BUNDLE_PLATFORM: $BUNDLE_GVISOR_PACKAGE"
+      ;;
+    *) die "manifest has invalid gVisor host runtime entry: $mf" ;;
+  esac
   # Select the app tar by the manifest version, NOT a glob head -1 — keeps the
   # loaded image locked to the AF_VERSION compose resolves at `up` even if a dir
   # ever holds two versions' tars (release.sh writes one version per dist/, so
@@ -383,9 +413,8 @@ bundle_gvisor_arch() {
 }
 
 load_bundle_sandbox_meta() {
-  local image_arch gvisor_arch
+  local image_arch
   image_arch="$(bundle_image_arch)"
-  gvisor_arch="$(bundle_gvisor_arch)"
   SANDBOX_TAR=""
   SANDBOX_VERIFY_TAR=""
   SANDBOX_GVISOR_TAR=""
@@ -393,8 +422,10 @@ load_bundle_sandbox_meta() {
     SANDBOX_TAR="$BUNDLE/artifactflow-sandbox-${BUNDLE_VER}-${image_arch}.tar.gz"
   fi
   SANDBOX_VERIFY_TAR="$BUNDLE/artifactflow-sandbox-verify-${BUNDLE_VER}.tar.gz"
-  if [[ -n "$gvisor_arch" ]]; then
-    SANDBOX_GVISOR_TAR="$(find "$BUNDLE" -maxdepth 1 -type f -name "sandbox-gvisor-*-${gvisor_arch}.tar.gz" -print | sort | tail -1)"
+  if [[ -n "$BUNDLE_GVISOR_PACKAGE" ]]; then
+    SANDBOX_GVISOR_TAR="$BUNDLE/$BUNDLE_GVISOR_PACKAGE"
+    [[ -f "$SANDBOX_GVISOR_TAR" ]] \
+      || die "manifest-declared gVisor package not found: $SANDBOX_GVISOR_TAR"
   fi
 }
 
@@ -604,6 +635,9 @@ EOF
   if [[ -f "$DEPLOY_DIR/.env" ]]; then
     secure_env_file "$DEPLOY_DIR/.env"
     info "$DEPLOY_DIR/.env already exists"
+    if ! env_file_value "$DEPLOY_DIR/.env" AF_ENABLE_SANDBOX >/dev/null; then
+      info "AF_ENABLE_SANDBOX is missing; add =1 for a sandbox deployment or =0 otherwise before preflight/deploy"
+    fi
   elif [[ -f "$DEPLOY_DIR/.env.intranet.example" ]]; then
     cp "$DEPLOY_DIR/.env.intranet.example" "$DEPLOY_DIR/.env" || die "failed to seed deploy/.env"
     secure_env_file "$DEPLOY_DIR/.env"
@@ -618,6 +652,7 @@ EOF
 # preflight
 # ════════════════════════════════════════════════════════════════════
 cmd_preflight() {
+  resolve_sandbox_enablement
   parse_conf
   local fail=0 host
   step "preflight across $(all_hosts | wc -l | tr -d ' ') host(s)"
@@ -689,6 +724,7 @@ cmd_deploy() {
     shift
   done
   [[ -n "$bundle" ]] || die "usage: fleet.sh deploy [--dry-run] <bundle-dir>"
+  resolve_sandbox_enablement
   parse_conf
   load_bundle_meta "$bundle"
   (( DRY )) && info "DRY-RUN — no host will be touched"
@@ -860,6 +896,7 @@ deploy_multi_host() {
 # status
 # ════════════════════════════════════════════════════════════════════
 cmd_status() {
+  resolve_sandbox_enablement
   parse_conf
   local cur; cur="$(state_get current)"
   step "fleet status${cur:+ (deployed version: $cur)}"
@@ -884,6 +921,7 @@ cmd_status() {
 # ════════════════════════════════════════════════════════════════════
 cmd_rollback() {
   [[ "${1:-}" == "--dry-run" ]] && DRY=1
+  resolve_sandbox_enablement
   parse_conf
   local prev cur; prev="$(state_get previous)"; cur="$(state_get current)"
   [[ -n "$prev" ]] || die "no previous version recorded in $STATE_FILE — nothing to roll back to"
