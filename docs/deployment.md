@@ -203,24 +203,29 @@ docker compose -f docker-compose.prod.yml up -d
 #   artifactflow-infra-caddy2.10-pg16-redis7.tar.gz  (~130MB)
 # 文件名按 base image 版本内容寻址 —— 目标机已有同名 tar 就可跳过传输
 
-# 首次部署且要启用 bash/mount/persist 沙盒工具 —— 再加 sandbox 宿主前置包
-./scripts/release.sh 1.0.0 --with-infra --with-sandbox
+# 首次部署且要启用 bash/mount/persist 沙盒工具：sandbox 镜像每次按内容更新，
+# gVisor 是宿主机运行时，只在新机器初始化或显式升级时携带。
+./scripts/release.sh 1.0.0 --with-infra --with-sandbox --with-gvisor
 # 额外产出：
 #   artifactflow-sandbox-1.0.0-amd64.tar.gz       sandbox 运行镜像
-#   artifactflow-sandbox-verify-1.0.0.tar.gz      gVisor 验证探针
-#   sandbox-gvisor-<date>-x86_64.tar.gz           runsc 离线安装包
+#   artifactflow-sandbox-verify-1.0.0.tar.gz      sandbox 集成验证探针
+#   sandbox-gvisor-release-20260706.0-x86_64.tar.gz  runsc 离线安装包
 
-# release 是阶段化的；如果网络在后段下载 gVisor / wheels 时抖掉，
+# 已装 runsc 的机器更新 sandbox 镜像时不加 --with-gvisor，不访问 gVisor 下载站点：
+./scripts/release.sh 1.0.1 --with-sandbox
+
+# release 是阶段化的；如果显式下载 gVisor / wheels 时网络抖掉，
 # 修复网络后用 --resume 重跑，会跳过已完成且输入未变的 app/infra/sandbox-image 等阶段。
-./scripts/release.sh 1.0.0 --with-infra --with-sandbox --resume
+./scripts/release.sh 1.0.0 --with-infra --with-sandbox --with-gvisor --resume
 # 如需强制重跑某一阶段：
-./scripts/release.sh 1.0.0 --with-infra --with-sandbox --resume --force gvisor
+./scripts/release.sh 1.0.0 --with-infra --with-sandbox --with-gvisor --resume --force gvisor
 ```
 
-> **拆 4 tar 按变更频率分层：**
+> **发布介质按变更频率分层：**
 > - `config` / `deploy` 是 bind-mount 进容器的,改 prompt / Caddyfile / scripts 重传对应 tar 即可,不动镜像。
 > - `app` 是 backend + frontend,几乎每次发版都改。
 > - `infra` 是 caddy / postgres / redis 三个 base image,版本动得极少（半年一次量级）,默认**不打**,显式 `--with-infra` 才生成。命名带 base image 版本号方便目标机一眼看出"我已经有这个 infra tar 了"。
+> - `gVisor` 是宿主机 OCI runtime，不跟随 sandbox 镜像更新。默认**不打**，仅新机器或显式 runtime/security 升级时用 `--with-gvisor`；包名按固定版本 + 架构寻址，可跨 app release 复用。
 
 > **目标平台默认 `linux/amd64`。** Apple Silicon 上跑 `release.sh` 会自动通过 buildx + QEMU 交叉编译，省得装到 x86_64 服务器后撞 `exec format error`。要构建 arm64 目标，用 `./scripts/release.sh 1.0.0 --platform linux/arm64`（或继续传 `PLATFORM=linux/arm64`）。一次 release 只产出一个目标架构的 bundle。
 
@@ -240,7 +245,8 @@ APP=/root/workspace/artifactflow
 #      artifactflow-$VERSION.manifest.txt
 #    首次部署 / infra 镜像变更时还需要：
 #      artifactflow-infra-caddy2.10-pg16-redis7.tar.gz{,.sha256}
-#    启用 sandbox 时还需要 sandbox image / verify / gVisor 三件套及其 .sha256。
+#    启用 sandbox 时需要 sandbox image + verify 及其 .sha256；只有目标机尚未
+#    安装 runsc 或本次显式升级 gVisor 时，才额外携带 gVisor 包。
 mkdir -p "$BUNDLE" "$APP"
 
 # 2. 先只解 deploy/ 到运行目录，拿到 fleet/verify 脚本。
@@ -259,8 +265,8 @@ vi deploy/fleet.conf  # app local scale=N 即 docker compose --scale backend=N
 #    不要在目标机先解 config/、改完再 fleet deploy：deploy 会重新从 bundle 解 config，
 #    覆盖这些现场修改。模型 endpoint 临时热修见下方「运行时配置变更」。
 
-# 5. 启用沙盒时，先以 root 准备 runsc / sandbox 镜像 / scratch 根。
-#    仅当 release bundle 用 --with-sandbox 构建、且本部署要启用沙盒时执行本步。
+# 5. 启用沙盒时，先以 root 准备 sandbox 镜像 / scratch 根。
+#    bundle 有 gVisor 包时会安装/升级；没有时校验并复用宿主机现有 runsc。
 #    生产不要用 8G starter；按并发 × SANDBOX_WORKSPACE_QUOTA_MB 估算。
 # sudo env \
 #   AF_BUNDLE_VERSION="$VERSION" \
@@ -524,13 +530,13 @@ frontend 镜像、跑一次 release gate，然后按 `deploy/fleet.conf` 里的 
 
 `bash` / `mount` / `persist` 三个沙盒工具需要宿主侧前置 + 一个 compose overlay。**没有沙盒需求的部署跳过本节**——基础 compose 不挂 `docker.sock`，没有这个暴露面。架构与全部 `SANDBOX_*` 旋钮见 [架构 · 沙盒执行](architecture/sandbox.md)。
 
-随发布包额外携带三个传输单元（与应用包同一构建机产出）：**沙盒镜像** tar（`scripts/build-sandbox-image.sh`，注意按目标机选 `PLATFORM`）、**verify 探针** tar（同脚本产出，arch 无关）、**gVisor 包** tar（`sandbox/gvisor-pkg/fetch-and-package.sh`）。
+常规 sandbox 更新携带两个成对传输单元（与应用包同一构建机产出）：**沙盒镜像** tar（`scripts/build-sandbox-image.sh`，注意按目标机选 `PLATFORM`）和 **verify 探针** tar（同脚本产出，arch 无关）。**gVisor 包**是独立的宿主机 runtime 单元，仅在新机器初始化或显式升级时通过 `--with-gvisor` 生成；固定版本 + 架构的包可跨应用 release 复用。
 
 ### 宿主前置（一次性）
 
-先显式运行 `prepare-sandbox` 从 release bundle 完成宿主前置。这个步骤会安装/注册
-runsc、写 `/etc/fstab` 并挂载 scratch loop，所以需要 root；排障时也可以直接跑
-同一套底层动作（安装 gVisor、加载 sandbox 镜像、
+先显式运行 `prepare-sandbox` 从 release bundle 完成宿主前置。这个步骤会在包存在时安装/注册
+runsc，否则检查宿主机现有 runsc；随后写 `/etc/fstab` 并挂载 scratch loop，所以需要 root。排障时也可以直接跑
+同一套底层动作（可选安装 gVisor、加载 sandbox 镜像、
 创建 scratch loop、跑 smoke/verify，并把 `ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT` /
 `ARTIFACTFLOW_SANDBOX_RUNTIME` 写入 `deploy/.env`）：
 
@@ -544,7 +550,7 @@ sudo env AF_SANDBOX_POOL_SIZE=80G deploy/scripts/fleet.sh prepare-sandbox .
 
 它等价于以下手工步骤，保留在这里便于排障：
 
-1. **gVisor（runsc）**：解开 gVisor 包，`sudo ./install.sh && sudo systemctl reload docker && sudo ./smoke-test.sh`（内含 `unshare -U` 预检）。arm / 鲲鹏注意：Kylin V10 arm 默认 64K 页内核，gVisor 拒启——先用 `sandbox/kernel-4k-pkg/` 换 4K 内核再装（x86 跳过）。
+1. **gVisor（runsc，仅首次/升级）**：解开 gVisor 包，`sudo ./install.sh && sudo systemctl reload docker && sudo ./smoke-test.sh`（内含 `unshare -U` 预检）。日常 sandbox 镜像更新跳过安装，只检查 `runsc` 已存在且 Docker 已注册。arm / 鲲鹏注意：Kylin V10 arm 默认 64K 页内核，gVisor 拒启——先用 `sandbox/kernel-4k-pkg/` 换 4K 内核再装（x86 跳过）。
 2. **沙盒镜像**：`gunzip -c artifactflow-sandbox-<ver>-<arch>.tar.gz | docker load`。
 3. **scratch 根 = 定容 loop 文件系统**（磁盘配额的硬墙层：watchdog race 窗口内写穿也只是池子满，宿主盘无恙；独立 inode 表顺带兜住海量小文件）：
 

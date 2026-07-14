@@ -25,7 +25,7 @@ Then layer gVisor on top:
 
 ```bash
 # (gVisor package, same trip)
-cd ../sandbox-gvisor-<date>-<arch> && sudo ./install.sh && sudo systemctl reload docker
+cd ../sandbox-gvisor-release-<version>-<arch> && sudo ./install.sh && sudo systemctl reload docker
 ```
 
 Withdraw ("验完即撤"):
