@@ -51,6 +51,7 @@ def test_runtime_ref_cli_and_release_wiring_use_exact_tag():
     assert '--build-arg "ARTIFACTFLOW_SANDBOX_IMAGE=${SANDBOX_IMAGE_REF}"' in release
     assert "Sandbox image required: ${SANDBOX_IMAGE_REF}" in release
     assert "--with-gvisor" in release
+    assert "\\n+      AF_SANDBOX_" not in release
     assert 'docker image inspect "$BUNDLE_SANDBOX_IMAGE"' in fleet
 
 
