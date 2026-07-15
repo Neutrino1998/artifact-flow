@@ -127,6 +127,16 @@ def test_mermaid_to_png_routing_contract():
     assert "```mermaid fenced code block" in lead_md
 
 
+def test_pdf_skill_large_document_memory_contract():
+    skill_md = (SRC_DIR / "pdf" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "`pages_text = []`" in skill_md
+    assert "`text += ...`" in skill_md
+    assert "只限制工具输出" in skill_md
+    assert "`page.close()`" in skill_md
+    assert "`rg -n -C`" in skill_md
+
+
 def test_preinstalled_skill_scripts_are_syntax_valid():
     scripts = sorted(SRC_DIR.glob("*/scripts/**/*.py"))
     assert scripts, "预装 skill 应至少包含脚本,否则本 smoke 失效"
