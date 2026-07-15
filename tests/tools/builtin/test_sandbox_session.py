@@ -490,6 +490,46 @@ class TestExec:
         with pytest.raises(SandboxUnavailableError, match="channel"):
             await session.exec("again")
 
+    async def test_quota_sticky_set_during_docker_error_inspect_wins(
+        self, session, fake_docker, monkeypatch
+    ):
+        """inspect await 期间 watchdog 写入的精确归因不能被 stopped 覆盖。"""
+        await session.ensure_container()
+        container = fake_docker.created_containers[0]
+
+        class DeadExec(FakeExec):
+            async def inspect(self):
+                raise DockerError(409, {"message": "container is not running"})
+
+        container.next_exec = DeadExec([], [{"ExitCode": None, "Running": True}])
+
+        async def inspect_after_quota(_container, *, phase):
+            quota_bytes = config.SANDBOX_WORKSPACE_QUOTA_MB * 1024 * 1024
+            await session._kill_over_quota(quota_bytes + 1)
+            return {
+                "container_id": container._id,
+                "inspect_available": False,
+                "state": {
+                    "running": False,
+                    "dead": None,
+                    "oom_killed": None,
+                    "exit_code": None,
+                    "error": "container_not_found",
+                    "finished_at": None,
+                },
+            }
+
+        monkeypatch.setattr(
+            session, "_inspect_container_best_effort", inspect_after_quota
+        )
+
+        with pytest.raises(SandboxUnavailableError, match="quota") as caught:
+            await session.exec("whatever")
+
+        failure = caught.value.diagnostics["sandbox_failure"]
+        assert failure["failure_kind"] == "workspace_quota"
+        assert failure["container_id"] == container._id
+
 
 # ============================================================
 # 磁盘配额(C′ 软配额层;loop 池子硬墙是部署侧,D 段验)

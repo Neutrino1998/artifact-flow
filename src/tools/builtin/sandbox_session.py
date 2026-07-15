@@ -753,6 +753,10 @@ class SandboxSession:
             snapshot = await self._inspect_container_best_effort(
                 container, phase="exec Docker error"
             )
+            # inspect await 期间 quota watchdog 可能已经冻结了更精确的失败归因；
+            # sticky 必须胜过随后观察到的通用 stopped/404，不能被覆盖。
+            if self._sticky_failure is not None:
+                raise self._sticky_error() from e
             state = snapshot.get("state") if snapshot else None
             if state is not None and state.get("running") is False:
                 failure_kind = self._stopped_failure_kind(snapshot)
