@@ -251,6 +251,7 @@ class Settings(BaseSettings):
                                         # (engine 在工具 await 期轮询 cancel → task.cancel 在飞调用,
                                         # core/cancellation.py)该职责剥离,本值只剩 runaway 上界一职,放宽到 300。
     SANDBOX_START_TIMEOUT: int = 60     # 秒,容器 create+start 上限(daemon 卡死时 loud-fail,不 wedge 整 turn)
+    SANDBOX_INSPECT_TIMEOUT_SEC: float = 1.0  # exec 后 best-effort 容器状态快照上限;观测超时不改写命令结果
     SANDBOX_MEM_LIMIT_MB: int = 1024    # 容器内存上限;MemorySwap 设同值 = 禁 swap
     SANDBOX_CPU_LIMIT: float = 1.0      # CPU 核数上限(换算 NanoCpus)
     SANDBOX_PIDS_LIMIT: int = 256       # fork 炸弹闸

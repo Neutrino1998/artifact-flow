@@ -91,11 +91,23 @@ class TestBashTool:
         assert f"[output truncated at {config.SANDBOX_MAX_OUTPUT_CHARS} chars]" in result.data
 
     async def test_sandbox_unavailable_is_tool_failure(self):
+        diagnostics = {
+            "sandbox_failure": {
+                "failure_kind": "oom",
+                "container_id": "container-0123",
+            }
+        }
         result = await BashTool(
-            FakeSession(error=SandboxUnavailableError("Sandbox image 'x' not found"))
+            FakeSession(
+                error=SandboxUnavailableError(
+                    "Sandbox image 'x' not found",
+                    diagnostics=diagnostics,
+                )
+            )
         )(command="echo hi")
         assert not result.success
         assert "not found" in result.error
+        assert result.metadata == diagnostics
 
     async def test_blank_command_rejected(self):
         result = await BashTool(FakeSession(result=_result()))(command="   ")

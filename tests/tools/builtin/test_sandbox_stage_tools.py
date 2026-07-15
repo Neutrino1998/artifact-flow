@@ -39,6 +39,10 @@ class FakeStageSession:
     def sticky_failure(self):
         return self._sticky
 
+    @property
+    def sticky_diagnostics(self):
+        return {}
+
     async def ensure_container(self):
         if self._fail_ensure is not None:
             raise self._fail_ensure

@@ -116,7 +116,7 @@ async def _persist_events(state):
 | `PERMISSION_REQUEST` | `permission_level`, `tool`, `params` |
 | `PERMISSION_RESULT` | `approved`, `tool`, `reason?` |
 
-`TOOL_COMPLETE.metadata` 携带工具自定义诊断（如 `update_artifact` 的模糊匹配统计），LLM 看不到、仅前端 / replay 可见。**不再**携带 artifact 快照——artifact 的 live 内容走下方独立的 `ARTIFACT_*` 事件。
+`TOOL_COMPLETE.metadata` 携带工具自定义诊断（如 `update_artifact` 的模糊匹配统计、沙盒失败的有界 `sandbox_failure`），LLM 看不到、仅前端 / replay 可见。沙盒 metadata 只保留 container id、归因、稳定 State 子集和资源上限；Docker API 原始异常留 ops 日志，不把完整 inspect 灌进事件。**不再**携带 artifact 快照——artifact 的 live 内容走下方独立的 `ARTIFACT_*` 事件。
 
 Permission 事件的阻塞语义属于 RuntimeStore，见 [concurrency.md → Interrupt 机制](concurrency.md#interrupt-机制).
 

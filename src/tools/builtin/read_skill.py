@@ -206,7 +206,11 @@ class MountSkillTool(BaseTool):
         try:
             await self._session.ensure_container()
         except SandboxError as e:
-            return ToolResult(success=False, error=str(e))  # session 已记 ops 日志
+            return ToolResult(
+                success=False,
+                error=str(e),
+                metadata=e.diagnostics,
+            )  # session 已记 ops 日志
 
         # 有界字节拷贝进容器 /tmp(宿主直写 tmp_dir,O_NOFOLLOW 圈地同 mount)。
         try:
@@ -261,13 +265,21 @@ class MountSkillTool(BaseTool):
         try:
             exec_result = await self._session.exec(command)
         except SandboxError as e:
-            return ToolResult(success=False, error=str(e))  # session 已记 ops 日志
+            return ToolResult(
+                success=False,
+                error=str(e),
+                metadata=e.diagnostics,
+            )  # session 已记 ops 日志
 
         if exec_result.exit_code != 0:
             # watchdog 超额杀(zip bomb)→ sticky 归因;否则受信 bundle 解不开 = 意外,ops 要看。
             sticky = self._session.sticky_failure
             if sticky is not None:
-                return ToolResult(success=False, error=sticky)
+                return ToolResult(
+                    success=False,
+                    error=sticky,
+                    metadata=self._session.sticky_diagnostics,
+                )
             logger.error(
                 f"mount_skill: extraction failed for '{slug}' "
                 f"(exit={exec_result.exit_code}, msg={self._session.message_id}): "

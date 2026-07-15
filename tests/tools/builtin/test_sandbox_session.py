@@ -81,10 +81,24 @@ class FakeExec:
 
 class FakeContainer:
     def __init__(self, fail_start=False):
+        self._id = "container-0123456789abcdef"
         self.fail_start = fail_start
         self.started = False
         self.deleted_with = None
         self.exec_calls: list[dict] = []
+        self.show_calls = 0
+        self.show_error = None
+        self.show_results = [{
+            "Id": self._id,
+            "State": {
+                "Running": True,
+                "Dead": False,
+                "OOMKilled": False,
+                "ExitCode": 0,
+                "Error": "",
+                "FinishedAt": "0001-01-01T00:00:00Z",
+            },
+        }]
         self.next_exec = FakeExec(
             messages=[], inspect_results=[{"ExitCode": 0, "Running": False}]
         )
@@ -96,6 +110,14 @@ class FakeContainer:
 
     async def delete(self, force=False):
         self.deleted_with = {"force": force}
+
+    async def show(self):
+        self.show_calls += 1
+        if self.show_error is not None:
+            raise self.show_error
+        if len(self.show_results) > 1:
+            return self.show_results.pop(0)
+        return self.show_results[0]
 
     async def exec(self, cmd, stdout=True, stderr=True, workdir=None):
         self.exec_calls.append({"cmd": cmd, "workdir": workdir})
@@ -298,10 +320,12 @@ class TestExec:
         monkeypatch.setattr(config, "SANDBOX_COMMAND_TIMEOUT", 42)
         cmd = "echo \"it's got 'quotes' $and $(subshells)\""
         await session.exec(cmd)
-        call = fake_docker.created_containers[0].exec_calls[0]
+        container = fake_docker.created_containers[0]
+        call = container.exec_calls[0]
         # cmd 整体一个 argv 元素 —— 无宿主侧 shell、无引号问题
         assert call["cmd"] == ["timeout", "--signal=KILL", "42", "bash", "-c", cmd]
         assert call["workdir"] == WORKSPACE_MOUNT
+        assert container.show_calls == 1  # 返回前一次本地 daemon inspect
 
     async def test_output_merged_in_arrival_order(self, session, fake_docker):
         await session.ensure_container()
@@ -351,6 +375,81 @@ class TestExec:
         result = await session.exec("whatever")
         assert result.exit_code == 7
 
+    async def test_container_inspect_failure_is_best_effort(self, session, fake_docker):
+        """观测器失败不改写已取得的命令结果。"""
+        await session.ensure_container()
+        container = fake_docker.created_containers[0]
+        container.show_error = DockerError(500, {"message": "inspect unavailable"})
+
+        result = await session.exec("echo ok")
+
+        assert result.exit_code == 0
+        assert container.show_calls == 1
+
+    async def test_container_missing_after_exec_is_authoritative(
+        self, session, fake_docker
+    ):
+        """inspect 404 说明目标已消失，当前命令不能继续标成成功。"""
+        await session.ensure_container()
+        container = fake_docker.created_containers[0]
+        container.show_error = DockerError(404, {"message": "No such container"})
+
+        with pytest.raises(SandboxUnavailableError) as caught:
+            await session.exec("echo maybe")
+
+        failure = caught.value.diagnostics["sandbox_failure"]
+        assert failure["failure_kind"] == "container_stopped"
+        assert failure["inspect_available"] is False
+        assert failure["state"]["running"] is False
+        assert failure["state"]["error"] == "container_not_found"
+
+    async def test_silent_oom_is_attributed_to_current_exec_with_diagnostics(
+        self, session, fake_docker
+    ):
+        """runsc 可能返回 WaitPID EOF/128 而不抛 DockerError；container state 才是权威。"""
+        await session.ensure_container()
+        container = fake_docker.created_containers[0]
+        container.next_exec = FakeExec(
+            messages=[_msg(b"containerManager.WaitPID failed: EOF\n", 2)],
+            inspect_results=[{"ExitCode": 128, "Running": False}],
+        )
+        container.show_results = [{
+            "Id": container._id,
+            "State": {
+                "Running": False,
+                "Dead": False,
+                "OOMKilled": True,
+                "ExitCode": 128,
+                "Error": "",
+                "FinishedAt": "2026-07-15T02:53:14Z",
+            },
+        }]
+
+        with pytest.raises(SandboxUnavailableError, match="1024MB") as caught:
+            await session.exec("python eat_memory.py")
+
+        failure = caught.value.diagnostics["sandbox_failure"]
+        assert failure["failure_kind"] == "oom"
+        assert failure["container_id"] == container._id
+        assert failure["inspect_available"] is True
+        assert failure["state"] == {
+            "running": False,
+            "dead": False,
+            "oom_killed": True,
+            "exit_code": 128,
+            "error": "",
+            "finished_at": "2026-07-15T02:53:14Z",
+        }
+        assert failure["limits"]["memory_mb"] == config.SANDBOX_MEM_LIMIT_MB
+        assert failure["exec"]["exit_code"] == 128
+
+        # 后续调用复述同一份已冻结证据，不再撞死容器句柄。
+        with pytest.raises(SandboxUnavailableError) as repeated:
+            await session.exec("again")
+        assert repeated.value.diagnostics == caught.value.diagnostics
+        assert len(container.exec_calls) == 1
+        assert container.show_calls == 1
+
     async def test_abandon_guard_raises_timeout_error(self, session, fake_docker, monkeypatch):
         """exec 通道卡死 → asyncio 弃等护栏(只提前返回,不假装杀死了进程)。"""
         monkeypatch.setattr(config, "SANDBOX_COMMAND_TIMEOUT", 0)
@@ -373,7 +472,7 @@ class TestExec:
             await session.exec("hang")
 
     async def test_container_died_mid_exec_is_loud_and_sticky(self, session, fake_docker):
-        """容器中途消失(外力 rm 等,无 sticky 前因)→ loud-fail + 后续不再撞死手柄。"""
+        """exec API 失败但 inspect 仍说 running → 通道失败 + sticky。"""
         await session.ensure_container()
         container = fake_docker.created_containers[0]
 
@@ -382,9 +481,13 @@ class TestExec:
                 raise DockerError(409, {"message": "container is not running"})
 
         container.next_exec = DeadExec([], [{"ExitCode": None, "Running": True}])
-        with pytest.raises(SandboxUnavailableError, match="died"):
+        with pytest.raises(SandboxUnavailableError, match="channel") as caught:
             await session.exec("whatever")
-        with pytest.raises(SandboxUnavailableError, match="died"):
+        failure = caught.value.diagnostics["sandbox_failure"]
+        assert failure["failure_kind"] == "exec_channel_error"
+        assert failure["docker_error_status"] == 409
+        assert failure["container_id"] == container._id
+        with pytest.raises(SandboxUnavailableError, match="channel"):
             await session.exec("again")
 
 

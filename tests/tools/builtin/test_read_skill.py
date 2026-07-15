@@ -163,6 +163,7 @@ class _FakeSandbox:
         self._exec_error = exec_error
         self._ensure_error = ensure_error
         self.sticky_failure = sticky
+        self.sticky_diagnostics = {}
         self.last_command = None
 
     async def ensure_container(self):

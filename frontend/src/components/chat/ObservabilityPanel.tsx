@@ -660,6 +660,7 @@ function serializeEventToText(event: AdminEventItem): string {
     if (d.params != null) lines.push(`\n--- Params ---\n${JSON.stringify(d.params, null, 2)}`);
     if (d.result_data != null) lines.push(`\n--- Result ---\n${typeof d.result_data === 'string' ? d.result_data : JSON.stringify(d.result_data, null, 2)}`);
     if (d.error != null) lines.push(`\n--- Error ---\n${d.error as string}`);
+    if (d.metadata != null) lines.push(`\n--- Metadata ---\n${JSON.stringify(d.metadata, null, 2)}`);
   }
   if (d != null && event.event_type === 'agent_start' && d.system_prompt != null) {
     lines.push(`\n--- System Prompt ---\n${d.system_prompt as string}`);
@@ -1090,6 +1091,9 @@ function EventDetail({
           ) : null}
           {d.error != null ? (
             <DetailBlock label="Error" content={d.error as string} />
+          ) : null}
+          {d.metadata != null ? (
+            <DetailBlock label="Metadata" content={JSON.stringify(d.metadata, null, 2)} />
           ) : null}
         </div>
       ) : null}

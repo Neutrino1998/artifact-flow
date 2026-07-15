@@ -111,6 +111,7 @@ bind mount 无界之外，容器 rootfs overlay upper 同样无界（容器内 `
 ## 命令超时与输出溢出
 
 - **每条命令超时** = 容器内 `timeout --signal=KILL` 包 argv（exec argv 数组无引号问题），`SANDBOX_COMMAND_TIMEOUT` 秒。超时强杀 → exit 137，按时长归因为超时（与 OOM-kill 的同码区分）。
+- **exec 后容器状态快照** = 返回命令结果前，经本地 Docker socket 做一次有界 best-effort inspect。daemon 超时/5xx/响应畸形只记 warning，不改写已取得的命令结果；`State.Running=false` 或目标容器已 404 是权威事实，当前 bash 立即 loud-fail。`OOMKilled=true` 明确归因内存上限，否则只记 `container_stopped`，不从 128/137 或 runsc 文案猜根因。删容器前的有界状态子集进 `TOOL_COMPLETE.metadata.sandbox_failure`，Docker API 原始异常进 ops 日志。
 - **输出溢出两层**：session 侧 `SANDBOX_MAX_OUTPUT_CHARS` 硬帽（超出继续 drain 但丢弃，防内存放大，带显式截断标记）；剩下 > `max_result_size_chars`（50k）的部分由引擎的[超长工具结果落盘](tools.md#超长工具结果自动落盘) idiom 接手，引擎零改动。
 
 ## 孤儿回收 reaper
@@ -145,6 +146,7 @@ bind mount 无界之外，容器 rootfs overlay upper 同样无界（容器内 `
 | `SANDBOX_SCRATCH_ROOT` | `/tmp/artifactflow-sandbox` | scratch 根；prod 挂成定容 loop 文件系统 |
 | `SANDBOX_COMMAND_TIMEOUT` | `300` | 单条命令秒上限（容器内 `timeout --signal=KILL`）。曾=120 兼任最坏 cancel 延迟上界；cancel-interrupt（工具 await 期可被打断，见 execution-lifecycle.md）落地后只剩 runaway 一职，放宽 |
 | `SANDBOX_START_TIMEOUT` | `60` | 容器 create+start 秒上限（daemon 卡死 loud-fail，不 wedge 整 turn） |
+| `SANDBOX_INSPECT_TIMEOUT_SEC` | `1.0` | 每次 exec 后 best-effort 容器状态快照上限；观测超时不影响正常命令结果 |
 | `SANDBOX_MEM_LIMIT_MB` | `1024` | 容器内存上限（MemorySwap 同值 = 禁 swap） |
 | `SANDBOX_CPU_LIMIT` | `1.0` | CPU 核数上限 |
 | `SANDBOX_PIDS_LIMIT` | `256` | fork 炸弹闸 |
