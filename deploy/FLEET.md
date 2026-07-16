@@ -1,18 +1,24 @@
 # Fleet deploy (fleet.sh)
 
 `fleet.sh` is the single deploy entry point for ArtifactFlow across the whole
-range from one box to many. **Single machine is the degenerate case of the
-multi-host sequence, not a separate flow** — running it daily keeps the
-multi-host path continuously rehearsed, so the two never drift apart.
+range from one box to many. Both topologies use the same bundle, release
+snapshot, activation/state and rollback contract. Same-host ordering is handed
+to Compose; cross-host ordering remains explicit Fleet logic and therefore
+still needs its own physical acceptance exercise.
 
 ```
 deploy/scripts/fleet.sh init-local           # seed single-host fleet.conf + deploy/.env
+deploy/scripts/fleet.sh bootstrap <bundle>   # init-local if needed → plan → first deploy
 deploy/scripts/fleet.sh preflight            # per-host readiness + deploy/.env checks
 deploy/scripts/fleet.sh deploy <bundle-dir>  # verify → extract → load → release gate → up → LB → smoke
 deploy/scripts/fleet.sh deploy --dry-run <d> # print the plan, touch nothing
+deploy/scripts/fleet.sh deploy-config <dir>  # config-only: verify → reconcile → rolling app restart
+deploy/scripts/fleet.sh env check|apply FILE # validate/apply env without changing the release id
+deploy/scripts/fleet.sh proxy-reload         # reload Caddy config/certificate on the LB
+deploy/scripts/fleet.sh maintenance on|off   # fleet-aware maintenance flag
 deploy/scripts/fleet.sh prepare-sandbox <d>  # prepare image/verify and/or optional gVisor units
 deploy/scripts/fleet.sh status               # per-host `compose ps` + LB health
-deploy/scripts/fleet.sh rollback             # re-up the previous version
+deploy/scripts/fleet.sh rollback             # restore app + config + deploy from previous release
 ```
 
 Sandbox is opt-in. Its persistent target policy is the required
@@ -93,9 +99,10 @@ wrong tar.
 1. **verify** — `verify-bundle.sh` checks every release tar's sha256.
 2. **arch check** — host `uname -m` must match the bundle Platform (loud-fail;
    informational under `--dry-run`).
-3. **extract** — unpack `deploy/` and `config/` from the bundle into the install
-   root. Target-local files such as `deploy/.env`, `fleet.conf`, certs, and
-   state are gitignored and not overwritten by release tars.
+3. **stage** — unpack `deploy/` and `config/` under
+   `.artifactflow/releases/<release-id>/` without touching the active release.
+   Target-local files (`deploy/.env`, `fleet.conf`, certs, maintenance and
+   state) remain under the stable control-plane `deploy/` directory.
 4. **load** — `docker load` the app tar (backend + frontend images live in it),
    plus the infra tar if present and an `infra` role is declared.
 5. **sandbox check** — when `AF_ENABLE_SANDBOX=1`, require runsc,
@@ -111,10 +118,15 @@ wrong tar.
    default 120s).
 9. **smoke** — one authed-free `/health/ready` hit through the LB.
 
-On success the deployed version is recorded in `deploy/.fleet-state` (gitignored)
-as `current`, and the prior `current` becomes `previous` — that's what `rollback`
-re-ups. Images for the previous version stay loaded, so rollback is just a
-re-`up` at the old `AF_VERSION`; nothing is rebuilt or re-fetched.
+On success Fleet atomically switches `.artifactflow/current`, then records the
+release id in `deploy/.fleet-state` (gitignored). The previous release directory
+and images remain present. `rollback` therefore restores the matching
+`app_version + config + deploy` unit instead of changing only an image tag.
+
+Config-only bundles contain only `config + checksum + manifest`. Fleet clones
+the active immutable deploy unit, validates/reconciles the staged config once,
+rolls the app service(s), probes through the LB, and only then activates the new
+release id. No app build, transfer, or `docker load` occurs.
 
 ### Single-host up
 
@@ -125,8 +137,8 @@ frontend, then caddy gate on health. fleet.sh prepares the release units, loads
 images, then runs one `docker compose --profile infra up -d --scale backend=N`.
 
 > Note: single-host `up` recreates changed containers, so there's a brief blip
-> during the swap. For a zero-surprise window (maintenance page during the
-> swap), wrap `fleet.sh deploy` with `deploy/scripts/maintenance.sh on|off`.
+> during the swap. For a predictable window (maintenance page during the
+> swap), use `fleet.sh deploy --maintenance <bundle-dir>`.
 > True zero-downtime rolling is inherently a multi-host property.
 
 ### Multi-host up
@@ -134,34 +146,32 @@ images, then runs one `docker compose --profile infra up -d --scale backend=N`.
 Compose `depends_on` is same-host only, so **fleet.sh owns the cross-host
 ordering**: infra up → release gate on the release host (`compose run --rm
 --no-deps release`, must exit 0) → app hosts brought up **one at a time**,
-each waited to `/health/ready` before the next (so a replica is always serving)
-→ regenerate the LB's static upstream from the app hosts and `caddy reload` →
+each waited to `/health/ready` before the next (preserving capacity when there
+is more than one app host)
+→ regenerate the LB's static upstream from the app hosts and recreate Caddy →
 smoke through the LB.
 
-## Multi-host: unexercised seams
+## Multi-host: executable, physical acceptance pending
 
-**Multi-host is authored but has never run against a second machine.** A real
-multi-host `deploy` is *gated off* in `fleet.sh` (`cmd_deploy`) — only
-`--dry-run` prints the plan. Before removing that guard, validate these three
-cross-host seams on the first 2-machine run (they can't be exercised on one box,
-and each loud-fails rather than silently misbehaving):
+The former hard `die` has been removed and the transport/order path is now
+executable: per-host transfer and checksum, immutable staging, role-specific
+image load, infra, one release gate, app hosts one-by-one, generated static
+Caddy upstreams, LB smoke, then activation. It still awaits its first physical
+2-machine acceptance run, so operators must treat that run as a controlled
+commissioning event with a maintenance window and rollback bundle retained.
 
-- **(a) backend port publishing.** The base compose only `expose: 8000`
-  (compose-internal). A cross-host LB needs backend host-published. Add a small
-  fleet overlay compose that publishes the port — **do not edit the single-host
-  compose**, or you break the validated docker-DNS `dynamic a` path.
-- **(b) static Caddy upstream.** Single-host uses `dynamic a { name backend }`
-  (docker DNS resolves the scaled replicas). Across machines there's no shared
-  DNS — the LB needs a generated static list (`k1:8000 k2:8000 …`) rendered from
-  `fleet.conf`. Active health checks *do* work on static upstreams (they don't
-  on `dynamic a`), so this is also when the `health_uri` wedge-removal from the
-  single-host tuning starts pulling its weight.
-- **(c) per-host `.env` DB/Redis URLs.** App hosts must point `DATABASE_URL` /
-  `REDIS_URL` at the **infra host**, not `localhost`. Ship a single-source
-  `.env` plus a per-host `.env.<host>` override (also gitignored).
-
-Un-gate by deleting the `die` in `cmd_deploy`'s multi-host branch once (a)–(c)
-are in place and a 2-machine `deploy` has run green.
+- `deploy/docker-compose.fleet-app.yml` publishes backend/frontend on app hosts.
+  Until per-replica port discovery exists, **every multi-host app row must use
+  `scale=1`**; Fleet loud-fails otherwise.
+- Fleet renders `deploy/caddy/upstreams.caddy` inside the LB's staged release
+  from the app rows. Single-host keeps Docker DNS through the shipped default.
+- `deploy/.env` is the common source. Optional gitignored
+  `deploy/.env.<host>` files override DB/Redis URLs or published ports for one
+  remote host; Fleet materializes the merged file on that host. The literal
+  `local` host uses `deploy/.env` directly—do not create `.env.local`.
+- Before declaring the path production-accepted, verify SSH permissions,
+  hostname reachability from LB→app, partial-host rollback, and the site's
+  firewall rules on 8000/3000 during the first physical exercise.
 
 ## Arch
 

@@ -19,6 +19,7 @@
 	email {$AF_ACME_EMAIL}
 }
 
+import /etc/caddy/conf/upstreams.caddy
 import /etc/caddy/conf/common.caddy
 
 {$AF_DOMAIN} {

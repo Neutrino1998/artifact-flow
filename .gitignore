@@ -19,6 +19,7 @@ logs/
 temp/
 cache/
 checkpoints/
+.artifactflow/
 
 # Claude Code（整个目录不入库:本地设置 + 运行时锁）
 .claude/

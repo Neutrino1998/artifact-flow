@@ -14,7 +14,19 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-COMPOSE_FILE="$ROOT/deploy/docker-compose.intranet.yml"
+ACTIVE_ROOT="$(readlink -f "$ROOT/.artifactflow/current" 2>/dev/null || true)"
+if [[ -n "$ACTIVE_ROOT" && -f "$ACTIVE_ROOT/deploy/docker-compose.intranet.yml" ]]; then
+  COMPOSE_FILE="$ACTIVE_ROOT/deploy/docker-compose.intranet.yml"
+else
+  COMPOSE_FILE="$ROOT/deploy/docker-compose.intranet.yml"
+fi
+MAINT_ENV_FILE="$ROOT/deploy/.env"
+MAINT_RUNTIME_DEPLOY_DIR="$ROOT/deploy"
+if [[ -f "$MAINT_ENV_FILE" \
+   && "$(awk -F= '$1 == "AF_ENABLE_SANDBOX" {print $2; exit}' "$MAINT_ENV_FILE")" == 1 \
+   && -f "${ACTIVE_ROOT:-$ROOT}/deploy/docker-compose.sandbox.yml" ]]; then
+  MAINT_EXTRA_COMPOSE_FILE="${ACTIVE_ROOT:-$ROOT}/deploy/docker-compose.sandbox.yml"
+fi
 
 MAINT_MODE_LABEL="Mode 3 / 内网"
 MAINT_PROXY_LABEL="caddy"

@@ -33,8 +33,8 @@
 
 # ─────────────────────────────────────────────────────────────────────
 # Single machine — the common case. Every role on `local`, no ssh at all.
-# This is the degenerate form of the multi-host sequence: fleet.sh runs the
-# SAME deploy序列, transport just resolves to local execution.
+# It uses the same Fleet command/release contract as multi-host; Compose owns
+# same-host dependency ordering and no ssh transport is involved.
 # ─────────────────────────────────────────────────────────────────────
 infra    local
 release  local
@@ -44,12 +44,12 @@ lb       local
 # ─────────────────────────────────────────────────────────────────────
 # Two machines — comment out the single-box block above and uncomment this.
 # Control host runs fleet.sh and ssh's to k1/k2 (see deploy/FLEET.md).
-# NOTE: cross-host is authored but UNEXERCISED until a 2nd machine exists —
-# read the "Multi-host: unexercised seams" section of FLEET.md before relying
-# on it (backend port publishing, static Caddy upstream, per-host DB URLs).
+# NOTE: cross-host execution is implemented but still awaits its first physical
+# acceptance run. Keep scale=1 on every app row until per-replica port discovery
+# is added; see FLEET.md before commissioning the first two-machine fleet.
 # ─────────────────────────────────────────────────────────────────────
 # infra    k1   arch=arm64
 # release  k1
-# app      k1   arch=arm64  scale=2
-# app      k2   arch=arm64  scale=2
+# app      k1   arch=arm64  scale=1
+# app      k2   arch=arm64  scale=1
 # lb       k1   arch=arm64

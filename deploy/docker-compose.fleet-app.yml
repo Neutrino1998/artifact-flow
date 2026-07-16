@@ -1,0 +1,11 @@
+# Multi-host app overlay. A host in a cross-machine fleet publishes exactly one
+# backend and one frontend for the LB host. fleet.sh currently rejects scale>1
+# on a multi-host app row; add distinct per-replica ports/service discovery
+# before relaxing that invariant.
+services:
+  backend:
+    ports:
+      - "${AF_BACKEND_PORT:-8000}:8000"
+  frontend:
+    ports:
+      - "${AF_FRONTEND_PORT:-3000}:3000"

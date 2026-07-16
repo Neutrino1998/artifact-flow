@@ -26,6 +26,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+RELEASE_ROOT="${AF_RELEASE_ROOT:-$ROOT}"
 
 fail=0
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
@@ -219,8 +220,8 @@ cmd_check() {
     info "no artifactflow *.sha256 files found in $ROOT"
   fi
 
-  [[ -d "$ROOT/deploy" ]] && ok "deploy/ extracted" || bad "deploy/ missing"
-  [[ -d "$ROOT/config" ]] && ok "config/ extracted" || bad "config/ missing"
+  [[ -d "$RELEASE_ROOT/deploy" ]] && ok "deploy/ release unit present" || bad "deploy/ release unit missing: $RELEASE_ROOT/deploy"
+  [[ -d "$RELEASE_ROOT/config" ]] && ok "config/ release unit present" || bad "config/ release unit missing: $RELEASE_ROOT/config"
   [[ -f "$ROOT/deploy/.env" ]] && ok "deploy/.env present" || bad "deploy/.env missing"
 
   if [[ -f "$ROOT/deploy/.env" ]]; then

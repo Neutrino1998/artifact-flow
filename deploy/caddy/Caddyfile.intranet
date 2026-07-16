@@ -22,6 +22,7 @@
 	auto_https off
 }
 
+import /etc/caddy/conf/upstreams.caddy
 import /etc/caddy/conf/common.caddy
 
 # HTTPS entry. Host-agnostic (`https://:443`): the intranet has no canonical

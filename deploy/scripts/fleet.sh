@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # fleet.sh — ArtifactFlow unified deploy entrypoint (Phase D, 决策 7).
 #
-# One command surface for the whole "single box → multi-worker → multi-host"
-# continuum. Single machine is the DEGENERATE case, not a separate flow: the
-# same deploy sequence runs, the transport layer just resolves `host=local` to
-# local execution (no ssh). Running single-box daily keeps the multi-host path
-# continuously rehearsed — that's the anti-drift value.
+# One command surface and release model for the whole "single box →
+# multi-worker → multi-host" continuum. Same-host dependency ordering is owned
+# by Compose; cross-host ordering is owned by Fleet. They share bundle checks,
+# immutable staging, activation/state and rollback, while SSH/firewall/static-
+# upstream seams still require a physical multi-host acceptance run.
 #
 # Topology lives in deploy/fleet.conf (copy from fleet.conf.example). Roles:
 # infra (pg+redis) / release (one-shot migrate+reconcile) / app (backend×scale
@@ -13,13 +13,18 @@
 #
 # Subcommands:
 #   fleet.sh init-local                write single-host fleet.conf + seed deploy/.env
+#   fleet.sh bootstrap <bundle-dir>    init-local (if needed) → preflight → first deploy
 #   fleet.sh preflight                 per-host docker/compose/disk/clock + deploy/.env checks
 #   fleet.sh deploy <bundle-dir>       verify → extract → load → release gate → (rolling) up → LB → smoke
 #   fleet.sh deploy --dry-run <dir>    print the plan, touch nothing
+#   fleet.sh deploy-config <dir>       verify → stage config → reconcile → rolling app restart
 #   fleet.sh prepare-sandbox <dir>     load sandbox image; install runsc only when bundled
 #   fleet.sh status                    per-host `compose ps` + /health/ready probe
 #   fleet.sh rollback                  re-up the previously-deployed version (images kept)
 #   fleet.sh rollback --dry-run        print the rollback plan
+#   fleet.sh env check|apply [file]     validate/apply target-local environment
+#   fleet.sh proxy-reload               reload Caddy config/cert on the LB host
+#   fleet.sh maintenance on|off|status  fleet-aware maintenance flag
 #
 # Env (all optional):
 #   AF_FLEET_CONF     topology file           (default deploy/fleet.conf)
@@ -34,13 +39,12 @@
 #
 # Exit: 0 = success; non-zero = a step failed (message on stderr, sequence stops).
 #
-# ── Single-host vs multi-host (what's TESTED) ──
-# Single-host (all roles `local`) is the near-term path and is Mac-testable end
-# to end — it delegates ordering to compose's own depends_on (release gate +
-# healthchecks). Multi-host is authored but UNEXERCISED until a 2nd machine:
-# cross-host role split needs backend port publishing, a static Caddy upstream
-# (not docker-DNS `dynamic a`), and per-host DB/Redis URLs — see deploy/FLEET.md
-# "Multi-host: unexercised seams". Those seams loud-fail rather than pretend.
+# ── Single-host vs multi-host acceptance ──
+# Single-host (all roles `local`) is the exercised path. Multi-host now has an
+# executable transport/order path (published app overlay, generated static
+# Caddy upstreams, per-host env merge, rolling app hosts), but still awaits its
+# first physical two-machine acceptance run. Until per-replica port discovery
+# exists, multi-host app rows are structurally limited to scale=1.
 
 set -uo pipefail  # not -e: we drive the sequence with explicit die() so every
                   # stop point carries a diagnostic, and per-host loops report
@@ -49,8 +53,12 @@ set -uo pipefail  # not -e: we drive the sequence with explicit die() so every
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DEPLOY_DIR="$ROOT/deploy"
-COMPOSE_FILE="$DEPLOY_DIR/docker-compose.intranet.yml"
-SANDBOX_COMPOSE_FILE="$DEPLOY_DIR/docker-compose.sandbox.yml"
+RUNTIME_ROOT="$ROOT/.artifactflow"
+RELEASES_DIR="$RUNTIME_ROOT/releases"
+CURRENT_LINK="$RUNTIME_ROOT/current"
+COMPOSE_BASENAME="docker-compose.intranet.yml"
+SANDBOX_COMPOSE_BASENAME="docker-compose.sandbox.yml"
+FLEET_APP_COMPOSE_BASENAME="docker-compose.fleet-app.yml"
 ENABLE_SANDBOX=""
 
 FLEET_CONF="${AF_FLEET_CONF:-$DEPLOY_DIR/fleet.conf}"
@@ -72,7 +80,7 @@ die()  { bad "$1"; exit "${2:-1}"; }
 ROLE=(); HOST=(); ARCH=(); SCALE=()
 parse_conf() {
   [[ -f "$FLEET_CONF" ]] || die "fleet.conf not found: $FLEET_CONF (copy from fleet.conf.example)"
-  local line role host rest kv a s
+  local line role host rest kv a s j
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%%#*}"                       # strip inline comment
     read -r role host rest <<<"$line"        # split first two + remainder
@@ -87,6 +95,19 @@ parse_conf() {
       esac
     done
     case "$role" in infra|release|app|lb) ;; *) die "fleet.conf: bad role '$role'";; esac
+    [[ -z "$a" || "$a" == amd64 || "$a" == arm64 ]] \
+      || die "fleet.conf: arch must be amd64 or arm64 (got '$a' on $role $host)"
+    if [[ -n "$s" ]]; then
+      [[ "$role" == app ]] || die "fleet.conf: scale is only valid on app rows ($role $host)"
+      [[ "$s" =~ ^[0-9]+$ && "$s" -ge 1 ]] \
+        || die "fleet.conf: scale must be a positive integer on app $host"
+    fi
+    for j in "${!ROLE[@]}"; do
+      [[ "${ROLE[$j]}" != "$role" || "${HOST[$j]}" != "$host" ]] \
+        || die "fleet.conf: duplicate row '$role $host'"
+      [[ -z "$a" || -z "${ARCH[$j]}" || "${HOST[$j]}" != "$host" || "${ARCH[$j]}" == "$a" ]] \
+        || die "fleet.conf: host $host has conflicting arch values (${ARCH[$j]} vs $a)"
+    done
     ROLE+=("$role"); HOST+=("$host"); ARCH+=("$a"); SCALE+=("$s")
   done < "$FLEET_CONF"
   [[ ${#ROLE[@]} -gt 0 ]] || die "fleet.conf is empty"
@@ -111,6 +132,15 @@ host_has_role() {  # host_has_role <host> <role>
   local host="$1" want="$2" i
   for i in "${!ROLE[@]}"; do
     [[ "${HOST[$i]}" == "$host" && "${ROLE[$i]}" == "$want" ]] && return 0
+  done
+  return 1
+}
+
+host_arch() {
+  local host="$1" i
+  for i in "${!HOST[@]}"; do
+    [[ "${HOST[$i]}" == "$host" && -n "${ARCH[$i]}" ]] \
+      && { printf '%s\n' "${ARCH[$i]}"; return 0; }
   done
   return 1
 }
@@ -147,14 +177,19 @@ copy_to() {  # copy_to <host> <local-src> <dst-path>
 }
 
 run_prepare_host_check() {  # run_prepare_host_check <host>
-  local host="$1" dir with_infra=0 version_env="" sandbox_env="" expected_version=""
+  local host="$1" dir with_infra=0 version_env="" sandbox_env="" release_env="" expected_version=""
   dir="$(target_dir "$host")"
   host_has_role "$host" infra && with_infra=1
   expected_version="${BUNDLE_VER:-${AF_BUNDLE_VERSION:-}}"
   [[ -n "$expected_version" ]] && version_env="AF_VERSION='$expected_version' "
   [[ -n "${BUNDLE_SANDBOX_IMAGE:-}" ]] && sandbox_env="AF_SANDBOX_IMAGE_REF='$BUNDLE_SANDBOX_IMAGE' "
+  if [[ -n "${BUNDLE_VER:-}" ]]; then
+    release_env="AF_RELEASE_ROOT='$(release_dir_for "$dir" "$BUNDLE_VER")' "
+  elif [[ -n "$(state_get current)" ]]; then
+    release_env="AF_RELEASE_ROOT='$(release_dir_for "$dir" "$(state_get current)")' "
+  fi
 
-  run_on "$host" "if [ -d '$dir' ]; then cd '$dir'; else echo '  ℹ prepare-host check skipped ($dir not created yet)'; exit 0; fi; if [ -x deploy/scripts/prepare-host.sh ]; then AF_WITH_INFRA='$with_infra' AF_ENABLE_SANDBOX='$ENABLE_SANDBOX' ${version_env}${sandbox_env}deploy/scripts/prepare-host.sh check; else echo '  ℹ prepare-host check skipped (deploy/scripts/prepare-host.sh not found yet)'; fi"
+  run_on "$host" "if [ -d '$dir' ]; then cd '$dir'; else echo '  ℹ prepare-host check skipped ($dir not created yet)'; exit 0; fi; if [ -x deploy/scripts/prepare-host.sh ]; then AF_WITH_INFRA='$with_infra' AF_ENABLE_SANDBOX='$ENABLE_SANDBOX' ${version_env}${sandbox_env}${release_env}deploy/scripts/prepare-host.sh check; else echo '  ℹ prepare-host check skipped (deploy/scripts/prepare-host.sh not found yet)'; fi"
 }
 
 env_file_value() {
@@ -293,13 +328,45 @@ sandbox_scratch_check_cmd() {
   printf '%s' "env_file='$dir/deploy/.env'; root=\$(awk -F= '/^ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT=/{v=\$2} END{print v}' \"\$env_file\" 2>/dev/null); root=\${root:-/var/lib/artifactflow/sandbox-scratch}; findmnt -rn \"\$root\" >/dev/null"
 }
 
-# compose on a host: cd into its deploy dir, export AF_VERSION, run given args.
-compose_flags_for_dir() {
-  local dir="$1"
-  printf -- "-f '%s/deploy/docker-compose.intranet.yml'" "$dir"
-  if [[ "$ENABLE_SANDBOX" == 1 ]]; then
-    printf -- " -f '%s/deploy/docker-compose.sandbox.yml'" "$dir"
+# ── immutable release roots + compose routing ──────────────────────
+validate_release_id() {
+  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
+    || die "invalid release id '$1' (allowed: letters, digits, dot, underscore, dash)"
+}
+
+release_dir_for() {  # release_dir_for <install-root> <release-id>
+  printf '%s/.artifactflow/releases/%s\n' "$1" "$2"
+}
+
+active_release_dir_local() {
+  if [[ -L "$CURRENT_LINK" && -f "$CURRENT_LINK/deploy/$COMPOSE_BASENAME" ]]; then
+    (cd "$CURRENT_LINK" && pwd -P)
+  else
+    # Compatibility for deployments created before immutable release roots.
+    printf '%s\n' "$ROOT"
   fi
+}
+
+release_meta_value_local() {  # release_meta_value_local <release-root> <key>
+  local release_root="$1" key="$2"
+  [[ -f "$release_root/.af-release" ]] || return 1
+  awk -F= -v key="$key" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' \
+    "$release_root/.af-release"
+}
+
+release_app_version_local() {
+  local release_root="$1" value=""
+  value="$(release_meta_value_local "$release_root" app_version || true)"
+  if [[ -n "$value" ]]; then printf '%s\n' "$value"; else state_get current; fi
+}
+
+activate_release_local() {  # activate_release_local <release-root>
+  local release_root="$1" link_tmp="$CURRENT_LINK.tmp.$$"
+  mkdir -p "$RUNTIME_ROOT" || die "failed to create $RUNTIME_ROOT"
+  ln -s "$release_root" "$link_tmp" || die "failed to create active-release link"
+  # Target hosts are Linux; -T replaces the symlink itself instead of treating
+  # a symlink-to-directory as a destination directory.
+  mv -Tf "$link_tmp" "$CURRENT_LINK" || die "failed to activate release $release_root"
 }
 
 shell_args() {
@@ -309,17 +376,24 @@ shell_args() {
   done
 }
 
-compose_on() {  # compose_on <host> <version> <compose-args...>
-  local host="$1" ver="$2"; shift 2
-  local dir flags args
+compose_on_release() {  # compose_on_release <host> <release-id> <app-version> <args...>
+  local host="$1" release_id="$2" app_ver="$3"; shift 3
+  local dir release_root flags args
   dir="$(target_dir "$host")"
-  flags="$(compose_flags_for_dir "$dir")"
+  release_root="$(release_dir_for "$dir" "$release_id")"
+  flags="--env-file '$dir/deploy/.env' -f '$release_root/deploy/$COMPOSE_BASENAME'"
+  if [[ "$ENABLE_SANDBOX" == 1 ]]; then
+    flags+=" -f '$release_root/deploy/$SANDBOX_COMPOSE_BASENAME'"
+  fi
+  if host_has_role "$host" app && [[ "$(all_hosts)" != local ]]; then
+    flags+=" -f '$release_root/deploy/$FLEET_APP_COMPOSE_BASENAME'"
+  fi
   args="$(shell_args "$@")"
-  run_on "$host" "cd '$dir/deploy' && AF_VERSION='$ver' docker compose $flags$args"
+  run_on "$host" "cd '$dir/deploy' && AF_RUNTIME_DEPLOY_DIR='$dir/deploy' AF_VERSION='$app_ver' docker compose $flags$args"
 }
 
 # ── bundle introspection (manifest is source of truth) ──────────────
-BUNDLE=""; BUNDLE_VER=""; BUNDLE_PLATFORM=""; BUNDLE_SANDBOX_IMAGE=""; BUNDLE_GVISOR_PACKAGE=""; APP_TAR=""
+BUNDLE=""; BUNDLE_MANIFEST=""; BUNDLE_VER=""; BUNDLE_KIND=""; BUNDLE_PLATFORM=""; BUNDLE_SANDBOX_IMAGE=""; BUNDLE_GVISOR_PACKAGE=""; APP_TAR=""
 SANDBOX_TAR=""; SANDBOX_VERIFY_TAR=""; SANDBOX_GVISOR_TAR=""
 is_release_manifest() {
   local header
@@ -360,12 +434,19 @@ load_bundle_meta() {
     mf="${manifests[0]}"
   fi
   BUNDLE_VER="$(awk 'NR==1{print $NF}' "$mf")"
+  BUNDLE_MANIFEST="$mf"
+  BUNDLE_KIND="$(manifest_value "$mf" "Release kind")"
+  BUNDLE_KIND="${BUNDLE_KIND:-app}"
   BUNDLE_PLATFORM="$(manifest_value "$mf" "Platform")"
   BUNDLE_SANDBOX_IMAGE="$(manifest_value "$mf" "Sandbox image required")"
   BUNDLE_GVISOR_PACKAGE="$(manifest_value "$mf" "gVisor host runtime")"
   [[ -n "$BUNDLE_VER" ]] || die "cannot read version from manifest $mf"
-  [[ "$BUNDLE_SANDBOX_IMAGE" =~ ^artifactflow-sandbox:[0-9a-f]{16}-(amd64|arm64)$ ]] \
-    || die "manifest has invalid or missing immutable sandbox image reference: $mf"
+  validate_release_id "$BUNDLE_VER"
+  case "$BUNDLE_KIND" in app|config) ;; *) die "manifest has invalid Release kind '$BUNDLE_KIND': $mf" ;; esac
+  if [[ "$BUNDLE_KIND" == app ]]; then
+    [[ "$BUNDLE_SANDBOX_IMAGE" =~ ^artifactflow-sandbox:[0-9a-f]{16}-(amd64|arm64)$ ]] \
+      || die "manifest has invalid or missing immutable sandbox image reference: $mf"
+  fi
   case "$BUNDLE_GVISOR_PACKAGE" in
     ""|none|skipped*) BUNDLE_GVISOR_PACKAGE="" ;;
     sandbox-gvisor-*.tar.gz)
@@ -381,8 +462,11 @@ load_bundle_meta() {
   # loaded image locked to the AF_VERSION compose resolves at `up` even if a dir
   # ever holds two versions' tars (release.sh writes one version per dist/, so
   # this is defensive, but the coupling is free).
-  APP_TAR="$BUNDLE/artifactflow-app-${BUNDLE_VER}.tar.gz"
-  [[ -f "$APP_TAR" ]] || die "app tar for version $BUNDLE_VER not found: $APP_TAR"
+  APP_TAR=""
+  if [[ "$BUNDLE_KIND" == app ]]; then
+    APP_TAR="$BUNDLE/artifactflow-app-${BUNDLE_VER}.tar.gz"
+    [[ -f "$APP_TAR" ]] || die "app tar for version $BUNDLE_VER not found: $APP_TAR"
+  fi
 }
 
 # Normalize any arch spelling to a canonical family token, so a compose
@@ -429,22 +513,105 @@ load_bundle_sandbox_meta() {
   fi
 }
 
-extract_release_units_single_local() {
-  local config_tar deploy_tar
+STAGED_RELEASE=""
+
+bundle_unit_digest() {
+  local file
+  for file in "$@"; do
+    printf '%s|%s\n' "$(basename "$file")" "$(sha256sum "$file" | awk '{print $1}')"
+  done | sha256sum | awk '{print $1}'
+}
+
+stage_app_release_local() {
+  local config_tar deploy_tar release_root tmp digest recorded=""
   config_tar="$BUNDLE/artifactflow-config-${BUNDLE_VER}.tar.gz"
   deploy_tar="$BUNDLE/artifactflow-deploy-${BUNDLE_VER}.tar.gz"
   [[ -f "$config_tar" ]] || die "config tar for version $BUNDLE_VER not found: $config_tar"
   [[ -f "$deploy_tar" ]] || die "deploy tar for version $BUNDLE_VER not found: $deploy_tar"
+  release_root="$(release_dir_for "$ROOT" "$BUNDLE_VER")"
 
-  step "extract config/deploy units"
+  step "stage immutable release $BUNDLE_VER"
   if (( DRY )); then
-    info "would: tar xzf $deploy_tar -C $ROOT"
-    info "would: tar xzf $config_tar -C $ROOT"
-  else
-    tar xzf "$deploy_tar" -C "$ROOT" || die "deploy tar extract failed"
-    tar xzf "$config_tar" -C "$ROOT" || die "config tar extract failed"
-    ok "config/deploy extracted"
+    info "would extract deploy/config into $release_root (current remains untouched)"
+    STAGED_RELEASE="$release_root"
+    return 0
   fi
+
+  digest="$(bundle_unit_digest "$deploy_tar" "$config_tar")"
+  if [[ -d "$release_root" ]]; then
+    recorded="$(release_meta_value_local "$release_root" bundle_digest || true)"
+    [[ "$recorded" == "$digest" ]] \
+      || die "release id $BUNDLE_VER already exists with different content: $release_root"
+    STAGED_RELEASE="$release_root"
+    ok "release already staged with matching digest"
+    return 0
+  fi
+
+  mkdir -p "$RELEASES_DIR" || die "failed to create $RELEASES_DIR"
+  tmp="$(mktemp -d "$RELEASES_DIR/.${BUNDLE_VER}.tmp.XXXXXX")" \
+    || die "failed to create release staging directory"
+  tar xzf "$deploy_tar" -C "$tmp" \
+    || { rm -rf "$tmp"; die "deploy tar extract failed"; }
+  tar xzf "$config_tar" -C "$tmp" \
+    || { rm -rf "$tmp"; die "config tar extract failed"; }
+  [[ -f "$tmp/deploy/$COMPOSE_BASENAME" && -d "$tmp/config" ]] \
+    || { rm -rf "$tmp"; die "release tar layout invalid (need deploy/$COMPOSE_BASENAME + config/)"; }
+  grep -q 'AF_RUNTIME_DEPLOY_DIR' "$tmp/deploy/$COMPOSE_BASENAME" \
+    || { rm -rf "$tmp"; die "bundle deploy compose predates immutable release support; rebuild with the current release.sh"; }
+  {
+    printf 'release_id=%s\n' "$BUNDLE_VER"
+    printf 'kind=app\n'
+    printf 'app_version=%s\n' "$BUNDLE_VER"
+    printf 'bundle_digest=%s\n' "$digest"
+  } > "$tmp/.af-release"
+  mv "$tmp" "$release_root" || { rm -rf "$tmp"; die "failed to finalize $release_root"; }
+  STAGED_RELEASE="$release_root"
+  ok "staged $release_root"
+}
+
+stage_config_release_local() {
+  local config_tar release_root tmp digest recorded="" active app_ver
+  config_tar="$BUNDLE/artifactflow-config-${BUNDLE_VER}.tar.gz"
+  [[ -f "$config_tar" ]] || die "config tar for version $BUNDLE_VER not found: $config_tar"
+  release_root="$(release_dir_for "$ROOT" "$BUNDLE_VER")"
+  active="$(active_release_dir_local)"
+  [[ "$active" != "$ROOT" && -f "$active/.af-release" ]] \
+    || die "deploy-config requires one successful immutable app release first"
+  app_ver="$(release_app_version_local "$active")"
+  [[ -n "$app_ver" ]] || die "cannot determine active app version"
+
+  step "stage immutable config release $BUNDLE_VER (app stays $app_ver)"
+  if (( DRY )); then
+    info "would clone active deploy unit + extract config into $release_root"
+    STAGED_RELEASE="$release_root"
+    return 0
+  fi
+  digest="$(bundle_unit_digest "$config_tar")"
+  if [[ -d "$release_root" ]]; then
+    recorded="$(release_meta_value_local "$release_root" bundle_digest || true)"
+    [[ "$recorded" == "$digest" ]] \
+      || die "release id $BUNDLE_VER already exists with different content: $release_root"
+    STAGED_RELEASE="$release_root"
+    ok "config release already staged with matching digest"
+    return 0
+  fi
+  mkdir -p "$RELEASES_DIR" || die "failed to create $RELEASES_DIR"
+  tmp="$(mktemp -d "$RELEASES_DIR/.${BUNDLE_VER}.tmp.XXXXXX")" \
+    || die "failed to create config staging directory"
+  cp -a "$active/deploy" "$tmp/deploy" \
+    || { rm -rf "$tmp"; die "failed to inherit active deploy unit"; }
+  tar xzf "$config_tar" -C "$tmp" \
+    || { rm -rf "$tmp"; die "config tar extract failed"; }
+  [[ -d "$tmp/config" ]] || { rm -rf "$tmp"; die "config tar layout invalid"; }
+  {
+    printf 'release_id=%s\n' "$BUNDLE_VER"
+    printf 'kind=config\n'
+    printf 'app_version=%s\n' "$app_ver"
+    printf 'bundle_digest=%s\n' "$digest"
+  } > "$tmp/.af-release"
+  mv "$tmp" "$release_root" || { rm -rf "$tmp"; die "failed to finalize $release_root"; }
+  STAGED_RELEASE="$release_root"
+  ok "staged $release_root"
 }
 
 prepare_sandbox_single_local() {
@@ -559,21 +726,32 @@ state_write() {  # state_write <current> <previous>
 }
 
 # ── readiness + smoke through the LB ────────────────────────────────
-lb_ready_cmd() {  # a curl that returns 0 iff /health/ready is green via the LB
+lb_ready_cmd() {  # lb_ready_cmd <lb-host>: curl iff /health/ready is green
+  local host="${1:-local}" port=""
+  if declare -F host_env_value >/dev/null 2>&1; then
+    port="$(host_env_value "$host" AF_HTTPS_PORT)"
+  else
+    port="$(env_file_value "$DEPLOY_DIR/.env" AF_HTTPS_PORT || true)"
+  fi
+  port="${port:-$HTTPS_PORT}"
   # self-signed intranet cert → -k; loopback on the lb host's published HTTPS port
-  echo "curl -fsk --max-time 5 https://localhost:${HTTPS_PORT}/health/ready >/dev/null"
+  echo "curl -fsk --max-time 5 https://localhost:${port}/health/ready >/dev/null"
 }
-wait_ready() {  # wait_ready <lb-host>
-  local host="$1" waited=0 cmd; cmd="$(lb_ready_cmd)"
+wait_ready_result() {  # wait_ready_result <lb-host>; returns non-zero, never exits
+  local host="$1" waited=0 cmd; cmd="$(lb_ready_cmd "$host")"
   step "wait for /health/ready via LB ($host, timeout ${READY_TIMEOUT}s)"
   while (( waited < READY_TIMEOUT )); do
     if run_on "$host" "$cmd" 2>/dev/null; then ok "LB healthy after ${waited}s"; return 0; fi
     sleep 3; waited=$((waited+3))
   done
-  die "LB /health/ready not green within ${READY_TIMEOUT}s on $host"
+  bad "LB /health/ready not green within ${READY_TIMEOUT}s on $host"
+  return 1
+}
+wait_ready() {  # wait_ready <lb-host>
+  wait_ready_result "$1" || die "deployment did not become ready"
 }
 smoke() {  # smoke <lb-host>
-  local host="$1" cmd; cmd="$(lb_ready_cmd)"
+  local host="$1" cmd; cmd="$(lb_ready_cmd "$host")"
   step "smoke: /health/ready through LB ($host)"
   run_on "$host" "$cmd" 2>/dev/null && ok "smoke passed" || die "smoke failed on $host"
 }
@@ -648,6 +826,31 @@ EOF
   fi
 }
 
+cmd_bootstrap() {
+  local bundle="" scale=2
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --scale)
+        shift; [[ $# -gt 0 ]] || die "--scale requires a value"; scale="$1" ;;
+      --scale=*) scale="${1#--scale=}" ;;
+      -*) die "unknown bootstrap flag: $1" ;;
+      *) bundle="$1" ;;
+    esac
+    shift
+  done
+  [[ -n "$bundle" ]] || die "usage: fleet.sh bootstrap [--scale N] <bundle-dir>"
+  if [[ ! -f "$FLEET_CONF" ]]; then
+    cmd_init_local --scale "$scale"
+  else
+    info "using existing topology $FLEET_CONF"
+  fi
+  # The bundle-aware dry run validates topology/manifest/arch and prints the
+  # exact first-deploy plan. The real deploy repeats checksum and host checks
+  # after staging the immutable release units.
+  cmd_deploy --dry-run "$bundle"
+  cmd_deploy "$bundle"
+}
+
 # ════════════════════════════════════════════════════════════════════
 # preflight
 # ════════════════════════════════════════════════════════════════════
@@ -713,11 +916,23 @@ cmd_preflight() {
 # deploy
 # ════════════════════════════════════════════════════════════════════
 DRY=0
+MAINTENANCE_WINDOW=0
+
+fleet_maintenance() {  # fleet_maintenance on|off|status [note]
+  local action="$1" note="${2:-}" lb dir args
+  lb="$(role_host lb)"; dir="$(target_dir "$lb")"
+  args="$(shell_args "$action")$(shell_args "$note")"
+  run_on "$lb" "cd '$dir' && deploy/scripts/maintenance.sh$args"
+}
+
 cmd_deploy() {
   local bundle=""
+  DRY=0
+  MAINTENANCE_WINDOW=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --dry-run) DRY=1 ;;
+      --maintenance) MAINTENANCE_WINDOW=1 ;;
       -*) die "unknown deploy flag: $1" ;;
       *) bundle="$1" ;;
     esac
@@ -727,6 +942,8 @@ cmd_deploy() {
   resolve_sandbox_enablement
   parse_conf
   load_bundle_meta "$bundle"
+  [[ "$BUNDLE_KIND" == app ]] \
+    || die "bundle $BUNDLE_VER is config-only; use: fleet.sh deploy-config $bundle"
   (( DRY )) && info "DRY-RUN — no host will be touched"
   step "deploy version=$BUNDLE_VER platform=$BUNDLE_PLATFORM from $BUNDLE"
 
@@ -737,6 +954,10 @@ cmd_deploy() {
   else
     info "would run verify-bundle.sh $BUNDLE"
   fi
+  if (( MAINTENANCE_WINDOW && ! DRY )); then
+    fleet_maintenance on "Deploying release $BUNDLE_VER" \
+      || die "failed to enable maintenance mode"
+  fi
 
   local hosts; hosts="$(all_hosts)"
   local single=0
@@ -745,8 +966,6 @@ cmd_deploy() {
   if (( single )); then
     deploy_single_local
   else
-    info "MULTI-HOST path — authored but UNEXERCISED (see deploy/FLEET.md). Aborting real run for safety; --dry-run to inspect the plan."
-    (( DRY )) || die "multi-host deploy is gated off until validated on a 2nd machine; remove this guard in fleet.sh cmd_deploy after acceptance"
     deploy_multi_host
   fi
 
@@ -755,8 +974,115 @@ cmd_deploy() {
   if (( DRY )); then
     info "dry-run complete — plan above, nothing changed"
   else
-    state_write "$BUNDLE_VER" "${prev:-}"
+    state_write "$BUNDLE_VER" "${prev:-}" \
+      || die "release is healthy but failed to record Fleet state in $STATE_FILE"
+    if (( MAINTENANCE_WINDOW )); then
+      fleet_maintenance off \
+        || die "release is healthy but maintenance mode could not be disabled"
+    fi
     ok "deploy done — version $BUNDLE_VER live${prev:+, previous was $prev}"
+  fi
+}
+
+restore_config_single_local() {
+  local release_id="$1" release_root app_ver n
+  [[ -n "$release_id" ]] || return 1
+  release_root="$(release_dir_for "$ROOT" "$release_id")"
+  [[ -f "$release_root/.af-release" ]] || return 1
+  app_ver="$(release_app_version_local "$release_root")"
+  n="$(single_app_scale)"
+  info "restoring config/reconcile from $release_id"
+  compose_on_release local "$release_id" "$app_ver" run --rm --no-deps release \
+    || return 1
+  compose_on_release local "$release_id" "$app_ver" up -d --no-deps --force-recreate \
+    --scale "backend=$n" backend frontend || return 1
+  wait_ready_result local
+}
+
+deploy_config_single_local() {
+  local previous_release active app_ver n up_ok=0
+  previous_release="$(state_get current)"
+  active="$(active_release_dir_local)"
+  stage_config_release_local
+  app_ver="$(release_app_version_local "$STAGED_RELEASE")"
+  n="$(single_app_scale)"
+
+  if (( DRY )); then
+    info "would run release/reconcile against staged config with app image $app_ver"
+    info "would recreate backend/frontend from config release $BUNDLE_VER, then probe LB"
+    return 0
+  fi
+
+  step "validate + reconcile staged config once"
+  compose_on_release local "$BUNDLE_VER" "$app_ver" run --rm --no-deps release \
+    || die "config release/reconcile gate failed; active release remains $previous_release"
+
+  step "activate config on application services"
+  compose_on_release local "$BUNDLE_VER" "$app_ver" up -d --no-deps --force-recreate \
+    --scale "backend=$n" backend frontend && up_ok=1
+  if (( ! up_ok )); then
+    restore_config_single_local "$previous_release" \
+      || bad "automatic config restore failed; maintenance mode should remain enabled"
+    die "config service recreation failed"
+  fi
+  if ! wait_ready_result local; then
+    restore_config_single_local "$previous_release" \
+      || bad "automatic config restore failed; maintenance mode should remain enabled"
+    die "config release failed readiness"
+  fi
+  smoke local
+  activate_release_local "$STAGED_RELEASE"
+}
+
+cmd_deploy_config() {
+  local bundle=""
+  DRY=0
+  MAINTENANCE_WINDOW=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run) DRY=1 ;;
+      --maintenance) MAINTENANCE_WINDOW=1 ;;
+      -*) die "unknown deploy-config flag: $1" ;;
+      *) bundle="$1" ;;
+    esac
+    shift
+  done
+  [[ -n "$bundle" ]] || die "usage: fleet.sh deploy-config [--dry-run] <bundle-dir>"
+  resolve_sandbox_enablement
+  parse_conf
+  load_bundle_meta "$bundle"
+  [[ "$BUNDLE_KIND" == config ]] \
+    || die "bundle $BUNDLE_VER is an app release; use: fleet.sh deploy $bundle"
+  (( DRY )) && info "DRY-RUN — no host will be touched"
+  step "deploy config release=$BUNDLE_VER from $BUNDLE"
+  if (( ! DRY )); then
+    "$SCRIPT_DIR/verify-bundle.sh" "$BUNDLE" || die "config bundle checksum verification failed"
+  else
+    info "would run verify-bundle.sh $BUNDLE"
+  fi
+  if (( MAINTENANCE_WINDOW && ! DRY )); then
+    fleet_maintenance on "Deploying config release $BUNDLE_VER" \
+      || die "failed to enable maintenance mode"
+  fi
+
+  local hosts; hosts="$(all_hosts)"
+  if [[ "$hosts" == local ]]; then
+    deploy_config_single_local
+  else
+    deploy_config_multi_host
+  fi
+
+  local prev; prev="$(state_get current)"
+  if (( DRY )); then
+    info "dry-run complete — plan above, nothing changed"
+  else
+    state_write "$BUNDLE_VER" "${prev:-}" \
+      || die "config is healthy but failed to record Fleet state in $STATE_FILE"
+    if (( MAINTENANCE_WINDOW )); then
+      fleet_maintenance off \
+        || die "config is healthy but maintenance mode could not be disabled"
+    fi
+    ok "config release $BUNDLE_VER live (app images unchanged)"
   fi
 }
 
@@ -772,16 +1098,50 @@ cmd_prepare_sandbox() {
   done
   [[ -n "$bundle" ]] || die "usage: fleet.sh prepare-sandbox [--dry-run] <bundle-dir>"
   load_bundle_meta "$bundle"
+  [[ "$BUNDLE_KIND" == app ]] || die "config-only bundles do not carry sandbox artifacts"
   (( DRY )) && info "DRY-RUN — sandbox host will not be touched"
   assert_arch local ""
   prepare_sandbox_single_local 1
 }
 
-# single box: every role local. compose owns ordering (release gate +
-# healthchecks); we just load images and up the whole stack.
+app_scale_for_host() {
+  local host="$1" i
+  for i in $(app_indices); do
+    [[ "${HOST[$i]}" == "$host" ]] \
+      && { printf '%s\n' "${SCALE[$i]:-1}"; return 0; }
+  done
+  return 1
+}
+
+single_app_scale() {
+  app_scale_for_host local
+}
+
+restore_release_single_local() {  # best-effort recovery; caller reports failure
+  local release_id="$1" release_root app_ver n
+  [[ -n "$release_id" ]] || return 1
+  release_root="$(release_dir_for "$ROOT" "$release_id")"
+  [[ -f "$release_root/.af-release" ]] || return 1
+  app_ver="$(release_app_version_local "$release_root")"
+  n="$(single_app_scale)"
+  info "attempting automatic restore of last successful release $release_id"
+  if has_infra; then
+    compose_on_release local "$release_id" "$app_ver" --profile infra up -d --remove-orphans --scale "backend=$n" \
+      || return 1
+  else
+    compose_on_release local "$release_id" "$app_ver" up -d --remove-orphans --scale "backend=$n" \
+      || return 1
+  fi
+  wait_ready_result local
+}
+
+# single box: every role local. Compose owns ordering (release gate +
+# healthchecks), while Fleet keeps config/deploy in an immutable release root.
 deploy_single_local() {
-  assert_arch local ""
-  extract_release_units_single_local
+  local n previous_release="" up_ok=0
+  assert_arch local "$(host_arch local || true)"
+  stage_app_release_local
+  previous_release="$(state_get current)"
 
   step "load app images ($(basename "$APP_TAR"))"
   if (( DRY )); then info "would: docker load -i $APP_TAR"; else docker load -i "$APP_TAR" || die "docker load failed"; ok "images loaded"; fi
@@ -813,10 +1173,7 @@ deploy_single_local() {
   fi
 
   # scale for the (single) app row
-  local i n="" profile=""
-  for i in $(app_indices); do n="${SCALE[$i]}"; done
-  has_infra && profile="--profile infra"
-  local scale_arg=""; [[ -n "$n" ]] && scale_arg="--scale backend=$n"
+  n="$(single_app_scale)"
 
   # Intranet Caddy hard-references deploy/certs/{server.crt,server.key}; a
   # missing pem makes it fail config load and never start. Ensure a cert exists
@@ -830,7 +1187,8 @@ deploy_single_local() {
   fi
 
   if [[ "$ENABLE_SANDBOX" == 1 ]]; then
-    [[ -f "$SANDBOX_COMPOSE_FILE" ]] || die "AF_ENABLE_SANDBOX=1 but $SANDBOX_COMPOSE_FILE is missing"
+    [[ -f "$STAGED_RELEASE/deploy/$SANDBOX_COMPOSE_BASENAME" ]] \
+      || die "AF_ENABLE_SANDBOX=1 but staged release lacks $SANDBOX_COMPOSE_BASENAME"
     if (( DRY )); then
       info "would require: runsc registered, $BUNDLE_SANDBOX_IMAGE loaded, scratch root mounted"
     else
@@ -843,77 +1201,579 @@ deploy_single_local() {
     fi
   fi
 
-  local compose_args=(-f "$COMPOSE_FILE")
-  [[ "$ENABLE_SANDBOX" == 1 ]] && compose_args+=(-f "$SANDBOX_COMPOSE_FILE")
-
-  step "compose up (profile='${profile:-none}' ${scale_arg:-scale=1} sandbox=${ENABLE_SANDBOX})"
+  step "compose up from immutable release (infra=$(has_infra && printf 1 || printf 0) scale=$n sandbox=${ENABLE_SANDBOX})"
   if (( DRY )); then
-    info "would: AF_VERSION=$BUNDLE_VER docker compose ${compose_args[*]} $profile up -d --remove-orphans $scale_arg"
+    info "would: compose release=$BUNDLE_VER app=$BUNDLE_VER up -d --remove-orphans --scale backend=$n"
     info "would: wait for /health/ready, then smoke"
     return 0
   fi
-  # shellcheck disable=SC2086
-  env AF_VERSION="$BUNDLE_VER" docker compose "${compose_args[@]}" $profile up -d --remove-orphans $scale_arg \
-    || die "compose up failed (release gate may have aborted — check 'docker compose logs release')"
+
+  if has_infra; then
+    compose_on_release local "$BUNDLE_VER" "$BUNDLE_VER" --profile infra up -d --remove-orphans --scale "backend=$n" \
+      && up_ok=1
+  else
+    compose_on_release local "$BUNDLE_VER" "$BUNDLE_VER" up -d --remove-orphans --scale "backend=$n" \
+      && up_ok=1
+  fi
+  if (( ! up_ok )); then
+    restore_release_single_local "$previous_release" \
+      || bad "automatic restore unavailable/failed; maintenance mode should remain enabled"
+    die "compose up failed (release gate may have aborted — inspect release/backend logs)"
+  fi
   ok "stack up"
-  wait_ready local
+  if ! wait_ready_result local; then
+    restore_release_single_local "$previous_release" \
+      || bad "automatic restore unavailable/failed; maintenance mode should remain enabled"
+    die "new release failed readiness; restored last successful release when possible"
+  fi
   smoke local
+  activate_release_local "$STAGED_RELEASE"
 }
 
-# multi-host: fleet.sh owns cross-host ordering (compose depends_on is same-host
-# only). Structured but UNEXERCISED — the cross-host seams are marked below.
-deploy_multi_host() {
-  info "plan for version $BUNDLE_VER:"
-  local i h n
-  # 1. per-host: copy bundle + load images (+ untar config/deploy on remotes)
-  while IFS= read -r h; do
-    info "  [$h] scp bundle → docker load app$(has_infra && [[ "$(role_host infra)" == "$h" ]] && echo ' + infra') → untar config/deploy into $(target_dir "$h")"
-  done < <(all_hosts)
-  # 2. push single-source .env + per-host override
-  info "  push deploy/.env (+ per-host .env.<host> override) to every host"
-  # 3. release gate on the one release host
-  info "  [$(role_host release)] docker compose run --rm --no-deps release  (must exit 0)"
-  # 4. rolling app up, host by host
-  for i in $(app_indices); do
-    h="${HOST[$i]}"; n="${SCALE[$i]:-1}"
-    info "  [$h] compose up -d --no-deps --scale backend=$n backend frontend → wait /health/ready → next"
+host_override_file() { printf '%s/.env.%s\n' "$DEPLOY_DIR" "$1"; }
+
+host_env_value() {  # host_env_value <host> <key>
+  local host="$1" key="$2" value="" override
+  # `local` is the control host itself, so deploy/.env is already its concrete
+  # target env. Per-host overlays are only for materializing remote host files;
+  # applying .env.local here would also pollute the common base used for the
+  # next remote host.
+  if ! is_local "$host"; then
+    override="$(host_override_file "$host")"
+    value="$(env_file_value "$override" "$key" || true)"
+  fi
+  [[ -n "$value" ]] || value="$(env_file_value "$DEPLOY_DIR/.env" "$key" || true)"
+  printf '%s\n' "$value"
+}
+
+render_host_env() {  # render_host_env <host> <output>
+  local host="$1" output="$2" override line key value
+  cp "$DEPLOY_DIR/.env" "$output" || die "failed to stage base .env for $host"
+  override="$(host_override_file "$host")"
+  if ! is_local "$host" && [[ -f "$override" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ "$line" =~ ^[[:space:]]*# || -z "$line" || "$line" != *=* ]] && continue
+      key="${line%%=*}"; value="${line#*=}"
+      env_file_set "$output" "$key" "$value"
+    done < "$override"
+  fi
+  chmod 600 "$output"
+}
+
+copy_release_file() {  # copy_release_file <host> <file> <remote-bundle>
+  local host="$1" file="$2" remote_bundle="$3"
+  [[ -f "$file" ]] || die "required release file missing: $file"
+  if (( DRY )); then
+    info "  [$host] would copy $(basename "$file")"
+  else
+    copy_to "$host" "$file" "$remote_bundle/$(basename "$file")" \
+      || die "$host: failed to copy $(basename "$file")"
+  fi
+}
+
+prepare_release_host() {  # prepare_release_host <host>
+  local host="$1" dir remote_bundle deploy_tar config_tar manifest env_tmp digest infra_tar=""
+  dir="$(target_dir "$host")"
+  remote_bundle="$dir/.artifactflow/bundles/$BUNDLE_VER"
+  deploy_tar="$BUNDLE/artifactflow-deploy-${BUNDLE_VER}.tar.gz"
+  config_tar="$BUNDLE/artifactflow-config-${BUNDLE_VER}.tar.gz"
+  manifest="$BUNDLE_MANIFEST"
+  digest="$(bundle_unit_digest "$deploy_tar" "$config_tar")"
+
+  step "prepare release host $host"
+  if (( DRY )); then
+    info "  would create $remote_bundle and immutable release root"
+  else
+    run_on "$host" "mkdir -p '$remote_bundle' '$dir/deploy' '$dir/.artifactflow/releases'" \
+      || die "$host: cannot create deployment directories"
+  fi
+  copy_release_file "$host" "$deploy_tar" "$remote_bundle"
+  copy_release_file "$host" "$deploy_tar.sha256" "$remote_bundle"
+  copy_release_file "$host" "$config_tar" "$remote_bundle"
+  copy_release_file "$host" "$config_tar.sha256" "$remote_bundle"
+  copy_release_file "$host" "$manifest" "$remote_bundle"
+
+  if host_has_role "$host" app || host_has_role "$host" release; then
+    copy_release_file "$host" "$APP_TAR" "$remote_bundle"
+    copy_release_file "$host" "$APP_TAR.sha256" "$remote_bundle"
+  fi
+  if host_has_role "$host" infra || host_has_role "$host" lb; then
+    infra_tar="$(find "$BUNDLE" -maxdepth 1 -type f -name 'artifactflow-infra-*.tar.gz' -print | head -1)"
+    if [[ -n "$infra_tar" ]]; then
+      copy_release_file "$host" "$infra_tar" "$remote_bundle"
+      copy_release_file "$host" "$infra_tar.sha256" "$remote_bundle"
+    fi
+  fi
+
+  if (( DRY )); then
+    info "  [$host] would merge deploy/.env + optional .env.$host"
+    info "  [$host] would verify, bootstrap deploy scripts, stage release, and load role images"
+    return 0
+  fi
+
+  env_tmp="$(mktemp "/tmp/artifactflow-env-${BUNDLE_VER}.XXXXXX")" \
+    || die "failed to create host env staging file"
+  render_host_env "$host" "$env_tmp"
+  copy_to "$host" "$env_tmp" "$dir/deploy/.env" \
+    || { rm -f "$env_tmp"; die "$host: failed to install deploy/.env"; }
+  rm -f "$env_tmp"
+  run_on "$host" "chmod 600 '$dir/deploy/.env'; cd '$remote_bundle'; sha256sum -c '$(basename "$deploy_tar.sha256")'; tar xzf '$(basename "$deploy_tar")' -C '$dir'; '$dir/deploy/scripts/verify-bundle.sh' '$remote_bundle'" \
+    || die "$host: transferred bundle verification/bootstrap failed"
+
+  # Stage without touching the active symlink. Version collision with different
+  # content is a loud failure, never an overwrite.
+  run_on "$host" "set -eu; release='$dir/.artifactflow/releases/$BUNDLE_VER'; if [ -d \"\$release\" ]; then grep -qx 'bundle_digest=$digest' \"\$release/.af-release\"; else tmp=\$(mktemp -d '$dir/.artifactflow/releases/.${BUNDLE_VER}.tmp.XXXXXX'); tar xzf '$remote_bundle/$(basename "$deploy_tar")' -C \"\$tmp\"; tar xzf '$remote_bundle/$(basename "$config_tar")' -C \"\$tmp\"; test -f \"\$tmp/deploy/$COMPOSE_BASENAME\"; test -d \"\$tmp/config\"; printf 'release_id=%s\nkind=app\napp_version=%s\nbundle_digest=%s\n' '$BUNDLE_VER' '$BUNDLE_VER' '$digest' > \"\$tmp/.af-release\"; mv \"\$tmp\" \"\$release\"; fi" \
+    || die "$host: immutable release staging failed"
+
+  if host_has_role "$host" app || host_has_role "$host" release; then
+    run_on "$host" "docker load -i '$remote_bundle/$(basename "$APP_TAR")'" \
+      || die "$host: app image load failed"
+    run_on "$host" "actual=\$(docker image inspect 'artifactflow:$BUNDLE_VER' --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | awk -F= '\$1 == \"ARTIFACTFLOW_SANDBOX_IMAGE\" {sub(/^[^=]*=/, \"\"); print; exit}'); test \"\$actual\" = '$BUNDLE_SANDBOX_IMAGE'" \
+      || die "$host: backend image sandbox reference does not match the release manifest"
+  fi
+  if [[ -n "$infra_tar" ]]; then
+    run_on "$host" "docker load -i '$remote_bundle/$(basename "$infra_tar")'" \
+      || die "$host: infra image load failed"
+  fi
+  run_prepare_host_check "$host" || die "$host: prepare-host check failed"
+}
+
+wait_app_host() {  # wait_app_host <host>
+  local host="$1" waited=0 backend_port frontend_port
+  backend_port="$(host_env_value "$host" AF_BACKEND_PORT)"; backend_port="${backend_port:-8000}"
+  frontend_port="$(host_env_value "$host" AF_FRONTEND_PORT)"; frontend_port="${frontend_port:-3000}"
+  while (( waited < READY_TIMEOUT )); do
+    if run_on "$host" "curl -fsS --max-time 5 'http://localhost:$backend_port/health/ready' >/dev/null && curl -fsS --max-time 5 'http://localhost:$frontend_port/' >/dev/null" 2>/dev/null; then
+      ok "$host app ready after ${waited}s"
+      return 0
+    fi
+    sleep 3; waited=$((waited + 3))
   done
-  # 5. regenerate static Caddy upstream from app hosts + reload
-  info "  [$(role_host lb)] ensure-cert.sh (self-signed placeholder if certs/ empty) → render static upstream ($(for i in $(app_indices); do printf '%s:8000 ' "${HOST[$i]}"; done)) → caddy reload"
-  # 6. smoke through LB
-  info "  smoke via LB ($(role_host lb))"
-  echo
-  info "UNEXERCISED SEAMS (must validate on the 2nd machine before un-gating):"
-  info "  a) backend port publishing — base compose only 'expose: 8000' (compose-internal);"
-  info "     cross-host LB needs it host-published. Add a fleet overlay, do NOT edit the"
-  info "     single-host compose (keeps the tested dynamic-DNS path intact)."
-  info "  b) static Caddy upstream — single-host uses 'dynamic a { name backend }' (docker"
-  info "     DNS); cross-host has no shared DNS, needs a generated 'k1:8000 k2:8000' list."
-  info "  c) per-host .env DB/Redis URLs must point at the infra host, not localhost."
+  bad "$host app not ready within ${READY_TIMEOUT}s"
+  return 1
+}
+
+write_multi_host_upstreams() {  # write static targets into LB release
+  local lb="$1" release_id="$2" tmp i h backend_port frontend_host frontend_port remote
+  tmp="$(mktemp /tmp/artifactflow-upstreams.XXXXXX)" || die "failed to create upstream config"
+  {
+    echo '(backend_upstream_targets) {'
+    printf '\tto'
+    for i in $(app_indices); do
+      h="${HOST[$i]}"; backend_port="$(host_env_value "$h" AF_BACKEND_PORT)"; backend_port="${backend_port:-8000}"
+      printf ' %s:%s' "$h" "$backend_port"
+    done
+    printf '\n}\n\n'
+    frontend_host="${HOST[$(app_indices | head -1)]}"
+    frontend_port="$(host_env_value "$frontend_host" AF_FRONTEND_PORT)"; frontend_port="${frontend_port:-3000}"
+    printf '(frontend_upstream_targets) {\n\tto %s:%s\n}\n' "$frontend_host" "$frontend_port"
+  } > "$tmp"
+  remote="$(release_dir_for "$(target_dir "$lb")" "$release_id")/deploy/caddy/upstreams.caddy"
+  if (( DRY )); then
+    info "  [$lb] would render static Caddy upstreams: $(tr '\n' ' ' < "$tmp")"
+  else
+    copy_to "$lb" "$tmp" "$remote" || { rm -f "$tmp"; die "$lb: failed to install static upstreams"; }
+  fi
+  rm -f "$tmp"
+}
+
+activate_release_on() {  # activate_release_on <host> <release-id>
+  local host="$1" release_id="$2" dir release link tmp
+  dir="$(target_dir "$host")"; release="$(release_dir_for "$dir" "$release_id")"
+  link="$dir/.artifactflow/current"; tmp="$link.tmp.$$"
+  run_on "$host" "ln -s '$release' '$tmp' && mv -Tf '$tmp' '$link'" \
+    || { bad "$host: failed to activate release $release_id"; return 1; }
+}
+
+restore_multi_host_release() {  # best effort after a failed rollout
+  local release_id="$1" release_root app_ver infra_host release_host lb i h
+  [[ -n "$release_id" ]] || return 1
+  release_root="$(release_dir_for "$ROOT" "$release_id")"
+  [[ -f "$release_root/.af-release" ]] || return 1
+  app_ver="$(release_app_version_local "$release_root")"
+  info "attempting fleet-wide restore to $release_id"
+  infra_host="$(role_host infra || true)"
+  [[ -z "$infra_host" ]] || compose_on_release "$infra_host" "$release_id" "$app_ver" --profile infra up -d postgres redis || true
+  release_host="$(role_host release)"
+  compose_on_release "$release_host" "$release_id" "$app_ver" run --rm --no-deps release || true
+  for i in $(app_indices); do
+    h="${HOST[$i]}"
+    compose_on_release "$h" "$release_id" "$app_ver" up -d --no-deps --force-recreate backend frontend || true
+  done
+  lb="$(role_host lb)"
+  compose_on_release "$lb" "$release_id" "$app_ver" up -d --no-deps --force-recreate caddy || true
+  while IFS= read -r h; do activate_release_on "$h" "$release_id" || true; done < <(all_hosts)
+  wait_ready_result "$lb"
+}
+
+# Multi-host transport and ordering. This path is intentionally conservative:
+# exactly one backend per app host until per-replica port discovery exists.
+deploy_multi_host() {
+  local i h n infra_host release_host lb previous_release
+  previous_release="$(state_get current)"
+  for i in $(app_indices); do
+    n="${SCALE[$i]:-1}"
+    [[ "$n" == 1 ]] || die "multi-host app row ${HOST[$i]} must use scale=1 (got $n); add service discovery before scaling within a host"
+  done
+  info "MULTI-HOST path is executable but awaits first physical acceptance run; proceeding without the former hard gate"
+  stage_app_release_local  # control-plane copy for state/rollback metadata
+
+  while IFS= read -r h; do
+    assert_arch "$h" "$(host_arch "$h" || true)"
+    prepare_release_host "$h"
+  done < <(all_hosts)
+  (( DRY )) && {
+    write_multi_host_upstreams "$(role_host lb)" "$BUNDLE_VER"
+    info "would run infra → release gate → app hosts one-by-one → LB → smoke → activate"
+    return 0
+  }
+
+  infra_host="$(role_host infra || true)"
+  if [[ -n "$infra_host" ]]; then
+    step "start infra on $infra_host"
+    compose_on_release "$infra_host" "$BUNDLE_VER" "$BUNDLE_VER" --profile infra up -d postgres redis \
+      || { restore_multi_host_release "$previous_release" || true; die "infra rollout failed"; }
+  fi
+
+  release_host="$(role_host release)"
+  step "release/reconcile gate on $release_host"
+  compose_on_release "$release_host" "$BUNDLE_VER" "$BUNDLE_VER" run --rm --no-deps release \
+    || { restore_multi_host_release "$previous_release" || true; die "release gate failed"; }
+
+  for i in $(app_indices); do
+    h="${HOST[$i]}"
+    step "roll app host $h"
+    compose_on_release "$h" "$BUNDLE_VER" "$BUNDLE_VER" up -d --no-deps --force-recreate backend frontend \
+      || { restore_multi_host_release "$previous_release" || true; die "$h app rollout failed"; }
+    wait_app_host "$h" \
+      || { restore_multi_host_release "$previous_release" || true; die "$h failed readiness"; }
+  done
+
+  lb="$(role_host lb)"
+  write_multi_host_upstreams "$lb" "$BUNDLE_VER"
+  run_on "$lb" "cd '$(target_dir "$lb")' && deploy/scripts/ensure-cert.sh" \
+    || { restore_multi_host_release "$previous_release" || true; die "$lb certificate bootstrap failed"; }
+  step "roll LB host $lb"
+  compose_on_release "$lb" "$BUNDLE_VER" "$BUNDLE_VER" up -d --no-deps --force-recreate caddy \
+    || { restore_multi_host_release "$previous_release" || true; die "$lb rollout failed"; }
+  wait_ready_result "$lb" \
+    || { restore_multi_host_release "$previous_release" || true; die "fleet LB readiness failed"; }
+  smoke "$lb"
+
+  while IFS= read -r h; do
+    activate_release_on "$h" "$BUNDLE_VER" \
+      || { restore_multi_host_release "$previous_release" || true; die "$h release activation failed"; }
+  done < <(all_hosts)
+  activate_release_local "$STAGED_RELEASE"
+}
+
+prepare_config_host() {  # prepare_config_host <host> <previous-release> <app-version>
+  local host="$1" previous="$2" app_ver="$3" dir remote_bundle config_tar digest release
+  dir="$(target_dir "$host")"
+  remote_bundle="$dir/.artifactflow/bundles/$BUNDLE_VER"
+  config_tar="$BUNDLE/artifactflow-config-${BUNDLE_VER}.tar.gz"
+  digest="$(bundle_unit_digest "$config_tar")"
+  release="$(release_dir_for "$dir" "$BUNDLE_VER")"
+  step "prepare config release on $host"
+  if (( DRY )); then
+    info "  [$host] would copy/verify config and clone deploy from $previous"
+    return 0
+  fi
+  run_on "$host" "mkdir -p '$remote_bundle' '$dir/.artifactflow/releases'" \
+    || die "$host: cannot create config bundle directory"
+  copy_release_file "$host" "$config_tar" "$remote_bundle"
+  copy_release_file "$host" "$config_tar.sha256" "$remote_bundle"
+  copy_release_file "$host" "$BUNDLE_MANIFEST" "$remote_bundle"
+  run_on "$host" "cd '$remote_bundle' && sha256sum -c '$(basename "$config_tar.sha256")'" \
+    || die "$host: config transfer checksum failed"
+  run_on "$host" "set -eu; release='$release'; previous='$(release_dir_for "$dir" "$previous")'; test -f \"\$previous/.af-release\"; if [ -d \"\$release\" ]; then grep -qx 'bundle_digest=$digest' \"\$release/.af-release\"; else tmp=\$(mktemp -d '$dir/.artifactflow/releases/.${BUNDLE_VER}.tmp.XXXXXX'); cp -a \"\$previous/deploy\" \"\$tmp/deploy\"; tar xzf '$remote_bundle/$(basename "$config_tar")' -C \"\$tmp\"; test -d \"\$tmp/config\"; printf 'release_id=%s\nkind=config\napp_version=%s\nbundle_digest=%s\n' '$BUNDLE_VER' '$app_ver' '$digest' > \"\$tmp/.af-release\"; mv \"\$tmp\" \"\$release\"; fi" \
+    || die "$host: config release staging failed"
+}
+
+deploy_config_multi_host() {
+  local previous_release app_ver release_host lb i h n
+  previous_release="$(state_get current)"
+  [[ -n "$previous_release" ]] || die "multi-host deploy-config needs a previous successful release"
+  for i in $(app_indices); do
+    n="${SCALE[$i]:-1}"
+    [[ "$n" == 1 ]] || die "multi-host deploy-config requires scale=1 per app host (got $n on ${HOST[$i]})"
+  done
+  stage_config_release_local
+  app_ver="$(release_app_version_local "$STAGED_RELEASE")"
+  info "MULTI-HOST config path awaits physical acceptance; proceeding without the former hard gate"
+  while IFS= read -r h; do
+    prepare_config_host "$h" "$previous_release" "$app_ver"
+  done < <(all_hosts)
+  if (( DRY )); then
+    info "would reconcile once → roll app hosts → LB smoke → activate config release"
+    return 0
+  fi
+
+  release_host="$(role_host release)"
+  compose_on_release "$release_host" "$BUNDLE_VER" "$app_ver" run --rm --no-deps release \
+    || die "config release gate failed; no host was activated"
+  for i in $(app_indices); do
+    h="${HOST[$i]}"
+    compose_on_release "$h" "$BUNDLE_VER" "$app_ver" up -d --no-deps --force-recreate backend frontend \
+      || { restore_multi_host_release "$previous_release" || true; die "$h config rollout failed"; }
+    wait_app_host "$h" \
+      || { restore_multi_host_release "$previous_release" || true; die "$h config readiness failed"; }
+  done
+  lb="$(role_host lb)"
+  wait_ready_result "$lb" \
+    || { restore_multi_host_release "$previous_release" || true; die "config rollout LB readiness failed"; }
+  smoke "$lb"
+  while IFS= read -r h; do
+    activate_release_on "$h" "$BUNDLE_VER" || die "$h config activation failed"
+  done < <(all_hosts)
+  activate_release_local "$STAGED_RELEASE"
+}
+
+rollback_multi_host() {  # rollback_multi_host <target-release> <current-release>
+  local target="$1" current="$2" release_root app_ver infra_host release_host lb i h
+  release_root="$(release_dir_for "$ROOT" "$target")"
+  [[ -f "$release_root/.af-release" ]] || die "control-plane release snapshot missing: $release_root"
+  app_ver="$(release_app_version_local "$release_root")"
+  while IFS= read -r h; do
+    run_on "$h" "test -f '$(release_dir_for "$(target_dir "$h")" "$target")/.af-release'" \
+      || die "$h: rollback snapshot $target missing"
+  done < <(all_hosts)
+  if (( DRY )); then
+    info "would roll every role to release=$target app=$app_ver, smoke, then activate"
+    return 0
+  fi
+
+  infra_host="$(role_host infra || true)"
+  [[ -z "$infra_host" ]] || compose_on_release "$infra_host" "$target" "$app_ver" --profile infra up -d postgres redis \
+    || die "rollback infra failed"
+  release_host="$(role_host release)"
+  compose_on_release "$release_host" "$target" "$app_ver" run --rm --no-deps release \
+    || die "rollback release/reconcile gate failed"
+  for i in $(app_indices); do
+    h="${HOST[$i]}"
+    compose_on_release "$h" "$target" "$app_ver" up -d --no-deps --force-recreate backend frontend \
+      || die "$h rollback failed"
+    wait_app_host "$h" || die "$h rollback readiness failed"
+  done
+  lb="$(role_host lb)"
+  compose_on_release "$lb" "$target" "$app_ver" up -d --no-deps --force-recreate caddy \
+    || die "$lb rollback failed"
+  wait_ready "$lb"
+  smoke "$lb"
+  while IFS= read -r h; do activate_release_on "$h" "$target" || die "$h rollback activation failed"; done < <(all_hosts)
+  activate_release_local "$release_root"
+  state_write "$target" "$current" \
+    || die "rollback is healthy but failed to record Fleet state in $STATE_FILE"
+  ok "rolled back fleet to $target (app=$app_ver, config/deploy restored)"
+}
+
+validate_env_candidate() {
+  local file="$1" key value fail=0
+  [[ -f "$file" ]] || die "env file not found: $file"
+  for key in ARTIFACTFLOW_JWT_SECRET ARTIFACTFLOW_CREDENTIAL_KEY ARTIFACTFLOW_REDIS_URL ARTIFACTFLOW_REDIS_KEY_PREFIX; do
+    value="$(env_file_value "$file" "$key" || true)"
+    [[ -n "$value" && "$value" != *CHANGE_ME* ]] \
+      || { bad "$file: missing/placeholder $key"; fail=1; }
+  done
+  value="$(env_file_value "$file" ARTIFACTFLOW_DATABASE_URLS || true)"
+  [[ -n "$value" ]] || value="$(env_file_value "$file" ARTIFACTFLOW_DATABASE_URL || true)"
+  [[ -n "$value" ]] || { bad "$file: database URL missing"; fail=1; }
+  value="$(env_file_value "$file" AF_ENABLE_SANDBOX || true)"
+  [[ "$value" == 0 || "$value" == 1 ]] || { bad "$file: AF_ENABLE_SANDBOX must be 0 or 1"; fail=1; }
+  (( fail == 0 )) || die "env validation failed"
+  ok "env candidate basic validation passed"
+}
+
+install_env_local() {  # install_env_local <candidate>
+  local candidate="$1" tmp
+  tmp="$(mktemp "$DEPLOY_DIR/.env.tmp.XXXXXX")" || die "cannot stage deploy/.env"
+  cp "$candidate" "$tmp" || { rm -f "$tmp"; die "cannot copy env candidate"; }
+  chmod 600 "$tmp" || { rm -f "$tmp"; die "cannot secure env candidate"; }
+  mv "$tmp" "$DEPLOY_DIR/.env" || die "cannot activate deploy/.env"
+}
+
+restore_remote_envs() {
+  local h dir
+  while IFS= read -r h; do
+    is_local "$h" && continue
+    dir="$(target_dir "$h")"
+    run_on "$h" "if [ -f '$dir/deploy/.env.fleet-prev' ]; then mv -f '$dir/deploy/.env.fleet-prev' '$dir/deploy/.env'; chmod 600 '$dir/deploy/.env'; fi" || true
+  done < <(all_hosts)
+}
+
+cmd_env() {
+  local action="${1:-}" candidate="${2:-$DEPLOY_DIR/.env}" cur release_root app_ver backup h dir tmp infra_host release_host lb i n
+  case "$action" in check|apply) ;; *) die "usage: fleet.sh env {check|apply} [env-file]" ;; esac
+  validate_env_candidate "$candidate"
+  [[ "$action" == check ]] && return 0
+  parse_conf
+  cur="$(state_get current)"
+  [[ -n "$cur" ]] || die "env apply requires a successful immutable release"
+  release_root="$(release_dir_for "$ROOT" "$cur")"
+  [[ -f "$release_root/.af-release" ]] || die "active release snapshot missing: $release_root"
+  app_ver="$(release_app_version_local "$release_root")"
+  backup="$(mktemp /tmp/artifactflow-env-backup.XXXXXX)" || die "cannot create env backup"
+  cp "$DEPLOY_DIR/.env" "$backup" || { rm -f "$backup"; die "cannot back up deploy/.env"; }
+  install_env_local "$candidate"
+  resolve_sandbox_enablement
+
+  if [[ "$(all_hosts)" == local ]]; then
+    run_prepare_host_check local \
+      || { install_env_local "$backup"; rm -f "$backup"; die "new env failed host validation; restored old env"; }
+    n="$(single_app_scale)"
+    step "apply env by reconciling/recreating the active release"
+    if has_infra; then
+      compose_on_release local "$cur" "$app_ver" --profile infra up -d --remove-orphans --scale "backend=$n" \
+        || { install_env_local "$backup"; restore_release_single_local "$cur" || true; rm -f "$backup"; die "env apply failed; old env restored"; }
+    else
+      compose_on_release local "$cur" "$app_ver" up -d --remove-orphans --scale "backend=$n" \
+        || { install_env_local "$backup"; restore_release_single_local "$cur" || true; rm -f "$backup"; die "env apply failed; old env restored"; }
+    fi
+    wait_ready_result local \
+      || { install_env_local "$backup"; restore_release_single_local "$cur" || true; rm -f "$backup"; die "env readiness failed; old env restored"; }
+  else
+    for i in $(app_indices); do
+      n="${SCALE[$i]:-1}"; [[ "$n" == 1 ]] || die "multi-host env apply requires scale=1 on ${HOST[$i]}"
+    done
+    while IFS= read -r h; do
+      if is_local "$h"; then
+        run_prepare_host_check "$h" \
+          || { install_env_local "$backup"; restore_remote_envs; restore_multi_host_release "$cur" || true; rm -f "$backup"; die "$h: new env validation failed"; }
+        continue
+      fi
+      dir="$(target_dir "$h")"
+      run_on "$h" "cp '$dir/deploy/.env' '$dir/deploy/.env.fleet-prev'" \
+        || { install_env_local "$backup"; restore_remote_envs; rm -f "$backup"; die "$h: cannot back up env"; }
+      tmp="$(mktemp /tmp/artifactflow-host-env.XXXXXX)" \
+        || { install_env_local "$backup"; restore_remote_envs; rm -f "$backup"; die "cannot stage host env"; }
+      render_host_env "$h" "$tmp"
+      copy_to "$h" "$tmp" "$dir/deploy/.env" \
+        || { rm -f "$tmp"; install_env_local "$backup"; restore_remote_envs; rm -f "$backup"; die "$h: env copy failed"; }
+      rm -f "$tmp"
+      run_on "$h" "chmod 600 '$dir/deploy/.env'" \
+        || { install_env_local "$backup"; restore_remote_envs; rm -f "$backup"; die "$h: cannot secure env"; }
+      run_prepare_host_check "$h" \
+        || { install_env_local "$backup"; restore_remote_envs; restore_multi_host_release "$cur" || true; rm -f "$backup"; die "$h: new env validation failed"; }
+    done < <(all_hosts)
+    infra_host="$(role_host infra || true)"
+    [[ -z "$infra_host" ]] || compose_on_release "$infra_host" "$cur" "$app_ver" --profile infra up -d postgres redis \
+      || { install_env_local "$backup"; restore_remote_envs; restore_multi_host_release "$cur" || true; die "infra env apply failed"; }
+    release_host="$(role_host release)"
+    compose_on_release "$release_host" "$cur" "$app_ver" run --rm --no-deps release \
+      || { install_env_local "$backup"; restore_remote_envs; restore_multi_host_release "$cur" || true; die "env release gate failed"; }
+    for i in $(app_indices); do
+      h="${HOST[$i]}"
+      compose_on_release "$h" "$cur" "$app_ver" up -d --no-deps --force-recreate backend frontend \
+        || { install_env_local "$backup"; restore_remote_envs; restore_multi_host_release "$cur" || true; die "$h env rollout failed"; }
+      wait_app_host "$h" || { install_env_local "$backup"; restore_remote_envs; restore_multi_host_release "$cur" || true; die "$h env readiness failed"; }
+    done
+    lb="$(role_host lb)"
+    compose_on_release "$lb" "$cur" "$app_ver" up -d --no-deps --force-recreate caddy \
+      || { install_env_local "$backup"; restore_remote_envs; restore_multi_host_release "$cur" || true; die "LB env apply failed"; }
+    wait_ready_result "$lb" \
+      || { install_env_local "$backup"; restore_remote_envs; restore_multi_host_release "$cur" || true; die "env apply LB readiness failed"; }
+    while IFS= read -r h; do dir="$(target_dir "$h")"; run_on "$h" "rm -f '$dir/deploy/.env.fleet-prev'" || true; done < <(all_hosts)
+  fi
+  rm -f "$backup"
+  ok "environment applied to release $cur (app=$app_ver)"
+}
+
+cmd_proxy_reload() {
+  resolve_sandbox_enablement
+  parse_conf
+  local cur release_root app_ver lb
+  cur="$(state_get current)"; [[ -n "$cur" ]] || die "no active release"
+  release_root="$(release_dir_for "$ROOT" "$cur")"
+  app_ver="$(release_app_version_local "$release_root")"; app_ver="${app_ver:-latest}"
+  lb="$(role_host lb)"
+  compose_on_release "$lb" "$cur" "$app_ver" exec caddy caddy reload \
+    --config /etc/caddy/conf/Caddyfile.intranet --adapter caddyfile \
+    || die "Caddy reload failed on $lb"
+  ok "Caddy config/cert reloaded on $lb"
+}
+
+cmd_maintenance() {
+  local action="${1:-status}" note="${2:-}"
+  case "$action" in on|off|status) ;; *) die "usage: fleet.sh maintenance {on|off|status} [note]" ;; esac
+  parse_conf
+  fleet_maintenance "$action" "$note"
 }
 
 # ════════════════════════════════════════════════════════════════════
 # status
 # ════════════════════════════════════════════════════════════════════
+status_compose_on() {  # status_compose_on <host> <release-id-or-empty> <app-version> <args...>
+  local host="$1" release_id="$2" app_ver="$3" dir args; shift 3
+  if [[ -n "$release_id" ]]; then
+    compose_on_release "$host" "$release_id" "$app_ver" "$@"
+  else
+    dir="$(target_dir "$host")"; args="$(shell_args "$@")"
+    run_on "$host" "cd '$dir/deploy' && docker compose --env-file '$dir/deploy/.env' -f '$dir/deploy/$COMPOSE_BASENAME'$args"
+  fi
+}
+
 cmd_status() {
   resolve_sandbox_enablement
   parse_conf
-  local cur; cur="$(state_get current)"
+  local cur app_ver="latest" fail=0; cur="$(state_get current)"
+  if [[ -n "$cur" ]]; then
+    local control_release; control_release="$(release_dir_for "$ROOT" "$cur")"
+    app_ver="$(release_app_version_local "$control_release")"
+    app_ver="${app_ver:-latest}"
+  fi
   step "fleet status${cur:+ (deployed version: $cur)}"
   local host
   while IFS= read -r host; do
     printf '\n  \033[1m[%s]\033[0m\n' "$host"
-    local ps
+    local ps expected="" svc ids count want cid container_state
     # No `--profile infra` needed: `docker compose ps` lists ALL running project
     # containers regardless of which profiles are active (verified on compose
     # v2), so pg/redis show up here even though they're profile-gated.
-    ps="$(compose_on "$host" "${cur:-latest}" ps --format 'table {{.Service}}\t{{.Status}}' 2>/dev/null)"
-    if [[ -n "$ps" ]]; then printf '%s\n' "$ps" | sed 's/^/    /'; else info "no compose project up (or unreachable)"; fi
+    ps="$(status_compose_on "$host" "$cur" "$app_ver" ps --format 'table {{.Service}}\t{{.Status}}' 2>/dev/null)"
+    if [[ -n "$ps" ]]; then
+      printf '%s\n' "$ps" | sed 's/^/    /'
+    elif host_has_role "$host" release \
+      && ! host_has_role "$host" infra \
+      && ! host_has_role "$host" app \
+      && ! host_has_role "$host" lb; then
+      info "release-only host: no long-running service expected"
+    else
+      info "no compose project up (or unreachable)"
+    fi
+
+    host_has_role "$host" infra && expected+=" postgres redis"
+    host_has_role "$host" app && expected+=" backend frontend"
+    host_has_role "$host" lb && expected+=" caddy"
+    for svc in $expected; do
+      ids="$(status_compose_on "$host" "$cur" "$app_ver" ps -q "$svc" 2>/dev/null)"
+      count="$(printf '%s\n' "$ids" | awk 'NF {n++} END {print n+0}')"
+      want=1
+      [[ "$svc" == backend ]] && want="$(app_scale_for_host "$host")"
+      if [[ "$count" != "$want" ]]; then
+        bad "$host: $svc running container count=$count, expected=$want"
+        fail=1
+        continue
+      fi
+      while IFS= read -r cid; do
+        [[ -n "$cid" ]] || continue
+        container_state="$(run_on "$host" "docker inspect -f '{{.State.Running}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' '$cid'" 2>/dev/null || true)"
+        case "$container_state" in
+          "true healthy"|"true none") ;;
+          *) bad "$host: $svc container ${cid:0:12} state=${container_state:-unreachable}"; fail=1 ;;
+        esac
+      done <<< "$ids"
+    done
   done < <(all_hosts)
   # health via LB
   local lb; lb="$(role_host lb)"
   echo
-  if run_on "$lb" "$(lb_ready_cmd)" 2>/dev/null; then ok "LB /health/ready green ($lb)"; else bad "LB /health/ready NOT green ($lb)"; fi
+  if run_on "$lb" "$(lb_ready_cmd "$lb")" 2>/dev/null; then
+    ok "LB /health/ready green ($lb)"
+  else
+    bad "LB /health/ready NOT green ($lb)"
+    fail=1
+  fi
+  (( fail == 0 ))
 }
 
 # ════════════════════════════════════════════════════════════════════
@@ -925,29 +1785,37 @@ cmd_rollback() {
   parse_conf
   local prev cur; prev="$(state_get previous)"; cur="$(state_get current)"
   [[ -n "$prev" ]] || die "no previous version recorded in $STATE_FILE — nothing to roll back to"
-  step "rollback: $cur → $prev (images for $prev must still be loaded)"
+  validate_release_id "$prev"
+  step "rollback release: $cur → $prev"
   local hosts; hosts="$(all_hosts)"
   if [[ "$hosts" != "local" ]]; then
-    info "multi-host rollback authored but UNEXERCISED — inspect and run per-host manually"
-    (( DRY )) || die "multi-host rollback gated off until validated"
-  fi
-  local i n="" profile="" scale_arg=""
-  for i in $(app_indices); do n="${SCALE[$i]}"; done
-  has_infra && profile="--profile infra"
-  [[ -n "$n" ]] && scale_arg="--scale backend=$n"
-  if (( DRY )); then
-    info "would: AF_VERSION=$prev docker compose -f $COMPOSE_FILE $([[ "$ENABLE_SANDBOX" == 1 ]] && printf '%s' "-f $SANDBOX_COMPOSE_FILE") $profile up -d --remove-orphans $scale_arg"
+    rollback_multi_host "$prev" "$cur"
     return 0
   fi
-  local compose_args=(-f "$COMPOSE_FILE")
-  [[ "$ENABLE_SANDBOX" == 1 ]] && compose_args+=(-f "$SANDBOX_COMPOSE_FILE")
-  # shellcheck disable=SC2086
-  env AF_VERSION="$prev" docker compose "${compose_args[@]}" $profile up -d --remove-orphans $scale_arg \
-    || die "rollback compose up failed"
+  local release_root app_ver n
+  release_root="$(release_dir_for "$ROOT" "$prev")"
+  [[ -f "$release_root/.af-release" ]] \
+    || die "release snapshot missing: $release_root"
+  app_ver="$(release_app_version_local "$release_root")"
+  [[ -n "$app_ver" ]] || die "release $prev has no app_version metadata"
+  n="$(single_app_scale)"
+  if (( DRY )); then
+    info "would activate release snapshot=$prev app=$app_ver and reconcile its config"
+    return 0
+  fi
+  if has_infra; then
+    compose_on_release local "$prev" "$app_ver" --profile infra up -d --remove-orphans \
+      --scale "backend=$n" || die "rollback compose up failed"
+  else
+    compose_on_release local "$prev" "$app_ver" up -d --remove-orphans \
+      --scale "backend=$n" || die "rollback compose up failed"
+  fi
   wait_ready local
   smoke local
-  state_write "$prev" "$cur"   # swap: now-current is prev, and cur becomes the thing to re-forward to
-  ok "rolled back to $prev"
+  activate_release_local "$release_root"
+  state_write "$prev" "$cur" \
+    || die "rollback is healthy but failed to record Fleet state in $STATE_FILE"
+  ok "rolled back full release to $prev (app=$app_ver, config/deploy restored)"
 }
 
 # ── dispatch ────────────────────────────────────────────────────────
@@ -956,13 +1824,18 @@ main() {
   local sub="${1:-}"; shift || true
   case "$sub" in
     init-local) cmd_init_local "$@" ;;
+    bootstrap) cmd_bootstrap "$@" ;;
     preflight) cmd_preflight "$@" ;;
     deploy)    cmd_deploy "$@" ;;
+    deploy-config) cmd_deploy_config "$@" ;;
     prepare-sandbox) cmd_prepare_sandbox "$@" ;;
+    env)       cmd_env "$@" ;;
+    proxy-reload) cmd_proxy_reload "$@" ;;
+    maintenance) cmd_maintenance "$@" ;;
     status)    cmd_status "$@" ;;
     rollback)  cmd_rollback "$@" ;;
     ""|-h|--help|help) usage ;;
-    *) die "unknown subcommand: $sub (try: init-local | preflight | deploy | prepare-sandbox | status | rollback)" ;;
+    *) die "unknown subcommand: $sub (try: bootstrap | init-local | preflight | deploy | deploy-config | env | proxy-reload | maintenance | prepare-sandbox | status | rollback)" ;;
   esac
 }
 main "$@"

@@ -25,6 +25,20 @@
 # differs. Centralising the logic here stops the intranet and prod scripts
 # from drifting apart over time.
 
+maint_dc() {
+  local env_args=()
+  local compose_args=(-f "$COMPOSE_FILE")
+  [[ -n "${MAINT_ENV_FILE:-}" ]] && env_args=(--env-file "$MAINT_ENV_FILE")
+  [[ -n "${MAINT_EXTRA_COMPOSE_FILE:-}" ]] \
+    && compose_args+=(-f "$MAINT_EXTRA_COMPOSE_FILE")
+  if [[ -n "${MAINT_RUNTIME_DEPLOY_DIR:-}" ]]; then
+    env AF_RUNTIME_DEPLOY_DIR="$MAINT_RUNTIME_DEPLOY_DIR" \
+      "${DC[@]}" "${env_args[@]}" "${compose_args[@]}" "$@"
+  else
+    "${DC[@]}" "${env_args[@]}" "${compose_args[@]}" "$@"
+  fi
+}
+
 # Default through-proxy health probe: exec into the caddy container and hit
 # Caddy's internal health listener (`:2021` in deploy/caddy/common.caddy — HTTP, no
 # TLS, NOT published to the host). The request flows Caddy(:2021) →
@@ -35,7 +49,7 @@
 # TLS-on-localhost hostname mismatch (cert is for the domain, not localhost).
 maint_probe() {
   local caddy_cid
-  caddy_cid=$("${DC[@]}" -f "$COMPOSE_FILE" ps -q caddy 2>/dev/null || true)
+  caddy_cid=$(maint_dc ps -q caddy 2>/dev/null || true)
   if [[ -z "$caddy_cid" ]]; then
     echo "⚠ caddy 容器未运行，无法验证链路，维护页保持开启"
     echo "  先确保 caddy 已启动：${DC[*]} -f $COMPOSE_FILE up -d caddy"
@@ -81,7 +95,7 @@ maint_pause() {
   sleep 2
 
   echo "→ Stopping backend / frontend"
-  "${DC[@]}" -f "$COMPOSE_FILE" stop backend frontend
+  maint_dc stop backend frontend
 
   echo
   echo "✓ 维护窗口已开启 (${MAINT_MODE_LABEL})"
@@ -100,7 +114,7 @@ _maint_wait_healthy() {
   echo -n "→ Waiting for $label healthy (timeout ${timeout}s)"
   local cid state
   for _ in $(seq 1 "$iters"); do
-    cid=$("${DC[@]}" -f "$COMPOSE_FILE" ps -q "$svc" 2>/dev/null || true)
+    cid=$(maint_dc ps -q "$svc" 2>/dev/null || true)
     if [[ -n "$cid" ]]; then
       state=$(docker inspect --format '{{.State.Health.Status}}' "$cid" 2>/dev/null || echo unknown)
       if [[ "$state" == "healthy" ]]; then
@@ -143,10 +157,10 @@ maint_resume() {
 
   if [[ -n "$version" ]]; then
     echo "→ Starting backend / frontend (AF_VERSION=$version)"
-    AF_VERSION="$version" "${DC[@]}" -f "$COMPOSE_FILE" up -d backend frontend
+    AF_VERSION="$version" maint_dc up -d backend frontend
   else
     echo "→ Starting backend / frontend"
-    "${DC[@]}" -f "$COMPOSE_FILE" up -d backend frontend
+    maint_dc up -d backend frontend
   fi
 
   # Backend AND frontend must both be healthy — the proxy routes `/` to frontend,

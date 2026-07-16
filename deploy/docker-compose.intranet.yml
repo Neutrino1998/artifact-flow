@@ -36,8 +36,10 @@ services:
       - AF_HTTPS_PORT=${AF_HTTPS_PORT:-443}
     volumes:
       - ./caddy:/etc/caddy/conf:ro
-      - ./certs:/etc/caddy/certs:ro
-      - ./maintenance:/etc/caddy/maintenance:ro
+      # A versioned Fleet release owns the immutable Caddy config above, while
+      # certs and the maintenance flag remain target-local mutable state.
+      - ${AF_RUNTIME_DEPLOY_DIR:-.}/certs:/etc/caddy/certs:ro
+      - ${AF_RUNTIME_DEPLOY_DIR:-.}/maintenance:/etc/caddy/maintenance:ro
       - /etc/localtime:/etc/localtime:ro
     # Dual-purpose probe: (a) container health; (b) the wedge DETECTOR for
     # passive upstream removal — active health checks don't run against
@@ -78,7 +80,7 @@ services:
       - ../config:/app/config:ro
       - /etc/localtime:/etc/localtime:ro
     env_file:
-      - .env
+      - ${AF_RUNTIME_DEPLOY_DIR:-.}/.env
     environment:
       - PYTHONUNBUFFERED=1
     depends_on:
@@ -104,9 +106,9 @@ services:
       - /etc/localtime:/etc/localtime:ro
       # autoheal marker (Phase C):宿主 autoheal.sh 追加重启痕迹,backend 只读挂载
       # 读本机 instance_id 匹配的最近一条,经心跳 last_autoheal 在面板代报。
-      - ./autoheal:/app/autoheal:ro
+      - ${AF_RUNTIME_DEPLOY_DIR:-.}/autoheal:/app/autoheal:ro
     env_file:
-      - .env
+      - ${AF_RUNTIME_DEPLOY_DIR:-.}/.env
     environment:
       - PYTHONUNBUFFERED=1
       # Release handled by the one-shot `release` service above; this backend only serves

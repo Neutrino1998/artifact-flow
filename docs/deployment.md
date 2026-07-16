@@ -232,7 +232,8 @@ docker compose -f docker-compose.prod.yml up -d
 ### 首次部署（在目标内网机器上）
 
 推荐把**发布包目录**和**运行目录**分开：发布 tar 保持原样放在 bundle
-目录，运行目录只放解出的 `deploy/`、`config/`、`.env`、证书和 fleet 状态。
+目录。运行目录的稳定 `deploy/` 只保存控制脚本和目标机本地状态；不可变的
+`config + deploy` 发布单元存放在 `.artifactflow/releases/<release-id>/`。
 
 ```bash
 VERSION=1.0.0
@@ -275,9 +276,9 @@ vi deploy/fleet.conf  # app local scale=N 即 docker compose --scale backend=N
 #   AF_SANDBOX_POOL_SIZE=80G \
 #   deploy/scripts/fleet.sh prepare-sandbox "$BUNDLE"
 
-# 6. 启动。fleet 从 deploy/.env 读取必填的 AF_ENABLE_SANDBOX=0|1，再校验
-#    bundle、解 config/deploy、load 镜像、跑 release gate、等待健康。
-AF_BUNDLE_VERSION="$VERSION" deploy/scripts/fleet.sh deploy "$BUNDLE"
+# 6. 首次启动。已有 fleet.conf/.env 时 bootstrap 直接复用；否则也可以让它
+#    自动 init-local --scale 2。它先打印计划，再执行正式部署。
+AF_BUNDLE_VERSION="$VERSION" deploy/scripts/fleet.sh bootstrap --scale 2 "$BUNDLE"
 
 # 7. 创建管理员
 docker compose -f deploy/docker-compose.intranet.yml exec backend \
@@ -291,28 +292,34 @@ docker compose -f deploy/docker-compose.intranet.yml exec backend \
 
 ```bash
 deploy/scripts/fleet.sh init-local           # 生成单机 fleet.conf，并从模板种 deploy/.env
+deploy/scripts/fleet.sh bootstrap <bundle>   # 首次：初始化（如需要）→ 计划 → 部署
 deploy/scripts/fleet.sh preflight            # 单机/每台机器就绪检查
 deploy/scripts/fleet.sh deploy <bundle-dir>  # 校验 → 解包 → load → release 门 → up → 探活
 deploy/scripts/fleet.sh deploy --dry-run <d> # 只打印计划，不改动任何东西
+deploy/scripts/fleet.sh deploy-config <dir>  # 只发布 config，不构建/传输/load app 镜像
+deploy/scripts/fleet.sh env check|apply FILE # 校验或应用目标机环境变量
+deploy/scripts/fleet.sh proxy-reload         # 在 LB 节点 reload Caddy 配置/证书
+deploy/scripts/fleet.sh maintenance on|off   # 统一维护页入口
 deploy/scripts/fleet.sh prepare-sandbox <d>  # 从 bundle 单独准备 runsc/sandbox/verify
 deploy/scripts/fleet.sh status               # 各机器 compose ps + LB 健康
 deploy/scripts/fleet.sh rollback             # 回退到上一个成功版本
 ```
 
-计划性更新 `config/`、`deploy/` 或 backend/frontend 镜像时，主路径都是重新生成
-release bundle 后跑 `fleet deploy <bundle-dir>`。单机路径会从 bundle 解出
-`artifactflow-{config,deploy}-*.tar.gz`，加载 `artifactflow-app-*.tar.gz` 里的
-backend/frontend 镜像，再跑 release gate 和 compose up；下面的手工命令只用于现场热修。
+backend/frontend 或 deploy 变化走完整 `fleet deploy`；纯 `config/` 变化走
+`fleet deploy-config`。两条路径都先 stage 到不可变 release 目录，探活成功后才切换
+`.artifactflow/current`；rollback 恢复对应版本的 app、config 和 deploy。
 
 拓扑写在 `deploy/fleet.conf`（从 `fleet.conf.example` 复制，gitignored），单机场景下四个角色
 （`infra`/`release`/`app`/`lb`）都填 `local`；`app` 行的 `scale=N` 就是 `--scale backend=N`
 的等价物。完整命令、多机时序、以及 TLS 证书自动兜底（`up` 前自动跑
 `ensure-cert.sh`），见 [`deploy/FLEET.md`](https://github.com/Neutrino1998/artifact-flow/blob/main/deploy/FLEET.md)。
 
-> **现状：** 单机路径（含 `--scale`）已跑通并推荐日常使用；**多机路径目前 gated off**
-> （`fleet.sh` 里显式 `die`，只有 `--dry-run` 能打印计划），要等第二台机器上跑通验收后才解封——
-> 详见 FLEET.md「Multi-host: unexercised seams」。多机到位前，扩容仍只能在单机上
-> `--scale`；跨机负载均衡 / 多机数据库 URL 等留在文档里作为**已设计未验证**的路径。
+> **现状：** 单机路径（含 `--scale`）已跑通；多机路径已解除硬门禁并实现传输、
+> role 时序、静态 Caddy upstream、逐 app host 探活和完整 release 激活，但仍等待第一次
+> 真实双机验收。验收前多机每个 app host 强制 `scale=1`；同机多副本仍走单机拓扑。
+> 多机以控制端 `deploy/.env` 为公共基础；远端主机可用 gitignored 的
+> `deploy/.env.<host>` 覆盖连接地址或发布端口。字面值 `local` 直接使用基础
+> `.env`，不要创建 `.env.local`。
 >
 > `fleet.sh` 默认只包装 `deploy/docker-compose.intranet.yml`（Mode 3 基础栈）。
 > `deploy/.env` 必须持久声明 `AF_ENABLE_SANDBOX=0|1`；已有 sandbox 部署升级到
@@ -324,12 +331,13 @@ backend/frontend 镜像，再跑 release gate 和 compose up；下面的手工�
 > Mode 2（公网）扩缩容仍用上面 Mode 2A「扩缩容」小节里的裸 `--scale` +
 > `deploy-prod.sh`。
 >
-> `fleet.sh deploy` 是直接 `up`（数秒 blip，无维护页）；要维护页包住整个升级窗口，
-> 在 deploy 前后用 `maintenance.sh on|off` 包住即可。
+> `fleet.sh deploy` 默认直接 `up`；需要维护页时追加 `--maintenance`。失败时维护页保持
+> 开启，成功探活后 Fleet 自动关闭。
 
 ### 滚动更新已有部署
 
-新版本到位后，`fleet deploy` 接管校验、解包、加载镜像、起服务和探活；需要维护页窗口时，用 `maintenance.sh on|off` 包住它。
+新版本到位后，`fleet deploy` 接管校验、不可变 staging、加载镜像、release gate、
+起服务、探活和激活；需要维护页窗口时追加 `--maintenance`。
 
 ```bash
 VERSION=1.0.1
@@ -358,137 +366,87 @@ vi deploy/.env  # 确认存在 AF_ENABLE_SANDBOX=0|1
 #   AF_SANDBOX_POOL_SIZE=80G \
 #   ./deploy/scripts/fleet.sh prepare-sandbox "$BUNDLE"
 
-# 2. 进维护窗口（可选；fleet deploy 本身是直接 up）
-./deploy/scripts/maintenance.sh on "升级到 $VERSION"
-
-# 3. fleet 按 deploy/.env 的 sandbox 策略接管解包 + docker load + compose up +
-#    健康检查；成功后关闭维护页。
-AF_BUNDLE_VERSION="$VERSION" ./deploy/scripts/fleet.sh deploy "$BUNDLE" && \
-  ./deploy/scripts/maintenance.sh off
+# 2. Fleet 接管 staging + docker load + compose + 健康检查；成功才激活。
+AF_BUNDLE_VERSION="$VERSION" \
+  ./deploy/scripts/fleet.sh deploy --maintenance "$BUNDLE"
 ```
 
-> **nginx→Caddy 一次性切换（既有内网部署首次升到 Caddy 版）：** 新 compose 里反向代理服务从 `nginx` 换成了 `caddy`，`up -d` 不会自动移除旧服务的容器。切换步骤：证书就位（`deploy/certs/server.crt` + `server.key`，完整链，见该目录 README）→ 常规 prep（verify-bundle / docker load / tar xzf deploy+config）→ `docker compose -f deploy/docker-compose.intranet.yml --profile infra down` → `AF_VERSION=<版本> ... up -d`（infra 服务定义变更走 down/up，不走 pause/resume）。防火墙记得放行 HTTPS 端口（默认 443，`AF_HTTPS_PORT` 可改）。切换后旧的 `nginx:*` 镜像可 `docker rmi` 回收。
+> **compose / Caddy / infra 变更不再需要手工编排。** 这些内容属于完整 deploy
+> 单元，随 `fleet deploy` 一起 stage；Fleet 会从该 release 运行 compose，必要时
+> recreate 发生变化的 Caddy、Postgres、Redis、backend 或 frontend，并使用
+> `--remove-orphans` 清理同一 compose project 的旧服务（包括历史 nginx 容器）。
+> 需要可见维护窗口时加 `--maintenance`，不要再手工拼 pause / recreate / resume。
+>
+> **唯一不能靠 recreate 生效的是已有数据卷里的 `POSTGRES_*` 身份。**
+> `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` 只在空卷 `initdb` 时读取。
+> 旋转密码或用户时先在数据库执行 `ALTER USER` / `CREATE USER`，再把候选 `.env`
+> 里的数据库 URL 与 `POSTGRES_*` 记录同步，最后运行 `fleet.sh env check` 和
+> `fleet.sh env apply`。直接改变量并重建 Postgres 会造成应用凭据与库内凭据不一致。
 
-> **涉及 compose infra config 变更的升级（罕见）：** 多数升级只改 backend / frontend 镜像和它们用到的 `ARTIFACTFLOW_*` env，`pause/resume` 已覆盖（resume.sh `up backend frontend` → compose 自动 diff config-hash → 改了就 recreate）。但若本版本动了 `postgres` / `redis` / `caddy` 服务块的 HostConfig 字段（`image` / `logging` / `mem_limit` / `volumes` / `ports` / `cap_add` / `command`），`deploy/caddy/` 下的配置，或 `.env` 里 `AF_HTTP_PORT` / `AF_HTTPS_PORT`（caddy `ports:` interpolation），resume.sh 不触碰 infra 容器，新配置永远不生效。**前提**：先按上面常规流程完成 `verify-bundle.sh` + `docker load` + `tar xzf deploy/config`，让新 compose + 新 Caddyfile 就位，再进入下面两个时机（否则 recreate 用的是旧 compose / 旧 Caddyfile）：
->
-> **(a) caddy 块 / Caddyfile / `AF_HTTP(S)_PORT` 变了 → 在 `pause.sh` 之前 recreate**：
-> ```bash
-> docker compose -f deploy/docker-compose.intranet.yml --profile infra \
->     up -d --force-recreate --no-deps caddy
-> ```
-> 接受 1–2 秒 caddy 重启的连接 RST（可由维护窗口公告吸收）。放 pause 之前只是流程简单（维护页全程可用）；Caddy 按请求时解析 upstream，backend 停止时启动也不会崩，没有旧 nginx 静态 upstream 的顺序硬约束。仅改 `deploy/caddy/` 配置内容（不动 compose 字段）时也可以用零停机的 `docker compose ... exec caddy caddy reload --config /etc/caddy/conf/Caddyfile.intranet --adapter caddyfile` 代替 recreate。
->
-> **(b) postgres 或 redis 块变了 → 在 `pause` 与 `resume` 之间 recreate**：
-> ```bash
-> docker compose -f deploy/docker-compose.intranet.yml --profile infra \
->     up -d --force-recreate --no-deps <postgres redis 中实际变了的>
-> ```
-> 此时 backend/frontend 已 stop，无活跃应用连接，recreate 干净。
->
-> ⚠️ **`POSTGRES_*` 不属于本流程**：`POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` 是 init-only —— `postgres:16-alpine` 的 entrypoint 只在 `postgres_data` 卷**为空**时用这些 env 跑 `initdb`，已有卷的情况下完全忽略。改 .env 里这些值然后 recreate postgres，**库内用户/密码不会变**：backend 会用 `DATABASE_URL` 里的新密码、PG 库内仍是旧密码 → 认证失败 → backend 起不来（`pg_isready` 不做认证 → PG healthy 但 backend 连不上，故障表现更隐蔽）。旋转密码 / 改用户的正确流程：连进 PG 跑 `ALTER USER artifactflow WITH PASSWORD '...';`（或 `CREATE USER` / `CREATE DATABASE`），改完同步 `.env` 里 `ARTIFACTFLOW_DATABASE_URL`（backend 真正用的值）和 `POSTGRES_PASSWORD`（仅作 .env 文档，给未来 fresh-init 用），然后走 pause/resume（无需 infra recreate）。`POSTGRES_*` 真正生效的场景只有清空数据卷重新 init（生产几乎不会做）。
->
-> 两条 recreate 都必须 `--no-deps`：不加 compose 会顺手把 backend/frontend 也起来（caddy `depends_on` 它俩），违反前提，且会用 `${AF_VERSION:-latest}` 拉镜像（内网通常没有 `latest` tag）。数据安全：named volume 在 recreate 中不动；PG 走 crash recovery 启动（5–15s），Redis 控制状态全是 TTL key 应用层自愈，caddy 无状态（静态证书在 bind-mount 目录，不在容器里）。
->
-> **`.env` 变量归属(`.env.{intranet,prod}.example` 头注释也复述了同样规则)**：
->
-> | 变量 | 走哪条路径 |
-> |---|---|
-> | `ARTIFACTFLOW_*`（JWT / DATABASE_URL / REDIS_URL / MAX_CONCURRENT_TASKS / API keys 等） | 常规 pause/resume（resume.sh up backend → compose 检测 env_file 变化 → recreate backend） |
-> | `AF_HTTP_PORT` / `AF_HTTPS_PORT`（caddy `ports:` interpolation；后者兼作 HTTP→HTTPS 跳转目标端口） | 上面 (a) —— caddy pre-pause force-recreate |
-> | `POSTGRES_*` | 见上方 ⚠ 块 —— **不能**走 recreate，必须 SQL `ALTER USER` |
-> | `AF_VERSION` | `resume.sh <VERSION>` 显式传入即可 |
->
-> **验证 HostConfig 已生效**（recreate 完毕后、resume 之前；容器名按当前 compose project 实际命名，默认 `artifactflow-<svc>-1`）：
->
-> ```bash
-> for s in caddy backend frontend postgres redis; do
->   echo "--- $s ---"
->   docker inspect artifactflow-${s}-1 --format \
->     '{{.HostConfig.LogConfig.Type}} {{.HostConfig.LogConfig.Config}} mem={{.HostConfig.Memory}}'
-> done
-> # 期望 LogConfig.Type=json-file，Config 含 max-size:100m / max-file:3；
-> # Memory（字节）：caddy=0 / backend=2147483648 / frontend=1073741824 /
-> # postgres=2147483648 / redis=805306368
-> ```
+### 运行时配置变更
 
-### 运行时配置变更（无需 rebuild / 重新传镜像）
+**单机和多机统一走 config release + `fleet deploy-config`。** `fleet.sh` 是全舰唯一发布
+入口；不要登录某台宿主机直接修改 `config/` 后单独 restart。那会让各节点的
+bind-mounted 文件不一致，而且绕过 bundle 校验、版本记录和 seeded registry
+reconcile；下一次发布还会覆盖这类现场修改。
 
-正式发布的 `config/` 变更应先在构建机改好、提交、再 release；`fleet deploy`
-会从 bundle 覆盖目标机上的 `config/`。下表适合现场临时热修，下一次 deploy 会被
-bundle 内容覆盖。
+下表说明各类配置的发布和生效方式：
 
 | 变更类型 | 操作 | 生效命令 |
 |---------|------|---------|
-| `config/models/models.yaml`（模型 / base_url） | 直接编辑宿主机文件 | `docker compose -f deploy/docker-compose.intranet.yml restart backend` |
-| `config/agents/*.md` / `config/tools/*.md` / `config/skills/`（DB seeded registry） | 推荐重新打 config release 并 `fleet deploy`；紧急热修才直接编辑宿主机文件 | 跑一次 release/reconcile gate 后再重启 backend 进程；compose flags 必须与当前部署一致（启用沙盒时也带 `-f deploy/docker-compose.sandbox.yml`） |
-| `config/site/notifications.json`（左栏通知） | 管理员菜单「通知管理」或直接编辑宿主机文件，schema 见 `config/site/README.md` | **无需 restart** — backend 只写 `config/site` 挂载目录，frontend 只读服务同一目录；前端 60s 轮询自动重拉（标签回前台时立即重拉） |
-| `config/site/welcome_tips.json` / `branding.json`（欢迎页提示 / 版权页脚） | 直接编辑宿主机文件；`branding.json` 首次启用需 `cp branding.example.json branding.json` 再填值（仓库 `.gitignore` 排除真实文件） | **无需 restart**，但**只在挂载时拉一次、不轮询**——改完需用户刷新页面才看到。文件缺失 / schema 错位 → 对应 UI 自动隐藏或回落默认（fail-closed）。 |
-| `deploy/.env`（任何 `ARTIFACTFLOW_*` 变量） | 直接编辑 | 用当前 compose flags 执行 `AF_VERSION="$VERSION" ... up -d backend`（restart 不会重读 .env，up 会检测 env 变化重建容器） |
-| `deploy/caddy/`（Caddyfile.intranet / common.caddy） | 直接编辑（或 tar 覆盖） | `docker compose -f deploy/docker-compose.intranet.yml exec caddy caddy reload --config /etc/caddy/conf/Caddyfile.intranet --adapter caddyfile`（零停机；`restart caddy` 也行） |
-| `deploy/certs/`（换证书） | 覆盖 `server.crt` / `server.key` | 同上 — `caddy reload` |
-| `deploy/docker-compose.intranet.yml`（端口、profile 等） | 直接编辑 | `up -d` |
+| `config/models/models.yaml`（模型 / base_url） | 修改、提交并打 config-only release | `fleet.sh deploy-config <bundle-dir>`；app 镜像不变 |
+| `config/agents/*.md` / `config/tools/*.md` / `config/skills/`（DB seeded registry） | 修改、提交并打 config-only release | `deploy-config` 在 release 节点 reconcile 一次，再滚动更新 app 节点 |
+| `config/site/notifications.json`（左栏通知） | 单机可用管理员菜单；多机/正式文件变更走 config-only release | 单机前端 60s 轮询；Fleet 发布则由 `deploy-config` 保证所有 app host 内容一致 |
+| `config/site/welcome_tips.json` / `branding.json`（欢迎页提示 / 版权页脚） | 修改后打 config-only release | `deploy-config` 后用户刷新页面；文件缺失/schema 错位仍 fail-closed |
+| `deploy/.env`（任何 `ARTIFACTFLOW_*` 变量） | 在控制端准备候选文件 | `fleet.sh env check FILE` 后 `fleet.sh env apply FILE`；Fleet 负责 recreate 和失败恢复 |
+| `deploy/caddy/`（Caddyfile.intranet / common.caddy） | 作为完整 app/deploy release 发布 | `fleet deploy`；只有目标机本地证书轮换使用 `proxy-reload` |
+| `deploy/certs/`（换证书） | 在 LB 节点稳定 `deploy/certs/` 覆盖证书 | `fleet.sh proxy-reload` |
+| `deploy/docker-compose.intranet.yml`（端口、profile 等） | 打完整 release | `fleet.sh deploy <bundle-dir>` |
 
-> **关键区别：** `models.yaml` 是 backend 进程直接读文件，改完 restart backend；
-> agents/tools/skills 会 reconcile 进 DB registry，改文件后必须重新跑 release/reconcile
-> gate。改 `.env` 用 `up -d`（让 compose 重建容器注入环境变量）；手动
-> `run release` / `up -d backend` 都必须显式传当前 `AF_VERSION`，否则 compose 会回落到
-> `${AF_VERSION:-latest}`。`config/site/` 是例外：同一个宿主目录只读挂在 frontend、
-> 可写挂在 backend 的通知管理入口，无需重启；其中 `notifications.json` 前端轮询
-> 自动重拉，`welcome_tips.json` / `branding.json` 只在页面加载时读取，运维改完需用户刷新。
+> **关键区别：** `models.yaml` 由 backend 进程直接读取；agents/tools/skills
+> 还会 reconcile 进 DB registry。两者的机制不同，但运维入口相同：都交给
+> `fleet deploy-config`，不由操作者手工挑选节点和生效命令。`.env` 由 `fleet env apply`
+> 根据当前 release 统一重建，而不是 restart。单机部署通过管理员菜单修改
+> `config/site/notifications.json` 时无需发布或重启；多机与正式文件变更仍必须走
+> config-only release，避免只写中某个 app host。
 
-紧急热修 seeded registry 的命令形状如下；`VERSION` 填当前正在运行的镜像版本。
-Mode 3A（本机 PG/Redis）才追加 `--profile infra`，Mode 3B（外部 PG/Redis）不要加。
-沙盒部署还要把 `COMPOSE` 加上 `-f deploy/docker-compose.sandbox.yml`：
+### Config-only 变更
+
+Config-only bundle 只包含 `config tar + checksum + manifest`，不会执行 Docker build、
+传输 app tar 或 `docker load`。Fleet 从当前成功 release 继承 deploy 单元，把新 config
+stage 成一个新 release id，完成校验/reconcile 和探活后再激活。
+
+不再提供“现场改文件 + 手工 restart”的独立流程；单机与多机都使用同一套 Fleet
+命令和 release/rollback 契约。SSH、端口和静态 upstream 等多机接缝仍需独立真机验收。
 
 ```bash
-VERSION=2026.07.09-intranet.1  # current running version
-COMPOSE="docker compose -f deploy/docker-compose.intranet.yml"
-# Mode 3A only:
-# COMPOSE="$COMPOSE --profile infra"
-# Sandbox deployment only:
-# COMPOSE="$COMPOSE -f deploy/docker-compose.sandbox.yml"
-
-AF_VERSION="$VERSION" $COMPOSE run --rm release
-AF_VERSION="$VERSION" $COMPOSE restart backend
+# 构建机
+VERSION=1.0.1-config.1
+./scripts/release.sh "$VERSION" --config-only --platform linux/amd64
 ```
 
-### 仅推送 config 更新（不动镜像）
+只需传输以下三个文件：
 
-推荐仍然走 release bundle + fleet，让 `config/` 的来源、校验和版本记录保持一致。
-如果只是现场临时改 `config/models/models.yaml` 这类文件，可以按上表直接重启
-backend；如果要把配置变更固化成一次发布，按下面流程。
-
-```bash
-# 构建机：轻量手工包 config + deploy。
-# deploy tar 用来让目标机先自举到新版 fleet/verify 脚本。
-VERSION=1.0.1
-tar czf artifactflow-config-1.0.1.tar.gz config/
-tar czf artifactflow-deploy-1.0.1.tar.gz deploy/
-sha256sum artifactflow-config-1.0.1.tar.gz > artifactflow-config-1.0.1.tar.gz.sha256
-sha256sum artifactflow-deploy-1.0.1.tar.gz > artifactflow-deploy-1.0.1.tar.gz.sha256
+```text
+artifactflow-config-$VERSION.tar.gz
+artifactflow-config-$VERSION.tar.gz.sha256
+artifactflow-$VERSION.manifest.txt
 ```
 
-目标机：
+在 Fleet 控制端执行：
 
 ```bash
-VERSION=1.0.1
+VERSION=1.0.1-config.1
 BUNDLE=/root/workspace/tmp/$VERSION
-APP=/root/workspace/artifactflow
-
-cd "$APP"
-tar xzf "$BUNDLE/artifactflow-deploy-$VERSION.tar.gz"
-deploy/scripts/verify-bundle.sh "$BUNDLE"
-tar xzf "$BUNDLE/artifactflow-config-$VERSION.tar.gz" -C "$APP"
-
-# models.yaml 只需 backend 进程重读；agents/tools/skills 需要跑 release/reconcile gate。
-docker compose -f deploy/docker-compose.intranet.yml restart backend
+cd /root/workspace/artifactflow
+AF_BUNDLE_VERSION="$VERSION" \
+  deploy/scripts/fleet.sh deploy-config --maintenance "$BUNDLE"
 ```
 
-> 如果这次 config-only bundle 改了 `config/agents/`、`config/tools/` 或
-> `config/skills/`，用上方「运行时配置变更」里的 release/reconcile gate 命令替代
-> 直接 restart。只改 `config/site/*.json` 时不需要任何 docker 命令；其中
-> `notifications.json` 前端 60s 轮询自己生效，`welcome_tips.json` /
-> `branding.json` 只在挂载时拉一次，需要用户刷新页面才看到。
+> `fleet deploy-config` 会根据 bundle 执行 release/reconcile gate 和全节点更新，不需要
+> 再按配置类型手工补 restart。仅在**单机管理员菜单**直接修改通知文件时才无需
+> Docker 命令；正式 bundle 仍执行上面的 `deploy-config`。`notifications.json`
+> 前端 60s 轮询，`welcome_tips.json` / `branding.json` 需要用户刷新页面。
 
 ### 更新 backend / frontend 镜像（app tar）
 
@@ -873,7 +831,10 @@ flowchart TD
 | compose 文件 | `docker-compose.prod.yml` | `deploy/docker-compose.intranet.yml` |
 | resume 健康探针 | 共用：caddy 容器内经 Caddy 内部端口 `wget localhost:2021/health/ready`（真正过 Caddy 反代 → 验证配置已加载 + Caddy→backend 通；该端口不发布到宿主机，避开 TLS-on-localhost 域名不匹配） | 同左（`_maint_lib.sh` 默认实现） |
 
-**两层接口：** 镜像升级（典型场景）用 `pause*.sh` / `resume*.sh`，封装"维护页 + 停服务 → 起新版本 + 关维护页"全套；config-only 改动不需要停服务，直接用底层的 `maintenance.sh on|off`（公网内网共用同一个）。
+**两层接口：** Fleet 运维优先使用 `deploy --maintenance`、`deploy-config
+--maintenance` 或 `fleet.sh maintenance on|off|status`；`pause*.sh` / `resume*.sh`
+保留给**单机**上需要明确停掉 backend/frontend 的人工维护窗口（会自动读取当前
+release 和 sandbox overlay）。多机不要逐台运行这两个脚本，统一用 Fleet 维护入口。
 
 **机制：**
 
@@ -883,32 +844,28 @@ flowchart TD
 - `/health/` 故意不挡——容器 healthcheck 和外部监控仍要看到真实状态
 - **上游真实 503 原样穿透**：维护页 503 只在 gated 路径内产生，`/health/ready` 在 DB/Redis 异常时返回的 JSON 503 不会被改写为 HTML（`/health` 的 handle 在链里排在维护 gate 之前）
 
-**首次启用（仅一次）：** compose 已声明 `deploy/maintenance` 卷挂载，但既有代理容器需要 force-recreate 一次才会挂上：
+**首次启用：** Fleet 管理的 Mode 3 不需要额外命令；完整 `fleet deploy` 会让 Caddy
+挂载稳定的 `deploy/maintenance/`。从旧版、非 Fleet 部署升级时，先完成一次正常的
+Fleet full release。只有 Mode 2 仍需对既有 Caddy 做一次 recreate：
 
 ```bash
-# Mode 3（内网）
-docker compose -f deploy/docker-compose.intranet.yml up -d --force-recreate --no-deps caddy
 # Mode 2（公网 / Caddy）
 docker compose -f docker-compose.prod.yml --profile infra up -d --force-recreate caddy
 ```
 
-之后所有切换不需要碰 docker。
+之后所有维护 flag 切换都不需要碰 Docker。
 
-**镜像升级（典型场景）：** 内网用 `pause.sh` / `resume.sh`，公网用 `pause-prod.sh` / `resume-prod.sh`。下面以内网气隙升级为例（公网无 docker load / tar 步骤，把脚本名换成 `-prod` 版即可）：
+**镜像升级（典型场景）：** 内网由 Fleet 直接管理维护页和 release 激活：
 
 ```bash
-# 1. 加载新镜像（不影响在跑容器）—— 仅内网气隙需要
-docker load -i tmp/artifactflow-v2.3.0.tar.gz
-tar xzf tmp/artifactflow-deploy-v2.3.0.tar.gz   # 如果 deploy 也变了
-tar xzf tmp/artifactflow-config-v2.3.0.tar.gz   # 如果 config 也变了
-
-# 2. 进维护窗口（写 flag → 等 2s → stop backend frontend）
-./deploy/scripts/pause.sh "正在更新到 v2.3.0，预计 5 分钟"
-
-# 3. 退维护窗口（up -d backend frontend → 等 healthy → 关 flag）
-#    backend 或 frontend 60s 内不 healthy → 维护页保持开启，运维有时间排查
-./deploy/scripts/resume.sh v2.3.0
+VERSION=v2.3.0
+BUNDLE=/root/workspace/tmp/$VERSION
+AF_BUNDLE_VERSION="$VERSION" \
+  ./deploy/scripts/fleet.sh deploy --maintenance "$BUNDLE"
 ```
+
+失败时 Fleet 尝试恢复上一个完整 release，维护页保持开启；成功探活后自动关闭。
+`pause.sh` / `resume.sh` 仍可用于不发布 release 的人工停服窗口。
 
 > **公网（Mode 2）升级：镜像本地构建，没有 docker load / tar / 版本 tag。** prod compose
 > 的 backend/frontend 固定是 `:latest`，所以**升级 = 切代码再重建**，`resume-prod.sh`
@@ -938,22 +895,18 @@ tar xzf tmp/artifactflow-config-v2.3.0.tar.gz   # 如果 config 也变了
 > ```
 > 最小允许值 10s（再小就会比容器 healthcheck 的 `start_period=15s` 还短，必假阴性）。
 
-**Config-only 热修 —— 直接 `maintenance.sh`：**
+**Config-only 发布：**
 
-只调 `models.yaml` 这种 restart backend 就能生效的场景，不需要 `pause.sh`
-那种"停服务"操作，开关 flag 的同时 `restart backend` 就够：
+配置修复打成 config-only bundle；如需要维护页覆盖发布窗口，直接使用 Fleet 选项：
 
 ```bash
-./deploy/scripts/maintenance.sh on "调整模型配置，约 1 分钟"
-vim config/models/models.yaml
-docker compose -f deploy/docker-compose.intranet.yml restart backend
-./deploy/scripts/maintenance.sh off
+AF_BUNDLE_VERSION="$VERSION" \
+  ./deploy/scripts/fleet.sh deploy-config --maintenance "$BUNDLE"
 ```
 
-> 调 prompt / 工具 / skills 时不要只 restart backend；这些配置会 reconcile 进 DB，
-> 需要跑 release/reconcile gate，或者重新打 config release 后走 `fleet deploy`。
->
-> **注意：** `.env` 变更不能走 `restart`——`docker compose restart` 不会重读 `.env` interpolation，容器还在用旧值。需要改环境变量时，请走 `pause.sh → 改 .env → resume.sh`（resume 内部 `up -d` 会重建容器并注入新环境变量），或者短维护窗口下手动 `maintenance.sh on → AF_VERSION="$VERSION" docker compose ... up -d backend → maintenance.sh off`。
+> **注意：** `.env` 变更不能走 `restart`——`docker compose restart` 不会重读
+> `.env` interpolation。先运行 `fleet.sh env check FILE`，再运行
+> `fleet.sh env apply FILE`；Fleet 会用当前不可变 release 重建受影响服务并在失败时恢复旧 env。
 
 ### 健康检查
 

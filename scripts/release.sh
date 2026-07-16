@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Build, tag, and package ArtifactFlow images for air-gapped deployment.
 #
 # Usage:
-#   ./scripts/release.sh [VERSION] [--with-infra | --app-only]
+#   ./scripts/release.sh [VERSION] [--with-infra | --app-only | --config-only]
 #                        [--with-sandbox] [--with-gvisor]
 #                        [--with-analyst-tools]
 #                        [--platform linux/amd64|linux/arm64]
@@ -15,6 +15,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Defaults:
 #   VERSION:     $(date +%Y%m%d)
 #   layout:      --app-only (skip infra images, skip analyst tools)
+#
+# Config-only:
+#   --config-only packages config + manifest + checksum only. It never builds
+#   or saves app images and is consumed by `fleet.sh deploy-config`.
 #
 # Output (in dist/):
 #   artifactflow-app-<VERSION>.tar.gz             backend + frontend images
@@ -57,6 +61,7 @@ WITH_INFRA=0
 WITH_SANDBOX=0
 WITH_GVISOR=0
 WITH_ANALYST_TOOLS=0
+CONFIG_ONLY=0
 PLATFORM_ARG=""
 RESUME=0
 FORCE_PHASES=()
@@ -68,6 +73,7 @@ while [[ $# -gt 0 ]]; do
     --with-sandbox)       WITH_SANDBOX=1 ;;
     --with-gvisor)        WITH_GVISOR=1 ;;
     --with-analyst-tools) WITH_ANALYST_TOOLS=1 ;;
+    --config-only)        CONFIG_ONLY=1 ;;
     --resume)             RESUME=1 ;;
     --force)
       shift
@@ -94,6 +100,11 @@ while [[ $# -gt 0 ]]; do
 done
 VERSION="${VERSION:-$(date +%Y%m%d)}"
 
+if (( CONFIG_ONLY )); then
+  (( WITH_INFRA == 0 && WITH_SANDBOX == 0 && WITH_GVISOR == 0 && WITH_ANALYST_TOOLS == 0 )) \
+    || { echo "--config-only cannot be combined with infra/sandbox/gvisor/analyst artifacts" >&2; exit 2; }
+fi
+
 # Build platform — default linux/amd64 because the intranet target is x86_64.
 # Apple Silicon Macs default to linux/arm64 without --platform, producing
 # images that fail at startup on the server with "exec format error".
@@ -104,7 +115,11 @@ case "$PLATFORM_INPUT" in
   linux/arm64|linux/aarch64) PLATFORM=linux/arm64; ARCH_TAG=arm64; GVISOR_ARCH=aarch64 ;;
   *) echo "Unsupported platform '$PLATFORM_INPUT' (expected linux/amd64 or linux/arm64)" >&2; exit 2 ;;
 esac
-SANDBOX_IMAGE_REF="$(python3 "$ROOT/scripts/sandbox_runtime_ref.py" --arch "$ARCH_TAG")"
+if (( CONFIG_ONLY )); then
+  SANDBOX_IMAGE_REF="unchanged (config-only release)"
+else
+  SANDBOX_IMAGE_REF="$(python3 "$ROOT/scripts/sandbox_runtime_ref.py" --arch "$ARCH_TAG")"
+fi
 
 OUTDIR="dist"
 APP_ARCHIVE="$OUTDIR/artifactflow-app-${VERSION}.tar.gz"
@@ -159,11 +174,19 @@ SANDBOX_GVISOR_ARCHIVE=""
 CHECKSUM_INPUTS=()
 CHECKSUM_OUTPUTS=()
 
-INFRA_DESC=$([[ $WITH_INFRA == 1 ]] && echo "included" || echo "skipped (--app-only)")
-SANDBOX_DESC=$([[ $WITH_SANDBOX == 1 ]] && echo "included" || echo "skipped")
-GVISOR_DESC=$([[ $WITH_GVISOR == 1 ]] && echo "included" || echo "skipped")
-ANALYST_DESC=$([[ $WITH_ANALYST_TOOLS == 1 ]] && echo "included" || echo "skipped")
-echo "=== ArtifactFlow Release: ${VERSION} (platform: ${PLATFORM}, infra: ${INFRA_DESC}, sandbox: ${SANDBOX_DESC}, gVisor: ${GVISOR_DESC}, analyst-tools: ${ANALYST_DESC}) ==="
+if (( CONFIG_ONLY )); then
+  INFRA_DESC="unchanged"
+  SANDBOX_DESC="unchanged"
+  GVISOR_DESC="unchanged"
+  ANALYST_DESC="unchanged"
+else
+  INFRA_DESC=$([[ $WITH_INFRA == 1 ]] && echo "included" || echo "skipped (--app-only)")
+  SANDBOX_DESC=$([[ $WITH_SANDBOX == 1 ]] && echo "included" || echo "skipped")
+  GVISOR_DESC=$([[ $WITH_GVISOR == 1 ]] && echo "included" || echo "skipped")
+  ANALYST_DESC=$([[ $WITH_ANALYST_TOOLS == 1 ]] && echo "included" || echo "skipped")
+fi
+RELEASE_KIND=$([[ $CONFIG_ONLY == 1 ]] && echo config || echo app)
+echo "=== ArtifactFlow Release: ${VERSION} (kind: ${RELEASE_KIND}, platform: ${PLATFORM}, infra: ${INFRA_DESC}, sandbox: ${SANDBOX_DESC}, gVisor: ${GVISOR_DESC}, analyst-tools: ${ANALYST_DESC}) ==="
 
 mkdir -p "$OUTDIR"
 
@@ -203,10 +226,10 @@ artifact_inputs_digest() {
   done | shasum -a 256 | awk '{print $1}'
 }
 
-repo_fingerprint() {
+paths_fingerprint() {
   (
     cd "$ROOT"
-    git ls-files --cached --others --exclude-standard -z . \
+    git ls-files --cached --others --exclude-standard -z -- "$@" \
       | LC_ALL=C sort -z \
       | xargs -0 shasum -a 256 2>/dev/null \
       | shasum -a 256 \
@@ -217,8 +240,17 @@ repo_fingerprint() {
 phase_input() {
   local phase="$1"
   case "$phase" in
-    app|sandbox-image|config|deploy)
-      printf '%s|%s|%s|%s\n' "$phase" "$VERSION" "$PLATFORM" "$REPO_FINGERPRINT"
+    app)
+      printf '%s|%s|%s|%s\n' "$phase" "$VERSION" "$PLATFORM" "$APP_FINGERPRINT"
+      ;;
+    sandbox-image)
+      printf '%s|%s|%s|%s\n' "$phase" "$VERSION" "$PLATFORM" "$SANDBOX_FINGERPRINT"
+      ;;
+    config)
+      printf '%s|%s|%s|%s\n' "$phase" "$VERSION" "$PLATFORM" "$CONFIG_FINGERPRINT"
+      ;;
+    deploy)
+      printf '%s|%s|%s|%s\n' "$phase" "$VERSION" "$PLATFORM" "$DEPLOY_FINGERPRINT"
       ;;
     infra)
       printf '%s|%s|%s|%s|%s|%s\n' "$phase" "$PLATFORM" "$CADDY_TAG" "$POSTGRES_TAG" "$REDIS_TAG" "$INFRA_SLUG"
@@ -233,7 +265,7 @@ phase_input() {
       printf '%s|%s\n' "$phase" "$(artifact_inputs_digest)"
       ;;
     manifest)
-      printf '%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$phase" "$VERSION" "$PLATFORM" "$WITH_INFRA" "$WITH_SANDBOX" "$WITH_GVISOR" "$WITH_ANALYST_TOOLS" "${SANDBOX_GVISOR_ARCHIVE:-}" "$(artifact_inputs_digest)"
+      printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "$phase" "$VERSION" "$PLATFORM" "$CONFIG_ONLY" "$WITH_INFRA" "$WITH_SANDBOX" "$WITH_GVISOR" "$WITH_ANALYST_TOOLS" "${SANDBOX_GVISOR_ARCHIVE:-}" "$(artifact_inputs_digest)"
       ;;
     *)
       printf '%s|%s|%s\n' "$phase" "$VERSION" "$PLATFORM"
@@ -282,32 +314,42 @@ write_phase_stamp() {
   mv -f "$tmp" "$stamp"
 }
 
-REPO_FINGERPRINT="$(repo_fingerprint)"
+CONFIG_FINGERPRINT="$(paths_fingerprint config)"
+APP_FINGERPRINT=""
+DEPLOY_FINGERPRINT=""
+SANDBOX_FINGERPRINT=""
+if (( ! CONFIG_ONLY )); then
+  APP_FINGERPRINT="$(paths_fingerprint Dockerfile .dockerignore requirements.lock requirements.txt pyproject.toml setup.py run_server.py src frontend deploy/entrypoint.sh)"
+  DEPLOY_FINGERPRINT="$(paths_fingerprint deploy)"
+  SANDBOX_FINGERPRINT="$(paths_fingerprint sandbox scripts/build-sandbox-image.sh scripts/sandbox_runtime_ref.py)"
+fi
 
 APP_IMAGES=(
   "artifactflow:${VERSION}"
   "artifactflow-frontend:${VERSION}"
 )
 
-app_input="$(phase_input app)"
-if ! phase_done app "$app_input" "$APP_ARCHIVE"; then
-  # Build application images via buildx so we can cross-compile to amd64.
-  # `--load` writes the result into the local docker daemon (vs `--push` to a registry).
-  echo "Building backend image..."
-  docker buildx build --platform "${PLATFORM}" \
-    -t "artifactflow:${VERSION}" -t artifactflow:latest \
-    --build-arg "ARTIFACTFLOW_SANDBOX_IMAGE=${SANDBOX_IMAGE_REF}" \
-    --load .
+if (( ! CONFIG_ONLY )); then
+  app_input="$(phase_input app)"
+  if ! phase_done app "$app_input" "$APP_ARCHIVE"; then
+    # Build application images via buildx so we can cross-compile to amd64.
+    # `--load` writes the result into the local docker daemon (vs `--push` to a registry).
+    echo "Building backend image..."
+    docker buildx build --platform "${PLATFORM}" \
+      -t "artifactflow:${VERSION}" -t artifactflow:latest \
+      --build-arg "ARTIFACTFLOW_SANDBOX_IMAGE=${SANDBOX_IMAGE_REF}" \
+      --load .
 
-  echo "Building frontend image..."
-  docker buildx build --platform "${PLATFORM}" \
-    -t "artifactflow-frontend:${VERSION}" -t artifactflow-frontend:latest \
-    --build-arg NEXT_PUBLIC_API_URL= \
-    --load ./frontend
+    echo "Building frontend image..."
+    docker buildx build --platform "${PLATFORM}" \
+      -t "artifactflow-frontend:${VERSION}" -t artifactflow-frontend:latest \
+      --build-arg NEXT_PUBLIC_API_URL= \
+      --load ./frontend
 
-  echo "Saving app images to ${APP_ARCHIVE}..."
-  docker save "${APP_IMAGES[@]}" | gzip > "$APP_ARCHIVE"
-  write_phase_stamp app "$app_input" "$APP_ARCHIVE"
+    echo "Saving app images to ${APP_ARCHIVE}..."
+    docker save "${APP_IMAGES[@]}" | gzip > "$APP_ARCHIVE"
+    write_phase_stamp app "$app_input" "$APP_ARCHIVE"
+  fi
 fi
 
 if [[ $WITH_INFRA == 1 ]]; then
@@ -393,18 +435,20 @@ fi
 # target-local files out by construction: deploy/.env, fleet.conf, .fleet-state,
 # cert private material, maintenance flags, and per-host .env overrides are all
 # ignored and must never be copied from the build machine into a release bundle.
-deploy_input="$(phase_input deploy)"
-if ! phase_done deploy "$deploy_input" "$DEPLOY_ARCHIVE"; then
-  echo "Packaging deploy/ to ${DEPLOY_ARCHIVE}..."
-  # --no-xattrs / --no-fflags: see config tar above — silence the GNU-tar
-  # "unknown extended header keyword" warnings on the target by not emitting
-  # macOS metadata.
-  (
-    cd "$ROOT"
-    git ls-files --cached --others --exclude-standard -z deploy \
-      | tar --no-xattrs --no-fflags --null -T - -czf "$DEPLOY_ARCHIVE"
-  )
-  write_phase_stamp deploy "$deploy_input" "$DEPLOY_ARCHIVE"
+if (( ! CONFIG_ONLY )); then
+  deploy_input="$(phase_input deploy)"
+  if ! phase_done deploy "$deploy_input" "$DEPLOY_ARCHIVE"; then
+    echo "Packaging deploy/ to ${DEPLOY_ARCHIVE}..."
+    # --no-xattrs / --no-fflags: see config tar above — silence the GNU-tar
+    # "unknown extended header keyword" warnings on the target by not emitting
+    # macOS metadata.
+    (
+      cd "$ROOT"
+      git ls-files --cached --others --exclude-standard -z deploy \
+        | tar --no-xattrs --no-fflags --null -T - -czf "$DEPLOY_ARCHIVE"
+    )
+    write_phase_stamp deploy "$deploy_input" "$DEPLOY_ARCHIVE"
+  fi
 fi
 
 # Analyst-tools bundle — pandas/numpy offline wheels for the analyst machine
@@ -505,7 +549,11 @@ EOF
   fi
 fi
 
-CHECKSUM_INPUTS=("$APP_ARCHIVE" "$CONFIG_ARCHIVE" "$DEPLOY_ARCHIVE")
+if (( CONFIG_ONLY )); then
+  CHECKSUM_INPUTS=("$CONFIG_ARCHIVE")
+else
+  CHECKSUM_INPUTS=("$APP_ARCHIVE" "$CONFIG_ARCHIVE" "$DEPLOY_ARCHIVE")
+fi
 [[ $WITH_INFRA == 1 ]] && CHECKSUM_INPUTS+=("$INFRA_ARCHIVE")
 if [[ $WITH_SANDBOX == 1 ]]; then
   CHECKSUM_INPUTS+=("$SANDBOX_ARCHIVE" "$SANDBOX_VERIFY_ARCHIVE")
@@ -540,11 +588,16 @@ manifest_input="$(phase_input manifest)"
 if ! phase_done manifest "$manifest_input" "$MANIFEST"; then
 {
   echo "ArtifactFlow Release ${VERSION}"
+  echo "Release kind: ${RELEASE_KIND}"
   echo "Built:        $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "Built from:   $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')@$(git rev-parse --short HEAD 2>/dev/null || echo '?')"
   echo "Platform:     ${PLATFORM}"
   echo "Sandbox image required: ${SANDBOX_IMAGE_REF}"
-  LAYOUT_DESC="app + config + deploy"
+  if (( CONFIG_ONLY )); then
+    LAYOUT_DESC="config"
+  else
+    LAYOUT_DESC="app + config + deploy"
+  fi
   [[ $WITH_INFRA == 1 ]] && LAYOUT_DESC+=" + infra"
   [[ $WITH_SANDBOX == 1 ]] && LAYOUT_DESC+=" + sandbox"
   [[ $WITH_GVISOR == 1 ]] && LAYOUT_DESC+=" + gVisor runtime"
@@ -552,51 +605,59 @@ if ! phase_done manifest "$manifest_input" "$MANIFEST"; then
   echo "Layout:       $LAYOUT_DESC"
   echo ""
   echo "App images:"
-  for img in "${APP_IMAGES[@]}"; do
-    id=$(docker image inspect "$img" --format '{{.Id}}' 2>/dev/null | cut -c8-19)
-    size=$(docker image inspect "$img" --format '{{.Size}}' 2>/dev/null \
-           | awk '{printf "%.0f MB", $1/1024/1024}')
-    echo "  $img"
-    echo "    id=$id  size=$size"
-  done
-  echo ""
-  if [[ $WITH_INFRA == 1 ]]; then
-    echo "Infra images (in artifactflow-infra-${INFRA_SLUG}.tar.gz):"
-    echo "  caddy:${CADDY_TAG}"
-    echo "  postgres:${POSTGRES_TAG}"
-    echo "  redis:${REDIS_TAG}"
+  if (( CONFIG_ONLY )); then
+    echo "  unchanged (config-only release)"
   else
-    echo "Infra images: skipped — target must already have these loaded:"
-    echo "  caddy:${CADDY_TAG}"
-    echo "  postgres:${POSTGRES_TAG}"
-    echo "  redis:${REDIS_TAG}"
-    echo "  (run release with --with-infra to ship them)"
+    for img in "${APP_IMAGES[@]}"; do
+      id=$(docker image inspect "$img" --format '{{.Id}}' 2>/dev/null | cut -c8-19)
+      size=$(docker image inspect "$img" --format '{{.Size}}' 2>/dev/null \
+             | awk '{printf "%.0f MB", $1/1024/1024}')
+      echo "  $img"
+      echo "    id=$id  size=$size"
+    done
   fi
   echo ""
-  if [[ $WITH_SANDBOX == 1 ]]; then
-    echo "Sandbox image bundle:"
-    echo "  required: ${SANDBOX_IMAGE_REF}"
-    echo "  image:   $(basename "$SANDBOX_ARCHIVE")"
-    echo "  verify:  $(basename "$SANDBOX_VERIFY_ARCHIVE")"
-    echo "  target:  deploy/scripts/fleet.sh prepare-sandbox <bundle-dir>, then"
-    echo "           set AF_ENABLE_SANDBOX=1 in deploy/.env and run fleet.sh deploy"
-    if [[ -f "$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt" ]]; then
-      image_id=$(awk '/^Image id:/ {sub(/^Image id:[[:space:]]*/, ""); print; exit}' "$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt")
-      [[ -n "$image_id" ]] && echo "  image id: $image_id"
+  if (( CONFIG_ONLY )); then
+    echo "Runtime units: app/deploy/infra/sandbox/gVisor/analyst-tools unchanged"
+  else
+    if [[ $WITH_INFRA == 1 ]]; then
+      echo "Infra images (in artifactflow-infra-${INFRA_SLUG}.tar.gz):"
+      echo "  caddy:${CADDY_TAG}"
+      echo "  postgres:${POSTGRES_TAG}"
+      echo "  redis:${REDIS_TAG}"
+    else
+      echo "Infra images: skipped — target must already have these loaded:"
+      echo "  caddy:${CADDY_TAG}"
+      echo "  postgres:${POSTGRES_TAG}"
+      echo "  redis:${REDIS_TAG}"
+      echo "  (run release with --with-infra to ship them)"
     fi
-  else
-    echo "Sandbox image bundle: skipped — target must already have"
-    echo "  ${SANDBOX_IMAGE_REF} + scratch root, or re-run release with"
-    echo "  --with-sandbox to ship the required immutable sandbox image."
-  fi
-  echo ""
-  if [[ $WITH_GVISOR == 1 ]]; then
-    echo "gVisor host runtime: $(basename "$SANDBOX_GVISOR_ARCHIVE")"
-    echo "  pinned: release-${GVISOR_VERSION} (${GVISOR_ARCH})"
-  else
-    echo "gVisor host runtime: none"
-    echo "  target must already have runsc registered."
-    echo "  Use --with-gvisor only for a new host or an explicit runtime update."
+    echo ""
+    if [[ $WITH_SANDBOX == 1 ]]; then
+      echo "Sandbox image bundle:"
+      echo "  required: ${SANDBOX_IMAGE_REF}"
+      echo "  image:   $(basename "$SANDBOX_ARCHIVE")"
+      echo "  verify:  $(basename "$SANDBOX_VERIFY_ARCHIVE")"
+      echo "  target:  deploy/scripts/fleet.sh prepare-sandbox <bundle-dir>, then"
+      echo "           set AF_ENABLE_SANDBOX=1 in deploy/.env and run fleet.sh deploy"
+      if [[ -f "$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt" ]]; then
+        image_id=$(awk '/^Image id:/ {sub(/^Image id:[[:space:]]*/, ""); print; exit}' "$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt")
+        [[ -n "$image_id" ]] && echo "  image id: $image_id"
+      fi
+    else
+      echo "Sandbox image bundle: skipped — target must already have"
+      echo "  ${SANDBOX_IMAGE_REF} + scratch root, or re-run release with"
+      echo "  --with-sandbox to ship the required immutable sandbox image."
+    fi
+    echo ""
+    if [[ $WITH_GVISOR == 1 ]]; then
+      echo "gVisor host runtime: $(basename "$SANDBOX_GVISOR_ARCHIVE")"
+      echo "  pinned: release-${GVISOR_VERSION} (${GVISOR_ARCH})"
+    else
+      echo "gVisor host runtime: none"
+      echo "  target must already have runsc registered."
+      echo "  Use --with-gvisor only for a new host or an explicit runtime update."
+    fi
   fi
   echo ""
   echo "Config tar highlights:"
@@ -607,12 +668,18 @@ if ! phase_done manifest "$manifest_input" "$MANIFEST"; then
     | sed 's/^/  /'
   echo ""
   echo "Deploy tar highlights:"
-  tar tzf "$DEPLOY_ARCHIVE" \
-    | grep -E '^deploy/[^/]+/$|\.sh$|\.yml$|Caddyfile|\.caddy$|\.env\.example$' \
-    | sort -u \
-    | sed 's/^/  /'
+  if (( CONFIG_ONLY )); then
+    echo "  unchanged (config-only release)"
+  else
+    tar tzf "$DEPLOY_ARCHIVE" \
+      | grep -E '^deploy/[^/]+/$|\.sh$|\.yml$|Caddyfile|\.caddy$|\.env\.example$' \
+      | sort -u \
+      | sed 's/^/  /'
+  fi
   echo ""
-  if [[ $WITH_ANALYST_TOOLS == 1 ]]; then
+  if (( CONFIG_ONLY )); then
+    :
+  elif [[ $WITH_ANALYST_TOOLS == 1 ]]; then
     echo "Analyst-tools bundle (artifactflow-analyst-tools-${ANALYST_SLUG}.tar.gz):"
     echo "  pandas:        ${PANDAS_VERSION}"
     echo "  numpy:         ${NUMPY_VERSION}"
@@ -625,18 +692,24 @@ if ! phase_done manifest "$manifest_input" "$MANIFEST"; then
     echo "  pandas/numpy installed (run release with --with-analyst-tools"
     echo "  to ship offline wheels; see docs/_archive/ops/deployment-sop.md)."
   fi
-  echo ""
-  echo "Backend image embeds py-spy (Dockerfile builder stage); compose enables"
-  echo "cap_add: [SYS_PTRACE] for the backup attach path:"
-  echo "  docker compose -f deploy/docker-compose.intranet.yml exec backend \\"
-  echo "    py-spy dump --pid 1"
+  if (( ! CONFIG_ONLY )); then
+    echo ""
+    echo "Backend image embeds py-spy (Dockerfile builder stage); compose enables"
+    echo "cap_add: [SYS_PTRACE] for the backup attach path:"
+    echo "  docker compose -f deploy/docker-compose.intranet.yml exec backend \\"
+    echo "    py-spy dump --pid 1"
+  fi
 } > "$MANIFEST"
   write_phase_stamp manifest "$manifest_input" "$MANIFEST"
 fi
 
 echo ""
 echo "=== Release artifacts ==="
-ls -lh "$OUTDIR"/artifactflow-{app,config,deploy}-"${VERSION}".tar.gz{,.sha256} "$MANIFEST" 2>/dev/null
+if (( CONFIG_ONLY )); then
+  ls -lh "$CONFIG_ARCHIVE" "$CONFIG_ARCHIVE.sha256" "$MANIFEST"
+else
+  ls -lh "$OUTDIR"/artifactflow-{app,config,deploy}-"${VERSION}".tar.gz{,.sha256} "$MANIFEST" 2>/dev/null
+fi
 if [[ $WITH_INFRA == 1 ]]; then
   ls -lh "$INFRA_ARCHIVE" "$INFRA_ARCHIVE.sha256"
 fi
@@ -654,6 +727,18 @@ echo ""
 echo "Manifest preview (first 30 lines):"
 head -30 "$MANIFEST" | sed 's/^/  /'
 echo ""
+
+if (( CONFIG_ONLY )); then
+  cat <<EOF
+To deploy this config-only release on the intranet Fleet control host:
+
+  # Transfer these three files into one approved bundle directory:
+  #   artifactflow-config-${VERSION}.tar.gz{,.sha256}
+  #   artifactflow-${VERSION}.manifest.txt
+  AF_BUNDLE_VERSION=${VERSION} deploy/scripts/fleet.sh deploy-config <bundle-dir>
+EOF
+  exit 0
+fi
 
 # Recipe is rendered conditionally on the flags actually used this build. It
 # lists the files that must be present in the target bundle directory, but leaves
@@ -724,7 +809,7 @@ $ANALYST_FOOTER
     vi deploy/.env        # Set persistent AF_ENABLE_SANDBOX=1 if this target enables sandbox tools; otherwise keep 0.
     vi deploy/fleet.conf
 ${SANDBOX_PREP_LOCAL}
-    AF_BUNDLE_VERSION=${VERSION} deploy/scripts/fleet.sh deploy "\$BUNDLE"
+    AF_BUNDLE_VERSION=${VERSION} deploy/scripts/fleet.sh bootstrap "\$BUNDLE"
     ${ANALYST_RECIPE}
     # No pause/resume here — there's nothing running to pause.
     # Preflight pass 2 — after \`up\`, now verifies py-spy lives in the image.
@@ -748,22 +833,7 @@ ${SANDBOX_PREP_LOCAL}
     # Existing deployments must declare their persistent target policy before
     # the first deploy with this Fleet version: AF_ENABLE_SANDBOX=0 or 1 in deploy/.env.
 ${SANDBOX_PREP_TMP}
-    # ─── compose infra changes (rare) ────────────────────────────
-    # If this version changed compose \`caddy\` / \`postgres\` / \`redis\` service
-    # blocks (image / logging / mem_limit / volumes / ports / command), the
-    # Caddyfiles, or .env's AF_HTTP_PORT / AF_HTTPS_PORT (caddy ports:
-    # interpolation), resume.sh won't propagate the change — see
-    # docs/deployment.md → 滚动更新已有部署 → "涉及 compose infra 服务 config
-    # 变更的升级". Recreate windows:
-    #   - caddy / AF_HTTP(S)_PORT: recreate BEFORE pause.sh below (keeps the
-    #     maintenance page servable through the window; Caddy dials upstreams
-    #     lazily, so recreating with backends stopped is also safe)
-    #   - PG/Redis: recreate between pause and resume
-    # POSTGRES_* env are init-only — changing user/password/db on a live
-    # cluster needs SQL (\`ALTER USER ...\`), NOT container recreate.
-    # Most releases skip this entire block.
-    # ─────────────────────────────────────────────────────────────
-    # Fleet deploy is a direct compose up. For a maintenance-page window instead,
-    # run maintenance.sh on before deploy and maintenance.sh off after it succeeds.
-    AF_BUNDLE_VERSION=${VERSION} ./deploy/scripts/fleet.sh deploy "\$BUNDLE"
+    # Fleet owns compose/Caddy/infra reconciliation and full-release rollback.
+    # Add --maintenance when users should see a maintenance page during the swap.
+    AF_BUNDLE_VERSION=${VERSION} ./deploy/scripts/fleet.sh deploy --maintenance "\$BUNDLE"
 EOF
