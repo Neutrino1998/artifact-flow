@@ -77,6 +77,54 @@ info() { printf '  \033[2mℹ %s\033[0m\n' "$1"; }
 step() { printf '\033[1m▶ %s\033[0m\n' "$1"; }
 die()  { bad "$1"; exit "${2:-1}"; }
 
+# Serialize release-changing operations on the designated Fleet control host.
+# An atomic directory works on both Linux targets and macOS planning hosts;
+# stale locks fail closed instead of being guessed away after a crash.
+MUTATION_LOCK_DIR="$RUNTIME_ROOT/fleet-mutation.lock"
+MUTATION_LOCK_HELD=0
+
+release_mutation_lock() {
+  (( MUTATION_LOCK_HELD )) || return 0
+  rm -f "$MUTATION_LOCK_DIR/owner"
+  if ! rmdir "$MUTATION_LOCK_DIR" 2>/dev/null; then
+    bad "failed to remove Fleet mutation lock: $MUTATION_LOCK_DIR"
+  fi
+  MUTATION_LOCK_HELD=0
+}
+
+acquire_mutation_lock() {  # acquire_mutation_lock <command-description>
+  local command_desc="$1" owner=""
+  mkdir -p "$RUNTIME_ROOT" || die "cannot create Fleet runtime root: $RUNTIME_ROOT"
+  if ! mkdir "$MUTATION_LOCK_DIR" 2>/dev/null; then
+    if [[ -f "$MUTATION_LOCK_DIR/owner" ]]; then
+      owner="$(tr '\n' ' ' < "$MUTATION_LOCK_DIR/owner")"
+    fi
+    die "another Fleet mutation is running (or a stale lock remains)${owner:+: $owner}. After verifying no Fleet process is active, remove $MUTATION_LOCK_DIR"
+  fi
+  MUTATION_LOCK_HELD=1
+  {
+    printf 'pid=%s\n' "$$"
+    printf 'started=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'command=%s\n' "$command_desc"
+  } > "$MUTATION_LOCK_DIR/owner" \
+    || { release_mutation_lock; die "cannot record Fleet mutation lock owner"; }
+  trap release_mutation_lock EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' HUP TERM
+}
+
+needs_mutation_lock() {  # needs_mutation_lock <subcommand> [args...]
+  local sub="$1" arg; shift
+  case "$sub" in
+    deploy|deploy-config|rollback)
+      for arg in "$@"; do [[ "$arg" == --dry-run ]] && return 1; done
+      return 0
+      ;;
+    env) [[ "${1:-}" == apply ]] ;;
+    *) return 1 ;;
+  esac
+}
+
 # ── fleet.conf parsing → parallel topology arrays ─────────────────
 ROLE=(); HOST=(); ARCH=(); SCALE=(); ADVERTISE=()
 parse_conf() {
@@ -408,7 +456,7 @@ compose_on_release() {  # compose_on_release <host> <release-id> <app-version> <
 }
 
 # ── bundle introspection (manifest is source of truth) ──────────────
-BUNDLE=""; BUNDLE_MANIFEST=""; BUNDLE_VER=""; BUNDLE_KIND=""; BUNDLE_PLATFORM=""; BUNDLE_SANDBOX_IMAGE=""; BUNDLE_GVISOR_PACKAGE=""; APP_TAR=""
+BUNDLE=""; BUNDLE_MANIFEST=""; BUNDLE_VER=""; BUNDLE_KIND=""; BUNDLE_PLATFORM=""; BUNDLE_EXPECTED_BASE=""; BUNDLE_SANDBOX_IMAGE=""; BUNDLE_GVISOR_PACKAGE=""; APP_TAR=""
 SANDBOX_TAR=""; SANDBOX_VERIFY_TAR=""; SANDBOX_GVISOR_TAR=""
 is_release_manifest() {
   local header
@@ -453,11 +501,17 @@ load_bundle_meta() {
   BUNDLE_KIND="$(manifest_value "$mf" "Release kind")"
   BUNDLE_KIND="${BUNDLE_KIND:-app}"
   BUNDLE_PLATFORM="$(manifest_value "$mf" "Platform")"
+  BUNDLE_EXPECTED_BASE="$(manifest_value "$mf" "Expected base release")"
   BUNDLE_SANDBOX_IMAGE="$(manifest_value "$mf" "Sandbox image required")"
   BUNDLE_GVISOR_PACKAGE="$(manifest_value "$mf" "gVisor host runtime")"
   [[ -n "$BUNDLE_VER" ]] || die "cannot read version from manifest $mf"
   validate_release_id "$BUNDLE_VER"
   case "$BUNDLE_KIND" in app|config) ;; *) die "manifest has invalid Release kind '$BUNDLE_KIND': $mf" ;; esac
+  if [[ -n "$BUNDLE_EXPECTED_BASE" ]]; then
+    [[ "$BUNDLE_KIND" == config ]] \
+      || die "Expected base release is only valid for config bundles: $mf"
+    validate_release_id "$BUNDLE_EXPECTED_BASE"
+  fi
   if [[ "$BUNDLE_KIND" == app ]]; then
     [[ "$BUNDLE_SANDBOX_IMAGE" =~ ^artifactflow-sandbox:[0-9a-f]{16}-(amd64|arm64)$ ]] \
       || die "manifest has invalid or missing immutable sandbox image reference: $mf"
@@ -529,6 +583,7 @@ load_bundle_sandbox_meta() {
 }
 
 STAGED_RELEASE=""
+CONFIG_BASE_RELEASE=""
 
 release_identity_digest() {  # release_identity_digest <lineage> <unit-file>...
   local lineage="$1" file; shift
@@ -597,10 +652,14 @@ stage_config_release_local() {
     || die "deploy-config requires one successful immutable app release first"
   active_id="$(release_meta_value_local "$active" release_id || true)"
   [[ -n "$active_id" ]] || die "cannot determine active base release id"
+  if [[ -n "$BUNDLE_EXPECTED_BASE" && "$active_id" != "$BUNDLE_EXPECTED_BASE" ]]; then
+    die "config bundle expects base $BUNDLE_EXPECTED_BASE but active release is $active_id; checkout/rebuild the config bundle"
+  fi
+  CONFIG_BASE_RELEASE="$active_id"
   app_ver="$(release_app_version_local "$active")"
   [[ -n "$app_ver" ]] || die "cannot determine active app version"
 
-  step "stage immutable config release $BUNDLE_VER (app stays $app_ver)"
+  step "stage immutable config release $BUNDLE_VER from base $active_id (app stays $app_ver)"
   if (( DRY )); then
     info "would clone active deploy unit + extract config into $release_root"
     STAGED_RELEASE="$release_root"
@@ -627,6 +686,7 @@ stage_config_release_local() {
     printf 'release_id=%s\n' "$BUNDLE_VER"
     printf 'kind=config\n'
     printf 'app_version=%s\n' "$app_ver"
+    printf 'base_release=%s\n' "$active_id"
     printf 'bundle_digest=%s\n' "$digest"
   } > "$tmp/.af-release"
   mv "$tmp" "$release_root" || { rm -rf "$tmp"; die "failed to finalize $release_root"; }
@@ -1024,10 +1084,9 @@ restore_config_single_local() {
 }
 
 deploy_config_single_local() {
-  local previous_release active app_ver n up_ok=0
-  previous_release="$(state_get current)"
-  active="$(active_release_dir_local)"
+  local previous_release app_ver n up_ok=0
   stage_config_release_local
+  previous_release="$CONFIG_BASE_RELEASE"
   app_ver="$(release_app_version_local "$STAGED_RELEASE")"
   n="$(single_app_scale)"
 
@@ -1096,7 +1155,7 @@ cmd_deploy_config() {
     deploy_config_multi_host
   fi
 
-  local prev; prev="$(state_get current)"
+  local prev; prev="$CONFIG_BASE_RELEASE"
   if (( DRY )); then
     info "dry-run complete — plan above, nothing changed"
   else
@@ -1523,19 +1582,19 @@ prepare_config_host() {  # prepare_config_host <host> <previous-release> <app-ve
   copy_release_file "$host" "$BUNDLE_MANIFEST" "$remote_bundle"
   run_on "$host" "cd '$remote_bundle' && sha256sum -c '$(basename "$config_tar.sha256")'" \
     || die "$host: config transfer checksum failed"
-  run_on "$host" "set -eu; release='$release'; previous='$(release_dir_for "$dir" "$previous")'; test -f \"\$previous/.af-release\"; if [ -d \"\$release\" ]; then grep -qx 'bundle_digest=$digest' \"\$release/.af-release\"; else tmp=\$(mktemp -d '$dir/.artifactflow/releases/.${BUNDLE_VER}.tmp.XXXXXX'); cp -a \"\$previous/deploy\" \"\$tmp/deploy\"; tar xzf '$remote_bundle/$(basename "$config_tar")' -C \"\$tmp\"; test -d \"\$tmp/config\"; printf 'release_id=%s\nkind=config\napp_version=%s\nbundle_digest=%s\n' '$BUNDLE_VER' '$app_ver' '$digest' > \"\$tmp/.af-release\"; mv \"\$tmp\" \"\$release\"; fi" \
+  run_on "$host" "set -eu; current='$dir/.artifactflow/current'; test -f \"\$current/.af-release\" || { echo 'active release metadata missing' >&2; exit 1; }; actual=\$(awk -F= '\$1 == \"release_id\" {sub(/^[^=]*=/, \"\"); print; exit}' \"\$current/.af-release\"); if [ \"\$actual\" != '$previous' ]; then echo \"active release mismatch: expected $previous, got \${actual:-<missing>}\" >&2; exit 1; fi; release='$release'; previous='$(release_dir_for "$dir" "$previous")'; test -f \"\$previous/.af-release\"; if [ -d \"\$release\" ]; then grep -qx 'bundle_digest=$digest' \"\$release/.af-release\"; else tmp=\$(mktemp -d '$dir/.artifactflow/releases/.${BUNDLE_VER}.tmp.XXXXXX'); cp -a \"\$previous/deploy\" \"\$tmp/deploy\"; tar xzf '$remote_bundle/$(basename "$config_tar")' -C \"\$tmp\"; test -d \"\$tmp/config\"; printf 'release_id=%s\nkind=config\napp_version=%s\nbase_release=%s\nbundle_digest=%s\n' '$BUNDLE_VER' '$app_ver' '$previous' '$digest' > \"\$tmp/.af-release\"; mv \"\$tmp\" \"\$release\"; fi" \
     || die "$host: config release staging failed"
 }
 
 deploy_config_multi_host() {
   local previous_release app_ver release_host lb i h n
-  previous_release="$(state_get current)"
-  [[ -n "$previous_release" ]] || die "multi-host deploy-config needs a previous successful release"
   for i in $(app_indices); do
     n="${SCALE[$i]:-1}"
     [[ "$n" == 1 ]] || die "multi-host deploy-config requires scale=1 per app host (got $n on ${HOST[$i]})"
   done
   stage_config_release_local
+  previous_release="$CONFIG_BASE_RELEASE"
+  [[ -n "$previous_release" ]] || die "multi-host deploy-config needs a previous successful release"
   app_ver="$(release_app_version_local "$STAGED_RELEASE")"
   info "MULTI-HOST config path awaits physical acceptance; proceeding without the former hard gate"
   while IFS= read -r h; do
@@ -1859,6 +1918,9 @@ cmd_rollback() {
 usage() { sed -n '2,40p' "$0"; }
 main() {
   local sub="${1:-}"; shift || true
+  if needs_mutation_lock "$sub" "$@"; then
+    acquire_mutation_lock "$sub $*"
+  fi
   case "$sub" in
     init-local) cmd_init_local "$@" ;;
     bootstrap) cmd_bootstrap "$@" ;;

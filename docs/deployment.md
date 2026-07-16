@@ -421,6 +421,12 @@ Config-only bundle 只包含 `config tar + checksum + manifest`，不会执行 D
 传输 app tar 或 `docker load`。Fleet 从当前成功 release 继承 deploy 单元，把新 config
 stage 成一个新 release id，完成校验/reconcile 和探活后再激活。
 
+会改变运行状态的 `deploy` / `deploy-config` / `rollback` / `env apply` 在指定
+Fleet 控制机上从 staging 到 activation/state 更新全程串行。锁目录为
+`.artifactflow/fleet-mutation.lock`，dry-run 不加锁。进程崩溃后锁会 fail-closed；
+确认没有 Fleet 操作在运行后，删除其 `owner` 文件并 `rmdir` 该目录。
+同一部署只使用一台指定控制机；这不是跨多个独立控制机的分布式锁。
+
 不再提供“现场改文件 + 手工 restart”的独立流程；单机与多机都使用同一套 Fleet
 命令和 release/rollback 契约。SSH、端口和静态 upstream 等多机接缝仍需独立真机验收。
 
@@ -440,7 +446,9 @@ deploy/scripts/fleet.sh config apply \
 生成标准 config-only bundle 后调用同一个 `fleet deploy-config`，因此仍包含
 checksum、reconcile gate、所有 app host 滚动重建、探活、版本记录和回滚。
 如果 checkout 之后当前 release 或其 config 被其他操作改变，`apply` 会拒绝用旧快照
-覆盖新状态。真实 bundle 保留在 `.artifactflow/hotfix-bundles/<id>`。可先运行
+覆盖新状态。bundle 会把基线写入可强制的 `Expected base release`；保留的
+bundle 如果在新 release 上重试会明确失败，必须重新 checkout，不会静默 rebase。
+真实 bundle 保留在 `.artifactflow/hotfix-bundles/<id>`。可先运行
 `fleet.sh config apply --dry-run /tmp/model-hotfix` 查看计划。
 
 > hotfix 只适用于 `config/`。`deploy/.env` 是目标机本地可变状态，继续使用

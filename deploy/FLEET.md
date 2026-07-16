@@ -133,6 +133,21 @@ the active immutable deploy unit, validates/reconciles the staged config once,
 rolls the app service(s), probes through the LB, and only then activates the new
 release id. No app build, transfer, or `docker load` occurs.
 
+Actual `deploy`, `deploy-config`, `rollback`, and `env apply` operations are
+serialized on the designated Fleet control host from staging through
+activation and state update. The atomic lock lives at
+`.artifactflow/fleet-mutation.lock`; dry-runs do not take it. A process crash
+leaves the lock fail-closed. After confirming no Fleet mutation is still
+running, recover it with:
+
+```bash
+rm -f .artifactflow/fleet-mutation.lock/owner
+rmdir .artifactflow/fleet-mutation.lock
+```
+
+Use one designated control host. The lock intentionally does not pretend to be
+a distributed lock across unrelated checkouts/control machines.
+
 A release id is a content identity, not a mutable tag. Full-release collision
 checks include app, config, and deploy tars; config-only collision checks also
 include the inherited active release id. Reusing an id with a changed image or
@@ -160,7 +175,10 @@ checkout retains a private baseline and its base release id; apply refuses to
 continue if the active release/config changed in the meantime, preventing a
 stale emergency edit from overwriting a newer deployment. Successful and
 failed real bundles remain under `.artifactflow/hotfix-bundles/<id>` for audit
-or retry. Rollback remains the normal full-release `fleet.sh rollback`.
+or retry. The bundle itself carries an enforced `Expected base release`, so a
+retry after another release activates fails and requires a fresh checkout;
+it never silently rebases. Rollback remains the normal full-release
+`fleet.sh rollback`.
 
 This path is only for `config/`. Target-local `deploy/.env` uses `fleet.sh env
 check|apply`; Caddy/deploy-unit changes still require a full app/deploy release.

@@ -162,7 +162,7 @@ cmd_apply() {
     printf 'ArtifactFlow Release %s\n' "$release_id"
     printf 'Release kind: config\n'
     printf 'Built:        %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    printf 'Built from:   active-release@%s\n' "$base_id"
+    printf 'Expected base release: %s\n' "$base_id"
     printf 'Platform:     %s\n' "$platform"
     printf 'Layout:       config\n'
   } > "$bundle/artifactflow-${release_id}.manifest.txt"

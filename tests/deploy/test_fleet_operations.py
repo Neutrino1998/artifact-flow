@@ -89,6 +89,57 @@ def test_deploy_config_dry_run_does_not_require_app_tar(tmp_path: Path) -> None:
     assert "app tar" not in result.stderr.lower()
 
 
+def test_deploy_config_rejects_retained_bundle_after_base_changes(
+    tmp_path: Path,
+) -> None:
+    root, fleet = _fleet_root(tmp_path)
+    bundle = tmp_path / "stale-bundle"
+    bundle.mkdir()
+    machine = platform.machine().lower()
+    arch = "arm64" if machine in {"arm64", "aarch64"} else "amd64"
+    version = "hotfix-from-v1"
+    (bundle / f"artifactflow-{version}.manifest.txt").write_text(
+        "\n".join(
+            [
+                f"ArtifactFlow Release {version}",
+                "Release kind: config",
+                "Expected base release: app-v1",
+                f"Platform:     linux/{arch}",
+                "Layout:       config",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (bundle / f"artifactflow-config-{version}.tar.gz").touch()
+
+    release = root / ".artifactflow/releases/app-v2"
+    (release / "deploy").mkdir(parents=True)
+    (release / "config").mkdir()
+    (release / "deploy/docker-compose.intranet.yml").touch()
+    (release / ".af-release").write_text(
+        "release_id=app-v2\nkind=app\napp_version=app-v2\nbundle_digest=test-v2\n",
+        encoding="utf-8",
+    )
+    current = root / ".artifactflow/current"
+    current.unlink()
+    current.symlink_to(release, target_is_directory=True)
+    (root / "deploy/.fleet-state").write_text(
+        "current=app-v2\nprevious=app-v1\n", encoding="utf-8"
+    )
+
+    result = subprocess.run(
+        ["bash", str(fleet), "deploy-config", "--dry-run", str(bundle)],
+        cwd=root,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode != 0
+    assert "expects base app-v1 but active release is app-v2" in result.stderr
+
+
 def test_app_deploy_dry_run_plans_immutable_release_without_writes(
     tmp_path: Path,
 ) -> None:
@@ -185,8 +236,53 @@ def test_config_hotfix_checkout_and_apply_dry_run(tmp_path: Path) -> None:
 
     assert apply.returncode == 0, apply.stderr
     assert "deploy config release=hotfix-model-test" in apply.stdout
+    assert "from base app-v1" in apply.stdout
     assert "app stays app-v1" in apply.stdout
     assert not (root / ".artifactflow/hotfix-bundles").exists()
+
+
+def test_config_hotfix_bundle_records_enforced_base(tmp_path: Path) -> None:
+    root, fleet = _fleet_root(tmp_path)
+    workspace = tmp_path / "manifest-hotfix"
+    subprocess.run(
+        ["bash", str(fleet), "config", "checkout", str(workspace)],
+        cwd=root,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    (workspace / "config/models/models.yaml").write_text(
+        "endpoint: http://new.internal\n", encoding="utf-8"
+    )
+
+    # Let bundle generation finish, then fail the delegated deploy so the real
+    # bundle remains available for contract inspection.
+    _write_executable(fleet, "#!/bin/sh\nexit 1\n")
+    bundle_root = tmp_path / "hotfix-bundles"
+    env = os.environ.copy()
+    env["AF_HOTFIX_BUNDLE_DIR"] = str(bundle_root)
+    result = subprocess.run(
+        [
+            "bash",
+            str(root / "deploy/scripts/config-hotfix.sh"),
+            "apply",
+            "--id",
+            "hotfix-manifest-test",
+            str(workspace),
+        ],
+        cwd=root,
+        env=env,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode != 0
+    manifest = (
+        bundle_root
+        / "hotfix-manifest-test/artifactflow-hotfix-manifest-test.manifest.txt"
+    ).read_text(encoding="utf-8")
+    assert "Expected base release: app-v1" in manifest
 
 
 def test_config_hotfix_rejects_stale_checkout(tmp_path: Path) -> None:
@@ -315,6 +411,88 @@ def test_multi_host_requires_explicit_lb_reachable_app_address(
     assert "needs advertise=<LB-reachable-address>" in result.stderr
 
 
+def test_remote_config_staging_checks_current_base(tmp_path: Path) -> None:
+    root, fleet = _fleet_root(tmp_path)
+    bundle = tmp_path / "remote-config"
+    bundle.mkdir()
+    version = "config-v2"
+    (bundle / f"artifactflow-config-{version}.tar.gz").write_bytes(b"config")
+    manifest = bundle / f"artifactflow-{version}.manifest.txt"
+    manifest.touch()
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "\n".join(
+                [
+                    'source "$1"',
+                    'BUNDLE="$2"',
+                    f'BUNDLE_VER="{version}"',
+                    'BUNDLE_MANIFEST="$3"',
+                    "DRY=0",
+                    'run_on() { printf "%s\\n" "$2"; }',
+                    "copy_release_file() { :; }",
+                    'prepare_config_host app2 app-v1 app-v1',
+                ]
+            ),
+            "_",
+            str(fleet),
+            str(bundle),
+            str(manifest),
+        ],
+        cwd=root,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "active release mismatch: expected app-v1" in result.stdout
+    assert "base_release=%s" in result.stdout
+
+
+def test_fleet_mutations_are_serialized_on_control_host(tmp_path: Path) -> None:
+    root, fleet = _fleet_root(tmp_path)
+    holder = subprocess.Popen(
+        [
+            "bash",
+            "-c",
+            'source "$1"; acquire_mutation_lock holder; echo locked; read -r _',
+            "_",
+            str(fleet),
+        ],
+        cwd=root,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "locked"
+        contender = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'source "$1"; acquire_mutation_lock contender',
+                "_",
+                str(fleet),
+            ],
+            cwd=root,
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+        assert contender.returncode != 0
+        assert "another Fleet mutation is running" in contender.stderr
+    finally:
+        if holder.poll() is None:
+            holder.communicate(input="release\n", timeout=5)
+
+    assert not (root / ".artifactflow/fleet-mutation.lock").exists()
+
+
 def test_bootstrap_plan_and_apply_do_not_share_parser_state(tmp_path: Path) -> None:
     root, fleet = _fleet_root(tmp_path)
     bundle = tmp_path / "bootstrap-bundle"
@@ -352,6 +530,7 @@ def test_bootstrap_plan_and_apply_do_not_share_parser_state(tmp_path: Path) -> N
     assert result.returncode != 0
     assert "duplicate row" not in result.stderr
     assert "checksum verification failed" in result.stderr
+    assert not (root / ".artifactflow/fleet-mutation.lock").exists()
 
 
 def test_backend_runtime_copy_and_resume_fingerprint_are_aligned() -> None:
