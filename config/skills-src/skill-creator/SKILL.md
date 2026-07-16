@@ -8,14 +8,25 @@ description: >
 license: Apache-2.0
 compatibility: 需要沙盒(bash/mount/persist)。体检与实测在真实运行环境中进行。
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
 ---
 
 # 技能创建与体检
 
-一个技能 = 一个 zip:根部 `SKILL.md`(YAML frontmatter + 正文指引),可选
-`scripts/`(固化操作)、`references/`(按需查阅的深料)、`assets/`(模板/数据)、
-`wheels/`(离线依赖)。环境事实(烤了什么、缺什么、硬门槛)见
+一个技能的交付物 = 一个 zip。统一按下面的推荐结构制作:
+
+```text
+<name>/
+├── SKILL.md
+├── scripts/       # 可选:固化操作
+├── references/    # 可选:按需查阅的深料
+├── assets/        # 可选:模板/数据
+└── wheels/        # 可选:离线依赖
+```
+
+`SKILL.md` 使用 YAML frontmatter + Markdown 正文。平台也兼容 `SKILL.md` 直接
+位于 zip 根部,但打包工具固定生成上述单层包装目录;附属文件全部放在同一技能目录
+内。环境事实(烤了什么、缺什么、硬门槛)见
 [references/environment.md](references/environment.md) —— 两条流程都以它为准。
 打包工具:[package_skill.py](scripts/package_skill.py)。
 
@@ -26,6 +37,19 @@ metadata:
 刚好。
 
 **2 · 写 SKILL.md。**
+- 从最小骨架开始,`name` 推荐用小写字母/数字/`-`/`_`,正文不可为空:
+
+  ```markdown
+  ---
+  name: my-skill
+  description: 当用户需要……时使用,帮助完成……
+  ---
+
+  # My Skill
+
+  按照以下步骤完成任务……
+  ```
+
 - `description` 是唯一常驻模型上下文的部分,决定"会不会被想起来用":写
   **什么时候用 + 能做什么**,一到三句,含用户会说出口的触发词。
 - 正文写"怎么做":步骤化、给可直接运行的命令/代码块、写明边界与降级

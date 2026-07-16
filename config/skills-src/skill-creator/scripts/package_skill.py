@@ -9,7 +9,7 @@
   - 根目录有 SKILL.md,frontmatter 有 ---...--- 围栏
   - frontmatter 里有 name: 与 description:
   - 剥 frontmatter 后正文非空
-  - zip 总大小 ≤100MB(平台单包上限)
+  - zip 总大小 ≤200MB(平台私有 skill 默认单包上限)
 
 排除打包:__pycache__ / *.pyc / .DS_Store / .git。
 """
@@ -18,7 +18,8 @@ import sys
 import zipfile
 from pathlib import Path
 
-MAX_ZIP_BYTES = 100 * 1024 * 1024
+MAX_ZIP_MB = 200
+MAX_ZIP_BYTES = MAX_ZIP_MB * 1024 * 1024
 _JUNK = {"__pycache__", ".DS_Store", ".git"}
 
 
@@ -62,7 +63,8 @@ def main():
 
     size = out.stat().st_size
     if size > MAX_ZIP_BYTES:
-        raise SystemExit(f"error: {out} 有 {size/2**20:.0f}MB,超过平台 100MB 单包上限 —— "
+        raise SystemExit(f"error: {out} 有 {size/2**20:.0f}MB,超过平台默认 "
+                         f"{MAX_ZIP_MB}MB 单包上限 —— "
                          "检查是否把数据/产物打了进去")
     print(f"packaged {out} ({size:,} bytes)")
     print("下一步:persist 这个 zip 为 artifact → 用户下载 → 前端「技能管理 → 导入技能」上传。")
