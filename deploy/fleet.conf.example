@@ -12,7 +12,7 @@
 #
 # ── Format ──
 # One row per (role, host). Blank lines and `#` comments ignored.
-# Columns:  <role>  <host>  [arch=arm64|amd64]  [scale=N]
+# Columns:  <role>  <host>  [arch=arm64|amd64]  [scale=N]  [advertise=NAME|IPv4]
 #   role   one of: infra | release | app | lb   (see below)
 #   host   an ssh-reachable hostname/IP, OR the literal `local`
 #          (= run right here, no ssh — the single-box degenerate case)
@@ -22,6 +22,9 @@
 #          assumption; build either x86 or arm with release.sh --platform.
 #   scale  app rows only: number of backend replicas (frontend stays 1 —
 #          only backend is the multi-replica, Redis-coordinated tier).
+#   advertise  app rows only and required in a multi-host topology: the
+#          explicit DNS name/IPv4 that the LB container can route to. `host`
+#          remains only the control-plane ssh/local transport address.
 #
 # ── Roles ──
 #   infra    postgres + redis  (compose --profile infra; omit row for
@@ -50,6 +53,6 @@ lb       local
 # ─────────────────────────────────────────────────────────────────────
 # infra    k1   arch=arm64
 # release  k1
-# app      k1   arch=arm64  scale=1
-# app      k2   arch=arm64  scale=1
+# app      k1   arch=arm64  scale=1  advertise=app1.internal
+# app      k2   arch=arm64  scale=1  advertise=app2.internal
 # lb       k1   arch=arm64

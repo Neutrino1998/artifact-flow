@@ -57,6 +57,21 @@
 	header_up X-Real-IP {remote_host}
 }
 
+# Frontend uses the same passive failover shape. On multi-host releases Fleet
+# renders every app host as a target, so rolling the first app host or losing
+# it does not take the UI down. The single-host target remains frontend:3000.
+(frontend_upstream) {
+	import frontend_upstream_targets
+	lb_policy round_robin
+	lb_try_duration 5s
+	lb_try_interval 250ms
+	fail_duration 30s
+	transport http {
+		dial_timeout 2s
+		response_header_timeout 15s
+	}
+}
+
 # The whole site body — matchers + route. Import inside a site block.
 (af_site) {
 	# Batched upload ceiling — the AUTHORITATIVE total-bytes cap. POST /api/v1/chat
@@ -145,7 +160,7 @@
 		# 7. Frontend catch-all.
 		handle {
 			reverse_proxy {
-				import frontend_upstream_targets
+				import frontend_upstream
 			}
 		}
 	}

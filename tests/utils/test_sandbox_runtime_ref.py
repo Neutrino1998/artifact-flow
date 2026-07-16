@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -247,8 +248,12 @@ def _fleet_dry_run_from_env_file(tmp_path, sandbox_policy):
         ]),
         encoding="utf-8",
     )
-    for kind in ("app", "config", "deploy"):
+    for kind in ("app", "config"):
         (bundle / f"artifactflow-{kind}-{version}.tar.gz").touch()
+    deploy_tar = bundle / f"artifactflow-deploy-{version}.tar.gz"
+    overlay = root / "deploy" / "docker-compose.sandbox.yml"
+    with tarfile.open(deploy_tar, "w:gz") as archive:
+        archive.add(overlay, arcname="deploy/docker-compose.sandbox.yml")
 
     env = os.environ.copy()
     env.pop("AF_ENABLE_SANDBOX", None)

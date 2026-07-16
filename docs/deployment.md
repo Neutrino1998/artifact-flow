@@ -297,6 +297,8 @@ deploy/scripts/fleet.sh preflight            # 单机/每台机器就绪检查
 deploy/scripts/fleet.sh deploy <bundle-dir>  # 校验 → 解包 → load → release 门 → up → 探活
 deploy/scripts/fleet.sh deploy --dry-run <d> # 只打印计划，不改动任何东西
 deploy/scripts/fleet.sh deploy-config <dir>  # 只发布 config，不构建/传输/load app 镜像
+deploy/scripts/fleet.sh config checkout DIR # 从当前 release 创建紧急配置编辑区
+deploy/scripts/fleet.sh config apply DIR    # 打包并通过 Fleet 应用 config hotfix
 deploy/scripts/fleet.sh env check|apply FILE # 校验或应用目标机环境变量
 deploy/scripts/fleet.sh proxy-reload         # 在 LB 节点 reload Caddy 配置/证书
 deploy/scripts/fleet.sh maintenance on|off   # 统一维护页入口
@@ -311,7 +313,10 @@ backend/frontend 或 deploy 变化走完整 `fleet deploy`；纯 `config/` 变�
 
 拓扑写在 `deploy/fleet.conf`（从 `fleet.conf.example` 复制，gitignored），单机场景下四个角色
 （`infra`/`release`/`app`/`lb`）都填 `local`；`app` 行的 `scale=N` 就是 `--scale backend=N`
-的等价物。完整命令、多机时序、以及 TLS 证书自动兜底（`up` 前自动跑
+的等价物。多机时每个 `app` 行还必须填 `advertise=<LB 容器可达 DNS/IPv4>`；
+`host` 只是 SSH/本地传输地址，即使其值为 `local` 也不会被写进 Caddy upstream。
+Fleet 会将全部 app 机的 backend 和 frontend 都加入上游。完整命令、多机时序、
+以及 TLS 证书自动兜底（`up` 前自动跑
 `ensure-cert.sh`），见 [`deploy/FLEET.md`](https://github.com/Neutrino1998/artifact-flow/blob/main/deploy/FLEET.md)。
 
 > **现状：** 单机路径（含 `--scale`）已跑通；多机路径已解除硬门禁并实现传输、
@@ -394,7 +399,7 @@ reconcile；下一次发布还会覆盖这类现场修改。
 
 | 变更类型 | 操作 | 生效命令 |
 |---------|------|---------|
-| `config/models/models.yaml`（模型 / base_url） | 修改、提交并打 config-only release | `fleet.sh deploy-config <bundle-dir>`；app 镜像不变 |
+| `config/models/models.yaml`（模型 / base_url） | 常规改动走代码库 config-only release；紧急改动可在 Fleet 控制端 checkout/apply | 统一进入 `fleet.sh deploy-config`；app 镜像不变 |
 | `config/agents/*.md` / `config/tools/*.md` / `config/skills/`（DB seeded registry） | 修改、提交并打 config-only release | `deploy-config` 在 release 节点 reconcile 一次，再滚动更新 app 节点 |
 | `config/site/notifications.json`（左栏通知） | 单机可用管理员菜单；多机/正式文件变更走 config-only release | 单机前端 60s 轮询；Fleet 发布则由 `deploy-config` 保证所有 app host 内容一致 |
 | `config/site/welcome_tips.json` / `branding.json`（欢迎页提示 / 版权页脚） | 修改后打 config-only release | `deploy-config` 后用户刷新页面；文件缺失/schema 错位仍 fail-closed |
@@ -418,6 +423,30 @@ stage 成一个新 release id，完成校验/reconcile 和探活后再激活。
 
 不再提供“现场改文件 + 手工 restart”的独立流程；单机与多机都使用同一套 Fleet
 命令和 release/rollback 契约。SSH、端口和静态 upstream 等多机接缝仍需独立真机验收。
+
+**紧急现场 hotfix（无需代码库 / release.sh / Docker）：**
+
+```bash
+cd /opt/artifactflow
+deploy/scripts/fleet.sh config checkout /tmp/model-hotfix
+vi /tmp/model-hotfix/config/models/models.yaml
+
+VERSION="hotfix-model-$(date +%Y%m%d-%H%M%S)"
+deploy/scripts/fleet.sh config apply \
+  --id "$VERSION" --maintenance /tmp/model-hotfix
+```
+
+`checkout` 会从当前成功 release 复制完整 `config/` 和一份私有基线；`apply`
+生成标准 config-only bundle 后调用同一个 `fleet deploy-config`，因此仍包含
+checksum、reconcile gate、所有 app host 滚动重建、探活、版本记录和回滚。
+如果 checkout 之后当前 release 或其 config 被其他操作改变，`apply` 会拒绝用旧快照
+覆盖新状态。真实 bundle 保留在 `.artifactflow/hotfix-bundles/<id>`。可先运行
+`fleet.sh config apply --dry-run /tmp/model-hotfix` 查看计划。
+
+> hotfix 只适用于 `config/`。`deploy/.env` 是目标机本地可变状态，继续使用
+> `fleet.sh env check FILE` + `fleet.sh env apply FILE`；Compose/Caddy 变更打完整 release。
+
+**常规可审计 config 发布（构建机）：**
 
 ```bash
 # 构建机

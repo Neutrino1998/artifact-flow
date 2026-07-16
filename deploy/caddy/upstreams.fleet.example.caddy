@@ -5,5 +5,5 @@
 }
 
 (frontend_upstream_targets) {
-	to app1.internal:3000
+	to app1.internal:3000 app2.internal:3000
 }

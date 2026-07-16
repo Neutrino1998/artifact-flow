@@ -13,6 +13,8 @@ deploy/scripts/fleet.sh preflight            # per-host readiness + deploy/.env 
 deploy/scripts/fleet.sh deploy <bundle-dir>  # verify → extract → load → release gate → up → LB → smoke
 deploy/scripts/fleet.sh deploy --dry-run <d> # print the plan, touch nothing
 deploy/scripts/fleet.sh deploy-config <dir>  # config-only: verify → reconcile → rolling app restart
+deploy/scripts/fleet.sh config checkout DIR  # copy active config into an emergency edit workspace
+deploy/scripts/fleet.sh config apply DIR     # package + apply a config-only hotfix locally
 deploy/scripts/fleet.sh env check|apply FILE # validate/apply env without changing the release id
 deploy/scripts/fleet.sh proxy-reload         # reload Caddy config/certificate on the LB
 deploy/scripts/fleet.sh maintenance on|off   # fleet-aware maintenance flag
@@ -51,7 +53,7 @@ For custom or multi-host layouts, copy `fleet.conf.example` → `fleet.conf`
 (gitignored — it may carry host IPs). One row per `(role, host)`:
 
 ```
-<role>  <host>  [arch=arm64|amd64]  [scale=N]
+<role>  <host>  [arch=arm64|amd64]  [scale=N]  [advertise=NAME|IPv4]
 ```
 
 | field | meaning |
@@ -60,6 +62,7 @@ For custom or multi-host layouts, copy `fleet.conf.example` → `fleet.conf`
 | host  | ssh-reachable hostname/IP, or literal `local` (run here, no ssh) |
 | arch  | validated against the bundle + host `uname -m`; not used to pick tars (see Arch) |
 | scale | app rows only — backend replica count; **frontend is always 1** |
+| advertise | app rows only; required for multi-host — explicit address reachable from the LB container |
 
 Cardinality enforced: exactly one `release`, exactly one `lb`, ≥1 `app`.
 
@@ -81,7 +84,9 @@ lb       local
   the tar is carried in, and a host inside the intranet *drives* the deploy.
   Control host ≠ build host. (You *can* run it on one of the targets instead —
   it treats itself as `local`, others over ssh — but then control and data
-  share a box.)
+  share a box.) In that mixed topology, the app's `host=local` remains a
+  control-plane sentinel; set `advertise=<real-LB-reachable-address>` so it is
+  never rendered as the unroutable `local:8000` upstream.
 
 ssh knobs: `AF_SSH_USER` (default current user), `AF_SSH_OPTS`
 (e.g. `-i ~/.ssh/fleet -p 2222`), `AF_REMOTE_DIR` (install dir on remotes,
@@ -128,6 +133,38 @@ the active immutable deploy unit, validates/reconciles the staged config once,
 rolls the app service(s), probes through the LB, and only then activates the new
 release id. No app build, transfer, or `docker load` occurs.
 
+A release id is a content identity, not a mutable tag. Full-release collision
+checks include app, config, and deploy tars; config-only collision checks also
+include the inherited active release id. Reusing an id with a changed image or
+different base is therefore a loud failure on both control and remote hosts.
+
+### Emergency config hotfix on the Fleet control host
+
+When the active release only needs a small config edit, the installed deploy
+unit has a source-free helper. It creates the same config-only bundle and then
+calls `deploy-config`; `release.sh`, git, and Docker are not required on the
+production control host:
+
+```bash
+cd /opt/artifactflow
+deploy/scripts/fleet.sh config checkout /tmp/model-hotfix
+vi /tmp/model-hotfix/config/models/models.yaml
+
+VERSION="hotfix-model-$(date +%Y%m%d-%H%M%S)"
+deploy/scripts/fleet.sh config apply \
+  --id "$VERSION" --maintenance /tmp/model-hotfix
+```
+
+Use `config apply --dry-run /tmp/model-hotfix` to inspect the Fleet plan. The
+checkout retains a private baseline and its base release id; apply refuses to
+continue if the active release/config changed in the meantime, preventing a
+stale emergency edit from overwriting a newer deployment. Successful and
+failed real bundles remain under `.artifactflow/hotfix-bundles/<id>` for audit
+or retry. Rollback remains the normal full-release `fleet.sh rollback`.
+
+This path is only for `config/`. Target-local `deploy/.env` uses `fleet.sh env
+check|apply`; Caddy/deploy-unit changes still require a full app/deploy release.
+
 ### Single-host up
 
 All roles are `local`, so **compose owns the ordering** via its own
@@ -164,7 +201,9 @@ commissioning event with a maintenance window and rollback bundle retained.
   Until per-replica port discovery exists, **every multi-host app row must use
   `scale=1`**; Fleet loud-fails otherwise.
 - Fleet renders `deploy/caddy/upstreams.caddy` inside the LB's staged release
-  from the app rows. Single-host keeps Docker DNS through the shipped default.
+  from every app row's `advertise=` address, for both backend and frontend.
+  `host` is only the ssh/local transport address and is never used as a data
+  plane default. Single-host keeps Docker DNS through the shipped default.
 - `deploy/.env` is the common source. Optional gitignored
   `deploy/.env.<host>` files override DB/Redis URLs or published ports for one
   remote host; Fleet materializes the merged file on that host. The literal
@@ -172,6 +211,17 @@ commissioning event with a maintenance window and rollback bundle retained.
 - Before declaring the path production-accepted, verify SSH permissions,
   hostname reachability from LB→app, partial-host rollback, and the site's
   firewall rules on 8000/3000 during the first physical exercise.
+
+## Implementation boundary
+
+Fleet is the stable operator CLI and release contract; Compose remains the
+single-host runtime. The current shell executor is intentionally limited to a
+small homogeneous fleet with static inventory. Do not grow it into host
+discovery, secret distribution, dynamic inventory, or general task execution.
+When the first physical multi-host acceptance exposes a need for those
+capabilities, move the multi-host transport/idempotent task layer to Ansible
+while keeping these Fleet commands and immutable release semantics. Kubernetes
+or Swarm is not justified by the current static private-deployment shape alone.
 
 ## Arch
 

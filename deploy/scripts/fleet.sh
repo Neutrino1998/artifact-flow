@@ -18,6 +18,7 @@
 #   fleet.sh deploy <bundle-dir>       verify → extract → load → release gate → (rolling) up → LB → smoke
 #   fleet.sh deploy --dry-run <dir>    print the plan, touch nothing
 #   fleet.sh deploy-config <dir>       verify → stage config → reconcile → rolling app restart
+#   fleet.sh config checkout|apply     edit/package/apply config on a Fleet control host
 #   fleet.sh prepare-sandbox <dir>     load sandbox image; install runsc only when bundled
 #   fleet.sh status                    per-host `compose ps` + /health/ready probe
 #   fleet.sh rollback                  re-up the previously-deployed version (images kept)
@@ -76,21 +77,24 @@ info() { printf '  \033[2mℹ %s\033[0m\n' "$1"; }
 step() { printf '\033[1m▶ %s\033[0m\n' "$1"; }
 die()  { bad "$1"; exit "${2:-1}"; }
 
-# ── fleet.conf parsing → parallel arrays ROLE/HOST/ARCH/SCALE ───────
-ROLE=(); HOST=(); ARCH=(); SCALE=()
+# ── fleet.conf parsing → parallel topology arrays ─────────────────
+ROLE=(); HOST=(); ARCH=(); SCALE=(); ADVERTISE=()
 parse_conf() {
   [[ -f "$FLEET_CONF" ]] || die "fleet.conf not found: $FLEET_CONF (copy from fleet.conf.example)"
-  local line role host rest kv a s j
+  # Make repeated parses describe only the current file contents.
+  ROLE=(); HOST=(); ARCH=(); SCALE=(); ADVERTISE=()
+  local line role host rest kv a s d j
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%%#*}"                       # strip inline comment
     read -r role host rest <<<"$line"        # split first two + remainder
     [[ -z "${role:-}" ]] && continue
     [[ -z "${host:-}" ]] && die "fleet.conf: role '$role' has no host"
-    a=""; s=""
+    a=""; s=""; d=""
     for kv in $rest; do
       case "$kv" in
         arch=*)  a="${kv#arch=}" ;;
         scale=*) s="${kv#scale=}" ;;
+        advertise=*) d="${kv#advertise=}" ;;
         *) die "fleet.conf: unknown field '$kv' on row '$role $host'" ;;
       esac
     done
@@ -102,13 +106,18 @@ parse_conf() {
       [[ "$s" =~ ^[0-9]+$ && "$s" -ge 1 ]] \
         || die "fleet.conf: scale must be a positive integer on app $host"
     fi
+    if [[ -n "$d" ]]; then
+      [[ "$role" == app ]] || die "fleet.conf: advertise is only valid on app rows ($role $host)"
+      [[ "$d" =~ ^[A-Za-z0-9._-]+$ ]] \
+        || die "fleet.conf: advertise must be a DNS name or IPv4 address on app $host"
+    fi
     for j in "${!ROLE[@]}"; do
       [[ "${ROLE[$j]}" != "$role" || "${HOST[$j]}" != "$host" ]] \
         || die "fleet.conf: duplicate row '$role $host'"
       [[ -z "$a" || -z "${ARCH[$j]}" || "${HOST[$j]}" != "$host" || "${ARCH[$j]}" == "$a" ]] \
         || die "fleet.conf: host $host has conflicting arch values (${ARCH[$j]} vs $a)"
     done
-    ROLE+=("$role"); HOST+=("$host"); ARCH+=("$a"); SCALE+=("$s")
+    ROLE+=("$role"); HOST+=("$host"); ARCH+=("$a"); SCALE+=("$s"); ADVERTISE+=("$d")
   done < "$FLEET_CONF"
   [[ ${#ROLE[@]} -gt 0 ]] || die "fleet.conf is empty"
   # cardinality: exactly one release + one lb; at least one app
@@ -119,6 +128,12 @@ parse_conf() {
   (( nr == 1 )) || die "fleet.conf needs exactly one 'release' row (found $nr)"
   (( nl == 1 )) || die "fleet.conf needs exactly one 'lb' row (found $nl)"
   (( na >= 1 )) || die "fleet.conf needs at least one 'app' row (found $na)"
+  if [[ "$(all_hosts)" != local ]]; then
+    for i in $(app_indices); do
+      [[ -n "${ADVERTISE[$i]}" ]] \
+        || die "fleet.conf: multi-host app ${HOST[$i]} needs advertise=<LB-reachable-address>"
+    done
+  fi
 }
 
 role_host() {  # echo the (first) host for a role; empty if absent
@@ -515,11 +530,14 @@ load_bundle_sandbox_meta() {
 
 STAGED_RELEASE=""
 
-bundle_unit_digest() {
-  local file
-  for file in "$@"; do
-    printf '%s|%s\n' "$(basename "$file")" "$(sha256sum "$file" | awk '{print $1}')"
-  done | sha256sum | awk '{print $1}'
+release_identity_digest() {  # release_identity_digest <lineage> <unit-file>...
+  local lineage="$1" file; shift
+  {
+    printf 'lineage|%s\n' "$lineage"
+    for file in "$@"; do
+      printf '%s|%s\n' "$(basename "$file")" "$(sha256sum "$file" | awk '{print $1}')"
+    done
+  } | sha256sum | awk '{print $1}'
 }
 
 stage_app_release_local() {
@@ -537,7 +555,7 @@ stage_app_release_local() {
     return 0
   fi
 
-  digest="$(bundle_unit_digest "$deploy_tar" "$config_tar")"
+  digest="$(release_identity_digest app "$APP_TAR" "$deploy_tar" "$config_tar")"
   if [[ -d "$release_root" ]]; then
     recorded="$(release_meta_value_local "$release_root" bundle_digest || true)"
     [[ "$recorded" == "$digest" ]] \
@@ -570,13 +588,15 @@ stage_app_release_local() {
 }
 
 stage_config_release_local() {
-  local config_tar release_root tmp digest recorded="" active app_ver
+  local config_tar release_root tmp digest recorded="" active active_id app_ver
   config_tar="$BUNDLE/artifactflow-config-${BUNDLE_VER}.tar.gz"
   [[ -f "$config_tar" ]] || die "config tar for version $BUNDLE_VER not found: $config_tar"
   release_root="$(release_dir_for "$ROOT" "$BUNDLE_VER")"
   active="$(active_release_dir_local)"
   [[ "$active" != "$ROOT" && -f "$active/.af-release" ]] \
     || die "deploy-config requires one successful immutable app release first"
+  active_id="$(release_meta_value_local "$active" release_id || true)"
+  [[ -n "$active_id" ]] || die "cannot determine active base release id"
   app_ver="$(release_app_version_local "$active")"
   [[ -n "$app_ver" ]] || die "cannot determine active app version"
 
@@ -586,7 +606,7 @@ stage_config_release_local() {
     STAGED_RELEASE="$release_root"
     return 0
   fi
-  digest="$(bundle_unit_digest "$config_tar")"
+  digest="$(release_identity_digest "base:$active_id" "$config_tar")"
   if [[ -d "$release_root" ]]; then
     recorded="$(release_meta_value_local "$release_root" bundle_digest || true)"
     [[ "$recorded" == "$digest" ]] \
@@ -847,8 +867,12 @@ cmd_bootstrap() {
   # The bundle-aware dry run validates topology/manifest/arch and prints the
   # exact first-deploy plan. The real deploy repeats checksum and host checks
   # after staging the immutable release units.
-  cmd_deploy --dry-run "$bundle"
-  cmd_deploy "$bundle"
+  # Each CLI command gets a fresh process. Besides fixing topology arrays, this
+  # prevents any future subcommand-global state from leaking from plan → apply.
+  "$SCRIPT_DIR/fleet.sh" deploy --dry-run "$bundle" \
+    || die "bootstrap plan failed"
+  "$SCRIPT_DIR/fleet.sh" deploy "$bundle" \
+    || die "bootstrap deploy failed"
 }
 
 # ════════════════════════════════════════════════════════════════════
@@ -1187,11 +1211,15 @@ deploy_single_local() {
   fi
 
   if [[ "$ENABLE_SANDBOX" == 1 ]]; then
-    [[ -f "$STAGED_RELEASE/deploy/$SANDBOX_COMPOSE_BASENAME" ]] \
-      || die "AF_ENABLE_SANDBOX=1 but staged release lacks $SANDBOX_COMPOSE_BASENAME"
     if (( DRY )); then
+      tar tzf "$BUNDLE/artifactflow-deploy-${BUNDLE_VER}.tar.gz" 2>/dev/null \
+        | grep -qx "deploy/$SANDBOX_COMPOSE_BASENAME" \
+        || die "AF_ENABLE_SANDBOX=1 but deploy bundle lacks $SANDBOX_COMPOSE_BASENAME"
+      info "would include $SANDBOX_COMPOSE_BASENAME from the deploy bundle"
       info "would require: runsc registered, $BUNDLE_SANDBOX_IMAGE loaded, scratch root mounted"
     else
+      [[ -f "$STAGED_RELEASE/deploy/$SANDBOX_COMPOSE_BASENAME" ]] \
+        || die "AF_ENABLE_SANDBOX=1 but staged release lacks $SANDBOX_COMPOSE_BASENAME"
       command -v runsc >/dev/null 2>&1 || die "AF_ENABLE_SANDBOX=1 but runsc is missing; run fleet.sh prepare-sandbox <bundle-dir> or deploy/scripts/prepare-host.sh sandbox"
       docker info 2>/dev/null | grep -q runsc || die "AF_ENABLE_SANDBOX=1 but Docker runtime 'runsc' is not registered"
       docker image inspect "$BUNDLE_SANDBOX_IMAGE" >/dev/null 2>&1 \
@@ -1278,7 +1306,7 @@ prepare_release_host() {  # prepare_release_host <host>
   deploy_tar="$BUNDLE/artifactflow-deploy-${BUNDLE_VER}.tar.gz"
   config_tar="$BUNDLE/artifactflow-config-${BUNDLE_VER}.tar.gz"
   manifest="$BUNDLE_MANIFEST"
-  digest="$(bundle_unit_digest "$deploy_tar" "$config_tar")"
+  digest="$(release_identity_digest app "$APP_TAR" "$deploy_tar" "$config_tar")"
 
   step "prepare release host $host"
   if (( DRY )); then
@@ -1353,21 +1381,30 @@ wait_app_host() {  # wait_app_host <host>
   return 1
 }
 
+render_multi_host_upstreams() {
+  local i h address backend_port frontend_port
+  echo '(backend_upstream_targets) {'
+  printf '\tto'
+  for i in $(app_indices); do
+    h="${HOST[$i]}"; address="${ADVERTISE[$i]}"
+    backend_port="$(host_env_value "$h" AF_BACKEND_PORT)"; backend_port="${backend_port:-8000}"
+    printf ' %s:%s' "$address" "$backend_port"
+  done
+  printf '\n}\n\n'
+  echo '(frontend_upstream_targets) {'
+  printf '\tto'
+  for i in $(app_indices); do
+    h="${HOST[$i]}"; address="${ADVERTISE[$i]}"
+    frontend_port="$(host_env_value "$h" AF_FRONTEND_PORT)"; frontend_port="${frontend_port:-3000}"
+    printf ' %s:%s' "$address" "$frontend_port"
+  done
+  printf '\n}\n'
+}
+
 write_multi_host_upstreams() {  # write static targets into LB release
-  local lb="$1" release_id="$2" tmp i h backend_port frontend_host frontend_port remote
+  local lb="$1" release_id="$2" tmp remote
   tmp="$(mktemp /tmp/artifactflow-upstreams.XXXXXX)" || die "failed to create upstream config"
-  {
-    echo '(backend_upstream_targets) {'
-    printf '\tto'
-    for i in $(app_indices); do
-      h="${HOST[$i]}"; backend_port="$(host_env_value "$h" AF_BACKEND_PORT)"; backend_port="${backend_port:-8000}"
-      printf ' %s:%s' "$h" "$backend_port"
-    done
-    printf '\n}\n\n'
-    frontend_host="${HOST[$(app_indices | head -1)]}"
-    frontend_port="$(host_env_value "$frontend_host" AF_FRONTEND_PORT)"; frontend_port="${frontend_port:-3000}"
-    printf '(frontend_upstream_targets) {\n\tto %s:%s\n}\n' "$frontend_host" "$frontend_port"
-  } > "$tmp"
+  render_multi_host_upstreams > "$tmp"
   remote="$(release_dir_for "$(target_dir "$lb")" "$release_id")/deploy/caddy/upstreams.caddy"
   if (( DRY )); then
     info "  [$lb] would render static Caddy upstreams: $(tr '\n' ' ' < "$tmp")"
@@ -1472,7 +1509,7 @@ prepare_config_host() {  # prepare_config_host <host> <previous-release> <app-ve
   dir="$(target_dir "$host")"
   remote_bundle="$dir/.artifactflow/bundles/$BUNDLE_VER"
   config_tar="$BUNDLE/artifactflow-config-${BUNDLE_VER}.tar.gz"
-  digest="$(bundle_unit_digest "$config_tar")"
+  digest="$(release_identity_digest "base:$previous" "$config_tar")"
   release="$(release_dir_for "$dir" "$BUNDLE_VER")"
   step "prepare config release on $host"
   if (( DRY )); then
@@ -1828,6 +1865,7 @@ main() {
     preflight) cmd_preflight "$@" ;;
     deploy)    cmd_deploy "$@" ;;
     deploy-config) cmd_deploy_config "$@" ;;
+    config)    "$SCRIPT_DIR/config-hotfix.sh" "$@" ;;
     prepare-sandbox) cmd_prepare_sandbox "$@" ;;
     env)       cmd_env "$@" ;;
     proxy-reload) cmd_proxy_reload "$@" ;;
@@ -1835,7 +1873,9 @@ main() {
     status)    cmd_status "$@" ;;
     rollback)  cmd_rollback "$@" ;;
     ""|-h|--help|help) usage ;;
-    *) die "unknown subcommand: $sub (try: bootstrap | init-local | preflight | deploy | deploy-config | env | proxy-reload | maintenance | prepare-sandbox | status | rollback)" ;;
+    *) die "unknown subcommand: $sub (try: bootstrap | init-local | preflight | deploy | deploy-config | config | env | proxy-reload | maintenance | prepare-sandbox | status | rollback)" ;;
   esac
 }
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

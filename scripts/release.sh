@@ -319,7 +319,9 @@ APP_FINGERPRINT=""
 DEPLOY_FINGERPRINT=""
 SANDBOX_FINGERPRINT=""
 if (( ! CONFIG_ONLY )); then
-  APP_FINGERPRINT="$(paths_fingerprint Dockerfile .dockerignore requirements.lock requirements.txt pyproject.toml setup.py run_server.py src frontend deploy/entrypoint.sh)"
+  # Keep this list aligned with the backend Dockerfile's explicit runtime COPY
+  # inputs, plus frontend (the second image stored in the same app archive).
+  APP_FINGERPRINT="$(paths_fingerprint Dockerfile .dockerignore requirements.lock requirements.txt pyproject.toml setup.py run_server.py alembic.ini src scripts/create_admin.py scripts/inspect_tool_failures.py scripts/migrate_users_csv.py scripts/observability_report.py scripts/reconcile_config.py deploy/entrypoint.sh frontend)"
   DEPLOY_FINGERPRINT="$(paths_fingerprint deploy)"
   SANDBOX_FINGERPRINT="$(paths_fingerprint sandbox scripts/build-sandbox-image.sh scripts/sandbox_runtime_ref.py)"
 fi
