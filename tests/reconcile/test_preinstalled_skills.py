@@ -124,7 +124,23 @@ def test_mermaid_to_png_routing_contract():
     assert "`.mmd` 是 `/workspace` 中的临时渲染输入" in skill_md
     assert "不要 `persist`" in skill_md
     assert "`persist` 源" not in skill_md
+    assert "不要在 PNG 标签中使用 emoji" in skill_md
+    assert "emoji 同行的中文一起变成方块" in skill_md
+    assert "不要把中文整体改成英文" in skill_md
+    assert "不要尝试 `apt-get`" in skill_md
+    assert "或 `fc-cache`" in skill_md
     assert "```mermaid fenced code block" in lead_md
+
+
+def test_dataviz_font_contract():
+    skill_md = (SRC_DIR / "dataviz" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "Matplotlib 图表直接支持普通中文" in skill_md
+    assert "镜像不提供" in skill_md
+    assert "emoji 字体" in skill_md
+    assert "不要在标题、轴标签或标注中用 emoji" in skill_md
+    assert "`Glyph ... missing from font(s)`" in skill_md
+    assert "emoji 缺字不会连带破坏同行中文" in skill_md
 
 
 def test_pdf_skill_large_document_memory_contract():

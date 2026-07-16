@@ -6,7 +6,7 @@ description: >
 license: Apache-2.0
 compatibility: 需要沙盒(bash/mount/persist)；镜像已烤 merman-cli 和 Noto Sans CJK SC 字体。
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 ---
 
 # Mermaid 转 PNG
@@ -43,10 +43,15 @@ merman-cli -i /workspace/system-flow.mmd \
 ```
 
 - 节点文字含标点、括号或空格时使用 `A["文字"]` 这类引号标签；节点 ID 保持简短 ASCII。
+- 不要在 PNG 标签中使用 emoji（如 🚀、📦、🔍）充当图标。镜像支持普通中英文，
+  但不提供 emoji 字体；`merman-cli` 的字体回退还可能让 emoji 同行的中文一起变成方块。
+  转换已有 Mermaid 时先把装饰性 emoji 换成普通文字，不要把中文整体改成英文。
 - 不使用 `--raster-unbounded`、`--suppress-errors` 或在无网沙盒中加载远程 icon pack。解析失败应修正
   源文件，不交付错误占位图。
 
 ## 质检
 
 渲染成功不代表布局合格。检查节点文字、连线、方向、截断、重叠和中文字形；过密时先减少
-节点文字、分图或改变 `LR`/`TB` 方向。渲染 PNG 后用可用的视觉能力检查，不要只看退出码。
+节点文字、分图或改变 `LR`/`TB` 方向。出现方块时先检查并移除 emoji，不要尝试 `apt-get`
+或 `fc-cache`——字体已烤入只读、无网镜像，运行时安装或刷新缓存无效。渲染 PNG 后用可用的
+视觉能力检查，不要只看退出码。
