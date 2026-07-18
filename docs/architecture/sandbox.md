@@ -28,7 +28,7 @@ per-turn ephemeral 有一个提示词层面的副作用：历史里上一轮 mou
 
 动态注入本身保留（ContextManager 每轮 `<system-reminder>`，仅对授沙盒工具的 agent、且引擎递了 session 快照时渲染），价值在另两态：
 
-- **not_started**——一句话：工作区为空、旧文件已失效、需要就重新 mount；
+- **not_started**——一句话：`/workspace` 为空，上一轮由 `mount` 放入的 artifact 副本和由 `mount_skill` 解开的 skill bundle 文件都已失效，需要就重新 mount；artifact 和已激活 skill 本身不因此消失；
 - **running**——工作区第一层清单（`SANDBOX_STATUS_MAX_ENTRIES` 条数帽 + 显式 truncated 标记，turn 内 mount / bash 落的文件下一次 LLM 调用即可见）：给 `persist` 的 path 决策当依据，省一次 `ls`；
 - **unavailable**——sticky 失败复述原因，省掉模型再撞一次工具的回合。
 
