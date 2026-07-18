@@ -14,13 +14,13 @@
 
 | 工具 | 权限 | 参数 | 职责 |
 |------|------|------|------|
-| `bash` | **CONFIRM** | `command` | 在本轮容器内 `bash -c` 执行。跑不可信代码 → CONFIRM。 |
+| `bash` | AUTO | `command` | 在本轮容器内 `bash -c` 执行；安全边界由下层 containment 提供。 |
 | `mount` | AUTO | `artifact_id` | 把一个 artifact 物化进工作区 `<workspace>/<artifact_id>`（显式 stage-in）。 |
 | `persist` | AUTO | `path`, `artifact_id`(可选) | 把工作区某文件回写成 artifact（显式 stage-out）：默认按文件名产新件；给 `artifact_id` 走 upsert（不存在则以该 id 新建，存在则原地覆盖）。 |
 
 底下是一个 per-turn `SandboxSession`（`src/tools/builtin/sandbox_session.py`），owns 容器生命周期 + bind-mount 工作区 + watchdog 注册 + 绑定本 turn 的 `ArtifactWorkingSet`。三个工具都是其上的薄操作。`create_sandbox_tools`（`src/tools/builtin/sandbox_ops.py`）由 `controller_factory` 按请求调用，与 `create_artifact_tools` 同 idiom。
 
-工具只挂在拥有它们的 agent 的 `tools` 白名单（当前 `lead_agent` / `research_agent` / `explore_agent`）。bash = CONFIRM 在 agent MD 里显式声明——这是沙盒对模型的唯一暴露面，不在白名单的 agent 看不到也调不动这三个工具。
+工具只挂在拥有它们的 agent 的 `tools` 白名单（当前 `lead_agent` / `research_agent` / `explore_agent`）。三者的工具定义默认均为 AUTO；agent MD 只声明成员关系，不在白名单的 agent 看不到也调不动这三个工具。
 
 ### 动态状态注入
 
@@ -77,15 +77,11 @@ controller_factory（每 turn）
 
 其余容器硬约束：`ReadonlyRootfs`（rootfs 只读）、非 root（uid 1000）、`SANDBOX_MEM_LIMIT_MB` 内存上限（MemorySwap 设同值 = 禁 swap）、`SANDBOX_CPU_LIMIT` CPU 核数、`SANDBOX_PIDS_LIMIT` fork 炸弹闸。
 
-### bash 的 CONFIRM 是同意闸，不是 containment
+### bash 默认 AUTO，containment 才是安全边界
 
-接上面的 consent / confinement 之分：bash = CONFIRM 让用户在不可信代码跑之前看一眼**具体命令**，是一道**知情 / 同意**闸；它**不**是安全边界。沙盒的安全靠上面三条（gVisor / DooD 参数防污染 / `--network=none`）+ per-turn ephemeral——一条 bash 命令不管确没确认，都跑在同一个无网、无逃逸、不可触宿主、turn 末即焚的容器里。
+`bash` 默认 AUTO，模型命令不经 Permission Interrupt 直接执行。这不是放弃沙盒的安全边界：代码仍跑在 gVisor 隔离、DooD 参数不受模型污染、`--network=none`、配额 / 超时 / pids 受限且 turn 末即焚的容器里。Permission Interrupt 只能提供用户知情 / 逐命令审阅这层 consent，不能代替 containment；既然它不防逃逸、出网、宿主触达或跨 turn 留存，就不把它当作沙盒的默认安全机制。
 
-推论：用户可对 bash 勾 `always_allow`（写进 `state["always_allowed_tools"]`，按工具名生效，跨 agent、并经 message metadata 跨 turn 继承），后续 bash 跳过确认。这是**用户（防御方）自己弃权 per-command review**，不是对手绕过——① 触发 always_allow 的只能是用户，模型无法自授；② 弃权后代码照样 contained，爆炸半径仍是用户自己的 per-turn 沙盒 + 自己的 artifact，外泄 / 逃逸 / 宿主 / 跨 turn 留存全部够不着（就算被无害命令骗取了 always_allow，之后的恶意命令最多烧被配额 / 超时 / pids 限住的算力、读写已挂入的工作区，仍出不了沙盒）。
-
-故按「前端锁 = UX / 后端锁 = 正确性，谁被绕过会受伤」判别，bash 的 confirm 落在 **UX 侧**：它在 containment **内**，弃权只让用户自己少一道审阅。对比 `web_fetch` 的 confirm——那道闸把守的是**真实出网**这条独立边界，弃权会让另一个 actor / 数据外泄受害，故必须严防绕过。两道 confirm 同级别名、不同性质，根因就在「闸后面是不是还有 containment」。
-
-> 若某部署出于合规要对 bash 逐命令强制审查、不容弃权，那是一个独立的 operator 策略特性（per-tool「不可弃权」声明），不是这道闸当前的语义。
+对比 `web_fetch` 的 CONFIRM：它把守的是真实出网这条独立边界，语义不同。若某部署出于合规要对 bash 逐命令强制审查、不容弃权，那应是一个独立的 operator 策略特性（per-tool「不可弃权」声明），不是当前沙盒工具的默认权限。
 
 ## Staging：宿主直读直写
 

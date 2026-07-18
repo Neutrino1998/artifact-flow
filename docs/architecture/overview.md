@@ -144,9 +144,9 @@ ArtifactFlow 的核心扩展机制全部基于配置文件，无需修改 Python
 
 | Agent | 职责 | 工具 | 备注 |
 |-------|------|------|------|
-| `lead_agent` | 协调者，任务规划，Artifact 管理，可直接执行小规模搜索/抓取 | 全部 artifact 工具（含 `grep_artifact`）+ `web_search` (AUTO) + `web_fetch` (CONFIRM) + `call_subagent` + [沙盒](sandbox.md) `bash` (CONFIRM) / `mount` / `persist` | 唯一出口 |
-| `research_agent` | 大型知识探索 / 多源整合（隔离上下文） | artifact 工具（含 `grep_artifact`）+ `web_search` (AUTO) + `web_fetch` (CONFIRM) + [沙盒](sandbox.md) `bash` (CONFIRM) / `mount` / `persist` | max 50 rounds |
-| `explore_agent` | 大型既有材料分析 / 二进制与计算型处理（隔离上下文） | artifact 工具（含 `grep_artifact`）+ [沙盒](sandbox.md) `bash` (CONFIRM) / `mount` / `persist` | max 50 rounds，无 web |
+| `lead_agent` | 协调者，任务规划，Artifact 管理，可直接执行小规模搜索/抓取 | 全部 artifact 工具（含 `grep_artifact`）+ `web_search` (AUTO) + `web_fetch` (CONFIRM) + `call_subagent` + [沙盒](sandbox.md) `bash` / `mount` / `persist` (均 AUTO) | 唯一出口 |
+| `research_agent` | 大型知识探索 / 多源整合（隔离上下文） | artifact 工具（含 `grep_artifact`）+ `web_search` (AUTO) + `web_fetch` (CONFIRM) + [沙盒](sandbox.md) `bash` / `mount` / `persist` (均 AUTO) | max 50 rounds |
+| `explore_agent` | 大型既有材料分析 / 二进制与计算型处理（隔离上下文） | artifact 工具（含 `grep_artifact`）+ [沙盒](sandbox.md) `bash` / `mount` / `persist` (均 AUTO) | max 50 rounds，无 web |
 | `compact_agent` | 生成对话摘要（7 sections：Primary Request / Artifacts / Tool Interactions / Errors / Pending Tasks / Current Work / Next Step） | 无 | internal，由 `CompactionRunner` 在引擎循环内直接调用 |
 
 ## 信号流：用户视角的完整交互

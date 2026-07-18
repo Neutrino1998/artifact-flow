@@ -593,7 +593,7 @@ deploy/scripts/fleet.sh deploy .
 
 ### 验证沙盒链路
 
-前端对话里让 agent 在沙盒里跑一条命令（例如"用 bash 运行 echo ok"）：应弹出权限确认 → 批准后返回输出。turn 结束后 `docker ps -a --filter label=artifactflow.sandbox` 应无残留容器、scratch 根下无残留目录（崩溃残留由 reaper 周期回收）。
+前端对话里让 agent 在沙盒里跑一条命令（例如"用 bash 运行 echo ok"）：默认应无权限中断、直接返回输出。turn 结束后 `docker ps -a --filter label=artifactflow.sandbox` 应无残留容器、scratch 根下无残留目录（崩溃残留由 reaper 周期回收）。
 
 ---
 

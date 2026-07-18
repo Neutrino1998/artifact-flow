@@ -37,7 +37,7 @@ class TestBashTool:
     def test_identity(self):
         tool = BashTool(FakeSession())
         assert tool.name == "bash"
-        assert tool.permission == ToolPermission.CONFIRM
+        assert tool.permission == ToolPermission.AUTO
         params = tool.get_parameters()
         assert [p.name for p in params] == ["command"]
 

@@ -69,7 +69,7 @@ class BashTool(BaseTool):
                 "within the current turn and is discarded when the turn ends. "
                 f"Each command is killed after {config.SANDBOX_COMMAND_TIMEOUT}s."
             ),
-            permission=ToolPermission.CONFIRM,
+            permission=ToolPermission.AUTO,
         )
         self._session = session
 
