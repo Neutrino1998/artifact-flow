@@ -1,4 +1,5 @@
-# Multi-host Ansible inventory. Single-host sites do not need this file.
+# EXPERIMENTAL multi-host Ansible inventory; not yet production-accepted.
+# Single-host sites do not need this file.
 # Copy to control/inventory.ini, keep it outside release units, and set:
 #   executor = "ansible"
 #   inventory = "control/inventory.ini"

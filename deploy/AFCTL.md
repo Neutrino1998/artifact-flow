@@ -7,7 +7,6 @@ afctl site init --preset intranet|public
 afctl site migrate-v1 --preset intranet|public --sandbox-runtime runsc|runc
 afctl site validate
 afctl doctor
-afctl prepare [--gvisor-package FILE]
 afctl plan apply BUNDLE|RELEASE_ID|current
 afctl apply BUNDLE|RELEASE_ID|current
 afctl plan rollback
@@ -28,7 +27,7 @@ afctl config apply [--id ID] DIR
 ├── control/
 │   ├── site.toml
 │   ├── .env
-│   ├── inventory.ini       # 仅 Ansible executor
+│   ├── inventory.ini       # 仅实验性 Ansible executor
 │   ├── certs/
 │   ├── maintenance/
 │   └── autoheal/
@@ -43,6 +42,8 @@ afctl config apply [--id ID] DIR
 
 `plan` 永远只读。所有 release-changing apply/rollback/config apply 都使用同一 kernel lock 和 reconcile executor。成功探活前不写 state；失败时尝试恢复上一个成功 release，恢复失败则明确报错并保留维护页。
 
-`prepare` 是单机 Linux 的便利入口。Ansible executor 只验证远端稳定主机能力；runsc/runc 与 scratch mount 应在 commissioning 阶段由主机镜像或配置管理预置。
+`afctl` 不安装 runsc、不格式化磁盘，也不修改 `/etc/fstab`。runsc/runc 与 scratch mount 应在 commissioning 阶段由主机镜像、配置管理或明确的主机 SOP 预置，`doctor/apply` 只检查并 loud-fail。
+
+应用 release 不会顺便覆盖 `/opt/artifactflow/bin/afctl`。新版 bundle 自带的 `afctl` 用于执行该版 `plan/apply`；成功后再由 operator 显式安装到稳定路径。Ansible executor 保留为实验性路径，完成真实多机物理验收前不属于 production-supported contract。
 
 完整指南见 [`docs/deployment.md`](../docs/deployment.md)。

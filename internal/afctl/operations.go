@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 )
@@ -90,68 +89,6 @@ func (c *Controller) Maintenance(ctx context.Context, action, note string) error
 		}
 	}
 	_, _ = fmt.Fprintf(c.Out, "maintenance=%s\n", action)
-	return nil
-}
-
-func (c *Controller) installController(release string) error {
-	source := filepath.Join(c.releaseDir(release), "deploy", "bin", "afctl")
-	if _, err := os.Stat(source); errors.Is(err, os.ErrNotExist) {
-		return nil
-	} else if err != nil {
-		return err
-	}
-	if err := copyReplace(source, filepath.Join(c.Root, "bin", "afctl"), 0o755); err != nil {
-		return err
-	}
-	autoheal := filepath.Join(c.releaseDir(release), "deploy", "scripts", "autoheal.sh")
-	if _, err := os.Stat(autoheal); err == nil {
-		return copyReplace(autoheal, filepath.Join(c.Root, "bin", "artifactflow-autoheal"), 0o755)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return nil
-}
-
-func copyReplace(source, target string, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return err
-	}
-	in, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.CreateTemp(filepath.Dir(target), ".install-*")
-	if err != nil {
-		return err
-	}
-	tmp := out.Name()
-	ok := false
-	defer func() {
-		_ = out.Close()
-		if !ok {
-			_ = os.Remove(tmp)
-		}
-	}()
-	if err := out.Chmod(mode); err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-	if err := out.Sync(); err != nil {
-		return err
-	}
-	if err := out.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, target); err != nil {
-		return err
-	}
-	if err := syncDir(filepath.Dir(target)); err != nil {
-		return err
-	}
-	ok = true
 	return nil
 }
 

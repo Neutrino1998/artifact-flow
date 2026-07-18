@@ -16,7 +16,6 @@ type Site struct {
 	Infra               string
 	SandboxRuntime      string
 	ScratchRoot         string
-	ScratchSize         string
 	BackendReplicas     int
 	ReadyTimeoutSeconds int
 	Inventory           string

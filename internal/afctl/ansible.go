@@ -1,5 +1,8 @@
 package afctl
 
+// The Ansible adapter is experimental until it passes physical multi-host
+// commissioning. It deliberately remains outside the local Compose executor.
+
 import (
 	"context"
 	"encoding/json"

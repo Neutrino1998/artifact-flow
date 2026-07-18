@@ -38,6 +38,8 @@ def test_release_script_is_build_only_and_emits_strict_manifest() -> None:
     assert "--with-analyst-tools" not in release
     assert "fleet.sh" not in release
     assert "AF_ENABLE_SANDBOX" not in release
+    assert "afctl prepare" not in release
+    assert 'DEPLOY_STAGE/deploy/bin' not in release
     assert "artifactflow-release-${VERSION}-${ARCH}.tar" in release
 
 

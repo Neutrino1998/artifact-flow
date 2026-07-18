@@ -1,5 +1,5 @@
 # ArtifactFlow autoheal — oneshot,由 .timer 周期触发。
-# 安装:afctl apply 后把本文件与 .timer 拷到 /etc/systemd/system/，再执行
+# 安装:从已验收 release 显式安装脚本、本文件与 .timer，再执行
 #   systemctl daemon-reload && systemctl enable --now artifactflow-autoheal.timer
 # 详见 deploy/autoheal/README.md。
 [Unit]

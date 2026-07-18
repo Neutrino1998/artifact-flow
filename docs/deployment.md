@@ -1,6 +1,6 @@
 # 部署指南
 
-ArtifactFlow 只有两条运行路径：本地开发直接用 Compose；生产统一用 `afctl`。公网与内网不再是两套部署脚本，它们只是同一 release 的不同 capability 配置。
+ArtifactFlow 只有两条稳定运行路径：本地开发直接用 Compose；单机生产统一用 `afctl`。公网与内网不再是两套部署脚本，它们只是同一 release 的不同 capability 配置。多机 Ansible adapter 保留为实验性路径，尚未完成物理验收。
 
 ## 路径总览
 
@@ -9,14 +9,14 @@ ArtifactFlow 只有两条运行路径：本地开发直接用 Compose；生产�
 | 本地开发 / Quick Trial | `docker compose up -d` | 无 | 源码构建 |
 | 内网单机 | `afctl apply` | `static` | 离线 release bundle |
 | 公网单机 | `afctl apply` | `acme` | 同一 release bundle |
-| 内网或公网多机 | `afctl apply` | `static` / `acme` | 同一 bundle + Ansible inventory |
+| 实验性内网或公网多机 | `afctl apply` | `static` / `acme` | 同一 bundle + Ansible inventory |
 
 生产路径共同使用：
 
 - `deploy/compose.base.yml`
 - `deploy/compose.sandbox.yml`（始终启用）
 - `deploy/compose.tls-acme.yml`（仅 `tls = "acme"`）
-- `deploy/compose.multi-app.yml`（仅 Ansible app host）
+- `deploy/compose.multi-app.yml`（仅实验性 Ansible app host）
 
 不存在生产 `build:`、`:latest`、Compose v1 fallback、sandbox disable 或缺少 runsc 时自动切到 runc 的行为。未知 CLI 参数、site 字段和 manifest 字段都会失败。
 
@@ -48,7 +48,7 @@ docker compose exec backend python scripts/create_admin.py admin --password '<pa
 - `sandbox_runtime = "runsc"` 时安装并注册 gVisor
 - 静态 TLS 时由运维提供 `server.crt` 完整链和 `server.key`
 
-多机额外需要：
+实验性多机路径额外需要：
 
 - 控制机能 SSH 到所有目标机
 - 目标机 POSIX shell + Python 3.9+
@@ -119,7 +119,6 @@ tls = "static"
 infra = "bundled"
 sandbox_runtime = "runsc"
 scratch_root = "/data/artifactflow/sandbox"
-scratch_size = "80G"
 backend_replicas = 2
 ready_timeout_seconds = 120
 ```
@@ -128,14 +127,7 @@ ready_timeout_seconds = 120
 
 ### 准备 sandbox 主机能力
 
-推荐生产使用 runsc。把前一步生成的 gVisor package 及相邻同名 `.sha256` 带到目标机后：
-
-```bash
-sudo ./1.4.0/afctl --root /opt/artifactflow prepare \
-  --gvisor-package ./sandbox-gvisor-release-20260706.0-x86_64.tar.gz
-```
-
-`prepare` 只处理稳定主机能力：runsc 注册和 scratch loop filesystem。sandbox 镜像属于 release，在 `apply` 时加载。
+推荐生产使用 runsc。`afctl` 不以 root 安装 runtime、不格式化磁盘，也不修改 `/etc/fstab`；这些稳定主机能力由主机镜像、配置管理或明确的 commissioning SOP 预置。离线 gVisor 包的校验、安装和 smoke test 见 [`sandbox/gvisor-pkg/README.md`](https://github.com/Neutrino1998/artifact-flow/blob/main/sandbox/gvisor-pkg/README.md)。`scratch_root` 必须在运行 `doctor` 前成为独立挂载点。
 
 如果明确是 trusted/dev 环境，可以在 `site.toml` 写 `sandbox_runtime = "runc"`。这是显式降低隔离强度；`afctl` 会告警，但不会替你决定，也不会从 runsc 静默降级。
 
@@ -158,18 +150,22 @@ sudo ./1.4.0/afctl --root /opt/artifactflow prepare \
 sudo ./1.4.0/afctl --root /opt/artifactflow doctor
 sudo ./1.4.0/afctl --root /opt/artifactflow plan apply ./1.4.0
 sudo ./1.4.0/afctl --root /opt/artifactflow apply ./1.4.0
+sudo install -m 0755 ./1.4.0/afctl /opt/artifactflow/bin/afctl
 ```
 
-`plan` 只读，不拿 mutation lock、不创建 release、不加载镜像。`apply` 始终：校验 → materialize 完整 release → 加载精确镜像 → 开维护页 → Compose reconcile → 通过 Caddy 探活 → 原子写 `state.json` → 关维护页。
+`plan` 只读，不拿 mutation lock、不创建 release、不加载镜像。`apply` 始终：校验 → materialize 完整 release → 加载精确镜像 → 开维护页 → Compose reconcile → 通过 Caddy 探活 → 原子写 `state.json` → 关维护页。最后一条 `install` 是成功后的显式控制器升级；apply 本身不会覆盖或回滚正在使用的 `afctl`。
 
 ## 日常操作
 
 ### 新版本更新
 
 ```bash
-sudo /opt/artifactflow/bin/afctl --root /opt/artifactflow plan apply /media/1.4.1
-sudo /opt/artifactflow/bin/afctl --root /opt/artifactflow apply /media/1.4.1
+sudo /media/1.4.1/afctl --root /opt/artifactflow plan apply /media/1.4.1
+sudo /media/1.4.1/afctl --root /opt/artifactflow apply /media/1.4.1
+sudo install -m 0755 /media/1.4.1/afctl /opt/artifactflow/bin/afctl
 ```
+
+使用 bundle 自带控制器可以确保它理解该 bundle 的 manifest；只有 apply 成功后才更新稳定入口。安装失败不会改变已经探活成功的服务状态，可修复权限后单独重试。
 
 ### 临时修改 model YAML endpoint
 
@@ -222,7 +218,7 @@ docker logs artifactflow-backend-1 --tail 200
 docker logs artifactflow-caddy-1 --tail 200
 ```
 
-## 多机部署
+## 实验性多机部署
 
 复制 [`deploy/inventory.ini.example`](https://github.com/Neutrino1998/artifact-flow/blob/main/deploy/inventory.ini.example) 到 `/opt/artifactflow/control/inventory.ini`，然后修改 site：
 
@@ -237,7 +233,7 @@ Execution Environment 必须预先以精确 digest 加载。`doctor` 在尚无�
 
 `backend_replicas = 1` 表示每个 app inventory host 运行一份 backend/frontend；多机扩容通过增加 app host，而不是在一台机器上再 scale。一个物理机承担多个角色时，在多个 group 重复同一个 inventory hostname，不要为同一个 `ansible_host` 起多个 alias。Ansible 路径不会安装 runsc 或创建 scratch filesystem，以免应用发布顺手改变稳定宿主能力；commissioning 前应先用基础镜像或既有配置管理完成这些准备。
 
-多机入口仍是完全相同的：
+实验性多机入口仍是完全相同的：
 
 ```bash
 afctl --root /opt/artifactflow doctor
@@ -245,7 +241,7 @@ afctl --root /opt/artifactflow plan apply /media/1.4.1
 afctl --root /opt/artifactflow apply /media/1.4.1
 ```
 
-第一套真实多机环境尚未完成物理验收。首次 commissioning 必须安排维护窗口，验证 SSH 权限、目标 Python、LB→app 路由、防火墙、部分主机失败和 rollback；在此之前不宣称零停机 SLA。
+第一套真实多机环境尚未完成物理验收。`executor = "ansible"` 会在每次校验时明确告警。首次 commissioning 必须安排维护窗口，验证 SSH 权限、目标 Python、LB→app 路由、防火墙、部分主机失败和 rollback；在此之前它不属于 production-supported contract，也不宣称零停机 SLA。
 
 ## 从 Fleet v1 迁移
 

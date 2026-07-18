@@ -1,4 +1,5 @@
 ---
+# EXPERIMENTAL: not production-accepted until physical multi-host commissioning.
 # Multi-host executor for the same materialized release used by local apply.
 # Inventory contract: exactly one host in [release], one in [lb], one or more
 # in [app], and zero/one in [infra]. Every app host must set af_advertise to an

@@ -25,12 +25,14 @@ deadman 的 faulthandler 栈仍走 `docker logs` 供事后定因;autoheal 只负
 ## 安装(真机)
 
 ```bash
-# 1. afctl apply 已把脚本安装到 /opt/artifactflow/bin
-# 2. 装并启用 timer
-sudo cp artifactflow-autoheal.service artifactflow-autoheal.timer /etc/systemd/system/
+# 使用当前已验收 release 的脚本，显式安装；afctl apply 不修改控制面工具
+RELEASE=/opt/artifactflow/.artifactflow/releases/1.4.0
+sudo install -m 0755 "$RELEASE/deploy/scripts/autoheal.sh" \
+  /opt/artifactflow/bin/artifactflow-autoheal
+sudo install -m 0644 "$RELEASE/deploy/autoheal/artifactflow-autoheal.service" \
+  "$RELEASE/deploy/autoheal/artifactflow-autoheal.timer" /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now artifactflow-autoheal.timer
-# 3. 验
 systemctl list-timers artifactflow-autoheal.timer
 /opt/artifactflow/bin/artifactflow-autoheal --dry-run    # 只报告不动手
 ```

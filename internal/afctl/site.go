@@ -5,12 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 )
-
-var scratchSizePattern = regexp.MustCompile(`^[1-9][0-9]*[KMGTP]$`)
 
 var siteKeys = map[string]func(*Site, string) error{
 	"schema": func(s *Site, value string) error {
@@ -26,7 +23,6 @@ var siteKeys = map[string]func(*Site, string) error{
 	"infra":           func(s *Site, value string) error { s.Infra = value; return nil },
 	"sandbox_runtime": func(s *Site, value string) error { s.SandboxRuntime = value; return nil },
 	"scratch_root":    func(s *Site, value string) error { s.ScratchRoot = value; return nil },
-	"scratch_size":    func(s *Site, value string) error { s.ScratchSize = value; return nil },
 	"backend_replicas": func(s *Site, value string) error {
 		v, err := strconv.Atoi(value)
 		if err != nil {
@@ -156,9 +152,6 @@ func (s Site) Validate(root string) error {
 	if !filepath.IsAbs(s.ScratchRoot) || filepath.Clean(s.ScratchRoot) != s.ScratchRoot || filepath.Dir(s.ScratchRoot) == "/" || strings.ContainsAny(s.ScratchRoot, " \t\r\n") {
 		return fmt.Errorf("scratch_root must be a clean absolute path below a parent directory")
 	}
-	if !scratchSizePattern.MatchString(s.ScratchSize) {
-		return fmt.Errorf("scratch_size must look like 80G")
-	}
 	if s.BackendReplicas < 1 {
 		return fmt.Errorf("backend_replicas must be at least 1")
 	}
@@ -205,7 +198,6 @@ tls = %q
 infra = "bundled"
 sandbox_runtime = "runsc"
 scratch_root = "/data/artifactflow/sandbox"
-scratch_size = "80G"
 backend_replicas = 2
 ready_timeout_seconds = 120
 `, tls), nil

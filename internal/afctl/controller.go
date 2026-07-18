@@ -322,11 +322,6 @@ func (c *Controller) applyLocked(ctx context.Context, input string) error {
 	if err := c.writeState(target, previous, state); err != nil {
 		return fmt.Errorf("release is healthy but state write failed; maintenance remains enabled: %w", err)
 	}
-	if site.Executor == "local" {
-		if err := c.installController(target); err != nil {
-			return fmt.Errorf("release is healthy and state recorded, but afctl install failed; maintenance remains enabled: %w", err)
-		}
-	}
 	if err := c.disableMaintenanceAfterApply(ctx, site); err != nil {
 		return fmt.Errorf("release is healthy and recorded but maintenance could not be disabled: %w", err)
 	}

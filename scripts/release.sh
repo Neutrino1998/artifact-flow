@@ -3,9 +3,8 @@ set -euo pipefail
 
 # Build one immutable ArtifactFlow application release bundle.
 #
-# This script is deliberately build-only. Host preparation belongs to
-# `afctl prepare`; configuration hotfixes belong to `afctl config`; multi-host
-# transport belongs to the pinned Ansible execution environment.
+# This script is deliberately build-only. Host provisioning stays outside the
+# application controller; configuration hotfixes belong to `afctl config`.
 #
 # Usage:
 #   ./scripts/release.sh VERSION [--app-only|--with-infra]
@@ -144,15 +143,12 @@ echo "→ package config"
 COPYFILE_DISABLE=1 tar --exclude='.DS_Store' --exclude='._*' \
   -czf "$STAGE/$CONFIG_ARCHIVE" config
 
-echo "→ package deploy unit with target afctl"
+echo "→ package deploy unit"
 (
   git ls-files -z deploy \
     | COPYFILE_DISABLE=1 tar --null -T - -cf - \
     | tar -xf - -C "$DEPLOY_STAGE"
 )
-mkdir -p "$DEPLOY_STAGE/deploy/bin"
-cp "$STAGE/afctl" "$DEPLOY_STAGE/deploy/bin/afctl"
-chmod 0755 "$DEPLOY_STAGE/deploy/bin/afctl"
 COPYFILE_DISABLE=1 tar --exclude='.DS_Store' --exclude='._*' \
   -czf "$STAGE/$DEPLOY_ARCHIVE" -C "$DEPLOY_STAGE" deploy
 
@@ -199,8 +195,8 @@ echo
 echo "Target workflow:"
 echo "  tar xf $(basename "$TRANSPORT")"
 echo "  sudo ./$VERSION/afctl --root /opt/artifactflow site init --preset intranet  # first host only"
-echo "  # edit control/site.toml + control/.env, provide TLS, then prepare host capabilities"
-echo "  sudo ./$VERSION/afctl --root /opt/artifactflow prepare  # add --gvisor-package FILE if runsc is absent"
+echo "  # edit control/site.toml + control/.env and provision documented host prerequisites"
 echo "  sudo ./$VERSION/afctl --root /opt/artifactflow doctor"
 echo "  sudo ./$VERSION/afctl --root /opt/artifactflow plan apply ./$VERSION"
 echo "  sudo ./$VERSION/afctl --root /opt/artifactflow apply ./$VERSION"
+echo "  sudo install -m 0755 ./$VERSION/afctl /opt/artifactflow/bin/afctl  # after successful apply"

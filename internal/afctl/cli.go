@@ -98,14 +98,6 @@ func dispatch(ctx context.Context, c *Controller, args []string) error {
 			return fmt.Errorf("usage: afctl doctor")
 		}
 		return c.Doctor(ctx)
-	case "prepare":
-		pkg := ""
-		if len(args) == 3 && args[1] == "--gvisor-package" {
-			pkg = args[2]
-		} else if len(args) != 1 {
-			return fmt.Errorf("usage: afctl prepare [--gvisor-package FILE]")
-		}
-		return c.Prepare(ctx, pkg)
 	case "plan":
 		if len(args) < 2 {
 			return fmt.Errorf("usage: afctl plan apply TARGET | afctl plan rollback")
@@ -260,7 +252,6 @@ Usage:
   afctl [--root PATH] site validate
   afctl [--root PATH] site migrate-v1 --preset intranet|public --sandbox-runtime runsc|runc
   afctl [--root PATH] doctor
-  afctl [--root PATH] prepare [--gvisor-package FILE]
   afctl [--root PATH] plan apply <bundle-dir|release-id|current>
   afctl [--root PATH] apply <bundle-dir|release-id|current>
   afctl [--root PATH] plan rollback
