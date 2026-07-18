@@ -37,7 +37,7 @@ logger = get_logger("ArtifactFlow")
 class BashTool(BaseTool):
     """在 per-turn 沙盒容器内执行 bash 命令。
 
-    - CONFIRM 权限:跑不可信(模型生成)代码。
+    - AUTO 权限:不经 Permission Interrupt；不可信代码的安全边界由沙盒 containment 提供。
     - 唯一参数 command —— 超时/配额/输出帽全是隐藏常量(参数面最小化)。
     - 命令退出码非零不算工具失败(grep 无命中 exit 1 是信息不是故障):
       success=True + 输出里带 exit code,让模型自己解读。success=False 只留给
