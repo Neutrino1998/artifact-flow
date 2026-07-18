@@ -1,5 +1,5 @@
-# Default single-host upstream targets. The Ansible executor renders this file
-# inside the immutable release on the LB host for a multi-host topology;
+# Default single-host upstream targets. The experimental Ansible executor
+# overlays a topology-derived file from target-local control/ on the LB host;
 # common.caddy keeps all timeout/retry/header policy shared between both forms.
 
 (backend_upstream_targets) {

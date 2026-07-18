@@ -163,6 +163,9 @@ func (s Site) Validate(root string) error {
 			return fmt.Errorf("inventory and ansible_ee_image are only valid with executor = \"ansible\"")
 		}
 	} else {
+		if s.Infra != "external" {
+			return fmt.Errorf("experimental ansible executor currently requires infra = \"external\"; provision PostgreSQL and Redis separately")
+		}
 		if s.BackendReplicas != 1 {
 			return fmt.Errorf("ansible executor requires backend_replicas = 1; scale is the number of app inventory hosts")
 		}

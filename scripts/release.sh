@@ -186,7 +186,11 @@ rm -rf "$DEPLOY_STAGE"
 # image archives. Extract it on the control host, then pass the directory to
 # afctl. manifest.json remains the only deployment contract.
 tar -cf "$TRANSPORT" -C "$OUT_ROOT" "$VERSION"
-sha256sum "$TRANSPORT" > "$TRANSPORT.sha256"
+(
+  cd "$(dirname "$TRANSPORT")"
+  TRANSPORT_NAME="$(basename "$TRANSPORT")"
+  sha256sum "$TRANSPORT_NAME" > "$TRANSPORT_NAME.sha256"
+)
 
 echo
 echo "✓ release bundle: $BUNDLE"

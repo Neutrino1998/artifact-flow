@@ -23,10 +23,10 @@ class Settings(BaseSettings):
     CORS_ALLOW_METHODS: List[str] = ["*"]
     CORS_ALLOW_HEADERS: List[str] = ["*"]
 
-    # Runtime site config (notifications / welcome tips / branding). The
-    # frontend serves the same host directory as static /site/*.json files; the
-    # admin API writes through this path so notices can be managed from the UI
-    # without moving low-frequency site config into the database.
+    # Runtime site config (notifications / welcome tips / branding). Production
+    # deployment overrides this to the control/site mount; the source-tree
+    # default keeps local development simple. The frontend serves the same host
+    # directory as static /site/*.json files.
     SITE_CONFIG_DIR: str = "config/site"
 
     # SSE 配置

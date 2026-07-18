@@ -87,13 +87,24 @@ func (c *Controller) SiteMigrateV1(preset, sandboxRuntime string) error {
 			return err
 		}
 	}
-	_, _ = fmt.Fprintln(c.Out, "migrated v1 target-local environment and certificates")
+	for _, legacySite := range []string{
+		filepath.Join(c.Root, ".artifactflow", "current", "config", "site"),
+		filepath.Join(c.Root, "config", "site"),
+	} {
+		if info, err := os.Stat(legacySite); err == nil && info.IsDir() {
+			if err := copyLegacySiteConfig(legacySite, filepath.Join(c.controlDir(), "site")); err != nil {
+				return err
+			}
+			break
+		}
+	}
+	_, _ = fmt.Fprintln(c.Out, "migrated v1 target-local environment, certificates, and site config")
 	_, _ = fmt.Fprintln(c.Out, "legacy current/.fleet-state were intentionally not imported; apply one v2 full bundle to establish state.json")
 	return nil
 }
 
 func (c *Controller) initialDirectories() []string {
-	return []string{c.controlDir(), filepath.Join(c.controlDir(), "certs"), filepath.Join(c.controlDir(), "maintenance"), filepath.Join(c.controlDir(), "autoheal"), c.releasesDir(), filepath.Join(c.Root, "bin")}
+	return []string{c.controlDir(), filepath.Join(c.controlDir(), "certs"), filepath.Join(c.controlDir(), "site"), filepath.Join(c.controlDir(), "maintenance"), filepath.Join(c.controlDir(), "autoheal"), c.releasesDir(), filepath.Join(c.Root, "bin")}
 }
 
 func copyLegacyCerts(source, destination string) error {
@@ -114,6 +125,26 @@ func copyLegacyCerts(source, destination string) error {
 			mode = 0o600
 		}
 		if err := copyFile(filepath.Join(source, name), filepath.Join(destination, name), mode); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyLegacySiteConfig(source, destination string) error {
+	for _, name := range []string{"notifications.json", "welcome_tips.json", "branding.json"} {
+		path := filepath.Join(source, name)
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("legacy site config %s must be a regular file", path)
+		}
+		if err := copyFile(path, filepath.Join(destination, name), 0o644); err != nil {
 			return err
 		}
 	}

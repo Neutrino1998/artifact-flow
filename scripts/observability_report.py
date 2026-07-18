@@ -13,8 +13,8 @@ observability_report.py — 跑一下就能看的 obs 报告
 DB 访问复用 app 的 async driver(asyncpg / aiomysql / aiosqlite)+ ORM
 `select(MessageEvent)`,在 Python 侧拍平 `data` JSON 列到 DataFrame —— 不
 写方言特化 SQL,也不需要 sync driver(psycopg2 / pymysql)。pandas 是分析
-工具,不在 runtime requirements.txt;`pip install pandas` 或走 release
-bundle 的离线 wheel 安装。
+工具,不在 runtime requirements.txt 或应用 release 中;请在独立分析环境安装
+(`pip install pandas`),离线环境由运维另行提供 wheelhouse。
 
 硬 wedge dump 见 docs/runbooks/service-hang.md Step 3(`docker logs` 的精确
 形式因 compose mode 而异),本脚本不聚合。
@@ -46,9 +46,9 @@ def _require_pandas():
         return pd
     except ImportError:
         print(
-            "ERROR: pandas not installed. Install with `pip install pandas` "
-            "or via the release bundle's offline wheels "
-            "(`pip install --no-index --find-links <bundle>/wheels pandas`).",
+            "ERROR: pandas not installed. Install it in the analyst environment "
+            "with `pip install pandas`; ArtifactFlow application releases do not "
+            "bundle analyst wheels.",
             file=sys.stderr,
         )
         sys.exit(2)

@@ -41,6 +41,8 @@ def test_release_script_is_build_only_and_emits_strict_manifest() -> None:
     assert "afctl prepare" not in release
     assert 'DEPLOY_STAGE/deploy/bin' not in release
     assert "artifactflow-release-${VERSION}-${ARCH}.tar" in release
+    assert 'sha256sum "$TRANSPORT"' not in release
+    assert 'sha256sum "$TRANSPORT_NAME"' in release
 
 
 def test_production_compose_has_no_build_latest_or_sandbox_fallback() -> None:
@@ -68,18 +70,27 @@ def test_public_and_intranet_share_one_compose_base() -> None:
 def test_ansible_renders_the_snippets_caddy_imports_and_leaves_state_order_to_afctl() -> None:
     playbook = (ROOT / "deploy/ansible/apply.yml").read_text(encoding="utf-8")
     caddy = (ROOT / "deploy/caddy/common.caddy").read_text(encoding="utf-8")
+    lb_overlay = (ROOT / "deploy/compose.multi-lb.yml").read_text(encoding="utf-8")
     assert "(backend_upstream_targets)" in playbook
     assert "(frontend_upstream_targets)" in playbook
     assert "import backend_upstream_targets" in caddy
     assert "import frontend_upstream_targets" in caddy
     assert "Disable maintenance after health succeeds" not in playbook
     assert "serial: 1" in playbook
+    assert "/control/caddy/upstreams.caddy" in playbook
+    assert "/releases/{{ af_release_id }}/deploy/caddy/upstreams.caddy" not in playbook
+    assert "af_ready_timeout_seconds" in playbook
+    assert "af_infra" not in playbook
+    assert "${AF_RUNTIME_DEPLOY_DIR:-.}/caddy/upstreams.caddy" in lb_overlay
 
 
 def test_maintenance_assets_and_target_local_state_are_separate_mounts() -> None:
     base = (ROOT / "deploy/compose.base.yml").read_text(encoding="utf-8")
     assert "./maintenance:/etc/caddy/maintenance:ro" in base
     assert "${AF_RUNTIME_DEPLOY_DIR:-.}/maintenance:/etc/caddy/maintenance-state:ro" in base
+    assert "../config/site:/app/site-config:rw" not in base
+    assert "${AF_RUNTIME_DEPLOY_DIR:-.}/site:/app/site-config:rw" in base
+    assert "${AF_RUNTIME_DEPLOY_DIR:-.}/site:/app/public/site:ro" in base
 
 
 def test_manifest_schema_example_is_strict_json_shape() -> None:

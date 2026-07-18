@@ -99,7 +99,9 @@ services:
     volumes:
       - artifactflow_data:/app/data
       - ../config:/app/config:ro
-      - ../config/site:/app/site-config:rw
+      # Operator-managed notices/branding are target-local runtime state, not
+      # part of the immutable release config snapshot.
+      - ${AF_RUNTIME_DEPLOY_DIR:-.}/site:/app/site-config:rw
       - /etc/localtime:/etc/localtime:ro
       # autoheal marker (Phase C):宿主 autoheal.sh 追加重启痕迹,backend 只读挂载
       # 读本机 instance_id 匹配的最近一条,经心跳 last_autoheal 在面板代报。
@@ -153,7 +155,7 @@ services:
     mem_limit: 1g
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      - ../config/site:/app/public/site:ro
+      - ${AF_RUNTIME_DEPLOY_DIR:-.}/site:/app/public/site:ro
     # node:20-alpine base — use node itself (no curl/wget guarantees on slim images).
     # Accepts any non-5xx as alive: Next.js may 200 the home page or 3xx-redirect to /login.
     healthcheck:

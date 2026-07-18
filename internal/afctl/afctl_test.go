@@ -191,6 +191,26 @@ func TestAnsibleSiteValidationWarnsThatExecutorIsExperimental(t *testing.T) {
 	}
 }
 
+func TestAnsibleSiteRejectsBundledInfra(t *testing.T) {
+	root := t.TempDir()
+	writeTestSite(t, root, "runc")
+	path := filepath.Join(root, "control", "site.toml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	site := strings.Replace(string(data), `executor = "local"`, `executor = "ansible"`, 1)
+	site = strings.Replace(site, `infra = "external"`, `infra = "bundled"`, 1)
+	site = strings.Replace(site, "backend_replicas = 2", "backend_replicas = 1", 1)
+	site += "inventory = \"control/inventory.ini\"\nansible_ee_image = \"example/ansible@sha256:" + strings.Repeat("0", 64) + "\"\n"
+	if err := os.WriteFile(path, []byte(site), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadSite(path); err == nil || !strings.Contains(err.Error(), "requires infra") {
+		t.Fatalf("expected ansible bundled-infra rejection, got %v", err)
+	}
+}
+
 func TestSiteMigrateV1PreservesSecretsAndDropsOldSandboxSwitch(t *testing.T) {
 	root := t.TempDir()
 	legacy := filepath.Join(root, "deploy")
@@ -202,6 +222,13 @@ func TestSiteMigrateV1PreservesSecretsAndDropsOldSandboxSwitch(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(legacy, "certs", "server.crt"), []byte("cert"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	legacySite := filepath.Join(root, ".artifactflow", "current", "config", "site")
+	if err := os.MkdirAll(legacySite, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacySite, "notifications.json"), []byte("[]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	c := NewController(root, &bytes.Buffer{}, &bytes.Buffer{})
@@ -224,6 +251,10 @@ func TestSiteMigrateV1PreservesSecretsAndDropsOldSandboxSwitch(t *testing.T) {
 	}
 	if _, err := os.Stat(c.statePath()); !os.IsNotExist(err) {
 		t.Fatalf("legacy state must not be imported: %v", err)
+	}
+	migratedSite, err := os.ReadFile(filepath.Join(c.controlDir(), "site", "notifications.json"))
+	if err != nil || string(migratedSite) != "[]\n" {
+		t.Fatalf("legacy site config not migrated: %q, %v", migratedSite, err)
 	}
 }
 

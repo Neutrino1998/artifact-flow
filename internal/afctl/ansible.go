@@ -19,13 +19,12 @@ type ansibleVars struct {
 	ReleaseIdentity string            `json:"af_release_identity"`
 	AppVersion      string            `json:"af_app_version"`
 	Platform        string            `json:"af_platform"`
-	Infra           string            `json:"af_infra"`
 	TLS             string            `json:"af_tls"`
 	SandboxRuntime  string            `json:"af_sandbox_runtime"`
 	ScratchRoot     string            `json:"af_scratch_root"`
+	ReadyTimeout    int               `json:"af_ready_timeout_seconds"`
 	AppImages       []string          `json:"af_app_images"`
 	CaddyImages     []string          `json:"af_caddy_images"`
-	DataImages      []string          `json:"af_data_images"`
 	CaddyImage      string            `json:"af_caddy_image"`
 	PostgresImage   string            `json:"af_postgres_image"`
 	RedisImage      string            `json:"af_redis_image"`
@@ -46,7 +45,7 @@ func (c *Controller) runAnsible(ctx context.Context, site Site, release string, 
 	if err != nil || relInventory == ".." || strings.HasPrefix(relInventory, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("ansible inventory must be inside install root %s", c.Root)
 	}
-	appImages, caddyImages, dataImages := classifyImages(meta)
+	appImages, caddyImages := classifyImages(meta)
 	caddyImage, postgresImage, redisImage, err := infraImageRefs(meta.Images)
 	if err != nil {
 		return err
@@ -64,7 +63,7 @@ func (c *Controller) runAnsible(ctx context.Context, site Site, release string, 
 			artifacts[artifact.Role] = "/work/.artifactflow/releases/" + release + "/artifacts/" + artifact.File
 		}
 	}
-	vars := ansibleVars{InstallRoot: c.Root, ReleaseSource: "/work/.artifactflow/releases/" + release, ReleaseID: release, ReleaseIdentity: meta.Identity, AppVersion: meta.AppVersion, Platform: meta.Platform, Infra: site.Infra, TLS: site.TLS, SandboxRuntime: site.SandboxRuntime, ScratchRoot: site.ScratchRoot, AppImages: appImages, CaddyImages: caddyImages, DataImages: dataImages, CaddyImage: caddyImage, PostgresImage: postgresImage, RedisImage: redisImage, SandboxImage: meta.SandboxImage, Artifacts: artifacts}
+	vars := ansibleVars{InstallRoot: c.Root, ReleaseSource: "/work/.artifactflow/releases/" + release, ReleaseID: release, ReleaseIdentity: meta.Identity, AppVersion: meta.AppVersion, Platform: meta.Platform, TLS: site.TLS, SandboxRuntime: site.SandboxRuntime, ScratchRoot: site.ScratchRoot, ReadyTimeout: site.ReadyTimeoutSeconds, AppImages: appImages, CaddyImages: caddyImages, CaddyImage: caddyImage, PostgresImage: postgresImage, RedisImage: redisImage, SandboxImage: meta.SandboxImage, Artifacts: artifacts}
 	data, err := json.MarshalIndent(vars, "", "  ")
 	if err != nil {
 		return err
@@ -149,7 +148,7 @@ func (c *Controller) writeAnsibleVars(data []byte) (hostPath, containerPath stri
 	return hostPath, "/work/" + filepath.ToSlash(rel), cleanup, nil
 }
 
-func classifyImages(meta ReleaseMetadata) (app, caddy, data []string) {
+func classifyImages(meta ReleaseMetadata) (app, caddy []string) {
 	for _, image := range meta.Images {
 		if image == meta.SandboxImage {
 			continue
@@ -158,9 +157,7 @@ func classifyImages(meta ReleaseMetadata) (app, caddy, data []string) {
 			app = append(app, image)
 		} else if strings.HasPrefix(image, "artifactflow-caddy:") {
 			caddy = append(caddy, image)
-		} else if strings.HasPrefix(image, "artifactflow-postgres:") || strings.HasPrefix(image, "artifactflow-redis:") {
-			data = append(data, image)
 		}
 	}
-	return app, caddy, data
+	return app, caddy
 }

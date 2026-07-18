@@ -1,8 +1,8 @@
 """Runtime site-config schemas.
 
-These models cover small operator-managed JSON files under config/site. They
-are not database entities; the admin API validates and writes the same files
-that the frontend already serves from /site/*.json.
+These models cover small operator-managed runtime JSON files. They are not
+database entities; the admin API validates and writes the same files that the
+frontend already serves from /site/*.json.
 """
 
 from __future__ import annotations

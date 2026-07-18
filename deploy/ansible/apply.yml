@@ -2,8 +2,9 @@
 # EXPERIMENTAL: not production-accepted until physical multi-host commissioning.
 # Multi-host executor for the same materialized release used by local apply.
 # Inventory contract: exactly one host in [release], one in [lb], one or more
-# in [app], and zero/one in [infra]. Every app host must set af_advertise to an
-# address reachable from the LB container. Only ansible.builtin modules are used.
+# in [app]. External PostgreSQL and Redis are required. Every app host must set
+# af_advertise to an address reachable from the LB container. Only
+# ansible.builtin modules are used.
 
 - name: Validate ArtifactFlow inventory
   hosts: localhost
@@ -15,9 +16,8 @@
           - groups.get('release', []) | length == 1
           - groups.get('lb', []) | length == 1
           - groups.get('app', []) | length > 0
-          - groups.get('infra', []) | length <= 1
-          - (af_infra == 'bundled' and groups.get('infra', []) | length == 1) or (af_infra == 'external' and groups.get('infra', []) | length == 0)
-        fail_msg: "inventory requires release=1, lb=1, app>=1, infra<=1"
+          - groups.get('infra', []) | length == 0
+        fail_msg: "inventory requires release=1, lb=1, app>=1 and no infra group; experimental Ansible requires external PostgreSQL/Redis"
     - name: Require explicit app data-plane addresses
       ansible.builtin.assert:
         that:
@@ -97,6 +97,8 @@
       loop:
         - "{{ af_install_root }}/control"
         - "{{ af_install_root }}/control/certs"
+        - "{{ af_install_root }}/control/site"
+        - "{{ af_install_root }}/control/caddy"
         - "{{ af_install_root }}/control/maintenance"
         - "{{ af_install_root }}/control/autoheal"
         - "{{ af_install_root }}/.artifactflow/releases"
@@ -220,8 +222,8 @@
       ansible.builtin.command:
         argv: [docker, run, --rm, "--runtime={{ af_sandbox_runtime }}", --network=none, "{{ af_sandbox_image }}", "true"]
 
-- name: Load infrastructure archive where infrastructure images execute
-  hosts: infra:lb
+- name: Load Caddy archive on the load balancer
+  hosts: lb
   gather_facts: false
   tasks:
     - name: Copy infrastructure archive
@@ -243,47 +245,6 @@
         argv: [docker, image, inspect, "{{ item }}"]
       loop: "{{ af_caddy_images }}"
       changed_when: false
-
-- name: Require exact data-service images on bundled infra host
-  hosts: infra
-  gather_facts: false
-  tasks:
-    - name: Inspect Postgres and Redis images
-      ansible.builtin.command:
-        argv: [docker, image, inspect, "{{ item }}"]
-      loop: "{{ af_data_images }}"
-      changed_when: false
-
-- name: Start bundled infrastructure
-  hosts: infra
-  gather_facts: false
-  tasks:
-    - name: Reconcile Postgres and Redis
-      ansible.builtin.command:
-        argv:
-          - env
-          - "AF_VERSION={{ af_app_version }}"
-          - "AF_CADDY_IMAGE={{ af_caddy_image }}"
-          - "AF_POSTGRES_IMAGE={{ af_postgres_image }}"
-          - "AF_REDIS_IMAGE={{ af_redis_image }}"
-          - "AF_RUNTIME_DEPLOY_DIR={{ af_install_root }}/control"
-          - "ARTIFACTFLOW_SANDBOX_RUNTIME={{ af_sandbox_runtime }}"
-          - "ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT={{ af_scratch_root }}"
-          - docker
-          - compose
-          - --project-name
-          - artifactflow
-          - --env-file
-          - "{{ af_install_root }}/control/.env"
-          - -f
-          - "{{ af_install_root }}/.artifactflow/releases/{{ af_release_id }}/deploy/compose.base.yml"
-          - --profile
-          - infra
-          - up
-          - -d
-          - postgres
-          - redis
-      when: af_infra == 'bundled'
 
 - name: Run the single release gate
   hosts: release
@@ -354,7 +315,7 @@
   tasks:
     - name: Render all backend and frontend upstreams
       ansible.builtin.copy:
-        dest: "{{ af_install_root }}/.artifactflow/releases/{{ af_release_id }}/deploy/caddy/upstreams.caddy"
+        dest: "{{ af_install_root }}/control/caddy/upstreams.caddy"
         mode: "0644"
         content: |
           (backend_upstream_targets) {
@@ -365,7 +326,7 @@
           }
     - name: Reconcile Caddy
       ansible.builtin.command:
-        argv: "{{ ['env', 'AF_VERSION=' + af_app_version, 'AF_CADDY_IMAGE=' + af_caddy_image, 'AF_POSTGRES_IMAGE=' + af_postgres_image, 'AF_REDIS_IMAGE=' + af_redis_image, 'AF_RUNTIME_DEPLOY_DIR=' + af_install_root + '/control', 'ARTIFACTFLOW_SANDBOX_RUNTIME=' + af_sandbox_runtime, 'ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT=' + af_scratch_root, 'docker', 'compose', '--project-name', 'artifactflow', '--env-file', af_install_root + '/control/.env', '-f', af_install_root + '/.artifactflow/releases/' + af_release_id + '/deploy/compose.base.yml'] + (['-f', af_install_root + '/.artifactflow/releases/' + af_release_id + '/deploy/compose.tls-acme.yml'] if af_tls == 'acme' else []) + ['up', '-d', '--no-deps', '--force-recreate', 'caddy'] }}"
+        argv: "{{ ['env', 'AF_VERSION=' + af_app_version, 'AF_CADDY_IMAGE=' + af_caddy_image, 'AF_POSTGRES_IMAGE=' + af_postgres_image, 'AF_REDIS_IMAGE=' + af_redis_image, 'AF_RUNTIME_DEPLOY_DIR=' + af_install_root + '/control', 'ARTIFACTFLOW_SANDBOX_RUNTIME=' + af_sandbox_runtime, 'ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT=' + af_scratch_root, 'docker', 'compose', '--project-name', 'artifactflow', '--env-file', af_install_root + '/control/.env', '-f', af_install_root + '/.artifactflow/releases/' + af_release_id + '/deploy/compose.base.yml', '-f', af_install_root + '/.artifactflow/releases/' + af_release_id + '/deploy/compose.multi-lb.yml'] + (['-f', af_install_root + '/.artifactflow/releases/' + af_release_id + '/deploy/compose.tls-acme.yml'] if af_tls == 'acme' else []) + ['up', '-d', '--no-deps', '--force-recreate', 'caddy'] }}"
     - name: Wait for readiness through Caddy
       ansible.builtin.command:
         argv:
@@ -387,7 +348,7 @@
           - "8"
           - http://localhost:2021/health/ready
       register: af_ready
-      retries: 30
+      retries: "{{ [1, ((af_ready_timeout_seconds | int + 3) // 4)] | max }}"
       delay: 4
       until: af_ready.rc == 0
       changed_when: false

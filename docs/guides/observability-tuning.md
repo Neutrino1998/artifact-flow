@@ -24,11 +24,11 @@ python scripts/observability_report.py
 # 拉长到 72h
 python scripts/observability_report.py --hours 72
 
-# pandas 缺失时:走 release bundle 的离线 wheel
-pip install --no-index --find-links analyst-tools/wheels pandas
+# pandas 缺失时，在独立分析环境安装
+python -m pip install pandas
 ```
 
-pandas 不在 runtime `requirements.txt`(`observability_report.py:14-17`),只有分析机要装;release bundle `--with-analyst-tools` 跟 backend 镜像 ABI 对齐(`scripts/release.sh:27-30`)。
+pandas 不在 runtime `requirements.txt`，也不随 ArtifactFlow 应用 release 分发，只有分析机需要。离线环境应通过组织现有的 Python wheelhouse 流程提供依赖；应用发布脚本不承担分析环境 provisioning。
 
 数据库 URL 优先级:`ARTIFACTFLOW_DATABASE_URLS` 第一个 → `ARTIFACTFLOW_DATABASE_URL` → `sqlite+aiosqlite:///data/artifactflow.db`(`observability_report.py:62-81`,与 app 一致,生产同时设两者时不会查错库)。
 

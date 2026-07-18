@@ -54,6 +54,7 @@ docker compose exec backend python scripts/create_admin.py admin --password '<pa
 - 目标机 POSIX shell + Python 3.9+
 - 控制机已加载 digest 固定的 Ansible Execution Environment
 - inventory 中每个 app host 都有 LB 可达的 `af_advertise`
+- 使用 app/release host 可达的 external PostgreSQL 和 Redis；不支持 bundled infra
 - 每个 app host 已由主机镜像/配置管理预置 runsc/runc 与 scratch mount；多机 apply 只验证
 
 ## 构建 release
@@ -125,6 +126,8 @@ ready_timeout_seconds = 120
 
 公网只把 `tls` 设为 `acme`，并在 `control/.env` 填 `AF_DOMAIN` 和 `AF_ACME_EMAIL`；ACME 固定要求公网 80/443。托管数据库把 `infra` 改为 `external` 并填写外部 PostgreSQL/Redis 地址。
 
+`site init` 同时创建 `control/site/`。管理员通知、品牌和欢迎提示属于现场可变配置，backend/frontend 都从这里读取；缺少文件时 UI 使用已有 fallback，不会阻塞启动。需要自定义时可参考 release 中 `config/site/*.example.json`，但运行时不会写回 release。
+
 ### 准备 sandbox 主机能力
 
 推荐生产使用 runsc。`afctl` 不以 root 安装 runtime、不格式化磁盘，也不修改 `/etc/fstab`；这些稳定主机能力由主机镜像、配置管理或明确的 commissioning SOP 预置。离线 gVisor 包的校验、安装和 smoke test 见 [`sandbox/gvisor-pkg/README.md`](https://github.com/Neutrino1998/artifact-flow/blob/main/sandbox/gvisor-pkg/README.md)。`scratch_root` 必须在运行 `doctor` 前成为独立挂载点。
@@ -185,7 +188,7 @@ checkout 记录当前 release 和配置摘要。`config apply` 在 mutation lock
 
 ### 修改 `.env` 或证书
 
-目标机可变配置只有 `control/`：
+目标机可变配置只有 `control/`，包括 `.env`、证书以及 `site/` 下的通知/品牌内容：
 
 ```bash
 sudo vi /opt/artifactflow/control/.env
@@ -224,12 +227,13 @@ docker logs artifactflow-caddy-1 --tail 200
 
 ```toml
 executor = "ansible"
+infra = "external"
 backend_replicas = 1
 inventory = "control/inventory.ini"
 ansible_ee_image = "registry.internal/artifactflow-ansible-ee@sha256:<digest>"
 ```
 
-Execution Environment 必须预先以精确 digest 加载。`doctor` 在尚无真实验收环境时只检查控制机 inventory 与 EE，不伪装成远端 dry-run；apply 开始时会在任何服务 mutation 前逐机 loud-fail 检查 Docker/Compose、架构、runsc 和 scratch mount。初版 playbook 只使用 `ansible.builtin`，通过 Compose CLI 操作远端，不依赖 community collection。apply 顺序为：远端 capability check → 分发完整 release → infra → 唯一 release gate → app host `serial: 1` → 汇总所有 backend/frontend upstream → LB → Caddy 健康。
+Execution Environment 必须预先以精确 digest 加载。实验路径当前明确拒绝 `infra = "bundled"`，不尝试自动发布 PostgreSQL/Redis 端口或配置跨主机网络。`doctor` 在尚无真实验收环境时只检查控制机 inventory 与 EE，不伪装成远端 dry-run；apply 开始时会在任何服务 mutation 前逐机 loud-fail 检查 Docker/Compose、架构、runsc 和 scratch mount。初版 playbook 只使用 `ansible.builtin`，通过 Compose CLI 操作远端，不依赖 community collection。apply 顺序为：远端 capability check → 分发完整 release → 唯一 release gate → app host `serial: 1` → 将所有 backend/frontend upstream 渲染到 LB 的 `control/caddy/` → Caddy 健康。
 
 `backend_replicas = 1` 表示每个 app inventory host 运行一份 backend/frontend；多机扩容通过增加 app host，而不是在一台机器上再 scale。一个物理机承担多个角色时，在多个 group 重复同一个 inventory hostname，不要为同一个 `ansible_host` 起多个 alias。Ansible 路径不会安装 runsc 或创建 scratch filesystem，以免应用发布顺手改变稳定宿主能力；commissioning 前应先用基础镜像或既有配置管理完成这些准备。
 
@@ -252,7 +256,7 @@ sudo ./1.4.0/afctl --root /opt/artifactflow site migrate-v1 \
   --preset intranet --sandbox-runtime runsc
 ```
 
-它只迁移 target-local `.env` 与证书，并删除已废弃的 `AF_ENABLE_SANDBOX`。旧 `.fleet-state`、`.artifactflow/current` 和 `.af-release` 不会被同步进新状态；同步两套状态正是 v1 复杂性的来源。随后先 `doctor/plan`，再应用一个完整 v2 bundle，成功后建立唯一 `.artifactflow/state.json`。旧 release 只作人工应急参考，不是 v2 rollback 候选。
+它迁移 target-local `.env`、证书和旧 active release（兼容更早的根目录布局）里已有的 `config/site/{notifications,welcome_tips,branding}.json`，并删除已废弃的 `AF_ENABLE_SANDBOX`。这里只复制现场配置，不导入旧 `.fleet-state`、`.artifactflow/current` 或 `.af-release` 的 release 状态；同步两套状态正是 v1 复杂性的来源。随后先 `doctor/plan`，再应用一个完整 v2 bundle，成功后建立唯一 `.artifactflow/state.json`。旧 release 只作人工应急参考，不是 v2 rollback 候选。
 
 如果安装早到 Docker volumes 仍使用 `deploy_*` 前缀，第一次 v2 apply 前先按 [`deploy/MIGRATION-project-name.md`](https://github.com/Neutrino1998/artifact-flow/blob/main/deploy/MIGRATION-project-name.md) 在维护窗口复制到固定 `artifactflow_*` 名称；afctl 不会猜测或自动移动生产数据。
 

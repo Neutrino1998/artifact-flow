@@ -47,7 +47,7 @@ config-only 不是下游 executor 分支。它先在 lock 内校验 expected bas
 | infra | `bundled` / `external` |
 | sandbox_runtime | `runsc` / `runc` |
 
-Compose substrate 只有 base + capability overlays。生产没有 `build:` 和 `:latest`。target-local secret/cert/inventory/maintenance 留在 `control/`，shipped deploy/config 在 immutable release 内。
+Compose substrate 只有 base + capability overlays。生产没有 `build:` 和 `:latest`。target-local secret/cert/site content/inventory/maintenance 和派生 upstream 留在 `control/`，shipped deploy/config 在 immutable release 内且从不作为可写挂载。
 
 ### Sandbox 始终存在
 
@@ -59,7 +59,7 @@ runsc 注册和 scratch filesystem 是稳定 host capability，由主机镜像�
 
 单机直接调用 Compose，是当前 production-supported executor。实验性多机路径通过 digest 固定的 Ansible Execution Environment，只使用 `ansible.builtin`；playbook 调 Compose CLI，`serial: 1` 滚 app host。`afctl` 保留 release/state/lock/plan 语义，Ansible 只负责远端传输和顺序，不建立第二套 release contract。
 
-控制面 Ansible dependency 被封进 EE。目标 baseline 是 SSH、POSIX shell、Python 3.9+；app host 还必须预置 runsc/runc 与 scratch mount，不满足时 loud-fail。每个物理机在 inventory 只能用一个 hostname，靠加入多个 group 表达多角色。多控制机协调不在支持范围，一个 site 指定一台控制机。
+控制面 Ansible dependency 被封进 EE。当前实验路径只接受 external PostgreSQL/Redis，不实现跨主机 bundled infra。目标 baseline 是 SSH、POSIX shell、Python 3.9+；app host 还必须预置 runsc/runc 与 scratch mount，不满足时 loud-fail。每个物理机在 inventory 只能用一个 hostname，靠加入多个 group 表达多角色。多控制机协调不在支持范围，一个 site 指定一台控制机。
 
 ## 不变量
 
@@ -70,6 +70,7 @@ runsc 注册和 scratch filesystem 是稳定 host capability，由主机镜像�
 - tar extraction 拒绝绝对路径、`..`、symlink 和 device entry。
 - apply 全窗口持有 kernel lock；进程退出自动释放，没有 stale lock directory。
 - health 成功前不写 state；state 用 fsync + rename 原子替换；多机各节点的维护/autoheal 互斥旗标也只在 state 写入后清除。
+- 管理员可写 site config 和拓扑派生 upstream 只存在于 `control/`，正常 API/Ansible 不改写 release。
 - 没有 Compose v1、runc、self-signed TLS、old release root、missing image 或 manifest guessing fallback。
 - 单机 apply 总开 maintenance；失败恢复失败时 maintenance 保留。
 
