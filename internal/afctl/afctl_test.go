@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeRunner struct {
@@ -36,6 +37,15 @@ func (r *fakeRunner) Output(_ context.Context, command Command) (string, error) 
 		return `{"runsc":{}}`, nil
 	}
 	return "ok", nil
+}
+
+type deadlineRunner struct{}
+
+func (deadlineRunner) Run(context.Context, Command) error { return nil }
+
+func (deadlineRunner) Output(ctx context.Context, _ Command) (string, error) {
+	<-ctx.Done()
+	return "", ctx.Err()
 }
 
 func writeTestSite(t *testing.T, root, runtimeName string) {
@@ -188,6 +198,9 @@ func TestAnsibleSiteValidationWarnsThatExecutorIsExperimental(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "experimental") {
 		t.Fatalf("missing experimental warning: %s", errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "notification editing") {
+		t.Fatalf("missing multi-host notification warning: %s", errOut.String())
 	}
 }
 
@@ -370,6 +383,7 @@ func TestApplyWritesOneStateAndConfigHotfixBindsBase(t *testing.T) {
 		t.Fatalf("legacy current symlink must not exist: %v", err)
 	}
 	forceRecreate := false
+	deadlineProbe := false
 	for _, command := range runner.commands {
 		if command.Name == "docker" && len(command.Args) >= 3 && command.Args[0] == "load" {
 			if !strings.HasPrefix(command.Args[2], filepath.Join(c.releaseDir("v1"), "artifacts")) {
@@ -379,9 +393,15 @@ func TestApplyWritesOneStateAndConfigHotfixBindsBase(t *testing.T) {
 		if command.Name == "docker" && slices.Contains(command.Args, "up") && slices.Contains(command.Args, "--force-recreate") {
 			forceRecreate = true
 		}
+		if command.Name == "docker" && slices.Contains(command.Args, "http://localhost:2021/health/ready") && slices.Contains(command.Args, "1") {
+			deadlineProbe = true
+		}
 	}
 	if !forceRecreate {
 		t.Fatal("apply must recreate services so stable-path env/certificate changes take effect")
+	}
+	if !deadlineProbe {
+		t.Fatal("apply must cap its readiness probe by the remaining deadline")
 	}
 
 	workspace := filepath.Join(t.TempDir(), "hotfix")
@@ -415,6 +435,23 @@ func TestApplyWritesOneStateAndConfigHotfixBindsBase(t *testing.T) {
 	}
 	if manifest.ExpectedBaseRelease != "v1" {
 		t.Fatalf("manifest base=%s", manifest.ExpectedBaseRelease)
+	}
+}
+
+func TestLocalReadinessProbeCannotOutliveSiteDeadline(t *testing.T) {
+	c := NewController(t.TempDir(), &bytes.Buffer{}, &bytes.Buffer{})
+	c.Runner = deadlineRunner{}
+	started := time.Now()
+	err := c.reconcile(context.Background(), Site{
+		Executor:            "local",
+		Infra:               "external",
+		ReadyTimeoutSeconds: 1,
+	}, "v1", ReleaseMetadata{})
+	if err == nil || !strings.Contains(err.Error(), "timed out after 1s") {
+		t.Fatalf("expected readiness timeout, got %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("one-second readiness deadline took %s", elapsed)
 	}
 }
 

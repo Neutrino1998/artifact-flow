@@ -124,6 +124,8 @@ backend_replicas = 2
 ready_timeout_seconds = 120
 ```
 
+`ready_timeout_seconds` 是服务启动后的 readiness 探测总 deadline；单次探测和重试间隔都会受剩余时间约束，不是重试次数的近似换算。
+
 公网只把 `tls` 设为 `acme`，并在 `control/.env` 填 `AF_DOMAIN` 和 `AF_ACME_EMAIL`；ACME 固定要求公网 80/443。托管数据库把 `infra` 改为 `external` 并填写外部 PostgreSQL/Redis 地址。
 
 `site init` 同时创建 `control/site/`。管理员通知、品牌和欢迎提示属于现场可变配置，backend/frontend 都从这里读取；缺少文件时 UI 使用已有 fallback，不会阻塞启动。需要自定义时可参考 release 中 `config/site/*.example.json`，但运行时不会写回 release。
@@ -236,6 +238,8 @@ ansible_ee_image = "registry.internal/artifactflow-ansible-ee@sha256:<digest>"
 Execution Environment 必须预先以精确 digest 加载。实验路径当前明确拒绝 `infra = "bundled"`，不尝试自动发布 PostgreSQL/Redis 端口或配置跨主机网络。`doctor` 在尚无真实验收环境时只检查控制机 inventory 与 EE，不伪装成远端 dry-run；apply 开始时会在任何服务 mutation 前逐机 loud-fail 检查 Docker/Compose、架构、runsc 和 scratch mount。初版 playbook 只使用 `ansible.builtin`，通过 Compose CLI 操作远端，不依赖 community collection。apply 顺序为：远端 capability check → 分发完整 release → 唯一 release gate → app host `serial: 1` → 将所有 backend/frontend upstream 渲染到 LB 的 `control/caddy/` → Caddy 健康。
 
 `backend_replicas = 1` 表示每个 app inventory host 运行一份 backend/frontend；多机扩容通过增加 app host，而不是在一台机器上再 scale。一个物理机承担多个角色时，在多个 group 重复同一个 inventory hostname，不要为同一个 `ansible_host` 起多个 alias。Ansible 路径不会安装 runsc 或创建 scratch filesystem，以免应用发布顺手改变稳定宿主能力；commissioning 前应先用基础镜像或既有配置管理完成这些准备。
+
+当前基于文件的管理员通知编辑只支持单机 executor。实验性多机的每个 app host 都有独立 `control/site/`，在线保存无法保证后续 API 或 frontend 请求读到同一份文件；在通知迁入共享数据库前，不要在多机站点使用「通知管理」。这里刻意不增加文件同步、共享文件系统或 sticky session。
 
 实验性多机入口仍是完全相同的：
 

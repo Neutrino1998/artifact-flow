@@ -515,16 +515,36 @@ func (c *Controller) reconcile(ctx context.Context, site Site, release string, m
 		return err
 	}
 	deadline := time.Now().Add(time.Duration(site.ReadyTimeoutSeconds) * time.Second)
-	var last error
-	for time.Now().Before(deadline) {
-		_, last = c.Runner.Output(ctx, c.composeCommand(site, release, meta, "exec", "-T", "caddy", "wget", "-q", "--spider", "-T", "8", "http://localhost:2021/health/ready"))
+	last := error(context.DeadlineExceeded)
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		probeSeconds := int((remaining + time.Second - 1) / time.Second)
+		if probeSeconds > 8 {
+			probeSeconds = 8
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, remaining)
+		_, last = c.Runner.Output(probeCtx, c.composeCommand(site, release, meta, "exec", "-T", "caddy", "wget", "-q", "--spider", "-T", strconv.Itoa(probeSeconds), "http://localhost:2021/health/ready"))
+		cancel()
 		if last == nil {
 			return nil
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		remaining = time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		delay := min(2*time.Second, remaining)
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return ctx.Err()
-		case <-time.After(2 * time.Second):
+		case <-timer.C:
 		}
 	}
 	return fmt.Errorf("load balancer readiness timed out after %ds: %w", site.ReadyTimeoutSeconds, last)

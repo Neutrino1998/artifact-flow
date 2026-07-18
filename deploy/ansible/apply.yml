@@ -341,14 +341,35 @@
           - exec
           - -T
           - caddy
-          - wget
-          - -q
-          - --spider
-          - -T
-          - "8"
-          - http://localhost:2021/health/ready
-      register: af_ready
-      retries: "{{ [1, ((af_ready_timeout_seconds | int + 3) // 4)] | max }}"
-      delay: 4
-      until: af_ready.rc == 0
+          - sh
+          - -ec
+          - |
+            timeout_seconds="$1"
+            deadline=$(( $(date +%s) + timeout_seconds ))
+            while :; do
+              remaining=$(( deadline - $(date +%s) ))
+              if [ "$remaining" -le 0 ]; then
+                echo "readiness timed out after ${timeout_seconds}s" >&2
+                exit 1
+              fi
+              probe_timeout="$remaining"
+              if [ "$probe_timeout" -gt 8 ]; then
+                probe_timeout=8
+              fi
+              if wget -q --spider -T "$probe_timeout" http://localhost:2021/health/ready; then
+                exit 0
+              fi
+              remaining=$(( deadline - $(date +%s) ))
+              if [ "$remaining" -le 0 ]; then
+                echo "readiness timed out after ${timeout_seconds}s" >&2
+                exit 1
+              fi
+              sleep_seconds=2
+              if [ "$remaining" -lt "$sleep_seconds" ]; then
+                sleep_seconds="$remaining"
+              fi
+              sleep "$sleep_seconds"
+            done
+          - wait-ready
+          - "{{ af_ready_timeout_seconds | string }}"
       changed_when: false

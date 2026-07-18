@@ -80,6 +80,8 @@ def test_ansible_renders_the_snippets_caddy_imports_and_leaves_state_order_to_af
     assert "/control/caddy/upstreams.caddy" in playbook
     assert "/releases/{{ af_release_id }}/deploy/caddy/upstreams.caddy" not in playbook
     assert "af_ready_timeout_seconds" in playbook
+    assert "deadline=$(( $(date +%s) + timeout_seconds ))" in playbook
+    assert "retries:" not in playbook
     assert "af_infra" not in playbook
     assert "${AF_RUNTIME_DEPLOY_DIR:-.}/caddy/upstreams.caddy" in lb_overlay
 

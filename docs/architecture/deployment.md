@@ -59,7 +59,7 @@ runsc 注册和 scratch filesystem 是稳定 host capability，由主机镜像�
 
 单机直接调用 Compose，是当前 production-supported executor。实验性多机路径通过 digest 固定的 Ansible Execution Environment，只使用 `ansible.builtin`；playbook 调 Compose CLI，`serial: 1` 滚 app host。`afctl` 保留 release/state/lock/plan 语义，Ansible 只负责远端传输和顺序，不建立第二套 release contract。
 
-控制面 Ansible dependency 被封进 EE。当前实验路径只接受 external PostgreSQL/Redis，不实现跨主机 bundled infra。目标 baseline 是 SSH、POSIX shell、Python 3.9+；app host 还必须预置 runsc/runc 与 scratch mount，不满足时 loud-fail。每个物理机在 inventory 只能用一个 hostname，靠加入多个 group 表达多角色。多控制机协调不在支持范围，一个 site 指定一台控制机。
+控制面 Ansible dependency 被封进 EE。当前实验路径只接受 external PostgreSQL/Redis，不实现跨主机 bundled infra；基于 host-local 文件的通知编辑也不属于多机支持范围，后续应迁移到共享数据库而不是增加文件同步。目标 baseline 是 SSH、POSIX shell、Python 3.9+；app host 还必须预置 runsc/runc 与 scratch mount，不满足时 loud-fail。每个物理机在 inventory 只能用一个 hostname，靠加入多个 group 表达多角色。多控制机协调不在支持范围，一个 site 指定一台控制机。
 
 ## 不变量
 

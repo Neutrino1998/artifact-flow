@@ -204,7 +204,7 @@ func (c *Controller) SiteValidate() (Site, error) {
 		return Site{}, err
 	}
 	if site.Executor == "ansible" {
-		_, _ = fmt.Fprintln(c.Err, "warning: executor=ansible is experimental and has not completed physical multi-host acceptance")
+		_, _ = fmt.Fprintln(c.Err, "warning: executor=ansible is experimental; physical multi-host acceptance is incomplete and file-backed notification editing is not multi-host consistent")
 	}
 	_, _ = fmt.Fprintf(c.Out, "site valid: executor=%s tls=%s infra=%s sandbox_runtime=%s\n", site.Executor, site.TLS, site.Infra, site.SandboxRuntime)
 	return site, nil
