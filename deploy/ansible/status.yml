@@ -1,0 +1,22 @@
+---
+- name: Inspect ArtifactFlow services
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: List project containers
+      ansible.builtin.command:
+        argv: [docker, ps, --filter, label=com.docker.compose.project=artifactflow, --format, "{{ '{{.Names}} {{.Status}}' }}"]
+      changed_when: false
+      register: af_ps
+    - name: Show project containers
+      ansible.builtin.debug:
+        var: af_ps.stdout_lines
+
+- name: Check load balancer readiness
+  hosts: lb
+  gather_facts: false
+  tasks:
+    - name: Probe readiness
+      ansible.builtin.command:
+        argv: [docker, exec, artifactflow-caddy-1, wget, -q, --spider, -T, "8", "http://localhost:2021/health/ready"]
+      changed_when: false

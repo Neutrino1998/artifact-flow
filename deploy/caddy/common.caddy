@@ -1,6 +1,6 @@
 # ArtifactFlow — shared Caddy snippets, imported by BOTH entry configs:
-#   deploy/caddy/Caddyfile          (Mode 2, public: ACME TLS on AF_DOMAIN)
-#   deploy/caddy/Caddyfile.intranet (Mode 3, intranet: static cert, auto_https off)
+#   deploy/caddy/Caddyfile.acme   (ACME TLS on AF_DOMAIN)
+#   deploy/caddy/Caddyfile.static (static cert, auto_https off)
 # The whole deploy/caddy/ DIRECTORY is mounted at /etc/caddy/conf — a directory
 # mount, deliberately not per-file: single-file bind mounts pin the file's
 # INODE at container start, so a host-side edit or `tar xzf` that replaces the
@@ -57,9 +57,10 @@
 	header_up X-Real-IP {remote_host}
 }
 
-# Frontend uses the same passive failover shape. On multi-host releases Fleet
-# renders every app host as a target, so rolling the first app host or losing
-# it does not take the UI down. The single-host target remains frontend:3000.
+# Frontend uses the same passive failover shape. On multi-host releases the
+# Ansible executor renders every app host as a target, so rolling one app host
+# or losing it does not take the UI down. The single-host target remains
+# frontend:3000.
 (frontend_upstream) {
 	import frontend_upstream_targets
 	lb_policy round_robin
@@ -92,10 +93,10 @@
 		max_size 210MiB
 	}
 
-	# Maintenance flag: present iff `maintenance.sh on` has run. Stat'd
+	# Maintenance flag: present iff `afctl maintenance/apply` has enabled it. Stat'd
 	# per-request (no reload needed).
 	@maintenance_on file {
-		root /etc/caddy/maintenance
+		root /etc/caddy/maintenance-state
 		try_files /MAINTENANCE_ON
 	}
 
@@ -107,6 +108,12 @@
 		# 1. Maintenance page's own assets — ALWAYS reachable, even mid-window,
 		#    or the page's own <img>/note.txt would 503 too. handle_path strips
 		#    the /__maintenance prefix before hitting the file root.
+		handle_path /__maintenance/note.txt {
+			root * /etc/caddy/maintenance-state
+			header Cache-Control "no-store"
+			file_server
+		}
+
 		handle_path /__maintenance/* {
 			root * /etc/caddy/maintenance
 			header Cache-Control "no-store"
@@ -169,7 +176,7 @@
 # Internal health listener body — served on :2021 in both modes: HTTP, NO TLS,
 # and deliberately NOT published to the host (compose only maps 80/443).
 # Reachable only from inside the caddy container / docker network.
-# resume.sh / resume-prod.sh probe this via `docker exec <caddy> wget`, so the
+# afctl probes this via `docker compose exec caddy wget`, so the
 # health check flows through Caddy's real reverse_proxy machinery (proving the
 # config loaded + Caddy → backend works) instead of bypassing Caddy by hitting
 # backend:8000 directly. A port-only address serves plain HTTP (no TLS / SNI /

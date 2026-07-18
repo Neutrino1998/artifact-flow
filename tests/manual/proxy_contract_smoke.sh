@@ -10,7 +10,7 @@
 # (one battery, two targets). nginx retired 2026-07 (commit d489c0e) — the
 # nginx half is gone; the battery itself is what still earns its keep.
 #
-# Target config: the PROD entry (deploy/caddy/Caddyfile) with
+# Target config: the ACME entry (deploy/caddy/Caddyfile.acme) with
 # AF_DOMAIN=http://test.local to neuter TLS/ACME. Deliberate: the whole
 # contract lives in common.caddy, which both entry shells import — testing
 # through the prod shell covers it without cert scaffolding. The intranet
@@ -96,7 +96,7 @@ preflight() {
   command -v docker >/dev/null || { echo "docker 不可用"; exit 2; }
   command -v python3 >/dev/null || { echo "python3 不可用"; exit 2; }
   [[ -f "$STUB_PY" ]]                       || { echo "缺 $STUB_PY"; exit 2; }
-  [[ -f "$CADDY_CONF_DIR/Caddyfile" ]]      || { echo "缺 $CADDY_CONF_DIR/Caddyfile"; exit 2; }
+  [[ -f "$CADDY_CONF_DIR/Caddyfile.acme" ]] || { echo "缺 $CADDY_CONF_DIR/Caddyfile.acme"; exit 2; }
   [[ -f "$CADDY_CONF_DIR/common.caddy" ]]   || { echo "缺 $CADDY_CONF_DIR/common.caddy"; exit 2; }
 }
 
@@ -128,7 +128,7 @@ start_proxy() {
     -e AF_DOMAIN=http://test.local -e AF_ACME_EMAIL=smoke@test.local \
     -v "$CADDY_CONF_DIR":/etc/caddy/conf:ro \
     -v "$TMP_MAINT":/etc/caddy/maintenance:ro \
-    caddy:2.10-alpine caddy run --config /etc/caddy/conf/Caddyfile --adapter caddyfile >/dev/null
+    caddy:2.10-alpine caddy run --config /etc/caddy/conf/Caddyfile.acme --adapter caddyfile >/dev/null
 }
 
 wait_ready() {

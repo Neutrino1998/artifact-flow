@@ -86,6 +86,7 @@ LLM 和工具的 API Key 不使用 `ARTIFACTFLOW_` 前缀，直接设置：
 - [流式传输](architecture/streaming.md) — SSE 事件体系、双实现
 - [并发与运行时](architecture/concurrency.md) — RuntimeStore、租约、中断
 - [可观测性](architecture/observability.md) — 事件持久化、Admin API、监控 UI
+- [部署架构](architecture/deployment.md) — afctl、不可变 release、单一 apply 与 Ansible 边界
 
 ### 指南
 
@@ -96,7 +97,7 @@ LLM 和工具的 API Key 不使用 `ARTIFACTFLOW_` 前缀，直接设置：
 
 ### 运维
 
-- [部署指南](deployment.md) — 五种部署模式、环境变量完整参考
+- [部署指南](deployment.md) — 统一 afctl 路径、生产运维与环境变量参考
 
 ### 前端
 

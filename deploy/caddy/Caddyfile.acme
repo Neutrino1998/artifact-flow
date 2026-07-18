@@ -1,4 +1,4 @@
-# ArtifactFlow — Caddy entry config (Mode 2 / public deployment)
+# ArtifactFlow — ACME TLS capability entry
 #
 # Caddy terminates TLS (auto Let's Encrypt) and serves the shared site body
 # from common.caddy (route order, maintenance gate, SSE flush, upload
@@ -26,7 +26,7 @@ import /etc/caddy/conf/common.caddy
 	import af_site
 }
 
-# Internal health listener for resume-prod.sh — see (af_health_probe) in
+# Internal health listener for afctl — see (af_health_probe) in
 # common.caddy for the full rationale.
 :2021 {
 	import af_health_probe

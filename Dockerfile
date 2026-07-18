@@ -27,9 +27,8 @@ RUN pip install --user --no-warn-script-location -r requirements.lock
 # PR-obs-lite's faulthandler deadman dump isn't enough. ~6MB; rides the
 # existing `COPY --from=builder /root/.local` path into the runtime image.
 # Requires `cap_add: [SYS_PTRACE]` on the backend service to actually
-# attach in-container — see deploy/docker-compose.intranet.yml.
-# Version pin must match what release.sh ships in the analyst-tools tar
-# (pandas+numpy wheels), to avoid ABI surprises across the same release.
+# attach in-container — see deploy/compose.base.yml.
+# Pin the diagnostic binary so the immutable application image is reproducible.
 RUN pip install --user --no-warn-script-location py-spy==0.4.1
 
 # --- Stage 2: runtime ---

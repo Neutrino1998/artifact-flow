@@ -1,0 +1,34 @@
+---
+- name: Manage the site maintenance and autoheal-interlock flag
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Report maintenance state
+      ansible.builtin.stat:
+        path: "{{ af_install_root }}/control/maintenance/MAINTENANCE_ON"
+      register: af_maintenance
+      when: af_maintenance_action == 'status'
+    - name: Print maintenance state
+      ansible.builtin.debug:
+        msg: "maintenance={{ 'on' if af_maintenance.stat.exists else 'off' }}"
+      when: af_maintenance_action == 'status'
+    - name: Write maintenance note
+      ansible.builtin.copy:
+        dest: "{{ af_install_root }}/control/maintenance/note.txt"
+        content: "{{ af_maintenance_note }}\n"
+        mode: "0644"
+      when: af_maintenance_action == 'on'
+    - name: Enable maintenance
+      ansible.builtin.file:
+        path: "{{ af_install_root }}/control/maintenance/MAINTENANCE_ON"
+        state: touch
+        mode: "0644"
+      when: af_maintenance_action == 'on'
+    - name: Disable maintenance
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ af_install_root }}/control/maintenance/MAINTENANCE_ON"
+        - "{{ af_install_root }}/control/maintenance/note.txt"
+      when: af_maintenance_action == 'off'

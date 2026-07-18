@@ -12,13 +12,13 @@
 #   autoheal.sh --dry-run    # 只报告会重启谁,不动手
 #
 # Env(均可选):
-#   AF_COMPOSE_FILE     compose 文件(默认 deploy/docker-compose.intranet.yml)
+#   AF_ROOT             install root (default /opt/artifactflow)
 #   AUTOHEAL_SERVICES   监视的服务名,空格分隔(默认 "backend frontend caddy")
 #   AUTOHEAL_MARKER     marker 文件路径(默认 <deploy>/autoheal/restart-marker.jsonl)
 #   AUTOHEAL_MAX_LINES  marker 保留行数上限(默认 500,追加后按行数截断)
 #
-# 与维护窗口互斥:pause.sh 会主动停掉 backend/frontend 并落 MAINTENANCE_ON 旗标。
-# 那些容器此刻「不在运行」是**有意**的,绝不能被 autoheal 拉活 —— 见 MAINTENANCE 旗标
+# 与维护窗口互斥:afctl apply/maintenance 会落 MAINTENANCE_ON 旗标。
+# 维护期间容器可能有意重建,绝不能被 autoheal 干扰 —— 见 MAINTENANCE 旗标
 # 检查:旗标在即整脚本 no-op 退出。
 #
 # 归因链(不直连 Redis,保脚本十行级可审计):重启即向 marker 追加一行
@@ -35,33 +35,24 @@
 
 set -uo pipefail  # 不用 -e:要遍历所有容器逐个处理,单个失败不该中断整轮
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEPLOY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-
-COMPOSE_FILE="${AF_COMPOSE_FILE:-$DEPLOY_DIR/docker-compose.intranet.yml}"
+ROOT="${AF_ROOT:-/opt/artifactflow}"
+CONTROL_DIR="$ROOT/control"
 SERVICES="${AUTOHEAL_SERVICES:-backend frontend caddy}"
-MARKER="${AUTOHEAL_MARKER:-$DEPLOY_DIR/autoheal/restart-marker.jsonl}"
+MARKER="${AUTOHEAL_MARKER:-$CONTROL_DIR/autoheal/restart-marker.jsonl}"
 MAX_LINES="${AUTOHEAL_MAX_LINES:-500}"
-MAINT_FLAG="$DEPLOY_DIR/maintenance/MAINTENANCE_ON"
+MAINT_FLAG="$CONTROL_DIR/maintenance/MAINTENANCE_ON"
 
 DRY_RUN=0
 [[ "${1:-}" == "--dry-run" ]] && DRY_RUN=1
 
-# ── 维护窗口互斥:旗标在 = pause.sh 有意停服,直接退出 ──
+# ── 维护窗口互斥:旗标在 = apply/人工维护,直接退出 ──
 if [[ -f "$MAINT_FLAG" ]]; then
   echo "○ 维护窗口开启中(MAINTENANCE_ON),autoheal 跳过本轮"
   exit 0
 fi
 
-# ── compose CLI:V2 plugin 优先,V1 standalone 兜底(老 CentOS) ──
-if docker compose version >/dev/null 2>&1; then
-  DC=(docker compose)
-elif command -v docker-compose >/dev/null 2>&1; then
-  DC=(docker-compose)
-else
-  echo "Error: 'docker compose' / 'docker-compose' 均不可用" >&2
-  exit 1
-fi
+docker compose version >/dev/null 2>&1 \
+  || { echo "Error: Docker Compose v2 is required" >&2; exit 1; }
 
 # ── 追加 marker 一行 + 按行数截断 ──
 append_marker() {
@@ -82,8 +73,10 @@ append_marker() {
 restarted=0
 checked=0
 for svc in $SERVICES; do
-  # 一个服务在 --scale 下有多个容器,逐个查健康
-  cids="$("${DC[@]}" -f "$COMPOSE_FILE" ps -q "$svc" 2>/dev/null || true)"
+  # Stable Compose labels avoid coupling autoheal to an active-release path.
+  cids="$(docker ps -q \
+    --filter label=com.docker.compose.project=artifactflow \
+    --filter "label=com.docker.compose.service=$svc" 2>/dev/null || true)"
   [[ -z "$cids" ]] && continue
   while IFS= read -r cid; do
     [[ -z "$cid" ]] && continue

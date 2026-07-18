@@ -1,14 +1,11 @@
-# Sandbox DooD overlay — OPT-IN. Stack with the base compose file:
+# Sandbox DooD overlay — REQUIRED for every afctl-managed deployment.
 #
-#   docker compose -f deploy/docker-compose.intranet.yml \
-#                  -f deploy/docker-compose.sandbox.yml [--profile infra] up -d
+# afctl always layers this file over compose.base.yml.
 #
-# Why a separate overlay: /var/run/docker.sock equals HOST ROOT for whoever
-# holds it. A deployment that doesn't grant the sandbox tools (bash/mount/
-# persist) must not carry that standing exposure, so the mount lives here,
-# not in the base file. The backend's only defense once the sock is mounted
-# is the DooD discipline (docs/architecture/sandbox.md): container-creation
-# params are backend constants, never model content.
+# Why a separate overlay: the socket boundary remains visible in Compose and
+# can be audited independently. afctl always includes this file; it never
+# silently removes sandbox capability. /var/run/docker.sock is host-root-
+# equivalent, so the backend's DooD constants remain the policy boundary.
 #
 # Path identity (the non-obvious constraint): the backend passes the per-turn
 # workspace dir as a bind SOURCE to the daemon, and the daemon resolves that
@@ -32,6 +29,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT:-/var/lib/artifactflow/sandbox-scratch}:${ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT:-/var/lib/artifactflow/sandbox-scratch}
     environment:
-      # "" would mean daemon-default runc — prod sandboxes must run under gVisor.
-      - ARTIFACTFLOW_SANDBOX_RUNTIME=${ARTIFACTFLOW_SANDBOX_RUNTIME:-runsc}
-      - ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT=${ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT:-/var/lib/artifactflow/sandbox-scratch}
+      # afctl supplies both from strict site.toml. No daemon-default fallback:
+      # runsc is supported production isolation; explicit runc is reduced
+      # isolation for trusted/dev deployments.
+      - ARTIFACTFLOW_SANDBOX_RUNTIME=${ARTIFACTFLOW_SANDBOX_RUNTIME:?afctl must set sandbox runtime}
+      - ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT=${ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT:?afctl must set scratch root}

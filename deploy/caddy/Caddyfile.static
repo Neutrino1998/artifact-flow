@@ -1,4 +1,4 @@
-# ArtifactFlow — Caddy entry config (Mode 3 / intranet, air-gapped)
+# ArtifactFlow — static TLS capability entry
 #
 # Replaces the retired nginx container: one reverse proxy for both modes, and
 # the intranet entry gains HTTPS via a STATICALLY issued cert (company test
@@ -7,12 +7,11 @@
 # common.caddy, same file Mode 2 uses.
 #
 # Cert contract (operator-side, not Caddy's job):
-#   - deploy/certs/server.crt MUST contain the FULL chain (leaf + intermediates);
+#   - control/certs/server.crt MUST contain the FULL chain (leaf + intermediates);
 #     a leaf-only pem makes browsers that lack the intermediate fail the chain.
 #   - Clients must trust the issuing (company) root CA.
-#   - Rotation: overwrite the pem files, then `docker exec <caddy> caddy reload
-#     --config /etc/caddy/conf/Caddyfile.intranet --adapter caddyfile`
-#     (maintenance.sh not needed — reload is zero-downtime).
+#   - Rotation goes through `afctl apply current`; it recreates Caddy with the
+#     target-local certificate and verifies readiness before leaving maintenance.
 {
 	# Air-gapped: ACME endpoints are unreachable and must never be attempted.
 	# An explicit `tls cert key` below already disables ACME for that site, but
@@ -42,7 +41,7 @@ http://:80 {
 	redir https://{http.request.host}:{$AF_HTTPS_PORT:443}{uri} 308
 }
 
-# Internal health listener for resume.sh — see (af_health_probe) in
+# Internal health listener for afctl — see (af_health_probe) in
 # common.caddy for the full rationale.
 :2021 {
 	import af_health_probe

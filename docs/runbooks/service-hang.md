@@ -2,29 +2,26 @@
 
 > 现场参照:2026-05-14 一次 `update_artifact` 同步 CPU 死算攥住 GIL、卡死 event loop 约 96 分钟、`/health/live` 全程无响应的事故。本 runbook 把当次实战命令固化下来,oncall 直接 copy-paste;wedge 形态与工具作者纪律见文末。
 
-## 前置:挑 compose 文件 + 选目标副本
+## 前置:选目标副本
 
-不同部署模式 backend 容器名 / 端口暴露不一致。**先按部署模式 export 三个变量,后续所有命令引用**:
+生产由 afctl 固定 Compose project label，不需要推导 active release 的 compose 路径：
 
 ```bash
-# Mode 1 (Quick Trial,根 docker-compose.yml,backend 直暴 8000)
-export COMPOSE=docker-compose.yml
-export HEALTH=http://localhost:8000        # backend 直连,无反向代理
-
-# Mode 2 (Production,docker-compose.prod.yml) / Mode 3 (Intranet,deploy/docker-compose.intranet.yml)
-# 都是 Caddy 入口:host 端口走 TLS(域名/证书对 localhost 不成立),整体服务检查
-# 用 caddy 容器内的内部健康监听 :2021(HTTP、不发布到宿主机,真正过反代链路)
-export COMPOSE=docker-compose.prod.yml                       # 或 deploy/docker-compose.intranet.yml
-health() { docker compose -f "$COMPOSE" exec caddy wget -qO- -T 5 "http://localhost:2021$1"; }
+# 生产：通过固定 project/service label 找容器
+export CADDY=$(docker ps -q \
+  --filter label=com.docker.compose.project=artifactflow \
+  --filter label=com.docker.compose.service=caddy | head -1)
+health() { docker exec "$CADDY" wget -qO- -T 5 "http://localhost:2021$1"; }
 # 用法:health /health/live 、health /health/ready(替代下文的 curl $HEALTH)
 
 # ── 挑要诊断的 backend 副本 ──
-# 默认是 1 个 backend;但生产可能 `--scale backend=2` 起多副本(见
-# docker-compose.prod.yml 顶部 usage 注释)。多副本时 `compose ps -q backend`
-# 会返回多行 ID,直接喂 docker stats / inspect 会失败,先列出来挑一个:
-docker compose -f "$COMPOSE" ps backend
+docker ps \
+  --filter label=com.docker.compose.project=artifactflow \
+  --filter label=com.docker.compose.service=backend
 # 拿哪个 = 你怀疑卡死的那个(unhealthy / restart count 高 / 上一次诊断指向的)
 export CID=<上面 NAME 或 CONTAINER ID 列任一>
+
+# Quick Trial 仍可用 `docker compose ps backend`，然后同样设置 CID。
 ```
 
 整体检查走 caddy 容器内 `:2021` 而不是宿主机发布端口:host 侧是 HTTPS(对 localhost 证书域名不匹配),且 `${AF_HTTP_PORT:-80}` 依赖 oncall shell 有没有 source `.env`(Compose 读 `.env` 做变量替换,shell 不会 auto-source → 容易 curl 错端口)。`exec caddy wget :2021` 不碰这两个坑,还顺带验证了 Caddy 配置已加载、Caddy→backend 通。caddy 容器自己挂了时回退 backend 直连:`docker exec <backend容器> curl http://127.0.0.1:8000/health/live`。
@@ -35,7 +32,7 @@ export CID=<上面 NAME 或 CONTAINER ID 列任一>
 
 - `/health/live` 卡住 / 504(纯协程端点,正常 1ms 内返回)
 - 前端"对话发出去没动静",所有 SSE 断
-- `docker compose -f $COMPOSE ps backend` CPU 100%、容器没退出
+- `docker ps` 显示 backend CPU 100%、容器没退出
 - 健康探针翻 unhealthy 但容器不重启(`HEALTHCHECK` 翻红 ≠ 自动 restart)
 
 如果只是依赖问题(DB / Redis 慢),`/health/live` **能正常 200**;不在本 runbook 范围,看 `/health/ready` 输出哪个 component `error`。
@@ -108,7 +105,7 @@ docker logs "$CID" --tail 300 2>&1 | grep -A 200 'Thread 0x'
 docker exec "$CID" py-spy dump --pid 1
 # 不出栈 → py-spy 缺 cap(先 `docker exec "$CID" py-spy --version` 验在;
 #                      attach 报 Operation not permitted 即缺 SYS_PTRACE)
-# 镜像里没 py-spy → 跑 deploy/scripts/preflight.sh 验镜像版本是否带 PR-forensics-bundle
+# 镜像里没 py-spy → 当前镜像不符合 release contract，准备回退/重新发布
 ```
 
 A 路径是默认通道(`src/observability/deadman.py`);C 路径是 deadman 失效时的备份。两者互补:deadman 走 C 线程不需要 GIL,py-spy 直接 attach 进程也不需要 GIL,任一都能在 wedge 期间拿到栈。
@@ -186,7 +183,7 @@ curl -sk -H "Authorization: Bearer $TOKEN" \
 # 软重启(只重启目标副本,其它副本继续服务;前端 / caddy 不动)
 docker restart "$CID"
 # 或一次重启 backend service 全部副本(多副本部署不想保留任何活动副本时):
-docker compose -f "$COMPOSE" restart backend
+docker restart "$CID"
 
 # 重启前冻结现场拿 coredump(可选,debug symbol 完整才有意义)
 PID=$(docker inspect -f '{{.State.Pid}}' "$CID")

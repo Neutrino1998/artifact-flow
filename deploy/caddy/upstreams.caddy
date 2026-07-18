@@ -1,6 +1,6 @@
-# Default single-host upstream targets. Fleet replaces this file inside a
-# versioned release on the LB host for a multi-host topology; common.caddy keeps
-# all timeout/retry/header policy shared between both forms.
+# Default single-host upstream targets. The Ansible executor renders this file
+# inside the immutable release on the LB host for a multi-host topology;
+# common.caddy keeps all timeout/retry/header policy shared between both forms.
 
 (backend_upstream_targets) {
 	dynamic a {

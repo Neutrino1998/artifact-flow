@@ -28,7 +28,7 @@ services:
       retries: 3
     # SYS_PTRACE: backup attach path (`docker exec backend py-spy dump --pid 1`).
     # Container-scope capability — only ptrace within this container's PID ns.
-    # See deploy/docker-compose.intranet.yml for the full rationale.
+    # See deploy/compose.base.yml for the full production rationale.
     cap_add:
       - SYS_PTRACE
     restart: unless-stopped

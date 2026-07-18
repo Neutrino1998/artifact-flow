@@ -72,6 +72,7 @@ nav:
       - Streaming: architecture/streaming.md
       - Concurrency: architecture/concurrency.md
       - Observability: architecture/observability.md
+      - Deployment: architecture/deployment.md
   - Guides:
       - Add Agent: guides/add-agent.md
       - Add Tool: guides/add-tool.md

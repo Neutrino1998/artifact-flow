@@ -1,0 +1,392 @@
+---
+# Multi-host executor for the same materialized release used by local apply.
+# Inventory contract: exactly one host in [release], one in [lb], one or more
+# in [app], and zero/one in [infra]. Every app host must set af_advertise to an
+# address reachable from the LB container. Only ansible.builtin modules are used.
+
+- name: Validate ArtifactFlow inventory
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Require topology cardinality
+      ansible.builtin.assert:
+        that:
+          - groups.get('release', []) | length == 1
+          - groups.get('lb', []) | length == 1
+          - groups.get('app', []) | length > 0
+          - groups.get('infra', []) | length <= 1
+          - (af_infra == 'bundled' and groups.get('infra', []) | length == 1) or (af_infra == 'external' and groups.get('infra', []) | length == 0)
+        fail_msg: "inventory requires release=1, lb=1, app>=1, infra<=1"
+    - name: Require explicit app data-plane addresses
+      ansible.builtin.assert:
+        that:
+          - hostvars[item].af_advertise is defined
+          - hostvars[item].af_advertise | length > 0
+        fail_msg: "app host {{ item }} requires af_advertise=<LB-reachable-address>"
+      loop: "{{ groups['app'] }}"
+    - name: Require one explicit transport address per inventory host
+      ansible.builtin.assert:
+        that:
+          - hostvars[item].ansible_host is defined
+          - hostvars[item].ansible_host | length > 0
+        fail_msg: "host {{ item }} requires ansible_host and must not alias another inventory name to the same machine"
+      loop: "{{ groups['all'] }}"
+    - name: Reject duplicate physical hosts represented by aliases
+      ansible.builtin.assert:
+        that:
+          - (groups['all'] | map('extract', hostvars, 'ansible_host') | list | unique | length) == (groups['all'] | length)
+        fail_msg: "put one inventory hostname in multiple role groups; do not use multiple aliases for one ansible_host"
+
+- name: Materialize immutable release and control plane
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Require target capabilities
+      ansible.builtin.command:
+        argv: [docker, compose, version]
+      changed_when: false
+    - name: Require reachable Docker daemon
+      ansible.builtin.command:
+        argv: [docker, info]
+      changed_when: false
+    - name: Require mounted sandbox scratch root
+      ansible.builtin.command:
+        argv: [findmnt, -rn, "{{ af_scratch_root }}"]
+      changed_when: false
+      when: inventory_hostname in groups['app']
+    - name: Require runsc when selected
+      ansible.builtin.command:
+        argv: [runsc, --version]
+      changed_when: false
+      when:
+        - inventory_hostname in groups['app']
+        - af_sandbox_runtime == 'runsc'
+    - name: Read registered Docker runtimes
+      ansible.builtin.command:
+        argv: [docker, info, --format, "{{ '{{json .Runtimes}}' }}"]
+      register: af_docker_runtimes
+      changed_when: false
+      when:
+        - inventory_hostname in groups['app']
+        - af_sandbox_runtime == 'runsc'
+    - name: Require runsc to be registered with Docker
+      ansible.builtin.assert:
+        that:
+          - "'runsc' in af_docker_runtimes.stdout"
+      when:
+        - inventory_hostname in groups['app']
+        - af_sandbox_runtime == 'runsc'
+    - name: Read target architecture
+      ansible.builtin.command:
+        argv: [uname, -m]
+      register: af_uname
+      changed_when: false
+    - name: Require bundle/target architecture match
+      ansible.builtin.assert:
+        that:
+          - >-
+            (af_platform == 'linux/amd64' and af_uname.stdout in ['x86_64', 'amd64']) or
+            (af_platform == 'linux/arm64' and af_uname.stdout in ['aarch64', 'arm64'])
+        fail_msg: "bundle {{ af_platform }} does not match {{ inventory_hostname }} architecture {{ af_uname.stdout }}"
+    - name: Create stable control and release-parent directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ af_install_root }}/control"
+        - "{{ af_install_root }}/control/certs"
+        - "{{ af_install_root }}/control/maintenance"
+        - "{{ af_install_root }}/control/autoheal"
+        - "{{ af_install_root }}/.artifactflow/releases"
+    - name: Copy target-local environment
+      ansible.builtin.copy:
+        src: /work/control/.env
+        dest: "{{ af_install_root }}/control/.env"
+        mode: "0600"
+    - name: Copy target-local static certificate chain
+      ansible.builtin.copy:
+        src: /work/control/certs/server.crt
+        dest: "{{ af_install_root }}/control/certs/server.crt"
+        mode: "0644"
+      when:
+        - af_tls == 'static'
+        - inventory_hostname in groups['lb']
+    - name: Copy target-local static private key
+      ansible.builtin.copy:
+        src: /work/control/certs/server.key
+        dest: "{{ af_install_root }}/control/certs/server.key"
+        mode: "0600"
+      when:
+        - af_tls == 'static'
+        - inventory_hostname in groups['lb']
+    - name: Enable maintenance before any rolling mutation
+      ansible.builtin.file:
+        path: "{{ af_install_root }}/control/maintenance/MAINTENANCE_ON"
+        state: touch
+        mode: "0644"
+    - name: Inspect existing immutable release
+      ansible.builtin.stat:
+        path: "{{ af_install_root }}/.artifactflow/releases/{{ af_release_id }}/.af-release.json"
+      register: af_existing_release
+    - name: Read existing immutable release identity
+      ansible.builtin.slurp:
+        src: "{{ af_install_root }}/.artifactflow/releases/{{ af_release_id }}/.af-release.json"
+      register: af_existing_release_meta
+      when: af_existing_release.stat.exists
+    - name: Reject release-id collision
+      ansible.builtin.assert:
+        that:
+          - (af_existing_release_meta.content | b64decode | from_json).identity == af_release_identity
+        fail_msg: "immutable release {{ af_release_id }} exists with different content on {{ inventory_hostname }}"
+      when: af_existing_release.stat.exists
+    - name: Materialize release through a staging directory
+      when: not af_existing_release.stat.exists
+      block:
+        - name: Reset incomplete staging directory
+          ansible.builtin.file:
+            path: "{{ af_install_root }}/.artifactflow/releases/.{{ af_release_id }}.staging"
+            state: absent
+        - name: Create staging directory
+          ansible.builtin.file:
+            path: "{{ af_install_root }}/.artifactflow/releases/.{{ af_release_id }}.staging"
+            state: directory
+            mode: "0755"
+        - name: Copy immutable deploy unit
+          ansible.builtin.copy:
+            src: "{{ af_release_source }}/deploy/"
+            dest: "{{ af_install_root }}/.artifactflow/releases/.{{ af_release_id }}.staging/deploy/"
+            mode: preserve
+        - name: Copy immutable config unit
+          ansible.builtin.copy:
+            src: "{{ af_release_source }}/config/"
+            dest: "{{ af_install_root }}/.artifactflow/releases/.{{ af_release_id }}.staging/config/"
+            mode: preserve
+        - name: Copy immutable release metadata
+          ansible.builtin.copy:
+            src: "{{ af_release_source }}/{{ item }}"
+            dest: "{{ af_install_root }}/.artifactflow/releases/.{{ af_release_id }}.staging/{{ item }}"
+            mode: "0644"
+          loop: [.af-release.json, manifest.json]
+        - name: Atomically publish immutable release
+          ansible.builtin.command:
+            argv:
+              - mv
+              - "{{ af_install_root }}/.artifactflow/releases/.{{ af_release_id }}.staging"
+              - "{{ af_install_root }}/.artifactflow/releases/{{ af_release_id }}"
+
+- name: Load application images where they execute
+  hosts: app:release
+  gather_facts: false
+  serial: 1
+  tasks:
+    - name: Load application archive
+      ansible.builtin.copy:
+        src: "{{ af_artifacts.app }}"
+        dest: "/tmp/artifactflow-app-{{ af_release_id }}.tar.gz"
+        mode: "0600"
+      when: af_artifacts.app is defined
+    - name: Import application archive
+      ansible.builtin.command:
+        argv: [docker, load, -i, "/tmp/artifactflow-app-{{ af_release_id }}.tar.gz"]
+      when: af_artifacts.app is defined
+    - name: Require exact application images
+      ansible.builtin.command:
+        argv: [docker, image, inspect, "{{ item }}"]
+      loop: "{{ af_app_images }}"
+      changed_when: false
+
+- name: Load sandbox image on app hosts
+  hosts: app
+  gather_facts: false
+  serial: 1
+  tasks:
+    - name: Copy sandbox archive
+      ansible.builtin.copy:
+        src: "{{ af_artifacts.sandbox }}"
+        dest: "/tmp/artifactflow-sandbox-{{ af_release_id }}.tar.gz"
+        mode: "0600"
+      when: af_artifacts.sandbox is defined
+    - name: Import sandbox archive
+      ansible.builtin.command:
+        argv: [docker, load, -i, "/tmp/artifactflow-sandbox-{{ af_release_id }}.tar.gz"]
+      when: af_artifacts.sandbox is defined
+    - name: Require exact sandbox image
+      ansible.builtin.command:
+        argv: [docker, image, inspect, "{{ af_sandbox_image }}"]
+      changed_when: false
+    - name: Smoke exact sandbox runtime without network
+      ansible.builtin.command:
+        argv: [docker, run, --rm, "--runtime={{ af_sandbox_runtime }}", --network=none, "{{ af_sandbox_image }}", "true"]
+
+- name: Load infrastructure archive where infrastructure images execute
+  hosts: infra:lb
+  gather_facts: false
+  tasks:
+    - name: Copy infrastructure archive
+      ansible.builtin.copy:
+        src: "{{ af_artifacts.infra }}"
+        dest: "/tmp/artifactflow-infra-{{ af_release_id }}.tar.gz"
+        mode: "0600"
+      when: af_artifacts.infra is defined
+    - name: Import infrastructure archive
+      ansible.builtin.command:
+        argv: [docker, load, -i, "/tmp/artifactflow-infra-{{ af_release_id }}.tar.gz"]
+      when: af_artifacts.infra is defined
+- name: Require exact Caddy image on load balancer
+  hosts: lb
+  gather_facts: false
+  tasks:
+    - name: Inspect Caddy image
+      ansible.builtin.command:
+        argv: [docker, image, inspect, "{{ item }}"]
+      loop: "{{ af_caddy_images }}"
+      changed_when: false
+
+- name: Require exact data-service images on bundled infra host
+  hosts: infra
+  gather_facts: false
+  tasks:
+    - name: Inspect Postgres and Redis images
+      ansible.builtin.command:
+        argv: [docker, image, inspect, "{{ item }}"]
+      loop: "{{ af_data_images }}"
+      changed_when: false
+
+- name: Start bundled infrastructure
+  hosts: infra
+  gather_facts: false
+  tasks:
+    - name: Reconcile Postgres and Redis
+      ansible.builtin.command:
+        argv:
+          - env
+          - "AF_VERSION={{ af_app_version }}"
+          - "AF_CADDY_IMAGE={{ af_caddy_image }}"
+          - "AF_POSTGRES_IMAGE={{ af_postgres_image }}"
+          - "AF_REDIS_IMAGE={{ af_redis_image }}"
+          - "AF_RUNTIME_DEPLOY_DIR={{ af_install_root }}/control"
+          - "ARTIFACTFLOW_SANDBOX_RUNTIME={{ af_sandbox_runtime }}"
+          - "ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT={{ af_scratch_root }}"
+          - docker
+          - compose
+          - --project-name
+          - artifactflow
+          - --env-file
+          - "{{ af_install_root }}/control/.env"
+          - -f
+          - "{{ af_install_root }}/.artifactflow/releases/{{ af_release_id }}/deploy/compose.base.yml"
+          - --profile
+          - infra
+          - up
+          - -d
+          - postgres
+          - redis
+      when: af_infra == 'bundled'
+
+- name: Run the single release gate
+  hosts: release
+  gather_facts: false
+  tasks:
+    - name: Migrate and reconcile once
+      ansible.builtin.command:
+        argv:
+          - env
+          - "AF_VERSION={{ af_app_version }}"
+          - "AF_CADDY_IMAGE={{ af_caddy_image }}"
+          - "AF_POSTGRES_IMAGE={{ af_postgres_image }}"
+          - "AF_REDIS_IMAGE={{ af_redis_image }}"
+          - "AF_RUNTIME_DEPLOY_DIR={{ af_install_root }}/control"
+          - "ARTIFACTFLOW_SANDBOX_RUNTIME={{ af_sandbox_runtime }}"
+          - "ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT={{ af_scratch_root }}"
+          - docker
+          - compose
+          - --project-name
+          - artifactflow
+          - --env-file
+          - "{{ af_install_root }}/control/.env"
+          - -f
+          - "{{ af_install_root }}/.artifactflow/releases/{{ af_release_id }}/deploy/compose.base.yml"
+          - run
+          - --rm
+          - --no-deps
+          - release
+
+- name: Roll application hosts one at a time
+  hosts: app
+  gather_facts: false
+  serial: 1
+  tasks:
+    - name: Reconcile backend and frontend
+      ansible.builtin.command:
+        argv:
+          - env
+          - "AF_VERSION={{ af_app_version }}"
+          - "AF_CADDY_IMAGE={{ af_caddy_image }}"
+          - "AF_POSTGRES_IMAGE={{ af_postgres_image }}"
+          - "AF_REDIS_IMAGE={{ af_redis_image }}"
+          - "AF_RUNTIME_DEPLOY_DIR={{ af_install_root }}/control"
+          - "ARTIFACTFLOW_SANDBOX_RUNTIME={{ af_sandbox_runtime }}"
+          - "ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT={{ af_scratch_root }}"
+          - docker
+          - compose
+          - --project-name
+          - artifactflow
+          - --env-file
+          - "{{ af_install_root }}/control/.env"
+          - -f
+          - "{{ af_install_root }}/.artifactflow/releases/{{ af_release_id }}/deploy/compose.base.yml"
+          - -f
+          - "{{ af_install_root }}/.artifactflow/releases/{{ af_release_id }}/deploy/compose.sandbox.yml"
+          - -f
+          - "{{ af_install_root }}/.artifactflow/releases/{{ af_release_id }}/deploy/compose.multi-app.yml"
+          - up
+          - -d
+          - --no-deps
+          - --force-recreate
+          - backend
+          - frontend
+
+- name: Reconcile load balancer and verify service
+  hosts: lb
+  gather_facts: false
+  tasks:
+    - name: Render all backend and frontend upstreams
+      ansible.builtin.copy:
+        dest: "{{ af_install_root }}/.artifactflow/releases/{{ af_release_id }}/deploy/caddy/upstreams.caddy"
+        mode: "0644"
+        content: |
+          (backend_upstream_targets) {
+              to {% for host in groups['app'] %}{{ hostvars[host].af_advertise }}:8000 {% endfor %}
+          }
+          (frontend_upstream_targets) {
+              to {% for host in groups['app'] %}{{ hostvars[host].af_advertise }}:3000 {% endfor %}
+          }
+    - name: Reconcile Caddy
+      ansible.builtin.command:
+        argv: "{{ ['env', 'AF_VERSION=' + af_app_version, 'AF_CADDY_IMAGE=' + af_caddy_image, 'AF_POSTGRES_IMAGE=' + af_postgres_image, 'AF_REDIS_IMAGE=' + af_redis_image, 'AF_RUNTIME_DEPLOY_DIR=' + af_install_root + '/control', 'ARTIFACTFLOW_SANDBOX_RUNTIME=' + af_sandbox_runtime, 'ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT=' + af_scratch_root, 'docker', 'compose', '--project-name', 'artifactflow', '--env-file', af_install_root + '/control/.env', '-f', af_install_root + '/.artifactflow/releases/' + af_release_id + '/deploy/compose.base.yml'] + (['-f', af_install_root + '/.artifactflow/releases/' + af_release_id + '/deploy/compose.tls-acme.yml'] if af_tls == 'acme' else []) + ['up', '-d', '--no-deps', '--force-recreate', 'caddy'] }}"
+    - name: Wait for readiness through Caddy
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - --project-name
+          - artifactflow
+          - --env-file
+          - "{{ af_install_root }}/control/.env"
+          - -f
+          - "{{ af_install_root }}/.artifactflow/releases/{{ af_release_id }}/deploy/compose.base.yml"
+          - exec
+          - -T
+          - caddy
+          - wget
+          - -q
+          - --spider
+          - -T
+          - "8"
+          - http://localhost:2021/health/ready
+      register: af_ready
+      retries: 30
+      delay: 4
+      until: af_ready.rc == 0
+      changed_when: false
