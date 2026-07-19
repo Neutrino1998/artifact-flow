@@ -1,104 +1,54 @@
 # ArtifactFlow
 
-> Pi-style 可配置 Agent 引擎 — 面向中小规模团队的多 Agent SaaS 服务
+ArtifactFlow 是一套面向私有化部署的多智能体服务。Agent、Model、Tool 和 Skill 由 Markdown/YAML 配置；生产环境通过不可变 Release 和 `afctl` 部署、升级与回滚。
 
-ArtifactFlow 是一个基于扁平 while loop 执行引擎的多 Agent 协作系统。它采用双 Artifact 架构（Task Plan + Result），通过配置化的 Agent/Tool/Model 体系，让团队无需编写代码即可扩展 AI 能力。
+![ArtifactFlow Web UI](assets/screenshot.png)
 
-## 核心特性
+## 从这里开始
 
-- **扁平 while loop 引擎** — 无框架依赖的 Pi-style 执行循环，call_llm → parse_tool_calls → execute → route，完全透明可调试
-- **Agent/Tool/Model 全配置化** — Agent 是 Markdown 文件（YAML frontmatter + role prompt），Model 是 YAML 配置，无需写 Python 即可扩展
-- **双 Artifact 架构** — Task Plan Artifact + Result Artifact，write-back cache 机制确保原子性持久化
-- **对话树 + Compaction** — 保留分支结构的上下文压缩，支持分支回溯
-- **SSE 实时流式 + Permission Interrupt** — fetch + ReadableStream 传输，CONFIRM 级工具触发用户授权中断
-- **多数据库 + 可选 Redis 分布式** — SQLite（开发）/ PostgreSQL / MySQL + InMemory / Redis RuntimeStore
+| 你的目标 | 阅读入口 |
+|---|---|
+| 先理解一次任务怎样执行 | [工作原理](how-it-works.md) |
+| 配置模型、Agent、工具或 Skill | [配置总览](configuration/index.md) |
+| 准备一台新的生产主机 | [主机准备](operations/host-preparation.md) |
+| 完成第一次生产部署 | [首次部署](operations/first-deployment.md) |
+| 发布新版本或回滚 | [Release 与升级](operations/releases.md) |
+| 查看状态、改配置或处理故障 | [日常维护](operations/maintenance.md) · [故障处理](operations/troubleshooting.md) |
 
-## 快速开始
+## 本地试用
 
-### 前置要求
-
-- Docker & Docker Compose
-- `DASHSCOPE_API_KEY` — 默认 Agent 配置使用通义千问（Qwen）模型，需要 DashScope API Key。如需使用 OpenAI 或 DeepSeek，只需修改 `config/agents/*.md` 中的 model 字段为已内置的 alias（如 `gpt-4o`、`deepseek-chat`）并设置对应 API Key
-
-### 三步启动
+本地试用使用 SQLite 和进程内运行时状态，适合体验和开发，不是生产拓扑。
 
 ```bash
-# 1. 克隆项目
-git clone <repo-url> && cd artifact-flow
-
-# 2. 配置环境变量
+git clone https://github.com/Neutrino1998/artifact-flow.git
+cd artifact-flow
 cp .env.example .env
-# 编辑 .env，填入：
-#   - ARTIFACTFLOW_JWT_SECRET（必填）
-#   - DASHSCOPE_API_KEY（默认模型必填）
-#   - BOCHA_API_KEY（Web 搜索工具）
-
-# 3. 启动服务
-docker compose up -d
-
-# 4. 创建管理员账号
-docker compose exec backend python scripts/create_admin.py admin --password <your-password>
 ```
 
-启动后访问：
+编辑 `.env`，至少填写：
 
-- 前端：http://localhost:3000
-- API 文档：http://localhost:8000/docs （需在 `.env` 中设置 `ARTIFACTFLOW_DEBUG=true`）
+- `ARTIFACTFLOW_JWT_SECRET`
+- `ARTIFACTFLOW_CREDENTIAL_KEY`
+- 一个模型供应商的 API Key，例如 `DASHSCOPE_API_KEY`
 
-> 这是 Quick Trial 模式（SQLite + InMemory），适合本地试用。生产部署请参考 [部署指南](deployment.md)。
+然后启动并创建管理员：
 
-## 环境变量速查
+```bash
+docker compose up -d
+docker compose exec backend python scripts/create_admin.py admin
+```
 
-所有应用级变量使用 `ARTIFACTFLOW_` 前缀（通过 Pydantic Settings 自动映射），完整列表见 [部署指南 - 环境变量完整参考](deployment.md#环境变量完整参考)。
+访问 <http://localhost:3000>。开发环境设置 `ARTIFACTFLOW_DEBUG=true` 后，可在 <http://localhost:8000/docs> 查看由 OpenAPI 生成的接口文档。
 
-| 变量 | 必填 | 默认值 | 说明 |
-|------|------|--------|------|
-| `ARTIFACTFLOW_JWT_SECRET` | **是** | — | JWT 签名密钥，`python -c "import secrets; print(secrets.token_urlsafe(32))"` 生成 |
-| `ARTIFACTFLOW_DATABASE_URL` | **是** | — | 数据库连接串，如 `sqlite+aiosqlite:///data/artifactflow.db` |
-| `ARTIFACTFLOW_REDIS_URL` | 否 | `""` (InMemory) | Redis 连接串，生产环境建议配置 |
-| `ARTIFACTFLOW_REDIS_KEY_PREFIX` | 启用 Redis 时必填 | `""` | Redis key 命名空间前缀 |
-| `ARTIFACTFLOW_DEBUG` | 否 | `false` | 开启调试日志、详细错误信息和 Swagger 文档 |
-| `ARTIFACTFLOW_EXECUTION_TIMEOUT` | 否 | `3600` | 总执行超时（秒） |
-| `ARTIFACTFLOW_PERMISSION_TIMEOUT` | 否 | `300` | 单次权限等待超时（秒） |
-| `ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD` | 否 | `100000` | 触发上下文压缩的 token 阈值 |
-| `ARTIFACTFLOW_MAX_CONCURRENT_TASKS` | 否 | `32` | 最大并发引擎执行数 |
+!!! warning "不要把本地试用当成生产部署"
+    本地 Compose 使用 SQLite、单进程运行时和源码构建镜像。生产环境应先完成[主机准备](operations/host-preparation.md)，再使用 Release 与 `afctl` 部署。
 
-LLM 和工具的 API Key 不使用 `ARTIFACTFLOW_` 前缀，直接设置：
+## 文档边界
 
-| 变量 | 说明 |
-|------|------|
-| `DASHSCOPE_API_KEY` | 通义千问 API |
-| `OPENAI_API_KEY` | OpenAI API |
-| `DEEPSEEK_API_KEY` | DeepSeek API |
-| `BOCHA_API_KEY` | Bocha Web 搜索 |
-| `JINA_API_KEY` | Jina Reader（网页抓取） |
+这套 Wiki 只维护三类稳定信息：
 
-## 文档导航
+1. 系统从用户请求到结果的大体工作方式；
+2. 部署方真正可以配置的公开契约；
+3. 主机准备、发布、维护和故障处理流程。
 
-### 架构
-
-- [架构概览](architecture/overview.md) — 三层模型、请求生命周期、设计决策
-- [执行引擎](architecture/engine.md) — Pi-style while loop、Agent 完成路由、Compaction
-- [Agent 系统](architecture/agents.md) — Agent-as-Config、协作模型
-- [工具系统](architecture/tools.md) — XML 工具调用、权限模型、执行流水线
-- [Artifact 架构](architecture/artifacts.md) — 双 Artifact、write-back cache
-- [数据层](architecture/data-layer.md) — ORM 模型、对话树、Event Sourcing
-- [流式传输](architecture/streaming.md) — SSE 事件体系、双实现
-- [并发与运行时](architecture/concurrency.md) — RuntimeStore、租约、中断
-- [可观测性](architecture/observability.md) — 事件持久化、Admin API、监控 UI
-- [部署架构](architecture/deployment.md) — afctl、不可变 release、单一 apply 与 Ansible 边界
-
-### 指南
-
-- [添加 Agent](guides/add-agent.md) — 创建自定义 Agent 配置
-- [添加 Tool](guides/add-tool.md) — 实现自定义工具
-- [添加 Model](guides/add-model.md) — 接入新 LLM Provider
-- [API 参考](guides/api-reference.md) — REST API 完整文档
-
-### 运维
-
-- [部署指南](deployment.md) — 统一 afctl 路径、生产运维与环境变量参考
-
-### 前端
-
-- [前端架构](frontend.md) — Next.js 15 + Zustand + SSE 集成
+具体类、函数、数据库字段和前端状态结构以代码、类型定义和测试为准，不在 Wiki 中重复维护。REST 字段与响应结构以运行中服务的 OpenAPI 为准。

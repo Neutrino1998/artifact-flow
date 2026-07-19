@@ -50,4 +50,6 @@ release 目录不会作为可写 bind mount。管理员通知等现场配置写�
 
 应用 release 不会顺便覆盖 `/opt/artifactflow/bin/afctl`。新版 bundle 自带的 `afctl` 用于执行该版 `plan/apply`；成功后再由 operator 显式安装到稳定路径。Ansible executor 保留为实验性路径，目前只接受 external PostgreSQL/Redis；完成真实多机物理验收前不属于 production-supported contract。
 
-完整指南见 [`docs/deployment.md`](../docs/deployment.md)。
+完整流程见 [`docs/operations/first-deployment.md`](../docs/operations/first-deployment.md)、
+[`docs/operations/releases.md`](../docs/operations/releases.md) 与
+[`docs/operations/maintenance.md`](../docs/operations/maintenance.md)。

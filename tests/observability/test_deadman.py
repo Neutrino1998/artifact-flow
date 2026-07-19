@@ -5,7 +5,7 @@ DeadmanSwitch 单元测试
 faulthandler.dump_traceback_later 的调用次数)。
 
 不验证 "真的让 loop wedge 后会 dump" — 那是 faulthandler 自身的契约,
-且 dump 走 stderr 不易在测试里截获;留给 docs/runbooks/service-hang.md
+且 dump 走 stderr 不易在测试里截获;留给 docs/operations/troubleshooting.md
 里的手动 SOP。
 """
 

@@ -109,11 +109,11 @@ def test_sandbox_dependency_descriptions_track_image_inputs():
     assert {"pandoc", "ripgrep", "zip", "git"} <= system_tools
     all_dependencies = system_tools | python_packages
 
+    # Public Wiki deliberately documents capability and operations, not the
+    # sandbox image's exact package inventory. Keep exact inventory assertions
+    # at the executable tool boundary and the component-local README only.
     exact_dependency_docs = {
         "BashTool.description": BashTool(None).description,
-        "docs/architecture/sandbox.md": (
-            _REPO_ROOT / "docs" / "architecture" / "sandbox.md"
-        ).read_text(),
     }
     for label, text in exact_dependency_docs.items():
         _assert_dependency_tokens(label, text, all_dependencies)

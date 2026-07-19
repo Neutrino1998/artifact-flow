@@ -1,177 +1,127 @@
 # ArtifactFlow
 
-> Pi-style 可配置 Agent 引擎 + 双 Artifact 架构,面向私有化部署的多智能体技术栈
+> 面向私有化部署的可配置多智能体服务
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![SQLite/PostgreSQL](https://img.shields.io/badge/SQLite%20%7C%20PostgreSQL-Persistent-blue.svg)]()
-[![Development Status](https://img.shields.io/badge/Status-Alpha%20Development-orange.svg)]()
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://neutrino1998.github.io/artifact-flow/)
+[![Development Status](https://img.shields.io/badge/status-alpha-orange.svg)]()
 
-ArtifactFlow 是一个基于扁平 while loop 执行引擎的多 Agent 协作系统。采用双 Artifact 架构（Task Plan + Result），通过配置化的 Agent / Tool / Model 体系，让团队无需编写代码即可扩展 AI 能力。执行引擎参考 [Pi-mono](https://github.com/badlogic/pi-mono) 设计。
+ArtifactFlow 使用 Pi-style 循环执行 Agent：Lead Agent 可以直接工作、调用 Tool，或把较大的子任务委派给隔离上下文中的 Subagent。Model、Agent、HTTP Tool、MCP 和 Skill 主要通过 Markdown/YAML 配置，生产环境通过不可变 Release 和 `afctl` 交付。
 
-## 项目定位
+它位于本地个人 Agent 与全托管平台之间，目标是为一个组织快速搭建数据不出域、可以持续运维的 AI 服务，而不是公开多租户 SaaS 或本地长期开发工作区。
 
-占据「本地个人 agent」和「全托管企业级平台」之间的中间生态位：
+![ArtifactFlow Web UI](docs/assets/screenshot.png)
 
-- **下** · 本地 CLI agent（Claude Code / pi-mono 等）—— 极致 dev loop 体验，但单用户、无私有化部署形态。
-- **上** · 全托管平台（Claude Managed Agents / OpenAI Assistants 等）—— 能力强，但数据出域、定价模型、深度定制对政企 / 合规场景是硬约束。
-- **中** · 本项目 —— **为具体 AI 赋能需求快速搭起稳定的私有化服务**的技术栈。每个部署服务单一组织/客户，不试图做公开 SaaS。
+## 核心能力
 
-由此带来的边界：
+- Pi-style per-agent loop 与原地串行 Subagent 委派
+- Model / Agent / Tool / MCP / Skill 配置与数据库注册表
+- Task Plan、Result 和上传文件统一为 Artifact
+- 对话树、事件历史和上下文 Compaction
+- SSE 实时输出、Permission Interrupt、Cancel 和 Timeout
+- 按轮 Sandbox：显式 mount、执行和 persist
+- SQLite/InMemory 本地试用；PostgreSQL/Redis 多副本生产运行
+- 不可变 Release、`afctl` Apply/rollback/config hotfix
 
-- 覆盖**单 turn / 短链路闭环**的任务（数据处理、文档转换、信息整合、多 agent 协作流程）。**不替代** Claude Code 那类本地持续 dev loop —— per-turn 沙盒 + 跨中心持久化与"跨轮持久工作目录"在架构上根本不兼容。
-- 跨中心 DR、事件溯源、权限中断、统一 cancel/timeout 是为「小团队稳定运维一套部署」做的，不是为流量增长 —— 这些"看起来重"的基础设施在私有化场景下恰好够用。
+## 本地试用
 
-## 预览
-
-**Web UI** — 三栏布局：侧边栏对话列表、聊天面板（流式渲染 + 分支导航）、Artifact 面板（Markdown / Source / Diff）
-
-![Screenshot](docs/assets/screenshot.png)
-
-## 核心特性
-
-- **扁平 while loop 引擎** — 无框架依赖的 Pi-style 执行循环，call_llm → parse_tool_calls → execute → route，完全透明可调试
-- **Agent / Tool / Model 全配置化** — Agent 是 Markdown 文件（YAML frontmatter + role prompt），Model 是 YAML 配置，无需写 Python 即可扩展
-- **双 Artifact 架构** — Task Plan Artifact + Result Artifact，write-back cache 机制确保原子性持久化
-- **对话树 + Compaction** — 保留分支结构的上下文压缩，支持分支回溯
-- **SSE 实时流式 + Permission Interrupt** — fetch + ReadableStream 传输，CONFIRM 级工具触发用户授权中断
-- **多数据库 + 可选 Redis 分布式** — SQLite（开发）/ PostgreSQL / MySQL + InMemory / Redis RuntimeStore
-
-## 快速开始
-
-### 前置要求
-
-- Docker & Docker Compose（推荐方式），或本地开发所需的 Python 3.11+ 与 Node.js 20+
-- 至少一个 LLM API Key（默认 Agent 配置使用 DashScope / 通义千问，可在 `config/agents/*.md` 中改用 `gpt-4o`、`deepseek-chat` 等内置 alias）
-- `BOCHA_API_KEY` — Web 搜索工具所需
-
-### 方式一：Docker 部署（推荐）
-
-SQLite + InMemory，适合本地试用。
+需要 Docker、Docker Compose 和至少一个 LLM API Key。
 
 ```bash
 git clone https://github.com/Neutrino1998/artifact-flow.git
 cd artifact-flow
-
 cp .env.example .env
-# 编辑 .env，至少填入：
-#   ARTIFACTFLOW_JWT_SECRET      (python -c "import secrets; print(secrets.token_urlsafe(32))" 生成)
-#   ARTIFACTFLOW_CREDENTIAL_KEY  (python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 生成；缺失服务无法启动)
-#   DASHSCOPE_API_KEY            (或改用其他 provider 对应的 key)
-#   BOCHA_API_KEY
+```
 
+编辑 `.env`，至少设置：
+
+- `ARTIFACTFLOW_JWT_SECRET`
+- `ARTIFACTFLOW_CREDENTIAL_KEY`
+- `DASHSCOPE_API_KEY`、`OPENAI_API_KEY` 或其他已配置模型的凭证
+
+启动：
+
+```bash
 docker compose up -d
-docker compose exec backend python scripts/create_admin.py admin --password <your-password>
+docker compose exec backend python scripts/create_admin.py admin
 ```
 
-访问：前端 http://localhost:3000 / API 文档 http://localhost:8000/docs （需 `ARTIFACTFLOW_DEBUG=true`）
+访问 <http://localhost:3000>。设置 `ARTIFACTFLOW_DEBUG=true` 后，可在 <http://localhost:8000/docs> 查看 OpenAPI 文档。
 
-> **生产部署**（PostgreSQL + Redis + 多副本）详见 [部署指南](docs/deployment.md)。
+本地 Compose 使用 SQLite 和进程内运行时，只适合试用与开发。生产部署从 Wiki 的[主机准备](https://neutrino1998.github.io/artifact-flow/operations/host-preparation/)开始。
 
-### 方式二：本地安装
+## 配置入口
 
-适合需要修改代码或进行开发的场景。
+| 能力 | 作者配置 |
+|---|---|
+| Model | `config/models/models.yaml` |
+| Agent | `config/agents/*.md` |
+| HTTP Tool / Toolset | `config/tools/` |
+| MCP Server | `config/mcp/*.md` |
+| Skill | `config/skills/` |
+| 现场配置 | 生产目标机的 `control/site.toml`、`control/.env`、`control/site/` |
+
+修改 Agent、Tool、MCP 或 Skill 后可先验证：
 
 ```bash
-git clone https://github.com/Neutrino1998/artifact-flow.git
-cd artifact-flow
+python scripts/reconcile_config.py --dry-run
+```
 
-# 创建虚拟环境
-conda create -n artifact-flow python=3.11 && conda activate artifact-flow
-# 或 python3 -m venv .venv && source .venv/bin/activate
+完整字段与生效方式见 Wiki 的[配置总览](https://neutrino1998.github.io/artifact-flow/configuration/)。
 
-# 系统依赖（用于 doc_converter）
-brew install pandoc          # macOS
-# sudo apt-get install -y pandoc   # Ubuntu/Debian
+## 生产发布
 
+生产单机是当前正式支持路径。构建机生成 Release：
+
+```bash
+./scripts/release.sh 1.4.0 --with-infra --platform linux/amd64
+```
+
+目标机使用 bundle 自带的 `afctl` 执行 `site init → doctor → plan apply → apply`。公网和内网是同一部署栈的不同 TLS capability；实验性 Ansible 多机路径尚未完成物理验收。
+
+详见：[首次部署](https://neutrino1998.github.io/artifact-flow/operations/first-deployment/) · [Release 与升级](https://neutrino1998.github.io/artifact-flow/operations/releases/) · [日常维护](https://neutrino1998.github.io/artifact-flow/operations/maintenance/)。
+
+## 开发
+
+Python 3.11+：
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install -e .
-
 cp .env.example .env
-echo "ARTIFACTFLOW_JWT_SECRET=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
-echo "ARTIFACTFLOW_CREDENTIAL_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> .env
-# 编辑 .env 填入其余 API Keys
-
-python scripts/create_admin.py admin --password admin
-python run_server.py         # 终端 1；加 --reload 开启热重载
-(cd frontend && npm ci && npm run dev)  # 终端 2
+python scripts/create_admin.py admin
+python run_server.py --reload
 ```
 
-启动后访问前端 http://localhost:3000；API 文档位于 http://localhost:8000/docs（需 `ARTIFACTFLOW_DEBUG=true`）。
-
-## 环境变量
-
-核心配置：
-
-| 变量 | 必填 | 默认值 | 说明 |
-|------|------|--------|------|
-| `ARTIFACTFLOW_JWT_SECRET` | **是** | — | JWT 签名密钥 |
-| `ARTIFACTFLOW_CREDENTIAL_KEY` | **是** | — | 外部工具凭证静态加密密钥（Fernet）；缺失服务无法启动，即使未配置任何带凭证的工具 |
-| `ARTIFACTFLOW_DATABASE_URL` | **是** | — | DB 连接串（SQLite / PostgreSQL / MySQL） |
-| `ARTIFACTFLOW_REDIS_URL` | 否 | `""` (InMemory) | 生产建议配置 |
-| `ARTIFACTFLOW_DEBUG` | 否 | `false` | 调试日志 + Swagger |
-| `DASHSCOPE_API_KEY` / `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` | 至少一个 | — | LLM provider |
-| `BOCHA_API_KEY` | Web 搜索时必填 | — | 博查 AI |
-| `JINA_API_KEY` | 否 | — | Jina Reader（网页抓取限额提升） |
-
-完整列表见 [部署指南 - 环境变量完整参考](docs/deployment.md#环境变量完整参考)。
-
-## 自定义配置
-
-所有运行时配置集中在 `config/` 目录，文件自带注释和示例：
-
-| 配置 | 文件 | 说明 |
-|------|------|------|
-| **模型** | `config/models/models.yaml` | 基于 [LiteLLM](https://github.com/BerriAI/litellm) 支持 100+ provider，含 Ollama/vLLM 自部署示例 |
-| **Agent** | `config/agents/*.md` | YAML frontmatter（模型、工具权限）+ 角色提示词 |
-| **自定义工具** | `config/tools/*.md` | YAML frontmatter（HTTP 端点、参数）+ 使用说明，参考 `_example.md` |
-
-扩展方法详见 [添加 Agent](docs/guides/add-agent.md) / [添加 Tool](docs/guides/add-tool.md) / [添加 Model](docs/guides/add-model.md)。
-
-## 项目结构
-
-```
-artifact-flow/
-├── src/
-│   ├── core/          # Pi-style 引擎、Controller、Compaction、Context Manager
-│   ├── agents/        # Agent 加载器（MD + YAML frontmatter）
-│   ├── tools/         # 工具基类、XML 解析、builtin 工具、自定义 HTTP 工具
-│   ├── db/            # SQLAlchemy ORM + Alembic 迁移
-│   ├── repositories/  # 数据访问层（Conversation / Artifact / User / MessageEvent）
-│   ├── models/        # LiteLLM 统一 LLM 接口
-│   └── api/           # FastAPI routers / schemas / services（SSE、RuntimeStore、JWT）
-├── frontend/          # Next.js 15 + Zustand + Tailwind
-├── config/            # agents/ models/ tools/（运行时只读）
-├── scripts/           # export_openapi / create_admin
-├── tests/             # 镜像 src/ 分层：core / tools / api / repositories / db / utils / integration / manual
-└── docs/              # MkDocs 文档站源码
-```
-
-## 测试
+前端：
 
 ```bash
-pytest                           # 全部
-pytest tests/repositories/       # Repository 合约测试
-pytest tests/api/                # API 集成测试
-pytest tests/db/test_concurrent.py  # 并发测试
+cd frontend
+npm ci
+npm run dev
 ```
 
-手动 / 交互式测试（需 LLM 后端）：
+API schema 变更后同步前端类型：
 
 ```bash
-python -m tests.manual.engine               # 多轮对话、Artifact、权限、分支
-python -m tests.manual.litellm_providers    # LLM provider 兼容性
+python scripts/export_openapi.py
+cd frontend && npm run generate-types
+```
+
+测试：
+
+```bash
+pytest
+cd frontend && npm run test:run
 ```
 
 ## 文档
 
-完整文档见 **[Wiki](https://neutrino1998.github.io/artifact-flow/)**：
+完整 Wiki：<https://neutrino1998.github.io/artifact-flow/>
 
-- [架构概览](https://neutrino1998.github.io/artifact-flow/architecture/overview/) · [执行引擎](https://neutrino1998.github.io/artifact-flow/architecture/engine/) · [Agent 系统](https://neutrino1998.github.io/artifact-flow/architecture/agents/) · [工具系统](https://neutrino1998.github.io/artifact-flow/architecture/tools/)
-- [Artifact](https://neutrino1998.github.io/artifact-flow/architecture/artifacts/) · [数据层](https://neutrino1998.github.io/artifact-flow/architecture/data-layer/) · [流式传输](https://neutrino1998.github.io/artifact-flow/architecture/streaming/) · [并发](https://neutrino1998.github.io/artifact-flow/architecture/concurrency/) · [可观测性](https://neutrino1998.github.io/artifact-flow/architecture/observability/)
-- [添加 Agent](https://neutrino1998.github.io/artifact-flow/guides/add-agent/) · [添加 Tool](https://neutrino1998.github.io/artifact-flow/guides/add-tool/) · [添加 Model](https://neutrino1998.github.io/artifact-flow/guides/add-model/) · [API Reference](https://neutrino1998.github.io/artifact-flow/guides/api-reference/)
-- [部署指南](https://neutrino1998.github.io/artifact-flow/deployment/) · [前端架构](https://neutrino1998.github.io/artifact-flow/frontend/)
+- [工作原理](https://neutrino1998.github.io/artifact-flow/how-it-works/)
+- [配置](https://neutrino1998.github.io/artifact-flow/configuration/)
+- [部署与运维](https://neutrino1998.github.io/artifact-flow/operations/host-preparation/)
 
-## 支持与反馈
-
-- [问题反馈](https://github.com/Neutrino1998/artifact-flow/issues)
-- [讨论交流](https://github.com/Neutrino1998/artifact-flow/discussions)
-- [联系作者](mailto:1998neutrino@gmail.com)
+Wiki 使用 MkDocs Material。推送 `main` 上的 `docs/**` 或 `mkdocs.yml` 变更后，GitHub Actions 会严格构建并发布到 `gh-pages`。

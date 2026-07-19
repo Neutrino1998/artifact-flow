@@ -129,7 +129,7 @@ export default function MessageInput() {
   // response, no further lead call), the backend overrides last_input_tokens
   // with the summary size and zeroes last_output_tokens, so the gauge correctly
   // drops post-compaction. lead-only by convention; subagent compaction does
-  // not pollute these fields. See docs/architecture/engine.md.
+  // not pollute these fields. See the engine state contract in src/core/engine.py.
   // Non-live: updates after each completed turn / on conversation load.
   const branchPath = useConversationStore((s) => s.branchPath);
   const compactionThreshold = useConfigStore((s) => s.compactionThreshold);

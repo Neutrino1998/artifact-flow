@@ -348,7 +348,7 @@ class Settings(BaseSettings):
     # ⚠️ 不能用 DSN ?command_timeout=0 禁用 —— asyncpg 拒绝 ≤0(connect_utils.py),会启动失败;
     #    DSN 若显式给值必须 >0,它会覆盖此默认。
     # MySQL/TDSQL 无等价 driver 钩子(靠 server innodb_lock_wait_timeout),SQLite 无此缺口。
-    # 详见 docs/architecture/execution-lifecycle.md「不变量 4」。
+    # 机制见 db/database.py._apply_session_tz_kwargs / command-timeout connect args。
     DB_COMMAND_TIMEOUT: float = 30.0
 
     # JWT 认证配置

@@ -14,7 +14,7 @@
 # (ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT in deploy/.env) feeds both sides of the
 # bind below AND the app config, keeping the three in lockstep.
 #
-# Host prerequisites (docs/deployment.md → 沙盒执行环境): runsc installed +
+# Host prerequisites (docs/operations/host-preparation.md): runsc installed +
 # registered in daemon.json (sandbox/gvisor-pkg), the sandbox image
 # docker-load'ed, and the scratch root provisioned as a dedicated mount
 # filesystem (the disk-quota hard wall).

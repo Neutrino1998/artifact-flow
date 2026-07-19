@@ -128,7 +128,7 @@ class SandboxSession:
     """per-turn 沙盒容器壳。
 
     壳本身零成本;首个 exec 才 lazy 起容器。引擎对单 turn 内的工具调用是串行
-    执行(见 docs/architecture/engine.md),故无并发起容器问题,不加锁。
+    执行(见 core/engine.py),故无并发起容器问题,不加锁。
 
     close() 幂等,且每步独立 best-effort(容器 → scratch → client):任一步失败
     记日志继续,残留由 lease-anchored reaper(C-reap)兜底。

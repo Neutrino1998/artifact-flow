@@ -300,7 +300,7 @@ class TestLeadOnlyMetricWrite:
     """
     The post-compaction write to execution_metrics.last_input_tokens (P2 fix)
     must respect the lead-only convention established by engine.py:425 and
-    documented at docs/architecture/engine.md. Subagent compaction must NOT
+    enforced by engine.py's lead-only metric contract. Subagent compaction must NOT
     touch this lead-scoped field — otherwise, if a subagent compaction is
     followed by error/cancel/timeout before the next lead call overwrites,
     the persisted value carries the subagent summary's tiny token count and

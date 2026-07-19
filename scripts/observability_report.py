@@ -16,7 +16,7 @@ DB 访问复用 app 的 async driver(asyncpg / aiomysql / aiosqlite)+ ORM
 工具,不在 runtime requirements.txt 或应用 release 中;请在独立分析环境安装
 (`pip install pandas`),离线环境由运维另行提供 wheelhouse。
 
-硬 wedge dump 见 docs/runbooks/service-hang.md Step 3(`docker logs` 的精确
+硬 wedge dump 见 docs/operations/troubleshooting.md(`docker logs` 的精确
 形式因 compose mode 而异),本脚本不聚合。
 """
 
@@ -409,7 +409,7 @@ def _print_lag_events(df_lag: pd.DataFrame) -> None:
         print(f"    {row.get('ts', '?')}  lag={row.get('lag_ms', '?')}ms  tasks={tasks_count}")
 
     print("\n  Hard wedge (GIL held by C extension) dump 入口:")
-    print("    see docs/runbooks/service-hang.md Step 3 (compose mode varies)")
+    print("    see docs/operations/troubleshooting.md (compose mode varies)")
 
 
 async def _run_report(hours: int, obs_dir: str) -> None:
