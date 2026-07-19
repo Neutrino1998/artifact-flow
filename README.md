@@ -61,11 +61,11 @@ docker compose exec backend python scripts/create_admin.py admin
 | Skill | `config/skills/` |
 | 现场配置 | 生产目标机的 `control/site.toml`、`control/.env`、`control/site/` |
 
-修改 Agent、Tool、MCP 或 Skill 后，在 Quick Trial 容器中验证并重启生效：
+修改 Agent、Tool、MCP 或 Skill 后，在 Quick Trial 容器中预检并重建 Backend 生效：
 
 ```bash
 docker compose exec backend python scripts/reconcile_config.py --dry-run
-docker compose restart backend
+docker compose up -d --force-recreate backend
 ```
 
 完整字段与生效方式见 Wiki 的[配置总览](https://neutrino1998.github.io/artifact-flow/configuration/)。

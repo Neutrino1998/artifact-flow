@@ -23,20 +23,20 @@ ArtifactFlow 的配置不是一个大文件。不同配置有不同的所有者�
 
 ### Docker Compose
 
-先在运行中的 Backend 容器里检查配置：
+先在运行中的 Backend 容器里检查已经挂载的配置文件：
 
 ```bash
 docker compose exec backend python scripts/reconcile_config.py --dry-run
 ```
 
-确认无误后重启 Backend：
+确认无误后重建 Backend，使 Compose 重新读取 `.env`：
 
 ```bash
-docker compose restart backend
+docker compose up -d --force-recreate backend
 docker compose logs --tail=100 backend
 ```
 
-容器 entrypoint 会在启动服务前把 Agent、Tool、MCP 和 Skill reconcile 到 Compose volume 中的数据库。Model 配置也会在这次重启后重新载入。
+`docker compose exec` 使用现有容器的环境，因此前面的 dry-run 看不到刚写入 `.env` 的新值。强制重建会加载新环境；容器 entrypoint 随后执行完整校验，并在启动服务前把 Agent、Tool、MCP 和 Skill reconcile 到 Compose volume 中的数据库。Model 配置和供应商凭证也会在这次重建后重新载入。
 
 ### 原生开发
 
