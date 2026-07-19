@@ -61,10 +61,11 @@ docker compose exec backend python scripts/create_admin.py admin
 | Skill | `config/skills/` |
 | 现场配置 | 生产目标机的 `control/site.toml`、`control/.env`、`control/site/` |
 
-修改 Agent、Tool、MCP 或 Skill 后可先验证：
+修改 Agent、Tool、MCP 或 Skill 后，在 Quick Trial 容器中验证并重启生效：
 
 ```bash
-python scripts/reconcile_config.py --dry-run
+docker compose exec backend python scripts/reconcile_config.py --dry-run
+docker compose restart backend
 ```
 
 完整字段与生效方式见 Wiki 的[配置总览](https://neutrino1998.github.io/artifact-flow/configuration/)。
@@ -90,6 +91,19 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e .
 cp .env.example .env
+mkdir -p data
+```
+
+生成两个必填密钥：
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+把输出分别填入 `.env` 的 `ARTIFACTFLOW_JWT_SECRET` 和 `ARTIFACTFLOW_CREDENTIAL_KEY`，并将至少一个模型供应商的占位凭证替换为真实值。然后初始化管理员并启动服务：
+
+```bash
 python scripts/create_admin.py admin
 python run_server.py --reload
 ```

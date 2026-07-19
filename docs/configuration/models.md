@@ -54,7 +54,7 @@ Ollama：
 models:
   local-llama:
     model: ollama/llama3
-    base_url: http://ollama.internal:11434/v1
+    base_url: http://ollama.internal:11434
     api_key: ollama
 ```
 
@@ -84,6 +84,6 @@ python tests/manual/litellm_providers.py
 常见问题：
 
 - alias 拼错会直接报 unknown model，不会静默回退；
-- `base_url` 应包含服务要求的版本路径，例如 `/v1`；
+- `base_url` 取决于 provider：`ollama/*` 使用服务根地址，LiteLLM 会追加原生 `/api/...` 路径；`openai/*` 兼容接口通常包含 `/v1`；
 - `params.timeout` 是等待模型响应数据的 read timeout；连接、写入和连接池等待由 `ARTIFACTFLOW_LLM_*_TIMEOUT` 控制；
 - 生产配置修改应通过 [`afctl config`](../operations/releases.md#配置热修)形成新的完整配置快照。

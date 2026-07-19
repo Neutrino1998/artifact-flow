@@ -19,20 +19,37 @@ ArtifactFlow 的配置不是一个大文件。不同配置有不同的所有者�
 
 ## 本地配置工作流
 
-修改 Agent、Tool、MCP 或 Skill 后，先做只读校验：
+`config/` 不会在运行中自动重新载入。Docker Compose 和原生开发使用不同的数据库，命令不要混用。
+
+### Docker Compose
+
+先在运行中的 Backend 容器里检查配置：
+
+```bash
+docker compose exec backend python scripts/reconcile_config.py --dry-run
+```
+
+确认无误后重启 Backend：
+
+```bash
+docker compose restart backend
+docker compose logs --tail=100 backend
+```
+
+容器 entrypoint 会在启动服务前把 Agent、Tool、MCP 和 Skill reconcile 到 Compose volume 中的数据库。Model 配置也会在这次重启后重新载入。
+
+### 原生开发
+
+在运行 Backend 的同一个 checkout 和 Python 环境中执行：
 
 ```bash
 python scripts/reconcile_config.py --dry-run
-```
-
-确认无误后写入开发数据库并重启服务：
-
-```bash
 python scripts/reconcile_config.py
-docker compose restart backend
 ```
 
-模型文件在进程内缓存，也需要重启。生产容器会在 Release gate 中自动完成数据库迁移与 reconcile；生产配置变更使用[配置热修](../operations/releases.md#配置热修)，不要手工操作 registry 表。
+然后停止并重新运行 `python run_server.py --reload`，使进程内配置缓存重新载入。`--dry-run` 不提交 registry 变更，但仍会连接并初始化当前环境配置的数据库，不是离线语法检查。
+
+生产容器会在 Release gate 中自动完成数据库迁移与 reconcile；生产配置变更使用[配置热修](../operations/releases.md#配置热修)，不要手工操作 registry 表。
 
 ## 生效与失败原则
 

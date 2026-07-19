@@ -69,10 +69,6 @@ Skill 不取代 Agent：
 
 可编辑源文件放在 `config/skills-src/` 时，应按项目既有构建流程产出 `config/skills/*.zip`；真正参与 reconcile 和 Release 的是 `config/skills/`。
 
-配置完成后执行：
-
-```bash
-python scripts/reconcile_config.py --dry-run
-```
+配置完成后按[本地配置工作流](index.md#本地配置工作流)检查并生效。
 
 生产环境由 Release gate 自动 reconcile。管理员和用户通过 UI 导入的 dynamic/private Skill 不属于 seeded 配置，后续 Release reconcile 不会把它当作源码配置覆盖。

@@ -140,10 +140,4 @@ Binary 模式不能与 `response_extract` 同时使用。未指定 MIME 或文�
 - `config/tools/_example.md`
 - `config/tools/_example_toolset/`
 
-运行：
-
-```bash
-python scripts/reconcile_config.py --dry-run
-```
-
-确认名称、参数、Secret 引用、JMESPath 和 Agent 引用都合法后，再进入正常 reconcile 或生产 Release 流程。
+按[本地配置工作流](index.md#本地配置工作流)检查并生效。确认名称、参数、Secret 引用、JMESPath 和 Agent 引用都合法后，再进入正常 reconcile 或生产 Release 流程。

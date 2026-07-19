@@ -74,12 +74,6 @@ Lead 的 prompt 应保持 Agent 无关。不要在 `lead_agent.md` 硬编码所�
 
 ## 生效
 
-开发环境：
-
-```bash
-python scripts/reconcile_config.py --dry-run
-python scripts/reconcile_config.py
-docker compose restart backend
-```
+开发环境按运行方式执行[本地配置工作流](index.md#本地配置工作流)，不要混用宿主 Python 与 Docker Compose 命令。
 
 生产环境通过配置热修或新应用 Release 生效。不要直接编辑 `.artifactflow/releases/<id>/config`。

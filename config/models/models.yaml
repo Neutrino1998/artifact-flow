@@ -65,7 +65,7 @@ models:
   # # Ollama 本地部署
   # local-llama:
   #   model: ollama/llama3
-  #   base_url: http://localhost:11434/v1
+  #   base_url: http://localhost:11434
   #   api_key: ollama
 
   # # vLLM 部署
