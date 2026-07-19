@@ -10,22 +10,28 @@
       
       
       
+        <link rel="canonical" href="https://neutrino1998.github.io/artifact-flow/how-it-works/">
       
+      
+        <link rel="prev" href="..">
+      
+      
+        <link rel="next" href="../configuration/">
       
       
         
       
       
-      <link rel="icon" href="/artifact-flow/assets/images/favicon.png">
+      <link rel="icon" href="../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
-        <title>ArtifactFlow</title>
+        <title>工作原理 - ArtifactFlow</title>
       
     
     
-      <link rel="stylesheet" href="/artifact-flow/assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
       
       
 
@@ -44,7 +50,7 @@
       
     
     
-    <script>__md_scope=new URL("/artifact-flow/",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -61,6 +67,11 @@
     <label class="md-overlay" for="__drawer"></label>
     <div data-md-component="skip">
       
+        
+        <a href="#artifactflow-如何工作" class="md-skip">
+          跳转至
+        </a>
+      
     </div>
     <div data-md-component="announce">
       
@@ -73,7 +84,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="页眉">
-    <a href="/artifact-flow/." title="ArtifactFlow" class="md-header__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+    <a href=".." title="ArtifactFlow" class="md-header__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -93,7 +104,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              
+              工作原理
             
           </span>
         </div>
@@ -183,7 +194,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="导航栏" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="/artifact-flow/." title="ArtifactFlow" class="md-nav__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
+    <a href=".." title="ArtifactFlow" class="md-nav__button md-logo" aria-label="ArtifactFlow" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -213,7 +224,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/artifact-flow/." class="md-nav__link">
+      <a href=".." class="md-nav__link">
         
   
   
@@ -237,10 +248,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="/artifact-flow/how-it-works/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    工作原理
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -256,6 +294,103 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#系统组成" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        系统组成
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#一次任务的执行过程" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一次任务的执行过程
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#配置怎样生效" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        配置怎样生效
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#artifact-与历史" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Artifact 与历史
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#实时权限与取消" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        实时、权限与取消
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sandbox-边界" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sandbox 边界
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#生产部署模型" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        生产部署模型
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -319,7 +454,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/artifact-flow/configuration/" class="md-nav__link">
+      <a href="../configuration/" class="md-nav__link">
         
   
   
@@ -347,7 +482,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/artifact-flow/configuration/models/" class="md-nav__link">
+      <a href="../configuration/models/" class="md-nav__link">
         
   
   
@@ -375,7 +510,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/artifact-flow/configuration/agents/" class="md-nav__link">
+      <a href="../configuration/agents/" class="md-nav__link">
         
   
   
@@ -403,7 +538,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/artifact-flow/configuration/tools/" class="md-nav__link">
+      <a href="../configuration/tools/" class="md-nav__link">
         
   
   
@@ -431,7 +566,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/artifact-flow/configuration/skills/" class="md-nav__link">
+      <a href="../configuration/skills/" class="md-nav__link">
         
   
   
@@ -459,7 +594,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/artifact-flow/configuration/runtime/" class="md-nav__link">
+      <a href="../configuration/runtime/" class="md-nav__link">
         
   
   
@@ -546,7 +681,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/artifact-flow/operations/host-preparation/" class="md-nav__link">
+      <a href="../operations/host-preparation/" class="md-nav__link">
         
   
   
@@ -574,7 +709,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/artifact-flow/operations/first-deployment/" class="md-nav__link">
+      <a href="../operations/first-deployment/" class="md-nav__link">
         
   
   
@@ -602,7 +737,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/artifact-flow/operations/releases/" class="md-nav__link">
+      <a href="../operations/releases/" class="md-nav__link">
         
   
   
@@ -630,7 +765,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/artifact-flow/operations/maintenance/" class="md-nav__link">
+      <a href="../operations/maintenance/" class="md-nav__link">
         
   
   
@@ -658,7 +793,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/artifact-flow/operations/troubleshooting/" class="md-nav__link">
+      <a href="../operations/troubleshooting/" class="md-nav__link">
         
   
   
@@ -703,6 +838,93 @@
   
   
   
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#系统组成" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        系统组成
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#一次任务的执行过程" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一次任务的执行过程
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#配置怎样生效" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        配置怎样生效
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#artifact-与历史" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Artifact 与历史
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#实时权限与取消" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        实时、权限与取消
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sandbox-边界" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sandbox 边界
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#生产部署模型" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        生产部署模型
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
   
 </nav>
                   </div>
@@ -715,8 +937,145 @@
               
               <article class="md-content__inner md-typeset">
                 
-  <h1>404 - Not found</h1>
+                  
 
+
+  
+  
+
+
+<h1 id="artifactflow-如何工作">ArtifactFlow 如何工作</h1>
+<p>ArtifactFlow 的目标不是提供一个通用 Agent 框架，而是让团队能通过配置快速交付一套可私有部署、可维护的 AI 服务。</p>
+<h2 id="系统组成">系统组成</h2>
+<pre class="mermaid"><code>flowchart LR
+    U["用户"] --&gt; API["Web / API"]
+    API --&gt; L["Lead Agent"]
+    L --&gt; M["Model"]
+    L --&gt; T["Tools"]
+    L --&gt; S["Subagents"]
+    T --&gt; A["Artifacts"]
+    S --&gt; A
+    L --&gt; A
+    L --&gt; SSE["SSE 实时事件"]
+    A --&gt; DB["Database"]
+    SSE --&gt; U</code></pre>
+<table>
+<thead>
+<tr>
+<th>概念</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Lead Agent</td>
+<td>接收用户请求，决定直接处理、调用工具或委派 Subagent，并给出最终回复</td>
+</tr>
+<tr>
+<td>Subagent</td>
+<td>在隔离的上下文中完成研究、材料分析等较大的子任务，结果回传给 Lead</td>
+</tr>
+<tr>
+<td>Model</td>
+<td>Agent 使用的 LLM，由 alias 映射到云端或自部署模型</td>
+</tr>
+<tr>
+<td>Tool</td>
+<td>一项可授权的操作，例如查询 HTTP API、调用 MCP 服务或运行沙盒命令</td>
+</tr>
+<tr>
+<td>Skill</td>
+<td>按需注入的工作方法和领域说明，也可以在激活时授予相关工具能力</td>
+</tr>
+<tr>
+<td>Artifact</td>
+<td>任务产生的可持久化材料，如计划、报告、代码、图片或上传文件</td>
+</tr>
+</tbody>
+</table>
+<h2 id="一次任务的执行过程">一次任务的执行过程</h2>
+<pre class="mermaid"><code>sequenceDiagram
+    participant User as 用户
+    participant API as API
+    participant Lead as Lead Agent
+    participant Model as LLM
+    participant Tool as Tool / Subagent
+    participant DB as Database
+
+    User-&gt;&gt;API: 发送消息和附件
+    API--&gt;&gt;User: 返回 stream 地址
+    API-&gt;&gt;Lead: 启动本轮执行
+    loop 直到 Lead 给出无工具调用的回复
+        Lead-&gt;&gt;Model: 当前上下文与可用能力
+        Model--&gt;&gt;Lead: 文本和可选工具调用
+        Lead--&gt;&gt;User: SSE 流式事件
+        opt 调用工具或 Subagent
+            Lead-&gt;&gt;Tool: 串行执行
+            Tool--&gt;&gt;Lead: ToolResult / Subagent result
+        end
+    end
+    Lead-&gt;&gt;DB: 落库消息、事件和 Artifact
+    Lead--&gt;&gt;User: complete</code></pre>
+<p>引擎是一个 per-agent 的普通循环：构造上下文、调用模型、解析并串行执行工具，然后把结果放回下一次模型调用。<code>call_subagent</code> 会原地进入目标 Agent 的同类循环；Subagent 结束后，结果像普通工具结果一样回到调用者。</p>
+<p>Lead Agent 是唯一的用户回复出口。Subagent 的最终文本不会直接发送给用户。</p>
+<h2 id="配置怎样生效">配置怎样生效</h2>
+<p>配置分成三个层次：</p>
+<pre class="mermaid"><code>flowchart TD
+    C["Release 内 config/"] --&gt; R["启动时 reconcile 到 DB registry"]
+    R --&gt; E["每轮构造用户可见的 Agent / Tool / Skill 快照"]
+    S["control/site.toml"] --&gt; D["afctl 选择部署能力"]
+    V["control/.env 与 control/site/"] --&gt; P["站点 Secret、运行参数和现场内容"]</code></pre>
+<ul>
+<li><code>config/models/models.yaml</code> 定义模型 alias。</li>
+<li><code>config/agents/*.md</code> 定义 Agent、提示词和能力成员关系。</li>
+<li><code>config/tools/</code>、<code>config/mcp/</code>、<code>config/skills/</code> 是配置作者的种子真相；发布启动阶段会把它们 reconcile 到数据库注册表。</li>
+<li><code>control/site.toml</code> 描述部署能力，例如 TLS、基础设施来源和 Sandbox runtime。</li>
+<li><code>control/.env</code> 保存 Secret 与应用运行参数。</li>
+<li><code>control/site/</code> 保存通知、欢迎提示和品牌信息等现场可变内容。</li>
+</ul>
+<p>生产环境修改 Release 内文件没有意义：Release 是不可变快照。应用配置改动应使用 <a href="../operations/releases/#配置热修"><code>afctl config</code></a>，现场 Secret 和证书则修改 <code>control/</code> 后执行 <code>apply current</code>。</p>
+<h2 id="artifact-与历史">Artifact 与历史</h2>
+<p>Artifact 是任务的持久化工作成果，不等同于聊天回复。Agent 在一轮内可以多次创建或编辑 Artifact；执行结束时统一写回数据库，因此同一轮的多次编辑可能只产生一个持久版本。</p>
+<p>聊天历史由执行事件重建，而不是把消息表的展示文本直接重新喂给模型。这使工具调用、Subagent 结果、权限决定和压缩摘要都能进入后续上下文。上下文过长时，系统为对应 Agent 生成压缩摘要，并从该摘要继续。</p>
+<h2 id="实时权限与取消">实时、权限与取消</h2>
+<ul>
+<li>模型片段、工具状态和 Artifact 变更通过 SSE 实时发送。</li>
+<li><code>confirm</code> 级工具在执行前等待用户批准；<code>auto</code> 级工具直接执行。</li>
+<li>同一对话通过 lease 保证同一时刻只有一个执行。</li>
+<li>取消、超时、错误和正常完成最终都进入统一的终态处理，随后持久化本轮事件。</li>
+</ul>
+<p>本地试用使用进程内 RuntimeStore 和 StreamTransport。生产多副本使用 Redis 保存 lease、interrupt、cancel 和流式传输状态；PostgreSQL 保存用户、对话、事件、配置注册表和 Artifact。</p>
+<h2 id="sandbox-边界">Sandbox 边界</h2>
+<p><code>bash</code>、<code>mount</code>、<code>persist</code> 共享一个按轮创建的临时 Sandbox：</p>
+<ul>
+<li><code>mount</code> 把 Artifact 显式放入工作区；</li>
+<li><code>bash</code> 在隔离容器里处理文件；</li>
+<li><code>persist</code> 把需要保留的文件显式写回 Artifact。</li>
+</ul>
+<p>生产支持的隔离 runtime 是 gVisor <code>runsc</code>。Sandbox 默认无网络；Backend 挂载 Docker socket 来创建同级容器，因此 Backend 本身属于宿主高信任组件。主机侧隔离和 scratch 文件系统必须在部署前完成，详见<a href="../operations/host-preparation/">主机准备</a>。</p>
+<h2 id="生产部署模型">生产部署模型</h2>
+<p>生产交付只有一个不可变 Release 契约和一个站点控制器：</p>
+<ul>
+<li><code>release.sh</code> 在构建机生成应用、配置、部署文件、Sandbox 镜像和严格 manifest；</li>
+<li><code>afctl</code> 在目标站点校验、物化并应用 Release；</li>
+<li><code>.artifactflow/state.json</code> 是当前版和上一版的唯一状态；</li>
+<li><code>control/</code> 保存不会随升级覆盖的现场配置；</li>
+<li>单机是当前正式支持路径，Ansible 多机 executor 仍是实验性能力。</li>
+</ul>
+<p>接下来可以阅读<a href="../configuration/">配置总览</a>或从<a href="../operations/host-preparation/">主机准备</a>开始部署。</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
               </article>
             </div>
           
@@ -759,10 +1118,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "/artifact-flow/", "features": ["navigation.sections", "navigation.top", "search.highlight", "content.code.copy"], "search": "/artifact-flow/assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
     
     
-      <script src="/artifact-flow/assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>
