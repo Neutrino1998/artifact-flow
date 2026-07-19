@@ -372,4 +372,6 @@
             done
           - wait-ready
           - "{{ af_ready_timeout_seconds | string }}"
+      async: "{{ af_ready_timeout_seconds }}"
+      poll: 1
       changed_when: false
