@@ -39,6 +39,7 @@ describe('LoginPage', () => {
     expect(input?.type).toBe('password');
     expect(showButton?.type).toBe('button');
     expect(showButton?.textContent).toBe('显示');
+    expect(showButton?.hasAttribute('aria-pressed')).toBe(false);
 
     await act(async () => {
       showButton?.click();

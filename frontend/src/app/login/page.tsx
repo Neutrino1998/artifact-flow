@@ -82,7 +82,6 @@ export default function LoginPage() {
                 type="button"
                 onClick={() => setShowPassword((visible) => !visible)}
                 aria-label={showPassword ? '隐藏密码' : '显示密码'}
-                aria-pressed={showPassword}
                 className="absolute inset-y-0 right-0 flex w-14 select-none items-center justify-center rounded-r-lg text-xs font-medium text-text-tertiary hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent dark:text-text-tertiary-dark dark:hover:text-accent"
               >
                 {showPassword ? '隐藏' : '显示'}
