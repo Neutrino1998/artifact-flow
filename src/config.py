@@ -68,9 +68,10 @@ class Settings(BaseSettings):
     READ_ARTIFACT_MAX_CHARS: int = 50000    # read_artifact 默认字符上限（隐藏，模型不可见）
     # 单次成功工具结果内联上限；超限由引擎完整落 artifact。
     TOOL_RESULT_INLINE_MAX_CHARS: int = Field(default=20_000, ge=0)
-    # 失败工具结果不会落 artifact；给模型的诊断使用独立正数硬帽，不能复用允许 0 的
-    # 成功结果内联阈值（0 = 所有非空成功结果落 artifact）。
-    TOOL_ERROR_MAX_CHARS: int = Field(default=8_000, gt=0)
+    # 失败工具结果不会落 artifact；给模型的诊断使用独立硬帽，不能复用允许 0 的
+    # 成功结果内联阈值（0 = 所有非空成功结果落 artifact）。最小 64 保证截断结果
+    # 同时容纳原始诊断前缀与完整 marker，空错误的 fallback 也不会越过硬帽。
+    TOOL_ERROR_MAX_CHARS: int = Field(default=8_000, ge=64)
     MCP_TOOL_LIST_CACHE_SECONDS: int = 60    # MCP tools/list 进程内缓存 TTL；0=每次重新发现
     TOOL_PERSIST_PREVIEW_LENGTH: int = 1000  # 工具结果落盘后回填给模型的预览长度
     SEARCH_TOOLS_MAX_RESULTS: int = 15      # search_tools 单次渲染完整 doc 的工具数上限（隐藏）；

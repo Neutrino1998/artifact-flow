@@ -75,7 +75,14 @@ def test_private_skill_count_limit_rejects_values_below_minus_one():
         Settings(SKILL_USER_MAX_PRIVATE_COUNT=-2)
 
 
-def test_tool_result_inline_limit_allows_zero_but_error_limit_does_not():
+@pytest.mark.parametrize("invalid_limit", [0, 1, 63])
+def test_tool_result_inline_limit_allows_zero_but_error_limit_has_sane_minimum(
+    invalid_limit,
+):
     assert Settings(TOOL_RESULT_INLINE_MAX_CHARS=0).TOOL_RESULT_INLINE_MAX_CHARS == 0
     with pytest.raises(ValidationError, match="TOOL_ERROR_MAX_CHARS"):
-        Settings(TOOL_ERROR_MAX_CHARS=0)
+        Settings(TOOL_ERROR_MAX_CHARS=invalid_limit)
+
+
+def test_tool_error_limit_accepts_minimum():
+    assert Settings(TOOL_ERROR_MAX_CHARS=64).TOOL_ERROR_MAX_CHARS == 64

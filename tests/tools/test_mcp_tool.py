@@ -201,6 +201,24 @@ async def test_mcp_large_error_text_remains_bounded():
     assert result.error.endswith("[MCP error response truncated...]")
 
 
+async def test_mcp_error_at_minimum_limit_keeps_prefix_and_full_marker(monkeypatch):
+    payload = "actionable upstream validation error " * 4
+
+    async def fake_call(url, headers, timeout, tool_name, arguments):
+        return McpToolCallResult(
+            is_error=True,
+            content=[{"type": "text", "text": payload}],
+        )
+
+    monkeypatch.setattr(config, "TOOL_ERROR_MAX_CHARS", 64)
+    result = await _tool(McpClientManager(call_callable=fake_call))()
+
+    assert result.success is False
+    assert len(result.error) == 64
+    assert result.error.startswith("actionable")
+    assert result.error.endswith("[MCP error response truncated...]")
+
+
 async def test_mcp_error_diagnostic_survives_zero_success_inline_threshold():
     payload = "actionable upstream error"
 
