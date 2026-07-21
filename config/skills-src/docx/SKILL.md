@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 LibreOffice、Pandoc、python-docx、lxml、Pillow、RapidFuzz。
 metadata:
-  version: "2.4.0"
+  version: "2.5.0"
 ---
 
 # Word 文档
@@ -45,22 +45,28 @@ LibreOffice 在本技能中主要负责兼容格式、渲染和 PDF 导出，不
 python "$SKILL/scripts/decompose_docx.py" 输入.docx /workspace/docx-read
 ```
 
-脚本用 Pandoc 保留修订并生成 `document.md`，同时输出 `manifest.json`、按文档顺序排列的
-`blocks.jsonl`、逐出现位置的 `figures/` 和 `tables/`。先读 `document.md`；需要定位图表时再查
-manifest 中的标题、前后段落和 block 顺序，不要把整个目录或全部图片一次性塞回上下文。
+脚本用 Pandoc 保留修订并生成 `document.md`，同时输出 `manifest.json` 和逐出现位置的
+`figures/`。`document.md` 是唯一内容来源，包含标题、段落、列表和表格；manifest 只是图片/表格的
+轻量目录，不重复保存正文或单元格文本。先读 `document.md`；需要定位图表时再查 manifest 中的
+合成 ID、标题、标题层级、前后段落和顺序，不要把整个目录或全部图片一次性塞回上下文。
 
 图片按“在文档中的一次出现”记录，而不是按媒体文件去重。同一原图若被不同裁剪，会得到不同的
-figure。只把与任务有关且 `vision_ready: true` 的 `visible_path` 持久化并交给视觉能力：普通位图是
-原始可见内容，矩形 `a:srcRect` 裁剪会先物化成裁剪后的 PNG，EMF/WMF/SVG 会 best-effort 转 PNG。
+figure。只把与任务有关、`include_in_current_view: true` 且存在 `visible_path` 的图片持久化并交给
+视觉能力：普通位图是原始可见内容，矩形 `a:srcRect` 裁剪会先物化成裁剪后的 PNG，
+EMF/WMF/SVG 会 best-effort 转 PNG。
 脚本不会输出未经显示变换的原始媒体；`source_part` 只是 DOCX 包内定位元数据，不能代替
-`visible_path`，否则可能读到文档中被裁掉的内容。正文关系可达的页眉、页脚、脚注和尾注图片也会
-进入 manifest；未知内容 part 中的图片只标记 fallback，不猜其显示语义。
+`visible_path`，否则可能读到文档中被裁掉的内容。`document.md` 中 Pandoc 生成的 `media/...`
+引用同样只是内容位置提示，不是可读取产物；实际图片只认 manifest 的 `visible_path`。正文关系可达
+的页眉、页脚、脚注和尾注图片也会进入 manifest；未知内容 part 中的图片只标记 fallback，不猜其
+显示语义。图片的 `revision_state`
+会区分 current/inserted/moved_to 与 deleted/moved_from；后两类只留目录记录，不物化图片，也不能当作
+当前文档内容送去识图。
 
-表格以 `document.md` 为常规阅读入口。只有 manifest 中 `structure_ready: true` 的普通文本表格
-才读取对应 `tables/table-*.json`，它保留外层行列和横向/纵向合并；`table-*.md` 只用于快速浏览。
-嵌套表、带修订的表格、图片/公式等非文本单元格会设为 `structure_ready: false`，不生成看似完整的
-JSON：嵌套或非文本内容按 `fallback` 渲染必要页面；表格内修订标记为 `unsupported`，只能做可见
-内容的 best-effort 阅读，不宣称保留增删状态、作者或时间。脚本不递归解释这些结构。
+表格内容只从 `document.md` 阅读。manifest 的表格项来自 Pandoc 已解析的内容树，只提供
+`table-###` 合成 ID、可获得的题注/源 ID、文档顺序和标题层级，方便引用与定位；合成 ID 只在本次
+拆解结果内有效，不是 Word 原生 ID，也不保证跨版本稳定。脚本不另建表格 JSON，不声称还原物理
+行列、合并、嵌套、内容控件或修订语义。若任务依赖 Pandoc 无法表达的精确表格结构或可见版式，
+再定位并渲染必要页面，按 best-effort 结果说明限制；不要用目录数量证明 Word 中所有表格均已识别。
 
 普通文字文档即使含有插图，也不要因此渲染全文。manifest 中 `fallback: page_required` 表示脚本
 不能可靠恢复当前出现位置的可见像素，例如旋转/翻转、非矩形裁剪、图片效果、VML、SmartArt 或
