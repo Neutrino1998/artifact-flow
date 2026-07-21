@@ -4,6 +4,7 @@ import { memo, useState, useEffect } from 'react';
 import { MENU_ROW_HOVER } from '@/lib/styles';
 import CyclingDots from './CyclingDots';
 import { formatTokens } from '@/lib/formatTokens';
+import { formatDuration } from '@/lib/formatDuration';
 
 interface ProcessingFlowProps {
   agentStepCount: number;
@@ -19,18 +20,6 @@ interface ProcessingFlowProps {
    *  is hidden (it's always 0 in this state). */
   queuedAhead?: number;
   children: React.ReactNode;
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const totalSec = Math.floor(ms / 1000);
-  if (totalSec < 60) {
-    const tenths = Math.floor(ms / 100) / 10;
-    return `${tenths.toFixed(1)}s`;
-  }
-  const m = Math.floor(totalSec / 60);
-  const rem = totalSec - m * 60;
-  return `${m}m ${rem}s`;
 }
 
 function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, hasError, totalDurationMs, totalTokens, queuedAhead, children }: ProcessingFlowProps) {
