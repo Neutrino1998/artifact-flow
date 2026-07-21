@@ -266,6 +266,16 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
         </mc:Fallback>
       </mc:AlternateContent>
     </w:p>
+    <mc:AlternateContent>
+      <mc:Choice Requires="wps"><w:tbl>
+        <w:tblPr><w:tblCaption w:val="MCE Choice catalog"/></w:tblPr>
+        <w:tblGrid><w:gridCol w:w="1000"/></w:tblGrid>
+        <w:tr><w:tc><w:p><w:r><w:t>MCE Choice table</w:t></w:r></w:p>
+        </w:tc></w:tr>
+      </w:tbl></mc:Choice>
+      <mc:Fallback><w:p><w:r><w:t>MCE fallback table</w:t></w:r></w:p>
+      </mc:Fallback>
+    </mc:AlternateContent>
     <w:p><w:del w:author="Reviewer" w:date="2026-01-01T00:00:00Z">
       <w:r><w:delText>Deleted image</w:delText></w:r>
       <w:r><w:drawing><wp:inline><wp:extent cx="100" cy="40"/>
@@ -382,8 +392,11 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
 
     output = tmp_path / "decomposed"
     output.mkdir()
-    figures, warnings = mod.inspect_docx(source, output)
+    current_view = tmp_path / "current-view.docx"
+    normalization_warnings = mod._write_current_view_docx(source, current_view)
+    figures, warnings = mod.inspect_docx(current_view, output)
 
+    assert normalization_warnings == []
     assert warnings == []
     assert len(figures) == 5
     assert figures[0]["source_part"] == figures[1]["source_part"]
@@ -441,13 +454,14 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
         } == expected_counts
         # Pandoc 3.1 and 3.9 differ on whether a nested table gets its own
         # callback. The catalog is explicitly best-effort, not a table count.
-        assert len(tables) in {4, 5}
+        assert len(tables) in {5, 6}
         assert manifest["counts"]["tables"] == len(tables)
         assert [table["id"] for table in tables] == [
             f"table-{index:03d}" for index in range(1, len(tables) + 1)
         ]
         assert all(table["content_source"] == "document.md" for table in tables)
         assert all(table["heading_path"] == ["Section"] for table in tables)
+        assert tables[0]["label"] == "MCE Choice catalog"
         assert set(tables[0]) == {
             "id", "source_id", "label", "order", "heading_path",
             "content_source",
@@ -455,11 +469,16 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
         assert "Merged cell" in markdown
         assert "Nested A" in markdown
         assert "Content control table" in markdown
+        assert "Alternate image selected text" in markdown
+        assert "fallback text" not in markdown
+        assert "MCE Choice table" in markdown
+        assert "MCE fallback table" not in markdown
         assert not (full_output / "blocks.jsonl").exists()
         assert not (full_output / "content.jsonl").exists()
         assert not (full_output / "tables").exists()
         assert not (full_output / "document.ast.json").exists()
         assert not (full_output / ".table-catalog.jsonl").exists()
+        assert not (full_output / ".current-view.docx").exists()
         assert not (full_output / "raw-media").exists()
 
         catalog_path = tmp_path / "small-table-catalog.jsonl"
@@ -500,7 +519,7 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
     )
     try:
         try:
-            mod.inspect_docx(source, limited_output)
+            mod.inspect_docx(current_view, limited_output)
         except mod.ResourceLimitError:
             pass
         else:
@@ -578,6 +597,36 @@ def test_docx_mce_fallback_becomes_the_only_current_view():
         "page rendering may be required"
     ]
     assert unavailable.xpath(".//mc:AlternateContent", namespaces=mod.NS) == []
+
+
+def test_docx_package_normalization_preserves_warnings_and_source(tmp_path):
+    pytest.importorskip("PIL.Image")
+    pytest.importorskip("lxml.etree")
+    mod = _load_skill_script("docx", "scripts/decompose_docx.py")
+
+    document_xml = f"""
+<w:document xmlns:w="{mod.W_NS}" xmlns:mc="{mod.MC_NS}"
+ xmlns:future="urn:example:unsupported">
+  <w:body><w:p><mc:AlternateContent>
+    <mc:Choice Requires="future"><w:r><w:t>future only</w:t></w:r></mc:Choice>
+  </mc:AlternateContent></w:p></w:body>
+</w:document>
+""".encode()
+    source = tmp_path / "source.docx"
+    current_view = tmp_path / "current-view.docx"
+    with zipfile.ZipFile(source, "w") as zf:
+        zf.writestr("word/document.xml", document_xml)
+
+    assert mod._write_current_view_docx(source, current_view) == [
+        "word/document.xml: AlternateContent has no supported Choice or "
+        "Fallback; page rendering may be required"
+    ]
+    with zipfile.ZipFile(source) as zf:
+        source_root = mod._xml(zf.read("word/document.xml"))
+    with zipfile.ZipFile(current_view) as zf:
+        current_root = mod._xml(zf.read("word/document.xml"))
+    assert source_root.xpath(".//mc:AlternateContent", namespaces=mod.NS)
+    assert not current_root.xpath(".//mc:AlternateContent", namespaces=mod.NS)
 
 
 def test_docx_decompose_preflights_before_pandoc(tmp_path):

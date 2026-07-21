@@ -825,6 +825,49 @@ def _discover_parts(zf: zipfile.ZipFile) -> list[tuple[str, str]]:
     return discovered
 
 
+def _write_current_view_docx(source: Path, destination: Path) -> list[str]:
+    """Write one MCE-selected package for Pandoc and OOXML inspection."""
+    warnings: list[str] = []
+    try:
+        with zipfile.ZipFile(source) as source_zip:
+            current_view_parts = {
+                part for part, _ in _discover_parts(source_zip)
+            }
+            with zipfile.ZipFile(destination, "x") as output_zip:
+                output_zip.comment = source_zip.comment
+                for info in source_zip.infolist():
+                    name = info.filename.replace("\\", "/")
+                    if name in current_view_parts:
+                        data = source_zip.read(info)
+                        root = _xml(data)
+                        alternates = root.xpath(
+                            ".//mc:AlternateContent", namespaces=NS
+                        )
+                        if alternates:
+                            warnings.extend(
+                                f"{name}: {warning}"
+                                for warning in _select_alternate_content(root)
+                            )
+                            data = etree.tostring(
+                                root.getroottree(),
+                                encoding="UTF-8",
+                                xml_declaration=True,
+                            )
+                        output_zip.writestr(info, data)
+                        continue
+
+                    with (
+                        source_zip.open(info) as input_member,
+                        output_zip.open(info, "w") as output_member,
+                    ):
+                        shutil.copyfileobj(
+                            input_member, output_member, length=1024 * 1024
+                        )
+    except zipfile.BadZipFile as exc:
+        raise DecomposeError(f"invalid DOCX package: {exc}") from exc
+    return warnings
+
+
 def _unsupported_content_warnings(root: etree._Element) -> list[str]:
     warnings: list[str] = []
     checks = {
@@ -844,7 +887,7 @@ def inspect_docx(
     source: Path,
     output_dir: Path,
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """Inspect OOXML and materialize safe current-view figures."""
+    """Inspect an MCE-selected DOCX and materialize safe current-view figures."""
     warnings: list[str] = []
     try:
         with zipfile.ZipFile(source) as zf:
@@ -853,10 +896,6 @@ def inspect_docx(
             def parsed_parts() -> Iterable[tuple[str, str, etree._Element]]:
                 for part, role in _discover_parts(zf):
                     root = _xml(zf.read(part))
-                    warnings.extend(
-                        f"{part}: {warning}"
-                        for warning in _select_alternate_content(root)
-                    )
                     warnings.extend(
                         f"{part}: {warning}"
                         for warning in _unsupported_content_warnings(root)
@@ -940,8 +979,14 @@ def decompose_docx(source: Path, destination: Path) -> dict[str, Any]:
         prefix=f".{destination.name}-", dir=destination.parent
     ))
     try:
-        tables = _run_pandoc(source, temp_dir)
-        figures, warnings = inspect_docx(source, temp_dir)
+        current_view_source = temp_dir / ".current-view.docx"
+        warnings = _write_current_view_docx(source, current_view_source)
+        tables = _run_pandoc(current_view_source, temp_dir)
+        figures, inspection_warnings = inspect_docx(
+            current_view_source, temp_dir
+        )
+        warnings.extend(inspection_warnings)
+        current_view_source.unlink()
         manifest = {
             "schema_version": 3,
             "source": source.name,
