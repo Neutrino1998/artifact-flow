@@ -246,7 +246,9 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
     <w:p>
       <w:r><w:t>Alternate image</w:t></w:r>
       <mc:AlternateContent>
-        <mc:Choice Requires="wps"><w:r><w:drawing><wp:inline>
+        <mc:Choice Requires="wps">
+          <w:r><w:t xml:space="preserve"> selected text</w:t></w:r>
+          <w:r><w:drawing><wp:inline>
           <wp:extent cx="100" cy="40"/>
           <a:graphic><a:graphicData><pic:pic>
             <pic:blipFill><a:blip r:embed="rId1"/>
@@ -255,9 +257,13 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
             <pic:spPr><a:xfrm/><a:prstGeom prst="rect"/></pic:spPr>
           </pic:pic></a:graphicData></a:graphic>
         </wp:inline></w:drawing></w:r></mc:Choice>
-        <mc:Fallback><w:r><w:pict><v:shape>
-          <v:imagedata r:id="rId1"/>
-        </v:shape></w:pict></w:r></mc:Fallback>
+        <mc:Fallback>
+          <w:r><w:t xml:space="preserve"> fallback text</w:t></w:r>
+          <w:r><w:pict><v:shape><v:imagedata r:id="rId1"/></v:shape></w:pict>
+            <w:object><o:OLEObject
+              xmlns:o="urn:schemas-microsoft-com:office:office"/></w:object>
+          </w:r>
+        </mc:Fallback>
       </mc:AlternateContent>
     </w:p>
     <w:p><w:del w:author="Reviewer" w:date="2026-01-01T00:00:00Z">
@@ -396,7 +402,7 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
     assert figures[1]["fallback_reasons"] == ["rotation"]
     assert figures[1]["block_order"] == 3
     assert figures[1]["visible_path"] is None
-    assert figures[2]["context"]["current"] == "Alternate image"
+    assert figures[2]["context"]["current"] == "Alternate image selected text"
     assert figures[2]["block_order"] == 4
     assert figures[2]["visible_path"] == "figures/figure-003.png"
     assert figures[2]["fallback"] is None
@@ -522,6 +528,56 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
             ) == []
     finally:
         mod._paragraph_context = original_paragraph_context
+
+
+def test_docx_mce_fallback_becomes_the_only_current_view():
+    pytest.importorskip("PIL.Image")
+    pytest.importorskip("lxml.etree")
+    mod = _load_skill_script("docx", "scripts/decompose_docx.py")
+
+    root = mod._xml(f"""
+<w:document xmlns:w="{mod.W_NS}" xmlns:r="{mod.R_NS}"
+ xmlns:v="{mod.V_NS}" xmlns:mc="{mod.MC_NS}"
+ xmlns:future="urn:example:unsupported"
+ xmlns:o="urn:schemas-microsoft-com:office:office">
+  <w:body><w:p><w:r><w:t>Before</w:t></w:r>
+    <mc:AlternateContent>
+      <mc:Choice Requires="future">
+        <w:r><w:t>future text</w:t><w:object><o:OLEObject/></w:object></w:r>
+      </mc:Choice>
+      <mc:Fallback>
+        <w:r><w:t>fallback text</w:t><w:pict><v:shape>
+          <v:imagedata r:id="rId1"/>
+        </v:shape></w:pict></w:r>
+      </mc:Fallback>
+    </mc:AlternateContent>
+  </w:p></w:body>
+</w:document>
+""".encode())
+
+    assert mod._select_alternate_content(root) == []
+    assert root.xpath(".//mc:AlternateContent", namespaces=mod.NS) == []
+    assert mod._unsupported_content_warnings(root) == []
+    paragraphs = mod._paragraph_context(root)
+    paragraph = root.xpath(".//w:p", namespaces=mod.NS)[0]
+    assert paragraphs[paragraph]["text"] == "Beforefallback text"
+    candidates = mod._image_candidates(root)
+    assert len(candidates) == 1
+    assert candidates[0].get(f"{{{mod.R_NS}}}id") == "rId1"
+
+    unavailable = mod._xml(f"""
+<w:document xmlns:w="{mod.W_NS}" xmlns:mc="{mod.MC_NS}"
+ xmlns:future="urn:example:unsupported">
+  <w:body><w:p><mc:AlternateContent>
+    <mc:Choice Requires="future"><w:r><w:t>future only</w:t></w:r></mc:Choice>
+  </mc:AlternateContent></w:p></w:body>
+</w:document>
+""".encode())
+    assert mod._select_alternate_content(unavailable) == [
+        "AlternateContent has no supported Choice or Fallback; "
+        "page rendering may be required"
+    ]
+    assert unavailable.xpath(".//mc:AlternateContent", namespaces=mod.NS) == []
 
 
 def test_docx_decompose_preflights_before_pandoc(tmp_path):

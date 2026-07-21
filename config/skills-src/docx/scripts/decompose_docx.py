@@ -434,57 +434,72 @@ def _supported_alternate_choice(choice: etree._Element) -> bool:
     )
 
 
-def _image_candidates(
-    root: etree._Element,
-) -> tuple[list[etree._Element], list[str]]:
-    selected: dict[etree._Element, etree._Element | None] = {}
-    selection_warnings: list[str] = []
-    alternates = root.xpath(
-        ".//mc:AlternateContent[not(ancestor::mc:AlternateContent)]",
-        namespaces=NS,
-    )
-    for alternate in alternates:
-        branch = next(
-            (
-                choice
-                for choice in alternate.xpath("./mc:Choice", namespaces=NS)
-                if _supported_alternate_choice(choice)
-            ),
-            None,
+def _select_alternate_content(root: etree._Element) -> list[str]:
+    """Select AlternateContent branches in place for every later consumer."""
+    warnings: list[str] = []
+    while True:
+        alternates = root.xpath(
+            ".//mc:AlternateContent[not(ancestor::mc:AlternateContent)]",
+            namespaces=NS,
         )
-        if branch is None:
-            fallbacks = alternate.xpath("./mc:Fallback[1]", namespaces=NS)
-            branch = fallbacks[0] if fallbacks else None
-        selected[alternate] = branch
-        all_images = alternate.xpath(
-            ".//a:blip | .//v:imagedata", namespaces=NS
-        )
-        selected_images = (
-            branch.xpath(".//a:blip | .//v:imagedata", namespaces=NS)
-            if branch is not None
-            else []
-        )
-        if all_images and not selected_images:
-            selection_warnings.append(
-                "AlternateContent selected branch has no supported image; "
-                "page rendering may be required"
+        if not alternates:
+            return warnings
+        for alternate in alternates:
+            branch = next(
+                (
+                    choice
+                    for choice in alternate.xpath("./mc:Choice", namespaces=NS)
+                    if _supported_alternate_choice(choice)
+                ),
+                None,
             )
+            if branch is None:
+                fallbacks = alternate.xpath("./mc:Fallback[1]", namespaces=NS)
+                branch = fallbacks[0] if fallbacks else None
 
-    candidates: list[etree._Element] = []
-    for candidate in root.xpath(".//a:blip | .//v:imagedata", namespaces=NS):
-        alternate_ancestors = candidate.xpath(
-            "ancestor::mc:AlternateContent[1]", namespaces=NS
-        )
-        if not alternate_ancestors:
-            candidates.append(candidate)
-            continue
-        alternate = alternate_ancestors[0]
-        branch = selected.get(alternate)
-        if branch is not None and any(
-            ancestor is branch for ancestor in candidate.iterancestors()
-        ):
-            candidates.append(candidate)
-    return candidates, selection_warnings
+            all_images = alternate.xpath(
+                ".//a:blip | .//v:imagedata", namespaces=NS
+            )
+            selected_images = (
+                branch.xpath(".//a:blip | .//v:imagedata", namespaces=NS)
+                if branch is not None
+                else []
+            )
+            if branch is None:
+                warnings.append(
+                    "AlternateContent has no supported Choice or Fallback; "
+                    "page rendering may be required"
+                )
+            elif all_images and not selected_images:
+                warnings.append(
+                    "AlternateContent selected branch has no supported image; "
+                    "page rendering may be required"
+                )
+
+            # The descendant XPath above makes a parent mandatory.
+            parent = alternate.getparent()
+            assert parent is not None
+            insertion_index = parent.index(alternate)
+            selected_children = list(branch) if branch is not None else []
+            for child in selected_children:
+                parent.insert(insertion_index, child)
+                insertion_index += 1
+
+            tail = alternate.tail
+            if selected_children:
+                last_child = selected_children[-1]
+                last_child.tail = (last_child.tail or "") + (tail or "")
+            elif tail:
+                previous = alternate.getprevious()
+                if previous is not None:
+                    previous.tail = (previous.tail or "") + tail
+                else:
+                    parent.text = (parent.text or "") + tail
+            parent.remove(alternate)
+
+
+def _image_candidates(root: etree._Element) -> list[etree._Element]:
+    return root.xpath(".//a:blip | .//v:imagedata", namespaces=NS)
 
 
 def _check_image_dimensions(image: Image.Image) -> None:
@@ -600,8 +615,7 @@ def _inspect_figures(
     figures: list[dict[str, Any]] = []
     for part, role, root in parts:
         relationships = _part_relationships(zf, part)
-        candidates, selection_warnings = _image_candidates(root)
-        warnings.extend(f"{part}: {warning}" for warning in selection_warnings)
+        candidates = _image_candidates(root)
         if not candidates:
             continue
         context = _paragraph_context(root)
@@ -839,6 +853,10 @@ def inspect_docx(
             def parsed_parts() -> Iterable[tuple[str, str, etree._Element]]:
                 for part, role in _discover_parts(zf):
                     root = _xml(zf.read(part))
+                    warnings.extend(
+                        f"{part}: {warning}"
+                        for warning in _select_alternate_content(root)
+                    )
                     warnings.extend(
                         f"{part}: {warning}"
                         for warning in _unsupported_content_warnings(root)
