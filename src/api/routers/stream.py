@@ -6,12 +6,13 @@ Stream Router
 """
 
 import asyncio
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Literal, Optional
 
 from fastapi import APIRouter, Depends, Request
 from starlette.responses import StreamingResponse
 
 from config import config
+from api.event_projection import project_event_for_user
 from api.dependencies import get_current_user, get_stream_transport
 from api.services.auth import TokenPayload
 from api.services.stream_transport import StreamNotFoundError
@@ -41,13 +42,16 @@ def build_stream_response(
     stream_transport: StreamTransport,
     user_id: Optional[str],
     last_event_id: Optional[str],
+    event_view: Literal["user", "admin"] = "user",
 ) -> StreamingResponse:
     """Build one observer's SSE response over a shared producer-owned stream.
 
     ``user_id`` is the stream owner identity to validate.  The regular route
     passes the authenticated user's id; the admin route first authorizes the
-    conversation and then passes its stored owner id.  Observer connect/disconnect
-    never changes the stream lifecycle.
+    conversation and then passes its stored owner id. ``event_view`` controls
+    only the response projection: ordinary users do not receive internal prompt
+    context, while the authorized admin observer receives the raw event.
+    Observer connect/disconnect never changes the stream lifecycle.
     """
 
     async def event_generator() -> AsyncGenerator[str, None]:
@@ -63,6 +67,8 @@ def build_stream_response(
                     yield format_sse_comment("ping")
                     continue
 
+                if event_view == "user":
+                    event = project_event_for_user(event)
                 stream_entry_id = event.pop("_stream_id", None)
                 yield format_sse_event(event, event=event.get("type"), id=stream_entry_id)
 

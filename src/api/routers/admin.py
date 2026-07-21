@@ -192,6 +192,7 @@ async def stream_admin_conversation(
         stream_transport=stream_transport,
         user_id=conv.user_id,
         last_event_id=request.headers.get("Last-Event-ID"),
+        event_view="admin",
     )
 
 

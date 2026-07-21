@@ -346,7 +346,17 @@ class TestEvents:
         async with db_manager.session() as session:
             repo = MessageEventRepository(session)
             await repo.batch_create([
-                {"message_id": msg_ids[0], "event_type": "agent_start", "agent_name": "lead_agent", "data": {"agent": "lead_agent"}},
+                {
+                    "message_id": msg_ids[0],
+                    "event_type": "agent_start",
+                    "agent_name": "lead_agent",
+                    "data": {
+                        "agent": "lead_agent",
+                        "system_prompt": "internal system prompt",
+                        "reminder": "internal dynamic reminder",
+                        "future_internal_field": "must stay private by default",
+                    },
+                },
                 {"message_id": msg_ids[0], "event_type": "llm_complete", "agent_name": "lead_agent", "data": {"content": "hello"}},
             ])
 
@@ -355,6 +365,7 @@ class TestEvents:
         body = resp.json()
         assert body["total"] == 2
         assert len(body["events"]) == 2
+        assert body["events"][0]["data"] == {"agent": "lead_agent"}
 
     async def test_get_events_with_type_filter(
         self, client: AsyncClient, db_manager: DatabaseManager, conv_with_messages

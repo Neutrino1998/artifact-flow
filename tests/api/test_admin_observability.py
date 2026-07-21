@@ -81,6 +81,7 @@ class TestAdminConversationActivity:
     async def test_admin_can_subscribe_to_owner_stream(
         self,
         app,
+        client: AsyncClient,
         admin_client: AsyncClient,
         test_user: User,
         observed_conversation: tuple[str, str],
@@ -88,21 +89,43 @@ class TestAdminConversationActivity:
         conv_id, message_id = observed_conversation
         runner, transport = await _make_active(app, conv_id, message_id, test_user.id)
         await transport.push_event(message_id, {
-            "type": "tool_start",
+            "type": "agent_start",
             "timestamp": "2026-07-13T00:00:00",
+            "agent": "lead_agent",
+            "data": {
+                "agent": "lead_agent",
+                "system_prompt": "admin-only system prompt",
+                "reminder": "admin-only dynamic reminder",
+                "future_internal_field": "admin-only future context",
+            },
+        })
+        await transport.push_event(message_id, {
+            "type": "tool_start",
+            "timestamp": "2026-07-13T00:00:01",
             "agent": "lead_agent",
             "data": {"tool": "fetch"},
         })
         await transport.push_event(message_id, {
             "type": "complete",
-            "timestamp": "2026-07-13T00:00:01",
+            "timestamp": "2026-07-13T00:00:02",
             "data": {"success": True, "message_id": message_id},
         })
         try:
+            user_response = await client.get(f"/api/v1/stream/{message_id}")
+            assert user_response.status_code == 200
+            assert "event: agent_start" in user_response.text
+            assert "admin-only system prompt" not in user_response.text
+            assert "admin-only dynamic reminder" not in user_response.text
+            assert "admin-only future context" not in user_response.text
+
             response = await admin_client.get(
                 f"/api/v1/admin/conversations/{conv_id}/stream"
             )
             assert response.status_code == 200
+            assert "event: agent_start" in response.text
+            assert "admin-only system prompt" in response.text
+            assert "admin-only dynamic reminder" in response.text
+            assert "admin-only future context" in response.text
             assert "event: tool_start" in response.text
             assert "event: complete" in response.text
         finally:
