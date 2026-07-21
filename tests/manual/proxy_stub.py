@@ -40,6 +40,10 @@ class Handler(BaseHTTPRequestHandler):
             }
         ).encode()
         self.send_response(200)
+        # Deliberate upstream fingerprints: the Caddy contract test verifies
+        # that none crosses the public response boundary.
+        self.send_header("X-Powered-By", "Next.js")
+        self.send_header("Via", "1.1 upstream-proxy")
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()

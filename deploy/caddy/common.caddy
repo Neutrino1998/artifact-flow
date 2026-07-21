@@ -75,6 +75,15 @@
 
 # The whole site body — matchers + route. Import inside a site block.
 (af_site) {
+	# Public responses must not advertise implementation products. Keep this at
+	# the site response boundary, not as reverse_proxy header_down rules: Caddy
+	# appends its own Via header after processing upstream response headers.
+	header {
+		-X-Powered-By
+		-Via
+		-Server
+	}
+
 	# Batched upload ceiling — the AUTHORITATIVE total-bytes cap. POST /api/v1/chat
 	# sends ALL attachments in ONE multipart request, so the body is the SUM of the
 	# batch. Three INDEPENDENT axes: per-file ≤200MB (MAX_UPLOAD_SIZE, app 422),

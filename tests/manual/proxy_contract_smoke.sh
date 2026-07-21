@@ -33,6 +33,7 @@
 #   2. /health ungated AND routed to backend   6. /__maintenance/* reachable mid-window
 #   3. routing (api & health→8000, /→3000)  7. upload: 211MiB→413, 200MiB legit→backend 200
 #   4. X-Real-IP injected + anti-spoof       8. SSE buffering off (incremental flush)
+#   9. public responses strip technology-identifying headers
 
 set -uo pipefail  # NOT -e: run every assertion, tally at the end
 
@@ -121,13 +122,16 @@ start_stub() {
 start_proxy() {
   docker rm -f "$PROXY_CTR" >/dev/null 2>&1 || true
   # AF_DOMAIN=http://... makes Caddy serve plain HTTP on :80 — no ACME, no TLS.
-  # Directory mount + explicit --config mirror the compose files exactly (a
-  # single-file mount would pin the inode AND break the common.caddy import).
+  # Caddy's directory mount + explicit --config mirror compose (a single-file
+  # mount would pin the inode AND break the common.caddy import). This test's
+  # temp dir combines maintenance assets + flag, so mount it at both production
+  # target paths: immutable page content and target-local mutable state.
   # Tag kept in lockstep with release.sh CADDY_TAG / both compose files.
   docker run -d --name "$PROXY_CTR" --network "$NET" -p "$HOST_PORT:80" \
     -e AF_DOMAIN=http://test.local -e AF_ACME_EMAIL=smoke@test.local \
     -v "$CADDY_CONF_DIR":/etc/caddy/conf:ro \
     -v "$TMP_MAINT":/etc/caddy/maintenance:ro \
+    -v "$TMP_MAINT":/etc/caddy/maintenance-state:ro \
     caddy:2.10-alpine caddy run --config /etc/caddy/conf/Caddyfile.acme --adapter caddyfile >/dev/null
 }
 
@@ -177,6 +181,19 @@ assert_real_ip() {
   else
     no "X-Real-IP: 值不像 IP → $xri"
   fi
+}
+
+assert_no_technology_headers() {
+  local path headers leaked=0
+  for path in / /api/ping /health/ready; do
+    headers="$(hc -D - -o /dev/null "$BASE$path")"
+    if printf '%s\n' "$headers" | grep -Eiq '^(x-powered-by|via|server)[[:space:]]*:'; then
+      leaked=1
+      no "technology headers: $path 仍暴露 X-Powered-By/Via/Server"
+    fi
+  done
+  [[ $leaked -eq 0 ]] \
+    && ok "technology headers: frontend/API/health 均未暴露 X-Powered-By/Via/Server"
 }
 
 assert_maintenance() {
@@ -315,6 +332,7 @@ run_target() {
   assert_routing
   assert_swagger_404
   assert_real_ip
+  assert_no_technology_headers
   assert_upload_cap
   assert_sse
   assert_maintenance   # LAST: sets the flag, which we can't reliably clear
