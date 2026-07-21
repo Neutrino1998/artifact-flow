@@ -156,6 +156,9 @@ def test_pdf_skill_large_document_memory_contract():
 
 def test_document_skills_use_risk_bounded_visual_verification():
     docx_md = (SRC_DIR / "docx" / "SKILL.md").read_text(encoding="utf-8")
+    docx_decompose = (
+        SRC_DIR / "docx" / "scripts" / "decompose_docx.py"
+    ).read_text(encoding="utf-8")
     pdf_md = (SRC_DIR / "pdf" / "SKILL.md").read_text(encoding="utf-8")
     pptx_md = (SRC_DIR / "pptx" / "SKILL.md").read_text(encoding="utf-8")
     xlsx_md = (SRC_DIR / "xlsx" / "SKILL.md").read_text(encoding="utf-8")
@@ -179,6 +182,8 @@ def test_document_skills_use_risk_bounded_visual_verification():
     assert "`revision_state`" in docx_md
     assert "脚本不另建表格 JSON" in docx_md
     assert "合成 ID 只在本次" in docx_md
+    assert "catalog_tables.lua" in docx_decompose
+    assert "document.ast.json" not in docx_decompose
     assert "--pages 5,8" in docx_md
     assert "不要因演示文稿含图片就把所有页面交给视觉能力" in pptx_md
     assert "普通数据读取、公式分析和值修改默认不渲染" in xlsx_md
@@ -206,7 +211,8 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
     )
     document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="{mod.W_NS}" xmlns:r="{mod.R_NS}"
- xmlns:a="{mod.A_NS}" xmlns:pic="{mod.PIC_NS}" xmlns:wp="{mod.WP_NS}">
+ xmlns:a="{mod.A_NS}" xmlns:pic="{mod.PIC_NS}" xmlns:wp="{mod.WP_NS}"
+ xmlns:v="{mod.V_NS}" xmlns:mc="{mod.MC_NS}" xmlns:wps="{mod.WPS_NS}">
   <w:body>
     <w:p>
       <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
@@ -236,6 +242,23 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
           <pic:spPr><a:xfrm rot="5400000"/><a:prstGeom prst="rect"/></pic:spPr>
         </pic:pic></a:graphicData></a:graphic>
       </wp:inline></w:drawing></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>Alternate image</w:t></w:r>
+      <mc:AlternateContent>
+        <mc:Choice Requires="wps"><w:r><w:drawing><wp:inline>
+          <wp:extent cx="100" cy="40"/>
+          <a:graphic><a:graphicData><pic:pic>
+            <pic:blipFill><a:blip r:embed="rId1"/>
+              <a:stretch><a:fillRect/></a:stretch>
+            </pic:blipFill>
+            <pic:spPr><a:xfrm/><a:prstGeom prst="rect"/></pic:spPr>
+          </pic:pic></a:graphicData></a:graphic>
+        </wp:inline></w:drawing></w:r></mc:Choice>
+        <mc:Fallback><w:r><w:pict><v:shape>
+          <v:imagedata r:id="rId1"/>
+        </v:shape></w:pict></w:r></mc:Fallback>
+      </mc:AlternateContent>
     </w:p>
     <w:p><w:del w:author="Reviewer" w:date="2026-01-01T00:00:00Z">
       <w:r><w:delText>Deleted image</w:delText></w:r>
@@ -356,7 +379,7 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
     figures, warnings = mod.inspect_docx(source, output)
 
     assert warnings == []
-    assert len(figures) == 4
+    assert len(figures) == 5
     assert figures[0]["source_part"] == figures[1]["source_part"]
     assert figures[0]["label"] == "Visible architecture"
     assert figures[0]["revision_state"] == "current"
@@ -373,18 +396,22 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
     assert figures[1]["fallback_reasons"] == ["rotation"]
     assert figures[1]["block_order"] == 3
     assert figures[1]["visible_path"] is None
-    assert figures[2]["revision_state"] == "deleted"
-    assert figures[2]["include_in_current_view"] is False
-    assert figures[2]["excluded_reason"] == "revision_not_in_current_view"
-    assert figures[2]["visible_path"] is None
+    assert figures[2]["context"]["current"] == "Alternate image"
+    assert figures[2]["block_order"] == 4
+    assert figures[2]["visible_path"] == "figures/figure-003.png"
     assert figures[2]["fallback"] is None
-    assert not (output / "figures" / "figure-003.png").exists()
-    assert figures[3]["part"] == "word/footnotes.xml"
-    assert figures[3]["part_role"] == "footnote"
-    assert figures[3]["include_in_current_view"] is True
-    assert figures[3]["visible_path"] == "figures/figure-004.png"
-    assert figures[3]["block_order"] is None
-    assert figures[3]["likely_decorative"] is False
+    assert figures[3]["revision_state"] == "deleted"
+    assert figures[3]["include_in_current_view"] is False
+    assert figures[3]["excluded_reason"] == "revision_not_in_current_view"
+    assert figures[3]["visible_path"] is None
+    assert figures[3]["fallback"] is None
+    assert not (output / "figures" / "figure-004.png").exists()
+    assert figures[4]["part"] == "word/footnotes.xml"
+    assert figures[4]["part_role"] == "footnote"
+    assert figures[4]["include_in_current_view"] is True
+    assert figures[4]["visible_path"] == "figures/figure-005.png"
+    assert figures[4]["block_order"] is None
+    assert figures[4]["likely_decorative"] is False
 
     if shutil.which("pandoc"):
         full_output = tmp_path / "full-decomposition"
@@ -394,17 +421,24 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
 
         assert manifest["schema_version"] == 3
         assert "blocks_path" not in manifest
-        assert manifest["counts"] == {
-            "figures": 4,
-            "current_figures": 3,
-            "available_figures": 2,
+        expected_counts = {
+            "figures": 5,
+            "current_figures": 4,
+            "available_figures": 3,
             "page_fallback_figures": 1,
             "excluded_revision_figures": 1,
-            "tables": 4,
         }
-        assert len(tables) == 4
+        assert {
+            key: value
+            for key, value in manifest["counts"].items()
+            if key != "tables"
+        } == expected_counts
+        # Pandoc 3.1 and 3.9 differ on whether a nested table gets its own
+        # callback. The catalog is explicitly best-effort, not a table count.
+        assert len(tables) in {4, 5}
+        assert manifest["counts"]["tables"] == len(tables)
         assert [table["id"] for table in tables] == [
-            "table-001", "table-002", "table-003", "table-004",
+            f"table-{index:03d}" for index in range(1, len(tables) + 1)
         ]
         assert all(table["content_source"] == "document.md" for table in tables)
         assert all(table["heading_path"] == ["Section"] for table in tables)
@@ -419,21 +453,17 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
         assert not (full_output / "content.jsonl").exists()
         assert not (full_output / "tables").exists()
         assert not (full_output / "document.ast.json").exists()
+        assert not (full_output / ".table-catalog.jsonl").exists()
         assert not (full_output / "raw-media").exists()
 
-        named_tables = mod._catalog_tables({"blocks": [
-            {
-                "t": "Header",
-                "c": [2, ["", [], []], [{"t": "Str", "c": "Analysis"}]],
-            },
-            {
-                "t": "Table",
-                "c": [
-                    ["source-table", [], []],
-                    [None, [{"t": "Plain", "c": [{"t": "Str", "c": "Results"}]}]],
-                ],
-            },
-        ]})
+        catalog_path = tmp_path / "small-table-catalog.jsonl"
+        catalog_path.write_text(json.dumps({
+            "source_id": "source-table",
+            "label": "Results",
+            "order": 2,
+            "heading_path": ["Analysis"],
+        }) + "\n", encoding="utf-8")
+        named_tables = mod._read_table_catalog(catalog_path)
         assert named_tables == [{
             "id": "table-001",
             "source_id": "source-table",
@@ -442,6 +472,17 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
             "heading_path": ["Analysis"],
             "content_source": "document.md",
         }]
+        original_catalog_limit = mod.MAX_TABLE_CATALOG_BYTES
+        mod.MAX_TABLE_CATALOG_BYTES = 1
+        try:
+            try:
+                mod._read_table_catalog(catalog_path)
+            except mod.ResourceLimitError:
+                pass
+            else:
+                raise AssertionError("table catalog size limit must fail loudly")
+        finally:
+            mod.MAX_TABLE_CATALOG_BYTES = original_catalog_limit
 
     limited_output = tmp_path / "limited"
     limited_output.mkdir()
@@ -492,12 +533,13 @@ def test_docx_decompose_preflights_before_pandoc(tmp_path):
     with zipfile.ZipFile(source, "w") as zf:
         zf.writestr(
             "word/document.xml",
-            f'<w:document xmlns:w="{mod.W_NS}"><w:body/></w:document>',
+            f'<w:document xmlns:w="{mod.W_NS}"><w:body><w:p><w:r>'
+            '<w:t>x</w:t></w:r></w:p></w:body></w:document>',
         )
 
     called = False
     original_run_pandoc = mod._run_pandoc
-    original_xml_part_limit = mod.MAX_XML_PART_BYTES
+    original_element_limit = mod.MAX_WORD_XML_ELEMENTS
 
     def unexpected_pandoc(*args, **kwargs):
         nonlocal called
@@ -505,17 +547,17 @@ def test_docx_decompose_preflights_before_pandoc(tmp_path):
         raise AssertionError("package preflight must run before Pandoc")
 
     mod._run_pandoc = unexpected_pandoc
-    mod.MAX_XML_PART_BYTES = 16
+    mod.MAX_WORD_XML_ELEMENTS = 4
     try:
         try:
             mod.decompose_docx(source, tmp_path / "output")
         except mod.ResourceLimitError as exc:
-            assert "XML part exceeds" in str(exc)
+            assert "Word XML element count" in str(exc)
         else:
-            raise AssertionError("oversized package must fail loudly")
+            raise AssertionError("over-complex package must fail loudly")
     finally:
         mod._run_pandoc = original_run_pandoc
-        mod.MAX_XML_PART_BYTES = original_xml_part_limit
+        mod.MAX_WORD_XML_ELEMENTS = original_element_limit
 
     assert called is False
     assert not (tmp_path / "output").exists()

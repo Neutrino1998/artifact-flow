@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 LibreOffice、Pandoc、python-docx、lxml、Pillow、RapidFuzz。
 metadata:
-  version: "2.5.0"
+  version: "2.5.1"
 ---
 
 # Word 文档
@@ -19,6 +19,7 @@ metadata:
 [accept_changes.py](scripts/accept_changes.py)、[add_comment.py](scripts/add_comment.py)、
 [check_redlines.py](scripts/check_redlines.py)、[unpack.py](scripts/unpack.py)、
 [pack.py](scripts/pack.py)、[decompose_docx.py](scripts/decompose_docx.py)、
+[内部表格目录过滤器](scripts/catalog_tables.lua)、
 [修订标记参考](references/redlines.md)、
 [默认 reference.docx](references/reference.docx)。
 
@@ -191,5 +192,6 @@ Word 仍可能有差异，交付时说明这是 best-effort 兼容结果。
 
 - Pandoc 重建会损失多栏、文本框、艺术字等复杂版式；保版式修改不能走往返转换。
 - `decompose_docx.py` 不是 Word 排版引擎，不推断元素所在物理页；不确定显示语义会明确要求页面 fallback。
+- 包大小或内容节点超过脚本资源上限时会受控失败；不要绕过闸门直接重跑 Pandoc，应让用户拆分文档。
 - python-docx/LibreOffice 对宏、OLE、SmartArt 和第三方扩展部件只做 best-effort 保留。
 - OOXML 解包只用于明确、可验证的结构手术；失败后回到原件，不把半成品当成果。

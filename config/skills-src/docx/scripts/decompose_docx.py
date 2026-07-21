@@ -19,6 +19,7 @@ import subprocess
 import tempfile
 import zipfile
 from collections import deque
+from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -32,6 +33,10 @@ PIC_NS = "http://schemas.openxmlformats.org/drawingml/2006/picture"
 R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
 V_NS = "urn:schemas-microsoft-com:vml"
+MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+WPC_NS = "http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas"
+WPG_NS = "http://schemas.microsoft.com/office/word/2010/wordprocessingGroup"
+WPS_NS = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
 PKG_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 
 NS = {
@@ -41,6 +46,13 @@ NS = {
     "r": R_NS,
     "wp": WP_NS,
     "v": V_NS,
+    "mc": MC_NS,
+}
+
+# This is a declared consumer subset, not a claim to implement all Markup
+# Compatibility semantics. Unknown Choice requirements select Fallback.
+SUPPORTED_MC_NAMESPACES = {
+    W_NS, A_NS, PIC_NS, R_NS, WP_NS, WPC_NS, WPG_NS, WPS_NS,
 }
 
 MAX_FIGURES = 500
@@ -53,6 +65,9 @@ MAX_XML_TOTAL_BYTES = 64 * 1024 * 1024
 # A cropped RGBA image can briefly coexist as source, crop, and normalized buffers
 # inside the 1 GiB no-swap sandbox.  Keep enough headroom for Pillow and Python.
 MAX_IMAGE_PIXELS = 40_000_000
+MAX_TABLE_CATALOG_BYTES = 8 * 1024 * 1024
+MAX_WORD_XML_ELEMENTS = 300_000
+MAX_WORD_PARAGRAPHS = 80_000
 MAX_REACHABLE_XML_PARTS = 1_000
 PANDOC_TIMEOUT_SECONDS = 120
 VECTOR_TIMEOUT_SECONDS = 60
@@ -143,8 +158,56 @@ def _preflight_docx(source: Path) -> None:
     try:
         with zipfile.ZipFile(source) as zf:
             _validate_package(zf)
+            _validate_word_xml_complexity(zf)
     except zipfile.BadZipFile as exc:
         raise DecomposeError(f"invalid DOCX package: {exc}") from exc
+
+
+def _is_word_xml_part(name: str) -> bool:
+    lowered = name.casefold()
+    return lowered.startswith("word/") and (
+        lowered.endswith(".xml") or lowered.endswith(".rels")
+    )
+
+
+def _validate_word_xml_complexity(zf: zipfile.ZipFile) -> None:
+    elements = 0
+    paragraphs = 0
+    for info in zf.infolist():
+        name = info.filename.replace("\\", "/")
+        if not _is_word_xml_part(name):
+            continue
+        try:
+            with zf.open(info) as source:
+                parsed = etree.iterparse(
+                    source,
+                    events=("end",),
+                    resolve_entities=False,
+                    no_network=True,
+                    huge_tree=False,
+                )
+                for _, element in parsed:
+                    elements += 1
+                    qname = etree.QName(element)
+                    if qname.namespace == W_NS and qname.localname == "p":
+                        paragraphs += 1
+                    if elements > MAX_WORD_XML_ELEMENTS:
+                        raise ResourceLimitError(
+                            "DOCX Word XML element count exceeds "
+                            f"{MAX_WORD_XML_ELEMENTS}"
+                        )
+                    if paragraphs > MAX_WORD_PARAGRAPHS:
+                        raise ResourceLimitError(
+                            "DOCX paragraph count exceeds "
+                            f"{MAX_WORD_PARAGRAPHS}"
+                        )
+                    element.clear()
+                    parent = element.getparent()
+                    if parent is not None:
+                        while element.getprevious() is not None:
+                            del parent[0]
+        except etree.XMLSyntaxError as exc:
+            raise DecomposeError(f"invalid content XML part {name}: {exc}") from exc
 
 
 def _part_relationships(
@@ -363,6 +426,67 @@ def _figure_label(node: etree._Element) -> str | None:
     return None
 
 
+def _supported_alternate_choice(choice: etree._Element) -> bool:
+    prefixes = (choice.get("Requires") or "").split()
+    return bool(prefixes) and all(
+        choice.nsmap.get(prefix) in SUPPORTED_MC_NAMESPACES
+        for prefix in prefixes
+    )
+
+
+def _image_candidates(
+    root: etree._Element,
+) -> tuple[list[etree._Element], list[str]]:
+    selected: dict[etree._Element, etree._Element | None] = {}
+    selection_warnings: list[str] = []
+    alternates = root.xpath(
+        ".//mc:AlternateContent[not(ancestor::mc:AlternateContent)]",
+        namespaces=NS,
+    )
+    for alternate in alternates:
+        branch = next(
+            (
+                choice
+                for choice in alternate.xpath("./mc:Choice", namespaces=NS)
+                if _supported_alternate_choice(choice)
+            ),
+            None,
+        )
+        if branch is None:
+            fallbacks = alternate.xpath("./mc:Fallback[1]", namespaces=NS)
+            branch = fallbacks[0] if fallbacks else None
+        selected[alternate] = branch
+        all_images = alternate.xpath(
+            ".//a:blip | .//v:imagedata", namespaces=NS
+        )
+        selected_images = (
+            branch.xpath(".//a:blip | .//v:imagedata", namespaces=NS)
+            if branch is not None
+            else []
+        )
+        if all_images and not selected_images:
+            selection_warnings.append(
+                "AlternateContent selected branch has no supported image; "
+                "page rendering may be required"
+            )
+
+    candidates: list[etree._Element] = []
+    for candidate in root.xpath(".//a:blip | .//v:imagedata", namespaces=NS):
+        alternate_ancestors = candidate.xpath(
+            "ancestor::mc:AlternateContent[1]", namespaces=NS
+        )
+        if not alternate_ancestors:
+            candidates.append(candidate)
+            continue
+        alternate = alternate_ancestors[0]
+        branch = selected.get(alternate)
+        if branch is not None and any(
+            ancestor is branch for ancestor in candidate.iterancestors()
+        ):
+            candidates.append(candidate)
+    return candidates, selection_warnings
+
+
 def _check_image_dimensions(image: Image.Image) -> None:
     width, height = image.size
     if width <= 0 or height <= 0 or width * height > MAX_IMAGE_PIXELS:
@@ -467,7 +591,7 @@ def _materialize_visible_image(
 
 def _inspect_figures(
     zf: zipfile.ZipFile,
-    parts: list[tuple[str, str, etree._Element]],
+    parts: Iterable[tuple[str, str, etree._Element]],
     output_dir: Path,
     warnings: list[str],
 ) -> list[dict[str, Any]]:
@@ -476,7 +600,8 @@ def _inspect_figures(
     figures: list[dict[str, Any]] = []
     for part, role, root in parts:
         relationships = _part_relationships(zf, part)
-        candidates = root.xpath(".//a:blip | .//v:imagedata", namespaces=NS)
+        candidates, selection_warnings = _image_candidates(root)
+        warnings.extend(f"{part}: {warning}" for warning in selection_warnings)
         if not candidates:
             continue
         context = _paragraph_context(root)
@@ -589,89 +714,54 @@ def _inspect_figures(
     return figures
 
 
-def _pandoc_plain_text(value: Any) -> str:
-    def collect(item: Any) -> str:
-        if isinstance(item, list):
-            return "".join(collect(child) for child in item)
-        if not isinstance(item, dict):
-            return ""
-        node_type = item.get("t")
-        content = item.get("c")
-        if node_type == "Str" and isinstance(content, str):
-            return content
-        if node_type in {"Space", "SoftBreak", "LineBreak"}:
-            return " "
-        if node_type in {"Code", "Math"} and isinstance(content, list):
-            return str(content[-1]) if content else ""
-        return collect(content)
+def _read_table_catalog(path: Path) -> list[dict[str, Any]]:
+    try:
+        catalog_size = path.stat().st_size
+    except OSError as exc:
+        raise DecomposeError(f"Pandoc did not produce a table catalog: {exc}") from exc
+    if catalog_size > MAX_TABLE_CATALOG_BYTES:
+        raise ResourceLimitError(
+            f"table catalog exceeds {MAX_TABLE_CATALOG_BYTES} bytes"
+        )
 
-    return " ".join(collect(value).split())
-
-
-def _iter_flow_blocks(blocks: Any):
-    if not isinstance(blocks, list):
-        return
-    for block in blocks:
-        if not isinstance(block, dict):
-            continue
-        node_type = block.get("t")
-        content = block.get("c")
-        if node_type == "Div" and isinstance(content, list) and len(content) > 1:
-            yield from _iter_flow_blocks(content[1])
-        elif node_type == "BlockQuote":
-            yield from _iter_flow_blocks(content)
-        elif node_type == "BulletList" and isinstance(content, list):
-            for item in content:
-                yield from _iter_flow_blocks(item)
-        elif (
-            node_type == "OrderedList"
-            and isinstance(content, list)
-            and len(content) > 1
-        ):
-            for item in content[1]:
-                yield from _iter_flow_blocks(item)
-        elif node_type == "DefinitionList" and isinstance(content, list):
-            for _, definitions in content:
-                for definition in definitions:
-                    yield from _iter_flow_blocks(definition)
-        else:
-            yield block
-
-
-def _catalog_tables(pandoc_document: dict[str, Any]) -> list[dict[str, Any]]:
     tables: list[dict[str, Any]] = []
-    heading_stack: list[str | None] = [None] * 9
-    for order, block in enumerate(
-        _iter_flow_blocks(pandoc_document.get("blocks", [])), start=1
-    ):
-        node_type = block.get("t")
-        content = block.get("c")
-        if node_type == "Header" and isinstance(content, list) and len(content) > 2:
-            try:
-                level = max(1, min(int(content[0]), 9))
-            except (TypeError, ValueError):
-                level = 1
-            title = _pandoc_plain_text(content[2])
-            if title:
-                heading_stack[level - 1] = title
-                heading_stack[level:] = [None] * (9 - level)
-            continue
-        if node_type != "Table" or not isinstance(content, list):
-            continue
-        if len(tables) >= MAX_TABLES:
-            raise ResourceLimitError(f"table limit is {MAX_TABLES}")
-        source_id = None
-        if content and isinstance(content[0], list) and content[0]:
-            source_id = content[0][0] or None
-        label = _pandoc_plain_text(content[1]) if len(content) > 1 else ""
-        tables.append({
-            "id": f"table-{len(tables) + 1:03d}",
-            "source_id": source_id,
-            "label": label or None,
-            "order": order,
-            "heading_path": [item for item in heading_stack if item],
-            "content_source": "document.md",
-        })
+    try:
+        with path.open(encoding="utf-8") as catalog:
+            for line_number, line in enumerate(catalog, start=1):
+                if not line.strip():
+                    continue
+                if len(tables) >= MAX_TABLES:
+                    raise ResourceLimitError(f"table limit is {MAX_TABLES}")
+                record = json.loads(line)
+                if not isinstance(record, dict):
+                    raise ValueError("record must be an object")
+                source_id = record.get("source_id")
+                label = record.get("label")
+                order = record.get("order")
+                heading_path = record.get("heading_path")
+                if source_id is not None and not isinstance(source_id, str):
+                    raise ValueError("source_id must be a string or null")
+                if label is not None and not isinstance(label, str):
+                    raise ValueError("label must be a string or null")
+                if isinstance(order, bool) or not isinstance(order, int) or order < 1:
+                    raise ValueError("order must be a positive integer")
+                if (
+                    not isinstance(heading_path, list)
+                    or len(heading_path) > 9
+                    or not all(isinstance(item, str) for item in heading_path)
+                ):
+                    raise ValueError("heading_path must contain at most 9 strings")
+                tables.append({
+                    "id": f"table-{len(tables) + 1:03d}",
+                    "source_id": source_id or None,
+                    "label": label or None,
+                    "order": order,
+                    "heading_path": heading_path,
+                    "content_source": "document.md",
+                })
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        detail = f" at line {line_number}" if "line_number" in locals() else ""
+        raise DecomposeError(f"invalid Pandoc table catalog{detail}: {exc}") from exc
     return tables
 
 
@@ -745,23 +835,28 @@ def inspect_docx(
     try:
         with zipfile.ZipFile(source) as zf:
             _validate_package(zf)
-            parsed_parts = [
-                (part, role, _xml(zf.read(part)))
-                for part, role in _discover_parts(zf)
-            ]
-            for part, _, root in parsed_parts:
-                warnings.extend(
-                    f"{part}: {warning}"
-                    for warning in _unsupported_content_warnings(root)
-                )
-            figures = _inspect_figures(zf, parsed_parts, output_dir, warnings)
+
+            def parsed_parts() -> Iterable[tuple[str, str, etree._Element]]:
+                for part, role in _discover_parts(zf):
+                    root = _xml(zf.read(part))
+                    warnings.extend(
+                        f"{part}: {warning}"
+                        for warning in _unsupported_content_warnings(root)
+                    )
+                    yield part, role, root
+
+            figures = _inspect_figures(zf, parsed_parts(), output_dir, warnings)
     except zipfile.BadZipFile as exc:
         raise DecomposeError(f"invalid DOCX package: {exc}") from exc
     return figures, warnings
 
 
 def _run_pandoc_command(
-    command: list[str], expected: Path, description: str
+    command: list[str],
+    expected: Path,
+    description: str,
+    *,
+    env: dict[str, str] | None = None,
 ) -> None:
     try:
         result = subprocess.run(
@@ -770,6 +865,7 @@ def _run_pandoc_command(
             text=True,
             timeout=PANDOC_TIMEOUT_SECONDS,
             check=False,
+            env=env,
         )
     except FileNotFoundError as exc:
         raise DecomposeError("pandoc is unavailable") from exc
@@ -782,40 +878,33 @@ def _run_pandoc_command(
         raise DecomposeError(detail or f"pandoc did not produce {description}")
 
 
-def _run_pandoc(source: Path, output_dir: Path) -> dict[str, Any]:
-    ast_path = output_dir / "document.ast.json"
+def _run_pandoc(source: Path, output_dir: Path) -> list[dict[str, Any]]:
     markdown = output_dir / "document.md"
-    ast_command = [
+    catalog = output_dir / ".table-catalog.jsonl"
+    table_filter = Path(__file__).with_name("catalog_tables.lua")
+    if not table_filter.is_file():
+        raise DecomposeError(f"Pandoc table catalog filter is missing: {table_filter}")
+    command = [
         "pandoc",
         "--track-changes=all",
+        "--lua-filter",
+        str(table_filter),
         str(source),
-        "-t",
-        "json",
-        "-o",
-        str(ast_path),
-    ]
-    markdown_command = [
-        "pandoc",
-        "-f",
-        "json",
-        str(ast_path),
         "-t",
         "gfm",
         "-o",
         str(markdown),
     ]
+    pandoc_env = os.environ.copy()
+    pandoc_env["ARTIFACTFLOW_DOCX_TABLE_CATALOG"] = str(catalog)
+    pandoc_env["ARTIFACTFLOW_DOCX_MAX_TABLES"] = str(MAX_TABLES)
     try:
-        _run_pandoc_command(ast_command, ast_path, "document AST")
-        try:
-            pandoc_document = json.loads(ast_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-            raise DecomposeError(f"invalid Pandoc document AST: {exc}") from exc
-        if not isinstance(pandoc_document, dict):
-            raise DecomposeError("invalid Pandoc document AST root")
-        _run_pandoc_command(markdown_command, markdown, "document.md")
-        return pandoc_document
+        _run_pandoc_command(
+            command, markdown, "document.md", env=pandoc_env
+        )
+        return _read_table_catalog(catalog)
     finally:
-        ast_path.unlink(missing_ok=True)
+        catalog.unlink(missing_ok=True)
 
 
 def decompose_docx(source: Path, destination: Path) -> dict[str, Any]:
@@ -833,9 +922,8 @@ def decompose_docx(source: Path, destination: Path) -> dict[str, Any]:
         prefix=f".{destination.name}-", dir=destination.parent
     ))
     try:
-        pandoc_document = _run_pandoc(source, temp_dir)
+        tables = _run_pandoc(source, temp_dir)
         figures, warnings = inspect_docx(source, temp_dir)
-        tables = _catalog_tables(pandoc_document)
         manifest = {
             "schema_version": 3,
             "source": source.name,
