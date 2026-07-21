@@ -185,7 +185,7 @@ async def test_mcp_large_success_text_is_left_complete_for_engine():
 
 
 async def test_mcp_large_error_text_remains_bounded():
-    payload = "X" * (config.TOOL_RESULT_INLINE_MAX_CHARS + 1)
+    payload = "X" * (config.TOOL_ERROR_MAX_CHARS + 1)
 
     async def fake_call(url, headers, timeout, tool_name, arguments):
         return McpToolCallResult(
@@ -197,8 +197,25 @@ async def test_mcp_large_error_text_remains_bounded():
     result = await tool()
 
     assert result.success is False
-    assert len(result.error) == tool.max_result_size_chars
+    assert len(result.error) == config.TOOL_ERROR_MAX_CHARS
     assert result.error.endswith("[MCP error response truncated...]")
+
+
+async def test_mcp_error_diagnostic_survives_zero_success_inline_threshold():
+    payload = "actionable upstream error"
+
+    async def fake_call(url, headers, timeout, tool_name, arguments):
+        return McpToolCallResult(
+            is_error=True,
+            content=[{"type": "text", "text": payload}],
+        )
+
+    tool = _tool(McpClientManager(call_callable=fake_call))
+    tool.max_result_size_chars = 0
+    result = await tool()
+
+    assert result.success is False
+    assert result.error == payload
 
 
 async def test_mcp_tool_converts_single_image_content_block_to_artifact():

@@ -30,7 +30,7 @@ class ToolPermission(Enum):
 @dataclass
 class ArtifactSpec:
     """工具声明式落盘:工具**声明**「把这份结果存成此 artifact」,由引擎中间件经
-    ``ArtifactService.ingest_tool_result`` 落库(具名、带类型、blob 可、配额闸)。
+    ``ArtifactService.ingest_tool_result`` 落库(具名、带类型、blob 可、文本/二进制准入)。
 
     工具**不**持 ``ArtifactService`` 句柄(守三层模型:通用工具保持哑,只有内建
     artifact/sandbox 工具——它们本就是 manager 层——直接碰 service)。

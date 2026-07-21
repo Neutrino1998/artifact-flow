@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from jsonschema import ValidationError, validate
 
+from config import config
 from tools.artifact_output import build_artifact_spec
 from tools.base import BaseTool, ToolParameter, ToolPermission, ToolResult
 from tools.custom.mcp_client import McpClientError, McpClientManager, McpToolDefinition
@@ -106,9 +107,9 @@ class McpTool(BaseTool):
             # 失败结果不会进入成功结果 artifact 路径；诊断仍须有界，避免恶意/异常
             # MCP server 用超长 error body 灌入事件与下一轮上下文。
             error_data = data
-            if len(error_data) > self.max_result_size_chars:
+            if len(error_data) > config.TOOL_ERROR_MAX_CHARS:
                 marker = "\n\n[MCP error response truncated...]"
-                limit = int(self.max_result_size_chars)
+                limit = config.TOOL_ERROR_MAX_CHARS
                 error_data = (
                     marker[:limit]
                     if limit <= len(marker)

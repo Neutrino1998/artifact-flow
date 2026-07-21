@@ -53,6 +53,22 @@ def _evt_artifact_updated() -> str:
 # 入口校验,_stage_artifact(create_from_upload / ingest_tool_result 共用内核)
 # 通过 _normalize_filename_to_id + dedup 保证生成的 ID 满足该 pattern。
 _ARTIFACT_ID_PATTERN = re.compile(r"^[\w\-.]{1,64}$")
+_UTF8_SIZE_CHUNK_CHARS = 64 * 1024
+
+
+def _fits_utf8_byte_limit(content: str, limit: int) -> bool:
+    """不物化整份 encoded 副本地判断文本是否落在 UTF-8 字节帽内。"""
+    # 每个 Unicode code point 的 UTF-8 表示至少一字节；先用 O(1) 下界挡住
+    # 明显超限输入，避免给巨型远端结果再复制一份 bytes。
+    if len(content) > limit:
+        return False
+
+    total = 0
+    for offset in range(0, len(content), _UTF8_SIZE_CHUNK_CHARS):
+        total += len(content[offset:offset + _UTF8_SIZE_CHUNK_CHARS].encode("utf-8"))
+        if total > limit:
+            return False
+    return True
 
 
 def _normalize_filename_to_id(filename: str, max_base_len: int = 56) -> str:
@@ -212,6 +228,31 @@ class ArtifactService:
         """确保 ArtifactSession 存在(数据库层)。"""
         await self._run_with_repo(lambda repo: repo.ensure_session_exists(session_id))
 
+    @staticmethod
+    def _text_admission_error(
+        session_id: str,
+        content: str,
+        *,
+        target_artifact_id: Optional[str] = None,
+    ) -> Optional[str]:
+        """所有文本 Artifact 写路径共用的单条 UTF-8 字节准入。"""
+        if _fits_utf8_byte_limit(content, config.ARTIFACT_TEXT_MAX_BYTES):
+            return None
+
+        logger.warning(
+            "Text artifact write rejected (size limit): chars=%d, max_bytes=%d "
+            "(session=%s, target=%s)",
+            len(content),
+            config.ARTIFACT_TEXT_MAX_BYTES,
+            session_id,
+            target_artifact_id or "<new>",
+        )
+        max_mb = config.ARTIFACT_TEXT_MAX_BYTES / 1024 / 1024
+        return (
+            f"Text artifact too large: UTF-8 content exceeds the {max_mb:g}MB limit. "
+            "Reduce or split the content and retry."
+        )
+
     # ========================================
     # 创建
     # ========================================
@@ -234,6 +275,11 @@ class ArtifactService:
                 f"Invalid artifact_id '{artifact_id}': must be 1-64 chars of "
                 f"letters/digits/underscore/hyphen/dot only."
             )
+        admission_error = self._text_admission_error(
+            session_id, content, target_artifact_id=artifact_id
+        )
+        if admission_error:
+            return False, admission_error
         try:
             await self.ensure_session_exists(session_id)
 
@@ -369,10 +415,10 @@ class ArtifactService:
         source: str,
         original_filename: Optional[str] = None,
     ) -> Tuple[bool, str, Optional[str]]:
-        """共享 stage 内核:XOR 校验 → dedup → ID 校验 → blob 上限 → per-user 配额 → register。
+        """共享 stage 内核:XOR 校验 → 文本/二进制准入 → dedup → ID 校验 → register。
         返回 ``(success, message, artifact_id)``;失败时 artifact_id 为 None。
 
-        三个调用方(用户上传 / 沙盒 persist / 工具结果)经此单一 chokepoint,blob
+        三个调用方(用户上传 / 沙盒 persist / 工具结果)经此单一 chokepoint,文本大小、blob
         存储边界、配额与 XOR 不变量只在这一处守门(不逐路径加闸)。``id_base`` 须已是
         合法 artifact_id base(经 ``_normalize_filename_to_id``)。
         """
@@ -386,6 +432,11 @@ class ArtifactService:
                 "An artifact stores exactly one representation: text in `content` "
                 "OR binary in `blob`, never both."
             ), None
+
+        if blob is None:
+            admission_error = self._text_admission_error(session_id, content)
+            if admission_error:
+                return False, admission_error, None
 
         # Dedup:同时对 WorkingSet(本轮已 stage / 缓存)与 DB(往轮已落库)去重,
         # 追加后缀直到唯一。整个冲突扫描在**一条**短 session 内走完(B-5 #4)——不再每探一次
@@ -808,6 +859,12 @@ class ArtifactService:
             )
             return False, info.message, failure_meta
 
+        admission_error = self._text_admission_error(
+            session_id, info.new_content, target_artifact_id=artifact_id
+        )
+        if admission_error:
+            return False, admission_error, None
+
         memory.content = info.new_content
         memory.current_version += 1
         memory.updated_at = utc_now()
@@ -872,6 +929,12 @@ class ArtifactService:
         blocked = self._binary_immutable_error(memory)
         if blocked:
             return False, blocked
+
+        admission_error = self._text_admission_error(
+            session_id, new_content, target_artifact_id=artifact_id
+        )
+        if admission_error:
+            return False, admission_error
 
         memory.content = new_content
         memory.current_version += 1
