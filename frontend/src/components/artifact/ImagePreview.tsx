@@ -1,8 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { fetchArtifactRawObjectUrl, type ArtifactRawObjectUrlFetcher } from '@/lib/api';
+import { triggerObjectUrlDownload } from '@/lib/download';
 import { useArtifactStore } from '@/stores/artifactStore';
+import { useStreamStore } from '@/stores/streamStore';
+import FullscreenViewer, { ViewerToolbarButton } from '@/components/ui/FullscreenViewer';
+import ZoomableCanvas from '@/components/ui/ZoomableCanvas';
 
 /** Render an image artifact (content_type image/*). Source depends on whether the
  *  artifact is live THIS turn (pendingFlush = liveContent[id], cleared at COMPLETE):
@@ -40,6 +44,8 @@ export default function ImagePreview({
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [dimensions, setDimensions] = useState({ width: 1, height: 1 });
 
   // The send-local preview File for this upload, matched by original name (stable
   // ref → only re-renders when it appears/disappears). undefined for any image not
@@ -50,6 +56,12 @@ export default function ImagePreview({
   // Live this turn, not yet flushed (created/updated this turn). Cleared at COMPLETE.
   const storePendingFlush = useArtifactStore((s) => !!s.liveContent[artifactId]);
   const pendingFlush = pendingFlushProp ?? storePendingFlush;
+  const isStreaming = useStreamStore((s) => s.isStreaming);
+
+  useEffect(() => {
+    setExpanded(false);
+    setDimensions({ width: 1, height: 1 });
+  }, [artifactId]);
 
   useEffect(() => {
     setUrl(null);
@@ -95,6 +107,20 @@ export default function ImagePreview({
     };
   }, [artifactId, fetchRawObjectUrl, localFile, pendingFlush, refreshKey, sessionId]);
 
+  const handleDownload = useCallback(async () => {
+    if (!sessionId || pendingFlush || isStreaming) return;
+    try {
+      // Fetch a dedicated URL for download: triggerObjectUrlDownload revokes its
+      // input after clicking, so passing the displayed URL would break both the
+      // inline image and the still-open viewer.
+      const downloadUrl = await fetchRawObjectUrl(sessionId, artifactId);
+      triggerObjectUrlDownload(originalFilename || artifactId, downloadUrl);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Download failed';
+      window.alert(message);
+    }
+  }, [artifactId, fetchRawObjectUrl, isStreaming, originalFilename, pendingFlush, sessionId]);
+
   if (error) {
     return (
       <div className="h-full flex items-center justify-center p-6 text-center text-sm text-text-tertiary dark:text-text-tertiary-dark">
@@ -109,10 +135,68 @@ export default function ImagePreview({
       </div>
     );
   }
+  const title = originalFilename || artifactId;
   return (
     <div className="h-full overflow-auto flex items-start justify-center p-4">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={url} alt={originalFilename || artifactId} className="max-w-full h-auto" />
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        className="group/image relative max-w-full cursor-zoom-in rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 dark:focus-visible:ring-offset-bg-dark"
+        aria-label={`全屏查看图片：${title}`}
+        title="点击全屏查看"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={url}
+          alt={title}
+          className="max-w-full h-auto"
+          onLoad={(event) => {
+            const { naturalWidth, naturalHeight } = event.currentTarget;
+            if (naturalWidth > 0 && naturalHeight > 0) {
+              setDimensions({ width: naturalWidth, height: naturalHeight });
+            }
+          }}
+        />
+        <span className="pointer-events-none absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-surface/80 dark:bg-surface-dark/80 text-text-secondary dark:text-text-secondary-dark opacity-0 group-hover/image:opacity-100 group-focus-visible/image:opacity-100 [@media(pointer:coarse)]:opacity-100 shadow-float transition-opacity">
+          <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" />
+          </svg>
+        </span>
+      </button>
+
+      <FullscreenViewer
+        open={expanded}
+        title={title}
+        onClose={() => setExpanded(false)}
+        toolbarActions={!pendingFlush && !isStreaming ? (
+          <ViewerToolbarButton
+            onClick={handleDownload}
+            aria-label="Download image"
+            title="下载原图"
+          >
+            <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <path d="M7 10l5 5 5-5M12 15V3" />
+            </svg>
+          </ViewerToolbarButton>
+        ) : undefined}
+      >
+        <ZoomableCanvas
+          contentWidth={dimensions.width}
+          contentHeight={dimensions.height}
+          resetKey={`${artifactId}:${url}`}
+          onBackgroundClick={() => setExpanded(false)}
+          ariaLabel={`图片查看器：${title}`}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={url}
+            alt={title}
+            draggable={false}
+            className="h-full w-full select-none object-contain"
+          />
+        </ZoomableCanvas>
+      </FullscreenViewer>
     </div>
   );
 }
