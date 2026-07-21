@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
+from collections import deque
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -47,7 +48,10 @@ MAX_TABLES = 500
 MAX_TABLE_CELLS = 100_000
 MAX_MEDIA_BYTES = 100 * 1024 * 1024
 MAX_PACKAGE_BYTES = 512 * 1024 * 1024
-MAX_IMAGE_PIXELS = 100_000_000
+# A cropped RGBA image can briefly coexist as source, crop, and normalized buffers
+# inside the 1 GiB no-swap sandbox.  Keep enough headroom for Pillow and Python.
+MAX_IMAGE_PIXELS = 40_000_000
+MAX_REACHABLE_XML_PARTS = 1_000
 PANDOC_TIMEOUT_SECONDS = 120
 VECTOR_TIMEOUT_SECONDS = 60
 
@@ -55,6 +59,13 @@ RASTER_SUFFIXES = {
     ".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp",
 }
 VECTOR_SUFFIXES = {".emf", ".svg", ".wmf"}
+RELATIONSHIP_PART_ROLES = {
+    "header": "header",
+    "footer": "footer",
+    "footnotes": "footnote",
+    "endnotes": "endnote",
+    "comments": "comment",
+}
 
 
 class DecomposeError(RuntimeError):
@@ -142,8 +153,21 @@ def _part_relationships(
 
 
 def _paragraph_text(paragraph: etree._Element) -> str:
-    nodes = paragraph.xpath(".//w:t | .//w:delText", namespaces=NS)
-    return "".join(node.text or "" for node in nodes).strip()
+    nodes = paragraph.xpath(
+        ".//*[self::w:t or self::w:tab or self::w:br or self::w:cr]"
+        "[not(ancestor::w:del) and not(ancestor::w:moveFrom)]",
+        namespaces=NS,
+    )
+    values: list[str] = []
+    for node in nodes:
+        local_name = etree.QName(node).localname
+        if local_name == "tab":
+            values.append("\t")
+        elif local_name in {"br", "cr"}:
+            values.append("\n")
+        else:
+            values.append(node.text or "")
+    return "".join(values).strip()
 
 
 def _paragraph_style(paragraph: etree._Element) -> str | None:
@@ -161,12 +185,20 @@ def _heading_level(style: str | None) -> int | None:
     return max(1, min(int(digits or "1"), 9))
 
 
-def _paragraph_context(root: etree._Element) -> dict[str, dict[str, Any]]:
+def _paragraph_context(
+    root: etree._Element,
+) -> dict[etree._Element, dict[str, Any]]:
     paragraphs = root.xpath(".//w:p", namespaces=NS)
     texts = [_paragraph_text(paragraph) for paragraph in paragraphs]
+    next_nonempty: list[str | None] = [None] * len(texts)
+    next_text: str | None = None
+    for index in range(len(texts) - 1, -1, -1):
+        next_nonempty[index] = next_text
+        if texts[index]:
+            next_text = texts[index]
     previous_nonempty: str | None = None
     heading_stack: list[str | None] = [None] * 9
-    records: dict[str, dict[str, Any]] = {}
+    records: dict[etree._Element, dict[str, Any]] = {}
     for index, paragraph in enumerate(paragraphs):
         text = texts[index]
         style = _paragraph_style(paragraph)
@@ -174,16 +206,12 @@ def _paragraph_context(root: etree._Element) -> dict[str, dict[str, Any]]:
         if level and text:
             heading_stack[level - 1] = text
             heading_stack[level:] = [None] * (9 - level)
-        next_nonempty = next(
-            (candidate for candidate in texts[index + 1:] if candidate), None
-        )
-        path = root.getroottree().getpath(paragraph)
-        records[path] = {
+        records[paragraph] = {
             "text": text or None,
             "style": style,
             "heading_path": [item for item in heading_stack if item],
             "before": previous_nonempty,
-            "after": next_nonempty,
+            "after": next_nonempty[index],
         }
         if text:
             previous_nonempty = text
@@ -271,6 +299,14 @@ def _presentation(
     return crop, list(dict.fromkeys(reasons)), extent
 
 
+def _check_image_dimensions(image: Image.Image) -> None:
+    width, height = image.size
+    if width <= 0 or height <= 0 or width * height > MAX_IMAGE_PIXELS:
+        raise ResourceLimitError(
+            f"decoded image dimensions exceed limit: {width}x{height}"
+        )
+
+
 def _open_vector(data: bytes, suffix: str) -> Image.Image:
     office = shutil.which("soffice") or shutil.which("libreoffice")
     if not office:
@@ -301,31 +337,30 @@ def _open_vector(data: bytes, suffix: str) -> Image.Image:
         if result.returncode or not converted.is_file():
             detail = (result.stderr or result.stdout).strip()[-300:]
             raise DecomposeError(detail or "LibreOffice did not produce a PNG")
-        with Image.open(converted) as image:
-            return image.copy()
+        try:
+            with Image.open(converted) as image:
+                _check_image_dimensions(image)
+                return image.copy()
+        except Image.DecompressionBombError as exc:
+            raise ResourceLimitError(
+                "converted vector exceeds Pillow's pixel safety limit"
+            ) from exc
 
 
 def _open_media(data: bytes, suffix: str) -> Image.Image:
     if suffix in VECTOR_SUFFIXES:
-        image = _open_vector(data, suffix)
-    elif suffix in RASTER_SUFFIXES:
+        return _open_vector(data, suffix)
+    if suffix in RASTER_SUFFIXES:
         try:
             with Image.open(io.BytesIO(data)) as opened:
+                _check_image_dimensions(opened)
                 opened.seek(0)
-                image = ImageOps.exif_transpose(opened).copy()
+                return ImageOps.exif_transpose(opened)
         except Image.DecompressionBombError as exc:
             raise ResourceLimitError(
                 "decoded image exceeds Pillow's pixel safety limit"
             ) from exc
-    else:
-        raise DecomposeError(f"unsupported embedded image format: {suffix or '(none)'}")
-    width, height = image.size
-    if width <= 0 or height <= 0 or width * height > MAX_IMAGE_PIXELS:
-        image.close()
-        raise ResourceLimitError(
-            f"decoded image dimensions exceed limit: {width}x{height}"
-        )
-    return image
+    raise DecomposeError(f"unsupported embedded image format: {suffix or '(none)'}")
 
 
 def _materialize_visible_image(
@@ -344,15 +379,19 @@ def _materialize_visible_image(
         bottom = height - round(height * crop["bottom"] / 100_000)
         if left or top or right != width or bottom != height:
             visible_image = source_image.crop((left, top, right, bottom))
-        has_alpha = (
-            visible_image.mode in {"RGBA", "LA"}
-            or "transparency" in visible_image.info
-        )
-        normalized = visible_image.convert("RGBA" if has_alpha else "RGB")
+        if visible_image.mode in {"RGB", "RGBA"}:
+            normalized = visible_image
+        else:
+            has_alpha = (
+                visible_image.mode == "LA"
+                or "transparency" in visible_image.info
+            )
+            normalized = visible_image.convert("RGBA" if has_alpha else "RGB")
         try:
             normalized.save(output, format="PNG", optimize=True)
         finally:
-            normalized.close()
+            if normalized is not visible_image:
+                normalized.close()
     finally:
         if visible_image is not source_image:
             visible_image.close()
@@ -364,17 +403,28 @@ def _materialize_visible_image(
 
 def _inspect_figures(
     zf: zipfile.ZipFile,
-    parts: list[tuple[str, etree._Element]],
+    parts: list[tuple[str, str, etree._Element]],
     output_dir: Path,
     warnings: list[str],
 ) -> list[dict[str, Any]]:
     figures_dir = output_dir / "figures"
     figures_dir.mkdir()
     figures: list[dict[str, Any]] = []
-    for part, root in parts:
+    for part, role, root in parts:
         relationships = _part_relationships(zf, part)
-        context = _paragraph_context(root)
         candidates = root.xpath(".//a:blip | .//v:imagedata", namespaces=NS)
+        if not candidates:
+            continue
+        context = _paragraph_context(root)
+        body_block_orders = {
+            block: index
+            for index, block in enumerate(
+                root.xpath(
+                    "./w:body/*[self::w:p or self::w:tbl]", namespaces=NS
+                ),
+                start=1,
+            )
+        }
         for node in candidates:
             if len(figures) >= MAX_FIGURES:
                 raise DecomposeError(f"image occurrence limit is {MAX_FIGURES}")
@@ -383,6 +433,8 @@ def _inspect_figures(
             rel_id = node.get(f"{{{R_NS}}}id") if is_vml else node.get(f"{{{R_NS}}}embed")
             linked_id = None if is_vml else node.get(f"{{{R_NS}}}link")
             crop, reasons, extent = _presentation(node)
+            if role == "other":
+                reasons.append("unsupported_content_part")
             relationship = relationships.get(rel_id or linked_id or "")
             source_part: str | None = None
             if linked_id:
@@ -399,10 +451,18 @@ def _inspect_figures(
                     reasons.append("missing_embedded_media")
 
             paragraphs = node.xpath("ancestor::w:p[1]", namespaces=NS)
+            paragraph_element = paragraphs[0] if paragraphs else None
             paragraph_path = (
-                root.getroottree().getpath(paragraphs[0]) if paragraphs else None
+                root.getroottree().getpath(paragraph_element)
+                if paragraph_element is not None
+                else None
             )
-            paragraph = context.get(paragraph_path or "", {})
+            body_blocks = node.xpath(
+                "ancestor::*[parent::w:body and (self::w:p or self::w:tbl)][1]",
+                namespaces=NS,
+            )
+            block_order = body_block_orders.get(body_blocks[0]) if body_blocks else None
+            paragraph = context.get(paragraph_element, {})
             suffix = Path(source_part or "").suffix.casefold()
             if source_part and suffix not in RASTER_SUFFIXES | VECTOR_SUFFIXES:
                 reasons.append("unsupported_media_format")
@@ -431,6 +491,7 @@ def _inspect_figures(
             figure = {
                 "id": figure_id,
                 "part": part,
+                "part_role": role,
                 "source_part": source_part,
                 "visible_path": visible_path,
                 "vision_ready": bool(visible_path),
@@ -440,16 +501,44 @@ def _inspect_figures(
                 "crop": crop,
                 "display_extent_emu": extent,
                 "paragraph_path": paragraph_path,
+                "block_order": block_order,
                 "context": {
                     "heading_path": paragraph.get("heading_path", []),
                     "before": paragraph.get("before"),
                     "current": paragraph.get("text"),
                     "after": paragraph.get("after"),
                 },
-                "likely_decorative": part != "word/document.xml",
+                "likely_decorative": role in {"header", "footer"},
             }
             figures.append(figure)
     return figures
+
+
+def _table_fallback_reasons(table: etree._Element) -> list[str]:
+    reasons: list[str] = []
+    if table.xpath(".//w:tbl", namespaces=NS):
+        reasons.append("nested_table")
+    revision_elements = {
+        "ins", "del", "moveFrom", "moveTo", "cellIns", "cellDel", "cellMerge",
+    }
+    for element in table.iter():
+        qname = etree.QName(element)
+        if (
+            qname.namespace == W_NS
+            and (
+                qname.localname in revision_elements
+                or qname.localname.endswith("Change")
+            )
+        ):
+            reasons.append("tracked_changes")
+            break
+    if table.xpath(
+        ".//w:drawing | .//w:pict | .//w:object | .//w:altChunk"
+        " | .//*[local-name()='oMath' or local-name()='oMathPara']",
+        namespaces=NS,
+    ):
+        reasons.append("non_text_cell_content")
+    return reasons
 
 
 def _cell_record(cell: etree._Element, column: int) -> dict[str, Any]:
@@ -462,14 +551,15 @@ def _cell_record(cell: etree._Element, column: int) -> dict[str, Any]:
     vertical_merge = None
     if merges:
         vertical_merge = merges[0].get(f"{{{W_NS}}}val") or "continue"
-    paragraphs = cell.xpath("./w:p", namespaces=NS)
+    paragraphs = cell.xpath(
+        ".//w:p[count(ancestor::w:tbl) = 1]", namespaces=NS
+    )
     text = "\n".join(filter(None, (_paragraph_text(p) for p in paragraphs)))
     return {
         "column": column,
         "grid_span": grid_span,
         "vertical_merge": vertical_merge,
         "text": text,
-        "nested_table": bool(cell.xpath("./w:tbl", namespaces=NS)),
     }
 
 
@@ -504,26 +594,24 @@ def _extract_blocks_and_tables(
     tables: list[dict[str, Any]] = []
     total_cells = 0
     previous_text: str | None = None
+    figure_ids_by_block: dict[int, list[str]] = {}
+    for figure in figures:
+        if figure["part"] != "word/document.xml":
+            continue
+        block_order = figure.get("block_order")
+        if block_order is not None:
+            figure_ids_by_block.setdefault(block_order, []).append(figure["id"])
 
     for node in body_nodes:
         local_name = etree.QName(node).localname
         if local_name not in {"p", "tbl"}:
             continue
-        block_path = root.getroottree().getpath(node)
-        figure_ids = [
-            figure["id"]
-            for figure in figures
-            if figure["part"] == "word/document.xml"
-            and figure["paragraph_path"]
-            and (
-                figure["paragraph_path"] == block_path
-                or figure["paragraph_path"].startswith(block_path + "/")
-            )
-        ]
+        block_order = len(blocks) + 1
+        figure_ids = figure_ids_by_block.get(block_order, [])
         if local_name == "p":
             text = _paragraph_text(node)
             blocks.append({
-                "order": len(blocks) + 1,
+                "order": block_order,
                 "type": "paragraph",
                 "text": text,
                 "style": _paragraph_style(node),
@@ -536,58 +624,81 @@ def _extract_blocks_and_tables(
         if len(tables) >= MAX_TABLES:
             raise DecomposeError(f"table limit is {MAX_TABLES}")
         table_id = f"table-{len(tables) + 1:03d}"
-        row_records: list[list[dict[str, Any]]] = []
-        column_counts: list[int] = []
-        complex_table = False
-        for row in node.xpath("./w:tr", namespaces=NS):
-            row_cells: list[dict[str, Any]] = []
-            column = 1
-            for cell in row.xpath("./w:tc", namespaces=NS):
-                total_cells += 1
-                if total_cells > MAX_TABLE_CELLS:
-                    raise DecomposeError(
-                        f"table cell limit is {MAX_TABLE_CELLS}"
+        fallback_reasons = _table_fallback_reasons(node)
+        if fallback_reasons:
+            needs_page = any(
+                reason in {"nested_table", "non_text_cell_content"}
+                for reason in fallback_reasons
+            )
+            table = {
+                "id": table_id,
+                "structure_ready": False,
+                "json_path": None,
+                "markdown_path": None,
+                "rows": None,
+                "columns": None,
+                "complex": None,
+                "fallback": "page_required" if needs_page else "unsupported",
+                "fallback_reasons": fallback_reasons,
+                "context_before": previous_text,
+                "figure_ids": figure_ids,
+            }
+        else:
+            row_records: list[list[dict[str, Any]]] = []
+            column_counts: list[int] = []
+            complex_table = False
+            for row in node.xpath("./w:tr", namespaces=NS):
+                row_cells: list[dict[str, Any]] = []
+                column = 1
+                for cell in row.xpath("./w:tc", namespaces=NS):
+                    total_cells += 1
+                    if total_cells > MAX_TABLE_CELLS:
+                        raise DecomposeError(
+                            f"table cell limit is {MAX_TABLE_CELLS}"
+                        )
+                    record = _cell_record(cell, column)
+                    row_cells.append(record)
+                    column += record["grid_span"]
+                    complex_table = complex_table or bool(
+                        record["grid_span"] != 1
+                        or record["vertical_merge"]
                     )
-                record = _cell_record(cell, column)
-                row_cells.append(record)
-                column += record["grid_span"]
-                complex_table = complex_table or bool(
-                    record["grid_span"] != 1
-                    or record["vertical_merge"]
-                    or record["nested_table"]
-                )
-            row_records.append(row_cells)
-            column_counts.append(column - 1)
-        columns = max(column_counts, default=0)
-        if len(set(column_counts)) > 1:
-            complex_table = True
+                row_records.append(row_cells)
+                column_counts.append(column - 1)
+            columns = max(column_counts, default=0)
+            if len(set(column_counts)) > 1:
+                complex_table = True
 
-        json_path = tables_dir / f"{table_id}.json"
-        markdown_path = tables_dir / f"{table_id}.md"
-        table_data = {
-            "id": table_id,
-            "rows": row_records,
-            "row_count": len(row_records),
-            "column_count": columns,
-            "complex": complex_table,
-        }
-        _json_write(json_path, table_data)
-        markdown_path.write_text(
-            _table_markdown(row_records, columns), encoding="utf-8"
-        )
-        table = {
-            "id": table_id,
-            "json_path": json_path.relative_to(output_dir).as_posix(),
-            "markdown_path": markdown_path.relative_to(output_dir).as_posix(),
-            "rows": len(row_records),
-            "columns": columns,
-            "complex": complex_table,
-            "context_before": previous_text,
-            "figure_ids": figure_ids,
-        }
+            json_path = tables_dir / f"{table_id}.json"
+            markdown_path = tables_dir / f"{table_id}.md"
+            table_data = {
+                "id": table_id,
+                "structure_ready": True,
+                "rows": row_records,
+                "row_count": len(row_records),
+                "column_count": columns,
+                "complex": complex_table,
+            }
+            _json_write(json_path, table_data)
+            markdown_path.write_text(
+                _table_markdown(row_records, columns), encoding="utf-8"
+            )
+            table = {
+                "id": table_id,
+                "structure_ready": True,
+                "json_path": json_path.relative_to(output_dir).as_posix(),
+                "markdown_path": markdown_path.relative_to(output_dir).as_posix(),
+                "rows": len(row_records),
+                "columns": columns,
+                "complex": complex_table,
+                "fallback": None,
+                "fallback_reasons": [],
+                "context_before": previous_text,
+                "figure_ids": figure_ids,
+            }
         tables.append(table)
         blocks.append({
-            "order": len(blocks) + 1,
+            "order": block_order,
             "type": "table",
             "table_id": table_id,
             "figure_ids": figure_ids,
@@ -595,15 +706,50 @@ def _extract_blocks_and_tables(
     return blocks, tables
 
 
-def _discover_parts(zf: zipfile.ZipFile) -> list[str]:
-    parts = ["word/document.xml"]
+def _relationship_part_role(relationship_type: str) -> str:
+    suffix = relationship_type.rsplit("/", 1)[-1]
+    return RELATIONSHIP_PART_ROLES.get(suffix, "other")
+
+
+def _discover_parts(zf: zipfile.ZipFile) -> list[tuple[str, str]]:
     names = set(zf.namelist())
-    for prefix in ("word/header", "word/footer"):
-        parts.extend(sorted(
-            name for name in names
-            if name.startswith(prefix) and name.endswith(".xml")
-        ))
-    return list(dict.fromkeys(parts))
+    queue: deque[tuple[str, str]] = deque([
+        ("word/document.xml", "body"),
+    ])
+    discovered: list[tuple[str, str]] = []
+    visited: set[str] = set()
+    while queue:
+        part, role = queue.popleft()
+        if part in visited:
+            continue
+        visited.add(part)
+        discovered.append((part, role))
+        if len(discovered) > MAX_REACHABLE_XML_PARTS:
+            raise ResourceLimitError(
+                f"reachable XML part limit is {MAX_REACHABLE_XML_PARTS}"
+            )
+        relationships = sorted(
+            _part_relationships(zf, part).values(),
+            key=lambda relationship: (
+                str(relationship["target"]),
+                str(relationship["type"]),
+            ),
+        )
+        for relationship in relationships:
+            if relationship["external"]:
+                continue
+            target = str(relationship["target"])
+            if (
+                target in names
+                and target.startswith("word/")
+                and target.casefold().endswith(".xml")
+                and target not in visited
+            ):
+                queue.append((
+                    target,
+                    _relationship_part_role(str(relationship["type"])),
+                ))
+    return discovered
 
 
 def _unsupported_content_warnings(root: etree._Element) -> list[str]:
@@ -631,12 +777,17 @@ def inspect_docx(
         with zipfile.ZipFile(source) as zf:
             _validate_package(zf)
             parsed_parts = [
-                (part, _xml(zf.read(part))) for part in _discover_parts(zf)
+                (part, role, _xml(zf.read(part)))
+                for part, role in _discover_parts(zf)
             ]
-            warnings.extend(_unsupported_content_warnings(parsed_parts[0][1]))
+            for part, _, root in parsed_parts:
+                warnings.extend(
+                    f"{part}: {warning}"
+                    for warning in _unsupported_content_warnings(root)
+                )
             figures = _inspect_figures(zf, parsed_parts, output_dir, warnings)
             blocks, tables = _extract_blocks_and_tables(
-                parsed_parts[0][1], figures, output_dir
+                parsed_parts[0][2], figures, output_dir
             )
     except zipfile.BadZipFile as exc:
         raise DecomposeError(f"invalid DOCX package: {exc}") from exc
@@ -698,7 +849,7 @@ def decompose_docx(source: Path, destination: Path) -> dict[str, Any]:
             encoding="utf-8",
         )
         manifest = {
-            "schema_version": 1,
+            "schema_version": 2,
             "source": source.name,
             "text_path": "document.md",
             "blocks_path": "blocks.jsonl",
@@ -715,6 +866,12 @@ def decompose_docx(source: Path, destination: Path) -> dict[str, Any]:
                     1 for figure in figures if not figure["vision_ready"]
                 ),
                 "tables": len(tables),
+                "structure_ready_tables": sum(
+                    1 for table in tables if table["structure_ready"]
+                ),
+                "table_fallbacks": sum(
+                    1 for table in tables if not table["structure_ready"]
+                ),
             },
         }
         _json_write(temp_dir / "manifest.json", manifest)

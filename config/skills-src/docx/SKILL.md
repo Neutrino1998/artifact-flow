@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 LibreOffice、Pandoc、python-docx、lxml、Pillow、RapidFuzz。
 metadata:
-  version: "2.3.0"
+  version: "2.4.0"
 ---
 
 # Word 文档
@@ -53,10 +53,14 @@ manifest 中的标题、前后段落和 block 顺序，不要把整个目录或�
 figure。只把与任务有关且 `vision_ready: true` 的 `visible_path` 持久化并交给视觉能力：普通位图是
 原始可见内容，矩形 `a:srcRect` 裁剪会先物化成裁剪后的 PNG，EMF/WMF/SVG 会 best-effort 转 PNG。
 脚本不会输出未经显示变换的原始媒体；`source_part` 只是 DOCX 包内定位元数据，不能代替
-`visible_path`，否则可能读到文档中被裁掉的内容。
+`visible_path`，否则可能读到文档中被裁掉的内容。正文关系可达的页眉、页脚、脚注和尾注图片也会
+进入 manifest；未知内容 part 中的图片只标记 fallback，不猜其显示语义。
 
-表格以 `document.md` 为常规阅读入口；需要稳定的行列、合并单元格或嵌套表信息时，按 manifest
-读取对应 `tables/table-*.json`。`table-*.md` 只用于快速浏览，不是复杂表格的结构真值。
+表格以 `document.md` 为常规阅读入口。只有 manifest 中 `structure_ready: true` 的普通文本表格
+才读取对应 `tables/table-*.json`，它保留外层行列和横向/纵向合并；`table-*.md` 只用于快速浏览。
+嵌套表、带修订的表格、图片/公式等非文本单元格会设为 `structure_ready: false`，不生成看似完整的
+JSON：嵌套或非文本内容按 `fallback` 渲染必要页面；表格内修订标记为 `unsupported`，只能做可见
+内容的 best-effort 阅读，不宣称保留增删状态、作者或时间。脚本不递归解释这些结构。
 
 普通文字文档即使含有插图，也不要因此渲染全文。manifest 中 `fallback: page_required` 表示脚本
 不能可靠恢复当前出现位置的可见像素，例如旋转/翻转、非矩形裁剪、图片效果、VML、SmartArt 或

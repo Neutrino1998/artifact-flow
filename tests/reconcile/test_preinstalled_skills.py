@@ -175,6 +175,9 @@ def test_document_skills_use_risk_bounded_visual_verification():
     assert "`vision_ready: true`" in docx_md
     assert "脚本不会输出未经显示变换的原始媒体" in docx_md
     assert "`source_part` 只是 DOCX 包内定位元数据" in docx_md
+    assert "`structure_ready: true`" in docx_md
+    assert "表格内修订标记为 `unsupported`" in docx_md
+    assert "脚本不递归解释这些结构" in docx_md
     assert "--pages 5,8" in docx_md
     assert "不要因演示文稿含图片就把所有页面交给视觉能力" in pptx_md
     assert "普通数据读取、公式分析和值修改默认不渲染" in xlsx_md
@@ -196,6 +199,10 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
 
     image_buffer = io.BytesIO()
     Image.new("RGB", (100, 40), "red").save(image_buffer, format="PNG")
+    footnote_image_buffer = io.BytesIO()
+    Image.new("RGB", (20, 10), "blue").save(
+        footnote_image_buffer, format="PNG"
+    )
     document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="{mod.W_NS}" xmlns:r="{mod.R_NS}"
  xmlns:a="{mod.A_NS}" xmlns:pic="{mod.PIC_NS}" xmlns:wp="{mod.WP_NS}">
@@ -215,6 +222,7 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
           <pic:spPr><a:xfrm/><a:prstGeom prst="rect"/></pic:spPr>
         </pic:pic></a:graphicData></a:graphic>
       </wp:inline></w:drawing></w:r>
+      <w:r><w:footnoteReference w:id="1"/></w:r>
     </w:p>
     <w:p>
       <w:r><w:t>Rotated fallback</w:t></w:r>
@@ -231,6 +239,23 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
       <w:tcPr><w:gridSpan w:val="2"/></w:tcPr>
       <w:p><w:r><w:t>Merged cell</w:t></w:r></w:p>
     </w:tc></w:tr></w:tbl>
+    <w:tbl><w:tr><w:tc>
+      <w:p><w:r><w:t>Outer cell</w:t></w:r></w:p>
+      <w:tbl><w:tr><w:tc>
+        <w:p><w:r><w:t>Nested A</w:t></w:r></w:p>
+      </w:tc><w:tc>
+        <w:p><w:r><w:t>Nested B</w:t></w:r></w:p>
+      </w:tc></w:tr></w:tbl>
+      <w:p/>
+    </w:tc></w:tr></w:tbl>
+    <w:tbl><w:tr><w:tc><w:p>
+      <w:del w:author="Reviewer" w:date="2026-01-01T00:00:00Z">
+        <w:r><w:delText>old</w:delText></w:r>
+      </w:del>
+      <w:ins w:author="Reviewer" w:date="2026-01-01T00:00:00Z">
+        <w:r><w:t>new</w:t></w:r>
+      </w:ins>
+    </w:p></w:tc></w:tr></w:tbl>
     <w:sectPr/>
   </w:body>
 </w:document>
@@ -241,6 +266,7 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
   <Default Extension="xml" ContentType="application/xml"/>
   <Default Extension="png" ContentType="image/png"/>
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/>
 </Types>
 """
     package_rels = """<?xml version="1.0" encoding="UTF-8"?>
@@ -251,6 +277,34 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
     document_rels = """<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes" Target="footnotes.xml"/>
+</Relationships>
+"""
+    footnotes_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:footnotes xmlns:w="{mod.W_NS}" xmlns:r="{mod.R_NS}"
+ xmlns:a="{mod.A_NS}" xmlns:pic="{mod.PIC_NS}" xmlns:wp="{mod.WP_NS}">
+  <w:footnote w:type="separator" w:id="-1">
+    <w:p><w:r><w:separator/></w:r></w:p>
+  </w:footnote>
+  <w:footnote w:type="continuationSeparator" w:id="0">
+    <w:p><w:r><w:continuationSeparator/></w:r></w:p>
+  </w:footnote>
+  <w:footnote w:id="1"><w:p>
+    <w:r><w:t>Footnote image</w:t></w:r>
+    <w:r><w:drawing><wp:inline><wp:extent cx="20" cy="10"/>
+      <a:graphic><a:graphicData><pic:pic>
+        <pic:blipFill><a:blip r:embed="rId1"/>
+          <a:stretch><a:fillRect/></a:stretch>
+        </pic:blipFill>
+        <pic:spPr><a:xfrm/><a:prstGeom prst="rect"/></pic:spPr>
+      </pic:pic></a:graphicData></a:graphic>
+    </wp:inline></w:drawing></w:r>
+  </w:p></w:footnote>
+</w:footnotes>
+"""
+    footnotes_rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/footnote.png"/>
 </Relationships>
 """
     source = tmp_path / "input.docx"
@@ -259,17 +313,21 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
         zf.writestr("_rels/.rels", package_rels)
         zf.writestr("word/document.xml", document_xml)
         zf.writestr("word/_rels/document.xml.rels", document_rels)
+        zf.writestr("word/footnotes.xml", footnotes_xml)
+        zf.writestr("word/_rels/footnotes.xml.rels", footnotes_rels)
         zf.writestr("word/media/image1.png", image_buffer.getvalue())
+        zf.writestr("word/media/footnote.png", footnote_image_buffer.getvalue())
 
     output = tmp_path / "decomposed"
     output.mkdir()
     figures, blocks, tables, warnings = mod.inspect_docx(source, output)
 
     assert warnings == []
-    assert len(figures) == 2
+    assert len(figures) == 3
     assert figures[0]["source_part"] == figures[1]["source_part"]
     assert figures[0]["vision_ready"] is True
     assert figures[0]["display_mode"] == "cropped"
+    assert figures[0]["block_order"] == 2
     assert figures[0]["context"]["heading_path"] == ["Section"]
     assert figures[0]["context"]["current"] == "Visible crop"
     with Image.open(output / figures[0]["visible_path"]) as visible:
@@ -278,17 +336,35 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
     assert figures[1]["vision_ready"] is False
     assert figures[1]["fallback"] == "page_required"
     assert figures[1]["fallback_reasons"] == ["rotation"]
+    assert figures[1]["block_order"] == 3
     assert figures[1]["visible_path"] is None
+    assert figures[2]["part"] == "word/footnotes.xml"
+    assert figures[2]["part_role"] == "footnote"
+    assert figures[2]["vision_ready"] is True
+    assert figures[2]["block_order"] is None
+    assert figures[2]["likely_decorative"] is False
 
     assert [block["type"] for block in blocks] == [
-        "paragraph", "paragraph", "paragraph", "table",
+        "paragraph", "paragraph", "paragraph", "table", "table", "table",
     ]
-    assert len(tables) == 1
+    assert blocks[1]["figure_ids"] == ["figure-001"]
+    assert blocks[2]["figure_ids"] == ["figure-002"]
+    assert len(tables) == 3
+    assert tables[0]["structure_ready"] is True
     assert tables[0]["complex"] is True
     assert tables[0]["columns"] == 2
     table_data = json.loads((output / tables[0]["json_path"]).read_text())
+    assert table_data["structure_ready"] is True
     assert table_data["rows"][0][0]["grid_span"] == 2
     assert table_data["rows"][0][0]["text"] == "Merged cell"
+    assert tables[1]["structure_ready"] is False
+    assert tables[1]["fallback"] == "page_required"
+    assert tables[1]["fallback_reasons"] == ["nested_table"]
+    assert tables[1]["json_path"] is None
+    assert tables[2]["structure_ready"] is False
+    assert tables[2]["fallback"] == "unsupported"
+    assert tables[2]["fallback_reasons"] == ["tracked_changes"]
+    assert tables[2]["json_path"] is None
 
     if shutil.which("pandoc"):
         pandoc_output = tmp_path / "pandoc"
@@ -300,7 +376,11 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
     limited_output = tmp_path / "limited"
     limited_output.mkdir()
     original_pixel_limit = mod.MAX_IMAGE_PIXELS
+    original_exif_transpose = mod.ImageOps.exif_transpose
     mod.MAX_IMAGE_PIXELS = 10
+    mod.ImageOps.exif_transpose = lambda image: (_ for _ in ()).throw(
+        AssertionError("pixel limit must run before EXIF transpose/decode")
+    )
     try:
         try:
             mod.inspect_docx(source, limited_output)
@@ -310,6 +390,27 @@ def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
             raise AssertionError("image pixel limit must fail loudly")
     finally:
         mod.MAX_IMAGE_PIXELS = original_pixel_limit
+        mod.ImageOps.exif_transpose = original_exif_transpose
+
+    image_free_output = tmp_path / "image-free"
+    image_free_output.mkdir()
+    image_free_root = mod._xml(
+        f'<w:styles xmlns:w="{mod.W_NS}"><w:p><w:r><w:t>x</w:t></w:r></w:p></w:styles>'.encode()
+    )
+    original_paragraph_context = mod._paragraph_context
+    mod._paragraph_context = lambda root: (_ for _ in ()).throw(
+        AssertionError("image-free parts must skip paragraph context")
+    )
+    try:
+        with zipfile.ZipFile(source) as zf:
+            assert mod._inspect_figures(
+                zf,
+                [("word/styles.xml", "other", image_free_root)],
+                image_free_output,
+                [],
+            ) == []
+    finally:
+        mod._paragraph_context = original_paragraph_context
 
 
 def test_docx_apply_redline_smoke(tmp_path):
