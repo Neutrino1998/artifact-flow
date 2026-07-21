@@ -55,6 +55,7 @@ export default function ZoomableCanvas({
     moved: boolean;
   } | null>(null);
   const suppressBackgroundClickRef = useRef(false);
+  const pointerDownOnBackgroundRef = useRef(false);
   const [viewport, setViewport] = useState({ width: 1, height: 1 });
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
@@ -138,7 +139,13 @@ export default function ZoomableCanvas({
   }, [changeZoom]);
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!canPan || event.button !== 0) return;
+    if (event.button !== 0) return;
+    // Pointer capture retargets the eventual click to the capturing viewport,
+    // even when the original press was on the image/SVG and capture has already
+    // been released at pointerup. Preserve the pre-capture hit-test result so a
+    // content click cannot be mistaken for a background click later.
+    pointerDownOnBackgroundRef.current = event.target === event.currentTarget;
+    if (!canPan) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = {
       pointerId: event.pointerId,
@@ -160,8 +167,18 @@ export default function ZoomableCanvas({
 
   const finishDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      if (event.type === 'pointercancel') {
+        pointerDownOnBackgroundRef.current = false;
+        suppressBackgroundClickRef.current = false;
+      }
+      return;
+    }
     suppressBackgroundClickRef.current = drag.moved;
+    if (event.type === 'pointercancel') {
+      pointerDownOnBackgroundRef.current = false;
+      suppressBackgroundClickRef.current = false;
+    }
     dragRef.current = null;
     setDragging(false);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -197,11 +214,15 @@ export default function ZoomableCanvas({
       onKeyDown={handleKeyDown}
       onDoubleClick={reset}
       onClick={(event) => {
+        const startedOnBackground = pointerDownOnBackgroundRef.current;
+        pointerDownOnBackgroundRef.current = false;
         if (suppressBackgroundClickRef.current) {
           suppressBackgroundClickRef.current = false;
           return;
         }
-        if (event.target === event.currentTarget) onBackgroundClick?.();
+        if (startedOnBackground && event.target === event.currentTarget) {
+          onBackgroundClick?.();
+        }
       }}
     >
       <div
