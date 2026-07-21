@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 from enum import Enum
 
+from config import config
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -108,7 +109,7 @@ class BaseTool(ABC):
         name: str,
         description: str,
         permission: ToolPermission = ToolPermission.AUTO,
-        max_result_size_chars: float = 50000,
+        max_result_size_chars: Optional[float] = None,
     ):
         """
         初始化工具
@@ -117,15 +118,20 @@ class BaseTool(ABC):
             name: 工具名称（唯一标识）
             description: 工具描述
             permission: 权限级别
-            max_result_size_chars: 工具结果字符数上限。超过则由引擎中间件
-                自动落盘为 artifact，并把回填内容替换为预览 + artifact id。
+            max_result_size_chars: 工具结果字符数上限。None 使用部署级默认值；
+                超过则由引擎中间件自动落盘为 artifact，并把回填内容替换为
+                预览 + artifact id。
                 math.inf = 永不落盘（read_artifact 必须用，避免循环）；
-                0 = 任何非空成功结果都落盘。默认 50000。
+                0 = 任何非空成功结果都落盘。
         """
         self.name = name
         self.description = description
         self.permission = permission
-        self.max_result_size_chars = max_result_size_chars
+        self.max_result_size_chars = (
+            config.TOOL_RESULT_INLINE_MAX_CHARS
+            if max_result_size_chars is None
+            else max_result_size_chars
+        )
     
     @abstractmethod
     async def execute(self, **params) -> ToolResult:

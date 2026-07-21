@@ -168,6 +168,39 @@ async def test_mcp_tool_renders_structured_content_as_json():
     assert result.data == '{"ok": true, "items": [1, 2]}'
 
 
+async def test_mcp_large_success_text_is_left_complete_for_engine():
+    """Adapter must not discard the tail before engine artifact persistence."""
+    payload = "X" * (config.TOOL_RESULT_INLINE_MAX_CHARS + 1)
+
+    async def fake_call(url, headers, timeout, tool_name, arguments):
+        return McpToolCallResult(
+            is_error=False,
+            content=[{"type": "text", "text": payload}],
+        )
+
+    result = await _tool(McpClientManager(call_callable=fake_call))()
+
+    assert result.success is True
+    assert result.data == payload
+
+
+async def test_mcp_large_error_text_remains_bounded():
+    payload = "X" * (config.TOOL_RESULT_INLINE_MAX_CHARS + 1)
+
+    async def fake_call(url, headers, timeout, tool_name, arguments):
+        return McpToolCallResult(
+            is_error=True,
+            content=[{"type": "text", "text": payload}],
+        )
+
+    tool = _tool(McpClientManager(call_callable=fake_call))
+    result = await tool()
+
+    assert result.success is False
+    assert len(result.error) == tool.max_result_size_chars
+    assert result.error.endswith("[MCP error response truncated...]")
+
+
 async def test_mcp_tool_converts_single_image_content_block_to_artifact():
     png = b"\x89PNG\r\n\x1a\n"
 

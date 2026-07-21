@@ -43,7 +43,7 @@ class BashTool(BaseTool):
       success=True + 输出里带 exit code,让模型自己解读。success=False 只留给
       基建故障(容器起不来 / exec 通道卡死)。
     - 输出溢出分两层:session 侧 SANDBOX_MAX_OUTPUT_CHARS 硬帽(防内存放大,
-      显式截断标记);>max_result_size_chars(50k)的部分由引擎溢出转 artifact
+      显式截断标记);>max_result_size_chars 的捕获结果由引擎溢出转 artifact
       idiom 接手,引擎零改动。
     """
 

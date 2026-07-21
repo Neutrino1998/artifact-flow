@@ -235,7 +235,7 @@ class GrepArtifactTool(BaseTool):
                 "Returns 'No matches for <pattern>' on empty hit; invalid regex returns success=false."
             ),
             permission=ToolPermission.AUTO,
-            # 沿用 BaseTool 默认 max_result_size_chars=50000：grep 结果若超阈值，
+            # 沿用 BaseTool 默认内联阈值：grep 结果若超阈值，
             # 引擎中间件会把它落盘成新 artifact，模型下次用 read_artifact 分段取。
         )
         self._service = service

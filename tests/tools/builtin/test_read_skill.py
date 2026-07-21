@@ -8,13 +8,13 @@ mount_skill 覆盖:可见性闸;无附属文件报错;剥壳前缀(wrapper / 裸
 """
 
 import io
-import math
 import os
 import zipfile
 from types import SimpleNamespace
 
 import pytest
 
+from config import config
 from core.effective_skillset import EffectiveSkillSet
 from reconcile.snapshot import SkillInfo
 from tools.base import ToolPermission
@@ -66,10 +66,10 @@ def _make_zip(members: dict) -> bytes:
 # ============================================================
 
 
-def test_contract_mirrors_read_artifact():
+def test_read_skill_uses_common_inline_limit():
     t = _tool({}, )
     assert t.permission == ToolPermission.AUTO
-    assert t.max_result_size_chars == math.inf
+    assert t.max_result_size_chars == config.TOOL_RESULT_INLINE_MAX_CHARS
     assert t.name == "read_skill"
 
 

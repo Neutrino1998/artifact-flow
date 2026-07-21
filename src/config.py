@@ -66,8 +66,8 @@ class Settings(BaseSettings):
     COMPACTION_TIMEOUT: int = 300            # 秒, 单次 compact LLM 调用超时（thinking 模型压缩 ~100k token 输入需较长 TTFT+生成时间，120s 偏紧）
     INVENTORY_PREVIEW_LENGTH: int = 200     # artifact 清单内容预览截断长度
     READ_ARTIFACT_MAX_CHARS: int = 50000    # read_artifact 默认字符上限（隐藏，模型不可见）
-    HTTP_TOOL_MAX_RESULT_CHARS: int = 50000  # external http 工具响应文本上限（隐藏）；超限尾部截断并显式标记
-    MCP_TOOL_MAX_RESULT_CHARS: int = 50000   # external mcp 工具 text/structured 响应上限（隐藏）；超限尾部截断并显式标记
+    # 单次成功工具结果内联上限；超限由引擎完整落 artifact。
+    TOOL_RESULT_INLINE_MAX_CHARS: int = Field(default=20_000, ge=0)
     MCP_TOOL_LIST_CACHE_SECONDS: int = 60    # MCP tools/list 进程内缓存 TTL；0=每次重新发现
     TOOL_PERSIST_PREVIEW_LENGTH: int = 1000  # 工具结果落盘后回填给模型的预览长度
     SEARCH_TOOLS_MAX_RESULTS: int = 15      # search_tools 单次渲染完整 doc 的工具数上限（隐藏）；
@@ -256,7 +256,7 @@ class Settings(BaseSettings):
     SANDBOX_CPU_LIMIT: float = 1.0      # CPU 核数上限(换算 NanoCpus)
     SANDBOX_PIDS_LIMIT: int = 256       # fork 炸弹闸
     SANDBOX_MAX_OUTPUT_CHARS: int = 200_000  # 单命令输出捕获硬帽:超出继续 drain 但丢弃(防内存放大),
-                                             # 截断显式标记。>50k 的部分由引擎溢出转 artifact idiom 接手。
+                                             # 截断显式标记。超过工具内联上限的捕获结果由引擎落 artifact。
     SANDBOX_STATUS_MAX_ENTRIES: int = 20     # 动态状态注入的工作区第一层清单条数帽:工作区是模型可写的树,
                                              # 不设帽=prompt 注水放大器;超出部分显式 "(+N more)" 标记
     # 磁盘配额(2026-06-10 C′ 方向:loop 池子=硬墙、以下=软配额与准入;host-prep 见 D 段)。
