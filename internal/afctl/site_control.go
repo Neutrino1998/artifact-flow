@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -251,6 +252,9 @@ func validateEnv(path string, site Site) error {
 				return fmt.Errorf("ACME TLS requires non-placeholder %s", key)
 			}
 		}
+		if err := validateACMEDomain(values["AF_DOMAIN"]); err != nil {
+			return err
+		}
 		if value := values["AF_HTTP_PORT"]; value != "" && value != "80" {
 			return fmt.Errorf("ACME TLS requires AF_HTTP_PORT=80")
 		}
@@ -263,6 +267,14 @@ func validateEnv(path string, site Site) error {
 	}
 	if runtimeValue, exists := values["ARTIFACTFLOW_SANDBOX_RUNTIME"]; exists && runtimeValue != site.SandboxRuntime {
 		return fmt.Errorf("ARTIFACTFLOW_SANDBOX_RUNTIME=%s conflicts with site.toml sandbox_runtime=%s; site.toml is authoritative", runtimeValue, site.SandboxRuntime)
+	}
+	return nil
+}
+
+func validateACMEDomain(value string) error {
+	parsed, err := url.Parse("https://" + value)
+	if err != nil || parsed.Host != value || parsed.Hostname() != value || parsed.Port() != "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("ACME TLS requires AF_DOMAIN to be a bare domain without scheme, port, or path (for example example.com)")
 	}
 	return nil
 }

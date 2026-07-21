@@ -224,6 +224,60 @@ func TestAnsibleSiteRejectsBundledInfra(t *testing.T) {
 	}
 }
 
+func TestACMESiteValidationRequiresBareDomain(t *testing.T) {
+	tests := []struct {
+		name    string
+		domain  string
+		wantErr bool
+	}{
+		{name: "domain", domain: "example.com"},
+		{name: "localhost", domain: "localhost"},
+		{name: "scheme", domain: "https://example.com", wantErr: true},
+		{name: "port", domain: "example.com:443", wantErr: true},
+		{name: "path", domain: "example.com/service", wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeTestSite(t, root, "runc")
+			sitePath := filepath.Join(root, "control", "site.toml")
+			siteData, err := os.ReadFile(sitePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			siteData = []byte(strings.Replace(string(siteData), `tls = "static"`, `tls = "acme"`, 1))
+			if err := os.WriteFile(sitePath, siteData, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			envPath := filepath.Join(root, "control", ".env")
+			env, err := os.OpenFile(envPath, os.O_APPEND|os.O_WRONLY, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, writeErr := fmt.Fprintf(env, "AF_DOMAIN=%s\nAF_ACME_EMAIL=ops@example.com\n", test.domain)
+			closeErr := env.Close()
+			if writeErr != nil {
+				t.Fatal(writeErr)
+			}
+			if closeErr != nil {
+				t.Fatal(closeErr)
+			}
+
+			c := NewController(root, &bytes.Buffer{}, &bytes.Buffer{})
+			_, err = c.SiteValidate()
+			if test.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "AF_DOMAIN to be a bare domain") {
+					t.Fatalf("expected bare-domain error for %q, got %v", test.domain, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected %q to be valid, got %v", test.domain, err)
+			}
+		})
+	}
+}
+
 func TestSiteMigrateV1PreservesSecretsAndDropsOldSandboxSwitch(t *testing.T) {
 	root := t.TempDir()
 	legacy := filepath.Join(root, "deploy")
