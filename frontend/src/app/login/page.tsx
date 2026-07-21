@@ -12,6 +12,7 @@ export default function LoginPage() {
   const authLogin = useAuthStore((s) => s.login);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -67,14 +68,26 @@ export default function LoginPage() {
             >
               Password
             </label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="w-full rounded-lg border border-border dark:border-border-dark bg-bg dark:bg-bg-dark px-3 py-2 text-text-primary dark:text-text-primary-dark outline-none focus:border-accent dark:focus:border-accent"
-            />
+            <div className="relative">
+              <input
+                id="password"
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                autoComplete="current-password"
+                className="w-full rounded-lg border border-border dark:border-border-dark bg-bg dark:bg-bg-dark py-2 pl-3 pr-14 text-text-primary dark:text-text-primary-dark outline-none focus:border-accent dark:focus:border-accent"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((visible) => !visible)}
+                aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                aria-pressed={showPassword}
+                className="absolute inset-y-0 right-0 flex w-14 select-none items-center justify-center rounded-r-lg text-xs font-medium text-text-tertiary hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent dark:text-text-tertiary-dark dark:hover:text-accent"
+              >
+                {showPassword ? '隐藏' : '显示'}
+              </button>
+            </div>
           </div>
 
           {error && (
