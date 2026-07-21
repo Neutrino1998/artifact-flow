@@ -210,13 +210,17 @@ def _validate_word_xml_complexity(zf: zipfile.ZipFile) -> None:
             raise DecomposeError(f"invalid content XML part {name}: {exc}") from exc
 
 
+def _relationship_part_path(part: str) -> str:
+    part_path = PurePosixPath(part)
+    return str(
+        part_path.parent / "_rels" / f"{part_path.name}.rels"
+    )
+
+
 def _part_relationships(
     zf: zipfile.ZipFile, part: str
 ) -> dict[str, dict[str, str | bool]]:
-    part_path = PurePosixPath(part)
-    rels_path = str(
-        part_path.parent / "_rels" / f"{part_path.name}.rels"
-    )
+    rels_path = _relationship_part_path(part)
     if rels_path not in zf.namelist():
         return {}
     root = _xml(zf.read(rels_path))
@@ -496,6 +500,15 @@ def _select_alternate_content(root: etree._Element) -> list[str]:
                 else:
                     parent.text = (parent.text or "") + tail
             parent.remove(alternate)
+
+
+def _explicit_relationship_ids(root: etree._Element) -> set[str]:
+    ids: set[str] = set()
+    for element in root.iter():
+        for attribute, value in element.attrib.items():
+            if etree.QName(attribute).namespace == R_NS and value:
+                ids.add(value)
+    return ids
 
 
 def _image_candidates(root: etree._Element) -> list[etree._Element]:
@@ -833,10 +846,19 @@ def _write_current_view_docx(source: Path, destination: Path) -> list[str]:
             current_view_parts = {
                 part for part, _ in _discover_parts(source_zip)
             }
+            relationship_sources = {
+                _relationship_part_path(part): part
+                for part in current_view_parts
+            }
+            removed_relationships: dict[str, set[str]] = {}
+            deferred_relationships: list[zipfile.ZipInfo] = []
             with zipfile.ZipFile(destination, "x") as output_zip:
                 output_zip.comment = source_zip.comment
                 for info in source_zip.infolist():
                     name = info.filename.replace("\\", "/")
+                    if name in relationship_sources:
+                        deferred_relationships.append(info)
+                        continue
                     if name in current_view_parts:
                         data = source_zip.read(info)
                         root = _xml(data)
@@ -844,10 +866,18 @@ def _write_current_view_docx(source: Path, destination: Path) -> list[str]:
                             ".//mc:AlternateContent", namespaces=NS
                         )
                         if alternates:
+                            before_ids = _explicit_relationship_ids(root)
                             warnings.extend(
                                 f"{name}: {warning}"
                                 for warning in _select_alternate_content(root)
                             )
+                            # Only IDs made unreachable by MCE are safe to prune;
+                            # implicit relationships never enter this difference.
+                            removed_ids = (
+                                before_ids - _explicit_relationship_ids(root)
+                            )
+                            if removed_ids:
+                                removed_relationships[name] = removed_ids
                             data = etree.tostring(
                                 root.getroottree(),
                                 encoding="UTF-8",
@@ -863,6 +893,25 @@ def _write_current_view_docx(source: Path, destination: Path) -> list[str]:
                         shutil.copyfileobj(
                             input_member, output_member, length=1024 * 1024
                         )
+
+                for info in deferred_relationships:
+                    name = info.filename.replace("\\", "/")
+                    source_part = relationship_sources[name]
+                    removed_ids = removed_relationships.get(source_part, set())
+                    data = source_zip.read(info)
+                    if removed_ids:
+                        root = _xml(data)
+                        for relationship in root.findall(
+                            f"{{{PKG_REL_NS}}}Relationship"
+                        ):
+                            if relationship.get("Id") in removed_ids:
+                                root.remove(relationship)
+                        data = etree.tostring(
+                            root.getroottree(),
+                            encoding="UTF-8",
+                            xml_declaration=True,
+                        )
+                    output_zip.writestr(info, data)
     except zipfile.BadZipFile as exc:
         raise DecomposeError(f"invalid DOCX package: {exc}") from exc
     return warnings

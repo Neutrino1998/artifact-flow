@@ -629,6 +629,80 @@ def test_docx_package_normalization_preserves_warnings_and_source(tmp_path):
     assert not current_root.xpath(".//mc:AlternateContent", namespaces=mod.NS)
 
 
+def test_docx_mce_prunes_only_relationships_from_discarded_branches(tmp_path):
+    pytest.importorskip("PIL.Image")
+    pytest.importorskip("lxml.etree")
+    mod = _load_skill_script("docx", "scripts/decompose_docx.py")
+
+    document_xml = f"""
+<w:document xmlns:w="{mod.W_NS}" xmlns:r="{mod.R_NS}"
+ xmlns:mc="{mod.MC_NS}" xmlns:wps="{mod.WPS_NS}">
+  <w:body><w:p><w:r><w:footnoteReference w:id="1"/></w:r></w:p><w:sectPr>
+    <mc:AlternateContent>
+      <mc:Choice Requires="wps">
+        <w:headerReference w:type="default" r:id="rIdH1"/>
+      </mc:Choice>
+      <mc:Fallback>
+        <w:headerReference w:type="default" r:id="rIdH2"/>
+      </mc:Fallback>
+    </mc:AlternateContent>
+  </w:sectPr></w:body>
+</w:document>
+""".encode()
+    document_rels = f"""
+<Relationships xmlns="{mod.PKG_REL_NS}">
+  <Relationship Id="rIdH1" Type="urn:relationships/header"
+    Target="header1.xml"/>
+  <Relationship Id="rIdH2" Type="urn:relationships/header"
+    Target="header2.xml"/>
+  <Relationship Id="rIdStyles" Type="urn:relationships/styles"
+    Target="styles.xml"/>
+  <Relationship Id="rIdFootnotes" Type="urn:relationships/footnotes"
+    Target="footnotes.xml"/>
+</Relationships>
+""".encode()
+    header1_xml = f'<w:hdr xmlns:w="{mod.W_NS}"><w:p/></w:hdr>'
+    header2_xml = f"""
+<w:hdr xmlns:w="{mod.W_NS}"
+ xmlns:o="urn:schemas-microsoft-com:office:office">
+  <w:p><w:r><w:object><o:OLEObject/></w:object></w:r></w:p>
+</w:hdr>
+"""
+    source = tmp_path / "source.docx"
+    current_view = tmp_path / "current-view.docx"
+    with zipfile.ZipFile(source, "w") as zf:
+        zf.writestr("word/document.xml", document_xml)
+        zf.writestr("word/_rels/document.xml.rels", document_rels)
+        zf.writestr("word/header1.xml", header1_xml)
+        zf.writestr("word/header2.xml", header2_xml)
+        zf.writestr("word/styles.xml", f'<w:styles xmlns:w="{mod.W_NS}"/>')
+        zf.writestr(
+            "word/footnotes.xml",
+            f'<w:footnotes xmlns:w="{mod.W_NS}"/>',
+        )
+
+    assert mod._write_current_view_docx(source, current_view) == []
+    with zipfile.ZipFile(current_view) as zf:
+        rels = mod._xml(zf.read("word/_rels/document.xml.rels"))
+        rel_ids = {
+            rel.get("Id")
+            for rel in rels.findall(f"{{{mod.PKG_REL_NS}}}Relationship")
+        }
+        discovered = {part for part, _ in mod._discover_parts(zf)}
+        assert "word/header2.xml" in zf.namelist()
+    assert rel_ids == {"rIdH1", "rIdStyles", "rIdFootnotes"}
+    assert "word/header1.xml" in discovered
+    assert "word/header2.xml" not in discovered
+    assert "word/styles.xml" in discovered
+    assert "word/footnotes.xml" in discovered
+
+    output = tmp_path / "decomposed"
+    output.mkdir()
+    figures, warnings = mod.inspect_docx(current_view, output)
+    assert figures == []
+    assert warnings == []
+
+
 def test_docx_decompose_preflights_before_pandoc(tmp_path):
     pytest.importorskip("PIL.Image")
     pytest.importorskip("lxml.etree")
