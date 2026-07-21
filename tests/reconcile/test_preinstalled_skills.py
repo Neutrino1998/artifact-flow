@@ -14,6 +14,7 @@
 import base64
 import importlib.util
 import io
+import json
 import shutil
 import subprocess
 import zipfile
@@ -170,6 +171,11 @@ def test_document_skills_use_risk_bounded_visual_verification():
     assert "不因文档含图就渲染全文" in pdf_md
     assert "不要因此渲染全文" in docx_md
     assert "不要把同一文件换 ID 重试" in docx_md
+    assert "decompose_docx.py" in docx_md
+    assert "`vision_ready: true`" in docx_md
+    assert "脚本不会输出未经显示变换的原始媒体" in docx_md
+    assert "`source_part` 只是 DOCX 包内定位元数据" in docx_md
+    assert "--pages 5,8" in docx_md
     assert "不要因演示文稿含图片就把所有页面交给视觉能力" in pptx_md
     assert "普通数据读取、公式分析和值修改默认不渲染" in xlsx_md
     assert "source-format skill decides whether to extract" in vision_md
@@ -181,6 +187,129 @@ def test_preinstalled_skill_scripts_are_syntax_valid():
     assert scripts, "预装 skill 应至少包含脚本,否则本 smoke 失效"
     for path in scripts:
         compile(path.read_text(encoding="utf-8"), str(path), "exec")
+
+
+def test_docx_decompose_materializes_visible_crop_and_flags_fallback(tmp_path):
+    Image = pytest.importorskip("PIL.Image")
+    pytest.importorskip("lxml.etree")
+    mod = _load_skill_script("docx", "scripts/decompose_docx.py")
+
+    image_buffer = io.BytesIO()
+    Image.new("RGB", (100, 40), "red").save(image_buffer, format="PNG")
+    document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="{mod.W_NS}" xmlns:r="{mod.R_NS}"
+ xmlns:a="{mod.A_NS}" xmlns:pic="{mod.PIC_NS}" xmlns:wp="{mod.WP_NS}">
+  <w:body>
+    <w:p>
+      <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+      <w:r><w:t>Section</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>Visible crop</w:t></w:r>
+      <w:r><w:drawing><wp:inline><wp:extent cx="100" cy="40"/>
+        <a:graphic><a:graphicData><pic:pic>
+          <pic:blipFill><a:blip r:embed="rId1"/>
+            <a:srcRect l="25000" r="25000"/>
+            <a:stretch><a:fillRect/></a:stretch>
+          </pic:blipFill>
+          <pic:spPr><a:xfrm/><a:prstGeom prst="rect"/></pic:spPr>
+        </pic:pic></a:graphicData></a:graphic>
+      </wp:inline></w:drawing></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>Rotated fallback</w:t></w:r>
+      <w:r><w:drawing><wp:inline><wp:extent cx="100" cy="40"/>
+        <a:graphic><a:graphicData><pic:pic>
+          <pic:blipFill><a:blip r:embed="rId1"/>
+            <a:stretch><a:fillRect/></a:stretch>
+          </pic:blipFill>
+          <pic:spPr><a:xfrm rot="5400000"/><a:prstGeom prst="rect"/></pic:spPr>
+        </pic:pic></a:graphicData></a:graphic>
+      </wp:inline></w:drawing></w:r>
+    </w:p>
+    <w:tbl><w:tr><w:tc>
+      <w:tcPr><w:gridSpan w:val="2"/></w:tcPr>
+      <w:p><w:r><w:t>Merged cell</w:t></w:r></w:p>
+    </w:tc></w:tr></w:tbl>
+    <w:sectPr/>
+  </w:body>
+</w:document>
+"""
+    content_types = """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="png" ContentType="image/png"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>
+"""
+    package_rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>
+"""
+    document_rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+</Relationships>
+"""
+    source = tmp_path / "input.docx"
+    with zipfile.ZipFile(source, "w") as zf:
+        zf.writestr("[Content_Types].xml", content_types)
+        zf.writestr("_rels/.rels", package_rels)
+        zf.writestr("word/document.xml", document_xml)
+        zf.writestr("word/_rels/document.xml.rels", document_rels)
+        zf.writestr("word/media/image1.png", image_buffer.getvalue())
+
+    output = tmp_path / "decomposed"
+    output.mkdir()
+    figures, blocks, tables, warnings = mod.inspect_docx(source, output)
+
+    assert warnings == []
+    assert len(figures) == 2
+    assert figures[0]["source_part"] == figures[1]["source_part"]
+    assert figures[0]["vision_ready"] is True
+    assert figures[0]["display_mode"] == "cropped"
+    assert figures[0]["context"]["heading_path"] == ["Section"]
+    assert figures[0]["context"]["current"] == "Visible crop"
+    with Image.open(output / figures[0]["visible_path"]) as visible:
+        assert visible.size == (50, 40)
+
+    assert figures[1]["vision_ready"] is False
+    assert figures[1]["fallback"] == "page_required"
+    assert figures[1]["fallback_reasons"] == ["rotation"]
+    assert figures[1]["visible_path"] is None
+
+    assert [block["type"] for block in blocks] == [
+        "paragraph", "paragraph", "paragraph", "table",
+    ]
+    assert len(tables) == 1
+    assert tables[0]["complex"] is True
+    assert tables[0]["columns"] == 2
+    table_data = json.loads((output / tables[0]["json_path"]).read_text())
+    assert table_data["rows"][0][0]["grid_span"] == 2
+    assert table_data["rows"][0][0]["text"] == "Merged cell"
+
+    if shutil.which("pandoc"):
+        pandoc_output = tmp_path / "pandoc"
+        pandoc_output.mkdir()
+        mod._run_pandoc(source, pandoc_output)
+        assert (pandoc_output / "document.md").is_file()
+        assert not (pandoc_output / "raw-media").exists()
+
+    limited_output = tmp_path / "limited"
+    limited_output.mkdir()
+    original_pixel_limit = mod.MAX_IMAGE_PIXELS
+    mod.MAX_IMAGE_PIXELS = 10
+    try:
+        try:
+            mod.inspect_docx(source, limited_output)
+        except mod.ResourceLimitError:
+            pass
+        else:
+            raise AssertionError("image pixel limit must fail loudly")
+    finally:
+        mod.MAX_IMAGE_PIXELS = original_pixel_limit
 
 
 def test_docx_apply_redline_smoke(tmp_path):
