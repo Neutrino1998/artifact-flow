@@ -17,6 +17,9 @@
 	# backstop. Caddy auto-renews ~30 days before expiry; you normally never act
 	# on these mails.
 	email {$AF_ACME_EMAIL}
+	# Keep automatic certificate issuance/renewal, but own the redirect below so
+	# its response passes through the shared technology-header policy.
+	auto_https disable_redirects
 }
 
 import /etc/caddy/conf/upstreams.caddy
@@ -24,6 +27,13 @@ import /etc/caddy/conf/common.caddy
 
 {$AF_DOMAIN} {
 	import af_site
+}
+
+# Explicit HTTP → HTTPS redirect. AF_DOMAIN is the canonical bare domain from
+# the ACME deployment contract; public ACME sites always publish 80/443.
+http://{$AF_DOMAIN} {
+	import strip_technology_headers
+	redir https://{$AF_DOMAIN}{uri} 308
 }
 
 # Internal health listener for afctl — see (af_health_probe) in

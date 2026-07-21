@@ -38,6 +38,7 @@ https://:443 {
 # AF_HTTP_PORT never leaks into the target (the nginx `$host` port-strip
 # pentest finding does not apply — scheme+port are rewritten wholesale).
 http://:80 {
+	import strip_technology_headers
 	redir https://{http.request.host}:{$AF_HTTPS_PORT:443}{uri} 308
 }
 

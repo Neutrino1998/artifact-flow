@@ -59,7 +59,7 @@ ready_timeout_seconds = 120
 按部署能力必需：
 
 - `infra = "bundled"`：`POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD`；
-- `tls = "acme"`：`AF_DOMAIN`、`AF_ACME_EMAIL`，且外部端口必须是 80/443；
+- `tls = "acme"`：`AF_DOMAIN`（裸域名，不含 scheme、端口或路径）、`AF_ACME_EMAIL`，且外部端口必须是 80/443；
 - Model：对应供应商的 API Key；
 - Tool/MCP：定义引用的 `TOOL_SECRET_*`。
 

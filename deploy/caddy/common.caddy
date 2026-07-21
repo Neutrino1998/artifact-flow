@@ -73,16 +73,21 @@
 	}
 }
 
-# The whole site body — matchers + route. Import inside a site block.
-(af_site) {
-	# Public responses must not advertise implementation products. Keep this at
-	# the site response boundary, not as reverse_proxy header_down rules: Caddy
-	# appends its own Via header after processing upstream response headers.
+# Public responses must not advertise implementation products. Import this at
+# every public response boundary, including plain-HTTP redirect sites. Keep it
+# outside reverse_proxy header_down rules: Caddy can add Via after upstream
+# processing and Server while producing local responses such as redirects.
+(strip_technology_headers) {
 	header {
 		-X-Powered-By
 		-Via
 		-Server
 	}
+}
+
+# The whole application site body — matchers + route. Import inside a site block.
+(af_site) {
+	import strip_technology_headers
 
 	# Batched upload ceiling — the AUTHORITATIVE total-bytes cap. POST /api/v1/chat
 	# sends ALL attachments in ONE multipart request, so the body is the SUM of the
