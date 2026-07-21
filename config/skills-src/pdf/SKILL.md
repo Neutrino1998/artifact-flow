@@ -8,7 +8,7 @@ description: >
 license: Apache-2.0
 compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 LibreOffice、pdfplumber、pypdf、pypdfium2；无 OCR 引擎。
 metadata:
-  version: "2.1.0"
+  version: "2.1.1"
 ---
 
 # PDF
@@ -94,6 +94,8 @@ with pdfplumber.open("输入.pdf") as pdf:
 - 多数页面有连续文本：按上述有界流式逐页提取到文件，再按需读取。
 - 只有零星字符或为空：按扫描件处理，渲染需要的页。
 - 表格先用 `extract_tables()`，抽取后必须和原页抽查；无框线表可调整 `table_settings`。
+- 文字型 PDF 中需要读取插图时，先用图题、章节标题或附近正文定位页码，只渲染命中的页面；
+  不因文档含图就渲染全文。
 
 ## 渲染与扫描件
 
@@ -104,6 +106,11 @@ artifactflow-office render 输入.pdf /workspace/pdf-pages --pages 1-5
 页码是 1-based，输出稳定为 `page-1.png` 等。长文档分批处理，不一次把整本图片送入上下文。
 当前模型能看图就直接识别；看不到图片时按部署能力委派视觉子代理。环境没有 OCR 引擎，
 手写体、低分辨率和复杂表格结果需标注不确定性。
+
+视觉验证采用风险驱动的最小范围：文字读取和检索默认不渲染；扫描件、目标图表和抽取结果存在
+歧义时只渲染相关页；新生成或转换的 PDF 默认抽查首页、末页及表格/图片密集页。只有用户明确
+要求版式审校、打印就绪或高保真交付，发生影响全篇的转换/版式变化，或用户已反馈视觉问题时，
+才做完整逐页检查。未做完整检查时按 best-effort 交付，不宣称已逐页验证或版式完全正确。
 
 ## 拆分、合并与旋转
 
@@ -130,7 +137,7 @@ artifactflow-office convert /workspace/报告.docx /workspace/报告.pdf
 artifactflow-office render /workspace/报告.pdf /workspace/report-pages
 ```
 
-转换后用 pypdf 检查可打开和页数，用 pdfplumber 抽查文本层，再逐页或抽样检查 PNG。
+转换后用 pypdf 检查可打开和页数，用 pdfplumber 抽查文本层，再按上述风险范围抽查 PNG。
 不要只看到命令退出码为 0 就宣称成功。
 
 ## 边界

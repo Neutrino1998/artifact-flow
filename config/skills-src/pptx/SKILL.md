@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 LibreOffice、python-pptx、Pillow、matplotlib、RapidFuzz。
 metadata:
-  version: "2.1.2"
+  version: "2.2.0"
 ---
 
 # 演示文稿
@@ -23,14 +23,18 @@ metadata:
 ## 标准流程
 
 1. `inspect_deck.py` 读取结构、文本、表格、图片和形状坐标。
-2. 选择保守编辑或重新生成；有模板时默认保留原设计。
-3. 用 JSON 文件驱动批量操作，不把长文本塞进 shell 参数。
-4. 跑静态几何检查。
-5. 用 LibreOffice 渲染每页并做视觉检查。
+2. 读取/总结时先根据结构筛出目标页、图片/图表页和低文本密度页，只处理任务所需页面。
+3. 选择保守编辑或重新生成；有模板时默认保留原设计。
+4. 用 JSON 文件驱动批量操作，不把长文本塞进 shell 参数。
+5. 跑静态几何检查，再按任务风险决定视觉验证范围。
 
 ```bash
 python "$SKILL/scripts/inspect_deck.py" 输入.pptx > /workspace/deck.json
 ```
+
+幻灯片语义通常来自图片、标题、箭头和形状的空间组合，因此读取视觉内容时优先渲染筛选后的完整
+幻灯片。只有用户明确分析某张照片/截图本身，或幻灯片渲染分辨率不足时，才单独提取原始嵌入图；
+不要因演示文稿含图片就把所有页面交给视觉能力。
 
 `.ppt` 老格式先转为 `.pptx`：
 
@@ -83,15 +87,19 @@ JSON 支持的版式见脚本头部 docstring。定量数据图用 `dataviz`/mat
 python "$SKILL/scripts/check_geometry.py" /workspace/输出.pptx
 ```
 
-视觉检查使用新目录，逐页查看 PNG：
+视觉检查使用新目录，并按风险选择页面：
 
 ```bash
 artifactflow-office render /workspace/输出.pptx /workspace/pptx-pages
 artifactflow-office convert /workspace/输出.pptx /workspace/输出.pdf
 ```
 
-修正内容后重新生成到新的渲染目录。至少检查文字截断、元素重叠、字体替换、图片缺失和页间一致性。
-当前模型看不到图片时，按部署能力委派视觉子代理，不能把静态几何通过等同于视觉通过。
+修正内容后重新生成到新的渲染目录。视觉验证采用风险驱动的最小范围：简单局部编辑只检查变更页
+及相邻高风险页；新建或大改默认抽查首页、末页、图片/图表页和高密度页。只有用户明确要求逐页设计
+审校、打印/演示就绪或高保真交付，发生母版、主题、字体、页面尺寸等全局变化，
+或用户已反馈视觉问题时，才检查全部幻灯片。
+当前模型看不到图片时，按部署能力委派视觉子代理；未做完整检查时按 best-effort 交付，
+不宣称已逐页验证或视觉完全正确，也不能把静态几何通过等同于视觉通过。
 
 ## 边界
 

@@ -153,6 +153,29 @@ def test_pdf_skill_large_document_memory_contract():
     assert "`rg -n -C`" in skill_md
 
 
+def test_document_skills_use_risk_bounded_visual_verification():
+    docx_md = (SRC_DIR / "docx" / "SKILL.md").read_text(encoding="utf-8")
+    pdf_md = (SRC_DIR / "pdf" / "SKILL.md").read_text(encoding="utf-8")
+    pptx_md = (SRC_DIR / "pptx" / "SKILL.md").read_text(encoding="utf-8")
+    xlsx_md = (SRC_DIR / "xlsx" / "SKILL.md").read_text(encoding="utf-8")
+    vision_md = (ROOT / "config" / "agents" / "_vision_agent.md").read_text(
+        encoding="utf-8"
+    )
+
+    for skill_md in (docx_md, pdf_md, pptx_md, xlsx_md):
+        assert "风险驱动的最小范围" in skill_md
+        assert "用户已反馈视觉问题" in skill_md
+        assert "不宣称已逐页验证" in skill_md
+
+    assert "不因文档含图就渲染全文" in pdf_md
+    assert "不要因此渲染全文" in docx_md
+    assert "不要把同一文件换 ID 重试" in docx_md
+    assert "不要因演示文稿含图片就把所有页面交给视觉能力" in pptx_md
+    assert "普通数据读取、公式分析和值修改默认不渲染" in xlsx_md
+    assert "source-format skill decides whether to extract" in vision_md
+    assert "report the actual page/title cues briefly and stop" in vision_md
+
+
 def test_preinstalled_skill_scripts_are_syntax_valid():
     scripts = sorted(SRC_DIR.glob("*/scripts/**/*.py"))
     assert scripts, "预装 skill 应至少包含脚本,否则本 smoke 失效"

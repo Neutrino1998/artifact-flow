@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 LibreOffice、Pandoc、python-docx、lxml、RapidFuzz。
 metadata:
-  version: "2.1.2"
+  version: "2.2.0"
 ---
 
 # Word 文档
@@ -25,7 +25,7 @@ metadata:
 
 | 需求 | 首选路线 |
 |---|---|
-| 读取、总结、抽取修订 | Pandoc 输出 Markdown；图片另行抽取 |
+| 读取、总结、抽取修订 | Pandoc 输出 Markdown；按引用筛选原始嵌入图片 |
 | 新建普通文档 | Markdown + Pandoc reference docx |
 | 保留既有版式做普通小改 | python-docx，修改最少对象后另存 |
 | 以修订模式做多处修改 | `apply_redline.py --plan` |
@@ -45,14 +45,31 @@ pandoc --track-changes=all --extract-media=/workspace/docx-media \
   输入.docx -t gfm -o /workspace/document.md
 ```
 
-若只需结构化检查表格、段落和样式，用 python-docx。文档以图片、文本框或图表为主时，
-直接渲染页面：
+普通文字文档即使含有插图，也不要因此渲染全文。`--extract-media` 已把原始媒体写入
+`/workspace/docx-media`；先结合 Markdown 中的图片引用和前后标题筛出与任务有关的图片：
+
+```bash
+rg -n -C 3 '!\[[^]]*\]\(|<img[^>]*src=' /workspace/document.md
+```
+
+跳过 logo、小图标和装饰图，只 `persist` 相关原始图片后交给视觉能力；EMF/WMF 等不支持的格式
+只转换对应文件，不为此渲染整本 Word。若只需结构化检查表格、段落和样式，用 python-docx。
+
+只有扫描页、文本框、SmartArt、OLE 等内容无法从原始媒体和正文恢复，或任务必须保留图文空间
+关系时，才渲染必要页面：
 
 ```bash
 artifactflow-office render 输入.docx /workspace/docx-pages
 ```
 
-逐页检查 PNG；当前模型看不到图片时，按部署能力委派视觉子代理。不要仅凭文本抽取宣称版式正确。
+渲染文件名中的序号是物理页序，不一定等于页脚页码或章节号；先核对目标页内容，再持久化并交给
+视觉能力。若视觉结果与预期不符，重新定位或切换到原始媒体路线，不要把同一文件换 ID 重试。
+
+视觉验证采用风险驱动的最小范围：读取、总结和抽取默认不做版式 QA；简单局部编辑先做结构检查，
+能可靠定位时只查看受影响或高风险页面；新建或大改默认抽查首页、末页及表格/图片密集页。只有用户
+明确要求版式审校、打印就绪或高保真交付，发生全局字体/模板/页尺寸等版式变更，
+或用户已反馈视觉问题时，才做完整逐页检查。未做完整检查时按 best-effort 交付，不宣称已逐页验证或
+版式完全正确。
 
 ## 创建
 
@@ -150,8 +167,9 @@ artifactflow-office convert /workspace/输出.docx /workspace/输出.pdf
 artifactflow-office render /workspace/输出.docx /workspace/docx-final-pages
 ```
 
-最终至少检查：页数是否异常、标题/表格是否被截断、图片是否缺失、分页是否漂移。复杂版式经
-LibreOffice 渲染与 Microsoft Word 仍可能有差异，交付时说明这是 best-effort 兼容结果。
+触发视觉验证时，按上述风险范围检查页数是否异常、标题/表格是否被截断、图片是否缺失、分页是否
+漂移。复杂版式经 LibreOffice 渲染与 Microsoft Word 仍可能有差异，交付时说明这是 best-effort
+兼容结果。
 
 ## 边界
 
