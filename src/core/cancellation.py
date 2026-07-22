@@ -11,7 +11,7 @@ cancel 落在其中时延迟 = 该 await 自己的内部超时。
 子 task 里，调用方按 poll_interval 轮询 flag，命中即 task.cancel() 子 task 并抛
 CooperativeCancelled。工具作者零新义务 —— cancel-safety 的契约不是新的：
 EXECUTION_TIMEOUT 的 asyncio.timeout 本来就会在任意 await 中间 cancel 整个
-engine task，工具早已被要求 cancel-safe（见 docs/architecture/execution-lifecycle.md）。
+engine task，工具早已被要求 cancel-safe（终态契约见 core/post_processing.py）。
 
 与外部 cancel（lease fencing / EXECUTION_TIMEOUT deadline）的辨析：那些路径
 cancel 的是**调用方所在的 task**，会在 asyncio.wait / flag 轮询处以

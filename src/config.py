@@ -23,10 +23,10 @@ class Settings(BaseSettings):
     CORS_ALLOW_METHODS: List[str] = ["*"]
     CORS_ALLOW_HEADERS: List[str] = ["*"]
 
-    # Runtime site config (notifications / welcome tips / branding). The
-    # frontend serves the same host directory as static /site/*.json files; the
-    # admin API writes through this path so notices can be managed from the UI
-    # without moving low-frequency site config into the database.
+    # Runtime site config (notifications / welcome tips / branding). Production
+    # deployment overrides this to the control/site mount; the source-tree
+    # default keeps local development simple. The frontend serves the same host
+    # directory as static /site/*.json files.
     SITE_CONFIG_DIR: str = "config/site"
 
     # SSE 配置
@@ -66,8 +66,12 @@ class Settings(BaseSettings):
     COMPACTION_TIMEOUT: int = 300            # 秒, 单次 compact LLM 调用超时（thinking 模型压缩 ~100k token 输入需较长 TTFT+生成时间，120s 偏紧）
     INVENTORY_PREVIEW_LENGTH: int = 200     # artifact 清单内容预览截断长度
     READ_ARTIFACT_MAX_CHARS: int = 50000    # read_artifact 默认字符上限（隐藏，模型不可见）
-    HTTP_TOOL_MAX_RESULT_CHARS: int = 50000  # external http 工具响应文本上限（隐藏）；超限尾部截断并显式标记
-    MCP_TOOL_MAX_RESULT_CHARS: int = 50000   # external mcp 工具 text/structured 响应上限（隐藏）；超限尾部截断并显式标记
+    # 单次成功工具结果内联上限；超限由引擎完整落 artifact。
+    TOOL_RESULT_INLINE_MAX_CHARS: int = Field(default=20_000, ge=0)
+    # 失败工具结果不会落 artifact；给模型的诊断使用独立硬帽，不能复用允许 0 的
+    # 成功结果内联阈值（0 = 所有非空成功结果落 artifact）。最小 64 保证截断结果
+    # 同时容纳原始诊断前缀与完整 marker，空错误的 fallback 也不会越过硬帽。
+    TOOL_ERROR_MAX_CHARS: int = Field(default=8_000, ge=64)
     MCP_TOOL_LIST_CACHE_SECONDS: int = 60    # MCP tools/list 进程内缓存 TTL；0=每次重新发现
     TOOL_PERSIST_PREVIEW_LENGTH: int = 1000  # 工具结果落盘后回填给模型的预览长度
     SEARCH_TOOLS_MAX_RESULTS: int = 15      # search_tools 单次渲染完整 doc 的工具数上限（隐藏）；
@@ -81,6 +85,10 @@ class Settings(BaseSettings):
     # 只带"已变更"信号(content 省略、content_omitted=True),前端靠 COMPLETE 后的
     # DB 对齐补全(对齐本就兜底)。update 的 span delta 不受此限(权威且体量随模型输出)。
     ARTIFACT_LIVE_CONTENT_MAX_CHARS: int = 256000
+    # Artifact 文本存储的单条 UTF-8 字节上限。所有文本创建/覆盖路径在
+    # ArtifactService 共享准入，超限 loud-fail；来源侧可另有更早的读取/转换闸，
+    # 但不能替代这个最终存储不变量。默认与文本上传/persist 的 20MB envelope 对齐。
+    ARTIFACT_TEXT_MAX_BYTES: int = Field(default=20 * 1024 * 1024, gt=0)
     # Artifact 二进制存储(ArtifactBlob)单条字节上限。写入侧 loud-fail(不静默截断)。
     # 隐藏常量,非模型可调。默认对齐 MAX_UPLOAD_SIZE(200MB),让单文件上传不会过了
     # HTTP 入口后又在 artifact 写入侧被拒;沙盒 persist 的 blob 也受同一闸约束。
@@ -201,12 +209,12 @@ class Settings(BaseSettings):
     # (to_thread 只缓解 loop 阻塞,解不了内存)。隐藏常量,operator 可调。
     MAX_TEXT_CONVERT_BYTES: int = 20 * 1024 * 1024  # 20MB
     # per-用户 blob 存储配额(字节)。该用户**所有 blob 字节之和**(ArtifactBlob.size_bytes
-    # 跨其全部会话)+ 本次新增若超此值 → 拒。**写入侧守门在唯一 chokepoint
-    # create_from_upload**(所有 blob 都经此:上传 + 沙盒 persist + 未来任何路径,一处校验
-    # 全覆盖,不逐路径加闸)——上传转 413、沙盒 persist 转 ToolResult 让模型提示用户清理。
+    # 跨其全部会话)+ 本次新增若超此值 → 拒。**写入侧守门在 ArtifactService 的共享边界**:
+    # 新建(上传 / 沙盒 persist / 工具结果)走 _stage_artifact,覆盖走 replace_from_upload,
+    # 两者共用 _blob_admission_error,不逐来源加闸。上传转 413、工具调用转 ToolResult。
     # /chat 另有 HTTP 预闸做 fail-fast(起 turn 前拒、零 DB 状态),非唯一守门。只数 blob
     # —— 二进制是"狂传大文件"灌爆盘的主向量(尤其沙盒 persist:无代理 body / 数量闸,
-    # 纯靠它兜底),文本(Artifact.content)有 MAX_TEXT_CONVERT_BYTES 兜着、量级小,刻意不计
+    # 纯靠它兜底),文本(Artifact.content)有共享 ARTIFACT_TEXT_MAX_BYTES 兜着、量级小,刻意不计
     # (进度条同口径,标"附件占用"非"总盘")。account = SUM(size_bytes) compute-on-read(DB
     # 唯一真相,不存计数器),靠 ix_artifact_blobs_session_size 走 index-only;校验计入
     # 「DB 已落 + 本轮已 stage 未 flush」否则一轮多次 persist 各自只看 DB 会齐齐击穿。
@@ -251,11 +259,12 @@ class Settings(BaseSettings):
                                         # (engine 在工具 await 期轮询 cancel → task.cancel 在飞调用,
                                         # core/cancellation.py)该职责剥离,本值只剩 runaway 上界一职,放宽到 300。
     SANDBOX_START_TIMEOUT: int = 60     # 秒,容器 create+start 上限(daemon 卡死时 loud-fail,不 wedge 整 turn)
+    SANDBOX_INSPECT_TIMEOUT_SEC: float = 1.0  # exec 后 best-effort 容器状态快照上限;观测超时不改写命令结果
     SANDBOX_MEM_LIMIT_MB: int = 1024    # 容器内存上限;MemorySwap 设同值 = 禁 swap
     SANDBOX_CPU_LIMIT: float = 1.0      # CPU 核数上限(换算 NanoCpus)
     SANDBOX_PIDS_LIMIT: int = 256       # fork 炸弹闸
     SANDBOX_MAX_OUTPUT_CHARS: int = 200_000  # 单命令输出捕获硬帽:超出继续 drain 但丢弃(防内存放大),
-                                             # 截断显式标记。>50k 的部分由引擎溢出转 artifact idiom 接手。
+                                             # 截断显式标记。超过工具内联上限的捕获结果由引擎落 artifact。
     SANDBOX_STATUS_MAX_ENTRIES: int = 20     # 动态状态注入的工作区第一层清单条数帽:工作区是模型可写的树,
                                              # 不设帽=prompt 注水放大器;超出部分显式 "(+N more)" 标记
     # 磁盘配额(2026-06-10 C′ 方向:loop 池子=硬墙、以下=软配额与准入;host-prep 见 D 段)。
@@ -347,7 +356,7 @@ class Settings(BaseSettings):
     # ⚠️ 不能用 DSN ?command_timeout=0 禁用 —— asyncpg 拒绝 ≤0(connect_utils.py),会启动失败;
     #    DSN 若显式给值必须 >0,它会覆盖此默认。
     # MySQL/TDSQL 无等价 driver 钩子(靠 server innodb_lock_wait_timeout),SQLite 无此缺口。
-    # 详见 docs/architecture/execution-lifecycle.md「不变量 4」。
+    # 机制见 db/database.py._apply_session_tz_kwargs / command-timeout connect args。
     DB_COMMAND_TIMEOUT: float = 30.0
 
     # JWT 认证配置

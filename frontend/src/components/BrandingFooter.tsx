@@ -52,7 +52,7 @@ export default function BrandingFooter({ variant }: { variant: Variant }) {
         >
           <svg
             aria-hidden="true"
-            className="h-[0.95em] w-[0.95em] shrink-0 translate-y-px"
+            className={`h-[11px] w-[11px] shrink-0 ${variant === 'login' ? '-translate-y-px' : ''}`}
             viewBox="0 0 16 16"
             fill="none"
             stroke="currentColor"

@@ -1,0 +1,19 @@
+# Capability overlay selected by site.toml: tls = "acme".
+# The base compose remains the same release/runtime unit used by static-TLS
+# intranet sites. This overlay changes only the TLS capability.
+
+services:
+  caddy:
+    command: ["caddy", "run", "--config", "/etc/caddy/conf/Caddyfile.acme", "--adapter", "caddyfile"]
+    environment:
+      - AF_DOMAIN=${AF_DOMAIN:?Set AF_DOMAIN in control/.env}
+      - AF_ACME_EMAIL=${AF_ACME_EMAIL:?Set AF_ACME_EMAIL in control/.env}
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+    name: artifactflow_caddy_data
+  caddy_config:
+    name: artifactflow_caddy_config

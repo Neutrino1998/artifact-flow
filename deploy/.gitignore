@@ -1,8 +1,4 @@
-# Deployment-specific topology (may carry host IPs) — commit fleet.conf.example,
-# not the real file. Mirrors the .env pattern.
+# Legacy local topology and the Ansible inventory may carry internal hostnames
+# and addresses. Keep both private during the migration window.
 fleet.conf
-# Per-host .env overrides (multi-host: DB/Redis URLs, per-host tuning).
-.env.*
-!.env.example
-# fleet.sh version state (records current/previous for rollback).
-.fleet-state
+inventory.ini

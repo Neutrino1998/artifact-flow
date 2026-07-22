@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from pydantic import ValidationError
 
 from config import config
+from api.event_projection import project_event_data_for_user
 from api.dependencies import (
     get_conversation_manager,
     get_current_user,
@@ -49,7 +50,6 @@ from api.services.execution_runner import ConflictError, ExecutionRunner
 from api.services.runtime_store import InjectQueueFull
 from api.routers.artifacts import convert_uploaded_file
 from core.conversation_manager import ConversationManager
-from core.events import StreamEventType
 from repositories.base import NotFoundError
 from utils.logger import get_logger
 
@@ -563,28 +563,13 @@ async def get_message_events(
                 "id": e.id,
                 "event_type": e.event_type,
                 "agent_name": e.agent_name,
-                "data": _replay_safe_event_data(e.event_type, e.data),
+                "data": project_event_data_for_user(e.event_type, e.data),
                 "created_at": e.created_at.isoformat(),
             }
             for e in events
         ],
         "total": len(events),
     }
-
-
-def _replay_safe_event_data(event_type: str, data):
-    """Replay 读边界脱敏:prod 下不重新暴露 raw 内部错误,对齐 live 的
-    sanitize_error_event。DB 仍存 raw(审计 / DEBUG replay 可见);request_id
-    已随事件持久化,保留不动(用户凭它回传、运维凭它 grep)。仅用户端点生效——
-    admin 可观测端点不脱敏(管理员应看到真实错误)。"""
-    if (
-        not config.DEBUG
-        and event_type == StreamEventType.ERROR.value
-        and isinstance(data, dict)
-        and data.get("error")
-    ):
-        return {**data, "error": "Internal server error"}
-    return data
 
 
 @router.post("/{conv_id}/resume", response_model=ResumeResponse)

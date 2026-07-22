@@ -1,0 +1,6 @@
+# EXPERIMENTAL multi-host LB overlay. Ansible renders topology-derived
+# upstreams under target-local control/ so the release stays immutable.
+services:
+  caddy:
+    volumes:
+      - ${AF_RUNTIME_DEPLOY_DIR:-.}/caddy/upstreams.caddy:/etc/caddy/conf/upstreams.caddy:ro

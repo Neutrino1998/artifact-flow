@@ -60,8 +60,7 @@ Recommended target paths:
 
 ```bash
 /data/docker
-/data/artifactflow/sandbox-pool.img
-/data/artifactflow/sandbox-scratch
+/data/artifactflow/sandbox
 /data/artifactflow/postgres
 ```
 
@@ -77,23 +76,25 @@ docker info | grep -i 'Docker Root Dir'   # expect /data/docker
 
 ## Build Media
 
-Build a normal app + sandbox image update for an already-provisioned ARM host.
-This reuses the installed runsc and existing infra images:
+Build a normal application update for an already-provisioned ARM host. Every
+release includes the content-addressed Sandbox image; an app-only release
+reuses the runsc runtime and infrastructure images already installed on the
+host:
 
 ```bash
-./scripts/release.sh <version> --platform linux/arm64 --app-only --with-sandbox
+./scripts/release.sh <version> --platform linux/arm64 --app-only
 ```
 
-For a first deployment, or an explicit gVisor runtime/security upgrade, add the
-independent host-runtime unit:
+For the first deployment, include the pinned Caddy, PostgreSQL, and Redis
+images:
 
 ```bash
-./scripts/release.sh <version> --platform linux/arm64 \
-  --with-infra --with-sandbox --with-gvisor
+./scripts/release.sh <version> --platform linux/arm64 --with-infra
 ```
 
-For a bare Kylin host with no Docker installed, also build and transfer the
-offline Docker package:
+Docker, runsc, and the scratch filesystem are host prerequisites rather than
+release contents. For a bare Kylin host, build and transfer the offline Docker
+package:
 
 ```bash
 ARCH=aarch64 sandbox/docker-pkg/fetch-and-package.sh
@@ -106,10 +107,11 @@ package:
 sandbox/kernel-4k-pkg/fetch-and-package.sh
 ```
 
-The optional gVisor package and sandbox image are architecture-specific. Use
-`aarch64` for gVisor / Docker packages and `linux/arm64` for image builds. The
-gVisor tar is named by pinned runtime version + architecture and can be reused
-across app releases.
+The gVisor and Docker packages and the Sandbox image are architecture-specific.
+Use `aarch64` for gVisor / Docker packages and `linux/arm64` for release builds.
+The gVisor tar is named by pinned runtime version + architecture and can be
+reused across app releases, but installing it remains an explicit commissioning
+step.
 
 ## Host Preflight
 
@@ -151,19 +153,53 @@ sudo systemctl reload docker
 sudo ./smoke-test.sh
 ```
 
-## Sandbox Preparation
+## Site Initialization and Sandbox Configuration
 
-Prefer the release helper after the release deploy tar is extracted on the host.
-The 2026-07 single-host layout keeps transfer bundles and runtime files
-separate:
+Keep transferred release bundles separate from target-local control state:
 
 ```bash
 /root/workspace/tmp/<version>     # release tar/.sha256/manifest bundle
-/root/workspace/artifactflow      # extracted deploy/config, .env, certs, state
+/opt/artifactflow/control         # site.toml, .env, certs, site content
+/opt/artifactflow/.artifactflow   # immutable releases and state.json
+```
+
+Provision `/data/artifactflow/sandbox` as a dedicated mounted filesystem before
+initializing the site. `afctl` validates this mount but deliberately does not
+create a loop device, format storage, edit `/etc/fstab`, or install runsc.
+
+Initialize a fresh intranet target with the release's own controller:
+
+```bash
+sudo /root/workspace/tmp/<version>/afctl \
+  --root /opt/artifactflow site init --preset intranet
+```
+
+For an existing Fleet v1 installation with `/opt/artifactflow/deploy/.env`, use
+`site migrate-v1 --preset intranet --sandbox-runtime runsc` instead; initialization
+will refuse to overwrite the legacy credentials.
+
+Keep the generated `control/site.toml` aligned with the host:
+
+```toml
+executor = "local"
+tls = "static"
+infra = "bundled"
+sandbox_runtime = "runsc"
+scratch_root = "/data/artifactflow/sandbox"
+backend_replicas = 2
+```
+
+Then place the static certificate under `control/certs/` and fill the internal
+model credentials generated in `control/.env`:
+
+```bash
+GPUSTACK_DEEPSEEK_API_KEY=
+GPUSTACK_VISION_API_KEY=
 ```
 
 For a two-backend deployment on a 16c / 32G host, start with total engine
-concurrency around 32 by setting per-backend concurrency to 16 in `deploy/.env`:
+concurrency around 32 by setting per-backend concurrency to 16 in
+`control/.env`:
 
 ```bash
 ARTIFACTFLOW_MAX_CONCURRENT_TASKS=16
@@ -172,25 +208,22 @@ ARTIFACTFLOW_DATABASE_POOL_SIZE=5
 ARTIFACTFLOW_DATABASE_MAX_OVERFLOW=10
 ```
 
-Prepare sandbox from the bundle directory:
+Validate the complete target state before applying the release:
 
 ```bash
-cd /root/workspace/artifactflow
-sudo env \
-  AF_BUNDLE_VERSION=<version> \
-  AF_SANDBOX_POOL=/data/artifactflow/sandbox-pool.img \
-  AF_SANDBOX_SCRATCH_ROOT=/data/artifactflow/sandbox-scratch \
-  AF_SANDBOX_POOL_SIZE=80G \
-  deploy/scripts/fleet.sh prepare-sandbox /root/workspace/tmp/<version>
+sudo /root/workspace/tmp/<version>/afctl --root /opt/artifactflow site validate
+sudo /root/workspace/tmp/<version>/afctl --root /opt/artifactflow doctor
+sudo /root/workspace/tmp/<version>/afctl --root /opt/artifactflow \
+  plan apply /root/workspace/tmp/<version>
+sudo /root/workspace/tmp/<version>/afctl --root /opt/artifactflow \
+  apply /root/workspace/tmp/<version>
 ```
 
-This prepares `runsc`, loads the sandbox image, creates the fixed-size scratch
-pool, mounts it, runs the smoke / verify probes, and writes the sandbox runtime
-settings into `deploy/.env`.
-
-Enable the sandbox overlay only on deployments that actually need sandbox
-tools. The overlay mounts `/var/run/docker.sock` into the backend container,
-which is the expected DooD shape and should not be enabled casually.
+Sandbox is always part of an `afctl` deployment. The Backend receives the
+Docker socket and the same absolute scratch path on host and container; the
+strict `site.toml` runtime and scratch fields are the single source of truth.
+Production uses `runsc`; `runc` is only an explicit reduced-isolation choice
+for trusted development targets.
 
 ## Previously Verified
 
@@ -210,7 +243,8 @@ host with a new enough kernel exists.
 
 ## Network Notes
 
-The fixed Docker subnet `192.168.222.0/24` in the intranet compose file was
+The fixed Docker subnet `192.168.222.0/24` in `deploy/compose.base.yml` on the
+intranet branch was
 introduced for the retired CentOS host because that machine conflicted with
 corporate `172.16/12` routes. Keep it for now, but treat it as inherited
 deployment-specific configuration rather than a proven Kylin requirement.
@@ -231,6 +265,8 @@ Calico ranges, or corporate client/server ranges.
 - [ ] A `/data` disk is mounted and has enough space for Docker, Postgres, and
   sandbox scratch.
 - [ ] The release bundle is built with `--platform linux/arm64`.
-- [ ] `prepare-sandbox` has run with `/data`-backed pool and scratch paths.
+- [ ] `/data/artifactflow/sandbox` is a dedicated mounted filesystem and matches
+      `control/site.toml` exactly.
 - [ ] The fixed Docker subnet has been checked against this host's actual
-  routing table.
+      routing table.
+- [ ] `site validate`, `doctor`, and `plan apply` pass before `apply`.

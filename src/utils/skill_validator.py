@@ -16,7 +16,7 @@ error=拒收、warning=透出不拦)。**绝不改写 body**(原则 3:lint 标�
 「哪个是 SKILL.md、剥壳前缀是什么」永远一致。
 
 **zip 字节总大小(SKILL_BUNDLE_MAX_BYTES)刻意不在此查**:那是按信任分层的配额闸
-(原则 7③:user 上传 25MB、admin/seed 无闸 —— seed 侧 wheels bundle 合法可超),
+(原则 7③:user 上传按部署配置限制、admin/seed 无闸 —— seed 侧 wheels bundle 合法可超),
 归 E-2 导入端点执行,塞进共享 validator 会错杀 seed。
 """
 

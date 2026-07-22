@@ -10,22 +10,22 @@
 # (one battery, two targets). nginx retired 2026-07 (commit d489c0e) — the
 # nginx half is gone; the battery itself is what still earns its keep.
 #
-# Target config: the PROD entry (deploy/caddy/Caddyfile) with
-# AF_DOMAIN=http://test.local to neuter TLS/ACME. Deliberate: the whole
-# contract lives in common.caddy, which both entry shells import — testing
-# through the prod shell covers it without cert scaffolding. The intranet
-# shell's own delta (static tls + HTTP→HTTPS redirect) is two thin lines,
-# validated live during the migration.
+# Target configs: the exact static-TLS entry exercises the full application
+# contract over real HTTPS plus its HTTP→HTTPS redirect. A second focused target
+# runs the exact ACME entry with Caddy's localhost CA, proving that its explicit
+# redirect and HTTPS responses share the same technology-header policy without
+# contacting a public CA.
 #
 # Usage:
 #   tests/manual/proxy_contract_smoke.sh
 #
 # Env knobs:
-#   SMOKE_HOST_PORT   host port to publish the proxy on (default 18080)
+#   SMOKE_HTTP_PORT   host port for HTTP redirects (default 18080)
+#   SMOKE_HTTPS_PORT  host port for the HTTPS application (default 18443)
 #   SMOKE_SSE         SSE buffering check: fail | warn | skip   (default fail)
 #   SMOKE_SKIP_UPLOAD set non-empty to skip the 211MB upload-cap check (slowest)
 #
-# Requires: docker, curl, python3 on the host. No project services needed.
+# Requires: docker, curl, openssl, python3 on the host. No project services needed.
 # NOT collected by pytest (no test_ prefix, lives in tests/manual/).
 #
 # Contract checked (mirror of deploy/caddy/common.caddy):
@@ -33,12 +33,15 @@
 #   2. /health ungated AND routed to backend   6. /__maintenance/* reachable mid-window
 #   3. routing (api & health→8000, /→3000)  7. upload: 211MiB→413, 200MiB legit→backend 200
 #   4. X-Real-IP injected + anti-spoof       8. SSE buffering off (incremental flush)
+#   9. HTTPS + both HTTP 308 entries strip technology-identifying headers
 
 set -uo pipefail  # NOT -e: run every assertion, tally at the end
 
-HOST_PORT="${SMOKE_HOST_PORT:-18080}"
+HTTP_PORT="${SMOKE_HTTP_PORT:-18080}"
+HTTPS_PORT="${SMOKE_HTTPS_PORT:-18443}"
 SMOKE_SSE="${SMOKE_SSE:-fail}"
-BASE="http://localhost:${HOST_PORT}"
+BASE="https://localhost:${HTTPS_PORT}"
+HTTP_BASE="http://localhost:${HTTP_PORT}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -49,18 +52,20 @@ NET="af-proxy-smoke-net"
 STUB_CTR="af-proxy-smoke-stub"
 PROXY_CTR="af-proxy-smoke-proxy"
 MAINT_BASE="$(mktemp -d)"   # per-target copies of deploy/maintenance live here
+CERT_DIR="$MAINT_BASE/certs"
 TMP_MAINT=""                # set per target by run_target
 FLAG=""
+HOST_HEADER="test.local"
 
 PASS=0; FAIL=0
 declare -a FAILED_TARGETS
 
-# host-side curl always sends Host: test.local — Caddy's site address is
-# http://test.local (TLS neutered for the test).
+# The static-TLS site is host-agnostic, so host-side curl sends Host: test.local
+# while connecting to localhost. -k trusts only this test's ephemeral cert.
 # --noproxy '*' is mandatory: a dev box with http_proxy/all_proxy set (Clash etc.)
 # would otherwise route localhost through the proxy, which 502s the published port
 # before the request ever reaches the container.
-hc() { curl -s -m 10 --noproxy '*' -H "Host: test.local" "$@"; }
+hc() { curl -k -s -m 10 --noproxy '*' -H "Host: $HOST_HEADER" "$@"; }
 code_of() { hc -o /dev/null -w "%{http_code}" "$@"; }
 # served_by_port from the stub's JSON echo — proves WHICH upstream served the
 # path (8000 backend / 3000 frontend), not just that something returned 200.
@@ -94,10 +99,18 @@ trap cleanup EXIT
 # ---------------------------------------------------------------------------
 preflight() {
   command -v docker >/dev/null || { echo "docker 不可用"; exit 2; }
+  command -v openssl >/dev/null || { echo "openssl 不可用"; exit 2; }
   command -v python3 >/dev/null || { echo "python3 不可用"; exit 2; }
   [[ -f "$STUB_PY" ]]                       || { echo "缺 $STUB_PY"; exit 2; }
-  [[ -f "$CADDY_CONF_DIR/Caddyfile" ]]      || { echo "缺 $CADDY_CONF_DIR/Caddyfile"; exit 2; }
+  [[ -f "$CADDY_CONF_DIR/Caddyfile.acme" ]] || { echo "缺 $CADDY_CONF_DIR/Caddyfile.acme"; exit 2; }
+  [[ -f "$CADDY_CONF_DIR/Caddyfile.static" ]] || { echo "缺 $CADDY_CONF_DIR/Caddyfile.static"; exit 2; }
   [[ -f "$CADDY_CONF_DIR/common.caddy" ]]   || { echo "缺 $CADDY_CONF_DIR/common.caddy"; exit 2; }
+
+  mkdir -p "$CERT_DIR"
+  openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+    -subj "/CN=test.local" \
+    -keyout "$CERT_DIR/server.key" -out "$CERT_DIR/server.crt" \
+    >/dev/null 2>&1
 }
 
 start_stub() {
@@ -120,15 +133,33 @@ start_stub() {
 
 start_proxy() {
   docker rm -f "$PROXY_CTR" >/dev/null 2>&1 || true
-  # AF_DOMAIN=http://... makes Caddy serve plain HTTP on :80 — no ACME, no TLS.
-  # Directory mount + explicit --config mirror the compose files exactly (a
-  # single-file mount would pin the inode AND break the common.caddy import).
+  # The exact static-TLS entry and both published ports mirror compose. Caddy's
+  # directory mount + explicit --config also mirror compose (a single-file
+  # mount would pin the inode AND break the common.caddy import). This test's
+  # temp dir combines maintenance assets + flag, so mount it at both production
+  # target paths: immutable page content and target-local mutable state.
   # Tag kept in lockstep with release.sh CADDY_TAG / both compose files.
-  docker run -d --name "$PROXY_CTR" --network "$NET" -p "$HOST_PORT:80" \
-    -e AF_DOMAIN=http://test.local -e AF_ACME_EMAIL=smoke@test.local \
+  docker run -d --name "$PROXY_CTR" --network "$NET" \
+    -p "$HTTP_PORT:80" -p "$HTTPS_PORT:443" \
+    -e AF_HTTPS_PORT="$HTTPS_PORT" \
+    -v "$CADDY_CONF_DIR":/etc/caddy/conf:ro \
+    -v "$CERT_DIR":/etc/caddy/certs:ro \
+    -v "$TMP_MAINT":/etc/caddy/maintenance:ro \
+    -v "$TMP_MAINT":/etc/caddy/maintenance-state:ro \
+    caddy:2.10-alpine caddy run --config /etc/caddy/conf/Caddyfile.static --adapter caddyfile >/dev/null
+}
+
+start_acme_proxy() {
+  docker rm -f "$PROXY_CTR" >/dev/null 2>&1 || true
+  # localhost makes the exact ACME entry use Caddy's local issuer, exercising
+  # automatic certificate management without contacting a public CA.
+  docker run -d --name "$PROXY_CTR" --network "$NET" \
+    -p "$HTTP_PORT:80" -p "$HTTPS_PORT:443" \
+    -e AF_DOMAIN=localhost -e AF_ACME_EMAIL=smoke@test.local \
     -v "$CADDY_CONF_DIR":/etc/caddy/conf:ro \
     -v "$TMP_MAINT":/etc/caddy/maintenance:ro \
-    caddy:2.10-alpine caddy run --config /etc/caddy/conf/Caddyfile --adapter caddyfile >/dev/null
+    -v "$TMP_MAINT":/etc/caddy/maintenance-state:ro \
+    caddy:2.10-alpine caddy run --config /etc/caddy/conf/Caddyfile.acme --adapter caddyfile >/dev/null
 }
 
 wait_ready() {
@@ -179,6 +210,36 @@ assert_real_ip() {
   fi
 }
 
+assert_no_technology_headers() {
+  local path headers leaked=0
+  for path in / /api/ping /health/ready; do
+    headers="$(hc -D - -o /dev/null "$BASE$path")"
+    if printf '%s\n' "$headers" | grep -Eiq '^(x-powered-by|via|server)[[:space:]]*:'; then
+      leaked=1
+      no "technology headers: $path 仍暴露 X-Powered-By/Via/Server"
+    fi
+  done
+  [[ $leaked -eq 0 ]] \
+    && ok "technology headers: frontend/API/health 均未暴露 X-Powered-By/Via/Server"
+}
+
+assert_redirect() {
+  local label="$1" expected_location="$2" headers status location
+  headers="$(curl -sS --noproxy '*' -D - -o /dev/null "$HTTP_BASE/redirect-check?q=1")"
+  status="$(printf '%s\n' "$headers" | sed -n '1s/\r$//p')"
+  location="$(printf '%s\n' "$headers" | grep -i '^location:' | sed 's/^[^:]*:[[:space:]]*//;s/\r$//')"
+  if [[ "$status" == *" 308 "* && "$location" == "$expected_location" ]]; then
+    ok "$label: HTTP → HTTPS 308 且 Location 正确"
+  else
+    no "$label: 期望 308/正确 Location，实得 '$status' '$location'"
+  fi
+  if printf '%s\n' "$headers" | grep -Eiq '^(x-powered-by|via|server)[[:space:]]*:'; then
+    no "$label: 308 仍暴露 X-Powered-By/Via/Server"
+  else
+    ok "$label: 308 未暴露 X-Powered-By/Via/Server"
+  fi
+}
+
 assert_maintenance() {
   # Runs LAST, on a fresh per-target dir. Flag currently ABSENT → verify / proxies
   # (the flag-off state). Then CREATE the flag and verify the gate. We never
@@ -224,7 +285,7 @@ assert_upload_cap() {
   # backend. Sparse file → ~0 disk; curl streams the zeros over loopback.
   big="$(mktemp)"
   dd if=/dev/null of="$big" bs=1 count=0 seek=$((211*1024*1024)) 2>/dev/null
-  code="$(curl -s -m 30 --noproxy '*' -H "Host: test.local" -o /dev/null -w "%{http_code}" \
+  code="$(curl -k -s -m 30 --noproxy '*' -H "Host: test.local" -o /dev/null -w "%{http_code}" \
             -H "Content-Type: application/octet-stream" \
             --data-binary @"$big" "$BASE/api/upload")"
   rm -f "$big"
@@ -239,7 +300,7 @@ assert_upload_cap() {
   # line; the body is the stub's small JSON echo (NOT the 200MiB upload).
   big="$(mktemp)"
   dd if=/dev/null of="$big" bs=1 count=0 seek=$((200*1024*1024)) 2>/dev/null
-  resp="$(curl -s -m 30 --noproxy '*' -H "Host: test.local" -w $'\n%{http_code}' \
+  resp="$(curl -k -s -m 30 --noproxy '*' -H "Host: test.local" -w $'\n%{http_code}' \
             -H "Content-Type: application/octet-stream" \
             --data-binary @"$big" "$BASE/api/upload")"
   rm -f "$big"
@@ -259,10 +320,15 @@ assert_sse() {
   local gap rc
   # Read the stream byte-by-byte, timestamp chunk1 vs chunk2. Buffering-off →
   # gap ≈ stub's 1.5s sleep; buffering-on → both land together (gap ≈ 0).
-  gap="$(python3 - "$HOST_PORT" <<'PY'
-import http.client, sys, time
+  gap="$(python3 - "$HTTPS_PORT" <<'PY'
+import http.client, ssl, sys, time
 port = int(sys.argv[1])
-c = http.client.HTTPConnection("localhost", port, timeout=15)
+c = http.client.HTTPSConnection(
+    "localhost",
+    port,
+    timeout=15,
+    context=ssl._create_unverified_context(),
+)
 c.putrequest("GET", "/api/v1/stream/test", skip_host=True, skip_accept_encoding=True)
 c.putheader("Host", "test.local")
 c.endheaders()
@@ -297,12 +363,13 @@ PY
 
 run_target() {
   echo ""
-  echo "═══ 目标: caddy ═══"
+  echo "═══ 目标: static TLS ═══"
   PASS=0; FAIL=0
   # Fresh maintenance dir (see assert_maintenance for why we never delete the
   # flag once set).
   TMP_MAINT="$MAINT_BASE/caddy"
   FLAG="$TMP_MAINT/MAINTENANCE_ON"
+  HOST_HEADER="test.local"
   mkdir -p "$TMP_MAINT"
   cp -R "$ROOT/deploy/maintenance/." "$TMP_MAINT/"
   rm -f "$FLAG"
@@ -315,6 +382,8 @@ run_target() {
   assert_routing
   assert_swagger_404
   assert_real_ip
+  assert_no_technology_headers
+  assert_redirect "static redirect" "https://localhost:${HTTPS_PORT}/redirect-check?q=1"
   assert_upload_cap
   assert_sse
   assert_maintenance   # LAST: sets the flag, which we can't reliably clear
@@ -323,10 +392,33 @@ run_target() {
   docker rm -f "$PROXY_CTR" >/dev/null 2>&1 || true
 }
 
+run_acme_target() {
+  echo ""
+  echo "═══ 目标: ACME entry ═══"
+  PASS=0; FAIL=0
+  TMP_MAINT="$MAINT_BASE/acme"
+  FLAG="$TMP_MAINT/MAINTENANCE_ON"
+  HOST_HEADER="localhost"
+  mkdir -p "$TMP_MAINT"
+  cp -R "$ROOT/deploy/maintenance/." "$TMP_MAINT/"
+  start_acme_proxy
+  if ! wait_ready; then
+    FAILED_TARGETS+=("acme(启动失败)")
+    docker rm -f "$PROXY_CTR" >/dev/null 2>&1 || true
+    return
+  fi
+  assert_no_technology_headers
+  assert_redirect "ACME redirect" "https://localhost/redirect-check?q=1"
+  echo "  ── ACME entry: $PASS 通过 / $FAIL 失败"
+  [[ $FAIL -gt 0 ]] && FAILED_TARGETS+=("acme($FAIL 失败)")
+  docker rm -f "$PROXY_CTR" >/dev/null 2>&1 || true
+}
+
 # ---------------------------------------------------------------------------
 preflight
 start_stub
 run_target
+run_acme_target
 
 echo ""
 echo "═══════════════════════════════"

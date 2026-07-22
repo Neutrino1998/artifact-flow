@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Derive the immutable sandbox image reference from runtime build inputs."""
+"""Derive the sandbox build-cache recipe reference from runtime inputs.
+
+Production releases retag the built image by its actual Docker image ID.
+"""
 
 from __future__ import annotations
 

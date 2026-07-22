@@ -52,9 +52,12 @@ WebFetch、Task —— 从 CC 生态移植的 skill 里出现这些词表时要�
 ## 导入硬门槛(平台侧自动执行)
 
 - slug:`name` 槽化后须匹配 `^[a-z0-9][a-z0-9_-]{0,63}$`。
-- 结构:zip 里恰好一个 SKILL.md(可带一层同名包装目录);成员 ≤2000;
-  解压总量 ≤500MB;SKILL.md ≤5MB;禁止 `../`/绝对路径。
-- 内容:frontmatter 合法 YAML;剥 frontmatter 后正文非空;``` 围栏配对。
-- 单 zip ≤100MB;私有导入计入个人存储配额。
+- 结构:zip 里恰好一个 SKILL.md;推荐放在同名包装目录 `<name>/SKILL.md`
+  (直接放 zip 根部也兼容),附属文件必须与它在同一技能目录内。成员 ≤2000;
+  解压总量 ≤500MB;SKILL.md ≤5MB;禁止 `../`、绝对路径与符号链接。
+- 内容:SKILL.md 是 UTF-8,frontmatter 是合法 YAML mapping,剥 frontmatter 后正文
+  非空。`name`/`description` 按标准骨架填写;未闭合代码围栏等启发式检查只 warning,
+  不阻断导入。
+- 私有 skill 的单 zip 默认 ≤200MB(部署可调整),并计入个人存储配额。
 - frontmatter 的 `model`/`effort`/`context`/`paths` 是 CC 扩展,本平台忽略
   (导入时会给 warning);`visibility` 由导入通道决定,写了也忽略。

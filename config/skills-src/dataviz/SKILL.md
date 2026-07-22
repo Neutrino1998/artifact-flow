@@ -7,7 +7,7 @@ description: >
   适配 ArtifactFlow 静态 HTML artifact 和无网络 sandbox。
 license: Apache-2.0
 metadata:
-  version: "0.1.1"
+  version: "0.1.2"
 ---
 
 # 数据可视化
@@ -47,7 +47,10 @@ python3 $SKILL/scripts/validate_palette.py "#60a5fa,#f59e0b,#a78bfa" --mode dark
 
 - HTML artifact 是静态页面：不要依赖 JS tooltip、D3、Plotly、Recharts、CDN 或外部字体。
   用内联 SVG/CSS、直接标签、图例、`<title>`、表格视图承载信息。
-- matplotlib 图表直接可用中文字体；必要时用 `MPLBACKEND=Agg` 的默认无头渲染。
+- Matplotlib 图表直接支持普通中文；必要时用 `MPLBACKEND=Agg` 的默认无头渲染。镜像不提供
+  emoji 字体，不要在标题、轴标签或标注中用 emoji 充当图标，改用普通文字或 matplotlib
+  marker/shape。`Glyph ... missing from font(s)` 警告表示成图确有方块缺字，不能忽略后交付；
+  emoji 缺字不会连带破坏同行中文。
 - 外部 Web 应用代码可以按目标栈实现交互，但 ArtifactFlow artifact 交付必须自包含。
 
 ## 默认资源

@@ -147,9 +147,8 @@ export async function fetchNotifications(): Promise<Notification[]> {
 // Branding（页脚版权 / 问题反馈入口）
 // ============================================================
 // 与 notifications / welcome_tips 同源：静态 JSON、运维改文件即生效、
-// 出错一律 null 让组件隐藏 —— 默认部署里 branding.json 自带占位符,
-// 删了文件 / 写坏 schema → 页脚消失（fail-closed），而不是回退到代码常量
-// 掩盖运维错误。
+// 出错一律 null 让组件隐藏：缺文件 / 写坏 schema → 页脚消失
+//（fail-closed），而不是回退到代码常量掩盖运维错误。
 
 export interface FeedbackLink {
   label: string;

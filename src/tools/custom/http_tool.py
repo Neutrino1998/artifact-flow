@@ -11,7 +11,6 @@ from jmespath.exceptions import JMESPathError
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 
-from config import config
 from tools.artifact_output import (
     build_artifact_spec,
     content_type_from_headers,
@@ -214,11 +213,8 @@ class HttpTool(BaseTool):
                 )
                 return ToolResult(success=True, data=note, metadata=metadata, artifact=spec)
 
-            # 限制返回长度(隐藏常量,operator 可调、模型不可见)
-            max_len = config.HTTP_TOOL_MAX_RESULT_CHARS
-            if len(result_text) > max_len:
-                result_text = result_text[:max_len] + "\n\n[Response truncated...]"
-
+            # 成功文本保持完整；引擎按 BaseTool.max_result_size_chars 统一决定
+            # 内联还是完整落 artifact，工具层不可先截断并丢失尾部。
             return ToolResult(
                 success=True,
                 data=result_text,

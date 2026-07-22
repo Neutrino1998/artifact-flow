@@ -1,8 +1,8 @@
 """Admin-managed runtime site config.
 
-The frontend serves config/site/*.json as static files. This manager provides a
-small authenticated write path for those files without introducing a database
-table for low-frequency site notices.
+The frontend serves the configured runtime site directory as static /site/*.json
+files. This manager provides a small authenticated write path for those files
+without introducing a database table for low-frequency site notices.
 """
 
 from __future__ import annotations

@@ -5,9 +5,9 @@ description: >
   批注、接受或拒绝修订、渲染质检及导出 PDF。需要处理 Word 文件或交付 docx/PDF 时激活。
   工作在无网络沙盒中，优先使用稳定脚本，OOXML 仅作最后手段。
 license: Apache-2.0
-compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 LibreOffice、Pandoc、python-docx、lxml、RapidFuzz。
+compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 LibreOffice、Pandoc、python-docx、lxml、Pillow、RapidFuzz。
 metadata:
-  version: "2.1.2"
+  version: "2.5.1"
 ---
 
 # Word 文档
@@ -18,14 +18,16 @@ metadata:
 包内工具：[apply_redline.py](scripts/apply_redline.py)、
 [accept_changes.py](scripts/accept_changes.py)、[add_comment.py](scripts/add_comment.py)、
 [check_redlines.py](scripts/check_redlines.py)、[unpack.py](scripts/unpack.py)、
-[pack.py](scripts/pack.py)、[修订标记参考](references/redlines.md)、
+[pack.py](scripts/pack.py)、[decompose_docx.py](scripts/decompose_docx.py)、
+[内部表格目录过滤器](scripts/catalog_tables.lua)、
+[修订标记参考](references/redlines.md)、
 [默认 reference.docx](references/reference.docx)。
 
 ## 路线选择
 
 | 需求 | 首选路线 |
 |---|---|
-| 读取、总结、抽取修订 | Pandoc 输出 Markdown；图片另行抽取 |
+| 读取、总结、抽取修订 | `decompose_docx.py` 拆出正文、可见图片和表格索引 |
 | 新建普通文档 | Markdown + Pandoc reference docx |
 | 保留既有版式做普通小改 | python-docx，修改最少对象后另存 |
 | 以修订模式做多处修改 | `apply_redline.py --plan` |
@@ -38,21 +40,53 @@ LibreOffice 在本技能中主要负责兼容格式、渲染和 PDF 导出，不
 
 ## 读取
 
-保留修订信息读取：
+常规读取统一先做一次语义拆解：
 
 ```bash
-pandoc --track-changes=all --extract-media=/workspace/docx-media \
-  输入.docx -t gfm -o /workspace/document.md
+python "$SKILL/scripts/decompose_docx.py" 输入.docx /workspace/docx-read
 ```
 
-若只需结构化检查表格、段落和样式，用 python-docx。文档以图片、文本框或图表为主时，
-直接渲染页面：
+脚本用 Pandoc 保留修订并生成 `document.md`，同时输出 `manifest.json` 和逐出现位置的
+`figures/`。`document.md` 是唯一内容来源，包含标题、段落、列表和表格；manifest 只是图片/表格的
+轻量目录，不重复保存正文或单元格文本。先读 `document.md`；需要定位图表时再查 manifest 中的
+合成 ID、标题、标题层级、前后段落和顺序，不要把整个目录或全部图片一次性塞回上下文。
+
+图片按“在文档中的一次出现”记录，而不是按媒体文件去重。同一原图若被不同裁剪，会得到不同的
+figure。只把与任务有关、`include_in_current_view: true` 且存在 `visible_path` 的图片持久化并交给
+视觉能力：普通位图是原始可见内容，矩形 `a:srcRect` 裁剪会先物化成裁剪后的 PNG，
+EMF/WMF/SVG 会 best-effort 转 PNG。
+脚本不会输出未经显示变换的原始媒体；`source_part` 只是 DOCX 包内定位元数据，不能代替
+`visible_path`，否则可能读到文档中被裁掉的内容。`document.md` 中 Pandoc 生成的 `media/...`
+引用同样只是内容位置提示，不是可读取产物；实际图片只认 manifest 的 `visible_path`。正文关系可达
+的页眉、页脚、脚注和尾注图片也会进入 manifest；未知内容 part 中的图片只标记 fallback，不猜其
+显示语义。图片的 `revision_state`
+会区分 current/inserted/moved_to 与 deleted/moved_from；后两类只留目录记录，不物化图片，也不能当作
+当前文档内容送去识图。
+
+表格内容只从 `document.md` 阅读。manifest 的表格项来自 Pandoc 已解析的内容树，只提供
+`table-###` 合成 ID、可获得的题注/源 ID、文档顺序和标题层级，方便引用与定位；合成 ID 只在本次
+拆解结果内有效，不是 Word 原生 ID，也不保证跨版本稳定。脚本不另建表格 JSON，不声称还原物理
+行列、合并、嵌套、内容控件或修订语义。若任务依赖 Pandoc 无法表达的精确表格结构或可见版式，
+再定位并渲染必要页面，按 best-effort 结果说明限制；不要用目录数量证明 Word 中所有表格均已识别。
+
+普通文字文档即使含有插图，也不要因此渲染全文。manifest 中 `fallback: page_required` 表示脚本
+不能可靠恢复当前出现位置的可见像素，例如旋转/翻转、非矩形裁剪、图片效果、VML、SmartArt 或
+OLE；此时才定位并渲染必要的物理页。先转 PDF 并按正文/标题线索确定候选页，再显式传页码：
 
 ```bash
-artifactflow-office render 输入.docx /workspace/docx-pages
+artifactflow-office convert 输入.docx /workspace/输入.pdf
+artifactflow-office render /workspace/输入.pdf /workspace/docx-pages --pages 5,8
 ```
 
-逐页检查 PNG；当前模型看不到图片时，按部署能力委派视觉子代理。不要仅凭文本抽取宣称版式正确。
+把 `5,8` 替换为已定位的物理页；它不一定等于页脚页码或章节号。无法一次精确定位时，只渲染小的
+候选范围并依据结果缩小/扩展，不省略 `--pages`。跳过 logo、小图标和装饰图。若视觉结果与预期
+不符，重新核对 manifest 的 fallback 原因和页码，不要把同一文件换 ID 重试。
+
+视觉验证采用风险驱动的最小范围：读取、总结和抽取默认不做版式 QA；简单局部编辑先做结构检查，
+能可靠定位时只查看受影响或高风险页面；新建或大改默认抽查首页、末页及表格/图片密集页。只有用户
+明确要求版式审校、打印就绪或高保真交付，发生全局字体/模板/页尺寸等版式变更，
+或用户已反馈视觉问题时，才做完整逐页检查。未做完整检查时按 best-effort 交付，不宣称已逐页验证或
+版式完全正确。
 
 ## 创建
 
@@ -147,14 +181,17 @@ python "$SKILL/scripts/add_comment.py" 输入.docx /workspace/批注稿.docx \
 ```bash
 artifactflow-office convert 输入.doc /workspace/输入.docx
 artifactflow-office convert /workspace/输出.docx /workspace/输出.pdf
-artifactflow-office render /workspace/输出.docx /workspace/docx-final-pages
+artifactflow-office render /workspace/输出.docx /workspace/docx-final-pages --pages 1
 ```
 
-最终至少检查：页数是否异常、标题/表格是否被截断、图片是否缺失、分页是否漂移。复杂版式经
-LibreOffice 渲染与 Microsoft Word 仍可能有差异，交付时说明这是 best-effort 兼容结果。
+触发视觉验证时，把示例中的 `1` 替换或扩展为按上述风险范围选出的物理页，检查页数是否异常、
+标题/表格是否被截断、图片是否缺失、分页是否漂移。复杂版式经 LibreOffice 渲染与 Microsoft
+Word 仍可能有差异，交付时说明这是 best-effort 兼容结果。
 
 ## 边界
 
 - Pandoc 重建会损失多栏、文本框、艺术字等复杂版式；保版式修改不能走往返转换。
+- `decompose_docx.py` 不是 Word 排版引擎，不推断元素所在物理页；不确定显示语义会明确要求页面 fallback。
+- 包大小或内容节点超过脚本资源上限时会受控失败；不要绕过闸门直接重跑 Pandoc，应让用户拆分文档。
 - python-docx/LibreOffice 对宏、OLE、SmartArt 和第三方扩展部件只做 best-effort 保留。
 - OOXML 解包只用于明确、可验证的结构手术；失败后回到原件，不把半成品当成果。

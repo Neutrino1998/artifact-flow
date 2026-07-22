@@ -368,7 +368,7 @@ class ExecutionController:
                 # 分支天然不混淆(超时在内层 engine_task,外部 cancel 来自外层 _wrapped)。
                 # post-processing 本身不在此 deadline 内(只裹引擎):它是有界 DB 写 +
                 # 函数级重试 + late-cancel 兜底,per-query wall-clock 由 DB 层负责
-                # (PG command_timeout / MySQL server GUC,见 docs/architecture/execution-lifecycle.md)。
+                # (PG command_timeout / MySQL server GUC,见 db/database.py)。
                 async with asyncio.timeout(config.EXECUTION_TIMEOUT):
                     final_state = await execute_loop(
                         state=initial_state,

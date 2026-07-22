@@ -27,9 +27,8 @@ RUN pip install --user --no-warn-script-location -r requirements.lock
 # PR-obs-lite's faulthandler deadman dump isn't enough. ~6MB; rides the
 # existing `COPY --from=builder /root/.local` path into the runtime image.
 # Requires `cap_add: [SYS_PTRACE]` on the backend service to actually
-# attach in-container — see deploy/docker-compose.intranet.yml.
-# Version pin must match what release.sh ships in the analyst-tools tar
-# (pandas+numpy wheels), to avoid ABI surprises across the same release.
+# attach in-container — see deploy/compose.base.yml.
+# Pin the diagnostic binary so the immutable application image is reproducible.
 RUN pip install --user --no-warn-script-location py-spy==0.4.1
 
 # --- Stage 2: runtime ---
@@ -57,8 +56,18 @@ WORKDIR /app
 # Bring over installed Python deps from builder (~/.local)
 COPY --from=builder /root/.local /root/.local
 
-# Source code
-COPY . .
+# Runtime inputs are explicit. This keeps image contents and release.sh's
+# resume fingerprint aligned: adding a runtime file requires changing this
+# list instead of silently riding a broad COPY while an old archive is reused.
+COPY requirements.txt requirements.lock ./
+COPY pyproject.toml setup.py run_server.py alembic.ini ./
+COPY src ./src
+# Only scripts invoked by the running service or in-container operators belong
+# in the image. Build/release helpers stay in the source/deploy bundle.
+COPY scripts/create_admin.py scripts/inspect_tool_failures.py \
+     scripts/migrate_users_csv.py scripts/observability_report.py \
+     scripts/reconcile_config.py ./scripts/
+COPY deploy/entrypoint.sh ./deploy/entrypoint.sh
 
 # Register the local package (no deps — already installed via builder). Disable
 # build isolation so this local setup.py install does not fetch build deps.

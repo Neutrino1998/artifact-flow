@@ -28,13 +28,13 @@ backend ×N (AF_SKIP_RELEASE=1)  ──serve only, no reconcile─────�
   path. Default (no `AF_SKIP_RELEASE`, no `release` arg) is unchanged — the old
   inline "leader migrates, followers reconcile under the lock" path, kept for
   Mode 1 (SQLite single box) and backward compatibility.
-- `docker-compose.prod.yml` and `deploy/docker-compose.intranet.yml` add the
-  `release` service + `AF_SKIP_RELEASE=1` on the backend + the gate.
+- `deploy/compose.base.yml` contains the `release` service,
+  `AF_SKIP_RELEASE=1` backend, and the gate for every production capability set.
 - Reverse proxy is **Caddy** (both modes; intranet nginx retired): it resolves
   `backend:8000` through docker DNS at request time and round-robins across all
   scaled replicas natively — no static-upstream staleness to work around.
-  Intranet entry config: `deploy/caddy/Caddyfile.intranet` (static cert HTTPS),
-  shared site body in `deploy/caddy/common.caddy`.
+  TLS entries are `deploy/caddy/Caddyfile.static` and `Caddyfile.acme`; the
+  shared site body remains in `deploy/caddy/common.caddy`.
 
 ## Prerequisites for multi-replica
 
@@ -45,14 +45,15 @@ backend ×N (AF_SKIP_RELEASE=1)  ──serve only, no reconcile─────�
 2. Keep `SANDBOX_REAP_ALLOW_LOCAL_STORE=false` (default): the reaper's liveness
    source must be the shared Redis, or replicas would reap each other's sandboxes.
 
-## Enable (intranet, single host)
+## Enable (single host)
 
 ```bash
-docker compose -f deploy/docker-compose.intranet.yml --profile infra up -d --scale backend=2
+vi /opt/artifactflow/control/site.toml  # backend_replicas = 2
+afctl --root /opt/artifactflow apply current
 ```
 
-For multi-host, the same `release` step runs once (Ansible: a release task
-delegated to one host) before starting backends on all hosts. Not wired here.
+For multi-host, afctl's Ansible executor runs the same release step on the one
+`[release]` host before rolling all `[app]` hosts with `serial: 1`.
 
 ## Validation (run on a real box before trusting it)
 

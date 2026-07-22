@@ -37,13 +37,13 @@ logger = get_logger("ArtifactFlow")
 class BashTool(BaseTool):
     """在 per-turn 沙盒容器内执行 bash 命令。
 
-    - CONFIRM 权限:跑不可信(模型生成)代码。
+    - AUTO 权限:不经 Permission Interrupt；不可信代码的安全边界由沙盒 containment 提供。
     - 唯一参数 command —— 超时/配额/输出帽全是隐藏常量(参数面最小化)。
     - 命令退出码非零不算工具失败(grep 无命中 exit 1 是信息不是故障):
       success=True + 输出里带 exit code,让模型自己解读。success=False 只留给
       基建故障(容器起不来 / exec 通道卡死)。
     - 输出溢出分两层:session 侧 SANDBOX_MAX_OUTPUT_CHARS 硬帽(防内存放大,
-      显式截断标记);>max_result_size_chars(50k)的部分由引擎溢出转 artifact
+      显式截断标记);>max_result_size_chars 的捕获结果由引擎溢出转 artifact
       idiom 接手,引擎零改动。
     """
 
@@ -69,7 +69,7 @@ class BashTool(BaseTool):
                 "within the current turn and is discarded when the turn ends. "
                 f"Each command is killed after {config.SANDBOX_COMMAND_TIMEOUT}s."
             ),
-            permission=ToolPermission.CONFIRM,
+            permission=ToolPermission.AUTO,
         )
         self._session = session
 
@@ -90,8 +90,9 @@ class BashTool(BaseTool):
         try:
             result = await self._session.exec(command)
         except SandboxError as e:
-            # session 侧已按错误类型记过 ops 日志,这里只回模型面文案
-            return ToolResult(success=False, error=str(e))
+            # session 侧记 ops 原始错误；有界证据走 metadata 留给 admin，
+            # 不拼进模型面错误文案。
+            return ToolResult(success=False, error=str(e), metadata=e.diagnostics)
 
         lines = [result.output.rstrip("\n") if result.output.strip() else "(no output)"]
         if result.truncated:
@@ -194,7 +195,7 @@ class MountArtifactTool(BaseTool):
         try:
             await self._session.ensure_container()
         except SandboxError as e:
-            return ToolResult(success=False, error=str(e))
+            return ToolResult(success=False, error=str(e), metadata=e.diagnostics)
 
         # id 模式([\w\-.]{1,64})无路径分隔符,叶子永远落 workspace 顶层 ——
         # 逐级 openat 退化为单级,父目录就是 workspace 本体(容器够不着、换不了)。
@@ -358,7 +359,11 @@ class PersistFileTool(BaseTool):
         # 不开"抢救残留产物"通道(超额现场文件完整性不可信、等于给超额留后门)。
         sticky = self._session.sticky_failure
         if sticky is not None:
-            return ToolResult(success=False, error=sticky)
+            return ToolResult(
+                success=False,
+                error=sticky,
+                metadata=self._session.sticky_diagnostics,
+            )
 
         if not self._session.started:
             return ToolResult(

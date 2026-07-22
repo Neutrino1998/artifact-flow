@@ -1,5 +1,5 @@
 site_name: ArtifactFlow
-site_description: Pi-style 可配置 Agent 引擎 + 双 Artifact 架构的多智能体 SaaS
+site_description: 面向私有化部署的可配置多智能体服务
 site_url: https://neutrino1998.github.io/artifact-flow/
 repo_url: https://github.com/Neutrino1998/artifact-flow
 repo_name: Neutrino1998/artifact-flow
@@ -7,32 +7,14 @@ repo_name: Neutrino1998/artifact-flow
 theme:
   name: material
   language: zh
-  palette:
-    - scheme: default
-      primary: custom
-      accent: custom
-      toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
-    - scheme: slate
-      primary: custom
-      accent: custom
-      toggle:
-        icon: material/brightness-4
-        name: Switch to light mode
   features:
-    - navigation.tabs
     - navigation.sections
-    - navigation.expand
     - navigation.top
     - search.highlight
     - content.code.copy
 
 exclude_docs: |
   _archive/
-
-extra_css:
-  - stylesheets/custom.css
 
 plugins:
   - search
@@ -49,36 +31,24 @@ markdown_extensions:
         - name: mermaid
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
-  - pymdownx.tabbed:
-      alternate_style: true
   - admonition
   - pymdownx.details
-  - attr_list
-  - md_in_html
   - tables
 
 nav:
-  - Home: index.md
-  - Deployment: deployment.md
-  - Architecture:
-      - Overview: architecture/overview.md
-      - Engine: architecture/engine.md
-      - Execution Lifecycle: architecture/execution-lifecycle.md
-      - Agents: architecture/agents.md
-      - Tools: architecture/tools.md
-      - Sandbox: architecture/sandbox.md
-      - Artifacts: architecture/artifacts.md
-      - Data Layer: architecture/data-layer.md
-      - Streaming: architecture/streaming.md
-      - Concurrency: architecture/concurrency.md
-      - Observability: architecture/observability.md
-  - Guides:
-      - Add Agent: guides/add-agent.md
-      - Add Tool: guides/add-tool.md
-      - Add Model: guides/add-model.md
-      - API Reference: guides/api-reference.md
-      - Observability Tuning: guides/observability-tuning.md
-  - Runbooks:
-      - Service Hang: runbooks/service-hang.md
-      - Intranet Kylin ARM: runbooks/intranet-kylin-arm.md
-  - Frontend: frontend.md
+  - 首页: index.md
+  - 工作原理: how-it-works.md
+  - 配置:
+      - 配置总览: configuration/index.md
+      - Model: configuration/models.md
+      - Agent: configuration/agents.md
+      - Tool 与 MCP: configuration/tools.md
+      - Skill: configuration/skills.md
+      - 应用与站点: configuration/runtime.md
+  - 部署与运维:
+      - 主机准备: operations/host-preparation.md
+      - 首次部署: operations/first-deployment.md
+      - Release 与升级: operations/releases.md
+      - 日常维护: operations/maintenance.md
+      - 故障处理: operations/troubleshooting.md
+      - 内网麒麟 ARM: runbooks/intranet-kylin-arm.md

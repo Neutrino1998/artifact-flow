@@ -1,13 +1,13 @@
 """DooD compose 接线冒烟 — 在【容器化 backend 内】直接驱动 SandboxSession。
 
-验证 docker-compose.sandbox.yml overlay 的两个接线点,不依赖 LLM:
+验证 compose.sandbox.yml overlay 的两个接线点,不依赖 LLM:
   1. backend 容器经挂入的 /var/run/docker.sock 能创建沙盒兄弟容器;
   2. scratch 根「宿主↔backend 容器同路径」bind 成立——backend 把 workspace_dir
      作为 bind source 传给 daemon、daemon 按宿主路径解析,若路径不同一,容器内
      写的文件不会出现在 backend 看到的 scratch 目录里。
 
 用法(compose 栈已 up;tests/ 被 .dockerignore 排除在镜像外,故经 stdin 喂入):
-  docker compose -f deploy/docker-compose.intranet.yml -f deploy/docker-compose.sandbox.yml \
+  docker compose -f deploy/compose.base.yml -f deploy/compose.sandbox.yml \
     exec -T backend python - < tests/manual/dood_compose_smoke.py
 
 期望输出以 "DOOD SMOKE: ALL PASS" 结尾;任何一步失败即非零退出。

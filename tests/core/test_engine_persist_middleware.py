@@ -41,7 +41,7 @@ class _FixedTool(BaseTool):
         self,
         name: str,
         result: ToolResult,
-        max_result_size_chars: float = 50000,
+        max_result_size_chars: float | None = None,
     ):
         super().__init__(
             name=name,
@@ -134,7 +134,6 @@ async def _run_engine(
     tool: BaseTool,
     artifact_service=None,
     session_id: str = "sess-1",
-    tool_size_threshold: float = 50000,
 ):
     """Run one tool call then a final text response."""
     state = create_initial_state(

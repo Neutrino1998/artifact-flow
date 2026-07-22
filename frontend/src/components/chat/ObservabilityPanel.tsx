@@ -11,6 +11,8 @@ import { SELECT_CHEVRON_COMPACT } from '@/components/ui/SelectChevron';
 import * as api from '@/lib/api';
 import { isCsvMime } from '@/lib/artifactPreview';
 import { parseUtcIso } from '@/lib/time';
+import { formatDuration } from '@/lib/formatDuration';
+import { formatTokens } from '@/lib/formatTokens';
 import { triggerBlobDownload } from '@/lib/download';
 import ArtifactPreviewContent from '@/components/artifact/ArtifactPreviewContent';
 import PanelSearchBar from './PanelSearchBar';
@@ -196,15 +198,6 @@ function formatNumber(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
   if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
   return String(n);
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1_000) return `${ms}ms`;
-  const totalSecs = Math.floor(ms / 1_000);
-  if (totalSecs < 60) return `${totalSecs}s`;
-  const mins = Math.floor(totalSecs / 60);
-  const secs = totalSecs % 60;
-  return `${mins}m ${secs}s`;
 }
 
 function StatCard({ label, value, tone = 'neutral' }: { label: string; value: string; tone?: 'neutral' | 'warning' | 'error' }) {
@@ -660,6 +653,7 @@ function serializeEventToText(event: AdminEventItem): string {
     if (d.params != null) lines.push(`\n--- Params ---\n${JSON.stringify(d.params, null, 2)}`);
     if (d.result_data != null) lines.push(`\n--- Result ---\n${typeof d.result_data === 'string' ? d.result_data : JSON.stringify(d.result_data, null, 2)}`);
     if (d.error != null) lines.push(`\n--- Error ---\n${d.error as string}`);
+    if (d.metadata != null) lines.push(`\n--- Metadata ---\n${JSON.stringify(d.metadata, null, 2)}`);
   }
   if (d != null && event.event_type === 'agent_start' && d.system_prompt != null) {
     lines.push(`\n--- System Prompt ---\n${d.system_prompt as string}`);
@@ -928,6 +922,12 @@ function MessageGroupView({
   const hasHardError = issues.errors > 0;
   const hasIssues = Object.values(issues).some((n) => n > 0);
   const visibleEvents = issuesOnly ? group.events.filter(isIssueEvent) : group.events;
+  const executionMetrics = group.execution_metrics as {
+    total_duration_ms?: number | null;
+    total_token_usage?: { total_tokens?: number | null } | null;
+  } | null;
+  const totalDurationMs = executionMetrics?.total_duration_ms;
+  const totalTokens = executionMetrics?.total_token_usage?.total_tokens;
 
   return (
     <div className="mb-3">
@@ -951,7 +951,7 @@ function MessageGroupView({
         >
           <path d="M3 1l5 4-5 4z" />
         </svg>
-        <span className="text-xs font-medium text-text-primary dark:text-text-primary-dark truncate">
+        <span className="min-w-0 text-xs font-medium text-text-primary dark:text-text-primary-dark truncate">
           {inputPreview}
         </span>
         {offActiveBranch ? (
@@ -968,8 +968,14 @@ function MessageGroupView({
         {issues.toolFails > 0 ? <PillBadge tone="warning">{issues.toolFails} tool fail</PillBadge> : null}
         {issues.permissionDenied > 0 ? <PillBadge tone="warning">{issues.permissionDenied} denied</PillBadge> : null}
         {issues.compactionFails > 0 ? <PillBadge tone="warning">compaction fail</PillBadge> : null}
-        <span className="flex-shrink-0 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+        <span className="ml-auto flex-shrink-0 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+          {totalTokens != null && totalTokens > 0 ? (
+            <span className="font-mono">{formatTokens(totalTokens)} tokens · </span>
+          ) : null}
           {issuesOnly ? `${visibleEvents.length}/${group.events.length} events` : `${group.events.length} events`}
+          {totalDurationMs != null && totalDurationMs > 0 ? (
+            <span className="ml-2 font-mono">· {formatDuration(totalDurationMs)}</span>
+          ) : null}
         </span>
       </button>
 
@@ -1090,6 +1096,9 @@ function EventDetail({
           ) : null}
           {d.error != null ? (
             <DetailBlock label="Error" content={d.error as string} />
+          ) : null}
+          {d.metadata != null ? (
+            <DetailBlock label="Metadata" content={JSON.stringify(d.metadata, null, 2)} />
           ) : null}
         </div>
       ) : null}

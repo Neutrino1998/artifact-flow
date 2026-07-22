@@ -413,8 +413,10 @@ class ContextManager:
         if state == "not_started":
             return (
                 '<sandbox_status state="not_started">\n'
-                'No sandbox container started this turn — the workspace is empty; '
-                'files from previous turns are gone (mount again what you need).\n'
+                'No sandbox container has started this turn — /workspace is empty. '
+                'All workspace files from previous turns are gone, including artifact '
+                'copies mounted with `mount` and skill bundles unpacked with `mount_skill`; '
+                'mount them again if needed.\n'
                 '</sandbox_status>'
             )
         # running

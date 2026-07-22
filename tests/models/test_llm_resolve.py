@@ -17,7 +17,10 @@ from models.llm import (
 
 
 def test_known_alias_resolves():
-    assert _resolve_model_params("gpt-4o-mini")["model"] == "gpt-4o-mini"
+    assert (
+        _resolve_model_params("deepseek-v4-flash", api_key="test-key")["model"]
+        == "openai/deepseek-v4-flash"
+    )
 
 
 def test_default_timeout_is_split_by_http_phase(monkeypatch):
@@ -27,7 +30,9 @@ def test_default_timeout_is_split_by_http_phase(monkeypatch):
     monkeypatch.setattr("models.llm.settings.LLM_WRITE_TIMEOUT", 45.0)
     monkeypatch.setattr("models.llm.settings.LLM_POOL_TIMEOUT", 2.0)
 
-    timeout = _resolve_model_params("gpt-4o-mini")["timeout"]
+    timeout = _resolve_model_params(
+        "deepseek-v4-flash", api_key="test-key"
+    )["timeout"]
 
     assert isinstance(timeout, httpx.Timeout)
     assert timeout.connect == 3.0
@@ -107,12 +112,11 @@ def test_bare_model_with_base_url_no_double_prefix():
 # ============================================================
 
 def test_vision_flag_true_for_multimodal_alias():
-    assert model_supports_vision("qwen3.7-plus") is True
-    assert model_supports_vision("gpt-4o") is True
+    assert model_supports_vision("qwen3.6-27b-vision") is True
 
 
 def test_vision_flag_false_for_text_alias():
-    assert model_supports_vision("qwen3.7-max") is False
+    assert model_supports_vision("deepseek-v4-flash") is False
 
 
 def test_vision_flag_false_for_unknown_alias():
@@ -169,7 +173,8 @@ async def test_bad_request_fails_fast_no_retry(monkeypatch):
     monkeypatch.setattr("models.llm.acompletion", fake_acompletion)
     with pytest.raises(BadRequestError):
         await _drain(astream_with_retry([{"role": "user", "content": "x"}],
-                                        model="gpt-4o-mini", max_retries=3, retry_delay=0))
+                                        model="deepseek-v4-flash", api_key="test-key",
+                                        max_retries=3, retry_delay=0))
     assert calls["n"] == 1  # 立即抛,无重试
 
 
@@ -184,5 +189,6 @@ async def test_rate_limit_is_retried(monkeypatch):
     monkeypatch.setattr("models.llm.acompletion", fake_acompletion)
     with pytest.raises(RateLimitError):
         await _drain(astream_with_retry([{"role": "user", "content": "x"}],
-                                        model="gpt-4o-mini", max_retries=3, retry_delay=0))
+                                        model="deepseek-v4-flash", api_key="test-key",
+                                        max_retries=3, retry_delay=0))
     assert calls["n"] == 3  # 重试满 3 次才抛

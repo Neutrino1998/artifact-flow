@@ -190,7 +190,7 @@ class CompactionRunner:
         # 实际生效 —— 其他情况后续 lead call 会以真实 input_tokens 覆盖（engine.py:425）,
         # 本写入被自然丢弃；故无需特判「是不是终态前一次」。
         # 仅对 lead 写入：last_input_tokens 是 lead-only 字段（约束见 engine.py:425 +
-        # docs/architecture/engine.md），subagent compaction 不能污染此字段 —— 否则若
+        # engine.py 的 lead-only metric 约定），subagent compaction 不能污染此字段 —— 否则若
         # subagent 压缩后、下次 lead call 覆盖前发生 cancel/timeout/error,持久化会留下
         # subagent summary 的 token 数,导致 composer gauge 显著低估 lead 上下文。
         # gauge 分子 = last_input + last_output（与 compaction 触发口径 input+output 对齐）,

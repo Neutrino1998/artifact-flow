@@ -596,9 +596,9 @@ class TestEdgeCases:
         assert "3-b" not in result.data
 
     async def test_grep_default_max_result_size_chars(self):
-        """grep_artifact 默认 50000，溢出由引擎中间件落盘兜底。"""
+        """grep_artifact 沿用通用内联阈值，溢出由引擎中间件落盘兜底。"""
         tool = GrepArtifactTool(service=None)
-        assert tool.max_result_size_chars == 50000
+        assert tool.max_result_size_chars == config.TOOL_RESULT_INLINE_MAX_CHARS
 
 
 # ============================================================

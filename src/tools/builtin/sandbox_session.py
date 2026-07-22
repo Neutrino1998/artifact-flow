@@ -22,7 +22,7 @@ import os
 import shutil
 import uuid
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import aiodocker
 from aiodocker.exceptions import DockerError
@@ -96,11 +96,19 @@ def parse_scratch_dir_name(name: str) -> Optional[tuple]:
 
 
 class SandboxError(Exception):
-    """沙盒错误基类(工具层 catch 它转 loud-fail ToolResult)。"""
+    """沙盒错误基类(工具层 catch 它转 loud-fail ToolResult)。
+
+    ``diagnostics`` 是仅供 TOOL_COMPLETE.metadata / admin 审计的有界事实，
+    不拼进模型面错误文案。ops 原始错误仍由日志记录。
+    """
+
+    def __init__(self, message: str, *, diagnostics: Optional[dict] = None):
+        super().__init__(message)
+        self.diagnostics = diagnostics or {}
 
 
 class SandboxUnavailableError(SandboxError):
-    """容器创建失败 / session 已关闭 —— 该 turn 沙盒工具不可用。"""
+    """容器创建失败 / 中途停止 / session 已关闭 —— 该 turn 沙盒不可用。"""
 
 
 class SandboxExecTimeoutError(SandboxError):
@@ -120,7 +128,7 @@ class SandboxSession:
     """per-turn 沙盒容器壳。
 
     壳本身零成本;首个 exec 才 lazy 起容器。引擎对单 turn 内的工具调用是串行
-    执行(见 docs/architecture/engine.md),故无并发起容器问题,不加锁。
+    执行(见 core/engine.py),故无并发起容器问题,不加锁。
 
     close() 幂等,且每步独立 best-effort(容器 → scratch → client):任一步失败
     记日志继续,残留由 lease-anchored reaper(C-reap)兜底。
@@ -143,6 +151,9 @@ class SandboxSession:
         # (loud-fail 一次,后续调用立即复述原因)。失败原因多为环境性(镜像缺失 /
         # daemon 不可达 / 池子满),turn 内重试只会重复烧启动超时或重蹈超额。
         self._sticky_failure: Optional[str] = None
+        # 与 sticky 文案同生灭的 admin-only 结构化证据。后续工具重撞时
+        # 也能复述原始根因，不会因容器已删而退化成通用错误。
+        self._sticky_diagnostics: dict = {}
         self._scratch_dir = os.path.join(
             config.SANDBOX_SCRATCH_ROOT,
             scratch_dir_name(conversation_id, message_id),
@@ -160,6 +171,27 @@ class SandboxSession:
         容器中途死),None = 无。供不触发 ensure_container 的工具(persist)在
         其前置检查里复述配额失败,与 bash/mount 的 sticky 行为一致(P3)。"""
         return self._sticky_failure
+
+    @property
+    def sticky_diagnostics(self) -> dict:
+        """Sticky 失败的有界 admin-only 证据；调用方不应修改。"""
+        return self._sticky_diagnostics
+
+    @staticmethod
+    def _container_id(container: Any) -> str:
+        """aiodocker 容器 id；假对象/创建早期取不到时显式 unknown。"""
+        value = getattr(container, "_id", None)
+        return str(value) if value else "unknown"
+
+    def _set_sticky_failure(self, message: str, diagnostics: Optional[dict] = None) -> None:
+        self._sticky_failure = message
+        self._sticky_diagnostics = diagnostics or {}
+
+    def _sticky_error(self) -> SandboxUnavailableError:
+        return SandboxUnavailableError(
+            self._sticky_failure or "Sandbox tools are unavailable for this turn.",
+            diagnostics=self._sticky_diagnostics,
+        )
 
     @property
     def scratch_dir(self) -> str:
@@ -304,7 +336,7 @@ class SandboxSession:
         if self._closed:
             raise SandboxUnavailableError("Sandbox session is already closed for this turn.")
         if self._sticky_failure is not None:
-            raise SandboxUnavailableError(self._sticky_failure)
+            raise self._sticky_error()
         if self._container is not None:
             return
 
@@ -327,7 +359,7 @@ class SandboxSession:
             raise
         except SandboxUnavailableError as e:
             # 准入水位拒绝:消息已是模型面文案、日志已记,只补 sticky,不再 rewrap
-            self._sticky_failure = str(e)
+            self._set_sticky_failure(str(e), e.diagnostics)
             raise
         except DockerError as e:
             if e.status == 404 and config.SANDBOX_IMAGE in str(e.message):
@@ -348,7 +380,7 @@ class SandboxSession:
                 logger.exception(
                     f"Sandbox container create/start failed for {self.message_id}: {e}"
                 )
-            self._sticky_failure = msg
+            self._set_sticky_failure(msg)
             raise SandboxUnavailableError(msg) from e
         except TimeoutError as e:
             msg = (
@@ -359,12 +391,12 @@ class SandboxSession:
                 f"Sandbox container start timed out for {self.message_id} "
                 f"(daemon unresponsive?)"
             )
-            self._sticky_failure = msg
+            self._set_sticky_failure(msg)
             raise SandboxUnavailableError(msg) from e
         except Exception as e:
             msg = "Sandbox container failed to start. Sandbox tools are unavailable for this turn."
             logger.exception(f"Sandbox container create/start failed for {self.message_id}: {e}")
-            self._sticky_failure = msg
+            self._set_sticky_failure(msg)
             raise SandboxUnavailableError(msg) from e
 
         # 软配额 watchdog:容器活着的期间周期巡检本 turn scratch 的块占用,
@@ -373,7 +405,8 @@ class SandboxSession:
 
         logger.info(
             f"Sandbox container started for {self.message_id} "
-            f"(image={config.SANDBOX_IMAGE}, runtime={config.SANDBOX_RUNTIME or 'default'})"
+            f"(container_id={self._container_id(self._container)}, "
+            f"image={config.SANDBOX_IMAGE}, runtime={config.SANDBOX_RUNTIME or 'default'})"
         )
 
     async def _watchdog_loop(self) -> None:
@@ -410,10 +443,23 @@ class SandboxSession:
 
     async def _kill_over_quota(self, usage: int, *, measure_incomplete: bool = False) -> None:
         """超额处置:先置 sticky(in-flight exec 与后续调用都按它归因),再杀容器。"""
-        self._sticky_failure = (
+        message = (
             f"Sandbox workspace exceeded the "
             f"{config.SANDBOX_WORKSPACE_QUOTA_MB}MB disk quota and was terminated. "
             "Sandbox tools are unavailable for this turn."
+        )
+        self._set_sticky_failure(
+            message,
+            {
+                "sandbox_failure": {
+                    "failure_kind": "workspace_quota",
+                    "container_id": self._container_id(self._container),
+                    "observed_workspace_mb": round(usage / 1024 / 1024, 2),
+                    "limits": {
+                        "workspace_mb": config.SANDBOX_WORKSPACE_QUOTA_MB,
+                    },
+                }
+            },
         )
         # 模型行为触发、预期内防护、已处置 → warning
         if measure_incomplete:
@@ -510,6 +556,140 @@ class SandboxSession:
             except Exception:
                 logger.exception(f"aiodocker client close failed for {self.message_id}")
 
+    async def _inspect_container_best_effort(
+        self, container: Any, *, phase: str
+    ) -> Optional[dict]:
+        """Return a bounded container-state snapshot without making observation authoritative.
+
+        One local Docker inspect after each exec closes the reachable gap where runsc returns
+        an exec result (for example WaitPID EOF) even though the per-turn container has stopped.
+        Inspect timeout/failure is observer failure: log it and preserve the command result.
+        A successful snapshot with ``running is False`` is authoritative and handled by exec().
+        """
+        container_id = self._container_id(container)
+        try:
+            async with asyncio.timeout(config.SANDBOX_INSPECT_TIMEOUT_SEC):
+                info = await container.show()
+        except asyncio.CancelledError:
+            raise
+        except TimeoutError:
+            logger.warning(
+                f"Sandbox container inspect timed out after "
+                f"{config.SANDBOX_INSPECT_TIMEOUT_SEC}s during {phase} "
+                f"(container_id={container_id}, msg={self.message_id}); "
+                "preserving the command result"
+            )
+            return None
+        except DockerError as e:
+            # 404 是目标容器已不存在的权威事实，不是观测器本身失败。
+            # 不猜 OOM，但当前命令不能继续被标成成功。
+            if e.status == 404:
+                return {
+                    "container_id": container_id,
+                    "inspect_available": False,
+                    "state": {
+                        "running": False,
+                        "dead": None,
+                        "oom_killed": None,
+                        "exit_code": None,
+                        "error": "container_not_found",
+                        "finished_at": None,
+                    },
+                }
+            logger.warning(
+                f"Sandbox container inspect failed during {phase} "
+                f"(container_id={container_id}, msg={self.message_id}, "
+                f"status={e.status}, message={e.message!r}); preserving the command result"
+            )
+            return None
+        except Exception:
+            logger.exception(
+                f"Sandbox container inspect failed during {phase} "
+                f"(container_id={container_id}, msg={self.message_id}); "
+                "preserving the command result"
+            )
+            return None
+
+        if not isinstance(info, dict) or not isinstance(info.get("State"), dict):
+            logger.warning(
+                f"Sandbox container inspect returned malformed state during {phase} "
+                f"(container_id={container_id}, msg={self.message_id}); "
+                "preserving the command result"
+            )
+            return None
+
+        state = info["State"]
+        return {
+            "container_id": str(info.get("Id") or container_id),
+            "inspect_available": True,
+            "state": {
+                "running": state.get("Running"),
+                "dead": state.get("Dead"),
+                "oom_killed": state.get("OOMKilled"),
+                "exit_code": state.get("ExitCode"),
+                "error": state.get("Error") or "",
+                "finished_at": state.get("FinishedAt"),
+            },
+        }
+
+    def _build_failure_diagnostics(
+        self,
+        container: Any,
+        *,
+        failure_kind: str,
+        snapshot: Optional[dict],
+        exec_exit_code: Optional[int] = None,
+        exec_duration: Optional[float] = None,
+        output_truncated: Optional[bool] = None,
+        docker_error_status: Optional[int] = None,
+    ) -> dict:
+        item = {
+            "failure_kind": failure_kind,
+            "container_id": (
+                snapshot.get("container_id") if snapshot else self._container_id(container)
+            ),
+            "runtime": config.SANDBOX_RUNTIME or "default",
+            "inspect_available": (
+                snapshot.get("inspect_available", True) if snapshot else False
+            ),
+            "state": snapshot.get("state") if snapshot else None,
+            "limits": {
+                "memory_mb": config.SANDBOX_MEM_LIMIT_MB,
+                "cpu": config.SANDBOX_CPU_LIMIT,
+                "pids": config.SANDBOX_PIDS_LIMIT,
+            },
+        }
+        if exec_exit_code is not None or exec_duration is not None:
+            item["exec"] = {
+                "exit_code": exec_exit_code,
+                "duration_sec": round(exec_duration, 2) if exec_duration is not None else None,
+                "output_truncated": output_truncated,
+            }
+        if docker_error_status is not None:
+            item["docker_error_status"] = docker_error_status
+        return {"sandbox_failure": item}
+
+    @staticmethod
+    def _stopped_failure_kind(snapshot: dict) -> str:
+        state = snapshot.get("state") or {}
+        return "oom" if state.get("oom_killed") is True else "container_stopped"
+
+    def _failure_message(self, failure_kind: str) -> str:
+        if failure_kind == "oom":
+            return (
+                f"The sandbox container exceeded its {config.SANDBOX_MEM_LIMIT_MB}MB "
+                "memory limit and was terminated. Sandbox tools are unavailable for this turn."
+            )
+        if failure_kind == "container_stopped":
+            return (
+                "The sandbox container died while the command was running. "
+                "Sandbox tools are unavailable for this turn."
+            )
+        return (
+            "The sandbox command channel failed. "
+            "Sandbox tools are unavailable for this turn."
+        )
+
     # ------------------------------------------------------------------
     # exec
     # ------------------------------------------------------------------
@@ -524,10 +704,9 @@ class SandboxSession:
         # 局部引用:watchdog 超额杀会把 self._container 置 None(与本协程并发)
         container = self._container
         if container is None:
-            raise SandboxUnavailableError(
-                self._sticky_failure
-                or "Sandbox session is already closed for this turn."
-            )
+            if self._sticky_failure is not None:
+                raise self._sticky_error()
+            raise SandboxUnavailableError("Sandbox session is already closed for this turn.")
 
         argv = [
             "timeout",
@@ -548,40 +727,103 @@ class SandboxSession:
                 exit_code = await self._resolve_exit_code(exec_)
         except TimeoutError as e:
             # 弃等不等于杀死:容器内进程可能还活着,turn 末拆容器收尾
+            duration = loop.time() - started_at
+            diagnostics = self._build_failure_diagnostics(
+                container,
+                failure_kind="exec_channel_timeout",
+                snapshot=None,
+                exec_duration=duration,
+            )
             logger.error(
                 f"Sandbox exec abandoned after "
                 f"{config.SANDBOX_COMMAND_TIMEOUT + EXEC_ABANDON_GRACE_SEC}s "
-                f"(msg={self.message_id}); container will be torn down at turn end"
+                f"(container_id={self._container_id(container)}, msg={self.message_id}); "
+                "container will be torn down at turn end"
             )
             raise SandboxExecTimeoutError(
                 "Command did not return (exec channel unresponsive past the "
                 f"{config.SANDBOX_COMMAND_TIMEOUT}s command timeout). "
-                "The sandbox will be torn down at the end of this turn."
+                "The sandbox will be torn down at the end of this turn.",
+                diagnostics=diagnostics,
             ) from e
         except DockerError as e:
             # 容器中途消失(watchdog 超额杀 / 外力 rm):优先按 sticky 归因
             if self._sticky_failure is not None:
-                raise SandboxUnavailableError(self._sticky_failure) from e
-            logger.error(
-                f"Sandbox container died during exec for {self.message_id} "
-                f"(Docker error {e.status})"
+                raise self._sticky_error() from e
+            snapshot = await self._inspect_container_best_effort(
+                container, phase="exec Docker error"
             )
-            self._sticky_failure = (
-                "The sandbox container died while the command was running. "
-                "Sandbox tools are unavailable for this turn."
+            # inspect await 期间 quota watchdog 可能已经冻结了更精确的失败归因；
+            # sticky 必须胜过随后观察到的通用 stopped/404，不能被覆盖。
+            if self._sticky_failure is not None:
+                raise self._sticky_error() from e
+            state = snapshot.get("state") if snapshot else None
+            if state is not None and state.get("running") is False:
+                failure_kind = self._stopped_failure_kind(snapshot)
+            elif snapshot is not None:
+                failure_kind = "exec_channel_error"
+            else:
+                failure_kind = "docker_error"
+            diagnostics = self._build_failure_diagnostics(
+                container,
+                failure_kind=failure_kind,
+                snapshot=snapshot,
+                exec_duration=loop.time() - started_at,
+                docker_error_status=e.status,
             )
-            raise SandboxUnavailableError(self._sticky_failure) from e
+            log = logger.warning if failure_kind == "oom" else logger.error
+            log(
+                "Sandbox exec Docker error for %s "
+                "(container_id=%s, status=%s, message=%r, diagnostics=%s)",
+                self.message_id,
+                self._container_id(container),
+                e.status,
+                e.message,
+                diagnostics["sandbox_failure"],
+            )
+            message = self._failure_message(failure_kind)
+            self._set_sticky_failure(message, diagnostics)
+            raise self._sticky_error() from e
 
         # 探针②:watchdog 杀容器时 in-flight exec 多半正常返回 exit=137(stream
         # EOF、ExitCode 可解析)—— 裸 137 会被误读;sticky 已置时按配额失败归因。
         if self._sticky_failure is not None:
-            raise SandboxUnavailableError(self._sticky_failure)
+            raise self._sticky_error()
+
+        duration = loop.time() - started_at
+        snapshot = await self._inspect_container_best_effort(container, phase="post-exec")
+        # inspect await 期 watchdog 可能刚置 sticky 并删容器；二次检查关掉
+        # 「配额杀发生在首次检查之后」的窄竞态窗口。
+        if self._sticky_failure is not None:
+            raise self._sticky_error()
+        state = snapshot.get("state") if snapshot else None
+        if state is not None and state.get("running") is False:
+            failure_kind = self._stopped_failure_kind(snapshot)
+            diagnostics = self._build_failure_diagnostics(
+                container,
+                failure_kind=failure_kind,
+                snapshot=snapshot,
+                exec_exit_code=exit_code,
+                exec_duration=duration,
+                output_truncated=truncated,
+            )
+            log = logger.warning if failure_kind == "oom" else logger.error
+            log(
+                "Sandbox container stopped before exec result return for %s "
+                "(container_id=%s, diagnostics=%s)",
+                self.message_id,
+                self._container_id(container),
+                diagnostics["sandbox_failure"],
+            )
+            message = self._failure_message(failure_kind)
+            self._set_sticky_failure(message, diagnostics)
+            raise self._sticky_error()
 
         return SandboxExecResult(
             exit_code=exit_code,
             output=output,
             truncated=truncated,
-            duration=loop.time() - started_at,
+            duration=duration,
         )
 
     async def _drain_exec(self, exec_) -> tuple:

@@ -649,9 +649,6 @@ function SkillImportCard({
             >
               选择文件
             </button>
-            <div className="text-[11px] text-text-tertiary dark:text-text-tertiary-dark">
-              zip 内含一个 SKILL.md（可带 scripts / references / assets）
-            </div>
           </div>
         )}
         <input
@@ -661,6 +658,33 @@ function SkillImportCard({
           onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
           className="hidden"
         />
+      </div>
+
+      {/* Keep this format card aligned with BulkImportForm's upload guidance. */}
+      <div className="rounded-lg bg-panel/40 dark:bg-panel-accent-dark/40 p-4 text-xs space-y-2">
+        <div className="font-medium text-text-secondary dark:text-text-secondary-dark">
+          技能 ZIP 格式说明
+        </div>
+        <ul className="text-text-tertiary dark:text-text-tertiary-dark space-y-1 list-disc pl-4">
+          <li>
+            <span className="font-mono">SKILL.md</span>{' '}
+            <span className="text-status-error">*</span>（必需，ZIP 内只能有一个）
+          </li>
+          <li>
+            推荐目录：<span className="font-mono">my-skill/SKILL.md</span>
+            （直接放在 ZIP 根目录也兼容）
+          </li>
+          <li>
+            使用 UTF-8；YAML frontmatter 填写{' '}
+            <span className="font-mono">name</span>、{' '}
+            <span className="font-mono">description</span>，Markdown 正文不能为空
+          </li>
+          <li>
+            可选 <span className="font-mono">scripts/</span>、{' '}
+            <span className="font-mono">references/</span>、{' '}
+            <span className="font-mono">assets/</span>，与 SKILL.md 放在同一技能目录内
+          </li>
+        </ul>
       </div>
 
       {isAdmin && (

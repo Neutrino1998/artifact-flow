@@ -1,0 +1,9 @@
+# Multi-host app overlay. Each app host publishes one backend/frontend pair for
+# the LB. Scale out with more inventory hosts; per-host scale remains one.
+services:
+  backend:
+    ports:
+      - "${AF_BACKEND_PORT:-8000}:8000"
+  frontend:
+    ports:
+      - "${AF_FRONTEND_PORT:-3000}:3000"

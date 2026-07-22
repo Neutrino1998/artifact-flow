@@ -925,15 +925,32 @@ async def execute_loop(
                     tool_duration_ms = int(
                         (utc_now() - subagent_start_time).total_seconds() * 1000
                     )
-                    await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
-                        "tool": "call_subagent",
-                        "success": True,
-                        "result_data": (
+                    # call_subagent 是执行方式特殊，不是结果契约特殊：包装后的返回值同样
+                    # 经过统一内联阈值。超限时完整子 agent 结果落 artifact，调用方只拿
+                    # 预览句柄；落盘失败则沿用普通工具的 loud-fail 契约。
+                    subagent_result = ToolResult(
+                        success=True,
+                        data=(
                             f'<subagent_result agent="{target_agent}">'
                             f'\n{sub_response}'
                             f'\n</subagent_result>'
                         ),
+                        metadata={"subagent": target_agent},
+                    )
+                    subagent_result = await _maybe_persist_tool_result(
+                        "call_subagent", tool, subagent_result
+                    )
+                    await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
+                        "tool": "call_subagent",
+                        "success": subagent_result.success,
+                        "result_data": (
+                            subagent_result.data if subagent_result.success else None
+                        ),
+                        "error": (
+                            subagent_result.error if not subagent_result.success else None
+                        ),
                         "duration_ms": tool_duration_ms,
+                        "metadata": subagent_result.metadata or None,
                         "parser_warnings": parser_warnings,
                     })
                     tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1

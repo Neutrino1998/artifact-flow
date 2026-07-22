@@ -946,6 +946,23 @@ class TestHttpToolEndpoint:
         assert result.success is True
         assert "matched nothing" in result.data
 
+    async def test_large_success_response_is_left_complete_for_engine(self, monkeypatch):
+        """Adapter must not discard the tail before engine artifact persistence."""
+        from config import config
+
+        payload = "X" * (config.TOOL_RESULT_INLINE_MAX_CHARS + 1)
+        monkeypatch.setattr(
+            "tools.custom.http_tool.httpx.AsyncClient",
+            self._client_returning({"data": payload}),
+        )
+
+        tool = self._tool_extract("data")
+        result = await tool.execute()
+
+        assert result.success is True
+        assert result.data == payload
+        assert len(result.data) > tool.max_result_size_chars
+
     async def test_text_artifact_output_uses_extracted_content(self, monkeypatch):
         monkeypatch.setattr(
             "tools.custom.http_tool.httpx.AsyncClient",

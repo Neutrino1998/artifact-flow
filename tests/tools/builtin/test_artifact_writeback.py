@@ -268,6 +268,91 @@ class TestXorInvariant:
         assert ok_text and aid_text == "a.csv"
 
 
+class TestTextSizeAdmission:
+    """所有文本 Artifact 创建/修改路径共享 UTF-8 字节上限。"""
+
+    async def test_create_upload_and_tool_result_share_text_limit(
+        self, artifact_service: ArtifactService, session_id: str, monkeypatch
+    ):
+        monkeypatch.setattr(config, "ARTIFACT_TEXT_MAX_BYTES", 4)
+        artifact_service.set_session(session_id)
+
+        # 上限按 UTF-8 bytes 而非 Python chars；两个 é 恰好四字节。
+        ok, message = await artifact_service.create_artifact(
+            session_id, "exact", "text/plain", "Exact", "éé"
+        )
+        assert ok, message
+
+        ok, message = await artifact_service.create_artifact(
+            session_id, "agent_too_large", "text/plain", "Large", "ééx"
+        )
+        assert not ok
+        assert "Text artifact too large" in message
+
+        # 普通工具溢出兜底与显式 text ArtifactSpec 都经 ingest_tool_result。
+        ok, message, aid = await artifact_service.ingest_tool_result(
+            session_id,
+            ArtifactSpec(content_type="text/plain", content="12345"),
+            tool_name="remote_tool",
+        )
+        assert not ok
+        assert aid is None
+        assert "Text artifact too large" in message
+
+        ok, message, info = await artifact_service.create_from_upload(
+            session_id=session_id,
+            filename="upload.txt",
+            content="12345",
+            content_type="text/plain",
+        )
+        assert not ok
+        assert info is None
+        assert "Text artifact too large" in message
+
+    async def test_rewrite_and_update_reject_before_mutating_working_set(
+        self, artifact_service: ArtifactService, session_id: str, monkeypatch
+    ):
+        monkeypatch.setattr(config, "ARTIFACT_TEXT_MAX_BYTES", 4)
+        artifact_service.set_session(session_id)
+        ok, message = await artifact_service.create_artifact(
+            session_id, "doc", "text/plain", "Doc", "1234"
+        )
+        assert ok, message
+
+        ok, message = await artifact_service.rewrite_artifact(
+            session_id, "doc", "12345"
+        )
+        assert not ok
+        assert "Text artifact too large" in message
+
+        ok, message, metadata = await artifact_service.update_artifact(
+            session_id, "doc", "4", "45"
+        )
+        assert not ok
+        assert metadata is None
+        assert "Text artifact too large" in message
+
+        memory = artifact_service.working_set.peek(session_id, "doc")
+        assert memory.content == "1234"
+        assert memory.current_version == 1
+
+    async def test_text_limit_does_not_reclassify_or_reject_blob(
+        self, artifact_service: ArtifactService, session_id: str, monkeypatch
+    ):
+        monkeypatch.setattr(config, "ARTIFACT_TEXT_MAX_BYTES", 1)
+        ok, message, aid = await artifact_service.ingest_tool_result(
+            session_id,
+            ArtifactSpec(
+                content_type="application/octet-stream",
+                filename="payload.bin",
+                blob=b"12345",
+            ),
+            tool_name="remote_tool",
+        )
+        assert ok, message
+        assert aid == "payload.bin"
+
+
 class TestCreateFromUpload:
     """create_from_upload 也必须满足 _ARTIFACT_ID_PATTERN（之前漏校验，
     长文件名会让 ID 超 64 字符进 DB）。"""

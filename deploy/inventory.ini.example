@@ -1,0 +1,21 @@
+# EXPERIMENTAL multi-host Ansible inventory; not yet production-accepted.
+# Single-host sites do not need this file.
+# Copy to control/inventory.ini, keep it outside release units, and set:
+#   executor = "ansible"
+#   inventory = "control/inventory.ini"
+#   ansible_ee_image = "registry.example/af-ansible-ee@sha256:<digest>"
+# in control/site.toml.
+
+[release]
+release-1 ansible_host=10.0.0.11
+
+[app]
+app-1 ansible_host=10.0.0.12 af_advertise=10.0.0.12
+app-2 ansible_host=10.0.0.13 af_advertise=10.0.0.13
+
+[lb]
+lb-1 ansible_host=10.0.0.14
+
+[all:vars]
+ansible_user=artifactflow
+ansible_python_interpreter=/usr/bin/python3

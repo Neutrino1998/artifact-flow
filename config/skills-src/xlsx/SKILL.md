@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 LibreOffice、pandas、openpyxl。
 metadata:
-  version: "2.0.0"
+  version: "2.1.0"
 ---
 
 # 表格
@@ -38,6 +38,9 @@ for ws in wb.worksheets:
 
 `data_only=True` 读取的是最近一次计算缓存，不是公式本身。大表先用
 `read_only=True` 或 CSV 分块扫描，避免一次装入全部数据。
+
+需要审核图表或仪表盘时，先定位含图表的工作表、图表对象及其数据引用，只渲染相关工作表或打印
+区域；普通数据读取、公式分析和值修改默认不渲染，也不要因工作簿含图表就渲染全部打印页。
 
 `.xls` 老格式先转为 `.xlsx`：
 
@@ -98,8 +101,12 @@ artifactflow-office render /workspace/输出.xlsx /workspace/xlsx-pages
 artifactflow-office convert /workspace/输出.xlsx /workspace/输出.pdf
 ```
 
-逐页检查列是否截断、表头是否重复、数字格式是否正确、公式错误是否可见。当前模型看不到图片时，
-按部署能力委派视觉子代理。CSV 交付无需 LibreOffice，使用 pandas 并明确编码。
+视觉验证采用风险驱动的最小范围：局部格式修改只检查受影响工作表/打印区域；新建或大改默认抽查
+关键工作表及图表/宽表区域。只有用户明确要求打印就绪、高保真交付或完整视觉审校，发生全局主题、
+打印设置、列宽/缩放等变化，或用户已反馈视觉问题时，才检查全部相关打印页。检查时关注列截断、
+重复表头、数字格式和可见公式错误；当前模型看不到图片时按部署能力委派视觉子代理。未做完整检查
+时按 best-effort 交付，不宣称已逐页验证或版式完全正确。CSV 交付无需 LibreOffice，使用 pandas
+并明确编码。
 
 ## 边界
 

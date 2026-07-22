@@ -1,7 +1,8 @@
 """skill 工具(L2 read_skill + L3 mount_skill,Phase C-2 / D-2)。
 
-**read_skill(L2)** 镜像 read_artifact 的**工具契约**(句柄进 / 内容出、
-`max_result_size_chars=inf` 永不二次 persist、`AUTO`),但可见性**不照抄 owner-only**
+**read_skill(L2)** 镜像 read_artifact 的**工具契约**(句柄进 / 内容出、`AUTO`)。
+正文超出通用工具内联阈值时由引擎完整落 artifact；只有最终分页读取器
+read_artifact 需要 ``max_result_size_chars=inf``。可见性**不照抄 owner-only**
 —— skill 多 department 轴,走 EffectiveSkillSet(否则 dept skill 注入挡得住、read
 挡不住,changelog 06-23)。激活语义(决策 11/原则 8):read_skill 既返回正文,又声明式
 回填 `metadata.activated_skill` —— 引擎据此把 slug 进 `active_skills` + 在已算好的
@@ -19,7 +20,6 @@ runtime 重算(utils.skill_zip,同 D-1 定位器,不持久化)。
 
 import asyncio
 import io
-import math
 import shlex
 import zipfile
 from typing import List, Optional
@@ -84,8 +84,6 @@ class ReadSkillTool(BaseTool):
                 "if it later scrolls out of context, just read it again."
             ),
             permission=ToolPermission.AUTO,
-            # inf = 永不落盘(同 read_artifact:自身输出再落盘会成 read→artifact→read 环)
-            max_result_size_chars=math.inf,
         )
         self._service = service
         self._skillset = skillset
@@ -206,7 +204,11 @@ class MountSkillTool(BaseTool):
         try:
             await self._session.ensure_container()
         except SandboxError as e:
-            return ToolResult(success=False, error=str(e))  # session 已记 ops 日志
+            return ToolResult(
+                success=False,
+                error=str(e),
+                metadata=e.diagnostics,
+            )  # session 已记 ops 日志
 
         # 有界字节拷贝进容器 /tmp(宿主直写 tmp_dir,O_NOFOLLOW 圈地同 mount)。
         try:
@@ -261,13 +263,21 @@ class MountSkillTool(BaseTool):
         try:
             exec_result = await self._session.exec(command)
         except SandboxError as e:
-            return ToolResult(success=False, error=str(e))  # session 已记 ops 日志
+            return ToolResult(
+                success=False,
+                error=str(e),
+                metadata=e.diagnostics,
+            )  # session 已记 ops 日志
 
         if exec_result.exit_code != 0:
             # watchdog 超额杀(zip bomb)→ sticky 归因;否则受信 bundle 解不开 = 意外,ops 要看。
             sticky = self._session.sticky_failure
             if sticky is not None:
-                return ToolResult(success=False, error=sticky)
+                return ToolResult(
+                    success=False,
+                    error=sticky,
+                    metadata=self._session.sticky_diagnostics,
+                )
             logger.error(
                 f"mount_skill: extraction failed for '{slug}' "
                 f"(exit={exec_result.exit_code}, msg={self._session.message_id}): "

@@ -1,4 +1,4 @@
-# autoheal — 舰队自愈(Phase C 决策 5)
+# autoheal — 容器健康自愈
 
 宿主 systemd timer 周期把 **unhealthy** 的容器 `docker restart` 拉起来,并留一条可审计
 的重启痕迹供管理端面板代报。补齐自愈闭环的最后一环:
@@ -25,20 +25,22 @@ deadman 的 faulthandler 栈仍走 `docker logs` 供事后定因;autoheal 只负
 ## 安装(真机)
 
 ```bash
-# 1. 按实际解包路径改 .service 里的 WorkingDirectory / ExecStart 两处绝对路径
-# 2. 装并启用 timer
-sudo cp artifactflow-autoheal.service artifactflow-autoheal.timer /etc/systemd/system/
+# 使用当前已验收 release 的脚本，显式安装；afctl apply 不修改控制面工具
+RELEASE=/opt/artifactflow/.artifactflow/releases/1.4.0
+sudo install -m 0755 "$RELEASE/deploy/scripts/autoheal.sh" \
+  /opt/artifactflow/bin/artifactflow-autoheal
+sudo install -m 0644 "$RELEASE/deploy/autoheal/artifactflow-autoheal.service" \
+  "$RELEASE/deploy/autoheal/artifactflow-autoheal.timer" /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now artifactflow-autoheal.timer
-# 3. 验
 systemctl list-timers artifactflow-autoheal.timer
-/opt/artifactflow/deploy/scripts/autoheal.sh --dry-run    # 只报告不动手
+/opt/artifactflow/bin/artifactflow-autoheal --dry-run    # 只报告不动手
 ```
 
 ## 两个必须知道的约束
 
-- **与维护窗口互斥**:`pause.sh` 会主动停 backend/frontend 并落 `../maintenance/MAINTENANCE_ON`
-  旗标。那些容器此刻停着是**有意**的。autoheal 每轮先查旗标,在即整个 no-op 退出 ——
+- **与维护窗口互斥**:`afctl apply/maintenance` 会在 `control/maintenance/MAINTENANCE_ON`
+  落旗标。autoheal 每轮先查旗标,在即整个 no-op 退出 ——
   不会把维护窗口里停掉的服务错误拉活。
 
 - **归因经文件中转,脚本不碰 Redis**(保脚本十行级可审计):重启即向 `restart-marker.jsonl`

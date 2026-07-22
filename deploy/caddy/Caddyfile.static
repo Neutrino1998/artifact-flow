@@ -1,0 +1,49 @@
+# ArtifactFlow — static TLS capability entry
+#
+# Replaces the retired nginx container: one reverse proxy for both modes, and
+# the intranet entry gains HTTPS via a STATICALLY issued cert (company test
+# center / internal CA) — no ACME. The shared site body (route order,
+# maintenance gate, SSE flush, upload cap, X-Real-IP) is imported from
+# common.caddy, same file Mode 2 uses.
+#
+# Cert contract (operator-side, not Caddy's job):
+#   - control/certs/server.crt MUST contain the FULL chain (leaf + intermediates);
+#     a leaf-only pem makes browsers that lack the intermediate fail the chain.
+#   - Clients must trust the issuing (company) root CA.
+#   - Rotation goes through `afctl apply current`; it recreates Caddy with the
+#     target-local certificate and verifies readiness before leaving maintenance.
+{
+	# Air-gapped: ACME endpoints are unreachable and must never be attempted.
+	# An explicit `tls cert key` below already disables ACME for that site, but
+	# keep the global kill switch so a future careless site block (bare
+	# hostname, no tls) hangs the config load loudly at validate-time instead
+	# of wedging startup on an ACME dial that can never succeed.
+	auto_https off
+}
+
+import /etc/caddy/conf/upstreams.caddy
+import /etc/caddy/conf/common.caddy
+
+# HTTPS entry. Host-agnostic (`https://:443`): the intranet has no canonical
+# domain routing concern — whatever name/IP the cert covers, Caddy serves it.
+https://:443 {
+	tls /etc/caddy/certs/server.crt /etc/caddy/certs/server.key
+	import af_site
+}
+
+# HTTP → HTTPS redirect (auto_https off disables Caddy's built-in one).
+# AF_HTTPS_PORT is the HOST-published HTTPS port (compose passes it in,
+# default 443): the redirect must carry the PUBLIC port, not the container's.
+# {http.request.host} is the Host header WITHOUT its port, so a nonstandard
+# AF_HTTP_PORT never leaks into the target (the nginx `$host` port-strip
+# pentest finding does not apply — scheme+port are rewritten wholesale).
+http://:80 {
+	import strip_technology_headers
+	redir https://{http.request.host}:{$AF_HTTPS_PORT:443}{uri} 308
+}
+
+# Internal health listener for afctl — see (af_health_probe) in
+# common.caddy for the full rationale.
+:2021 {
+	import af_health_probe
+}

@@ -24,6 +24,10 @@ env
 # Local data (mount via volume)
 data/
 
+# Runtime configuration is a separately versioned/bind-mounted release unit.
+# Keeping it out of the app image makes config-only releases genuinely image-free.
+config/
+
 # Frontend (has its own Dockerfile)
 frontend/
 

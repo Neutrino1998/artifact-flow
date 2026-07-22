@@ -1,0 +1,36 @@
+# Sandbox DooD overlay — REQUIRED for every afctl-managed deployment.
+#
+# afctl always layers this file over compose.base.yml.
+#
+# Why a separate overlay: the socket boundary remains visible in Compose and
+# can be audited independently. afctl always includes this file; it never
+# silently removes sandbox capability. /var/run/docker.sock is host-root-
+# equivalent, so the backend's DooD constants remain the policy boundary.
+#
+# Path identity (the non-obvious constraint): the backend passes the per-turn
+# workspace dir as a bind SOURCE to the daemon, and the daemon resolves that
+# path on the HOST — so the scratch root must be mounted into the backend
+# container at the SAME absolute path it has on the host. One env var
+# (ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT derived from control/site.toml) feeds both sides of the
+# bind below AND the app config, keeping the three in lockstep.
+#
+# Host prerequisites (docs/operations/host-preparation.md): runsc installed +
+# registered in daemon.json (sandbox/gvisor-pkg), the sandbox image
+# docker-load'ed, and the scratch root provisioned as a dedicated mount
+# filesystem (the disk-quota hard wall).
+#
+# Sandbox containers are SIBLINGS of the backend (created via the daemon),
+# not children — backend mem_limit does not bound them; per-sandbox limits
+# come from ARTIFACTFLOW_SANDBOX_MEM_LIMIT_MB etc.
+
+services:
+  backend:
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT:-/var/lib/artifactflow/sandbox-scratch}:${ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT:-/var/lib/artifactflow/sandbox-scratch}
+    environment:
+      # afctl supplies both from strict site.toml. No daemon-default fallback:
+      # runsc is supported production isolation; explicit runc is reduced
+      # isolation for trusted/dev deployments.
+      - ARTIFACTFLOW_SANDBOX_RUNTIME=${ARTIFACTFLOW_SANDBOX_RUNTIME:?afctl must set sandbox runtime}
+      - ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT=${ARTIFACTFLOW_SANDBOX_SCRATCH_ROOT:?afctl must set scratch root}

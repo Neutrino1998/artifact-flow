@@ -1,0 +1,15 @@
+# Default single-host upstream targets. The experimental Ansible executor
+# overlays a topology-derived file from target-local control/ on the LB host;
+# common.caddy keeps all timeout/retry/header policy shared between both forms.
+
+(backend_upstream_targets) {
+	dynamic a {
+		name backend
+		port 8000
+		refresh 10s
+	}
+}
+
+(frontend_upstream_targets) {
+	to frontend:3000
+}

@@ -12,8 +12,8 @@ set -euo pipefail
 #
 # Output (dist/):
 #   artifactflow-sandbox-<VERSION>.tar.gz         docker-saved image (gzip)
-#   artifactflow-sandbox-<VERSION>.tar.gz.sha256  checksum (bare filename — see
-#                                                 deploy/scripts/verify-bundle.sh)
+#   artifactflow-sandbox-<VERSION>.tar.gz.sha256  standalone checksum sidecar
+#   artifactflow-sandbox-<VERSION>.image-ref      exact image-ID-derived ref
 #   artifactflow-sandbox-<VERSION>.wheels.lock    resolved pip set baked in the
 #                                                 image (diff-friendly sidecar)
 #   artifactflow-sandbox-<VERSION>.manifest.txt   image id + tool versions
@@ -41,11 +41,12 @@ case "$PLATFORM" in
   *)              ARCH_TAG="${PLATFORM##*/}" ;;
 esac
 
-# The production image identity is derived from runtime inputs, not the app
-# release version. Unrelated app/config releases therefore reuse the same image,
-# while any actual sandbox runtime change produces a new immutable reference.
-IMAGE="$(python3 "$ROOT/scripts/sandbox_runtime_ref.py" --arch "$ARCH_TAG")"
+# A recipe ref keeps rebuild caching stable across app releases. After build we
+# derive the production ref from Docker's actual image ID, so even a changed
+# base-image resolution cannot overwrite a rollback target.
+RECIPE_IMAGE="$(python3 "$ROOT/scripts/sandbox_runtime_ref.py" --arch "$ARCH_TAG")"
 ARCHIVE="$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.tar.gz"
+REF_FILE="$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.image-ref"
 VERIFY_ARCHIVE="$OUTDIR/artifactflow-sandbox-verify-${VERSION}.tar.gz"
 LOCK="$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.wheels.lock"
 MANIFEST="$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt"
@@ -53,10 +54,18 @@ MANIFEST="$OUTDIR/artifactflow-sandbox-${VERSION}-${ARCH_TAG}.manifest.txt"
 mkdir -p "$OUTDIR"
 
 echo "=== ArtifactFlow sandbox image: ${VERSION} (platform: ${PLATFORM}, tag: ${ARCH_TAG}) ==="
-echo "Building ${IMAGE} (native if build-host arch == ${ARCH_TAG}, else QEMU — be patient)..."
+echo "Building ${RECIPE_IMAGE} (native if build-host arch == ${ARCH_TAG}, else QEMU — be patient)..."
 docker buildx build --platform "${PLATFORM}" \
-  -t "${IMAGE}" -t artifactflow-sandbox:latest \
+  -t "${RECIPE_IMAGE}" -t artifactflow-sandbox:latest \
   -f "$DOCKERFILE" --load "$CTX"
+
+IMAGE_ID="$(docker image inspect "${RECIPE_IMAGE}" --format '{{.Id}}')"
+IMAGE_DIGEST="${IMAGE_ID#sha256:}"
+[[ "$IMAGE_DIGEST" =~ ^[0-9a-f]{64}$ ]] \
+  || { echo "cannot derive sandbox image id" >&2; exit 1; }
+IMAGE="artifactflow-sandbox:sha256-${IMAGE_DIGEST}"
+docker tag "${RECIPE_IMAGE}" "${IMAGE}"
+printf '%s\n' "$IMAGE" > "$REF_FILE"
 
 # Pull the frozen pip set + tool versions OUT of the built image so ops can
 # inspect/diff without loading the (large) tar. -u 0 reads /opt regardless of
@@ -74,14 +83,12 @@ ZIP_VER=$(docker run --rm "${IMAGE}" sh -c "zip -v | grep -m1 'This is Zip'")
 GIT_VER=$(docker run --rm "${IMAGE}" git --version)
 # Locally-built --load images have no RepoDigests (those come from a registry);
 # .Id (the config digest) is the right freeze anchor for an air-gapped image.
-IMAGE_ID=$(docker image inspect "${IMAGE}" --format '{{.Id}}')
 
 echo "Saving image to ${ARCHIVE}..."
 # The release tar carries only the immutable reference. :latest remains a local
 # build convenience and is never selected by production deployment.
 docker save "${IMAGE}" | gzip > "$ARCHIVE"
-# Checksum with a bare filename (run inside dist/) so `sha256sum -c` works from
-# that dir — same convention as release.sh / verify-bundle.sh.
+# Checksum with a bare filename for standalone verification.
 ( cd "$OUTDIR" && sha256sum "$(basename "$ARCHIVE")" > "$(basename "$ARCHIVE").sha256" )
 
 # Package the verify probes as a third transfer unit. They are NOT baked into
@@ -94,7 +101,7 @@ echo "Packaging verify probes to ${VERIFY_ARCHIVE}..."
 # 文件生成 AppleDouble `._*` 兄弟条目(--no-xattrs 不覆盖),落到 Linux 端是真实
 # 二进制垃圾文件。
 COPYFILE_DISABLE=1 \
-tar --no-xattrs --no-fflags --exclude='.DS_Store' --exclude='._*' --exclude='__pycache__' \
+tar --exclude='.DS_Store' --exclude='._*' --exclude='__pycache__' \
     -czf "$VERIFY_ARCHIVE" -C "$ROOT/sandbox" verify
 ( cd "$OUTDIR" && sha256sum "$(basename "$VERIFY_ARCHIVE")" > "$(basename "$VERIFY_ARCHIVE").sha256" )
 
@@ -105,6 +112,7 @@ Built (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)
 Platform:    ${PLATFORM}
 Image ref:   ${IMAGE}
 Image id:    ${IMAGE_ID}
+Recipe ref:  ${RECIPE_IMAGE}
 
 Tools:
   ${PY_VER}
@@ -117,7 +125,7 @@ Tools:
   ${ZIP_VER}
   ${GIT_VER}
 
-Python deps: artifactflow-sandbox-${VERSION}.wheels.lock (${WHEEL_COUNT} pkgs)
+Python deps: artifactflow-sandbox-${VERSION}-${ARCH_TAG}.wheels.lock (${WHEEL_COUNT} pkgs)
 
 Role: tier-1 baked sandbox environment for gVisor (runsc) verification (plan §B).
 Decoupled from the backend requirements.lock — this is the sandbox runtime, not the app.
@@ -134,6 +142,7 @@ echo
 echo "✓ Done:"
 echo "  $ARCHIVE"
 echo "  $ARCHIVE.sha256"
+echo "  $REF_FILE"
 echo "  $VERIFY_ARCHIVE (+ .sha256)"
 echo "  $LOCK"
 echo "  $MANIFEST"

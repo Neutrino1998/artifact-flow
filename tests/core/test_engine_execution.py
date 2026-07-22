@@ -17,7 +17,7 @@ from core.engine import EngineHooks, create_initial_state, execute_loop
 from core.events import StreamEventType, ExecutionEvent
 from tests.core._toolset import effective_for
 from api.services.runtime_store import InMemoryRuntimeStore
-from tools.base import BaseTool, ToolPermission, ToolResult
+from tools.base import ArtifactSpec, BaseTool, ToolPermission, ToolResult
 
 
 # ============================================================
@@ -137,6 +137,25 @@ class _FailingTool(BaseTool):
         return await self.execute(**params)
 
 
+class _RecordingArtifactService:
+    """Small engine collaborator that records tool-result artifact content."""
+
+    def __init__(self):
+        self.calls: list[tuple[str, str, str]] = []
+
+    def set_session(self, session_id: str) -> None:
+        pass
+
+    async def list_artifacts(self, session_id: str, **kwargs):
+        return []
+
+    async def ingest_tool_result(
+        self, session_id: str, spec: ArtifactSpec, tool_name: str = None
+    ):
+        self.calls.append((session_id, tool_name, spec.content))
+        return True, "ok", f"tool_{tool_name}_0001"
+
+
 def _hooks_from_store(store: InMemoryRuntimeStore) -> EngineHooks:
     """Build EngineHooks wired to a real RuntimeStore."""
     return EngineHooks(
@@ -157,6 +176,7 @@ async def _run_engine(
     permission_timeout=1,
     cancel_check_interval=None,
     force_compact=False,
+    artifact_service=None,
 ):
     """Helper to run engine with given LLM factory and return (state, emitted).
 
@@ -199,6 +219,7 @@ async def _run_engine(
             tools=tools or {},
             effective_toolsets=effective_for(agents, tools or {}),
             hooks=_hooks_from_store(store),
+            artifact_service=artifact_service,
             emit=capture_emit,
         )
 
@@ -290,6 +311,48 @@ class TestSubagentRouting:
         tool_completes = _events_of_type(emitted, "tool_complete")
         subagent_results = [tc for tc in tool_completes if tc["data"].get("tool") == "call_subagent"]
         assert any("search result here" in str(tc["data"].get("result_data", "")) for tc in subagent_results)
+
+    async def test_large_subagent_result_uses_tool_result_artifact_path(self):
+        """The special recursive route still obeys the common per-call inline limit."""
+        from config import config
+        from tools.builtin.call_subagent import CallSubagentTool
+
+        lead = _FakeAgentConfig(tools={"call_subagent": "auto"})
+        sub = _FakeAgentConfig(name="sub_agent", tools={})
+        long_response = "S" * (config.TOOL_RESULT_INLINE_MAX_CHARS + 1)
+        xml = _tool_call_xml(
+            "call_subagent", agent_name="sub_agent", instruction="return the result"
+        )
+        artifact_service = _RecordingArtifactService()
+
+        result, emitted, _ = await _run_engine(
+            _make_fake_stream_sequence([
+                _tool_call_chunks(xml),
+                _simple_llm_chunks(long_response),
+                _simple_llm_chunks("lead done"),
+            ]),
+            agents={"lead_agent": lead, "sub_agent": sub},
+            tools={"call_subagent": CallSubagentTool(valid_agents=["sub_agent"])},
+            artifact_service=artifact_service,
+        )
+
+        assert result["response"] == "lead done"
+        assert len(artifact_service.calls) == 1
+        _, tool_name, stored = artifact_service.calls[0]
+        assert tool_name == "call_subagent"
+        assert long_response in stored
+
+        complete = next(
+            e for e in emitted
+            if e["type"] == "tool_complete"
+            and e["data"].get("tool") == "call_subagent"
+        )
+        assert complete["data"]["success"] is True
+        assert "<artifact_slice" in complete["data"]["result_data"]
+        assert long_response not in complete["data"]["result_data"]
+        assert complete["data"]["metadata"]["persisted_artifact_id"] == (
+            "tool_call_subagent_0001"
+        )
 
     async def test_subagent_instruction_event(self):
         """call_subagent should emit SUBAGENT_INSTRUCTION event."""

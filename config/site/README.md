@@ -12,10 +12,10 @@
 
 | 环境 | 物理路径 | 由谁服务 |
 |---|---|---|
-| Docker（任一 compose 文件） | host `config/site/*.json` → frontend 容器 `/app/public/site/*.json`；backend 容器 `/app/site-config/*.json` | Next.js 容器服务静态文件；admin API 只写通知文件 |
+| Docker / 单机 afctl | host `control/site/*.json` → frontend 容器 `/app/public/site/*.json`；backend 容器 `/app/site-config/*.json` | Next.js 容器服务静态文件；admin API 只写通知文件 |
 | 本地 `npm run dev` | `frontend/public/site/*.json` | Next.js dev server |
 
-两端各自独立维护。运维改 prod 时可在管理员菜单进入「通知管理」写 `notifications.json`，也可直接编辑宿主机 `config/site/`；需要本地调试时手工 `cp` 一份到 `frontend/public/site/`。
+两端各自独立维护。`config/site/` 只保存源码默认值和示例；单机运维改生产时可在管理员菜单进入「通知管理」写 `notifications.json`，也可直接编辑目标机 `/opt/artifactflow/control/site/`。实验性 Ansible 多机的各 app host 不共享这个目录，因此暂不支持在线通知编辑；在通知迁入共享数据库前不要使用该入口，也不要用文件同步或 sticky session 补一致性。需要本地调试时手工 `cp` 一份到 `frontend/public/site/`。
 
 文件缺失或解析失败时，对应 UI 组件自动隐藏（通知）或回落到默认副标题（欢迎页）。**不会阻塞前端启动**。
 

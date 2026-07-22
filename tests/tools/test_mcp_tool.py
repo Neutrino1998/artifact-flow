@@ -168,6 +168,74 @@ async def test_mcp_tool_renders_structured_content_as_json():
     assert result.data == '{"ok": true, "items": [1, 2]}'
 
 
+async def test_mcp_large_success_text_is_left_complete_for_engine():
+    """Adapter must not discard the tail before engine artifact persistence."""
+    payload = "X" * (config.TOOL_RESULT_INLINE_MAX_CHARS + 1)
+
+    async def fake_call(url, headers, timeout, tool_name, arguments):
+        return McpToolCallResult(
+            is_error=False,
+            content=[{"type": "text", "text": payload}],
+        )
+
+    result = await _tool(McpClientManager(call_callable=fake_call))()
+
+    assert result.success is True
+    assert result.data == payload
+
+
+async def test_mcp_large_error_text_remains_bounded():
+    payload = "X" * (config.TOOL_ERROR_MAX_CHARS + 1)
+
+    async def fake_call(url, headers, timeout, tool_name, arguments):
+        return McpToolCallResult(
+            is_error=True,
+            content=[{"type": "text", "text": payload}],
+        )
+
+    tool = _tool(McpClientManager(call_callable=fake_call))
+    result = await tool()
+
+    assert result.success is False
+    assert len(result.error) == config.TOOL_ERROR_MAX_CHARS
+    assert result.error.endswith("[MCP error response truncated...]")
+
+
+async def test_mcp_error_at_minimum_limit_keeps_prefix_and_full_marker(monkeypatch):
+    payload = "actionable upstream validation error " * 4
+
+    async def fake_call(url, headers, timeout, tool_name, arguments):
+        return McpToolCallResult(
+            is_error=True,
+            content=[{"type": "text", "text": payload}],
+        )
+
+    monkeypatch.setattr(config, "TOOL_ERROR_MAX_CHARS", 64)
+    result = await _tool(McpClientManager(call_callable=fake_call))()
+
+    assert result.success is False
+    assert len(result.error) == 64
+    assert result.error.startswith("actionable")
+    assert result.error.endswith("[MCP error response truncated...]")
+
+
+async def test_mcp_error_diagnostic_survives_zero_success_inline_threshold():
+    payload = "actionable upstream error"
+
+    async def fake_call(url, headers, timeout, tool_name, arguments):
+        return McpToolCallResult(
+            is_error=True,
+            content=[{"type": "text", "text": payload}],
+        )
+
+    tool = _tool(McpClientManager(call_callable=fake_call))
+    tool.max_result_size_chars = 0
+    result = await tool()
+
+    assert result.success is False
+    assert result.error == payload
+
+
 async def test_mcp_tool_converts_single_image_content_block_to_artifact():
     png = b"\x89PNG\r\n\x1a\n"
 
