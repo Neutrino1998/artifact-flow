@@ -10,18 +10,16 @@ what must be checked again, and what must be true before production rollout.
   known hostname is `ai-agent-app`.
 - Role: sandbox-enabled ArtifactFlow app hosts, with later two-host HA
   validation.
+- The single-host production install root is `/root/workspace/artifactflow`.
+  Release transfer media stays outside it under `/root/workspace/tmp/<version>`.
 - The old CentOS 7 host `bsyshealthyapc` is retired for this deployment. Do not
   apply its Docker, NTP, or network conclusions to these Kylin hosts unless
   re-verified on the Kylin machines.
 
-After the 2026-06-12 sandbox smoke trip, the hosts were cleaned of the
-temporary application media, images, volumes, loop pool, and fstab entries. The
-expected residue is only:
-
-- a 4K-page Kylin kernel installed and selected
-- `runsc` registered in Docker's daemon config
-
-Treat the formal deployment as a fresh media transfer.
+The production app host has an existing Fleet v1 deployment at that install
+root. When `deploy/.env` exists and `control/site.toml` does not, preserve the
+running target and use `site migrate-v1`; do not treat it as a fresh site or
+run `site init` over its credentials.
 
 ## Hard Facts
 
@@ -37,18 +35,29 @@ Treat the formal deployment as a fresh media transfer.
 - gVisor uses the userspace `systrap` platform here; it does not need `/dev/kvm`.
 - The arm smoke path verified `89.11(64K) -> 89.38.4k`, then `run-all.sh` passed.
 
-## Production Blocker
+The production-host pre-migration probe also verified the durable target shape:
 
-Do not run production on the current split-root disk layout.
+- `aarch64` with `PAGE_SIZE=4096`
+- Docker Compose v2 and `runsc` registered in Docker
+- Docker data-root `/data/docker`
+- Sandbox runtime `runsc` with scratch mounted as ext4 at
+  `/data/artifactflow/sandbox-scratch`
+- two healthy Backend replicas
+- fixed volumes `artifactflow_data`, `artifactflow_postgres_data`, and
+  `artifactflow_redis_data` (no legacy `deploy_*` volume migration required)
+
+## Production Storage Invariant
+
+Do not deploy while Docker still uses the stock split-root disk layout.
 
 The target image had a 100G `vda` split into many XFS/LVM filesystems; the
 important constraint was `/var` at about 8G while Docker's data-root lived
 there, with essentially no free VG space to reshuffle. That is enough for a
 short smoke test, not for Postgres, images, and sandbox scratch.
 
-Before production, each host needs a new data disk mounted at `/data`. The
-2026-07 deployment used a 500G disk because the stock 100G `vda` was split
-across many small filesystems and `/var` was only about 8G.
+Each production host needs a data disk mounted at `/data`. The 2026-07
+deployment used a 500G disk because the stock 100G `vda` was split across many
+small filesystems and `/var` was only about 8G.
 Use it for:
 
 - Docker data-root (`/data/docker`), before loading images
@@ -60,7 +69,7 @@ Recommended target paths:
 
 ```bash
 /data/docker
-/data/artifactflow/sandbox
+/data/artifactflow/sandbox-scratch
 /data/artifactflow/postgres
 ```
 
@@ -159,24 +168,26 @@ Keep transferred release bundles separate from target-local control state:
 
 ```bash
 /root/workspace/tmp/<version>     # release tar/.sha256/manifest bundle
-/opt/artifactflow/control         # site.toml, .env, certs, site content
-/opt/artifactflow/.artifactflow   # immutable releases and state.json
+/root/workspace/artifactflow/control         # site.toml, .env, certs, site content
+/root/workspace/artifactflow/.artifactflow   # immutable releases and state.json
 ```
 
-Provision `/data/artifactflow/sandbox` as a dedicated mounted filesystem before
-initializing the site. `afctl` validates this mount but deliberately does not
-create a loop device, format storage, edit `/etc/fstab`, or install runsc.
+Provision `/data/artifactflow/sandbox-scratch` as a dedicated mounted
+filesystem before initializing the site. `afctl` validates this mount but
+deliberately does not create a loop device, format storage, edit `/etc/fstab`,
+or install runsc.
 
 Initialize a fresh intranet target with the release's own controller:
 
 ```bash
 sudo /root/workspace/tmp/<version>/afctl \
-  --root /opt/artifactflow site init --preset intranet
+  --root /root/workspace/artifactflow site init --preset intranet
 ```
 
-For an existing Fleet v1 installation with `/opt/artifactflow/deploy/.env`, use
-`site migrate-v1 --preset intranet --sandbox-runtime runsc` instead; initialization
-will refuse to overwrite the legacy credentials.
+For the existing Fleet v1 installation with
+`/root/workspace/artifactflow/deploy/.env`, use
+`site migrate-v1 --preset intranet --sandbox-runtime runsc` instead;
+initialization will refuse to overwrite the legacy credentials.
 
 Keep the generated `control/site.toml` aligned with the host:
 
@@ -185,7 +196,7 @@ executor = "local"
 tls = "static"
 infra = "bundled"
 sandbox_runtime = "runsc"
-scratch_root = "/data/artifactflow/sandbox"
+scratch_root = "/data/artifactflow/sandbox-scratch"
 backend_replicas = 2
 ```
 
@@ -211,11 +222,13 @@ ARTIFACTFLOW_DATABASE_MAX_OVERFLOW=10
 Validate the complete target state before applying the release:
 
 ```bash
-sudo /root/workspace/tmp/<version>/afctl --root /opt/artifactflow site validate
-sudo /root/workspace/tmp/<version>/afctl --root /opt/artifactflow doctor
-sudo /root/workspace/tmp/<version>/afctl --root /opt/artifactflow \
+sudo /root/workspace/tmp/<version>/afctl \
+  --root /root/workspace/artifactflow site validate
+sudo /root/workspace/tmp/<version>/afctl \
+  --root /root/workspace/artifactflow doctor
+sudo /root/workspace/tmp/<version>/afctl --root /root/workspace/artifactflow \
   plan apply /root/workspace/tmp/<version>
-sudo /root/workspace/tmp/<version>/afctl --root /opt/artifactflow \
+sudo /root/workspace/tmp/<version>/afctl --root /root/workspace/artifactflow \
   apply /root/workspace/tmp/<version>
 ```
 
@@ -261,12 +274,13 @@ Calico ranges, or corporate client/server ranges.
 - [ ] `getconf PAGE_SIZE` is `4096`.
 - [ ] Docker and Compose are installed from the controlled offline package or
   otherwise verified.
+- [ ] `docker info --format '{{.DockerRootDir}}'` returns `/data/docker`.
 - [ ] `runsc` is registered and `smoke-test.sh` passes.
 - [ ] A `/data` disk is mounted and has enough space for Docker, Postgres, and
   sandbox scratch.
 - [ ] The release bundle is built with `--platform linux/arm64`.
-- [ ] `/data/artifactflow/sandbox` is a dedicated mounted filesystem and matches
-      `control/site.toml` exactly.
+- [ ] `/data/artifactflow/sandbox-scratch` is a dedicated mounted filesystem
+      and matches `control/site.toml` exactly.
 - [ ] The fixed Docker subnet has been checked against this host's actual
       routing table.
 - [ ] `site validate`, `doctor`, and `plan apply` pass before `apply`.
