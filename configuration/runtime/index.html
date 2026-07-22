@@ -988,7 +988,7 @@
 <p>按部署能力必需：</p>
 <ul>
 <li><code>infra = "bundled"</code>：<code>POSTGRES_DB</code>、<code>POSTGRES_USER</code>、<code>POSTGRES_PASSWORD</code>；</li>
-<li><code>tls = "acme"</code>：<code>AF_DOMAIN</code>、<code>AF_ACME_EMAIL</code>，且外部端口必须是 80/443；</li>
+<li><code>tls = "acme"</code>：<code>AF_DOMAIN</code>（裸域名，不含 scheme、端口或路径）、<code>AF_ACME_EMAIL</code>，且外部端口必须是 80/443；</li>
 <li>Model：对应供应商的 API Key；</li>
 <li>Tool/MCP：定义引用的 <code>TOOL_SECRET_*</code>。</li>
 </ul>
