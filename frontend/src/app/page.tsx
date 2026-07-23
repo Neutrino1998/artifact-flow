@@ -50,7 +50,9 @@ export default function Home() {
   return (
     <AuthGuard>
       <ThreeColumnLayout
-        sidebar={<Sidebar />}
+        sidebar={({ variant, onNavigate }) => (
+          <Sidebar variant={variant} onNavigate={onNavigate} />
+        )}
         chat={
           <ErrorBoundary fallbackLabel="Chat panel encountered an error">
             <ChatPanel />

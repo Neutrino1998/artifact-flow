@@ -142,7 +142,7 @@ export default function ChatPanel() {
           </div>
         </div>
       ) : (
-        <div className="flex-1 flex flex-col items-center justify-center gap-2">
+        <div className="flex-1 flex flex-col items-center justify-center gap-2 px-4 text-center overflow-hidden">
           <div className="relative">
             <Image
               src="/cat-sleep-light.svg"
@@ -150,7 +150,7 @@ export default function ChatPanel() {
               width={578}
               height={316}
               priority
-              className="dark:hidden w-72 h-auto translate-y-6"
+              className="dark:hidden w-56 sm:w-72 h-auto translate-y-6"
             />
             <Image
               src="/cat-sleep-dark.svg"
@@ -158,10 +158,10 @@ export default function ChatPanel() {
               width={578}
               height={316}
               priority
-              className="hidden dark:block w-72 h-auto translate-y-6"
+              className="hidden dark:block w-56 sm:w-72 h-auto translate-y-6"
             />
           </div>
-          <div className="text-text-secondary dark:text-text-secondary-dark text-3xl font-semibold">
+          <div className="max-w-full text-text-secondary dark:text-text-secondary-dark text-2xl sm:text-3xl font-semibold leading-tight">
             {getGreeting()}，有什么可以帮你的？
           </div>
           <WelcomeTips />

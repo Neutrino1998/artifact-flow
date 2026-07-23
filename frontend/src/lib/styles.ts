@@ -23,7 +23,7 @@ export const LABEL_CLASS =
 // so `dark:border-border-dark` wins over `focus:border-accent` on focused
 // inputs in dark mode unless we stack them as `dark:focus:border-accent`.
 const INPUT_BASE =
-  'w-full px-3 py-2 rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent dark:focus:border-accent disabled:opacity-40';
+  'w-full min-h-11 sm:min-h-0 px-3 py-2 rounded-lg border border-border dark:border-border-dark text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark focus:outline-none focus:border-accent dark:focus:border-accent disabled:opacity-40';
 
 export const INPUT_ON_PANEL = `${INPUT_BASE} bg-surface dark:bg-surface-dark`;
 export const INPUT_ON_SURFACE = `${INPUT_BASE} bg-bg dark:bg-bg-dark`;
@@ -31,24 +31,25 @@ export const INPUT_ON_SURFACE = `${INPUT_BASE} bg-bg dark:bg-bg-dark`;
 // ---------------------------------------------------------------------------
 // Buttons
 //
-// Padding / sizing / radius are intentionally NOT baked in — different
+// Horizontal padding / radius are intentionally NOT baked in — different
 // contexts use different combinations (form-footer rounded-lg px-6 py-2,
 // modal-footer rounded-lg px-8 py-2, inline-toolbar rounded-md px-4 py-1.5
-// text-xs). Constants only normalize color / hover / disabled boilerplate.
-// All disabled states get `cursor-not-allowed` (previously inconsistent).
+// text-xs). The only shared sizing rule is a 44px mobile touch floor, reset at
+// `sm` so compact desktop toolbars keep their intended density. All disabled
+// states get `cursor-not-allowed` (previously inconsistent).
 // ---------------------------------------------------------------------------
 
 export const BUTTON_PRIMARY =
-  'bg-accent text-white font-medium hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
+  'min-h-11 sm:min-h-0 bg-accent text-white font-medium hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
 
 export const BUTTON_SECONDARY =
-  'border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark font-medium bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
+  'min-h-11 sm:min-h-0 border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark font-medium bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
 
 export const BUTTON_DANGER =
-  'bg-status-error text-white font-medium hover:bg-status-error/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
+  'min-h-11 sm:min-h-0 bg-status-error text-white font-medium hover:bg-status-error/80 disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
 
 export const BUTTON_DANGER_OUTLINE =
-  'border border-status-error text-status-error font-medium bg-surface dark:bg-surface-dark hover:bg-status-error/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
+  'min-h-11 sm:min-h-0 border border-status-error text-status-error font-medium bg-surface dark:bg-surface-dark hover:bg-status-error/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
 
 // Ghost / icon buttons (toolbar icons, pagination arrows, close buttons).
 // The hover fill is a translucent ink wash so the same recipe works on any
@@ -89,4 +90,4 @@ export const MENU_ROW_DANGER_HOVER =
 // observability). Full-size selects compose INPUT_ON_PANEL/_ON_SURFACE with
 // ' appearance-none pr-9' + <SelectChevron /> instead.
 export const SELECT_COMPACT =
-  'appearance-none pl-2 pr-7 py-1 text-xs rounded-md border border-border dark:border-border-dark bg-surface dark:bg-surface-dark text-text-secondary dark:text-text-secondary-dark focus:outline-none focus:border-accent dark:focus:border-accent disabled:opacity-40 disabled:cursor-not-allowed';
+  'min-h-11 sm:min-h-0 appearance-none pl-2 pr-7 py-1 text-xs rounded-md border border-border dark:border-border-dark bg-surface dark:bg-surface-dark text-text-secondary dark:text-text-secondary-dark focus:outline-none focus:border-accent dark:focus:border-accent disabled:opacity-40 disabled:cursor-not-allowed';

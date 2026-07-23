@@ -9,7 +9,12 @@ const MIN_ARTIFACT_WIDTH = 300;
 const DEFAULT_ARTIFACT_WIDTH = 480;
 
 interface ThreeColumnLayoutProps {
-  sidebar: React.ReactNode;
+  sidebar:
+    | React.ReactNode
+    | ((props: {
+        variant: 'desktop' | 'drawer';
+        onNavigate: () => void;
+      }) => React.ReactNode);
   chat: React.ReactNode;
   artifact?: React.ReactNode;
   // 3-state visibility override for the right panel:
@@ -29,6 +34,7 @@ export default function ThreeColumnLayout({
   const setSidebarCollapsed = useUIStore((s) => s.setSidebarCollapsed);
   const artifactPanelVisible = useUIStore((s) => s.artifactPanelVisible);
   const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const isLg = useMediaQuery(BREAKPOINTS.lg);
   const isMd = useMediaQuery(BREAKPOINTS.md);
@@ -39,6 +45,22 @@ export default function ThreeColumnLayout({
       setSidebarCollapsed(true);
     }
   }, [isLg, setSidebarCollapsed]);
+
+  // The drawer is a transient mobile surface, not another representation of
+  // the desktop collapsed rail. Close it when leaving the mobile breakpoint
+  // and support the same Escape exit as other temporary overlays.
+  useEffect(() => {
+    if (isMd) setMobileMenuOpen(false);
+  }, [isMd]);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileMenuOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [mobileMenuOpen]);
 
   // Draggable divider state
   const [artifactWidth, setArtifactWidth] = useState(DEFAULT_ARTIFACT_WIDTH);
@@ -95,25 +117,33 @@ export default function ThreeColumnLayout({
 
   const showArtifact = (forceArtifactVisible ?? artifactPanelVisible) && artifact;
   const showSidebar = isMd; // < 768px: sidebar completely hidden
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const closeMobileMenu = useCallback(() => setMobileMenuOpen(false), []);
+  const renderSidebar = (
+    variant: 'desktop' | 'drawer',
+    onNavigate: () => void,
+  ) => typeof sidebar === 'function' ? sidebar({ variant, onNavigate }) : sidebar;
 
   return (
-    <div ref={containerRef} className="flex h-screen overflow-hidden bg-chat dark:bg-chat-dark">
+    <div
+      ref={containerRef}
+      className="flex h-screen [height:100dvh] overflow-hidden bg-chat dark:bg-chat-dark"
+    >
       {/* Drag overlay — present only while resizing. Covers the whole layout
           (including any artifact-preview iframe) so the cursor stays on a
           same-document surface and mousemove/mouseup keep reaching `document`. */}
       {dragging && <div className="fixed inset-0 z-50 cursor-col-resize" />}
 
       {/* Mobile menu button — visible below md */}
-      {!isMd && (
+      {!isMd && !mobileMenuOpen && !showArtifact && (
         <button
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="fixed top-3 left-3 z-50 p-2 rounded-card bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark"
-          aria-label="Toggle menu"
-          title="菜单"
+          onClick={() => setMobileMenuOpen(true)}
+          className="fixed top-[calc(env(safe-area-inset-top)+0.75rem)] left-[calc(env(safe-area-inset-left)+0.75rem)] z-50 h-11 w-11 flex items-center justify-center rounded-card bg-panel-accent dark:bg-panel-dark border border-border dark:border-border-dark shadow-sidebar-card text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark"
+          aria-label="展开侧栏"
+          title="展开侧栏"
         >
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-            <path d="M3 5h12M3 9h12M3 13h12" />
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <rect x="1.5" y="1.5" width="13" height="13" rx="2" />
+            <path d="M6 1.5v13" />
           </svg>
         </button>
       )}
@@ -123,11 +153,16 @@ export default function ThreeColumnLayout({
         <>
           <div
             className="fixed inset-0 z-40 bg-black/40"
-            onClick={() => setMobileMenuOpen(false)}
+            onClick={closeMobileMenu}
           />
-          <div className="fixed inset-y-0 left-0 z-40 w-64 bg-panel dark:bg-panel-dark shadow-sidebar">
-            {sidebar}
-          </div>
+          <aside
+            aria-label="主菜单"
+            className="fixed inset-y-0 left-0 z-40 w-[min(17rem,calc(100vw-2rem))] p-2 pt-[calc(env(safe-area-inset-top)+0.5rem)] pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pl-[calc(env(safe-area-inset-left)+0.5rem)]"
+          >
+            <div className="h-full w-full rounded-card overflow-hidden bg-panel-accent dark:bg-panel-dark border border-border dark:border-border-dark shadow-sidebar-card">
+              {renderSidebar('drawer', closeMobileMenu)}
+            </div>
+          </aside>
         </>
       )}
 
@@ -142,13 +177,15 @@ export default function ThreeColumnLayout({
           }`}
         >
           <div className="h-full w-full rounded-card overflow-hidden bg-panel-accent dark:bg-panel-dark border border-border dark:border-border-dark shadow-sidebar-card">
-            {sidebar}
+            {renderSidebar('desktop', () => {})}
           </div>
         </div>
       )}
 
       {/* Chat — takes remaining space */}
-      <div className="flex-1 min-w-0 flex flex-col">{chat}</div>
+      <div className="flex-1 min-w-0 flex flex-col pt-[calc(env(safe-area-inset-top)+3.75rem)] md:pt-0">
+        {chat}
+      </div>
 
       {/* Artifact panel */}
       {showArtifact && (
@@ -160,8 +197,23 @@ export default function ThreeColumnLayout({
                 className="fixed inset-0 z-30 bg-black/40"
                 onClick={() => setArtifactPanelVisible(false)}
               />
-              <div className="fixed inset-y-0 right-0 z-30 w-[85vw] max-w-lg bg-chat dark:bg-chat-dark border-l border-border dark:border-border-dark overflow-auto">
-                {artifact}
+              <div className="fixed inset-y-0 right-0 z-30 w-[85vw] max-w-lg bg-chat dark:bg-chat-dark border-l border-border dark:border-border-dark overflow-hidden pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] flex flex-col">
+                <div className="flex items-center justify-between gap-3 px-4 py-2 border-b border-border dark:border-border-dark bg-chat dark:bg-chat-dark">
+                  <span className="font-medium text-text-secondary dark:text-text-secondary-dark">
+                    文件面板
+                  </span>
+                  <button
+                    onClick={() => setArtifactPanelVisible(false)}
+                    className="h-11 w-11 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-surface-dark"
+                    aria-label="关闭文件面板"
+                    title="关闭文件面板"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                      <path d="M4 4l10 10M14 4L4 14" />
+                    </svg>
+                  </button>
+                </div>
+                <div className="flex-1 min-h-0 overflow-hidden">{artifact}</div>
               </div>
             </>
           ) : (
