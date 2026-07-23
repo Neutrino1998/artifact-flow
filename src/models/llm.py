@@ -105,7 +105,15 @@ def _resolve_model_params(
         model_params = model_config.get("params", {})
         # YAML 级 base_url/api_key(函数参数优先)
         base_url = base_url or model_config.get("base_url")
-        api_key = api_key or model_config.get("api_key")
+        if not api_key:
+            api_key = model_config.get("api_key")
+        api_key_env = model_config.get("api_key_env")
+        if not api_key and api_key_env:
+            api_key = os.getenv(str(api_key_env))
+            if not api_key:
+                raise ValueError(
+                    f"Model '{model}' requires API key env var '{api_key_env}'"
+                )
     elif "/" in model or base_url:
         # 故意支持的两条直传路径,都不经 yaml:
         #   1. 原始 litellm 格式(带 provider 前缀,如 deepseek/deepseek-chat、ollama/llama3)

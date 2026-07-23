@@ -80,6 +80,65 @@ def test_model_timeout_must_be_positive_number(monkeypatch):
         _resolve_model_params("bad-timeout")
 
 
+def test_model_api_key_env_resolves_custom_env(monkeypatch):
+    monkeypatch.setenv("PRIVATE_MODEL_API_KEY", "secret-from-env")
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "private-model": {
+                    "model": "openai/private-model",
+                    "api_key_env": "PRIVATE_MODEL_API_KEY",
+                }
+            }
+        },
+    )
+
+    params = _resolve_model_params("private-model")
+
+    assert params["api_key"] == "secret-from-env"
+
+
+def test_explicit_api_key_overrides_model_api_key_env(monkeypatch):
+    monkeypatch.setenv("PRIVATE_MODEL_API_KEY", "secret-from-env")
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "private-model": {
+                    "model": "openai/private-model",
+                    "api_key_env": "PRIVATE_MODEL_API_KEY",
+                }
+            }
+        },
+    )
+
+    params = _resolve_model_params("private-model", api_key="explicit-secret")
+
+    assert params["api_key"] == "explicit-secret"
+
+
+def test_model_api_key_env_missing_loud_fails(monkeypatch):
+    monkeypatch.delenv("PRIVATE_MODEL_API_KEY", raising=False)
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "private-model": {
+                    "model": "openai/private-model",
+                    "api_key_env": "PRIVATE_MODEL_API_KEY",
+                }
+            }
+        },
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="requires API key env var 'PRIVATE_MODEL_API_KEY'",
+    ):
+        _resolve_model_params("private-model")
+
+
 def test_provider_prefixed_passthrough():
     assert _resolve_model_params("deepseek/deepseek-chat")["model"] == "deepseek/deepseek-chat"
 
