@@ -11,7 +11,8 @@ what must be checked again, and what must be true before production rollout.
 - Role: sandbox-enabled ArtifactFlow app hosts, with later two-host HA
   validation.
 - The single-host production install root is `/root/workspace/artifactflow`.
-  Release transfer media stays outside it under `/root/workspace/tmp/<version>`.
+  Release transfer media stays outside it under
+  `/root/workspace/releases/<version>`.
 - The old CentOS 7 host `bsyshealthyapc` is retired for this deployment. Do not
   apply its Docker, NTP, or network conclusions to these Kylin hosts unless
   re-verified on the Kylin machines.
@@ -122,6 +123,48 @@ The gVisor tar is named by pinned runtime version + architecture and can be
 reused across app releases, but installing it remains an explicit commissioning
 step.
 
+## Operator Paths and Retention
+
+Keep transport media, mutable operator workspaces, backups, and retired Fleet
+v1 files outside the install root:
+
+```text
+/root/workspace/releases/<version>/
+    extracted, immutable transport bundle used by that bundle's afctl
+/root/workspace/releases/legacy/<old>-before-<new>/
+    retired Fleet v1 files moved only after v2 acceptance
+/root/workspace/backups/pre-<version>/
+    pre-cutover backup material plus plan/apply/hotfix/rollback logs
+/root/workspace/hotfixes/<name>/
+    editable workspace created by `afctl config checkout`
+```
+
+The pre-release backup directory should be mode `0700` because it can contain
+the target-local environment and database dump. Retain at least:
+
+```text
+v1-config.tar.gz
+postgres.sql.gz
+containers.before.txt
+volumes.before.json
+plan.log
+apply.log
+config-hotfix.log
+rollback.log
+```
+
+The hotfix checkout is only an editable workspace. After a successful
+`config apply --id <id>`, afctl keeps the durable bundle and effective release
+under `.artifactflow/hotfix-bundles/` and `.artifactflow/releases/`; do not
+edit either tree in place.
+
+Move the old top-level `config/`, `deploy/`, commissioning kits, and legacy
+`.artifactflow/current` only after `afctl status`, application smoke tests, and
+container-mount inspection all pass. Never move the whole `.artifactflow`
+directory: v2 `state.json` and immutable releases live there. Keep old images
+through the initial observation window; moving files to `legacy/` is
+recoverable, deleting images is not equivalent to a v2 rollback.
+
 ## Host Preflight
 
 Run these on each target host before deployment:
@@ -167,7 +210,9 @@ sudo ./smoke-test.sh
 Keep transferred release bundles separate from target-local control state:
 
 ```bash
-/root/workspace/tmp/<version>     # release tar/.sha256/manifest bundle
+/root/workspace/releases/<version>             # extracted release bundle
+/root/workspace/backups/pre-<version>           # backups and operation logs
+/root/workspace/hotfixes/<name>                 # editable config checkout
 /root/workspace/artifactflow/control         # site.toml, .env, certs, site content
 /root/workspace/artifactflow/.artifactflow   # immutable releases and state.json
 ```
@@ -180,7 +225,7 @@ or install runsc.
 Initialize a fresh intranet target with the release's own controller:
 
 ```bash
-sudo /root/workspace/tmp/<version>/afctl \
+sudo /root/workspace/releases/<version>/afctl \
   --root /root/workspace/artifactflow site init --preset intranet
 ```
 
@@ -217,20 +262,45 @@ ARTIFACTFLOW_MAX_CONCURRENT_TASKS=16
 ARTIFACTFLOW_REDIS_MAX_CONNECTIONS=32
 ARTIFACTFLOW_DATABASE_POOL_SIZE=5
 ARTIFACTFLOW_DATABASE_MAX_OVERFLOW=10
+ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD=100000
 ```
+
+`ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD` is the post-call compaction trigger,
+not the model's hard context limit. Keep headroom below the inference server's
+real `max_model_len`. It lives in target-local `control/.env`, so afctl
+rollback does not restore an older value automatically.
 
 Validate the complete target state before applying the release:
 
 ```bash
-sudo /root/workspace/tmp/<version>/afctl \
+sudo /root/workspace/releases/<version>/afctl \
   --root /root/workspace/artifactflow site validate
-sudo /root/workspace/tmp/<version>/afctl \
+sudo /root/workspace/releases/<version>/afctl \
   --root /root/workspace/artifactflow doctor
-sudo /root/workspace/tmp/<version>/afctl --root /root/workspace/artifactflow \
-  plan apply /root/workspace/tmp/<version>
-sudo /root/workspace/tmp/<version>/afctl --root /root/workspace/artifactflow \
-  apply /root/workspace/tmp/<version>
+sudo /root/workspace/releases/<version>/afctl --root /root/workspace/artifactflow \
+  plan apply /root/workspace/releases/<version>
+sudo /root/workspace/releases/<version>/afctl --root /root/workspace/artifactflow \
+  apply /root/workspace/releases/<version>
+sudo install -m 0755 /root/workspace/releases/<version>/afctl \
+  /root/workspace/artifactflow/bin/afctl
 ```
+
+For a target-local config hotfix, bind the checkout to the current release and
+give the applied hotfix a stable ID:
+
+```bash
+sudo /root/workspace/artifactflow/bin/afctl \
+  --root /root/workspace/artifactflow \
+  config checkout /root/workspace/hotfixes/<name>
+sudo /root/workspace/artifactflow/bin/afctl \
+  --root /root/workspace/artifactflow \
+  config apply --id <hotfix-id> /root/workspace/hotfixes/<name>
+```
+
+This creates a normal v2 `current`/`previous` rollback edge. Rollback restores
+the previous immutable app/config/deploy snapshot, but it does not change
+`control/.env`, reverse database migrations, or switch the model actually
+served behind a GPUStack/vLLM route.
 
 Sandbox is always part of an `afctl` deployment. The Backend receives the
 Docker socket and the same absolute scratch path on host and container; the
