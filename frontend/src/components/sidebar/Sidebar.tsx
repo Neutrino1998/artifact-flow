@@ -173,6 +173,11 @@ export default function Sidebar({
     setTimeout(() => setRefreshSpinning(false), 600);
   }, [requestNotificationConfigRefresh]);
 
+  const handleCreateNotification = () => {
+    requestNotificationConfigCreate();
+    onNavigate();
+  };
+
   const handleSearchChat = () => {
     setActiveMode('conversationBrowser');
     onNavigate();
@@ -324,7 +329,7 @@ export default function Sidebar({
             {/* Notification config actions */}
             {inNotificationConfig && (
               <>
-                <IconButton onClick={requestNotificationConfigCreate} label="新建通知">
+                <IconButton onClick={handleCreateNotification} label="新建通知">
                   <PlusIcon />
                 </IconButton>
                 <IconButton onClick={handleRefreshNotifications} label="刷新通知" disabled={notificationConfigLoading}>
@@ -503,7 +508,7 @@ export default function Sidebar({
             {/* Notification config actions — hoisted from NotificationConfigPanel */}
             {inNotificationConfig && (
               <>
-                <button onClick={requestNotificationConfigCreate} className={navRowClass}>
+                <button onClick={handleCreateNotification} className={navRowClass}>
                   <PlusIcon />
                   新建通知
                 </button>
@@ -590,11 +595,15 @@ export default function Sidebar({
           <div className="px-5 pt-2 pb-1 text-xs font-semibold text-text-tertiary dark:text-text-tertiary-dark">
             对话列表
           </div>
-          {inObservability ? <AdminConversationList /> : <ConversationList onNavigate={onNavigate} />}
+          {inObservability ? (
+            <AdminConversationList onNavigate={onNavigate} />
+          ) : (
+            <ConversationList onNavigate={onNavigate} />
+          )}
         </>
       )}
 
-      {inNotificationConfig && <NotificationConfigList />}
+      {inNotificationConfig && <NotificationConfigList onNavigate={onNavigate} />}
 
       {/* Spacer — the conversation lists carry flex-1; without them the bottom
           section would float up, so pin it down in the takeover modes. */}
