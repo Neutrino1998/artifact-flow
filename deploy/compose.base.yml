@@ -99,9 +99,6 @@ services:
     volumes:
       - artifactflow_data:/app/data
       - ../config:/app/config:ro
-      # Operator-managed notices/branding are target-local runtime state, not
-      # part of the immutable release config snapshot.
-      - ${AF_RUNTIME_DEPLOY_DIR:-.}/site:/app/site-config:rw
       - /etc/localtime:/etc/localtime:ro
       # autoheal marker (Phase C):宿主 autoheal.sh 追加重启痕迹,backend 只读挂载
       # 读本机 instance_id 匹配的最近一条,经心跳 last_autoheal 在面板代报。
@@ -113,7 +110,6 @@ services:
       # Release handled by the one-shot `release` service above; this backend only serves
       # (no inline migrate/reconcile). Safe to `--scale backend=N` (also enable Redis).
       - AF_SKIP_RELEASE=1
-      - ARTIFACTFLOW_SITE_CONFIG_DIR=/app/site-config
       # Image version surfaced into the fleet heartbeat (/admin/instances panel).
       # Not an ARTIFACTFLOW_ tunable — read straight from env, defaults to "dev".
       - AF_VERSION=${AF_VERSION:?afctl must set AF_VERSION}

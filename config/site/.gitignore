@@ -1,4 +1,5 @@
-# 真实部署内容由运维填写，不进仓
+# 真实部署内容由运维填写，不进仓；notifications.json 仅可能是升级遗留备份，
+# 新运行时通知以共享数据库为准。
 notifications.json
 welcome_tips.json
 branding.json

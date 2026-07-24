@@ -177,6 +177,13 @@ export function getClientConfig(): Promise<ClientConfigResponse> {
   return request<ClientConfigResponse>('/api/v1/meta');
 }
 
+// Authenticated, DB-backed runtime notifications. Unlike welcome/branding,
+// these are online-administered shared state and therefore do not come from
+// the frontend's local /site directory.
+export function getNotifications(): Promise<SiteNotificationsResponse> {
+  return request<SiteNotificationsResponse>('/api/v1/notifications');
+}
+
 // Auth
 export function login(body: LoginRequest) {
   // Login does not need auth headers
@@ -921,7 +928,7 @@ export function deleteDepartmentUnitRule(deptId: string, unitName: string) {
   );
 }
 
-// Runtime Site Config (Admin)
+// Runtime Notification Config (Admin)
 export function getSiteNotifications() {
   return request<SiteNotificationsResponse>('/api/v1/admin/site/notifications');
 }

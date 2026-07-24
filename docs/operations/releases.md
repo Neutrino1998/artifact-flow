@@ -79,7 +79,7 @@ Apply、rollback 和 config apply 共用一个 kernel advisory lock。不要并�
 
 `state.json` 是 current/previous 的唯一权威。没有需要同步的 `current` symlink 或第二状态文件。Release 目录是完整 effective snapshot，不应作为可写 bind mount，也不应手工修改。
 
-现场 `.env`、证书、通知和维护状态始终在 `control/`，不会随 Release 切换。
+现场 `.env`、证书、欢迎/品牌静态内容和维护状态始终在 `control/`，不会随 Release 切换；在线通知保存在数据库中。
 
 ## 回滚
 

@@ -22,9 +22,10 @@ class ClientConfigResponse(BaseModel):
     lead_agent_model: str = Field(
         ...,
         description=(
-            "Model identifier configured for the lead_agent (e.g. 'qwen3.7-max'). "
-            "Surfaced in the composer so the user can see which model is driving the "
-            "current conversation without digging into agent MD files."
+            "Model identifier from the materialized DB lead_agent row (e.g. "
+            "'qwen3.7-max'). Turn execution reads that same registry snapshot; the "
+            "composer badge therefore reflects the effective model rather than a "
+            "per-worker agent MD cache."
         ),
     )
     max_upload_size: int = Field(

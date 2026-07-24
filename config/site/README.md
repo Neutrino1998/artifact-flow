@@ -1,10 +1,12 @@
 # Site config
 
-前端运行时读取的三份纯静态 JSON，用于驱动：
+前端运行时读取的两份纯静态 JSON，用于驱动：
 
-- **左栏通知**（`notifications.json`）—— UserMenu 上方的通知卡片，点击弹 modal 展开 markdown 详情。
 - **欢迎页轮播提示**（`welcome_tips.json`）—— 新对话欢迎页副标题，5s 一条向左滑动切换。
 - **版权 / 问题反馈页脚**（`branding.json`）—— 侧栏底部 + 登录页底部的「由 X 开发 · 问题反馈」一行。
+
+左栏通知已迁入共享数据库，由管理员 UI 编辑、由认证 API 提供给前端。
+`notifications.example.json` 只保留字段示例，不再是运行时数据源。
 
 ## 部署 / 工作流
 
@@ -12,14 +14,16 @@
 
 | 环境 | 物理路径 | 由谁服务 |
 |---|---|---|
-| Docker / 单机 afctl | host `control/site/*.json` → frontend 容器 `/app/public/site/*.json`；backend 容器 `/app/site-config/*.json` | Next.js 容器服务静态文件；admin API 只写通知文件 |
+| Docker / 单机 afctl | host `control/site/*.json` → frontend 容器 `/app/public/site/*.json` | Next.js 容器服务欢迎提示与品牌静态文件 |
 | 本地 `npm run dev` | `frontend/public/site/*.json` | Next.js dev server |
 
-两端各自独立维护。`config/site/` 只保存源码默认值和示例；单机运维改生产时可在管理员菜单进入「通知管理」写 `notifications.json`，也可直接编辑目标机 `/opt/artifactflow/control/site/`。实验性 Ansible 多机的各 app host 不共享这个目录，因此暂不支持在线通知编辑；在通知迁入共享数据库前不要使用该入口，也不要用文件同步或 sticky session 补一致性。需要本地调试时手工 `cp` 一份到 `frontend/public/site/`。
+`config/site/` 只保存源码默认值和示例；运维修改欢迎提示或品牌时编辑目标机
+`/opt/artifactflow/control/site/`。需要本地调试时手工 `cp` 一份到
+`frontend/public/site/`。
 
 文件缺失或解析失败时，对应 UI 组件自动隐藏（通知）或回落到默认副标题（欢迎页）。**不会阻塞前端启动**。
 
-## `notifications.json` schema
+## 通知 schema（共享 DB）
 
 ```jsonc
 [
@@ -36,8 +40,10 @@
 ```
 
 - 多条同时生效时，左栏卡片显示**最高 severity 那条**的标题 + 一个"+N"角标。
-- `dismissible: true` 的条目，用户点 × 后 ID 进入 `localStorage["af.dismissed_notifications"]`，再不展示（除非 ID 变了）。
-- 管理员 UI 保存时会校验 JSON schema、通知 ID 唯一性和 revision；如果文件在页面加载后被别人改过，会拒绝覆盖并提示刷新。
+- `dismissible: true` 的条目，用户点 × 后 ID 进入按用户隔离的浏览器
+  `localStorage`；清理浏览器数据后可能再次显示（best effort）。
+- 每个用户首次在该浏览器看到一个稳定通知 ID 时，详情 modal 自动弹出一次。
+- 管理员 UI 保存时会校验 JSON schema、通知 ID 唯一性和 DB revision；如果配置在页面加载后被别人改过，会拒绝覆盖并提示刷新。
 - 管理员 UI 可输入无时区的本地时间（如 `2026-05-15 00:00`）；后端按服务器本地时区解释并写回带 offset 的 ISO8601 字符串，避免浏览器按客户端时区误读。
 
 ## `welcome_tips.json` schema

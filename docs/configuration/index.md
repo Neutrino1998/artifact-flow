@@ -13,7 +13,8 @@ ArtifactFlow 的配置不是一个大文件。不同配置有不同的所有者�
 | Skill | `config/skills/` | DB registry | 按需工作方法、附件和工具授予 |
 | 部署能力 | `control/site.toml` | 目标机文件 | TLS、基础设施、Sandbox、executor |
 | Secret 与应用参数 | `control/.env` | 目标机文件 | 数据库、Redis、模型凭证、运行参数 |
-| 站点内容 | `control/site/` | 目标机文件 | 通知、欢迎提示和品牌信息 |
+| 站点静态内容 | `control/site/` | 目标机文件 | 欢迎提示和品牌信息 |
+| 在线通知 | 管理员 UI | PostgreSQL / SQLite | 多 backend 共享的通知正文与 revision |
 
 `config/` 随 Release 发布，不应在已经物化的 Release 目录中原地修改。`control/` 属于目标站点，升级和回滚不会覆盖它。
 

@@ -1,5 +1,13 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fetchNotifications, fetchWelcomeTips, fetchBranding, dismissNotification } from './siteConfig';
+import {
+  dismissNotification,
+  fetchBranding,
+  fetchNotifications,
+  fetchWelcomeTips,
+  markNotificationsSeen,
+  unseenNotificationIds,
+} from './siteConfig';
+import { API_URL } from './apiBase';
 
 /**
  * Tests for siteConfig 静态配置 fetcher。
@@ -11,7 +19,8 @@ import { fetchNotifications, fetchWelcomeTips, fetchBranding, dismissNotificatio
  * 加上常规 happy path：时间窗、dismiss 记忆、severity 排序。
  */
 
-const NOTIF_URL = '/site/notifications.json';
+const USER_ID = 'user-1';
+const NOTIF_URL = `${API_URL}/api/v1/notifications`;
 const TIPS_URL = '/site/welcome_tips.json';
 const BRAND_URL = '/site/branding.json';
 
@@ -20,7 +29,10 @@ function mockFetchJson(url: string, body: unknown, ok = true) {
     'fetch',
     vi.fn(async (input: RequestInfo) => {
       if (typeof input === 'string' && input === url) {
-        return new Response(JSON.stringify(body), { status: ok ? 200 : 500 });
+        const responseBody = url === NOTIF_URL
+          ? { notifications: body, revision: 0 }
+          : body;
+        return new Response(JSON.stringify(responseBody), { status: ok ? 200 : 500 });
       }
       return new Response('not found', { status: 404 });
     }),
@@ -61,7 +73,7 @@ describe('fetchNotifications: schema validation', () => {
       { id: 'n1', severity: 'info', title: 't', body: 'b', starts_at: 'not-a-date' },
       { id: 'n2', severity: 'info', title: 't2', body: 'b2' },
     ]);
-    const result = await fetchNotifications();
+    const result = await fetchNotifications(USER_ID);
     expect(result.map((n) => n.id)).toEqual(['n2']);
   });
 
@@ -70,7 +82,7 @@ describe('fetchNotifications: schema validation', () => {
       { id: 'n1', severity: 'info', title: 't', body: 'b', ends_at: 'tomorrow' },
       { id: 'n2', severity: 'info', title: 't2', body: 'b2' },
     ]);
-    const result = await fetchNotifications();
+    const result = await fetchNotifications(USER_ID);
     expect(result.map((n) => n.id)).toEqual(['n2']);
   });
 
@@ -78,13 +90,13 @@ describe('fetchNotifications: schema validation', () => {
     mockFetchJson(NOTIF_URL, [
       { id: 'n1', severity: 'info', title: 't', body: 'b', starts_at: 1700000000 },
     ]);
-    const result = await fetchNotifications();
+    const result = await fetchNotifications(USER_ID);
     expect(result).toEqual([]);
   });
 
   test('keeps notification when optional dates are omitted', async () => {
     mockFetchJson(NOTIF_URL, [{ id: 'n1', severity: 'info', title: 't', body: 'b' }]);
-    const result = await fetchNotifications();
+    const result = await fetchNotifications(USER_ID);
     expect(result).toHaveLength(1);
   });
 
@@ -94,7 +106,7 @@ describe('fetchNotifications: schema validation', () => {
       { severity: 'info', title: 't', body: 'b' }, // missing id
       { id: 'n2', severity: 'info', title: 't', body: 'b' }, // valid
     ]);
-    const result = await fetchNotifications();
+    const result = await fetchNotifications(USER_ID);
     expect(result.map((n) => n.id)).toEqual(['n2']);
   });
 
@@ -103,7 +115,7 @@ describe('fetchNotifications: schema validation', () => {
       { id: 'n1', severity: 'urgent', title: 't', body: 'b' },
       { id: 'n2', severity: 'critical', title: 't', body: 'b' },
     ]);
-    const result = await fetchNotifications();
+    const result = await fetchNotifications(USER_ID);
     expect(result.map((n) => n.id)).toEqual(['n2']);
   });
 
@@ -115,7 +127,7 @@ describe('fetchNotifications: schema validation', () => {
       { id: 'bad2', severity: 'info', title: 't', body: 'b', dismissible: 0 },
       { id: 'ok', severity: 'info', title: 't', body: 'b', dismissible: false },
     ]);
-    const result = await fetchNotifications();
+    const result = await fetchNotifications(USER_ID);
     expect(result.map((n) => n.id)).toEqual(['ok']);
   });
 
@@ -123,7 +135,7 @@ describe('fetchNotifications: schema validation', () => {
     mockFetchJson(NOTIF_URL, [
       { id: 'default', severity: 'info', title: 't', body: 'b' },
     ]);
-    const result = await fetchNotifications();
+    const result = await fetchNotifications(USER_ID);
     expect(result.map((n) => n.id)).toEqual(['default']);
   });
 });
@@ -146,7 +158,7 @@ describe('fetchNotifications: time window', () => {
     mockFetchJson(NOTIF_URL, [
       { id: 'future', severity: 'info', title: 't', body: 'b', starts_at: '2026-05-20T00:00:00Z' },
     ]);
-    const result = await fetchNotifications();
+    const result = await fetchNotifications(USER_ID);
     expect(result).toEqual([]);
   });
 
@@ -154,7 +166,7 @@ describe('fetchNotifications: time window', () => {
     mockFetchJson(NOTIF_URL, [
       { id: 'expired', severity: 'info', title: 't', body: 'b', ends_at: '2026-05-01T00:00:00Z' },
     ]);
-    const result = await fetchNotifications();
+    const result = await fetchNotifications(USER_ID);
     expect(result).toEqual([]);
   });
 
@@ -169,7 +181,7 @@ describe('fetchNotifications: time window', () => {
         ends_at: '2026-05-15T00:00:00Z',
       },
     ]);
-    const result = await fetchNotifications();
+    const result = await fetchNotifications(USER_ID);
     expect(result.map((n) => n.id)).toEqual(['active']);
   });
 });
@@ -184,8 +196,8 @@ describe('fetchNotifications: dismiss persistence', () => {
       { id: 'n1', severity: 'info', title: 't', body: 'b' },
       { id: 'n2', severity: 'info', title: 't2', body: 'b2' },
     ]);
-    dismissNotification('n1');
-    const result = await fetchNotifications();
+    dismissNotification(USER_ID, 'n1');
+    const result = await fetchNotifications(USER_ID);
     expect(result.map((n) => n.id)).toEqual(['n2']);
   });
 
@@ -193,9 +205,22 @@ describe('fetchNotifications: dismiss persistence', () => {
     mockFetchJson(NOTIF_URL, [
       { id: 'forced', severity: 'critical', title: 't', body: 'b', dismissible: false },
     ]);
-    dismissNotification('forced');
-    const result = await fetchNotifications();
+    dismissNotification(USER_ID, 'forced');
+    const result = await fetchNotifications(USER_ID);
     expect(result.map((n) => n.id)).toEqual(['forced']);
+  });
+
+  test('seen and dismissed state are isolated by user id', async () => {
+    const notification = { id: 'n1', severity: 'info' as const, title: 't', body: 'b' };
+    mockFetchJson(NOTIF_URL, [notification]);
+
+    markNotificationsSeen(USER_ID, ['n1']);
+    expect(unseenNotificationIds(USER_ID, [notification])).toEqual([]);
+    expect(unseenNotificationIds('user-2', [notification])).toEqual(['n1']);
+
+    dismissNotification(USER_ID, 'n1');
+    expect(await fetchNotifications(USER_ID)).toEqual([]);
+    expect((await fetchNotifications('user-2')).map((n) => n.id)).toEqual(['n1']);
   });
 });
 
@@ -212,7 +237,7 @@ describe('fetchNotifications: severity sort', () => {
       { id: 'i2', severity: 'info', title: 't', body: 'b' },
       { id: 'c2', severity: 'critical', title: 't', body: 'b' },
     ]);
-    const result = await fetchNotifications();
+    const result = await fetchNotifications(USER_ID);
     expect(result.map((n) => n.id)).toEqual(['c1', 'c2', 'w1', 'i1', 'i2']);
   });
 });
@@ -222,19 +247,19 @@ describe('fetchNotifications: severity sort', () => {
 // ============================================================
 
 describe('fetchNotifications: failure modes', () => {
-  test('returns [] on 404', async () => {
+  test('rejects on 404 so the component can preserve its last good list', async () => {
     mockFetch404();
-    expect(await fetchNotifications()).toEqual([]);
+    await expect(fetchNotifications(USER_ID)).rejects.toThrow();
   });
 
-  test('returns [] on invalid JSON', async () => {
+  test('rejects on invalid JSON', async () => {
     mockFetchRaw(NOTIF_URL, 'not json {{{');
-    expect(await fetchNotifications()).toEqual([]);
+    await expect(fetchNotifications(USER_ID)).rejects.toThrow();
   });
 
   test('returns [] when top level is not an array', async () => {
     mockFetchJson(NOTIF_URL, { id: 'n1' });
-    expect(await fetchNotifications()).toEqual([]);
+    expect(await fetchNotifications(USER_ID)).toEqual([]);
   });
 });
 
