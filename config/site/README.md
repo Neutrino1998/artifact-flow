@@ -21,7 +21,8 @@
 `/opt/artifactflow/control/site/`。需要本地调试时手工 `cp` 一份到
 `frontend/public/site/`。
 
-文件缺失或解析失败时，对应 UI 组件自动隐藏（通知）或回落到默认副标题（欢迎页）。**不会阻塞前端启动**。
+`welcome_tips.json` 缺失或解析失败时回落到默认副标题；`branding.json` 缺失或
+解析失败时隐藏页脚。**都不会阻塞前端启动**。
 
 ## 通知 schema（共享 DB）
 

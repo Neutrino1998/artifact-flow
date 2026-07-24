@@ -29,7 +29,7 @@ afctl config apply [--id ID] DIR
 │   ├── .env
 │   ├── inventory.ini       # 仅实验性 Ansible executor
 │   ├── certs/
-│   ├── site/               # 通知、品牌和欢迎提示；可写运行时配置
+│   ├── site/               # 品牌和欢迎提示的 frontend 静态内容
 │   ├── caddy/              # 实验性多机派生 upstream
 │   ├── maintenance/
 │   └── autoheal/

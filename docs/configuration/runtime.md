@@ -89,8 +89,9 @@ ready_timeout_seconds = 120
 
 左侧栏通知不再属于 `control/site/`：通知正文与 revision 存在共享数据库中，
 管理员 UI 的在线编辑在多 backend 间一致。旧部署遗留的
-`control/site/notifications.json` 不再被运行时读取；升级前应记录其中内容，并在
-升级后通过通知管理页重新保存。
+`control/site/notifications.json` 不再被运行时读取，也不会自动导入数据库；升级
+后的通知配置从空状态开始，旧通知自然失效。遗留文件仅作为历史备份保留，后续
+新通知统一通过通知管理页发布并使用新的 ID。
 
 ## 修改后的应用方式
 
