@@ -939,6 +939,11 @@
 <td>显式密钥；通常应改用环境变量</td>
 </tr>
 <tr>
+<td><code>api_key_env</code></td>
+<td>否</td>
+<td>承载该模型密钥的环境变量名；避免把真实密钥写入 YAML</td>
+</tr>
+<tr>
 <td><code>vision</code></td>
 <td>否</td>
 <td>是否允许 <code>read_artifact</code> 向模型发送图片块，默认 <code>false</code></td>
@@ -962,12 +967,13 @@
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">internal-qwen</span><span class="p">:</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Qwen3-32B</span>
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span><span class="nt">base_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://model-gateway.internal:8000/v1</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local-token</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span><span class="nt">api_key_env</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">INTERNAL_QWEN_API_KEY</span>
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="nt">params</span><span class="p">:</span>
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">      </span><span class="nt">temperature</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.6</span>
 <a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">      </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">900</span>
 </code></pre></div>
-<p>当 <code>base_url</code> 存在且 <code>model</code> 没有已知 provider 前缀时，运行时按 OpenAI-compatible 模型处理。</p>
+<p>当 <code>base_url</code> 存在且 <code>model</code> 没有已知 provider 前缀时，运行时按 OpenAI-compatible 模型处理。
+<code>api_key_env</code> 指向的变量缺失时会直接报错，不会把变量名当作密钥发送。</p>
 <p>Ollama：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">models</span><span class="p">:</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">local-llama</span><span class="p">:</span>

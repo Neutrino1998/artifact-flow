@@ -1019,11 +1019,11 @@
 <p>维护状态会让业务、API 和 SSE 返回 503 页面，但健康端点继续反映真实状态。Apply 会在自身窗口管理维护状态；不要在另一终端同时手工切换。</p>
 <h2 id="通知与现场内容">通知与现场内容</h2>
 <p>管理员可在 UI 编辑通知，也可修改：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>/opt/artifactflow/control/site/notifications.json
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>/opt/artifactflow/control/site/welcome_tips.json
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>/opt/artifactflow/control/site/branding.json
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>/opt/artifactflow/control/site/welcome_tips.json
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>/opt/artifactflow/control/site/branding.json
 </code></pre></div>
-<p>通知文件有 revision 并发保护。直接编辑后先检查 JSON；错误文件会让相应 UI fallback，但不会阻断服务。</p>
+<p>通知由共享数据库保存并通过管理员 UI 编辑，DB revision 会拒绝覆盖其他管理员的
+并发修改。欢迎提示与品牌仍是 frontend 本地静态文件；直接编辑后先检查 JSON。</p>
 <h2 id="证书和-secret-轮换">证书和 Secret 轮换</h2>
 <ul>
 <li>Tool/MCP Secret：更新 <code>control/.env</code> 中对应 <code>TOOL_SECRET_*</code>，执行 <code>apply current</code>，Release gate 会重新加密 seeded credential。</li>

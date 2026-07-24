@@ -1031,7 +1031,7 @@
 <li><code>config/tools/</code>、<code>config/mcp/</code>、<code>config/skills/</code> 是配置作者的种子真相；发布启动阶段会把它们 reconcile 到数据库注册表。</li>
 <li><code>control/site.toml</code> 描述部署能力，例如 TLS、基础设施来源和 Sandbox runtime。</li>
 <li><code>control/.env</code> 保存 Secret 与应用运行参数。</li>
-<li><code>control/site/</code> 保存通知、欢迎提示和品牌信息等现场可变内容。</li>
+<li><code>control/site/</code> 保存欢迎提示和品牌信息；在线通知保存在共享数据库中。</li>
 </ul>
 <p>生产环境修改 Release 内文件没有意义：Release 是不可变快照。应用配置改动应使用 <a href="../operations/releases/#配置热修"><code>afctl config</code></a>，现场 Secret 和证书则修改 <code>control/</code> 后执行 <code>apply current</code>。</p>
 <h2 id="artifact-与历史">Artifact 与历史</h2>

@@ -1025,7 +1025,7 @@
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>└── state.json
 </code></pre></div>
 <p><code>state.json</code> 是 current/previous 的唯一权威。没有需要同步的 <code>current</code> symlink 或第二状态文件。Release 目录是完整 effective snapshot，不应作为可写 bind mount，也不应手工修改。</p>
-<p>现场 <code>.env</code>、证书、通知和维护状态始终在 <code>control/</code>，不会随 Release 切换。</p>
+<p>现场 <code>.env</code>、证书、欢迎/品牌静态内容和维护状态始终在 <code>control/</code>，不会随 Release 切换；在线通知保存在数据库中。</p>
 <h2 id="回滚">回滚</h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>sudo<span class="w"> </span>/opt/artifactflow/bin/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>plan<span class="w"> </span>rollback
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>sudo<span class="w"> </span>/opt/artifactflow/bin/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>rollback
