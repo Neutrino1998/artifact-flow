@@ -72,7 +72,7 @@ models:
   # my-qwen:
   #   model: openai/Qwen2-7B-Instruct
   #   base_url: http://localhost:8000/v1
-  #   api_key: token-abc123
+  #   api_key_env: MY_QWEN_API_KEY
 
   # # 任意 OpenAI 兼容接口（无 litellm provider 前缀会自动加 openai/）
   # my-custom:
