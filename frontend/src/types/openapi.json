@@ -3537,6 +3537,32 @@
         ]
       }
     },
+    "/api/v1/notifications": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Get Notifications",
+        "operationId": "get_notifications_api_v1_notifications_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiteNotificationsResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/skills": {
       "get": {
         "tags": [
@@ -4674,7 +4700,7 @@
         "properties": {
           "file": {
             "type": "string",
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "File"
           },
           "visibility": {
@@ -4704,7 +4730,7 @@
         "properties": {
           "file": {
             "type": "string",
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "File"
           }
         },
@@ -4718,7 +4744,7 @@
         "properties": {
           "file": {
             "type": "string",
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "File"
           }
         },
@@ -4732,7 +4758,7 @@
         "properties": {
           "file": {
             "type": "string",
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "File"
           }
         },
@@ -4751,7 +4777,7 @@
           "files": {
             "items": {
               "type": "string",
-              "format": "binary"
+              "contentMediaType": "application/octet-stream"
             },
             "type": "array",
             "title": "Files",
@@ -5143,7 +5169,7 @@
           "lead_agent_model": {
             "type": "string",
             "title": "Lead Agent Model",
-            "description": "Model identifier configured for the lead_agent (e.g. 'qwen3.7-max'). Surfaced in the composer so the user can see which model is driving the current conversation without digging into agent MD files."
+            "description": "Model identifier from the materialized DB lead_agent row (e.g. 'qwen3.7-max'). Turn execution reads that same registry snapshot; the composer badge therefore reflects the effective model rather than a per-worker agent MD cache."
           },
           "max_upload_size": {
             "type": "integer",
@@ -6421,7 +6447,8 @@
             "title": "Notifications"
           },
           "revision": {
-            "type": "string",
+            "type": "integer",
+            "minimum": 0.0,
             "title": "Revision"
           }
         },
@@ -6952,9 +6979,8 @@
             "title": "Notifications"
           },
           "expected_revision": {
-            "type": "string",
-            "maxLength": 128,
-            "minLength": 1,
+            "type": "integer",
+            "minimum": 0.0,
             "title": "Expected Revision"
           }
         },
@@ -7305,13 +7331,22 @@
           "type": {
             "type": "string",
             "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
           }
         },
         "type": "object",
         "required": [
           "loc",
           "msg",
-          "type"
+          "type",
+          "input",
+          "ctx"
         ],
         "title": "ValidationError"
       },

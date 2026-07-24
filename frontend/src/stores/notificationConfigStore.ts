@@ -25,7 +25,7 @@ function newNotification(existing: SiteNotification[]): SiteNotification {
 
 interface NotificationConfigState {
   items: SiteNotification[];
-  revision: string | null;
+  revision: number | null;
   selectedIndex: number | null;
   loading: boolean;
   saving: boolean;
@@ -34,7 +34,7 @@ interface NotificationConfigState {
   error: string | null;
   previewMode: NotificationPreviewMode;
   confirmDelete: boolean;
-  setLoaded: (items: SiteNotification[], revision: string | null) => void;
+  setLoaded: (items: SiteNotification[], revision: number | null) => void;
   setLoading: (loading: boolean) => void;
   setSaving: (saving: boolean) => void;
   setError: (error: string | null) => void;

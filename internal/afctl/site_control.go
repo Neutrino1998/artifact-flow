@@ -133,6 +133,9 @@ func copyLegacyCerts(source, destination string) error {
 }
 
 func copyLegacySiteConfig(source, destination string) error {
+	// notifications.json is no longer a runtime source, but preserve a v1 copy
+	// as an explicit upgrade record so the operator can recreate it once in the
+	// DB-backed admin UI. Runtime code never falls back to this file.
 	for _, name := range []string{"notifications.json", "welcome_tips.json", "branding.json"} {
 		path := filepath.Join(source, name)
 		info, err := os.Lstat(path)
@@ -206,7 +209,7 @@ func (c *Controller) SiteValidate() (Site, error) {
 		return Site{}, err
 	}
 	if site.Executor == "ansible" {
-		_, _ = fmt.Fprintln(c.Err, "warning: executor=ansible is experimental; physical multi-host acceptance is incomplete and file-backed notification editing is not multi-host consistent")
+		_, _ = fmt.Fprintln(c.Err, "warning: executor=ansible is experimental; physical multi-host acceptance is incomplete")
 	}
 	_, _ = fmt.Fprintf(c.Out, "site valid: executor=%s tls=%s infra=%s sandbox_runtime=%s\n", site.Executor, site.TLS, site.Infra, site.SandboxRuntime)
 	return site, nil

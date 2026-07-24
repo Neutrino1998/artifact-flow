@@ -27,6 +27,7 @@ model: my-model
 | `models.<alias>.model` | 是 | LiteLLM 模型 ID，如 `dashscope/qwen3.7-plus` |
 | `base_url` | 否 | 自部署或 OpenAI-compatible endpoint |
 | `api_key` | 否 | 显式密钥；通常应改用环境变量 |
+| `api_key_env` | 否 | 承载该模型密钥的环境变量名；避免把真实密钥写入 YAML |
 | `vision` | 否 | 是否允许 `read_artifact` 向模型发送图片块，默认 `false` |
 | `params` | 否 | 透传给 LiteLLM 的模型参数 |
 | `defaults` | 否 | 所有 alias 共用的参数；model 级 `params` 覆盖同名默认值 |
@@ -42,13 +43,14 @@ models:
   internal-qwen:
     model: Qwen3-32B
     base_url: http://model-gateway.internal:8000/v1
-    api_key: local-token
+    api_key_env: INTERNAL_QWEN_API_KEY
     params:
       temperature: 0.6
       timeout: 900
 ```
 
 当 `base_url` 存在且 `model` 没有已知 provider 前缀时，运行时按 OpenAI-compatible 模型处理。
+`api_key_env` 指向的变量缺失时会直接报错，不会把变量名当作密钥发送。
 
 Ollama：
 

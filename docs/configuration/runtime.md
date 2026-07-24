@@ -82,13 +82,16 @@ ready_timeout_seconds = 120
 
 `control/site/` 可保存：
 
-- `notifications.json`：左侧栏通知；管理员 UI 支持带 revision 的在线编辑；
 - `welcome_tips.json`：新对话页轮播提示；
 - `branding.json`：开发方和问题反馈链接。
 
 示例位于 Release 的 `config/site/*.example.json`。文件缺失或解析失败时相应 UI 使用 fallback，不阻塞应用启动。
 
-这些文件是本机现场状态。实验性多机 executor 没有共享文件存储，因此当前不支持一致的在线通知编辑。
+左侧栏通知不再属于 `control/site/`：通知正文与 revision 存在共享数据库中，
+管理员 UI 的在线编辑在多 backend 间一致。旧部署遗留的
+`control/site/notifications.json` 不再被运行时读取，也不会自动导入数据库；升级
+后的通知配置从空状态开始，旧通知自然失效。遗留文件仅作为历史备份保留，后续
+新通知统一通过通知管理页发布并使用新的 ID。
 
 ## 修改后的应用方式
 

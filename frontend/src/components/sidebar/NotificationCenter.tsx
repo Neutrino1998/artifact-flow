@@ -1,7 +1,16 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { fetchNotifications, dismissNotification, type Notification, type Severity } from '@/lib/siteConfig';
+import {
+  dismissNotification,
+  fetchNotifications,
+  markNotificationsSeen,
+  unseenNotificationIds,
+  type Notification,
+  type Severity,
+} from '@/lib/siteConfig';
+import { useAuthStore } from '@/stores/authStore';
+import { useLatestOnly } from '@/hooks/useLatestOnly';
 import { MENU_ROW_HOVER } from '@/lib/styles';
 import MarkdownBlock from '@/components/markdown/MarkdownBlock';
 import { PillBadge } from '@/components/ui/PillBadge';
@@ -10,7 +19,7 @@ interface Props {
   collapsed?: boolean;
 }
 
-// 60s 是 starts_at/ends_at 过期 / 生效的最大延迟，也是运维改 JSON 到生效的最大延迟。
+// 60s 是 starts_at/ends_at 过期 / 生效与管理员 DB 更新的最大展示延迟。
 // 比这更频繁意义不大（通知配置低频变动），更稀疏会让时间窗语义失真。
 const POLL_INTERVAL_MS = 60_000;
 
@@ -44,10 +53,34 @@ function BellIcon({ className = '' }: { className?: string }) {
 export default function NotificationCenter({ collapsed }: Props) {
   const [items, setItems] = useState<Notification[]>([]);
   const [open, setOpen] = useState(false);
+  const userId = useAuthStore((state) => state.user?.id ?? null);
+  const claim = useLatestOnly();
 
   const reload = useCallback(() => {
-    void fetchNotifications().then(setItems);
-  }, []);
+    const isLatest = claim();
+    if (!userId) {
+      setItems([]);
+      return;
+    }
+    void fetchNotifications(userId)
+      .then((nextItems) => {
+        if (!isLatest()) return;
+        const unseenIds = unseenNotificationIds(userId, nextItems);
+        setItems(nextItems);
+        if (unseenIds.length > 0) {
+          // "First" is browser-best-effort, scoped by account + stable notice ID.
+          // Mark synchronously with opening so the 60s poll cannot reopen it.
+          markNotificationsSeen(userId, unseenIds);
+          setOpen(true);
+        }
+      })
+      .catch((error) => {
+        if (!isLatest()) return;
+        // Keep the last successfully loaded list on transient API failure. Empty
+        // and failed are different states; hiding a live notice would be worse.
+        console.error('Failed to fetch notifications:', error);
+      });
+  }, [claim, userId]);
 
   // items 清空时强制关 modal——否则用户开着 modal 时 poll 把通知刷没了，
   // open 状态会残留，下次 poll 通知再回来时 modal 会"自己弹出"。
@@ -67,10 +100,13 @@ export default function NotificationCenter({ collapsed }: Props) {
     document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
+      // Invalidate an in-flight request before account changes/unmount so a
+      // slower response cannot paint the previous user's notification list.
+      claim();
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [reload]);
+  }, [claim, reload]);
 
   if (items.length === 0) return null;
 
@@ -78,7 +114,8 @@ export default function NotificationCenter({ collapsed }: Props) {
   const extra = items.length - 1;
 
   const handleDismiss = (id: string) => {
-    dismissNotification(id);
+    if (!userId) return;
+    dismissNotification(userId, id);
     setItems((prev) => prev.filter((n) => n.id !== id));
   };
 

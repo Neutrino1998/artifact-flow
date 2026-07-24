@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     Integer,
+    BigInteger,
     LargeBinary,
     DateTime,
     ForeignKey,
@@ -25,6 +26,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Index,
     Computed,
+    CheckConstraint,
     func,
     text,
 )
@@ -46,6 +48,33 @@ _BLOB_TYPE_TIER_HINT = 100 * 1024 * 1024
 class Base(DeclarativeBase):
     """SQLAlchemy 声明式基类"""
     pass
+
+
+class SiteNotificationConfig(Base):
+    """全站通知的单行共享配置。
+
+    通知是低频、整批编辑的现场内容；保留 JSON 形状可直接复用现有 schema 和
+    管理界面。revision 与 payload 同行，让跨 worker 的 compare-and-swap 由一条
+    SQL 原子完成，而不是依赖主机本地文件锁。
+    """
+
+    __tablename__ = "site_notification_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    notifications: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    revision: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_site_notification_config_singleton"),
+    )
 
 
 class User(Base):

@@ -419,7 +419,7 @@ export default function MessageInput() {
   const hasStaged = stagedFiles.length > 0;
 
   return (
-    <div className="relative px-4 pt-4 pb-5">
+    <div className="relative px-4 pt-4 pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
       {/* Gradient fade above input */}
       <div className="absolute inset-x-0 -top-6 h-6 bg-gradient-to-t from-chat dark:from-chat-dark to-transparent pointer-events-none" />
       <div className="max-w-3xl mx-auto">
@@ -602,7 +602,7 @@ export default function MessageInput() {
               <button
                 onClick={handleFileSelect}
                 disabled={attachDisabled}
-                className="h-8 w-8 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                className="h-11 w-11 sm:h-8 sm:w-8 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 aria-label="Attach file"
                 title={atAttachmentCap ? `最多 ${MAX_CHAT_ATTACHMENTS} 个附件` : '添加附件（随消息发送，支持多选）'}
               >
@@ -614,7 +614,7 @@ export default function MessageInput() {
               {/* Artifact panel toggle */}
               <button
                 onClick={toggleArtifactPanel}
-                className="h-8 w-8 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
+                className="h-11 w-11 sm:h-8 sm:w-8 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark transition-colors"
                 aria-label="Toggle artifact panel"
                 title="切换文件面板"
               >
@@ -633,7 +633,7 @@ export default function MessageInput() {
                     setSkillFilter('');
                   }}
                   disabled={isStreaming}
-                  className={`h-8 w-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  className={`h-11 w-11 sm:h-8 sm:w-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                     activeSkills.length > 0 || skillPickerOpen
                       ? 'bg-accent/15 text-accent'
                       : 'text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark'
@@ -660,7 +660,7 @@ export default function MessageInput() {
                         setSkillFilter('');
                       }}
                     />
-                    <div className="absolute bottom-full left-0 mb-2 z-20 w-64 max-h-72 overflow-y-auto rounded-xl bg-surface dark:bg-surface-dark border border-border dark:border-border-dark shadow-float py-1">
+                    <div className="fixed inset-x-4 bottom-[calc(7rem+env(safe-area-inset-bottom))] z-20 max-h-72 overflow-y-auto rounded-xl bg-surface dark:bg-surface-dark border border-border dark:border-border-dark shadow-float py-1 sm:absolute sm:inset-x-auto sm:left-0 sm:bottom-full sm:mb-2 sm:w-64">
                       <div className="sticky top-0 px-2 pt-1 pb-1.5 mb-1 bg-surface dark:bg-surface-dark select-none space-y-1">
                         <span className="flex items-center px-2.5 py-1.5 rounded-lg bg-bg dark:bg-bg-dark text-sm font-medium text-text-secondary dark:text-text-secondary-dark">
                           选择激活技能
@@ -671,7 +671,7 @@ export default function MessageInput() {
                             value={skillFilter}
                             onChange={(e) => setSkillFilter(e.target.value)}
                             placeholder="过滤技能…"
-                            className="w-full px-2.5 py-1 rounded-lg bg-bg dark:bg-bg-dark text-xs text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none border border-transparent focus:border-accent"
+                            className="w-full min-h-11 sm:min-h-0 px-2.5 py-1 rounded-lg bg-bg dark:bg-bg-dark text-xs text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none border border-transparent focus:border-accent"
                           />
                         )}
                       </div>
@@ -683,7 +683,7 @@ export default function MessageInput() {
                               key={skill.slug}
                               onClick={() => toggleSkill(skill.slug)}
                               title={skill.description || undefined}
-                              className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+                              className="w-full min-h-11 sm:min-h-0 flex items-center gap-2 px-3 py-2 text-left hover:bg-bg dark:hover:bg-bg-dark transition-colors"
                             >
                               <span className={`flex-shrink-0 h-4 w-4 rounded border flex items-center justify-center ${
                                 checked
@@ -740,7 +740,7 @@ export default function MessageInput() {
               <button
                 onClick={() => setForceCompact((v) => !v)}
                 disabled={isStreaming || !hasPersistedHistory}
-                className={`h-8 w-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                className={`h-11 w-11 sm:h-8 sm:w-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                   effectiveForceCompact
                     ? 'bg-accent/15 text-accent'
                     : 'text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark'
@@ -765,7 +765,7 @@ export default function MessageInput() {
 
               {/* Char counter — only when approaching the cap */}
               {nearLimit && (
-                <span className="ml-1 text-xs tabular-nums text-text-tertiary dark:text-text-tertiary-dark">
+                <span className="hidden @sm:inline ml-1 text-xs tabular-nums text-text-tertiary dark:text-text-tertiary-dark">
                   {content.length}/{MAX_MESSAGE_CHARS}
                 </span>
               )}
@@ -849,7 +849,7 @@ export default function MessageInput() {
                 <button
                   onClick={handleSend}
                   disabled={sendDisabled}
-                  className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  className={`w-11 h-11 sm:w-8 sm:h-8 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                     isStop || cancelling
                       ? 'bg-status-error text-white hover:bg-status-error/80'
                       : 'bg-accent text-white hover:bg-accent-hover'

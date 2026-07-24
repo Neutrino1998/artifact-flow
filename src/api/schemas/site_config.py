@@ -1,9 +1,4 @@
-"""Runtime site-config schemas.
-
-These models cover small operator-managed runtime JSON files. They are not
-database entities; the admin API validates and writes the same files that the
-frontend already serves from /site/*.json.
-"""
+"""Runtime notification configuration schemas."""
 
 from __future__ import annotations
 
@@ -67,12 +62,12 @@ class SiteNotification(BaseModel):
 
 class SiteNotificationsResponse(BaseModel):
     notifications: List[SiteNotification]
-    revision: str
+    revision: int = Field(..., ge=0)
 
 
 class UpdateSiteNotificationsRequest(BaseModel):
     notifications: List[SiteNotification] = Field(..., max_length=50)
-    expected_revision: str = Field(..., min_length=1, max_length=128)
+    expected_revision: int = Field(..., ge=0)
 
     @model_validator(mode="after")
     def validate_unique_ids(self) -> "UpdateSiteNotificationsRequest":

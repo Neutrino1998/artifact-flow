@@ -1293,6 +1293,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Notifications */
+        get: operations["get_notifications_api_v1_notifications_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/skills": {
         parameters: {
             query?: never;
@@ -1868,10 +1885,7 @@ export interface components {
         };
         /** Body_admin_import_skill_api_v1_admin_skills_import_post */
         Body_admin_import_skill_api_v1_admin_skills_import_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
             /**
              * Visibility
@@ -1887,26 +1901,17 @@ export interface components {
         };
         /** Body_bulk_import_users_api_v1_admin_users_bulk_import_post */
         Body_bulk_import_users_api_v1_admin_users_bulk_import_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /** Body_import_skill_api_v1_skills_import_post */
         Body_import_skill_api_v1_skills_import_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /** Body_import_unit_seed_api_v1_admin_tools_units_import_post */
         Body_import_unit_seed_api_v1_admin_tools_units_import_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /** Body_send_message_api_v1_chat_post */
@@ -2165,7 +2170,7 @@ export interface components {
             compaction_token_threshold: number;
             /**
              * Lead Agent Model
-             * @description Model identifier configured for the lead_agent (e.g. 'qwen3.7-max'). Surfaced in the composer so the user can see which model is driving the current conversation without digging into agent MD files.
+             * @description Model identifier from the materialized DB lead_agent row (e.g. 'qwen3.7-max'). Turn execution reads that same registry snapshot; the composer badge therefore reflects the effective model rather than a per-worker agent MD cache.
              */
             lead_agent_model: string;
             /**
@@ -2851,7 +2856,7 @@ export interface components {
             /** Notifications */
             notifications: components["schemas"]["SiteNotification"][];
             /** Revision */
-            revision: string;
+            revision: number;
         };
         /**
          * SkillImportResponse
@@ -3128,7 +3133,7 @@ export interface components {
             /** Notifications */
             notifications: components["schemas"]["SiteNotification"][];
             /** Expected Revision */
-            expected_revision: string;
+            expected_revision: number;
         };
         /**
          * UpdateToolUnitRequest
@@ -3312,6 +3317,10 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+            /** Input */
+            input: unknown;
+            /** Context */
+            ctx: Record<string, never>;
         };
         /**
          * VersionDetailResponse
@@ -5591,6 +5600,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClientConfigResponse"];
+                };
+            };
+        };
+    };
+    get_notifications_api_v1_notifications_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteNotificationsResponse"];
                 };
             };
         };

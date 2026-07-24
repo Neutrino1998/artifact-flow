@@ -29,7 +29,7 @@ function IconButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`w-10 h-10 flex items-center justify-center rounded-md text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent ${MENU_ROW_HOVER}`}
+      className={`w-11 h-11 md:w-10 md:h-10 flex items-center justify-center rounded-md text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent ${MENU_ROW_HOVER}`}
       aria-label={label}
       title={label}
     >
@@ -40,10 +40,10 @@ function IconButton({
 
 // Plain text-row nav buttons (no border/fill) — icon + label with a subtle hover highlight.
 const navRowClass =
-  `w-full flex items-center gap-2.5 px-2 py-1.5 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`;
+  `w-full min-h-11 md:min-h-0 flex items-center gap-2.5 px-2 py-2.5 md:py-1.5 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`;
 
 const navRowDangerClass =
-  `w-full flex items-center gap-2.5 px-2 py-1.5 font-medium text-status-error rounded-lg ${MENU_ROW_DANGER_HOVER}`;
+  `w-full min-h-11 md:min-h-0 flex items-center gap-2.5 px-2 py-2.5 md:py-1.5 font-medium text-status-error rounded-lg ${MENU_ROW_DANGER_HOVER}`;
 
 const RefreshIcon = ({ size = 16, spinning = false }: { size?: number; spinning?: boolean }) => (
   <svg
@@ -103,7 +103,15 @@ const SelectIcon = () => (
   </svg>
 );
 
-export default function Sidebar() {
+interface SidebarProps {
+  variant?: 'desktop' | 'drawer';
+  onNavigate?: () => void;
+}
+
+export default function Sidebar({
+  variant = 'desktop',
+  onNavigate = () => {},
+}: SidebarProps) {
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const toggleArtifactPanel = useUIStore((s) => s.toggleArtifactPanel);
@@ -137,6 +145,12 @@ export default function Sidebar() {
     setArtifactPanelVisible(false);
     setActiveMode('none'); // 单一动作关掉任何接管面板(取代旧的 4 次 set*Visible(false))
     requestComposerFocus();
+    onNavigate();
+  };
+
+  const handleToggleArtifactPanel = () => {
+    toggleArtifactPanel();
+    onNavigate();
   };
 
   const [refreshSpinning, setRefreshSpinning] = useState(false);
@@ -159,20 +173,29 @@ export default function Sidebar() {
     setTimeout(() => setRefreshSpinning(false), 600);
   }, [requestNotificationConfigRefresh]);
 
+  const handleCreateNotification = () => {
+    requestNotificationConfigCreate();
+    onNavigate();
+  };
+
   const handleSearchChat = () => {
     setActiveMode('conversationBrowser');
+    onNavigate();
   };
 
   const handleManageSkills = () => {
     setActiveMode('skills');
+    onNavigate();
   };
 
   const handleSearchAdmin = () => {
     setObservabilityBrowseVisible(true);
+    onNavigate();
   };
 
   const handleExit = () => {
     setActiveMode('none');
+    onNavigate();
   };
 
   // Opening a form leaves selection mode — the old middle-panel button row was
@@ -181,16 +204,25 @@ export default function Sidebar() {
   const openUserView = (view: UserMgmtRightView) => {
     if (selectionMode) exitSelectionMode();
     setUserManagementRightView(view);
+    onNavigate();
   };
   const handleCreateUser = () => openUserView({ type: 'create-user' });
   const handleBulkImport = () => openUserView({ type: 'bulk-import' });
   const handleDeptManager = () => openUserView({ type: 'dept-manager' });
   // Toggle: 批量管理 enters selection mode; pressing it again (or the middle
   // toolbar's 退出 / Esc) leaves it — keeps the sidebar in sync with the panel.
-  const handleToggleSelection = () =>
+  const handleToggleSelection = () => {
     (selectionMode ? exitSelectionMode() : enterSelectionMode());
-  const handleCreateUnit = () => setToolUnitRightView({ type: 'create-unit' });
-  const handleImportUnit = () => setToolUnitRightView({ type: 'import-unit' });
+    onNavigate();
+  };
+  const handleCreateUnit = () => {
+    setToolUnitRightView({ type: 'create-unit' });
+    onNavigate();
+  };
+  const handleImportUnit = () => {
+    setToolUnitRightView({ type: 'import-unit' });
+    onNavigate();
+  };
 
   const inObservability = activeMode === 'observability' && isAdmin;
   // While a master-detail mode owns the right panel (force-shown on desktop,
@@ -222,7 +254,7 @@ export default function Sidebar() {
           : '退出通知管理';
 
   // ── Collapsed: 48px icon bar ──
-  if (sidebarCollapsed) {
+  if (variant === 'desktop' && sidebarCollapsed) {
     return (
       <div className="flex flex-col items-center h-full bg-panel-accent dark:bg-panel-dark py-3 gap-1 w-full">
         {/* Expand */}
@@ -297,7 +329,7 @@ export default function Sidebar() {
             {/* Notification config actions */}
             {inNotificationConfig && (
               <>
-                <IconButton onClick={requestNotificationConfigCreate} label="新建通知">
+                <IconButton onClick={handleCreateNotification} label="新建通知">
                   <PlusIcon />
                 </IconButton>
                 <IconButton onClick={handleRefreshNotifications} label="刷新通知" disabled={notificationConfigLoading}>
@@ -323,7 +355,7 @@ export default function Sidebar() {
         ) : (
           <>
             {/* Artifacts */}
-            <IconButton onClick={toggleArtifactPanel} label="文件面板">
+            <IconButton onClick={handleToggleArtifactPanel} label="文件面板">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <rect x="2" y="2" width="12" height="12" rx="1.5" />
                 <path d="M5 6h6M5 8.5h4" />
@@ -362,7 +394,7 @@ export default function Sidebar() {
         <NotificationCenter collapsed />
 
         {/* User menu */}
-        <UserMenu collapsed />
+        <UserMenu collapsed onNavigate={onNavigate} />
       </div>
     );
   }
@@ -382,7 +414,10 @@ export default function Sidebar() {
             </p>
           )}
         </div>
-        <IconButton onClick={toggleSidebar} label="收起侧栏">
+        <IconButton
+          onClick={variant === 'drawer' ? onNavigate : toggleSidebar}
+          label="收起侧栏"
+        >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
             <rect x="1.5" y="1.5" width="13" height="13" rx="2" />
             <path d="M6 1.5v13" />
@@ -473,7 +508,7 @@ export default function Sidebar() {
             {/* Notification config actions — hoisted from NotificationConfigPanel */}
             {inNotificationConfig && (
               <>
-                <button onClick={requestNotificationConfigCreate} className={navRowClass}>
+                <button onClick={handleCreateNotification} className={navRowClass}>
                   <PlusIcon />
                   新建通知
                 </button>
@@ -511,7 +546,7 @@ export default function Sidebar() {
         ) : (
           <>
             <button
-              onClick={toggleArtifactPanel}
+              onClick={handleToggleArtifactPanel}
               className={navRowClass}
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -560,11 +595,15 @@ export default function Sidebar() {
           <div className="px-5 pt-2 pb-1 text-xs font-semibold text-text-tertiary dark:text-text-tertiary-dark">
             对话列表
           </div>
-          {inObservability ? <AdminConversationList /> : <ConversationList />}
+          {inObservability ? (
+            <AdminConversationList onNavigate={onNavigate} />
+          ) : (
+            <ConversationList onNavigate={onNavigate} />
+          )}
         </>
       )}
 
-      {inNotificationConfig && <NotificationConfigList />}
+      {inNotificationConfig && <NotificationConfigList onNavigate={onNavigate} />}
 
       {/* Spacer — the conversation lists carry flex-1; without them the bottom
           section would float up, so pin it down in the takeover modes. */}
@@ -573,7 +612,7 @@ export default function Sidebar() {
       {/* Notifications + user menu at bottom */}
       <div className="px-3 pb-3 pt-2 space-y-2">
         <NotificationCenter />
-        <UserMenu />
+        <UserMenu onNavigate={onNavigate} />
       </div>
       <BrandingFooter variant="sidebar" />
     </div>

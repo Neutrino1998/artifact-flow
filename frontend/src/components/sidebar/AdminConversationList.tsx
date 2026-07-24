@@ -7,7 +7,11 @@ import type { AdminConversationSummary } from '@/lib/api';
 import { parseUtcIso } from '@/lib/time';
 import { MENU_ROW_HOVER } from '@/lib/styles';
 
-export default function AdminConversationList() {
+export default function AdminConversationList({
+  onNavigate = () => {},
+}: {
+  onNavigate?: () => void;
+}) {
   const [conversations, setConversations] = useState<AdminConversationSummary[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -33,6 +37,16 @@ export default function AdminConversationList() {
     loadConversations();
   }, [loadConversations, refreshTick]);
 
+  const handleSelectConversation = useCallback((conversationId: string) => {
+    setSelectedConvId(conversationId);
+    onNavigate();
+  }, [onNavigate, setSelectedConvId]);
+
+  const handleShowAll = useCallback(() => {
+    setObservabilityBrowseVisible(true);
+    onNavigate();
+  }, [onNavigate, setObservabilityBrowseVisible]);
+
   return (
     <div className="flex-1 overflow-y-auto">
       {conversations.map((conv) => (
@@ -43,7 +57,7 @@ export default function AdminConversationList() {
               ? 'bg-chat dark:bg-panel-accent-dark'
               : MENU_ROW_HOVER
           }`}
-          onClick={() => setSelectedConvId(conv.id)}
+          onClick={() => handleSelectConversation(conv.id)}
         >
           <div className="flex items-center gap-1.5">
             {conv.is_active && (
@@ -70,7 +84,7 @@ export default function AdminConversationList() {
       {hasMore && !loading && (
         <div className="mx-2 mb-1">
           <button
-            onClick={() => setObservabilityBrowseVisible(true)}
+            onClick={handleShowAll}
             className={`w-full px-3 py-2 text-xs text-text-secondary dark:text-text-secondary-dark rounded-lg ${MENU_ROW_HOVER}`}
           >
             显示所有对话

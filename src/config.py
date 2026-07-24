@@ -23,12 +23,6 @@ class Settings(BaseSettings):
     CORS_ALLOW_METHODS: List[str] = ["*"]
     CORS_ALLOW_HEADERS: List[str] = ["*"]
 
-    # Runtime site config (notifications / welcome tips / branding). Production
-    # deployment overrides this to the control/site mount; the source-tree
-    # default keeps local development simple. The frontend serves the same host
-    # directory as static /site/*.json files.
-    SITE_CONFIG_DIR: str = "config/site"
-
     # SSE 配置
     SSE_PING_INTERVAL: int = 15  # 秒，保持连接活跃
     EXECUTION_TIMEOUT: int = 3600   # 秒，引擎循环执行上限（含 permission 等待）；超时 → TIMED_OUT 终态

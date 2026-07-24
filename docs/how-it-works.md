@@ -76,7 +76,7 @@ flowchart TD
 - `config/tools/`、`config/mcp/`、`config/skills/` 是配置作者的种子真相；发布启动阶段会把它们 reconcile 到数据库注册表。
 - `control/site.toml` 描述部署能力，例如 TLS、基础设施来源和 Sandbox runtime。
 - `control/.env` 保存 Secret 与应用运行参数。
-- `control/site/` 保存通知、欢迎提示和品牌信息等现场可变内容。
+- `control/site/` 保存欢迎提示和品牌信息；在线通知保存在共享数据库中。
 
 生产环境修改 Release 内文件没有意义：Release 是不可变快照。应用配置改动应使用 [`afctl config`](operations/releases.md#配置热修)，现场 Secret 和证书则修改 `control/` 后执行 `apply current`。
 

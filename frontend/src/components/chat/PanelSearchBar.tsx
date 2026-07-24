@@ -42,41 +42,45 @@ export default function PanelSearchBar({
   return (
     <div className="px-4 pt-4 pb-2">
       <div className="max-w-3xl mx-auto">
-        <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-xl shadow-float px-4 py-3 flex items-center gap-3">
-          <svg
-            className="flex-shrink-0 text-text-tertiary dark:text-text-tertiary-dark"
-            width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
-          >
-            <circle cx="7" cy="7" r="5" />
-            <path d="M11 11l3.5 3.5" />
-          </svg>
-          <input
-            type="text"
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder={placeholder}
-            autoFocus={autoFocus}
-            disabled={disabled}
-            className="flex-1 bg-transparent text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none disabled:opacity-50"
-          />
-          {countLabel !== undefined && countLabel !== null && (
-            <span className="flex-shrink-0 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-              {countLabel}
-            </span>
-          )}
-          {rightSlot}
-          {onClose && (
-            <button
-              onClick={onClose}
-              className={`${BUTTON_GHOST_ICON} flex-shrink-0 p-1`}
-              aria-label="关闭"
-              title="关闭"
+        <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-xl shadow-float px-3 sm:px-4 py-2.5 sm:py-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+          <div className="flex min-w-0 w-full flex-1 items-center gap-3">
+            <svg
+              className="flex-shrink-0 text-text-tertiary dark:text-text-tertiary-dark"
+              width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
             >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                <path d="M4 4l8 8M12 4l-8 8" />
-              </svg>
-            </button>
-          )}
+              <circle cx="7" cy="7" r="5" />
+              <path d="M11 11l3.5 3.5" />
+            </svg>
+            <input
+              type="text"
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              placeholder={placeholder}
+              autoFocus={autoFocus}
+              disabled={disabled}
+              className="min-w-0 w-full flex-1 bg-transparent text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none disabled:opacity-50"
+            />
+          </div>
+          <div className="flex min-w-0 w-full sm:w-auto items-center justify-end gap-2 sm:gap-3">
+            {countLabel !== undefined && countLabel !== null && (
+              <span className="flex-shrink-0 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                {countLabel}
+              </span>
+            )}
+            {rightSlot}
+            {onClose && (
+              <button
+                onClick={onClose}
+                className={`${BUTTON_GHOST_ICON} flex-shrink-0 h-11 w-11 sm:h-8 sm:w-8 flex items-center justify-center`}
+                aria-label="关闭"
+                title="关闭"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                  <path d="M4 4l8 8M12 4l-8 8" />
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

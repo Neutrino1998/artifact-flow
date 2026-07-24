@@ -3,7 +3,11 @@
 import { useNotificationConfigStore } from '@/stores/notificationConfigStore';
 import { MENU_ROW_HOVER } from '@/lib/styles';
 
-export default function NotificationConfigList() {
+export default function NotificationConfigList({
+  onNavigate = () => {},
+}: {
+  onNavigate?: () => void;
+}) {
   const items = useNotificationConfigStore((s) => s.items);
   const selectedIndex = useNotificationConfigStore((s) => s.selectedIndex);
   const loading = useNotificationConfigStore((s) => s.loading);
@@ -31,7 +35,10 @@ export default function NotificationConfigList() {
               <div key={item.id} className="mx-2 mb-1">
                 <button
                   type="button"
-                  onClick={() => setSelectedIndex(index)}
+                  onClick={() => {
+                    setSelectedIndex(index);
+                    onNavigate();
+                  }}
                   className={`group relative w-full min-w-0 text-left cursor-pointer transition-colors rounded-lg px-3 py-2.5 overflow-hidden ${
                     isActive
                       ? 'bg-chat dark:bg-panel-accent-dark'

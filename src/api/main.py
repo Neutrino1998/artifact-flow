@@ -37,6 +37,7 @@ from api.routers import (
     chat,
     departments,
     meta,
+    notifications,
     skills,
     stream,
 )
@@ -413,6 +414,11 @@ def create_app() -> FastAPI:
         meta.router,
         prefix="/api/v1/meta",
         tags=["meta"]
+    )
+    app.include_router(
+        notifications.router,
+        prefix="/api/v1/notifications",
+        tags=["notifications"]
     )
     app.include_router(
         skills.router,

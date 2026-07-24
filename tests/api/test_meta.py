@@ -9,28 +9,29 @@ flip would only surface as a UI regression. These tests pin the shape.
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from agents.loader import load_all_agents
-from api import dependencies as deps
 from config import config
-
-
-# ============================================================
-# Local fixture: ASGITransport skips lifespan, so init_globals() doesn't run
-# and deps._agents stays None — get_agents() in the meta router would raise
-# RuntimeError. Mirror the conftest pattern that pre-populates deps._db_manager:
-# load agents once and stash on the module global for the test's duration.
-# ============================================================
+from db.models import Agent
 
 
 @pytest.fixture(autouse=True)
-def loaded_agents():
-    old = deps._agents
-    deps._agents = load_all_agents()
-    try:
-        yield
-    finally:
-        deps._agents = old
+async def materialized_lead_agent(db_session: AsyncSession):
+    """Meta must use the same DB agent row that turn execution hydrates."""
+    db_session.add(
+        Agent(
+            name="lead_agent",
+            description="test lead",
+            model="db-lead-model",
+            max_tool_rounds=3,
+            internal=False,
+            role_prompt="test",
+            builtin_tools={},
+            source="seeded",
+            seed_hash="test",
+        )
+    )
+    await db_session.commit()
 
 
 # ============================================================
@@ -63,10 +64,7 @@ async def test_meta_returns_full_shape(client: AsyncClient):
     # lead_agent_model — composer model badge
     assert "lead_agent_model" in data
     assert isinstance(data["lead_agent_model"], str)
-    # Loaded from config/agents/lead_agent.md frontmatter `model:` — non-empty
-    # guaranteed because AgentConfig defaults model to a literal even when the
-    # MD omits it, and lead_agent.md sets it explicitly.
-    assert len(data["lead_agent_model"]) > 0
+    assert data["lead_agent_model"] == "db-lead-model"
 
     # max_upload_size — composer's per-file size pre-gate (mirrors MAX_UPLOAD_SIZE)
     assert "max_upload_size" in data
@@ -77,3 +75,17 @@ async def test_meta_returns_full_shape(client: AsyncClient):
     assert "max_private_skills" in data
     assert isinstance(data["max_private_skills"], int)
     assert data["max_private_skills"] == config.SKILL_USER_MAX_PRIVATE_COUNT
+
+
+@pytest.mark.asyncio
+async def test_meta_missing_materialized_lead_agent_is_500(
+    client: AsyncClient,
+    db_session: AsyncSession,
+):
+    lead = await db_session.get(Agent, "lead_agent")
+    await db_session.delete(lead)
+    await db_session.commit()
+
+    response = await client.get("/api/v1/meta")
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Client configuration is unavailable"

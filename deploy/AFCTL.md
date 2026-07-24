@@ -29,7 +29,7 @@ afctl config apply [--id ID] DIR
 │   ├── .env
 │   ├── inventory.ini       # 仅实验性 Ansible executor
 │   ├── certs/
-│   ├── site/               # 通知、品牌和欢迎提示；可写运行时配置
+│   ├── site/               # 品牌和欢迎提示的 frontend 静态内容
 │   ├── caddy/              # 实验性多机派生 upstream
 │   ├── maintenance/
 │   └── autoheal/
@@ -42,7 +42,9 @@ afctl config apply [--id ID] DIR
 
 `state.json` 是 active/previous 的唯一权威；没有 `current` symlink 或 `.fleet-state`。release 目录是完整 effective snapshot：app release 直接含 app/config/deploy，config release 继承 expected base 的 app/deploy 后再成为完整 snapshot。
 
-release 目录不会作为可写 bind mount。管理员通知等现场配置写入 `control/site/`；实验性多机的 Caddy upstream 写入 `control/caddy/`，升级和 rollback 都不会覆盖它们。
+release 目录不会作为可写 bind mount。欢迎提示、品牌等 frontend 静态内容写入
+`control/site/`；在线通知写入共享数据库。实验性多机的 Caddy upstream 写入
+`control/caddy/`，升级和 rollback 都不会覆盖它们。
 
 `plan` 永远只读。所有 release-changing apply/rollback/config apply 都使用同一 kernel lock 和 reconcile executor。成功探活前不写 state；失败时尝试恢复上一个成功 release，恢复失败则明确报错并保留维护页。
 

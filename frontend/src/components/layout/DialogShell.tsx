@@ -59,20 +59,20 @@ export default function DialogShell({
       onClick={closeOnBackdrop ? onClose : undefined}
     >
       <div
-        className={`${surfaceClassName} border border-border dark:border-border-dark rounded-card shadow-modal ${sizeClass} w-full mx-4 p-6`}
+        className={`${surfaceClassName} border border-border dark:border-border-dark rounded-card shadow-modal ${sizeClass} w-full mx-4 max-h-[calc(100dvh-2rem)] overflow-y-auto p-4 sm:p-6`}
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-lg font-semibold text-text-primary dark:text-text-primary-dark mb-1">
           {title}
         </h2>
         {description && (
-          <div className="text-text-secondary dark:text-text-secondary-dark mb-6 text-sm">
+          <div className="text-text-secondary dark:text-text-secondary-dark mb-4 sm:mb-6 text-sm">
             {description}
           </div>
         )}
         {children}
         {footer && (
-          <div className="flex justify-end gap-3">
+          <div className="flex flex-col sm:flex-row sm:justify-end gap-3">
             {footer}
           </div>
         )}

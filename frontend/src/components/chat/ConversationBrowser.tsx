@@ -191,7 +191,7 @@ export default function ConversationBrowser() {
           ) : (
             <button
               onClick={enterSelectionMode}
-              className="flex-shrink-0 px-2.5 py-1 text-xs rounded-md text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+              className="flex-shrink-0 h-11 sm:h-auto px-3 sm:px-2.5 py-1 text-xs rounded-md text-text-secondary dark:text-text-secondary-dark hover:text-text-primary dark:hover:text-text-primary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
               title="批量管理"
             >
               批量管理
@@ -205,31 +205,32 @@ export default function ConversationBrowser() {
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4">
         <div className="max-w-3xl mx-auto">
         {selectionMode && (
-          <div className="mb-3 flex items-center gap-2 px-4 py-2.5 rounded-xl border border-accent/40 bg-accent/5 dark:bg-accent/10">
+          <div className="mb-3 flex flex-wrap items-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl border border-accent/40 bg-accent/5 dark:bg-accent/10">
             <span className="text-sm text-text-secondary dark:text-text-secondary-dark">
               已选 <span className="text-text-primary dark:text-text-primary-dark font-medium">{selectedCount}</span> 项
             </span>
             <button
               onClick={selectAllOnPage}
               disabled={allOnPageSelected || conversations.length === 0}
-              className="px-3 py-1 text-xs rounded-md border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="min-h-11 sm:min-h-0 px-3 py-1 text-xs rounded-md border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               全选当前页
             </button>
-            <div className="flex-1" />
-            <button
-              onClick={exitSelectionMode}
-              className="px-3 py-1 text-xs rounded-md border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-            >
-              退出
-            </button>
-            <button
-              onClick={() => setConfirmBulkDelete(true)}
-              disabled={selectedCount === 0}
-              className={`${BUTTON_DANGER} rounded-lg px-3 py-1 text-xs`}
-            >
-              删除 ({selectedCount})
-            </button>
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                onClick={exitSelectionMode}
+                className="min-h-11 sm:min-h-0 px-3 py-1 text-xs rounded-md border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+              >
+                退出
+              </button>
+              <button
+                onClick={() => setConfirmBulkDelete(true)}
+                disabled={selectedCount === 0}
+                className={`${BUTTON_DANGER} min-h-11 sm:min-h-0 rounded-lg px-3 py-1 text-xs`}
+              >
+                删除 ({selectedCount})
+              </button>
+            </div>
           </div>
         )}
         {conversations.map((conv) => (

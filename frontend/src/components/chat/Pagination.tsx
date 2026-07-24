@@ -54,9 +54,33 @@ export default function Pagination({
   const canNext = page < totalPages && !disabled;
 
   return (
-    <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-xl px-4 flex items-center justify-between gap-3 py-2 text-sm">
+    <div className="bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-xl px-3 sm:px-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 py-2 text-sm">
+      {totalPages > 1 && (
+        <div className="flex sm:hidden w-full items-center justify-between gap-3">
+          <button
+            onClick={() => onPageChange(page - 1)}
+            disabled={!canPrev}
+            className={`${BUTTON_GHOST_ICON} h-11 min-w-11 flex items-center justify-center text-lg`}
+            aria-label="上一页"
+          >
+            ‹
+          </button>
+          <span className="text-sm tabular-nums text-text-secondary dark:text-text-secondary-dark">
+            第 {page} / {totalPages} 页
+          </span>
+          <button
+            onClick={() => onPageChange(page + 1)}
+            disabled={!canNext}
+            className={`${BUTTON_GHOST_ICON} h-11 min-w-11 flex items-center justify-center text-lg`}
+            aria-label="下一页"
+          >
+            ›
+          </button>
+        </div>
+      )}
+
       {totalPages > 1 ? (
-        <div className="flex items-center gap-1">
+        <div className="hidden sm:flex items-center gap-1">
           <button
             onClick={() => onPageChange(page - 1)}
             disabled={!canPrev}
@@ -100,10 +124,10 @@ export default function Pagination({
         </div>
       ) : (
         // Keep the flex-row balanced so the page-size selector stays right-aligned.
-        <div />
+        <div className="hidden sm:block" />
       )}
 
-      <label className="flex items-center gap-2 text-text-secondary dark:text-text-secondary-dark">
+      <label className="flex w-full sm:w-auto items-center justify-end gap-2 text-text-secondary dark:text-text-secondary-dark">
         每页
         <div className="relative">
           <select

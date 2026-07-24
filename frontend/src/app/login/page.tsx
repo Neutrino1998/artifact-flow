@@ -33,8 +33,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-bg dark:bg-bg-dark">
-      <div className="w-full max-w-sm rounded-card bg-surface dark:bg-surface-dark p-8 shadow-modal">
+    <div className="flex min-h-screen [min-height:100dvh] flex-col items-center justify-center bg-bg dark:bg-bg-dark px-4 py-[env(safe-area-inset-top)]">
+      <div className="w-full max-w-sm rounded-card bg-surface dark:bg-surface-dark p-6 sm:p-8 shadow-modal">
         <h1 className="text-center text-3xl font-semibold font-serif text-text-primary dark:text-text-primary-dark">
           {APP_NAME}
         </h1>

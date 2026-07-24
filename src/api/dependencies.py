@@ -370,6 +370,25 @@ async def get_department_access_manager(
     return DepartmentAccessManager(session)
 
 
+async def get_site_config_manager(
+    session: AsyncSession = Depends(get_db_session),
+):
+    """每个请求一个 DB-backed 通知配置 Manager。"""
+    from core.site_config_manager import SiteConfigManager
+    from repositories.site_notification_repo import SiteNotificationRepository
+
+    return SiteConfigManager(SiteNotificationRepository(session))
+
+
+async def get_client_config_manager(
+    session: AsyncSession = Depends(get_db_session),
+):
+    """前端 runtime meta 的真实数据源聚合器。"""
+    from core.client_config_manager import ClientConfigManager
+
+    return ClientConfigManager(session)
+
+
 # ============================================================
 # 用户认证依赖
 # ============================================================

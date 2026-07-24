@@ -93,7 +93,7 @@ def test_maintenance_assets_and_target_local_state_are_separate_mounts() -> None
     assert "./maintenance:/etc/caddy/maintenance:ro" in base
     assert "${AF_RUNTIME_DEPLOY_DIR:-.}/maintenance:/etc/caddy/maintenance-state:ro" in base
     assert "../config/site:/app/site-config:rw" not in base
-    assert "${AF_RUNTIME_DEPLOY_DIR:-.}/site:/app/site-config:rw" in base
+    assert "/app/site-config" not in base
     assert "${AF_RUNTIME_DEPLOY_DIR:-.}/site:/app/public/site:ro" in base
 
 

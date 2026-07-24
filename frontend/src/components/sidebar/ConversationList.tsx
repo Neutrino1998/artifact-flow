@@ -8,7 +8,11 @@ import { listConversations } from '@/lib/api';
 import { MENU_ROW_HOVER } from '@/lib/styles';
 import ConversationItem from './ConversationItem';
 
-export default function ConversationList() {
+export default function ConversationList({
+  onNavigate = () => {},
+}: {
+  onNavigate?: () => void;
+}) {
   const conversations = useConversationStore((s) => s.conversations);
   const hasMore = useConversationStore((s) => s.hasMore);
   const listLoading = useConversationStore((s) => s.listLoading);
@@ -35,10 +39,16 @@ export default function ConversationList() {
       // 回普通聊天:一句关掉任何接管面板(含工具管理 —— 旧的逐个 set*Visible(false)
       // 漏了新面板正是 reviewer #1)。activeMode 单一真相源后,新增面板零改动自动覆盖。
       setActiveMode('none');
+      onNavigate();
       await switchConversation(id);
     },
-    [switchConversation, setActiveMode]
+    [switchConversation, setActiveMode, onNavigate]
   );
+
+  const showAllConversations = useCallback(() => {
+    setActiveMode('conversationBrowser');
+    onNavigate();
+  }, [setActiveMode, onNavigate]);
 
   useEffect(() => {
     loadConversations();
@@ -89,7 +99,7 @@ export default function ConversationList() {
       {hasMore && !listLoading && (
         <div className="mx-2 mb-1">
           <button
-            onClick={() => setActiveMode('conversationBrowser')}
+            onClick={showAllConversations}
             className={`w-full px-3 py-2 text-xs text-text-secondary dark:text-text-secondary-dark rounded-lg ${MENU_ROW_HOVER}`}
           >
             显示所有对话

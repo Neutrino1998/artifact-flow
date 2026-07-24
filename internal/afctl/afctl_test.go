@@ -220,8 +220,8 @@ func TestAnsibleSiteValidationWarnsThatExecutorIsExperimental(t *testing.T) {
 	if !strings.Contains(errOut.String(), "experimental") {
 		t.Fatalf("missing experimental warning: %s", errOut.String())
 	}
-	if !strings.Contains(errOut.String(), "notification editing") {
-		t.Fatalf("missing multi-host notification warning: %s", errOut.String())
+	if !strings.Contains(errOut.String(), "physical multi-host acceptance is incomplete") {
+		t.Fatalf("missing multi-host acceptance warning: %s", errOut.String())
 	}
 }
 

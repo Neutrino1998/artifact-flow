@@ -9,7 +9,13 @@ import { PillBadge } from '@/components/ui/PillBadge';
 import { MENU_ROW_HOVER, MENU_ROW_DANGER_HOVER } from '@/lib/styles';
 import StorageBar from './StorageBar';
 
-export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
+export default function UserMenu({
+  collapsed,
+  onNavigate = () => {},
+}: {
+  collapsed?: boolean;
+  onNavigate?: () => void;
+}) {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const toggleTheme = useUIStore((s) => s.toggleTheme);
@@ -60,37 +66,44 @@ export default function UserMenu({ collapsed }: { collapsed?: boolean }) {
   const handleLogout = () => {
     setPopoverOpen(false);
     logout();
+    onNavigate();
     // AuthGuard handles the redirect to /login when isAuthenticated becomes false
   };
 
   const handleManageUsers = () => {
     setPopoverOpen(false);
     setActiveMode('userManagement');
+    onNavigate();
   };
 
   const handleManageTools = () => {
     setPopoverOpen(false);
     setActiveMode('toolUnit');
+    onNavigate();
   };
 
   const handleDepartmentAccess = () => {
     setPopoverOpen(false);
     setActiveMode('departmentAccess');
+    onNavigate();
   };
 
   const handleObservability = () => {
     setPopoverOpen(false);
     setActiveMode('observability');
+    onNavigate();
   };
 
   const handleInstances = () => {
     setPopoverOpen(false);
     setActiveMode('instances');
+    onNavigate();
   };
 
   const handleNotificationConfig = () => {
     setPopoverOpen(false);
     setActiveMode('notificationConfig');
+    onNavigate();
   };
 
   const handleChangePassword = () => {

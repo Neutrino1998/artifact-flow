@@ -63,12 +63,12 @@ sudo /opt/artifactflow/bin/afctl --root /opt/artifactflow maintenance off
 管理员可在 UI 编辑通知，也可修改：
 
 ```text
-/opt/artifactflow/control/site/notifications.json
 /opt/artifactflow/control/site/welcome_tips.json
 /opt/artifactflow/control/site/branding.json
 ```
 
-通知文件有 revision 并发保护。直接编辑后先检查 JSON；错误文件会让相应 UI fallback，但不会阻断服务。
+通知由共享数据库保存并通过管理员 UI 编辑，DB revision 会拒绝覆盖其他管理员的
+并发修改。欢迎提示与品牌仍是 frontend 本地静态文件；直接编辑后先检查 JSON。
 
 ## 证书和 Secret 轮换
 

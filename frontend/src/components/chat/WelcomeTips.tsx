@@ -81,10 +81,10 @@ export default function WelcomeTips() {
 
   if (tips.length === 1) {
     return (
-      <div className="flex items-center justify-center text-text-tertiary dark:text-text-tertiary-dark">
-        <span className="relative">
-          <LightbulbIcon className="absolute right-full top-1/2 -translate-y-1/2 mr-2 shrink-0" />
-          {tips[0]}
+      <div className="flex max-w-full items-center justify-center px-2 text-center text-text-tertiary dark:text-text-tertiary-dark">
+        <span className="inline-flex max-w-full items-center justify-center gap-2">
+          <LightbulbIcon className="shrink-0" />
+          <span className="min-w-0">{tips[0]}</span>
         </span>
       </div>
     );
@@ -92,7 +92,7 @@ export default function WelcomeTips() {
 
   return (
     <div
-      className="flex items-center justify-center h-6 w-full max-w-2xl text-text-tertiary dark:text-text-tertiary-dark"
+      className="flex min-h-6 w-full max-w-2xl items-center justify-center px-2 text-center text-text-tertiary dark:text-text-tertiary-dark"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >
@@ -100,10 +100,10 @@ export default function WelcomeTips() {
           animation-name 变化(tip-in↔tip-out)触发重播。 */}
       <span
         key={idx}
-        className={`relative ${phase === 'out' ? 'animate-tip-out' : 'animate-tip-in'}`}
+        className={`inline-flex max-w-full items-center justify-center gap-2 ${phase === 'out' ? 'animate-tip-out' : 'animate-tip-in'}`}
       >
-        <LightbulbIcon className="absolute right-full top-1/2 -translate-y-1/2 mr-2 shrink-0" />
-        {tips[idx]}
+        <LightbulbIcon className="shrink-0" />
+        <span className="min-w-0">{tips[idx]}</span>
       </span>
     </div>
   );

@@ -169,7 +169,7 @@ export default function ArtifactToolbar() {
           {/* Back to list */}
           <button
             onClick={() => setCurrent(null)}
-            className={`${BUTTON_PRIMARY} ml-2 w-7 h-7 flex items-center justify-center rounded-full`}
+            className={`${BUTTON_PRIMARY} ml-2 w-11 h-11 sm:w-7 sm:h-7 flex items-center justify-center rounded-full`}
             aria-label="Back to artifact list"
             title="返回列表"
           >

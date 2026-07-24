@@ -1,12 +1,14 @@
 /**
- * Site-config fetchers: 从静态 public/site/*.json 读取通知与欢迎页提示。
+ * Runtime site-content fetchers.
  *
  * 设计要点：
- * - 文件 404 / 解析失败 / 字段错位 → 一律返回空数组，调用方据此隐藏组件。
- *   不会因为运维写错 JSON 把整个 UI 崩掉。
+ * - 通知从 authenticated backend API 读取（DB 共享）；欢迎提示与品牌仍来自
+ *   frontend 本地静态文件。
  * - 通知按 severity 排序、按时间窗过滤、被 dismiss 的剔除，都在这里做完，
  *   组件只渲染。
  */
+
+import { getNotifications } from '@/lib/api';
 
 export type Severity = 'info' | 'warn' | 'critical';
 
@@ -20,26 +22,71 @@ export interface Notification {
   dismissible?: boolean;
 }
 
-const DISMISS_KEY = 'af.dismissed_notifications';
+const NOTIFICATION_STATE_KEY_PREFIX = 'af.notification_state.';
 const SEVERITY_RANK: Record<Severity, number> = { info: 0, warn: 1, critical: 2 };
 
-function readDismissed(): Set<string> {
-  if (typeof window === 'undefined') return new Set();
+interface NotificationBrowserState {
+  seen: string[];
+  dismissed: string[];
+}
+
+function notificationStateKey(userId: string): string {
+  return `${NOTIFICATION_STATE_KEY_PREFIX}${encodeURIComponent(userId)}`;
+}
+
+function readNotificationState(userId: string): NotificationBrowserState {
+  if (typeof window === 'undefined') return { seen: [], dismissed: [] };
   try {
-    const raw = window.localStorage.getItem(DISMISS_KEY);
-    if (!raw) return new Set();
+    const raw = window.localStorage.getItem(notificationStateKey(userId));
+    if (!raw) return { seen: [], dismissed: [] };
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? new Set(parsed.filter((x): x is string => typeof x === 'string')) : new Set();
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { seen: [], dismissed: [] };
+    }
+    const state = parsed as Record<string, unknown>;
+    return {
+      seen: Array.isArray(state.seen)
+        ? state.seen.filter((x): x is string => typeof x === 'string')
+        : [],
+      dismissed: Array.isArray(state.dismissed)
+        ? state.dismissed.filter((x): x is string => typeof x === 'string')
+        : [],
+    };
   } catch {
-    return new Set();
+    return { seen: [], dismissed: [] };
   }
 }
 
-export function dismissNotification(id: string): void {
+function writeNotificationState(userId: string, state: NotificationBrowserState): void {
   if (typeof window === 'undefined') return;
-  const dismissed = readDismissed();
-  dismissed.add(id);
-  window.localStorage.setItem(DISMISS_KEY, JSON.stringify(Array.from(dismissed)));
+  try {
+    window.localStorage.setItem(notificationStateKey(userId), JSON.stringify(state));
+  } catch {
+    // Browser storage is intentionally best-effort. A blocked/full store means
+    // notifications may reappear on a later page load, never that they vanish.
+  }
+}
+
+export function dismissNotification(userId: string, id: string): void {
+  const state = readNotificationState(userId);
+  if (!state.dismissed.includes(id)) state.dismissed.push(id);
+  writeNotificationState(userId, state);
+}
+
+export function unseenNotificationIds(
+  userId: string,
+  notifications: Notification[],
+): string[] {
+  const seen = new Set(readNotificationState(userId).seen);
+  return notifications.filter((item) => !seen.has(item.id)).map((item) => item.id);
+}
+
+export function markNotificationsSeen(userId: string, ids: string[]): void {
+  if (ids.length === 0) return;
+  const state = readNotificationState(userId);
+  const seen = new Set(state.seen);
+  for (const id of ids) seen.add(id);
+  writeNotificationState(userId, { ...state, seen: Array.from(seen) });
 }
 
 // 可选时间字段在 schema 校验阶段就被解析过，到达 isActive 时一定是有效 epoch。
@@ -111,19 +158,13 @@ function toNotification(p: ParsedNotification): Notification {
   };
 }
 
-export async function fetchNotifications(): Promise<Notification[]> {
-  let raw: unknown;
-  try {
-    const res = await fetch('/site/notifications.json', { cache: 'no-store' });
-    if (!res.ok) return [];
-    raw = await res.json();
-  } catch {
-    return [];
-  }
+export async function fetchNotifications(userId: string): Promise<Notification[]> {
+  const response = await getNotifications();
+  const raw: unknown = response.notifications;
   if (!Array.isArray(raw)) return [];
 
   const now = Date.now();
-  const dismissed = readDismissed();
+  const dismissed = new Set(readNotificationState(userId).dismissed);
 
   const parsed: ParsedNotification[] = [];
   for (const item of raw) {
@@ -138,7 +179,7 @@ export async function fetchNotifications(): Promise<Notification[]> {
     return !dismissed.has(n.id);
   });
 
-  // critical > warn > info；同 severity 保持文件顺序
+  // critical > warn > info；同 severity 保持配置顺序
   visible.sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity]);
   return visible.map(toNotification);
 }
@@ -146,7 +187,7 @@ export async function fetchNotifications(): Promise<Notification[]> {
 // ============================================================
 // Branding（页脚版权 / 问题反馈入口）
 // ============================================================
-// 与 notifications / welcome_tips 同源：静态 JSON、运维改文件即生效、
+// 与 welcome_tips 同源：静态 JSON、运维改文件即生效、
 // 出错一律 null 让组件隐藏：缺文件 / 写坏 schema → 页脚消失
 //（fail-closed），而不是回退到代码常量掩盖运维错误。
 
