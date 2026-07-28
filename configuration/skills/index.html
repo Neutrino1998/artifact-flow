@@ -537,6 +537,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#同名与覆盖" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        同名与覆盖
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#skill-与-agent-的关系" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -861,6 +872,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#同名与覆盖" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        同名与覆盖
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#skill-与-agent-的关系" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -975,6 +997,9 @@
 </table>
 <p><code>allowed-tools</code> 以 unit 为粒度。可以写 Builtin 名、external unit 名或成员完整名；成员完整名也会归一化到所属 unit。未知名称会告警并保留，等未来对应 unit 出现后再解析。</p>
 <p>Seeded Skill 没有用户 owner，因此不能设置 <code>visibility: private</code>。正文不能为空。</p>
+<h2 id="同名与覆盖">同名与覆盖</h2>
+<p>共享 Skill 的 slug 在共享目录中唯一；个人 Skill 的 slug 只需在该用户自己的空间内唯一。因此，不同用户可以分别导入同名个人 Skill，个人 Skill 也可以与共享 Skill 同名。</p>
+<p>当某个用户的个人 Skill 与一个对其可见的共享 Skill 同名时，运行时优先使用个人 Skill。技能管理页会同时保留两项，并用红色边框标出当前被覆盖的共享 Skill；删除或重命名个人 Skill 后，共享 Skill 自动恢复，无需同步或迁移开关状态。</p>
 <h2 id="skill-与-agent-的关系">Skill 与 Agent 的关系</h2>
 <p>Skill 不取代 Agent：</p>
 <ul>
