@@ -4,7 +4,7 @@
 >
 > 创建日期：2026-07-19
 >
-> 最后更新：2026-07-27
+> 最后更新：2026-07-28
 >
 > 相关文档：`docs/architecture/tools.md`、`docs/architecture/engine.md`、`docs/architecture/execution-lifecycle.md`、`docs/_archive/design/skill-system-implementation-plan.md`
 
@@ -73,7 +73,7 @@
 - 不逐条把旧 XML 调用转换成 native tool calls，也不增加运行时翻译。
 - 不保证从迁移前的任意非 leaf 内部消息节点重新分叉；迁移时存在的所有 leaf head 均可继续。
 - 不依赖 vLLM/DashScope 等供应商私有的 `defer_loading`、`tool_reference` 扩展。
-- 不引入宏大的“统一 canonical schema 平台”；只提供 `BaseTool` native schema 导出和 MCP raw schema 通路。
+- 不引入宏大的“统一 schema 平台”；只提供 `BaseTool` native schema 导出和保留 MCP `inputSchema` 结构的派生通路。
 - 不把模型原始思维链当作调用理由，也不向用户暴露隐藏 reasoning；旧 `<reason>` 的产品语义由保留参数 `__reason` 承接。
 - 不持久化每次请求的完整 native tools schema 快照；现有 admin prompt reconstruction 只保证 cutover 后请求的 native messages 正确，不宣称还原包含 tools schema 在内的完整请求。迁移前请求不作正确性承诺，也不增加识别、特殊响应或 legacy formatter。
 - 不在首轮实现 provider capability matrix、strict mode 或自动供应商探测。
@@ -93,7 +93,7 @@
 8. Compaction 后最近一组真实 tool call/result 仍保持结构闭合且未被摘要替代。
 9. 每次模型调用前都会在完整 tool-result 组之后追加一条 synthetic user reminder；图片也通过这条 user 消息传入。
 10. 所有存量 leaf 经 semantic 或 mechanical boundary 后可继续，迁移前事件不再进入模型上下文。
-11. XML parser、XML tool-call formatter 及其专属测试从 runtime 删除。
+11. XML tool-call parser、调用 grammar/tool-doc formatter 及其专属测试从 runtime 删除；模型可读的 XML-like tool-result envelope 拆为独立 renderer 后保留。
 
 ## 已确定的设计原则
 
@@ -109,7 +109,7 @@
 
 `function.arguments` 仍按 JSON 字符串处理，流式响应必须先按 call/index 组装完成，再 `json.loads` 和校验。
 
-Native `role=tool.content` 统一使用新的协议无关文本序列化器，不复用 XML formatter。序列化结果采用稳定 JSON，至少保留 `success`、`data`、`error` 和 `parser_warnings`；图片只保留文本说明/引用，实际 image blocks 仍由第 7 节的 synthetic user carrier 承载。该序列化器同时服务模型自愈和 EventHistory 投影，不承担 legacy XML 转换。
+Native `role=tool.content` 保留现有模型可读的 XML-like `<tool_result>` envelope，继续表达 `name`、`success`、`data` 和 `error`。标准 native 协议只负责外层 `role=tool + tool_call_id` 绑定，不限制 content 内部采用 XML-like 文本；ArtifactFlow 也不解析这段结果文本。现有 `format_result()` 从同时承载调用 grammar/tool docs 的 `xml_formatter.py` 拆到独立 result renderer，避免“保留结果格式”被误解为保留 XML tool-call runtime。XML parser 专属的 `parser_warnings` 不迁移；native arguments 的 JSON/参数错误直接进入 `error`。图片只在结果文本中保留说明/引用，实际 image blocks 仍由第 7 节的 synthetic user carrier 承载。
 
 Native protocol 不认识 ArtifactFlow 的 unit，但 unit 仍是应用层的发现、权限和生命周期边界。每次请求对当前 agent 的 `EffectiveToolset` 形成两个投影：
 
@@ -149,11 +149,11 @@ content + reasoning_content + tool_calls
 - 即使 `content` 为空，只要存在 `tool_calls` 就必须生成 assistant 历史消息。
 - `reasoning_content` 必须覆盖同一用户回合的多轮工具调用、下一用户回合以及 compaction carry；DeepSeek thinking 等端点会把缺失回放视为协议错误。
 - reasoning 只回传模型并沿用现有受控 UI 展示，不作为 permission 文案，也不混入工具参数。
-- ArtifactFlow 的 canonical message 字段继续使用现有 `reasoning_content`；所有 LLM 请求都经过 LiteLLM，由 LiteLLM adapter 负责不同供应商的 wire-field 映射。不要增加 `reasoning_replay_field` 一类 per-model 配置。
-- 若目标端点出现可复现的字段兼容问题，优先升级 LiteLLM 或在唯一 LLM adapter 边界修复，并以端点 smoke 固化；不要把供应商分支扩散到 engine、history 或模型配置。
+- ArtifactFlow 内部统一使用现有 `reasoning_content` 字段；所有收发都经过唯一 LLM adapter 和 LiteLLM，但不假定任意 provider adapter 都天然正确保留/映射该字段。不要增加 `reasoning_replay_field` 一类 per-model 配置。
+- DeepSeek、DashScope/Qwen 和 raw vLLM 的实际兼容性必须由连续 tool-call smoke 验证。若目标端点出现可复现的问题，优先升级 LiteLLM 或在唯一 LLM adapter 边界修复；不要把供应商分支扩散到 engine、history 或模型配置。
 - `reasoning_content` 与用户可见的单次工具调用理由是两种数据。前者按 assistant envelope 回放；后者由第 8 节的 `__reason` 承接。
-- Token usage 正常路径以推理端经 LiteLLM 返回的 `prompt_tokens`、`completion_tokens`、`total_tokens` 为准；reasoning 是 generated completion 的组成部分，不能把可选的 `reasoning_tokens` breakdown 再加到 `completion_tokens` 上。
-- 推理端不返回可用 usage 时，本地 fallback 必须估算完整 assistant output envelope：`reasoning_content + content + canonical tool_calls`，不能继续只计算 content。该值明确标记为 estimate，只用于记账、上下文水位和 compaction 的 best-effort 判断。
+- Token usage 正常路径保持现状：直接采用推理端经 LiteLLM 返回的 `prompt_tokens`、`completion_tokens`、`total_tokens`，再沿用当前 `input_tokens`/`output_tokens` 映射；不新增 reasoning breakdown 的读取、持久化或观测字段。
+- 推理端不返回可用 usage 时，沿用现有 fallback，只把 output estimate 的输入补全为 `reasoning_content + content + serialized native tool_calls`，不能继续只计算 content；不新增 `estimated` 标记或 usage/event 字段。该估算只用于现有记账、上下文水位和 compaction 的 best-effort 判断。
 
 ### 3. Progressive state 是分支内、按 agent 隔离的持久状态
 
@@ -220,8 +220,7 @@ ArtifactFlow 每次调用都从当前 registry 生成 OpenAI-compatible schema�
 若最新 LLM 消息包含 tool calls：
 
 - Compactor 输入排除该条最新 tool-calling `LLM_COMPLETE`，避免摘要重复它。
-- `COMPACTION_SUMMARY` 标记需要 carry latest tool call。
-- EventHistory 在摘要消息之后，原样投影最近 assistant 的 `content + reasoning_content + tool_calls`。
+- 不给 `COMPACTION_SUMMARY` 增加 carry 字段。EventHistory 从事件结构直接推导：若 boundary 前最近一条同 agent 的 `LLM_COMPLETE` 带结构化 `tool_calls`，就在摘要消息之后原样投影该 assistant 的 `content + reasoning_content + tool_calls`；迁移前 XML 文本事件不满足此条件，自然不会被 carry。
 - 随后产生的真实 tool results 正常接在该 assistant 消息之后。
 
 目标历史形态为：
@@ -247,11 +246,11 @@ tool:      real result bound to tool_call_id
 
 生成和 apply 分离：
 
-- **在线 generate**：服务仍可写入时扫描 `(conversation_id, leaf_message_id, is_active_branch, last_event_id, head_fingerprint)` manifest；机械摘要和 active-branch 语义摘要均可预生成，不写 `MessageEvent`。
-- **Checkpoint/resume**：使用独立 SQLite checkpoint 记录 `migration_id`、conversation/leaf/agent、扫描时 active 状态、`last_event_id`、head fingerprint、summary source、status、attempts、summary hash、latency 和 error；支持 `--resume`，不把一次性迁移状态引入 runtime。
+- **在线 generate**：服务仍可写入时扫描 `(conversation_id, leaf_message_id, is_active_branch, head_fingerprint)` manifest；机械摘要和 active-branch 语义摘要均可预生成，不写 `MessageEvent`。
+- **Checkpoint/resume**：使用独立 SQLite checkpoint 记录 `migration_id`、conversation/leaf/agent、扫描时 active 状态、head fingerprint、summary source/content、status、attempts 和 error；支持 `--resume`，不把一次性迁移状态引入 runtime。吞吐与 ETA 从任务计数和运行时间直接计算，不再持久化独立 latency/hash 字段。
 - **有界并发与 ETA**：语义摘要使用 `--concurrency N`，对 429/5xx 有界重试；持续报告 total/completed/success/failed/inflight、滚动吞吐和基于剩余任务数的 ETA。
 - **停写 apply**：维护窗口停止新请求并等待 active executions 清空，做数据库快照后重新扫描 leaf/head。未变化结果直接复用；变化或新增 leaf 立即重做 mechanical，变化后的 active branch 可重跑 semantic，失败仍回退 mechanical。
-- **成对追加、best-effort resume**：最终校验每个 leaf/agent 均有候选 boundary 后，把 `COMPACTION_START` 与成功 `COMPACTION_SUMMARY` 作为完整 pair 在同一数据库事务中追加。Checkpoint 尽量跳过已完成任务；若数据库已提交但 checkpoint 状态未更新，resume 可以再追加一个完整 pair。重复成功 boundary 语义无害，EventHistory 使用最靠右的成功 summary；缺少任何成功 boundary、出现半对、head 再次变化或 apply 失败才阻止部署，semantic 失败本身不阻塞。
+- **成对追加、best-effort resume**：最终校验每个 leaf/agent 均有候选 boundary 后，把 `COMPACTION_START` 与成功 `COMPACTION_SUMMARY` 作为完整 pair 在同一数据库事务中追加。Checkpoint 尽量跳过已完成任务；若数据库已提交但 checkpoint 状态未更新，resume 可以再追加一个完整 pair。重复成功 boundary 语义无害，EventHistory 使用最靠右的成功 summary；缺少任何成功 boundary、head 再次变化或 apply 失败才阻止部署，semantic 失败本身不阻塞。事务性写入已使 migration 产生半对不可表示，不再增加独立半对检测。
 
 Boundary 成为新 EventHistory 自右向左扫描的终点；新 runtime 永远看不到此前 XML event，因此不需要 legacy XML parser、formatter 或历史分支。迁移程序可携带独立 legacy 读取逻辑，但 runtime 不得 import 或调用。Cutover 时从缺省空 `agent_progressive_state` 开始，模型需要时重新 read/search。旧事件继续沿用既有 UI 展示；admin 对 cutover 后 `AGENT_START` 的 reconstruction 使用 native messages 投影，迁移前锚点的结果不保证正确，并且不识别旧请求、不返回专属状态、不保留 legacy 投影逻辑。
 
@@ -283,7 +282,7 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 - `__reason` 在 schema 中列为 required，提升模型稳定生成的概率；runtime 对缺失或非字符串仍宽容，使用确定性 fallback，不因此拒绝本可执行的工具调用。
 - Engine 在业务参数校验和 `execute()` 前提取并删除 `__reason`；工具自身若合法声明业务参数 `reason`，保持原样，不发生冲突。
 - `__reason` 写入 `TOOL_START`、permission request/interrupt、可观察事件和前端展示；不写入工具实际参数，也不使用隐藏 reasoning 替代。
-- Builtin/HTTP schema 与 MCP raw `input_schema` 都在统一 exporter 边界注入该属性，并正确更新 `required`；即使原 schema 为 `additionalProperties: false` 也必须合法。
+- Builtin/HTTP schema 与从 MCP 原始 `inputSchema` 深拷贝得到的模型侧 schema 都在统一 exporter 边界注入该属性，并正确更新 `required`；MCP 原始 schema 保持不变，Engine 剥离 `__reason` 后仍用它校验业务参数。即使原 schema 为 `additionalProperties: false`，派生后的模型侧 schema 也必须合法。
 - Registry/config/MCP 外部定义不得占用保留名 `__reason`；在各自写入或 discovery 边界校验，MCP 冲突项跳过并 warning。
 
 这会为每个工具增加少量 schema token，但配合渐进披露仍可控，且保留了 ArtifactFlow 已打磨的 per-call explanation 能力。
@@ -323,24 +322,24 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 
 - 分支干净建立，现有相关测试可重复通过。
 - 明确最终覆盖 LiteLLM 下的 DeepSeek、DashScope 和至少一个 vLLM 类实际目标端点。
-- 迁移脚本能稳定枚举全部 leaf/agent、标记 active branch，且 checkpoint/report 能发现遗漏、半对 boundary、head 变化和摘要失败；重复的完整成功 pair 可报告但不视为失败。
+- 迁移脚本能稳定枚举全部 leaf/agent、标记 active branch，且 checkpoint/report 能发现遗漏、head 变化和摘要失败；重复的完整成功 pair 可报告但不视为失败。
 
 ## 阶段 1：Native schema、命名约束与流式 codec
 
 ### 包含
 
 - 为 `BaseTool` 增加 OpenAI 风格 function schema 导出。
-- Builtin/HTTP tool 从现有 `ToolParameter` 生成 schema；MCP tool 沿用 raw `input_schema`。
-- 在统一 exporter 为所有工具 schema 注入 required `__reason`，并在各定义入口禁止业务 schema 占用该保留名。
+- Builtin/HTTP tool 从现有 `ToolParameter` 生成 schema；MCP tool 以服务端返回的 `inputSchema` 为 schema source，在深拷贝上做最小规范化并保留嵌套结构和约束，不经过 `ToolParameter` 往返转换。
+- 在统一 exporter 为所有模型侧 schema 注入 required `__reason`，并在各定义入口禁止业务 schema 占用该保留名；MCP 原始 `inputSchema` 不被修改，继续作为执行期业务参数校验依据。
 - LLM 层支持传入 `tools`，并按 call index/id 组装流式 `tool_calls` delta。
-- 输出结构至少保留 content、reasoning content、tool calls、finish reason 和 usage。
-- 正常 usage 直接采用 LiteLLM/provider 返回值；保留可选 reasoning breakdown 仅用于观测，不参与总数相加。
-- Provider usage 缺失时，fallback 对 `reasoning_content + content + canonical tool_calls` 的完整 assistant envelope 做 token estimate，并明确标记 `estimated=true`。
+- LLM codec 输出保留 content、reasoning content、tool calls 和 usage；final finish reason 只在 codec 内用于判断 buffered tool calls 是否因截断而不可接受，不新增持久化或观测字段。
+- 正常 usage 完全沿用当前 LiteLLM/provider 的 `prompt_tokens`、`completion_tokens`、`total_tokens` 读取与 `input_tokens`/`output_tokens` 映射，不新增 reasoning breakdown 字段或计算分支。
+- Provider usage 缺失时，沿用现有 fallback，并把 output estimate 补全为 `reasoning_content + content + serialized native tool_calls`；不新增 `estimated` 标记或 usage/event 字段。
 - 任意流式 tool-call delta 在 provider stream 正常、非截断结束且通过 envelope 结构校验前都只存在于内存 buffer；取消、超时、截断或结构错误时不得进入可回放 `LLM_COMPLETE.tool_calls`。
 - arguments 完成后进行 JSON 解码，再进入现有参数校验；解析/校验失败产生可供模型自愈的明确 tool error。
 - 落实 64 字符工具名约束和入口校验。
 - 每次请求从当前 registry 与 per-agent effective tool set 生成通用 OpenAI-compatible schema；不保存 schema 快照，不写 provider template 适配或 per-model reasoning field 配置。
-- 保持 `reasoning_content` 为内部 canonical 字段并交由 LiteLLM 完成 provider wire mapping；为三类目标端点增加 tool-call + reasoning 连续回放 smoke。
+- 保持 `reasoning_content` 为 ArtifactFlow 内部统一字段，收发集中在唯一 LLM adapter/LiteLLM 边界；为三类目标端点增加 tool-call + reasoning 连续回放 smoke，不能仅凭 LiteLLM 抽象假定 provider mapping 正确。
 
 ### 不包含
 
@@ -350,19 +349,19 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 ### 验收
 
 - 单调用、多调用、分片 name/arguments、空 content、非法 JSON、重复/乱序 delta、缺失/重复 call id、截断 finish reason 以及流式中途取消均有单元测试；只有正常、非截断 terminal 且结构完整的 envelope 才接受 tool calls，非法 JSON arguments 则形成绑定 call id 的失败结果。
-- 所有生成的 schema 可被目标 OpenAI-compatible 接口接受，`additionalProperties: false` 场景仍合法包含 required `__reason`。
+- 所有生成的 schema 可被目标 OpenAI-compatible 接口接受；MCP 的嵌套 schema 约束不因导出丢失，原始 `inputSchema` 不被修改，`additionalProperties: false` 的模型侧派生 schema 仍合法包含 required `__reason`。
 - 不合法工具名或保留参数冲突在配置/写入边界失败，MCP 动态发现按约定跳过并记录 warning。
 - DeepSeek reasoning 必须回放且不返回 400；DashScope 与 raw vLLM 经 LiteLLM 使用同一 ArtifactFlow message shape，无 per-model 字段分支。
-- Usage fixture 覆盖 provider 正常返回、仅 reasoning、reasoning + content + tool calls，以及 provider usage 缺失；fallback 不漏算 reasoning/tool-call payload，且不会重复累加 reasoning breakdown。
+- Usage fixture 覆盖 provider 正常返回、仅 reasoning、reasoning + content + tool calls，以及 provider usage 缺失；正常路径的既有 input/output 计算保持不变，fallback 不漏算 reasoning/tool-call payload。
 
 ## 阶段 2：结构化事件、历史与 compaction 投影
 
 ### 包含
 
-- `LLM_COMPLETE` 可持久化 tool calls、content、reasoning content、finish reason 和 usage。
+- `LLM_COMPLETE` 持久化 tool calls、content、reasoning content 和现有 usage；finish reason 只服务流式 codec 的 accepted-call 判断，不进入事件。
 - `TOOL_START/TOOL_COMPLETE` 增加并投影 `call_id`。
 - EventHistory 将新事件投影为携带 `content + reasoning_content + tool_calls` 的 assistant，以及逐个绑定 `call_id` 的文本 `role=tool` result。
-- 增加协议无关的 native tool-result serializer，以稳定 JSON 编码成功、业务错误、参数错误和 parser warnings；runtime/EventHistory 不再依赖 XML formatter。
+- 将现有模型可读的 XML-like tool-result renderer 从 XML 调用 grammar/formatter 中拆出；`role=tool.content` 继续保留成功、业务错误和参数错误的现有 envelope，runtime 不解析该文本。XML parser 专属 warnings 随 parser 一起删除。
 - 实现并测试 compaction summary 后完整 carry latest real assistant envelope 的逻辑。
 - ContextManager 不再假定或修改最后一条消息；每次请求都在完整 tool-result 组之后追加独立 synthetic user reminder。
 - 图片工具结果在同组全部文本 tool results 之后，通过同一条 synthetic user message 的带来源标签 image blocks 传入。
@@ -378,7 +377,7 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 - assistant 可同时包含 content 和 tool calls，也可 content 为空。
 - Thinking 模型在同回合后续调用、下一用户回合和 compaction carry 中都收到原始 `reasoning_content`。
 - 多 tool-call 的结果严格按 `tool_call_id` 绑定。
-- Native tool-result serializer 对成功、业务错误、参数错误和 parser warnings 产生稳定 JSON，EventHistory 的 `role=tool.content` 不含 XML 调用协议。
+- 独立 tool-result renderer 对成功、业务错误和参数错误保持现有 XML-like envelope；EventHistory 只把它作为 `role=tool.content` 文本投影，调用绑定由外层 `tool_call_id` 完成。
 - compaction 前后历史语义等价，最近 tool call/result 不重复、不丢失、不 orphan。
 - 连续 user 消息、最后一条为 tool、图片与 reminder 共存时均产生同一种追加结构。
 - 单图片、图片+文本多工具、同组多图片、跨轮多图片、text-only 降级和 compaction 后图片历史均有 fixture；每个 carrier 只包含其所属调用组的图片。
@@ -389,7 +388,7 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 
 - 在 engine state 与 `Message.metadata` 中增加 `agent_progressive_state` map，按父消息恢复并随当前分支持久化。
 - 把当前全局 `active_skills` 行为迁移为 per-agent：`read_skill` 只更新调用 agent 的状态与 `EffectiveToolset`；用户 UI 激活明确写入 `lead_agent`。
-- `search_tools` 返回结构化 discovered full names，并只更新调用 agent 的 disclosed 状态。
+- `search_tools` 保持现有模型可见的 `ToolResult` 文本和错误语义，只在成功结果的现有 metadata 中附带本次实际展示的 deferred full names，供 Engine 更新调用 agent 的 disclosed 状态；不另造返回协议或事件字段。
 - Effective tool set 按当前 agent 统一计算 native-visible schema 与全量轻量 unit catalog；catalog 标记成员 `loaded`/`deferred`。
 - Dynamic reminder 为所有当前可访问的真实 tool unit 渲染 unit description 和成员名，不重复成员完整描述/参数；`search_tools` 命中 loaded 工具不修改状态。
 - Active skill grants、disclosed names、工具删除或 agent 权限变化始终与当前 agent 的实时有效权限求交。
@@ -447,8 +446,8 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 - 为 leaf 路径内的 subagent 生成确定性 reset boundary，不逐个调用 compaction model。
 - 使用 SQLite checkpoint 支持 `--resume`、稳定 task key、有界并发、429/5xx 重试、失败明细、rolling throughput 与 ETA；generate/report 阶段不写 `MessageEvent`。
 - Apply 前停止写入、等待 active executions 清空并完成数据库快照；重新校验全部 leaf 和 head fingerprint，变化/新增项补算，active semantic 失败自动采用 mechanical fallback。
-- 在维护窗口的 apply 阶段按 leaf/agent 事务性追加完整 `COMPACTION_START`/`COMPACTION_SUMMARY` pair；checkpoint 尽量避免重复，提交结果不确定时允许重试产生重复完整 pair，不允许半对。
-- Native 部署前验证所有 leaf/agent 至少存在一个成功 boundary，任何遗漏、半对、head 再变化或 apply 失败都阻止部署；重复完整成功 pair 与单纯 semantic 失败不阻塞。
+- 在维护窗口的 apply 阶段按 leaf/agent 事务性追加完整 `COMPACTION_START`/`COMPACTION_SUMMARY` pair；checkpoint 尽量避免重复，提交结果不确定时允许重试产生重复完整 pair。
+- Native 部署前验证所有 leaf/agent 至少存在一个成功 boundary，任何遗漏、head 再变化或 apply 失败都阻止部署；重复完整成功 pair 与单纯 semantic 失败不阻塞。
 - Cutover 后初始化空的 `agent_progressive_state`；旧原始事件继续沿用既有 UI 展示。更新 Admin API/frontend 文案与测试：现有 reconstruction 只保证 cutover 后 native messages 正确，不宣称包含 tools schema 的完整请求取证，也不为 pre-cutover 请求增加 detection、legacy reconstruction 或特殊响应分支。
 - 将迁移程序所需的 legacy rendering 与 runtime 隔离；迁移完成并验证后删除 runtime 的 XML tool-call parser、formatter、调用语法 prompt 和专属测试。
 - 更新 tools、engine、history、compaction、execution lifecycle 等活动架构文档。
@@ -463,7 +462,7 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 2. 服务在线期间扫描 manifest，以 checkpoint 并发生成 active semantic summaries 与全 leaf mechanical summaries；持续报告进度和 ETA。
 3. 进入维护窗口，停止新写入、等待 active executions 清空并完成数据库快照。
 4. 重扫全部 leaf/head；复用未变化结果，补算变化/新增项，并为 semantic 失败选择 mechanical fallback。
-5. 全部 leaf/agent 均有最终候选后按完整 pair 执行 apply，校验每个 leaf/agent 至少一个成功 boundary、无半对、summary hash 和 head 未再次变化；重复完整成功 pair 不阻塞。
+5. 全部 leaf/agent 均有最终候选后按完整 pair 执行 apply，校验每个 leaf/agent 至少一个成功 boundary 且 head 未再次变化；重复完整成功 pair 不阻塞。
 6. 校验全部通过后部署 native runtime；失败时继续运行旧版本或从快照回滚，不启用双 runtime。
 
 ### 不包含
@@ -474,9 +473,9 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 
 ### 验收
 
-- 所有扫描到的 leaf/agent 都至少有一个可验证的成功 boundary 且不存在半对；semantic 失败稳定回退 mechanical，任一 boundary 覆盖或 apply 失败都不会进入 native 部署，重复完整成功 pair 可接受。
+- 所有扫描到的 leaf/agent 都至少有一个可验证的成功 boundary；semantic 失败稳定回退 mechanical，任一 boundary 覆盖或 apply 失败都不会进入 native 部署，重复完整成功 pair 可接受。
 - Active leaf 优先从语义摘要继续当前工作，其他 leaf 至少从机械 user/final transcript 继续；新 runtime 不读取 boundary 之前的 XML event。
-- Checkpoint 中断后可 resume，已完成的 generate task 不重复模型调用；apply 提交结果不确定时允许重复完整 boundary pair，但不得产生半对。在线 generate 期间发生的新写入能在停写复核中被发现和补算。
+- Checkpoint 中断后可 resume，已完成的 generate task 不重复模型调用；apply 提交结果不确定时允许重复完整 boundary pair。在线 generate 期间发生的新写入能在停写复核中被发现和补算。
 - 代码库中不再存在运行时 XML tool-call 协议路径；离线迁移代码不会被 runtime import。
 - 全量测试通过，目标私有端点 smoke 通过。
 - 活动文档只描述 native runtime；归档文档保留历史背景但不作为当前行为依据。
@@ -489,7 +488,7 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 | 无工具回复 | content/reasoning/usage 正常，历史无伪 tool message |
 | 单/多工具调用 | name、arguments、call id 正确组装，每个 call 的 `__reason` 独立展示，串行执行语义不变 |
 | Thinking 回放 | 同回合工具循环、下一用户回合及 compaction carry 都原样回传 assistant `reasoning_content`；DeepSeek/DashScope/vLLM 均经 LiteLLM 使用同一内部字段 |
-| Token usage | Provider usage 为权威且 reasoning breakdown 不重复相加；无 usage 时完整 envelope fallback 覆盖 reasoning/content/tool calls 并标记 estimated |
+| Token usage | Provider 正常 usage 与现有 input/output 计算保持不变；无 usage 时仅补全现有 assistant output fallback 对 reasoning/content/tool calls 的估算，不增加 usage 字段 |
 | 流式中途取消/截断 | 正常、非截断 terminal 且结构校验通过前的任何 delta 都不进入 `LLM_COMPLETE.tool_calls`、不执行、也不制造 closure pair；已流出 content/reasoning 可按现状保存 |
 | 非法 JSON/参数 | 不执行工具，返回绑定 call id 的可自愈错误 |
 | 未披露/未声明调用 | 即使名称存在于 unit 目录或同一 envelope 先执行了 read/search，也不执行；下一次 LLM invocation 才使用更新后的 native set |
@@ -513,9 +512,9 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 | 风险 | 影响 | 控制方式 |
 |---|---|---|
 | LiteLLM/供应商流式 chunk 形态差异 | arguments 丢片或 call 归属错误 | codec fixture 覆盖实际响应；最终端点 smoke |
-| 私有模型 chat template 不支持标准 tools | 请求失败或模型输出普通文本 | 部署前置检查并响亮失败；不引入 XML fallback |
+| 私有模型 chat template 不支持标准 tools | 请求失败或模型输出普通文本 | Cutover 前显式端点 smoke 并响亮失败；不引入 runtime capability 探测或 XML fallback |
 | Thinking assistant 未回放或 LiteLLM provider mapping 漂移 | DeepSeek 等端点后续请求 400 | 完整 assistant envelope fixture + DeepSeek/DashScope/vLLM smoke；问题收敛在 LiteLLM/LLM adapter |
-| Provider 缺失 usage 时 fallback 漏算 reasoning/tool calls | Context 水位偏低，compaction 触发过晚 | 对完整 assistant output envelope 做保守 estimate 并标记 estimated；不承诺请求前精确预测 |
+| Provider 缺失 usage 时 fallback 漏算 reasoning/tool calls | Context 水位偏低，compaction 触发过晚 | 补全现有 assistant output estimate 的输入；不新增标记，也不承诺请求前精确预测 |
 | Semantic 摘要失败 | Active branch 当前工作丢失 | 自动回退已经生成的 mechanical summary；记录失败但不单独阻塞 cutover |
 | 迁移漏掉 leaf/agent 或在线 head 变化 | 存量对话无法继续或新 runtime 看到 legacy XML | Manifest fingerprint、checkpoint、停写重扫、DB 快照、部署前全量 boundary 校验 |
 | Progressive state 意外跨 agent 传播 | 扩大 schema/权限面并污染上下文 | metadata map 以 agent_name 为 key，read/search 仅更新调用者，授权实时求交 |
@@ -535,7 +534,7 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 
 - 最终私有部署 smoke matrix 中具体有哪些模型、vLLM 版本和 chat template。
 - `__reason` 缺失时 Permission UI 的最终 fallback 文案；协议策略已经确定，不影响执行结构。
-- 部署检查应放在启动自检还是首次模型调用失败路径，优先选择最小且可诊断的实现。
+- Cutover smoke 使用现有模型调用边界显式执行，不增加启动自检、首次调用探测或 provider capability 状态。
 - Mechanical summary 的 token/字符上限、保留最近对数，以及 semantic `--concurrency` 默认值；算法和 fallback 顺序已经确定。
 
 ## 完成定义
@@ -544,7 +543,7 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 
 - 唯一运行时协议为 native tool calls。
 - Per-agent deferred disclosure、unit catalog、skills、`__reason`、permissions、subagents、reasoning replay、multimodal、compaction 和取消语义均已迁移并有回归测试。
-- Runtime 无 XML parser/formatter/tool-call prompt 残留；一次性迁移程序不被 runtime import，也不随服务发布。
+- Runtime 无 XML tool-call parser、调用 grammar/tool-doc formatter 或调用语法 prompt 残留；独立的模型可读 XML-like tool-result renderer 明确保留且不参与解析。一次性迁移程序不被 runtime import，也不随服务发布。
 - 无协议 feature flag、legacy compatibility adapter 或自动 XML fallback。
 - 所有现存 leaf/agent 已按 semantic/mechanical/reset 规则追加成功 summary boundary；旧事件未被改写，native runtime 不读取 boundary 之前事件。
 - 新增历史按完整 assistant/tool 协议闭合；任何事件持久化路径均不能留下 accepted orphan call。
@@ -558,4 +557,5 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 |---|---|
 | 2026-07-19 | 初版：确定单分支一次性 native cutover；切片仅作为 branch 内施工检查点，不保留双 runtime 或历史兼容层。 |
 | 2026-07-20 | 根据设计复核收敛：采用 per-agent progressive state、完整 reasoning 回放、固定 synthetic user reminder、文本 tool result + user image、所有持久化前统一闭合，以及离线 compaction boundary 迁移旧 leaf；明确不保存 schema 快照、不提供 legacy runtime。 |
-| 2026-07-27 | 明确 unit 轻量目录与 native schema 双投影；reasoning 统一交由 LiteLLM adapter；以 required-but-tolerant `__reason` 承接调用意图；旧历史改为 active semantic + 全 leaf mechanical + subagent reset，并加入在线生成、SQLite checkpoint、有界并发、ETA 与停写复核；accepted call 增加非截断与结构完整性门槛；执行以本次 native tool-name 集合为闸；新增非 XML tool-result serializer；迁移 apply 降为完整 pair + best-effort resume，允许重复成功 boundary；admin 仅保证 cutover 后 messages reconstruction。 |
+| 2026-07-27 | 明确 unit 轻量目录与 native schema 双投影；`reasoning_content` 作为内部统一字段并在唯一 LLM adapter/LiteLLM 边界验证；usage 正常路径保持现状；以 required-but-tolerant `__reason` 承接调用意图；MCP 保留原始 `inputSchema` 并从深拷贝派生模型 schema；保留并拆分 XML-like tool-result renderer；旧历史改为 active semantic + 全 leaf mechanical + subagent reset，并加入在线生成、SQLite checkpoint、有界并发、ETA 与停写复核；accepted call 增加非截断与结构完整性门槛；执行以本次 native tool-name 集合为闸；迁移 apply 降为完整 pair + best-effort resume，允许重复成功 boundary；admin 仅保证 cutover 后 messages reconstruction。 |
+| 2026-07-28 | 删除无收益的 reasoning breakdown、usage estimate 标记、finish-reason 事件字段、parser warnings 迁移、boundary 半对检测与过细 checkpoint 指标；compaction carry 改为从事件结构推导，provider 兼容性只做显式 cutover smoke，`search_tools` 沿用现有 ToolResult 协议。 |
