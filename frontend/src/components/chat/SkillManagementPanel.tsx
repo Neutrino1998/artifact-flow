@@ -344,7 +344,7 @@ export default function SkillManagementPanel() {
                 className={`flex items-start gap-3 px-4 py-3 rounded-xl bg-surface dark:bg-surface-dark border transition-colors ${skillRowBorderClass(skill)}`}
               >
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex min-h-6 items-center gap-2">
                     <span className="text-sm font-medium text-text-primary dark:text-text-primary-dark truncate">
                       {skill.name}
                     </span>
@@ -444,64 +444,66 @@ export default function SkillManagementPanel() {
                   )}
                 </div>
 
-                {/* Row actions */}
-                <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
-                  {exportable && (
+                <div className="flex h-6 flex-shrink-0 items-center gap-3">
+                  {/* Row actions */}
+                  <div className="flex items-center gap-1">
+                    {exportable && (
+                      <button
+                        onClick={() => handleExport(skill)}
+                        disabled={busy}
+                        className="flex h-6 w-6 items-center justify-center rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors disabled:opacity-40"
+                        aria-label={`导出技能 ${skill.name}`}
+                        title={skill.has_extra_files ? '导出技能包' : '导出单文件技能'}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 13h11" />
+                        </svg>
+                      </button>
+                    )}
+                    {deletable && (
+                      <button
+                        onClick={() => setDeleteTarget(skill)}
+                        disabled={busy}
+                        className="flex h-6 w-6 items-center justify-center rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-status-error hover:bg-status-error/10 transition-colors disabled:opacity-40"
+                        aria-label={`删除技能 ${skill.name}`}
+                        title="删除该技能"
+                      >
+                        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                          <path d="M2.5 4h11M6.5 4V2.5h3V4M4 4l.8 9.5h6.4L12 4M6.5 7v4M9.5 7v4" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Enable switch */}
+                  {canUsePersonalToggle && !skill.shadowed_by_private ? (
                     <button
-                      onClick={() => handleExport(skill)}
+                      type="button"
+                      role="switch"
+                      aria-checked={skill.enabled}
+                      aria-label={`${skill.enabled ? '关闭' : '开启'}技能 ${skill.name}`}
                       disabled={busy}
-                      className="h-6 w-6 flex items-center justify-center rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors disabled:opacity-40"
-                      aria-label={`导出技能 ${skill.name}`}
-                      title={skill.has_extra_files ? '导出技能包' : '导出单文件技能'}
+                      onClick={() => handleToggle(skill.id, !skill.enabled)}
+                      className="inline-flex h-6 items-center disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 13h11" />
-                      </svg>
+                      <SwitchTrack checked={skill.enabled} />
                     </button>
-                  )}
-                  {deletable && (
-                    <button
-                      onClick={() => setDeleteTarget(skill)}
-                      disabled={busy}
-                      className="h-6 w-6 flex items-center justify-center rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-status-error hover:bg-status-error/10 transition-colors disabled:opacity-40"
-                      aria-label={`删除技能 ${skill.name}`}
-                      title="删除该技能"
+                  ) : skill.shadowed_by_private ? (
+                    <span
+                      className="inline-flex h-6 items-center text-[11px] text-status-error"
+                      title="删除或重命名同名私人技能后，这个共享技能会恢复"
                     >
-                      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                        <path d="M2.5 4h11M6.5 4V2.5h3V4M4 4l.8 9.5h6.4L12 4M6.5 7v4M9.5 7v4" />
-                      </svg>
-                    </button>
+                      已覆盖
+                    </span>
+                  ) : (
+                    <span
+                      className="inline-flex h-6 items-center text-[11px] text-text-tertiary dark:text-text-tertiary-dark"
+                      title="当前账号不在该 skill 的可见范围内"
+                    >
+                      不可见
+                    </span>
                   )}
                 </div>
-
-                {/* Enable switch */}
-                {canUsePersonalToggle && !skill.shadowed_by_private ? (
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={skill.enabled}
-                    aria-label={`${skill.enabled ? '关闭' : '开启'}技能 ${skill.name}`}
-                    disabled={busy}
-                    onClick={() => handleToggle(skill.id, !skill.enabled)}
-                    className="flex-shrink-0 mt-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <SwitchTrack checked={skill.enabled} />
-                  </button>
-                ) : skill.shadowed_by_private ? (
-                  <span
-                    className="mt-1 flex-shrink-0 text-[11px] text-status-error"
-                    title="删除或重命名同名私人技能后，这个共享技能会恢复"
-                  >
-                    已覆盖
-                  </span>
-                ) : (
-                  <span
-                    className="mt-1 flex-shrink-0 text-[11px] text-text-tertiary dark:text-text-tertiary-dark"
-                    title="当前账号不在该 skill 的可见范围内"
-                  >
-                    不可见
-                  </span>
-                )}
               </div>
             );
           })}
