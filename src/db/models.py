@@ -61,7 +61,12 @@ class SiteNotificationConfig(Base):
 
     __tablename__ = "site_notification_config"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    # MySQL otherwise infers AUTO_INCREMENT for a lone integer PK, then rejects
+    # the singleton CHECK below (3818: CHECK cannot reference an auto-increment
+    # column). The row identity is the fixed literal 1, not a generated sequence.
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=False, default=1
+    )
     notifications: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     revision: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0"
