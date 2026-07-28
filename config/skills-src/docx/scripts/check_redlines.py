@@ -8,6 +8,9 @@
 提取的可见文本,必须与原始文档的可见文本逐字相等。相等 → 修订是纯增量标注,
 没有静默改写正文;不等 → 打出词级 diff 定位破坏点,退出码 1。
 
+本脚本不验证接受修订后的内容或页面布局。带修订文字不可用 python-docx 的
+Paragraph.text/Run.text 验证,因为这些 API 不会可靠包含 w:ins/w:del 内容。
+
 比较仅覆盖 document.xml 正文(不含页眉页脚/脚注);空白折叠比较(段落合并类
 修订会扰动换行,不构成破坏)。
 
@@ -96,7 +99,13 @@ def main():
 
     norm = lambda paras: " ".join(" ".join(paras).split())  # noqa: E731 — 空白折叠
     if norm(baseline) == norm(reverted):
-        print(f"OK: 回滚 '{args.author}' 的修订后与原文一致,修订是纯增量标注")
+        print(f"OK: 回滚 '{args.author}' 的修订后与原文一致，未发现静默正文改写。")
+        print("范围：本检查仅验证修订完整性，不验证修改内容或页面布局。")
+        print(
+            "内容核对：使用 Pandoc --track-changes=accept 或 --track-changes=all；"
+            "不要使用 python-docx Paragraph.text/Run.text 检查修订文字。"
+        )
+        print("修改稿未再写入时，无需重复运行本检查，请进入后续步骤。")
         return
 
     print(f"FAIL: 回滚 '{args.author}' 的修订后与原文不一致 —— 有正文被静默改写!", file=sys.stderr)

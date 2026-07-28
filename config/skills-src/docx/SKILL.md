@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 LibreOffice、Pandoc、python-docx、lxml、Pillow、RapidFuzz。
 metadata:
-  version: "2.5.1"
+  version: "2.5.2"
 ---
 
 # Word 文档
@@ -164,6 +164,19 @@ plan 中相对文件路径以 plan 所在目录为基准；UTF-8 文本文件会
 ```bash
 python "$SKILL/scripts/check_redlines.py" 输入.docx /workspace/修订稿.docx --author 审阅
 ```
+
+这个检查只证明拒绝指定作者的修订后可以恢复原文，不证明修改内容或布局正确。
+带修订文字位于 `w:ins`/`w:del` 中，`python-docx` 的 `Paragraph.text`/`Run.text`
+不会可靠包含这些内容，**不得用它们验证修订是否成功**。需要核对接受修订后的文字或全部修订时，
+使用 Pandoc：
+
+```bash
+pandoc /workspace/修订稿.docx --track-changes=accept -t markdown
+pandoc /workspace/修订稿.docx --track-changes=all -t markdown
+```
+
+修改稿未继续写入时，`check_redlines.py` 成功一次后直接进入批注、渲染或交付，不要追加其他
+自创的文本检查，也不要重复运行完整性检查。
 
 ## 修订处置与批注
 
