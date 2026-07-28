@@ -141,7 +141,6 @@ def upgrade() -> None:
 
     op.drop_table("department_skill_rules")
     op.drop_table("user_skills")
-    op.drop_index(op.f("ix_skills_owner_user_id"), table_name="skills")
     op.drop_table("skills")
     op.rename_table("skills_v2", "skills")
     op.rename_table("user_skills_v2", "user_skills")
@@ -236,7 +235,6 @@ def downgrade() -> None:
 
     op.drop_table("department_skill_rules")
     op.drop_table("user_skills")
-    op.drop_index(op.f("ix_skills_owner_user_id"), table_name="skills")
     op.drop_table("skills")
     op.rename_table("skills_v1", "skills")
     op.rename_table("user_skills_v1", "user_skills")
