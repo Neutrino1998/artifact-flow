@@ -44,20 +44,21 @@ const VISIBILITY_OPTIONS = [
   { value: 'department', label: '部门' },
 ] as const;
 
-function mergeSkillRows(
+export function mergeSkillRows(
   visibleSkills: SkillItem[],
   adminSharedSkills: AdminSkillItem[] = [],
 ): SkillRow[] {
-  const adminBySlug = new Map(adminSharedSkills.map((s) => [s.slug, s]));
-  const visibleSlugs = new Set(visibleSkills.map((s) => s.slug));
+  const adminById = new Map(adminSharedSkills.map((s) => [s.id, s]));
+  const visibleIds = new Set(visibleSkills.map((s) => s.id));
   const rows: SkillRow[] = visibleSkills.map((skill) => ({
     ...skill,
-    adminShared: adminBySlug.get(skill.slug),
+    adminShared: adminById.get(skill.id),
   }));
 
   for (const adminSkill of adminSharedSkills) {
-    if (visibleSlugs.has(adminSkill.slug)) continue;
+    if (visibleIds.has(adminSkill.id)) continue;
     rows.push({
+      id: adminSkill.id,
       slug: adminSkill.slug,
       name: adminSkill.name,
       description: adminSkill.description,
@@ -68,12 +69,20 @@ function mergeSkillRows(
       has_extra_files: adminSkill.has_extra_files,
       visibility: adminSkill.visibility,
       is_owner: false,
+      shadowed_by_private: false,
       adminShared: adminSkill,
       adminOnly: true,
     });
   }
 
   return rows;
+}
+
+export function skillRowBorderClass(skill: SkillItem): string {
+  if (skill.shadowed_by_private) return 'border-status-error';
+  return skill.enabled
+    ? 'border-accent/60'
+    : 'border-border dark:border-border-dark';
 }
 
 // 用户侧技能管理(C-3 列举/toggle + E-2 导入/导出/删除)。中间面板接管(同
@@ -88,7 +97,7 @@ export default function SkillManagementPanel() {
   const [query, setQuery] = useState('');
   const [importOpen, setImportOpen] = useState(false);
   const [importNotice, setImportNotice] = useState<SkillImportNoticeData | null>(null);
-  // 正在写覆盖/删除的 slug 集(禁用其控件防抖动)。
+  // 正在写覆盖/删除的 skill id 集(同名行可独立操作)。
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<SkillRow | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
@@ -122,27 +131,27 @@ export default function SkillManagementPanel() {
     fetchConfig();
   }, [fetchConfig]);
 
-  const handleToggle = useCallback(async (slug: string, next: boolean) => {
+  const handleToggle = useCallback(async (skillId: string, next: boolean) => {
     // 乐观更新 + 失败回滚。pending 期禁开关避免连点。
-    setPending((p) => new Set(p).add(slug));
+    setPending((p) => new Set(p).add(skillId));
     setSkills((list) =>
-      list.map((s) => (s.slug === slug ? { ...s, enabled: next } : s)),
+      list.map((s) => (s.id === skillId ? { ...s, enabled: next } : s)),
     );
     try {
-      const updated = await setSkillEnabled(slug, next);
+      const updated = await setSkillEnabled(skillId, next);
       setSkills((list) =>
-        list.map((s) => (s.slug === slug ? { ...s, ...updated } : s)),
+        list.map((s) => (s.id === skillId ? { ...s, ...updated } : s)),
       );
     } catch (err) {
       // 回滚
       setSkills((list) =>
-        list.map((s) => (s.slug === slug ? { ...s, enabled: !next } : s)),
+        list.map((s) => (s.id === skillId ? { ...s, enabled: !next } : s)),
       );
-      console.error(`Failed to toggle skill ${slug}:`, err);
+      console.error(`Failed to toggle skill ${skillId}:`, err);
     } finally {
       setPending((p) => {
         const n = new Set(p);
-        n.delete(slug);
+        n.delete(skillId);
         return n;
       });
     }
@@ -151,7 +160,7 @@ export default function SkillManagementPanel() {
   const handleExport = useCallback(async (skill: SkillRow) => {
     setRowError(null);
     try {
-      const blob = await downloadSkillBundle(skill.slug, {
+      const blob = await downloadSkillBundle(skill.id, {
         admin: Boolean(skill.adminShared),
       });
       triggerBlobDownload(`${skill.slug}.zip`, blob);
@@ -164,16 +173,16 @@ export default function SkillManagementPanel() {
     async (skill: SkillRow, patch: AdminSkillUpdateRequest) => {
       if (!skill.adminShared?.can_edit) return;
       setRowError(null);
-      setPending((p) => new Set(p).add(skill.slug));
+      setPending((p) => new Set(p).add(skill.id));
       try {
-        await adminUpdateSkill(skill.slug, patch);
+        await adminUpdateSkill(skill.id, patch);
         await fetchSkills();
       } catch (err) {
         setRowError(err instanceof Error ? err.message : '更新共享技能失败');
       } finally {
         setPending((p) => {
           const n = new Set(p);
-          n.delete(skill.slug);
+          n.delete(skill.id);
           return n;
         });
       }
@@ -186,15 +195,17 @@ export default function SkillManagementPanel() {
       const skill = deleteTarget;
       if (!skill) return;
       setRowError(null);
-      setPending((p) => new Set(p).add(skill.slug));
+      setPending((p) => new Set(p).add(skill.id));
       try {
         // 非本人的 dynamic skill 只有 admin 通道能删(user 通道 403)
         if (skill.is_owner) {
-          await deleteSkill(skill.slug);
+          await deleteSkill(skill.id);
         } else {
-          await adminDeleteSkill(skill.slug);
+          await adminDeleteSkill(skill.id);
         }
-        setSkills((list) => list.filter((s) => s.slug !== skill.slug));
+        // 删除私人赢家后，共享同名项需要立即解除“被覆盖”状态；重新解析服务端
+        // effective set，避免只删本地行后留下红框和禁用开关。
+        await fetchSkills();
         setDeleteTarget(null);
       } catch (err) {
         const message = err instanceof Error ? err.message : '删除失败';
@@ -204,12 +215,12 @@ export default function SkillManagementPanel() {
       } finally {
         setPending((p) => {
           const n = new Set(p);
-          n.delete(skill.slug);
+          n.delete(skill.id);
           return n;
         });
       }
     },
-    [deleteTarget],
+    [deleteTarget, fetchSkills],
   );
 
   const q = query.trim().toLowerCase();
@@ -320,7 +331,7 @@ export default function SkillManagementPanel() {
           )}
 
           {!loading && !error && filtered.map((skill) => {
-            const busy = pending.has(skill.slug);
+            const busy = pending.has(skill.id);
             const deletable =
               skill.source === 'dynamic' && (skill.is_owner || isAdmin);
             const adminShared = skill.adminShared;
@@ -329,12 +340,8 @@ export default function SkillManagementPanel() {
             const exportable = !skill.adminOnly || Boolean(adminShared);
             return (
               <div
-                key={skill.slug}
-                className={`flex items-start gap-3 px-4 py-3 rounded-xl bg-surface dark:bg-surface-dark border transition-colors ${
-                  skill.enabled
-                    ? 'border-accent/60'
-                    : 'border-border dark:border-border-dark'
-                }`}
+                key={skill.id}
+                className={`flex items-start gap-3 px-4 py-3 rounded-xl bg-surface dark:bg-surface-dark border transition-colors ${skillRowBorderClass(skill)}`}
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
@@ -347,6 +354,14 @@ export default function SkillManagementPanel() {
                         title="当前账号不可见，但管理员仍可在共享目录中管理它"
                       >
                         管理项
+                      </PillBadge>
+                    )}
+                    {skill.shadowed_by_private && (
+                      <PillBadge
+                        tone="error"
+                        title="当前运行时会优先使用你的同名私人技能"
+                      >
+                        已被私人技能覆盖
                       </PillBadge>
                     )}
                     {skill.source === 'dynamic' && (
@@ -380,6 +395,11 @@ export default function SkillManagementPanel() {
                       title={skill.description}
                     >
                       {skill.description}
+                    </p>
+                  )}
+                  {skill.shadowed_by_private && (
+                    <p className="mt-1 text-xs text-status-error">
+                      你有一个同名私人技能；对话中使用该 slug 时，共享技能不会生效。
                     </p>
                   )}
                   {adminShared && (
@@ -455,18 +475,25 @@ export default function SkillManagementPanel() {
                 </div>
 
                 {/* Enable switch */}
-                {canUsePersonalToggle ? (
+                {canUsePersonalToggle && !skill.shadowed_by_private ? (
                   <button
                     type="button"
                     role="switch"
                     aria-checked={skill.enabled}
                     aria-label={`${skill.enabled ? '关闭' : '开启'}技能 ${skill.name}`}
                     disabled={busy}
-                    onClick={() => handleToggle(skill.slug, !skill.enabled)}
+                    onClick={() => handleToggle(skill.id, !skill.enabled)}
                     className="flex-shrink-0 mt-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <SwitchTrack checked={skill.enabled} />
                   </button>
+                ) : skill.shadowed_by_private ? (
+                  <span
+                    className="mt-1 flex-shrink-0 text-[11px] text-status-error"
+                    title="删除或重命名同名私人技能后，这个共享技能会恢复"
+                  >
+                    已覆盖
+                  </span>
                 ) : (
                   <span
                     className="mt-1 flex-shrink-0 text-[11px] text-text-tertiary dark:text-text-tertiary-dark"

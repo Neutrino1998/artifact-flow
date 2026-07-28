@@ -225,8 +225,8 @@ export function getSkills() {
   return request<SkillListResponse>('/api/v1/skills');
 }
 
-export function setSkillEnabled(slug: string, enabled: boolean) {
-  return request<SkillItem>(`/api/v1/skills/${encodeURIComponent(slug)}/enabled`, {
+export function setSkillEnabled(skillId: string, enabled: boolean) {
+  return request<SkillItem>(`/api/v1/skills/${encodeURIComponent(skillId)}/enabled`, {
     method: 'PUT',
     body: JSON.stringify({ enabled }),
   });
@@ -282,12 +282,12 @@ export async function importSkill(
 
 /** 导出后端保存的 skill zip。 */
 export async function downloadSkillBundle(
-  slug: string,
+  skillId: string,
   opts?: { admin?: boolean },
 ): Promise<Blob> {
   const path = opts?.admin
-    ? `/api/v1/admin/skills/${encodeURIComponent(slug)}/export`
-    : `/api/v1/skills/${encodeURIComponent(slug)}/export`;
+    ? `/api/v1/admin/skills/${encodeURIComponent(skillId)}/export`
+    : `/api/v1/skills/${encodeURIComponent(skillId)}/export`;
   const res = await fetch(
     `${BASE_URL}${path}`,
     { headers: authHeaders() },
@@ -305,15 +305,15 @@ export async function downloadSkillBundle(
 }
 
 /** 删除自己导入的 skill（owner 通道）。 */
-export function deleteSkill(slug: string) {
-  return request<void>(`/api/v1/skills/${encodeURIComponent(slug)}`, {
+export function deleteSkill(skillId: string) {
+  return request<void>(`/api/v1/skills/${encodeURIComponent(skillId)}`, {
     method: 'DELETE',
   });
 }
 
 /** admin 删任意 dynamic skill（含共享/他人私有；seeded 400）。 */
-export function adminDeleteSkill(slug: string) {
-  return request<void>(`/api/v1/admin/skills/${encodeURIComponent(slug)}`, {
+export function adminDeleteSkill(skillId: string) {
+  return request<void>(`/api/v1/admin/skills/${encodeURIComponent(skillId)}`, {
     method: 'DELETE',
   });
 }
@@ -322,8 +322,8 @@ export function adminListSkills() {
   return request<AdminSkillListResponse>('/api/v1/admin/skills');
 }
 
-export function adminUpdateSkill(slug: string, body: AdminSkillUpdateRequest) {
-  return request<AdminSkillItem>(`/api/v1/admin/skills/${encodeURIComponent(slug)}`, {
+export function adminUpdateSkill(skillId: string, body: AdminSkillUpdateRequest) {
+  return request<AdminSkillItem>(`/api/v1/admin/skills/${encodeURIComponent(skillId)}`, {
     method: 'PATCH',
     body: JSON.stringify(body),
   });

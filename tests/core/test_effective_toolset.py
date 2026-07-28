@@ -319,7 +319,7 @@ def test_skill_grant_cannot_reopen_dept_denied_unit():
     tools = {"weather": _Tool("weather", ToolPermission.AUTO)}
     skills = {
         "s": SkillInfo(
-            slug="s", name="s", description="", visibility="public",
+            id="s", slug="s", name="s", description="", visibility="public",
             default_enabled=True, owner_user_id=None, allowed_tools=["weather"],
         )
     }

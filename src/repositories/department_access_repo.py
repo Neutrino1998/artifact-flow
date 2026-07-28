@@ -21,6 +21,7 @@ from db.models import (
 
 @dataclass(frozen=True)
 class SkillAccessProjection:
+    id: str
     slug: str
     name: str
     description: str
@@ -64,12 +65,24 @@ class DepartmentAccessRepository:
         return chain
 
     async def get_skill(self, slug: str) -> Skill | None:
-        return await self._session.get(Skill, slug)
+        return (
+            await self._session.execute(
+                select(Skill).where(
+                    Skill.slug == slug,
+                    Skill.owner_user_id.is_(None),
+                    Skill.visibility.in_(["public", "department"]),
+                )
+            )
+        ).scalar_one_or_none()
 
     async def get_skill_for_update(self, slug: str) -> Skill | None:
         return (
             await self._session.execute(
-                select(Skill).where(Skill.slug == slug).with_for_update()
+                select(Skill).where(
+                    Skill.slug == slug,
+                    Skill.owner_user_id.is_(None),
+                    Skill.visibility.in_(["public", "department"]),
+                ).with_for_update()
             )
         ).scalar_one_or_none()
 
@@ -93,13 +106,14 @@ class DepartmentAccessRepository:
         """
         direct_rule, inherited_department_id = _rule_match_columns(
             DepartmentSkillRule,
-            DepartmentSkillRule.skill_slug,
-            Skill.slug,
+            DepartmentSkillRule.skill_id,
+            Skill.id,
             dept_ids,
         )
         rows = (
             await self._session.execute(
                 select(
+                    Skill.id.label("id"),
                     Skill.slug.label("slug"),
                     Skill.name.label("name"),
                     Skill.description.label("description"),
@@ -115,6 +129,7 @@ class DepartmentAccessRepository:
         ).mappings().all()
         return [
             SkillAccessProjection(
+                id=r["id"],
                 slug=r["slug"],
                 name=r["name"],
                 description=r["description"],
@@ -165,18 +180,18 @@ class DepartmentAccessRepository:
             for r in rows
         ]
 
-    async def add_skill_rule(self, dept_id: str, slug: str) -> None:
-        existing = await self._session.get(DepartmentSkillRule, (dept_id, slug))
+    async def add_skill_rule(self, dept_id: str, skill_id: str) -> None:
+        existing = await self._session.get(DepartmentSkillRule, (dept_id, skill_id))
         if existing is None:
             self._session.add(
-                DepartmentSkillRule(department_id=dept_id, skill_slug=slug)
+                DepartmentSkillRule(department_id=dept_id, skill_id=skill_id)
             )
 
-    async def delete_skill_rule(self, dept_id: str, slug: str) -> None:
+    async def delete_skill_rule(self, dept_id: str, skill_id: str) -> None:
         await self._session.execute(
             delete(DepartmentSkillRule).where(
                 DepartmentSkillRule.department_id == dept_id,
-                DepartmentSkillRule.skill_slug == slug,
+                DepartmentSkillRule.skill_id == skill_id,
             )
         )
 
@@ -187,9 +202,9 @@ class DepartmentAccessRepository:
                 DepartmentUnitRule(department_id=dept_id, unit_name=unit_name)
             )
 
-    async def has_skill_rule(self, dept_id: str, slug: str) -> bool:
+    async def has_skill_rule(self, dept_id: str, skill_id: str) -> bool:
         return (
-            await self._session.get(DepartmentSkillRule, (dept_id, slug))
+            await self._session.get(DepartmentSkillRule, (dept_id, skill_id))
             is not None
         )
 

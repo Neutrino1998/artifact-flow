@@ -1,7 +1,7 @@
 """用户侧 skill 管理 REST(C-3 列举/toggle + E-2 导入/导出/删除)。
 
 作用域 = 用户自己的 skill(个人偏好 + 私有导入;守 feedback-admin-scope-user-mgmt)。
-可见性走 SkillManager 的 EffectiveSkillSet 单点闸,不可见 slug → 404(不泄露存在性)。
+可见性走 SkillManager 的 EffectiveSkillSet 单点闸,不可见 skill → 404(不泄露存在性)。
 admin 共享导入/删除在 routers/admin_skills.py。dept 授权 UI 留 G。
 """
 
@@ -64,48 +64,47 @@ async def import_skill(
     return SkillImportResponse(**result)
 
 
-@router.get("/{slug}/export")
+@router.get("/{skill_id}/export")
 async def export_skill(
-    slug: str,
+    skill_id: str,
     user=Depends(get_current_user),
     mgr: SkillManager = Depends(get_skill_manager),
 ) -> Response:
     """导出 DB 中保存的 skill zip。不可见 → 404。"""
     try:
-        blob = await mgr.export_bundle(user.user_id, slug)
+        slug, blob = await mgr.export_bundle(user.user_id, skill_id)
     except SkillManagerError as e:
         raise _map(e)
     return Response(
         content=blob,
         media_type="application/zip",
-        # slug 过了可见性闸 = DB 里的合法 slug(导入期已过 SKILL_SLUG_RE),可安全入 header
         headers={"Content-Disposition": f'attachment; filename="{slug}.zip"'},
     )
 
 
-@router.delete("/{slug}", status_code=204)
+@router.delete("/{skill_id}", status_code=204)
 async def delete_skill(
-    slug: str,
+    skill_id: str,
     user=Depends(get_current_user),
     mgr: SkillManager = Depends(get_skill_manager),
 ) -> None:
     """删除自己导入的 dynamic skill。不可见 → 404;seeded → 400;非本人共享 → 403。"""
     try:
-        await mgr.delete_skill(user.user_id, slug)
+        await mgr.delete_skill(user.user_id, skill_id)
     except SkillManagerError as e:
         raise _map(e)
 
 
-@router.put("/{slug}/enabled", response_model=SkillItem)
+@router.put("/{skill_id}/enabled", response_model=SkillItem)
 async def set_skill_enabled(
-    slug: str,
+    skill_id: str,
     body: SkillToggleRequest,
     user=Depends(get_current_user),
     mgr: SkillManager = Depends(get_skill_manager),
 ) -> SkillItem:
     """个人开关某 skill 是否进 L1 索引(写 user_skill 覆盖)。"""
     try:
-        item = await mgr.set_enabled(user.user_id, slug, body.enabled)
+        item = await mgr.set_enabled(user.user_id, skill_id, body.enabled)
     except SkillManagerError as e:
         raise _map(e)
     return SkillItem(**item)

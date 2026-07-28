@@ -26,41 +26,29 @@ class SkillRepository:
         ).scalar_one_or_none()
 
     async def user_overrides(self, user_id: str) -> Dict[str, bool]:
-        """该用户的 user_skill 稀疏覆盖 `{slug: enabled}`。"""
+        """该用户的 user_skill 稀疏覆盖 `{skill_id: enabled}`。"""
         rows = (
             await self._session.execute(
-                select(UserSkill.skill_slug, UserSkill.enabled).where(
+                select(UserSkill.skill_id, UserSkill.enabled).where(
                     UserSkill.user_id == user_id
                 )
             )
         ).all()
-        return {slug: enabled for slug, enabled in rows}
+        return {skill_id: enabled for skill_id, enabled in rows}
 
-    async def get_skill_md(self, slug: str) -> Optional[str]:
+    async def get_skill_md(self, skill_id: str) -> Optional[str]:
         """L2 read_skill 的正文取数(标量,不外逃 ORM)。"""
         return (
             await self._session.execute(
-                select(Skill.skill_md).where(Skill.slug == slug)
+                select(Skill.skill_md).where(Skill.id == skill_id)
             )
         ).scalar_one_or_none()
 
-    async def get_bundle(self, slug: str) -> Optional[bytes]:
+    async def get_bundle(self, skill_id: str) -> Optional[bytes]:
         """skill zip 包取数(标量,不外逃 ORM)。无此 skill → None。"""
         return (
             await self._session.execute(
-                select(Skill.bundle).where(Skill.slug == slug)
-            )
-        ).scalar_one_or_none()
-
-    async def get_shared_bundle(self, slug: str) -> Optional[bytes]:
-        """Admin shared-catalog export: shared public/department skill bundle only."""
-        return (
-            await self._session.execute(
-                select(Skill.bundle).where(
-                    Skill.slug == slug,
-                    Skill.owner_user_id.is_(None),
-                    Skill.visibility.in_(["public", "department"]),
-                )
+                select(Skill.bundle).where(Skill.id == skill_id)
             )
         ).scalar_one_or_none()
 
@@ -110,25 +98,26 @@ class SkillRepository:
         """
         rows = (
             await self._session.execute(
-                select(Skill.slug)
+                select(Skill.id)
                 .where(Skill.owner_user_id == user_id)
                 .with_for_update()
             )
         ).scalars().all()
         return len(rows)
 
-    async def get_skill_row_meta(self, slug: str) -> Optional[dict]:
-        """slug → 行级元数据(admin 删除路径用,绕过可见性;不存在 → None)。"""
+    async def get_skill_row_meta(self, skill_id: str) -> Optional[dict]:
+        """skill_id → 行级元数据(admin 删除路径用,绕过可见性;不存在 → None)。"""
         row = (
             await self._session.execute(
-                select(Skill.slug, Skill.source, Skill.owner_user_id, Skill.visibility)
-                .where(Skill.slug == slug)
+                select(
+                    Skill.id, Skill.slug, Skill.source, Skill.owner_user_id, Skill.visibility
+                ).where(Skill.id == skill_id)
             )
         ).one_or_none()
         if row is None:
             return None
         return {
-            "slug": row.slug, "source": row.source,
+            "id": row.id, "slug": row.slug, "source": row.source,
             "owner_user_id": row.owner_user_id, "visibility": row.visibility,
         }
 
@@ -145,17 +134,44 @@ class SkillRepository:
             )
         ).scalars().all())
 
-    async def get_skill_for_update(self, slug: str) -> Optional[Skill]:
+    async def get_skill_for_update(self, skill_id: str) -> Optional[Skill]:
         """Load and row-lock a skill for writes that interpret or change visibility."""
         return (
             await self._session.execute(
-                select(Skill).where(Skill.slug == slug).with_for_update()
+                select(Skill).where(Skill.id == skill_id).with_for_update()
             )
         ).scalar_one_or_none()
 
-    async def slug_exists(self, slug: str) -> bool:
+    async def get_shared_skill(self, identifier: str, *, for_update: bool = False) -> Optional[Skill]:
+        """Resolve one shared skill by stable id, falling back to its shared-unique slug."""
+        statement = select(Skill).where(
+            Skill.id == identifier,
+            Skill.owner_user_id.is_(None),
+            Skill.visibility.in_(["public", "department"]),
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        row = (await self._session.execute(statement)).scalar_one_or_none()
+        if row is not None:
+            return row
+        statement = select(Skill).where(
+            Skill.slug == identifier,
+            Skill.owner_user_id.is_(None),
+            Skill.visibility.in_(["public", "department"]),
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        return (await self._session.execute(statement)).scalar_one_or_none()
+
+    async def scope_slug_exists(self, slug: str, owner_user_id: Optional[str]) -> bool:
+        namespace_key = owner_user_id or ""
         return (
-            await self._session.execute(select(Skill.slug).where(Skill.slug == slug))
+            await self._session.execute(
+                select(Skill.id).where(
+                    Skill.namespace_key == namespace_key,
+                    Skill.slug == slug,
+                )
+            )
         ).scalar_one_or_none() is not None
 
     def stage_insert_skill(self, **fields) -> None:
@@ -163,22 +179,22 @@ class SkillRepository:
         IntegrityError 暴露,Manager 折成 409)。"""
         self._session.add(Skill(**fields))
 
-    async def delete_skill(self, slug: str) -> None:
+    async def delete_skill(self, skill_id: str) -> None:
         """stage 删除(commit 归 Manager)。user_skill / dept 规则由 DB FK CASCADE 清,
         零 app-side 清理。"""
-        await self._session.execute(delete(Skill).where(Skill.slug == slug))
+        await self._session.execute(delete(Skill).where(Skill.id == skill_id))
 
-    async def clear_dept_rules(self, slug: str) -> None:
+    async def clear_dept_rules(self, skill_id: str) -> None:
         """Clear department rules for one skill when its visibility changes."""
         await self._session.execute(
-            delete(DepartmentSkillRule).where(DepartmentSkillRule.skill_slug == slug)
+            delete(DepartmentSkillRule).where(DepartmentSkillRule.skill_id == skill_id)
         )
 
-    async def set_user_override(self, user_id: str, slug: str, enabled: bool) -> None:
+    async def set_user_override(self, user_id: str, skill_id: str, enabled: bool) -> None:
         """Upsert user_skill 稀疏覆盖行(个人 enable/disable)。stage-only,commit 归 Manager
         (事务边界 = 每个 use-case,同 ToolRegistryManager)。
 
-        SELECT→INSERT 非原子:两请求(两标签页/重试客户端)同用户同 slug 首次并发 toggle 会
+        SELECT→INSERT 非原子:两请求(两标签页/重试客户端)同用户同 skill 首次并发 toggle 会
         都读到 None、都 insert → 后者撞复合 PK IntegrityError。捕获 → rollback → 重读改 UPDATE
         (last-writer-wins),把并发首插的自我 500 收成正常写(镜像 ToolRegistryManager._commit)。
 
@@ -190,7 +206,7 @@ class SkillRepository:
             row = (
                 await self._session.execute(
                     select(UserSkill).where(
-                        UserSkill.user_id == user_id, UserSkill.skill_slug == slug
+                        UserSkill.user_id == user_id, UserSkill.skill_id == skill_id
                     )
                 )
             ).scalar_one_or_none()
@@ -198,7 +214,7 @@ class SkillRepository:
                 row.enabled = enabled
                 return True
             self._session.add(
-                UserSkill(user_id=user_id, skill_slug=slug, enabled=enabled)
+                UserSkill(user_id=user_id, skill_id=skill_id, enabled=enabled)
             )
             return False
 

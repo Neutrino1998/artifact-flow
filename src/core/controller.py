@@ -288,9 +288,11 @@ class ExecutionController:
                 repo = SkillRepository(session)
                 out = []
                 for slug in to_inject:
-                    body = await repo.get_skill_md(slug)
+                    info = visible.get(slug)
+                    if info is None:
+                        continue
+                    body = await repo.get_skill_md(info.id)
                     if body and body.strip():
-                        info = visible.get(slug)
                         out.append({
                             "slug": slug,
                             "name": getattr(info, "name", slug),

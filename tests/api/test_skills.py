@@ -22,12 +22,15 @@ async def _seed_skill(db_session, slug, visibility="public", default_enabled=Tru
         bundle = _zip(
             f"---\nname: {slug.title()}\ndescription: d\n---\nbody\n"
         )
-    db_session.add(Skill(
+    row = Skill(
         slug=slug, name=slug.title(), description="d", visibility=visibility,
         default_enabled=default_enabled, source=source, skill_md="body",
-        owner_user_id=owner_user_id, bundle=bundle, has_extra_files=has_extra_files,
-    ))
+        owner_user_id=owner_user_id, namespace_key=owner_user_id or "",
+        bundle=bundle, has_extra_files=has_extra_files,
+    )
+    db_session.add(row)
     await db_session.commit()
+    return row
 
 
 GOOD_MD = """---
@@ -178,20 +181,48 @@ class TestImportSkill:
         assert r.status_code == 200
         assert any(f["rule"] == "tools.unknown_entry" for f in r.json()["findings"])
 
-    async def test_import_collision_with_seeded_409(self, client: AsyncClient, db_session):
+    async def test_private_import_can_shadow_same_slug_shared(
+        self, client: AsyncClient, db_session
+    ):
         await _seed_skill(db_session, "my-skill")
         r = await client.post("/api/v1/skills/import", files=_upload(_zip()))
-        assert r.status_code == 409
+        assert r.status_code == 200
+        items = (await client.get("/api/v1/skills")).json()["skills"]
+        same_slug = [item for item in items if item["slug"] == "my-skill"]
+        assert len(same_slug) == 2
+        shared = next(item for item in same_slug if item["visibility"] == "public")
+        private = next(item for item in same_slug if item["visibility"] == "private")
+        assert shared["shadowed_by_private"] is True
+        assert shared["enabled"] is False
+        assert private["shadowed_by_private"] is False
+        assert private["enabled"] is True
+        toggle = await client.put(
+            f"/api/v1/skills/{shared['id']}/enabled", json={"enabled": True}
+        )
+        assert toggle.status_code == 409
+        assert "同名私人技能覆盖" in toggle.json()["detail"]
 
-    async def test_import_collision_neutral_message(self, client: AsyncClient, db_session):
-        # 撞他人 private:同中性文案,不泄露归属/可见性
+    async def test_other_users_can_import_same_private_slug(
+        self, client: AsyncClient, db_session
+    ):
         other = await _add_user(db_session, "other-owner")
         await _seed_skill(db_session, "my-skill", visibility="private",
                           source="dynamic", owner_user_id=other.id)
         r = await client.post("/api/v1/skills/import", files=_upload(_zip()))
+        assert r.status_code == 200
+        rows = (await db_session.execute(
+            select(Skill).where(Skill.slug == "my-skill")
+        )).scalars().all()
+        assert len(rows) == 2
+        owners = {row.owner_user_id for row in rows}
+        assert other.id in owners
+        assert None not in owners
+
+    async def test_same_user_private_slug_still_conflicts(self, client: AsyncClient):
+        first = await client.post("/api/v1/skills/import", files=_upload(_zip()))
+        assert first.status_code == 200
+        r = await client.post("/api/v1/skills/import", files=_upload(_zip()))
         assert r.status_code == 409
-        assert "private" not in r.json()["detail"]
-        assert other.username not in r.json()["detail"]
 
     async def test_import_over_bundle_cap_422(self, client: AsyncClient, monkeypatch):
         monkeypatch.setattr(config, "SKILL_BUNDLE_MAX_BYTES", 10)
@@ -386,11 +417,11 @@ class TestAdminSharedSkillManagement:
     async def test_patch_dynamic_shared_updates_and_clears_dept_rules(
         self, admin_client: AsyncClient, db_session, test_user: User
     ):
-        await _seed_skill(db_session, "shared", source="dynamic")
+        shared = await _seed_skill(db_session, "shared", source="dynamic")
         db_session.add(Department(id="dept-a", name="Dept A"))
-        db_session.add(DepartmentSkillRule(department_id="dept-a", skill_slug="shared"))
+        db_session.add(DepartmentSkillRule(department_id="dept-a", skill_id=shared.id))
         db_session.add(UserSkill(
-            user_id=test_user.id, skill_slug="shared", enabled=False
+            user_id=test_user.id, skill_id=shared.id, enabled=False
         ))
         await db_session.commit()
 
@@ -403,6 +434,7 @@ class TestAdminSharedSkillManagement:
         body = r.json()
         assert body["visibility"] == "department"
         assert body["default_enabled"] is False
+        await db_session.refresh(shared)
         row = (await db_session.execute(
             select(Skill).where(Skill.slug == "shared")
         )).scalar_one()
@@ -410,21 +442,21 @@ class TestAdminSharedSkillManagement:
         assert row.default_enabled is False
         assert (await db_session.execute(
             select(DepartmentSkillRule).where(
-                DepartmentSkillRule.skill_slug == "shared"
+                DepartmentSkillRule.skill_id == shared.id
             )
         )).scalar_one_or_none() is None
         assert (await db_session.execute(
-            select(UserSkill).where(UserSkill.skill_slug == "shared")
+            select(UserSkill).where(UserSkill.skill_id == shared.id)
         )).scalar_one_or_none() is not None
 
     async def test_patch_default_enabled_only_keeps_dept_rules(
         self, admin_client: AsyncClient, db_session
     ):
-        await _seed_skill(
+        shared = await _seed_skill(
             db_session, "shared", visibility="department", source="dynamic"
         )
         db_session.add(Department(id="dept-a", name="Dept A"))
-        db_session.add(DepartmentSkillRule(department_id="dept-a", skill_slug="shared"))
+        db_session.add(DepartmentSkillRule(department_id="dept-a", skill_id=shared.id))
         await db_session.commit()
 
         r = await admin_client.patch(
@@ -436,7 +468,7 @@ class TestAdminSharedSkillManagement:
         assert (await db_session.execute(
             select(DepartmentSkillRule).where(
                 DepartmentSkillRule.department_id == "dept-a",
-                DepartmentSkillRule.skill_slug == "shared",
+                DepartmentSkillRule.skill_id == shared.id,
             )
         )).scalar_one_or_none() is not None
 
@@ -453,7 +485,7 @@ class TestAdminSharedSkillManagement:
     async def test_patch_private_dynamic_400(
         self, admin_client: AsyncClient, db_session, test_user: User
     ):
-        await _seed_skill(
+        private = await _seed_skill(
             db_session,
             "private",
             visibility="private",
@@ -462,7 +494,7 @@ class TestAdminSharedSkillManagement:
         )
 
         r = await admin_client.patch(
-            "/api/v1/admin/skills/private", json={"visibility": "public"}
+            f"/api/v1/admin/skills/{private.id}", json={"visibility": "public"}
         )
 
         assert r.status_code == 400
@@ -487,15 +519,16 @@ class TestAdminSharedSkillManagement:
     ):
         await _seed_skill(db_session, "shared", source="dynamic")
         mgr = SkillManager(db_session)
-        original = mgr._repo.get_skill_for_update
+        original = mgr._repo.get_shared_skill
         called = False
 
-        async def tracked(slug: str):
+        async def tracked(identifier: str, *, for_update: bool = False):
             nonlocal called
             called = True
-            return await original(slug)
+            assert for_update is True
+            return await original(identifier, for_update=for_update)
 
-        monkeypatch.setattr(mgr._repo, "get_skill_for_update", tracked)
+        monkeypatch.setattr(mgr._repo, "get_shared_skill", tracked)
 
         await mgr.update_admin_shared(
             "admin-user", "shared", default_enabled=False
@@ -529,6 +562,37 @@ class TestExportSkill:
         assert result.parsed.frontmatter["name"] == "Prose"
         assert result.parsed.frontmatter["description"] == "d"
         assert result.parsed.body == "body"
+
+    async def test_same_slug_candidates_export_exact_bundle_by_id(
+        self, client: AsyncClient, db_session
+    ):
+        shared_blob = _zip(
+            "---\nname: my-skill\ndescription: shared\n---\nshared body\n"
+        )
+        private_blob = _zip(
+            "---\nname: my-skill\ndescription: private\n---\nprivate body\n"
+        )
+        await _seed_skill(db_session, "my-skill", bundle=shared_blob)
+        assert (await client.post(
+            "/api/v1/skills/import", files=_upload(private_blob)
+        )).status_code == 200
+
+        items = (await client.get("/api/v1/skills")).json()["skills"]
+        same_slug = [item for item in items if item["slug"] == "my-skill"]
+        shared = next(item for item in same_slug if not item["is_owner"])
+        private = next(item for item in same_slug if item["is_owner"])
+
+        shared_export = await client.get(
+            f"/api/v1/skills/{shared['id']}/export"
+        )
+        private_export = await client.get(
+            f"/api/v1/skills/{private['id']}/export"
+        )
+        assert shared_export.content == shared_blob
+        assert private_export.content == private_blob
+        assert shared_export.headers["content-disposition"].endswith(
+            'filename="my-skill.zip"'
+        )
 
     async def test_export_invisible_404(self, client: AsyncClient, db_session):
         other = await _add_user(db_session, "exp-owner")
@@ -591,7 +655,9 @@ class TestDeleteSkill:
             select(Skill).where(Skill.slug == "my-skill")
         )).scalar_one_or_none() is None
         assert (await db_session.execute(
-            select(UserSkill).where(UserSkill.skill_slug == "my-skill")
+            select(UserSkill).join(Skill, UserSkill.skill_id == Skill.id).where(
+                Skill.slug == "my-skill"
+            )
         )).scalar_one_or_none() is None
         items = {s["slug"] for s in (await client.get("/api/v1/skills")).json()["skills"]}
         assert "my-skill" not in items
@@ -619,11 +685,12 @@ class TestDeleteSkill:
         self, admin_client: AsyncClient, client: AsyncClient, db_session
     ):
         # 用户私有 skill,admin 通道可删(绕过可见性)
-        assert (await client.post(
+        imported = await client.post(
             "/api/v1/skills/import", files=_upload(_zip())
-        )).status_code == 200
+        )
+        assert imported.status_code == 200
         assert (await admin_client.delete(
-            "/api/v1/admin/skills/my-skill"
+            f"/api/v1/admin/skills/{imported.json()['skill']['id']}"
         )).status_code == 204
         assert (await db_session.execute(
             select(Skill).where(Skill.slug == "my-skill")

@@ -40,7 +40,7 @@ def _snapshot(units=None, agents=None):
 
 def _skill(slug, allowed, visibility="public"):
     return SkillInfo(
-        slug=slug, name=slug, description="", visibility=visibility,
+        id=slug, slug=slug, name=slug, description="", visibility=visibility,
         default_enabled=True, owner_user_id=None, allowed_tools=allowed,
     )
 

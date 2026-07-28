@@ -33,7 +33,9 @@ async def _seed_departments(db_session):
 
 def _skill(slug: str, visibility: str = "public", **kw) -> Skill:
     return Skill(
+        id=kw.get("id", slug),
         slug=slug,
+        namespace_key=kw.get("owner_user_id") or "",
         name=kw.get("name", slug),
         description=kw.get("description", ""),
         visibility=visibility,
@@ -84,10 +86,10 @@ class TestDepartmentAccessRead:
         await _seed_resources(db_session)
         db_session.add_all([
             DepartmentSkillRule(
-                department_id="dept-root", skill_slug="public-skill"
+                department_id="dept-root", skill_id="public-skill"
             ),
             DepartmentSkillRule(
-                department_id="dept-leaf", skill_slug="dept-skill"
+                department_id="dept-leaf", skill_id="dept-skill"
             ),
             DepartmentUnitRule(
                 department_id="dept-root", unit_name="public_unit"
@@ -227,7 +229,7 @@ class TestDepartmentAccessMutation:
 
         assert called is True
 
-    async def test_private_skill_rule_rejected_without_writing_rule(
+    async def test_private_skill_is_outside_department_catalog(
         self, admin_client: AsyncClient, db_session
     ):
         await _seed_departments(db_session)
@@ -237,13 +239,12 @@ class TestDepartmentAccessMutation:
         resp = await admin_client.put(
             "/api/v1/admin/department-access/dept-leaf/skills/private-skill"
         )
-        assert resp.status_code == 400
-        assert "private skill" in resp.json()["detail"]
+        assert resp.status_code == 404
 
         rows = (
             await db_session.execute(
                 select(DepartmentSkillRule).where(
-                    DepartmentSkillRule.skill_slug == "private-skill"
+                    DepartmentSkillRule.skill_id == "private-skill"
                 )
             )
         ).scalars().all()
@@ -275,7 +276,7 @@ class TestDepartmentAccessMutation:
             await db_session.rollback()
             db_session.add(
                 DepartmentSkillRule(
-                    department_id="dept-leaf", skill_slug="public-skill"
+                    department_id="dept-leaf", skill_id="public-skill"
                 )
             )
             await db_session.commit()
@@ -289,7 +290,7 @@ class TestDepartmentAccessMutation:
             await db_session.execute(
                 select(DepartmentSkillRule).where(
                     DepartmentSkillRule.department_id == "dept-leaf",
-                    DepartmentSkillRule.skill_slug == "public-skill",
+                    DepartmentSkillRule.skill_id == "public-skill",
                 )
             )
         ).scalars().all()

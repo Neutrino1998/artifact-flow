@@ -2,10 +2,10 @@
 - GET    /api/v1/admin/skills          列出共享 skill(含 seeded read-only)
 - POST   /api/v1/admin/skills/import   导入为共享 skill(owner=null;可指定 public/department
                                        与默认启用;配额豁免,结构上限照查)
-- GET    /api/v1/admin/skills/{slug}/export
+- GET    /api/v1/admin/skills/{skill_id}/export
                                        导出 shared catalog skill(绕过 admin 自身部门可见性)
-- PATCH  /api/v1/admin/skills/{slug}   编辑 dynamic shared skill 的 visibility/default_enabled
-- DELETE /api/v1/admin/skills/{slug}   删任意 dynamic skill(seeded → 400,config 所有)
+- PATCH  /api/v1/admin/skills/{skill_id} 编辑 dynamic shared skill 的 visibility/default_enabled
+- DELETE /api/v1/admin/skills/{skill_id} 删任意 dynamic skill(seeded → 400,config 所有)
 
 router 只做 transport:认证(require_admin)、解析、SkillManagerError → HTTP 映射。
 业务规则(硬门/撞名/seeded 闸)全在 SkillManager —— 与用户通道同一条 import_zip
@@ -65,15 +65,15 @@ async def admin_import_skill(
     return SkillImportResponse(**result)
 
 
-@router.get("/skills/{slug}/export")
+@router.get("/skills/{skill_id}/export")
 async def admin_export_skill(
-    slug: str,
+    skill_id: str,
     _admin: TokenPayload = Depends(require_admin),
     mgr: SkillManager = Depends(get_skill_manager),
 ) -> Response:
     """导出 shared catalog skill,不按当前 admin 的部门可见性过滤。"""
     try:
-        blob = await mgr.export_admin_shared_bundle(slug)
+        slug, blob = await mgr.export_admin_shared_bundle(skill_id)
     except SkillManagerError as e:
         raise _map(e)
     return Response(
@@ -83,9 +83,9 @@ async def admin_export_skill(
     )
 
 
-@router.patch("/skills/{slug}", response_model=AdminSkillItem)
+@router.patch("/skills/{skill_id}", response_model=AdminSkillItem)
 async def admin_update_skill(
-    slug: str,
+    skill_id: str,
     body: AdminSkillUpdateRequest,
     admin: TokenPayload = Depends(require_admin),
     mgr: SkillManager = Depends(get_skill_manager),
@@ -94,7 +94,7 @@ async def admin_update_skill(
     try:
         item = await mgr.update_admin_shared(
             admin.user_id,
-            slug,
+            skill_id,
             visibility=body.visibility,
             default_enabled=body.default_enabled,
         )
@@ -103,14 +103,14 @@ async def admin_update_skill(
     return AdminSkillItem(**item)
 
 
-@router.delete("/skills/{slug}", status_code=204)
+@router.delete("/skills/{skill_id}", status_code=204)
 async def admin_delete_skill(
-    slug: str,
+    skill_id: str,
     admin: TokenPayload = Depends(require_admin),
     mgr: SkillManager = Depends(get_skill_manager),
 ) -> None:
     """删除任意 dynamic skill(绕过可见性;seeded → 400)。级联清 user_skill/dept 规则。"""
     try:
-        await mgr.delete_skill(admin.user_id, slug, as_admin=True)
+        await mgr.delete_skill(admin.user_id, skill_id, as_admin=True)
     except SkillManagerError as e:
         raise _map(e)

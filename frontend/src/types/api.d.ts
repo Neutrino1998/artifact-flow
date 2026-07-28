@@ -1025,7 +1025,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/skills/{slug}/export": {
+    "/api/v1/admin/skills/{skill_id}/export": {
         parameters: {
             query?: never;
             header?: never;
@@ -1036,7 +1036,7 @@ export interface paths {
          * Admin Export Skill
          * @description 导出 shared catalog skill,不按当前 admin 的部门可见性过滤。
          */
-        get: operations["admin_export_skill_api_v1_admin_skills__slug__export_get"];
+        get: operations["admin_export_skill_api_v1_admin_skills__skill_id__export_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1045,7 +1045,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/skills/{slug}": {
+    "/api/v1/admin/skills/{skill_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1059,14 +1059,14 @@ export interface paths {
          * Admin Delete Skill
          * @description 删除任意 dynamic skill(绕过可见性;seeded → 400)。级联清 user_skill/dept 规则。
          */
-        delete: operations["admin_delete_skill_api_v1_admin_skills__slug__delete"];
+        delete: operations["admin_delete_skill_api_v1_admin_skills__skill_id__delete"];
         options?: never;
         head?: never;
         /**
          * Admin Update Skill
          * @description 编辑 dynamic shared skill 的 visibility/default_enabled。seeded 仍 config-owned。
          */
-        patch: operations["admin_update_skill_api_v1_admin_skills__slug__patch"];
+        patch: operations["admin_update_skill_api_v1_admin_skills__skill_id__patch"];
         trace?: never;
     };
     "/api/v1/admin/department-access/{dept_id}": {
@@ -1351,7 +1351,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/skills/{slug}/export": {
+    "/api/v1/skills/{skill_id}/export": {
         parameters: {
             query?: never;
             header?: never;
@@ -1362,7 +1362,7 @@ export interface paths {
          * Export Skill
          * @description 导出 DB 中保存的 skill zip。不可见 → 404。
          */
-        get: operations["export_skill_api_v1_skills__slug__export_get"];
+        get: operations["export_skill_api_v1_skills__skill_id__export_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1371,7 +1371,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/skills/{slug}": {
+    "/api/v1/skills/{skill_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1385,13 +1385,13 @@ export interface paths {
          * Delete Skill
          * @description 删除自己导入的 dynamic skill。不可见 → 404;seeded → 400;非本人共享 → 403。
          */
-        delete: operations["delete_skill_api_v1_skills__slug__delete"];
+        delete: operations["delete_skill_api_v1_skills__skill_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/skills/{slug}/enabled": {
+    "/api/v1/skills/{skill_id}/enabled": {
         parameters: {
             query?: never;
             header?: never;
@@ -1403,7 +1403,7 @@ export interface paths {
          * Set Skill Enabled
          * @description 个人开关某 skill 是否进 L1 索引(写 user_skill 覆盖)。
          */
-        put: operations["set_skill_enabled_api_v1_skills__slug__enabled_put"];
+        put: operations["set_skill_enabled_api_v1_skills__skill_id__enabled_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1643,8 +1643,13 @@ export interface components {
          */
         AdminSkillItem: {
             /**
+             * Id
+             * @description Stable skill id used by management APIs
+             */
+            id: string;
+            /**
              * Slug
-             * @description Skill slug (natural key)
+             * @description Shared-catalog slug
              */
             slug: string;
             /**
@@ -1698,7 +1703,7 @@ export interface components {
         };
         /**
          * AdminSkillUpdateRequest
-         * @description PATCH /api/v1/admin/skills/{slug} request body.
+         * @description PATCH /api/v1/admin/skills/{skill_id} request body.
          */
         AdminSkillUpdateRequest: {
             /**
@@ -2458,6 +2463,8 @@ export interface components {
         };
         /** DepartmentSkillAccessItem */
         DepartmentSkillAccessItem: {
+            /** Id */
+            id: string;
             /** Slug */
             slug: string;
             /** Name */
@@ -2883,8 +2890,13 @@ export interface components {
          */
         SkillItem: {
             /**
+             * Id
+             * @description Stable skill id used by management APIs
+             */
+            id: string;
+            /**
              * Slug
-             * @description Skill slug (natural key)
+             * @description User-context skill slug
              */
             slug: string;
             /**
@@ -2932,6 +2944,11 @@ export interface components {
              * @description Whether the current user imported (owns) this dynamic skill.
              */
             is_owner: boolean;
+            /**
+             * Shadowed By Private
+             * @description Whether this shared skill is currently hidden at runtime by the user's same-slug private skill.
+             */
+            shadowed_by_private: boolean;
         };
         /**
          * SkillListResponse
@@ -2946,7 +2963,7 @@ export interface components {
         };
         /**
          * SkillToggleRequest
-         * @description PUT /api/v1/skills/{slug}/enabled request body.
+         * @description PUT /api/v1/skills/{skill_id}/enabled request body.
          */
         SkillToggleRequest: {
             /**
@@ -5037,12 +5054,12 @@ export interface operations {
             };
         };
     };
-    admin_export_skill_api_v1_admin_skills__slug__export_get: {
+    admin_export_skill_api_v1_admin_skills__skill_id__export_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                slug: string;
+                skill_id: string;
             };
             cookie?: never;
         };
@@ -5068,12 +5085,12 @@ export interface operations {
             };
         };
     };
-    admin_delete_skill_api_v1_admin_skills__slug__delete: {
+    admin_delete_skill_api_v1_admin_skills__skill_id__delete: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                slug: string;
+                skill_id: string;
             };
             cookie?: never;
         };
@@ -5097,12 +5114,12 @@ export interface operations {
             };
         };
     };
-    admin_update_skill_api_v1_admin_skills__slug__patch: {
+    admin_update_skill_api_v1_admin_skills__skill_id__patch: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                slug: string;
+                skill_id: string;
             };
             cookie?: never;
         };
@@ -5677,12 +5694,12 @@ export interface operations {
             };
         };
     };
-    export_skill_api_v1_skills__slug__export_get: {
+    export_skill_api_v1_skills__skill_id__export_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                slug: string;
+                skill_id: string;
             };
             cookie?: never;
         };
@@ -5708,12 +5725,12 @@ export interface operations {
             };
         };
     };
-    delete_skill_api_v1_skills__slug__delete: {
+    delete_skill_api_v1_skills__skill_id__delete: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                slug: string;
+                skill_id: string;
             };
             cookie?: never;
         };
@@ -5737,12 +5754,12 @@ export interface operations {
             };
         };
     };
-    set_skill_enabled_api_v1_skills__slug__enabled_put: {
+    set_skill_enabled_api_v1_skills__skill_id__enabled_put: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                slug: string;
+                skill_id: string;
             };
             cookie?: never;
         };

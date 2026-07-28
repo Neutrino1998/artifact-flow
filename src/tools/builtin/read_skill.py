@@ -107,7 +107,7 @@ class ReadSkillTool(BaseTool):
         info = self._skillset.visible.get(slug)
         if info is None:
             return ToolResult(success=False, error=f"Skill '{slug}' not found.")
-        body = await self._service.get_skill_md(slug)
+        body = await self._service.get_skill_md(info.id)
         if body is None:
             return ToolResult(success=False, error=f"Skill '{slug}' has no content.")
         # 提示按 has_extra_files 条件化:有附属文件才指向 mount_skill。
@@ -177,7 +177,7 @@ class MountSkillTool(BaseTool):
                 ),
             )
 
-        bundle = await self._service.get_bundle(slug)
+        bundle = await self._service.get_bundle(info.id)
         if bundle is None:
             # 可见快照说可 mount,但包取不到:写入/删除竞态或坏数据,ops 要看。
             logger.error(

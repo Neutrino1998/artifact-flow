@@ -78,10 +78,13 @@ class DepartmentAccessManager:
         await self._require_department(dept_id)
         skill = await self._require_skill(slug, for_update=True)
         self._require_skill_accessible_by_department(skill)
-        await self._repo.add_skill_rule(dept_id, slug)
+        # Capture the scalar before commit/rollback: the idempotent-conflict path
+        # rolls back the session, which expires ORM instances.
+        skill_id = skill.id
+        await self._repo.add_skill_rule(dept_id, skill_id)
 
         async def _exists() -> bool:
-            return await self._repo.has_skill_rule(dept_id, slug)
+            return await self._repo.has_skill_rule(dept_id, skill_id)
 
         await self._commit_idempotent_put(_exists)
 
@@ -89,7 +92,7 @@ class DepartmentAccessManager:
         await self._require_department(dept_id)
         skill = await self._require_skill(slug)
         self._require_skill_accessible_by_department(skill)
-        await self._repo.delete_skill_rule(dept_id, slug)
+        await self._repo.delete_skill_rule(dept_id, skill.id)
         await self._repo.commit()
 
     async def put_unit_rule(self, dept_id: str, unit_name: str) -> None:
@@ -197,6 +200,7 @@ class DepartmentAccessManager:
     ) -> dict:
         inherited_from = departments_by_id.get(skill.inherited_department_id)
         return {
+            "id": skill.id,
             "slug": skill.slug,
             "name": skill.name,
             "description": skill.description,

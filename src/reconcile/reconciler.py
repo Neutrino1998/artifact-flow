@@ -421,7 +421,10 @@ async def _reconcile_skills(
     session: AsyncSession, seeds: List[SkillSeed], report: ReconcileReport
 ) -> None:
     existing = {
-        s.slug: s for s in (await session.execute(select(Skill))).scalars().all()
+        s.slug: s
+        for s in (
+            await session.execute(select(Skill).where(Skill.owner_user_id.is_(None)))
+        ).scalars().all()
     }
     desired = {s.slug for s in seeds}
 
@@ -448,20 +451,21 @@ async def _reconcile_skills(
 
         # UPDATE:visibility 变更先清 dept 规则(决策 10,留 user_skill),再覆盖列
         if row.visibility != seed.visibility:
-            await _clear_dept_rules_for_skill(session, seed.slug)
+            await _clear_dept_rules_for_skill(session, row.id)
         _apply_skill_cols(row, seed)
         report.updated.append(label)
 
     for slug, row in existing.items():
         if slug in desired or row.source != "seeded":
             continue
-        await _prune_skill(session, slug)
+        await _prune_skill(session, row.id)
         report.pruned.append(f"skill:{slug}")
 
 
 def _new_skill(seed: SkillSeed) -> Skill:
     return Skill(
         slug=seed.slug,
+        namespace_key="",
         name=seed.name,
         description=seed.description,
         visibility=seed.visibility,
@@ -492,20 +496,20 @@ def _apply_skill_cols(row: Skill, seed: SkillSeed) -> None:
     row.seed_hash = seed.seed_hash
 
 
-async def _prune_skill(session: AsyncSession, slug: str) -> None:
+async def _prune_skill(session: AsyncSession, skill_id: str) -> None:
     # 显式删子行(dialect-safe);改名/删 config 丢规则(决策 10:人工重授,上面 loud-log)
-    await session.execute(delete(UserSkill).where(UserSkill.skill_slug == slug))
+    await session.execute(delete(UserSkill).where(UserSkill.skill_id == skill_id))
     await session.execute(
-        delete(DepartmentSkillRule).where(DepartmentSkillRule.skill_slug == slug)
+        delete(DepartmentSkillRule).where(DepartmentSkillRule.skill_id == skill_id)
     )
-    await session.execute(delete(Skill).where(Skill.slug == slug))
+    await session.execute(delete(Skill).where(Skill.id == skill_id))
 
 
-async def _clear_dept_rules_for_skill(session: AsyncSession, slug: str) -> None:
+async def _clear_dept_rules_for_skill(session: AsyncSession, skill_id: str) -> None:
     """改 visibility 清该 skill 的 dept 规则(决策 10 第二条路径,与 unit 侧同语义)。
 
     定向删 department_skill_rule(留 user_skill —— 个人开关与部门可见性正交)。
     """
     await session.execute(
-        delete(DepartmentSkillRule).where(DepartmentSkillRule.skill_slug == slug)
+        delete(DepartmentSkillRule).where(DepartmentSkillRule.skill_id == skill_id)
     )

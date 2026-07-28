@@ -70,6 +70,7 @@ class RegistrySnapshot:
 class SkillInfo:
     """skill 轻量元数据(user-agnostic)。L1 列举 / 可见性 / skill_grants 用;**不含
     skill_md / bundle**(大,按需经 repo 读 —— L2 read_skill / L3 mount)。"""
+    id: str
     slug: str
     name: str
     description: str
@@ -344,7 +345,7 @@ async def load_skill_snapshot_with_matches(
 async def _load_skill_snapshot_and_matches(
     session: AsyncSession, *, dept_ids: Optional[List[str]]
 ) -> tuple[Dict[str, SkillInfo], Set[str]]:
-    """读全部 skill 行,重建轻量 user-agnostic 元数据(`{slug: SkillInfo}`)。
+    """读全部 skill 行,重建轻量 user-agnostic 元数据(`{skill_id: SkillInfo}`)。
 
     每 turn 一次快照(同 load_registry_snapshot,controller_factory 调用,C-2 接入);
     per-user 解析(user_skill 覆盖 + dept 规则)另在 `EffectiveSkillSet` 做(C-2)。
@@ -354,7 +355,7 @@ async def _load_skill_snapshot_and_matches(
     ORM 不外逃:直接投影列、物化成 SkillInfo dataclass。"""
     dept_match_expr = (
         exists().where(
-            DepartmentSkillRule.skill_slug == Skill.slug,
+            DepartmentSkillRule.skill_id == Skill.id,
             DepartmentSkillRule.department_id.in_(dept_ids),
         )
         if dept_ids
@@ -363,6 +364,7 @@ async def _load_skill_snapshot_and_matches(
     rows = (
         await session.execute(
             select(
+                Skill.id,
                 Skill.slug,
                 Skill.name,
                 Skill.description,
@@ -374,15 +376,16 @@ async def _load_skill_snapshot_and_matches(
                 Skill.compatibility,
                 Skill.source,
                 dept_match_expr,
-            ).order_by(Skill.slug)
+            ).order_by(Skill.slug, Skill.namespace_key)
         )
     ).all()
     snapshot: Dict[str, SkillInfo] = {}
     dept_matched: Set[str] = set()
     for r in rows:
         if r.dept_matched:
-            dept_matched.add(r.slug)
-        snapshot[r.slug] = SkillInfo(
+            dept_matched.add(r.id)
+        snapshot[r.id] = SkillInfo(
+            id=r.id,
             slug=r.slug,
             name=r.name,
             description=r.description,
