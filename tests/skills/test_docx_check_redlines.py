@@ -19,7 +19,7 @@ def _write_docx(path: Path, document_xml: str) -> None:
         archive.writestr("word/document.xml", document_xml)
 
 
-def test_success_explains_integrity_only_and_rejects_python_docx_text(tmp_path):
+def test_success_explains_text_scope_and_rejects_python_docx_text(tmp_path):
     original = tmp_path / "original.docx"
     edited = tmp_path / "edited.docx"
     namespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -46,9 +46,10 @@ def test_success_explains_integrity_only_and_rejects_python_docx_text(tmp_path):
         text=True,
     )
 
-    assert "未发现静默正文改写" in result.stdout
-    assert "仅验证修订完整性" in result.stdout
-    assert "不验证修改内容或页面布局" in result.stdout
+    assert "word/document.xml 中提取的段落文字（空白折叠后）与原文一致" in result.stdout
+    assert "不保证覆盖页眉页脚、脚注、字段、格式、空白变化或段落边界" in result.stdout
+    assert "不验证修改内容是否符合预期或页面布局" in result.stdout
     assert "Pandoc --track-changes=accept 或 --track-changes=all" in result.stdout
     assert "不要使用 python-docx Paragraph.text/Run.text" in result.stdout
-    assert "无需重复运行本检查" in result.stdout
+    assert "同一未变更文件无需重复运行本检查" in result.stdout
+    assert "请执行对应的结构或视觉检查" in result.stdout
