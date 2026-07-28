@@ -704,7 +704,8 @@ function SkillImportCard({
             （直接放在 ZIP 根目录也兼容）
           </li>
           <li>
-            使用 UTF-8；YAML frontmatter 填写{' '}
+            使用 UTF-8；在文件开头两行{' '}
+            <span className="font-mono">---</span> 之间的 YAML 配置区填写{' '}
             <span className="font-mono">name</span>、{' '}
             <span className="font-mono">description</span>，Markdown 正文不能为空
           </li>
@@ -812,30 +813,180 @@ export function SkillValidationNotices({
   return (
     <>
       {errors.length > 0 && (
-        <StatusNotice tone="error" title="技能包未通过校验">
-          <div className="space-y-1">
-            <div>请修复以下阻断问题后重新打包上传：</div>
-            {errors.map((finding, index) => (
-              <div key={`${finding.rule}-${index}`} className="break-words">
-                {finding.message}
-              </div>
-            ))}
+        <StatusNotice tone="error" title="技能包还不能导入">
+          <div className="space-y-3">
+            <div>
+              发现 {errors.length} 个必须修改的问题。修好后，请重新打包为 ZIP 并上传。
+            </div>
+            <SkillFindingList findings={errors} />
+            <div className="border-t border-status-error/20 pt-3 text-xs leading-5">
+              <span className="font-medium text-text-primary dark:text-text-primary-dark">
+                不确定怎么修改？
+              </span>{' '}
+              回到对话，把刚才的 ZIP 作为附件发给 Agent，并说明：
+              <span className="mt-1 block rounded-md bg-surface/70 px-2 py-1.5 text-text-secondary dark:bg-surface-dark/70 dark:text-text-secondary-dark">
+                请检查这个 Skill 为什么无法导入 ArtifactFlow，修复问题后重新打包。
+              </span>
+            </div>
           </div>
         </StatusNotice>
       )}
       {warnings.length > 0 && (
         <StatusNotice tone="warning" title="其他校验提示">
-          <div className="space-y-1">
-            <div>以下问题不阻断导入，仅供修包参考。</div>
-            {warnings.map((finding, index) => (
-              <div key={`${finding.rule}-${index}`} className="break-words">
-                {finding.message}
-              </div>
-            ))}
+          <div className="space-y-3">
+            <div>以下问题不会阻止导入，但建议一并检查。</div>
+            <SkillFindingList findings={warnings} />
           </div>
         </StatusNotice>
       )}
     </>
+  );
+}
+
+type SkillFindingCopy = {
+  title: string;
+  guidance: string;
+};
+
+const SKILL_FINDING_COPY: Record<string, SkillFindingCopy> = {
+  'zip.invalid': {
+    title: 'ZIP 文件无法读取',
+    guidance: '请确认文件没有损坏，并使用标准 ZIP 格式重新压缩。',
+  },
+  'zip.too_many_members': {
+    title: 'ZIP 内文件太多',
+    guidance: '删除不需要的文件后重新打包。',
+  },
+  'zip.uncompressed_too_large': {
+    title: '解压后的内容太大',
+    guidance: '删除不必要的大文件，或缩小 assets、references 等目录中的文件。',
+  },
+  'zip.path_traversal': {
+    title: 'ZIP 中包含不安全的文件路径',
+    guidance: '移除绝对路径、包含“..”的路径或符号链接后重新打包。',
+  },
+  'zip.skill_md_count': {
+    title: '没有找到唯一的 SKILL.md',
+    guidance: '技能包中必须且只能有一个 SKILL.md，例如 my-skill/SKILL.md。',
+  },
+  'zip.stray_files': {
+    title: '部分文件放在技能目录之外',
+    guidance: '请把 SKILL.md 和其他文件都放进同一个顶层目录，再压缩这个目录。',
+  },
+  'zip.orphan_files': {
+    title: '有些文件可能没有被使用',
+    guidance: '如果这些文件不是由脚本读取的，请删除它们；否则可以忽略这条提示。',
+  },
+  'zip.bundle_too_large': {
+    title: '技能包文件太大',
+    guidance: '删除不必要的文件或压缩大文件，使 ZIP 小于系统限制。',
+  },
+  'md.member_too_large': {
+    title: 'SKILL.md 文件太大',
+    guidance: '精简 SKILL.md，把较长的说明移到 references/ 目录。',
+  },
+  'md.not_utf8': {
+    title: 'SKILL.md 的文本编码不正确',
+    guidance: '请用编辑器将 SKILL.md 重新保存为 UTF-8 编码。',
+  },
+  'md.frontmatter_invalid': {
+    title: 'SKILL.md 开头的配置格式有误',
+    guidance: '检查两行“---”之间的 YAML，尤其是缩进、冒号和引号。',
+  },
+  'md.body_empty': {
+    title: 'SKILL.md 缺少正文说明',
+    guidance: '请在第二行“---”之后写明 Agent 应该如何使用这个技能。',
+  },
+  'md.unclosed_fence': {
+    title: '代码块可能没有闭合',
+    guidance: '检查 SKILL.md 中的 ``` 或 ~~~，确保每个代码块都有结束标记。',
+  },
+  'md.too_long': {
+    title: 'SKILL.md 正文较长',
+    guidance: '建议把详细资料移到 references/，让主说明保持简洁。',
+  },
+  'md.link_unresolved': {
+    title: 'SKILL.md 引用的文件不存在',
+    guidance: '检查相对链接是否写对，并确认对应文件已经放进 ZIP。',
+  },
+  'fm.name_invalid': {
+    title: '技能名称格式不正确',
+    guidance: '把 SKILL.md 开头配置区里的 name 设置为非空文本，例如 name: document-review。',
+  },
+  'fm.description_invalid': {
+    title: '技能描述格式不正确',
+    guidance: '把 SKILL.md 开头配置区里的 description 设置为非空文本。',
+  },
+  'fm.allowed_tools_invalid': {
+    title: '允许使用的工具配置不正确',
+    guidance: '检查 SKILL.md 开头配置区里 allowed-tools 的写法和缩进。',
+  },
+  'fm.compatibility_invalid': {
+    title: '兼容性配置格式异常',
+    guidance: '检查 compatibility 的值；不需要时可以删除这个字段。',
+  },
+  'fm.license_invalid': {
+    title: '许可证配置格式异常',
+    guidance: 'license 应填写为一段文本；不需要时可以删除这个字段。',
+  },
+  'fm.metadata_invalid': {
+    title: '附加信息格式异常',
+    guidance: 'metadata 应使用 YAML 键值结构；不需要时可以删除这个字段。',
+  },
+  'fm.cc_extension': {
+    title: '包含 ArtifactFlow 不使用的配置',
+    guidance: '这些 Claude Code 专用字段会被忽略；确认无影响后也可以保留。',
+  },
+  'fm.unknown_keys': {
+    title: '包含无法识别的配置项',
+    guidance: '这些字段会被保留但不会生效；请确认字段名是否拼写正确。',
+  },
+  'fm.name_dir_mismatch': {
+    title: '技能名称与目录名不一致',
+    guidance: '建议让顶层目录名与 SKILL.md 配置区里的 name 保持一致。',
+  },
+  'fm.import_ignored_keys': {
+    title: '包内的可见范围设置不会生效',
+    guidance: '技能的公开范围和默认开关由导入页面决定，ZIP 内对应字段会被忽略。',
+  },
+  'tools.unknown_entry': {
+    title: '引用的工具当前不存在',
+    guidance: '检查 allowed-tools 中的名称，或先让管理员安装并配置对应工具。',
+  },
+  'slug.invalid': {
+    title: '无法生成有效的技能标识',
+    guidance: '请使用以英文字母或数字开头的 name，只包含小写字母、数字、“-”或“_”。',
+  },
+};
+
+function SkillFindingList({ findings }: { findings: SkillFindingItem[] }) {
+  return (
+    <ul className="space-y-2">
+      {findings.map((finding, index) => {
+        const copy = SKILL_FINDING_COPY[finding.rule];
+        return (
+          <li
+            key={`${finding.rule}-${index}`}
+            className="rounded-lg bg-surface/70 px-3 py-2 dark:bg-surface-dark/70"
+          >
+            <div className="font-medium text-text-primary dark:text-text-primary-dark">
+              {copy?.title ?? '技能包中有一项内容需要检查'}
+            </div>
+            <div className="mt-0.5 text-xs leading-5">
+              {copy?.guidance ?? '请展开技术详情，根据具体信息修改后重试。'}
+            </div>
+            <details className="mt-1 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+              <summary className="cursor-pointer select-none hover:text-text-secondary dark:hover:text-text-secondary-dark">
+                查看技术详情
+              </summary>
+              <div className="mt-1 break-words whitespace-pre-wrap font-mono text-[11px] leading-4">
+                {finding.message}
+              </div>
+            </details>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -880,13 +1031,9 @@ function SkillImportNotice({
       </StatusNotice>
       {findings.length > 0 && (
         <StatusNotice tone="warning" title="校验提示">
-          <div className="space-y-1">
-            <div>不阻断导入，仅供修包参考。</div>
-            {findings.map((finding, index) => (
-              <div key={index} className="break-words">
-                {finding.message}
-              </div>
-            ))}
+          <div className="space-y-3">
+            <div>技能已经导入；以下问题不会阻止使用，但建议检查。</div>
+            <SkillFindingList findings={findings} />
           </div>
         </StatusNotice>
       )}

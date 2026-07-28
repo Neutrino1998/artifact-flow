@@ -49,10 +49,32 @@ describe('SkillValidationNotices', () => {
 
     expect(errorNotice?.textContent).toContain('SKILL.md body is empty');
     expect(errorNotice?.textContent).not.toContain('unrecognized frontmatter keys');
+    expect(errorNotice?.textContent).toContain('SKILL.md 缺少正文说明');
+    expect(errorNotice?.textContent).toContain('把刚才的 ZIP 作为附件发给 Agent');
     expect(warningNotice?.textContent).toContain('unrecognized frontmatter keys');
     expect(warningNotice?.textContent).not.toContain('SKILL.md body is empty');
+    expect(warningNotice?.textContent).toContain('包含无法识别的配置项');
     expect(html).not.toContain('md.body_empty');
     expect(html).not.toContain('fm.unknown_keys');
+  });
+
+  it('keeps an actionable fallback for validator rules added by the backend', () => {
+    const html = renderToStaticMarkup(
+      <SkillValidationNotices
+        findings={[
+          {
+            rule: 'future.new_rule',
+            severity: 'error',
+            message: 'Exact backend detail',
+          },
+        ]}
+      />
+    );
+
+    expect(html).toContain('技能包中有一项内容需要检查');
+    expect(html).toContain('请展开技术详情，根据具体信息修改后重试');
+    expect(html).toContain('Exact backend detail');
+    expect(html).not.toContain('future.new_rule');
   });
 });
 
