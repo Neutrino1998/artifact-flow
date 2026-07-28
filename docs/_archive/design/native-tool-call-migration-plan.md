@@ -36,14 +36,14 @@
 
 | 阶段 | 内容 | 状态 | 合并/发布条件 |
 |---|---|---|---|
-| 0 | 建立迁移分支与基线 | 待开始 | 仅建立 branch，不发布 |
+| 0 | Provider native 协议探针与迁移基线 | 待开始 | 拟支持模型通过独立 probe，仅建立 branch，不发布 |
 | 1 | Native schema、命名约束与流式 codec | 待开始 | branch 内测试通过 |
 | 2 | 结构化事件、历史与 compaction 投影 | 待开始 | branch 内测试通过 |
 | 3 | Per-agent progressive state | 待开始 | branch 内测试通过 |
 | 4 | Engine 端到端切换与终态闭合 | 待开始 | native 主链路完整通过 |
 | 5 | 历史切换、删除 XML runtime、联调收尾 | 待开始 | 全量验收后整体合并 |
 
-依赖关系：阶段 1、2、3 可以在纯函数和 fixture 层交错推进；阶段 4 必须等待三者完成；阶段 5 必须等待 native 主链路稳定。
+依赖关系：阶段 0 先确认目标模型的 native wire protocol 可用，再进入主体改造；阶段 1、2、3 可以在纯函数和 fixture 层交错推进；阶段 4 必须等待三者完成；阶段 5 必须等待 native 主链路稳定。
 
 ## 分支策略
 
@@ -302,13 +302,18 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 
 ## 实施阶段
 
-## 阶段 0：建立分支与回归基线
+## 阶段 0：Provider native 协议探针与迁移基线
 
 ### 包含
 
 - 从最新 `main` 创建 `codex/native-tool-calls`。
 - 记录当前 engine、history、compaction、skills、permissions 和 cancellation 相关测试基线。
-- 准备 DeepSeek thinking、DashScope/Qwen 和 raw `openai/` + vLLM 三类 LiteLLM smoke 配置；环境缺失者明确记录为部署前验收项。
+- 在改动 Engine 前实现独立的 `tests/manual/native_tool_call_probe.py`，使用项目锁定的同一 LiteLLM 版本和实际 provider 配置直接发请求；不经过 ArtifactFlow runtime，不把探针实现演变成第二套 adapter。
+- 先对当前 DashScope key 可访问的 `qwen3.7-plus`、`deepseek-v4-flash`、`glm-5.2`、`kimi-k2.6`、`MiniMax-M2.5` 全部执行文本 native tool-call probe；raw `openai/` + vLLM 保留为目标私有环境的部署前必测项。
+- 所有文本模型执行同一最小闭环：首请求以 `stream=true` 发送 OpenAI-compatible `tools`（包含 required `__reason`）→ 组装 assistant `content + reasoning_content? + tool_calls` → 发送绑定原 `tool_call_id` 的 XML-like 文本 `role=tool` result → 追加独立 synthetic user reminder → 发起下一请求。模型返回了 `reasoning_content` 时必须在内存中原样回放；未返回时不伪造。
+- 所有文本模型再尝试同轮多调用及 `content + tool_calls` 组合，检查每个 id/name/arguments 的流式归属和回放；模型没有按提示产生该形态只记录行为差异，产生了却无法组装或回放才算协议失败。
+- 对具备视觉能力的 `qwen3.7-plus` 与 `kimi-k2.6` 增加图片 carrier probe：先闭合一个或多个文本 `role=tool` result，再通过同一条 synthetic user message 发送带来源标签的一张/多张图片和 reminder，确认下一响应可消费图片且不拒绝消息顺序。
+- Probe 记录脱敏后的请求/normalized message 结构、raw chunk 形态、finish reason、usage 是否存在以及 pass/fail；完整 reasoning 只在单次进程内用于回放，不写报告或 fixture。Provider usage 缺失、偶发遗漏 `__reason`、未主动产生多调用属于非阻塞观察项，不新增 runtime usage 或 capability 状态。
 - 盘点全部 conversation leaf、各 conversation 的 `active_branch` 及路径内 agent，定义 manifest/head fingerprint 和迁移规模报告。
 - 定义 SQLite checkpoint schema、`--resume`、有界并发、重试、滚动吞吐和 ETA 的 CLI 契约。
 - 明确 cutover 维护窗口、写入停止方式、数据库快照和迁移失败回滚流程。
@@ -316,12 +321,15 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 ### 不包含
 
 - 不创建 runtime 开关。
+- 不把 probe 结果持久化为模型 capability matrix，也不按模型生成 runtime 分支。
 - 不先改生产配置或部署默认值。
 
 ### 验收
 
 - 分支干净建立，现有相关测试可重复通过。
-- 明确最终覆盖 LiteLLM 下的 DeepSeek、DashScope 和至少一个 vLLM 类实际目标端点。
+- 五个 DashScope 候选模型均形成探针报告；任何拟继续声明支持的模型都必须接受 native tools、产出可组装的流式调用，并能消费完整 assistant/tool 后续历史。失败模型须在主体改造前解决 provider/template 配置或从本次支持范围移除；若它是必需模型则阻塞阶段 1。
+- 任一模型返回 `reasoning_content` 时，原样回放不会导致第二次请求 400；Qwen 与 Kimi 的单图/多图 synthetic carrier 均被接受。Usage 缺失和 `__reason` 遵循率只进入报告，不作为协议 gate。
+- 明确最终还需覆盖至少一个 raw `openai/` + vLLM 实际目标端点；环境当前不可用时列为阶段 5 cutover 阻塞项，而不是据此假定兼容。
 - 迁移脚本能稳定枚举全部 leaf/agent、标记 active branch，且 checkpoint/report 能发现遗漏、head 变化和摘要失败；重复的完整成功 pair 可报告但不视为失败。
 
 ## 阶段 1：Native schema、命名约束与流式 codec
@@ -339,7 +347,7 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 - arguments 完成后进行 JSON 解码，再进入现有参数校验；解析/校验失败产生可供模型自愈的明确 tool error。
 - 落实 64 字符工具名约束和入口校验。
 - 每次请求从当前 registry 与 per-agent effective tool set 生成通用 OpenAI-compatible schema；不保存 schema 快照，不写 provider template 适配或 per-model reasoning field 配置。
-- 保持 `reasoning_content` 为 ArtifactFlow 内部统一字段，收发集中在唯一 LLM adapter/LiteLLM 边界；为三类目标端点增加 tool-call + reasoning 连续回放 smoke，不能仅凭 LiteLLM 抽象假定 provider mapping 正确。
+- 保持 `reasoning_content` 为 ArtifactFlow 内部统一字段，收发集中在唯一 LLM adapter/LiteLLM 边界；将阶段 0 观察到的实际 chunk/message 形态固化为 codec fixture，并在阶段 5 通过 ArtifactFlow 完整链路重跑，不能仅凭 LiteLLM 抽象假定 provider mapping 正确。
 
 ### 不包含
 
@@ -505,7 +513,8 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 | 旧历史迁移 | Active leaf 优先 semantic、失败回退 mechanical，其他 leaf 使用 mechanical，subagent 使用 reset；全 leaf/agent 有 boundary，旧事件保持 append-only |
 | 迁移并发恢复 | 在线 generate 可 checkpoint/resume 并报告 ETA；停写复核能发现 head 变化；apply 保证完整 pair，允许重复成功 pair |
 | Admin reconstruction | Cutover 后请求按 native messages 正确重建；不宣称包含历史 tools schema，pre-cutover 结果无正确性保证且无 detection/特殊分支 |
-| 私有推理端 | chat template 接受 schema 与消息序列，流式 parser 输出稳定 |
+| 阶段 0 provider probe | 五个 DashScope 候选模型完成文本 tool-call/reasoning replay；Qwen、Kimi 完成单图/多图 synthetic carrier；报告区分协议 gate 与模型行为观察项 |
+| 私有推理端 | 阶段 5 在 ArtifactFlow 完整链路及至少一个 raw vLLM 目标环境重跑，chat template 接受 schema 与消息序列，流式 parser 输出稳定 |
 
 ## 风险与控制
 
@@ -532,7 +541,7 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 
 以下不阻塞架构实现，但应在阶段 0 或阶段 5 明确：
 
-- 最终私有部署 smoke matrix 中具体有哪些模型、vLLM 版本和 chat template。
+- 最终私有部署使用的 raw vLLM 版本、模型和 chat template；DashScope 阶段 0 候选模型已经确定。
 - `__reason` 缺失时 Permission UI 的最终 fallback 文案；协议策略已经确定，不影响执行结构。
 - Cutover smoke 使用现有模型调用边界显式执行，不增加启动自检、首次调用探测或 provider capability 状态。
 - Mechanical summary 的 token/字符上限、保留最近对数，以及 semantic `--concurrency` 默认值；算法和 fallback 顺序已经确定。
@@ -558,4 +567,4 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 | 2026-07-19 | 初版：确定单分支一次性 native cutover；切片仅作为 branch 内施工检查点，不保留双 runtime 或历史兼容层。 |
 | 2026-07-20 | 根据设计复核收敛：采用 per-agent progressive state、完整 reasoning 回放、固定 synthetic user reminder、文本 tool result + user image、所有持久化前统一闭合，以及离线 compaction boundary 迁移旧 leaf；明确不保存 schema 快照、不提供 legacy runtime。 |
 | 2026-07-27 | 明确 unit 轻量目录与 native schema 双投影；`reasoning_content` 作为内部统一字段并在唯一 LLM adapter/LiteLLM 边界验证；usage 正常路径保持现状；以 required-but-tolerant `__reason` 承接调用意图；MCP 保留原始 `inputSchema` 并从深拷贝派生模型 schema；保留并拆分 XML-like tool-result renderer；旧历史改为 active semantic + 全 leaf mechanical + subagent reset，并加入在线生成、SQLite checkpoint、有界并发、ETA 与停写复核；accepted call 增加非截断与结构完整性门槛；执行以本次 native tool-name 集合为闸；迁移 apply 降为完整 pair + best-effort resume，允许重复成功 boundary；admin 仅保证 cutover 后 messages reconstruction。 |
-| 2026-07-28 | 删除无收益的 reasoning breakdown、usage estimate 标记、finish-reason 事件字段、parser warnings 迁移、boundary 半对检测与过细 checkpoint 指标；compaction carry 改为从事件结构推导，provider 兼容性只做显式 cutover smoke，`search_tools` 沿用现有 ToolResult 协议。 |
+| 2026-07-28 | 删除无收益的 reasoning breakdown、usage estimate 标记、finish-reason 事件字段、parser warnings 迁移、boundary 半对检测与过细 checkpoint 指标；compaction carry 改为从事件结构推导，`search_tools` 沿用现有 ToolResult 协议；阶段 0 增加五个 DashScope 模型的独立 native protocol probe，并覆盖 reasoning 原样回放、`__reason`、多调用和 Qwen/Kimi 图片 carrier，阶段 5 再做 ArtifactFlow/raw vLLM 完整链路验收。 |
