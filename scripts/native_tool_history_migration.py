@@ -58,14 +58,12 @@ def _print_report(report: dict) -> None:
     print(
         "source: "
         f"conversations={source['conversations']} messages={source['messages']} "
-        f"empty_conversations={source['empty_conversations']} "
-        f"event_agent_links={source['event_agent_links']}"
+        f"empty_conversations={source['empty_conversations']}"
     )
     print(
         "leaves: "
         f"total={leaves['total']} active={leaves['active']} "
-        f"max_path_messages={leaves['max_path_messages']} "
-        f"max_agents={leaves['max_agents']}"
+        f"max_path_messages={leaves['max_path_messages']}"
     )
     for kind, counts in report["tasks"].items():
         print(f"tasks.{kind}: {counts}")

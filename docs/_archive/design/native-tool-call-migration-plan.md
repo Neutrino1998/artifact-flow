@@ -26,7 +26,7 @@
 - 渐进披露：把 per-agent skill/tool 披露状态纳入 effective tool set。
 - Compaction：保留最近的真实 tool-call/result 结构闭合。
 - 取消与异常：确保每个已生成的 native tool call 都有且仅有一个结束结果。
-- 历史切换：维护窗口内完全停止 backend writer 后生成并追加 compaction boundary，让所有既有 leaf 保留可继续上下文但不进入 legacy runtime。
+- 历史切换：维护窗口内完全停止 backend writer 后为所有既有 leaf 的 lead 生成并追加 compaction boundary；subagent 默认 fresh start，不增加 legacy runtime。
 - 工具命名与 schema：收紧为各私有推理端普遍可接受的 native function 约束。
 - 工具目录与调用意图：保留 unit 级发现语义，并把现有单次调用理由迁移为保留参数。
 
@@ -51,7 +51,7 @@
 - 所有阶段在该分支内完成，可按阶段提交，便于回看和定位回归。
 - 不引入协议 feature flag，不增加 per-model `tool_disclosure` 配置，不保留 XML/native 双 runtime。
 - 不把阶段 1–4 的半成品单独合入 `main`；阶段 5 验收完成后整体合并。
-- 不改写旧事件；迁移为所有现存 leaf/agent 追加 compaction boundary，新 runtime 不读取 boundary 之前的 XML 历史。
+- 不改写旧事件；迁移为所有现存 leaf 的 lead history 追加 compaction boundary，lead 不再读取 boundary 之前的 XML 历史。
 
 ## 目标
 
@@ -92,7 +92,7 @@
 7. 取消、超时、错误和 subagent 中止后不存在 orphan tool call。
 8. Compaction 后最近一组真实 tool call/result 仍保持结构闭合且未被摘要替代。
 9. 每次模型调用前都会在完整 tool-result 组之后追加一条 synthetic user reminder；图片也通过这条 user 消息传入。
-10. 所有存量 leaf 经 semantic 或 mechanical boundary 后可继续，迁移前事件不再进入模型上下文。
+10. 所有存量 leaf 的 lead 经 semantic 或 mechanical boundary 后可继续，迁移前 lead 事件不再进入模型上下文；subagent 默认 fresh start。
 11. XML tool-call parser、调用 grammar/tool-doc formatter 及其专属测试从 runtime 删除；模型可读的 XML-like tool-result envelope 拆为独立 renderer 后保留。
 
 ## 已确定的设计原则
@@ -233,7 +233,7 @@ tool:      real result bound to tool_call_id
 
 不伪造用于摘要的 assistant/tool 调用对，也不压缩最近的真实工具结果。
 
-### 6. 旧历史通过完全停机下的双层 compaction boundary 切换
+### 6. 旧历史通过完全停机下的 lead compaction boundary 切换
 
 迁移目标只是保留存量对话的主题和当前工作，使用户能从迁移时存在的任意 leaf 继续；明确放弃对迁移前真实模型请求的审计级重建。旧 `MessageEvent` 保持 append-only，不更新、不删除。
 
@@ -242,16 +242,16 @@ tool:      real result bound to tool_call_id
 1. **Semantic summary**：只为每个 conversation 的当前 `active_branch` 调用既有 compaction agent/prompt，保留主题、当前工作、关键事实和下一步。
 2. **Mechanical summary**：为所有 leaf 纯机械地沿分支路径读取 display-only 的 `Message.user_input` 与 `Message.response`，复制成角色明确的对话摘要；天然去掉中间 tool-call 过程。保留首个用户问题/标题和最近若干完整 user/assistant 对，超限时插入明确省略标记；单条过大时按固定规则截断。
 
-每个 leaf 最终只追加一个有效 lead boundary：active branch 的 semantic summary 成功时使用 semantic；失败时回退 mechanical；其他 leaf 直接使用 mechanical。路径内出现过的 subagent 追加便宜、确定性的 reset boundary，不调用模型，防止 `fresh_start=false` 的 subagent 继续读到 legacy XML。迁移时不存在的任意非 leaf 内部节点不作可继续承诺。
+每个 leaf 最终只追加一个有效 lead boundary：active branch 的 semantic summary 成功时使用 semantic；失败时回退 mechanical；其他 leaf 直接使用 mechanical。一次性迁移不扫描或压缩 subagent 历史：迁移后的 subagent 调用默认 `fresh_start=true`，该 instruction 本身就是历史边界；首次显式使用 `fresh_start=false` 延续迁移前 session 仅作 best-effort，可能看到 legacy XML 文本或因旧上下文过长失败。运行时按 agent 的正常 compaction 语义保持不变。迁移时不存在的任意非 leaf 内部节点不作可继续承诺。
 
 生成和 apply 都在完全停机后进行：
 
 - **停止全部 writer 后扫描**：先启用维护页阻断新请求，等待 active executions 清空，再停止全部 backend 实例并完成数据库快照。随后一次性扫描 `(conversation_id, leaf_message_id, is_active_branch)` manifest；从此直到 native runtime 部署完成，数据库除迁移程序外没有 writer，因此不再引入 head fingerprint、在线重扫或变化 leaf 补算逻辑。
-- **Checkpoint/resume**：使用独立 SQLite checkpoint 记录 `migration_id`、conversation/leaf/agent、`summary_kind`（semantic/mechanical/reset）、扫描时 active 状态、summary content、status、attempts 和 error；稳定 task key 必须包含 `summary_kind`，因为 active lead 同时有 semantic 与 mechanical 两个候选。支持 `--resume`，不把一次性迁移状态引入 runtime。吞吐与 ETA 从任务计数和运行时间直接计算，不再持久化独立 latency/hash 字段。
+- **Checkpoint/resume**：使用独立 SQLite checkpoint 记录 `migration_id`、conversation/leaf、`summary_kind`（semantic/mechanical）、扫描时 active 状态、summary content、status、attempts 和 error；稳定 task key 必须包含 `summary_kind`，因为 active lead 同时有 semantic 与 mechanical 两个候选。支持 `--resume`，不把一次性迁移状态引入 runtime。吞吐与 ETA 从任务计数和运行时间直接计算，不再持久化独立 latency/hash 字段。
 - **有界并发与 ETA**：语义摘要使用 `--concurrency N`，对 429/5xx 有界重试；持续报告 total/completed/success/failed/inflight、滚动吞吐和基于剩余任务数的 ETA。服务保持停机直到 generate、apply、verify 和 native runtime smoke 全部完成。
-- **确定性、事务性的成对追加**：最终校验每个 leaf/agent 均有候选 boundary 后，把 `COMPACTION_START` 与成功 `COMPACTION_SUMMARY` 作为完整 pair 在同一数据库事务中追加。两条事件的 `event_id` 从 `migration_id + leaf + agent + selected summary task` 确定性派生；若数据库已提交但 checkpoint 未更新，resume 重试命中同一组 event id 而不是追加重复 pair。事务性写入使半对不可表示，确定性 event id 使同一任务的重复 pair 不可表示；缺少成功 boundary 或 apply 失败才阻止部署，semantic 失败本身不阻塞。
+- **确定性、事务性的成对追加**：最终校验每个 leaf 的 lead 均有候选 boundary 后，把 `COMPACTION_START` 与成功 `COMPACTION_SUMMARY` 作为完整 pair 在同一数据库事务中追加。两条事件的 `event_id` 从 `migration_id + leaf + selected summary task` 确定性派生；若数据库已提交但 checkpoint 未更新，resume 重试命中同一组 event id 而不是追加重复 pair。事务性写入使半对不可表示，确定性 event id 使同一任务的重复 pair 不可表示；缺少成功 boundary 或 apply 失败才阻止部署，semantic 失败本身不阻塞。
 
-Boundary 成为新 EventHistory 自右向左扫描的终点；新 runtime 永远看不到此前 XML event，因此不需要 legacy XML parser、formatter 或历史分支。迁移程序可携带独立 legacy 读取逻辑，但 runtime 不得 import 或调用。Cutover 时从缺省空 `agent_progressive_state` 开始，模型需要时重新 read/search。旧事件继续沿用既有 UI 展示；admin 对 cutover 后 `AGENT_START` 的 reconstruction 使用 native messages 投影，迁移前锚点的结果不保证正确，并且不识别旧请求、不返回专属状态、不保留 legacy 投影逻辑。
+Boundary 成为 lead EventHistory 自右向左扫描的终点；lead 不再看到此前 XML event，因此 runtime 不需要 legacy XML parser、formatter 或历史分支。Subagent 依靠默认 `fresh_start=true` 隔离旧 session，而非迁移 boundary。迁移程序可携带独立 legacy 读取逻辑，但 runtime 不得 import 或调用。Cutover 时从缺省空 `agent_progressive_state` 开始，模型需要时重新 read/search。旧事件继续沿用既有 UI 展示；admin 对 cutover 后 `AGENT_START` 的 reconstruction 使用 native messages 投影，迁移前锚点的结果不保证正确，并且不识别旧请求、不返回专属状态、不保留 legacy 投影逻辑。
 
 ### 7. Reminder 与多模态使用统一的 synthetic user 消息
 
@@ -313,7 +313,7 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 - 所有文本模型再尝试同轮多调用及 `content + tool_calls` 组合，检查每个 id/name/arguments 的流式归属和回放；模型没有按提示产生该形态只记录行为差异，产生了却无法组装或回放才算协议失败。
 - 对具备视觉能力的 `qwen3.7-plus` 与 `kimi-k2.6` 增加图片 carrier probe：先闭合一个或多个文本 `role=tool` result，再通过同一条 synthetic user message 发送带来源标签的一张/多张图片和 reminder，确认下一响应可消费图片且不拒绝消息顺序。
 - Probe 记录脱敏后的请求/normalized message 结构、raw chunk 形态、finish reason、usage 是否存在以及 pass/fail；完整 reasoning 只在单次进程内用于回放，不写报告或 fixture。Provider usage 缺失、偶发遗漏 `__reason`、未主动产生多调用属于非阻塞观察项，不新增 runtime usage 或 capability 状态。
-- 盘点全部 conversation leaf、各 conversation 的 `active_branch` 及路径内 agent，定义停机扫描 manifest 和迁移规模报告；报告必须给出 semantic task 数量，供运维评估完全停机窗口。
+- 盘点全部 conversation leaf 和各 conversation 的 `active_branch`，定义停机扫描 manifest 和迁移规模报告；报告必须给出 semantic task 数量，供运维评估完全停机窗口。
 - 定义 SQLite checkpoint schema、`--resume`、有界并发、重试、滚动吞吐和 ETA 的 CLI 契约边界；具体 generate 默认值与目标环境吞吐在阶段 5 联调时确定。
 - 明确 cutover 维护窗口、active execution drain、全部 backend writer 停止方式、数据库快照和迁移失败回滚流程。
 
@@ -329,7 +329,7 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 - 五个 DashScope 候选模型均形成探针报告；任何拟继续声明支持的模型都必须接受 native tools、产出可组装的流式调用，并能消费完整 assistant/tool 后续历史。失败模型须在主体改造前解决 provider/template 配置或从本次支持范围移除；若它是必需模型则阻塞阶段 1。
 - 任一模型返回 `reasoning_content` 时，原样回放不会导致第二次请求 400；Qwen 与 Kimi 的单图/多图 synthetic carrier 均被接受。Usage 缺失和 `__reason` 遵循率只进入报告，不作为协议 gate。
 - 明确最终还需覆盖至少一个 raw `openai/` + vLLM 实际目标端点；环境当前不可用时列为阶段 5 cutover 阻塞项，而不是据此假定兼容。
-- 迁移脚本能在停机数据库上稳定枚举全部 leaf/agent、标记 active branch，且 checkpoint/report 能发现遗漏和摘要失败；checkpoint 的 task identity 能区分同一 active lead 的 semantic/mechanical 候选。
+- 迁移脚本能在停机数据库上稳定枚举全部 leaf、标记 active branch，且 checkpoint/report 能发现遗漏、未完成任务和摘要失败；checkpoint 的 task identity 能区分同一 active lead 的 semantic/mechanical 候选。
 
 阶段 0 的实现、运行命令、快照规模与模型观察见
 [`native-tool-call-stage0-runbook.md`](native-tool-call-stage0-runbook.md)，完整脱敏 provider
@@ -383,7 +383,7 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 
 - 不伪造 compaction tool call。
 - 不压缩最新工具结果。
-- 不在 runtime 投影或解析 boundary 之前的 legacy XML events。
+- 不为迁移前事件保留 legacy XML 解析或专属投影；lead boundary 之前的事件不可见，subagent 默认从 fresh-start instruction 开始。
 
 ### 验收
 
@@ -456,11 +456,10 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 ### 包含
 
 - 实现独立的一次性迁移程序：服务完全停机后，为每个 conversation 的 active branch 并发生成 semantic summary，同时为所有 leaf 生成纯机械 user/final-response summary。
-- 为 leaf 路径内的 subagent 生成确定性 reset boundary，不逐个调用 compaction model。
 - 使用 SQLite checkpoint 支持 `--resume`、含 `summary_kind` 的稳定 task key、有界并发、429/5xx 重试、失败明细、rolling throughput 与 ETA；generate/report 阶段不写 `MessageEvent`。
 - 扫描前启用维护页、等待 active executions 清空、停止全部 backend writer 并完成数据库快照；迁移期间不再运行在线变化检测或补算分支。
-- 在维护窗口的 apply 阶段按 leaf/agent 事务性追加完整 `COMPACTION_START`/`COMPACTION_SUMMARY` pair；两条事件使用由最终任务键派生的确定性 `event_id`，checkpoint 提交状态不确定时可幂等重试。
-- Native 部署前验证所有 leaf/agent 至少存在一个成功 boundary，任何遗漏或 apply 失败都阻止部署；单纯 semantic 失败不阻塞，稳定回退 mechanical。
+- 在维护窗口的 apply 阶段按 leaf 事务性追加 lead 的完整 `COMPACTION_START`/`COMPACTION_SUMMARY` pair；两条事件使用由最终任务键派生的确定性 `event_id`，checkpoint 提交状态不确定时可幂等重试。
+- Native 部署前验证所有 leaf 的 lead 至少存在一个成功 boundary，任何遗漏或 apply 失败都阻止部署；单纯 semantic 失败不阻塞，稳定回退 mechanical。
 - Cutover 后初始化空的 `agent_progressive_state`；旧原始事件继续沿用既有 UI 展示。更新 Admin API/frontend 文案与测试：现有 reconstruction 只保证 cutover 后 native messages 正确，不宣称包含 tools schema 的完整请求取证，也不为 pre-cutover 请求增加 detection、legacy reconstruction 或特殊响应分支。
 - 将迁移程序所需的 legacy rendering 与 runtime 隔离；迁移完成并验证后删除 runtime 的 XML tool-call parser、formatter、调用语法 prompt 和专属测试。
 - 更新 tools、engine、history、compaction、execution lifecycle 等活动架构文档。
@@ -474,8 +473,8 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 1. 先完成并验证 native 分支、一次性迁移程序和目标端点 smoke，不部署新 runtime。
 2. 进入维护窗口，以维护页阻断新业务/API/SSE；等待 active executions 清空。
 3. 停止全部 backend 实例，确认没有应用 writer 后完成数据库快照。此后旧 runtime 不再启动，除迁移程序外数据库保持静止。
-4. 扫描全部 leaf/agent，以 checkpoint 生成 active semantic、全 leaf mechanical 与 subagent reset 候选；持续报告进度和 ETA，semantic 失败选择 mechanical fallback。
-5. 全部 leaf/agent 均有最终候选后按确定性完整 pair 执行 apply，幂等重试，并校验每个 leaf/agent 至少一个成功 boundary。
+4. 扫描全部 leaf，以 checkpoint 生成 active semantic 与全 leaf mechanical 候选；持续报告进度和 ETA，semantic 失败选择 mechanical fallback。
+5. 全部 leaf 的 lead 均有最终候选后按确定性完整 pair 执行 apply，幂等重试，并校验每个 leaf 至少一个成功 lead boundary。
 6. 校验全部通过后部署 native runtime，在维护状态下完成 smoke；失败时停止新 runtime 并从数据库快照恢复旧版本，不启用双 runtime。
 
 ### 不包含
@@ -486,8 +485,9 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 
 ### 验收
 
-- 所有扫描到的 leaf/agent 都至少有一个可验证的成功 boundary；semantic 失败稳定回退 mechanical，任一 boundary 覆盖或 apply 失败都不会进入 native 部署；同一任务重试不会生成重复 pair。
-- Active leaf 优先从语义摘要继续当前工作，其他 leaf 至少从机械 user/final transcript 继续；新 runtime 不读取 boundary 之前的 XML event。
+- 所有扫描到的 leaf 都至少有一个可验证的成功 lead boundary；semantic 失败稳定回退 mechanical，任一 boundary 覆盖或 apply 失败都不会进入 native 部署；同一任务重试不会生成重复 pair。
+- Active leaf 的 lead 优先从语义摘要继续当前工作，其他 leaf 的 lead 至少从机械 user/final transcript 继续；lead 不读取 boundary 之前的 XML event。
+- Subagent 默认 `fresh_start=true` 的调用从新 instruction 开始；首次显式 `fresh_start=false` 延续迁移前 session 不作跨迁移上下文质量保证。
 - Checkpoint 中断后可 resume，已完成的 generate task 不重复模型调用；apply 提交结果不确定时凭确定性 event id 幂等重试。迁移期间 backend 保持停机，不存在在线写入复核路径。
 - 代码库中不再存在运行时 XML tool-call 协议路径；离线迁移代码不会被 runtime import。
 - 全量测试通过，目标私有端点 smoke 通过。
@@ -515,7 +515,7 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 | Compaction | 摘要后保留最新真实 assistant content/reasoning/tool calls 和未压缩 tool results |
 | Cancel/timeout/error | cooperative、external、late cancel、shutdown/lease fencing 等持久化路径中的 accepted call id 均恰好一个完成结果 |
 | Subagent 中止 | caller 的 `call_subagent` 调用被失败闭合 |
-| 旧历史迁移 | Active leaf 优先 semantic、失败回退 mechanical，其他 leaf 使用 mechanical，subagent 使用 reset；全 leaf/agent 有 boundary，旧事件保持 append-only |
+| 旧历史迁移 | Active leaf lead 优先 semantic、失败回退 mechanical，其他 leaf lead 使用 mechanical；subagent 默认 fresh start，旧事件保持 append-only |
 | 停机迁移恢复 | 完全停机后 generate 可 checkpoint/resume 并报告 ETA；apply 使用确定性 event id 幂等追加完整 pair，不产生同任务重复 pair |
 | Admin reconstruction | Cutover 后请求按 native messages 正确重建；不宣称包含历史 tools schema，pre-cutover 结果无正确性保证且无 detection/特殊分支 |
 | 阶段 0 provider probe | 五个 DashScope 候选模型完成文本 tool-call/reasoning replay；Qwen、Kimi 完成单图/多图 synthetic carrier；报告区分协议 gate 与模型行为观察项 |
@@ -530,7 +530,8 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 | Thinking assistant 未回放或 LiteLLM provider mapping 漂移 | DeepSeek 等端点后续请求 400 | 完整 assistant envelope fixture + DeepSeek/DashScope/vLLM smoke；问题收敛在 LiteLLM/LLM adapter |
 | Provider 缺失 usage 时 fallback 漏算 reasoning/tool calls | Context 水位偏低，compaction 触发过晚 | 补全现有 assistant output estimate 的输入；不新增标记，也不承诺请求前精确预测 |
 | Semantic 摘要失败 | Active branch 当前工作丢失 | 自动回退已经生成的 mechanical summary；记录失败但不单独阻塞 cutover |
-| 迁移漏掉 leaf/agent | 存量对话无法继续或新 runtime 看到 legacy XML | 停机扫描、checkpoint、DB 快照、部署前全量 boundary 校验 |
+| 迁移漏掉 lead leaf | 存量分支无法继续或 lead 看到 legacy XML | 停机扫描、checkpoint、DB 快照、部署前全量 lead boundary 校验 |
+| 首次 subagent 调用跨迁移继续旧 session | 模型看到 legacy XML 文本或上下文过长 | 默认 `fresh_start=true` 形成自然边界；显式 `fresh_start=false` 仅作 best-effort，不增加迁移 reset machinery |
 | 完全停机迁移耗时超出维护窗口 | 服务不可用时间过长 | 阶段 0 先报告 semantic task 数量；有界并发、checkpoint/resume 与 rolling ETA；规模不可接受时在进入主体改造前重新评估方案 |
 | 维护期间仍有 backend writer | 扫描结果与 apply 目标漂移 | 维护页阻断新请求、等待 active executions 清空、停止全部 backend 实例后才允许扫描；迁移程序不实现在线竞态补丁 |
 | Progressive state 意外跨 agent 传播 | 扩大 schema/权限面并污染上下文 | metadata map 以 agent_name 为 key，read/search 仅更新调用者，授权实时求交 |
@@ -562,7 +563,7 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 - Per-agent deferred disclosure、unit catalog、skills、`__reason`、permissions、subagents、reasoning replay、multimodal、compaction 和取消语义均已迁移并有回归测试。
 - Runtime 无 XML tool-call parser、调用 grammar/tool-doc formatter 或调用语法 prompt 残留；独立的模型可读 XML-like tool-result renderer 明确保留且不参与解析。一次性迁移程序不被 runtime import，也不随服务发布。
 - 无协议 feature flag、legacy compatibility adapter 或自动 XML fallback。
-- 所有现存 leaf/agent 已按 semantic/mechanical/reset 规则追加成功 summary boundary；旧事件未被改写，native runtime 不读取 boundary 之前事件。
+- 所有现存 leaf 的 lead 已按 semantic/mechanical 规则追加成功 summary boundary；旧事件未被改写，lead 不读取 boundary 之前事件，subagent 依赖默认 fresh start 隔离旧 session。
 - 新增历史按完整 assistant/tool 协议闭合；任何事件持久化路径均不能留下 accepted orphan call。
 - Admin 只保证 cutover 后请求的 native messages reconstruction，不宣称精确还原 tools schema；pre-cutover 结果不保证正确且不增加识别、专属响应或 legacy 投影路径。
 - 目标私有推理端联调通过，失败路径有用户反馈和 ops 日志。
@@ -576,4 +577,4 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 | 2026-07-20 | 根据设计复核收敛：采用 per-agent progressive state、完整 reasoning 回放、固定 synthetic user reminder、文本 tool result + user image、所有持久化前统一闭合，以及离线 compaction boundary 迁移旧 leaf；明确不保存 schema 快照、不提供 legacy runtime。 |
 | 2026-07-27 | 明确 unit 轻量目录与 native schema 双投影；`reasoning_content` 作为内部统一字段并在唯一 LLM adapter/LiteLLM 边界验证；usage 正常路径保持现状；以 required-but-tolerant `__reason` 承接调用意图；MCP 保留原始 `inputSchema` 并从深拷贝派生模型 schema；保留并拆分 XML-like tool-result renderer；旧历史改为 active semantic + 全 leaf mechanical + subagent reset，并加入在线生成、SQLite checkpoint、有界并发、ETA 与停写复核；accepted call 增加非截断与结构完整性门槛；执行以本次 native tool-name 集合为闸；迁移 apply 降为完整 pair + best-effort resume，允许重复成功 boundary；admin 仅保证 cutover 后 messages reconstruction。 |
 | 2026-07-28 | 删除无收益的 reasoning breakdown、usage estimate 标记、finish-reason 事件字段、parser warnings 迁移、boundary 半对检测与过细 checkpoint 指标；compaction carry 改为从事件结构推导，`search_tools` 沿用现有 ToolResult 协议；阶段 0 增加五个 DashScope 模型的独立 native protocol probe，并覆盖 reasoning 原样回放、`__reason`、多调用和 Qwen/Kimi 图片 carrier，阶段 5 再做 ArtifactFlow/raw vLLM 完整链路验收。 |
-| 2026-07-29 | 迁移执行改为完全停机：维护页阻断新请求、drain active executions、停止全部 backend writer、数据库快照后再 scan/generate/apply/verify；删除在线预生成、head fingerprint、停写重扫和变化 leaf 补算。Checkpoint 仅承担停机窗口内摘要任务恢复，task key 增加 `summary_kind`；boundary pair 使用确定性 event id + 单事务实现幂等重试。阶段 0 已实现五模型 probe、只读 scan/report、独立 checkpoint、cutover runbook 与 `afctl apply --keep-maintenance`；五模型 wire-protocol gate 通过。 |
+| 2026-07-29 | 迁移执行改为完全停机：维护页阻断新请求、drain active executions、停止全部 backend writer、数据库快照后再 scan/generate/apply/verify；删除在线预生成、head fingerprint、停写重扫和变化 leaf 补算。Checkpoint 仅承担停机窗口内摘要任务恢复，task key 增加 `summary_kind`；boundary pair 使用确定性 event id + 单事务实现幂等重试。阶段 0 已实现五模型 probe、只读 scan/report、独立 checkpoint、cutover runbook 与 `afctl apply --keep-maintenance`；五模型 wire-protocol gate 通过。Review 后进一步将一次性迁移收敛为全 leaf lead boundary，删除 subagent 扫描/reset；subagent 默认 fresh start，首次跨迁移 `fresh_start=false` 仅作 best-effort。 |

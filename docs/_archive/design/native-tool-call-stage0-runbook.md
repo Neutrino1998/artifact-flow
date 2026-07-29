@@ -56,18 +56,23 @@ python -m tests.manual.native_tool_call_probe --models all \
 
 | 模型 | 文本闭环 | multi/content replay | image carrier | 结论 |
 |---|---|---|---|---|
-| `qwen3.7-plus` | pass | pass | 单图/多图消息均被接受 | 协议 pass；视觉内容准确率与调用遵循有观察项 |
+| `qwen3.7-plus` | pass | 未触发（optional pass） | 单图/多图消息均被接受 | 协议 pass；视觉内容准确率与调用遵循有观察项 |
 | `deepseek-v4-flash` | pass | pass | 不适用 | pass |
 | `glm-5.2` | pass | pass | 不适用 | pass |
 | `kimi-k2.6` | pass | pass | 单图/多图 pass | pass |
 | `MiniMax-M2.5` | pass | pass | 不适用 | pass |
 
 Qwen 在两次前置运行中曾把可选 multi 场景的函数名生成为未声明的
-`example_function_name`；最终完整运行可组装并回放，但这仍是模型行为稳定性观察项。
+`example_function_name`；最终完整运行没有产生 optional tool call，因此没有执行该场景的
+history replay，这仍是模型行为稳定性观察项。
 最终运行中 Qwen 接受了完整 assistant/tool/image/user 顺序并返回正常响应，但把合成图片
-`42`/`17,29` 读成了 `29`/`17,28`。探针因此把视觉内容准确率与 wire protocol
+`42`/`17,29` 读成了 `4`/`17,22`。探针因此把视觉内容准确率与 wire protocol
 兼容性分开：HTTP/流错误、空响应或 carrier 历史被拒绝仍会阻断，OCR 偏差只记录观察。
 Kimi 在同一图片上返回了正确数字。
+
+报告中的 probe hash 对应实际执行时的源码。后续 review 修复了 optional multi 在零个已组装
+call 时必须先检查 `protocol_errors` 的分支，但没有重跑在线模型；保存报告中所有 call 的
+`protocol_errors` 均为空，因此修复后的 gate 对这组已捕获响应结论不变。
 
 ## 停机迁移规模盘点
 
@@ -86,30 +91,36 @@ python scripts/native_tool_history_migration.py report \
 ```
 
 `report` 只有在 `ready_for_apply=true` 时退出 0；尚有 pending/running task、候选
-boundary 已耗尽、缺少 task row 或 reset 未成功时均退出 1。Semantic 单独失败仍可由
+boundary 已耗尽或缺少 task row 时均退出 1。Semantic 单独失败仍可由
 mechanical candidate 回退。
 
 扫描器会响亮拒绝：
 
 - active branch 缺失、悬空或不是 leaf；
 - message parent 缺失或形成环；
-- event 引用扫描结果中不存在的 message；
 - checkpoint 与应用 SQLite DB 指向同一文件。
 
 任务构造：
 
 - 所有 leaf：`lead_agent/mechanical`；
 - 每个 conversation 的 active leaf：额外 `lead_agent/semantic`；
-- leaf 路径中出现的每个非 lead agent：`reset`。
 
-同一 active lead 的 semantic 与 mechanical 是两个独立 checkpoint task。Semantic 失败本身不阻塞；只要 mechanical fallback 成功即可。非 active leaf 的 mechanical 失败、semantic/mechanical 同时失败或 reset 失败才会耗尽 boundary 候选。
+同一 active lead 的 semantic 与 mechanical 是两个独立 checkpoint task。所有已创建任务
+必须先进入 succeeded/failed 终态；之后 semantic 失败本身不阻塞，只要 mechanical
+fallback 成功即可。非 active leaf 的 mechanical 失败或 active leaf 的两个候选同时失败
+才会耗尽 boundary 候选。
+
+一次性迁移不扫描或压缩 subagent 历史。迁移后的 `call_subagent` 默认
+`fresh_start=true`，instruction 自然形成该 subagent 的历史边界；首次显式使用
+`fresh_start=false` 延续迁移前 session 仅作 best-effort，可能看到 legacy XML 文本或旧
+上下文过长。运行时正常的 per-agent compaction 不受影响。
 
 本地阶段 0 验证使用正在运行的 SQLite 的一致性 backup，而非直接扫描 live DB：
 
 ```text
 conversations=2, messages=2, leaves=2, active=2
-mechanical tasks=2, semantic tasks=2, reset tasks=0
-blocking=0
+mechanical tasks=2, semantic tasks=2
+unfinished tasks=4, exhausted boundaries=0, missing task rows=0
 ```
 
 更新后的 checkpoint schema 再次扫描同一快照得到相同规模；新建任务均为 pending，
@@ -155,10 +166,10 @@ sudo /opt/artifactflow/bin/afctl --root /opt/artifactflow \
 ### 5. Scan、generate、apply、verify
 
 1. 执行一次 `scan`，创建 immutable manifest/checkpoint；
-2. 生成全 leaf mechanical、active semantic 与 subagent reset；
+2. 生成全 leaf mechanical 与 active semantic；
 3. Semantic 失败自动选择 mechanical；
 4. 使用确定性 event ID，在一个事务中追加每个 START/SUMMARY pair；
-5. 验证所有 leaf/agent 都有可用 boundary；
+5. 验证所有 leaf 都有可用的 lead boundary；
 6. Backend 在全过程保持停止。
 
 Checkpoint 只负责停机期间模型任务的中断恢复。若进程崩溃，保持服务停机并使用 `--resume`；不要重启旧 backend 后继续复用 checkpoint。

@@ -630,6 +630,14 @@ async def run_multi_content(candidate: Candidate, timeout: float) -> dict[str, A
             candidate=candidate, messages=messages, tools=tools, timeout=timeout
         )
         calls.append(first.report())
+        errors = list(first.protocol_errors)
+        if errors:
+            return {
+                "status": "fail",
+                "errors": errors,
+                "observations": observations,
+                "calls": calls,
+            }
         if not first.tool_calls:
             return {
                 "status": "pass",
@@ -641,7 +649,6 @@ async def run_multi_content(candidate: Candidate, timeout: float) -> dict[str, A
         # adherence. A structurally valid call to an undeclared name is a
         # model-behavior observation: the runtime can return a bound failure
         # result, so replay that same envelope here.
-        errors = list(first.protocol_errors)
         allowed_names = {"probe_alpha", "probe_beta"}
         for call in first.tool_calls:
             if call["function"]["name"] not in allowed_names:

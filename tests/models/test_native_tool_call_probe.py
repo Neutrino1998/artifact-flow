@@ -145,6 +145,31 @@ def test_error_redaction_covers_api_keys_and_data_uris(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "protocol_error",
+    [
+        "tool call 0 arguments are not valid JSON",
+        "stream failed: connection interrupted",
+    ],
+)
+async def test_optional_multi_rejects_protocol_error_without_calls(
+    monkeypatch, protocol_error
+):
+    async def malformed_call(**kwargs):
+        return CallCapture(protocol_errors=[protocol_error])
+
+    monkeypatch.setattr(probe, "stream_call", malformed_call)
+
+    result = await probe.run_multi_content(
+        Candidate(alias="probe", model="probe/model"), timeout=1
+    )
+
+    assert result["status"] == "fail"
+    assert result["errors"] == [protocol_error]
+    assert "optional multi-call shape" not in " ".join(result["observations"])
+
+
+@pytest.mark.asyncio
 async def test_candidate_gate_rejects_optional_multi_protocol_failure(monkeypatch):
     async def passing_minimal(candidate, timeout):
         return {"status": "pass"}

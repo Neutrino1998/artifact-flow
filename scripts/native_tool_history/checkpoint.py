@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import sqlite3
 from collections import Counter
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from utils.time import utc_now
 
 from .manifest import ScanResult
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 TASK_STATUSES = frozenset({"pending", "running", "succeeded", "failed"})
 
 
@@ -46,7 +47,6 @@ class Checkpoint:
                     source_database_kind TEXT NOT NULL,
                     conversations INTEGER NOT NULL,
                     messages INTEGER NOT NULL,
-                    event_agent_links INTEGER NOT NULL,
                     empty_conversations INTEGER NOT NULL,
                     status TEXT NOT NULL CHECK (
                         status IN ('scanned', 'generating', 'ready', 'applied')
@@ -59,7 +59,6 @@ class Checkpoint:
                     leaf_message_id TEXT NOT NULL,
                     is_active_branch INTEGER NOT NULL CHECK (is_active_branch IN (0, 1)),
                     path_message_count INTEGER NOT NULL CHECK (path_message_count > 0),
-                    agent_count INTEGER NOT NULL CHECK (agent_count > 0),
                     PRIMARY KEY (migration_id, conversation_id, leaf_message_id),
                     FOREIGN KEY (migration_id) REFERENCES migration_runs(migration_id)
                         ON DELETE CASCADE
@@ -69,11 +68,9 @@ class Checkpoint:
                     migration_id TEXT NOT NULL,
                     conversation_id TEXT NOT NULL,
                     leaf_message_id TEXT NOT NULL,
-                    agent_name TEXT NOT NULL,
                     summary_kind TEXT NOT NULL CHECK (
-                        summary_kind IN ('semantic', 'mechanical', 'reset')
+                        summary_kind IN ('semantic', 'mechanical')
                     ),
-                    is_active_branch INTEGER NOT NULL CHECK (is_active_branch IN (0, 1)),
                     status TEXT NOT NULL DEFAULT 'pending' CHECK (
                         status IN ('pending', 'running', 'succeeded', 'failed')
                     ),
@@ -94,7 +91,7 @@ class Checkpoint:
                     ),
                     PRIMARY KEY (
                         migration_id, conversation_id, leaf_message_id,
-                        agent_name, summary_kind
+                        summary_kind
                     ),
                     FOREIGN KEY (
                         migration_id, conversation_id, leaf_message_id
@@ -132,17 +129,15 @@ class Checkpoint:
                     """
                     INSERT INTO migration_runs (
                         migration_id, created_at, source_database_kind,
-                        conversations, messages, event_agent_links,
-                        empty_conversations, status
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'scanned')
+                        conversations, messages, empty_conversations, status
+                    ) VALUES (?, ?, ?, ?, ?, ?, 'scanned')
                     """,
                     (
                         migration_id,
-                        datetime.now(timezone.utc).isoformat(),
+                        utc_now().isoformat(),
                         source_database_kind,
                         scan.conversations,
                         scan.messages,
-                        scan.event_agent_links,
                         scan.empty_conversations,
                     ),
                 )
@@ -150,8 +145,8 @@ class Checkpoint:
                     """
                     INSERT INTO manifest_leaves (
                         migration_id, conversation_id, leaf_message_id,
-                        is_active_branch, path_message_count, agent_count
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                        is_active_branch, path_message_count
+                    ) VALUES (?, ?, ?, ?, ?)
                     """,
                     [
                         (
@@ -160,7 +155,6 @@ class Checkpoint:
                             leaf.leaf_message_id,
                             int(leaf.is_active_branch),
                             leaf.path_message_count,
-                            len(leaf.agents),
                         )
                         for leaf in scan.leaves
                     ],
@@ -169,17 +163,15 @@ class Checkpoint:
                     """
                     INSERT INTO summary_tasks (
                         migration_id, conversation_id, leaf_message_id,
-                        agent_name, summary_kind, is_active_branch
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                        summary_kind
+                    ) VALUES (?, ?, ?, ?)
                     """,
                     [
                         (
                             migration_id,
                             task.conversation_id,
                             task.leaf_message_id,
-                            task.agent_name,
                             task.summary_kind,
-                            int(task.is_active_branch),
                         )
                         for task in scan.tasks
                     ],
@@ -196,7 +188,6 @@ class Checkpoint:
         migration_id: str,
         conversation_id: str,
         leaf_message_id: str,
-        agent_name: str,
         summary_kind: str,
         status: str,
         attempts: int,
@@ -227,7 +218,7 @@ class Checkpoint:
                 UPDATE summary_tasks
                 SET status = ?, attempts = ?, summary_content = ?, error = ?
                 WHERE migration_id = ? AND conversation_id = ?
-                  AND leaf_message_id = ? AND agent_name = ? AND summary_kind = ?
+                  AND leaf_message_id = ? AND summary_kind = ?
                 """,
                 (
                     status,
@@ -237,7 +228,6 @@ class Checkpoint:
                     migration_id,
                     conversation_id,
                     leaf_message_id,
-                    agent_name,
                     summary_kind,
                 ),
             )
@@ -257,8 +247,7 @@ class Checkpoint:
                 """
                 SELECT COUNT(*) AS total,
                        SUM(is_active_branch) AS active,
-                       MAX(path_message_count) AS max_path_messages,
-                       MAX(agent_count) AS max_agents
+                       MAX(path_message_count) AS max_path_messages
                 FROM manifest_leaves WHERE migration_id = ?
                 """,
                 (migration_id,),
@@ -273,16 +262,14 @@ class Checkpoint:
             ).fetchall()
             leaf_rows = conn.execute(
                 """
-                SELECT conversation_id, leaf_message_id, is_active_branch,
-                       agent_count
+                SELECT conversation_id, leaf_message_id, is_active_branch
                 FROM manifest_leaves WHERE migration_id = ?
                 """,
                 (migration_id,),
             ).fetchall()
             all_tasks = conn.execute(
                 """
-                SELECT conversation_id, leaf_message_id, agent_name,
-                       summary_kind, status
+                SELECT conversation_id, leaf_message_id, summary_kind, status
                 FROM summary_tasks WHERE migration_id = ?
                 """,
                 (migration_id,),
@@ -291,7 +278,6 @@ class Checkpoint:
         by_kind: dict[str, Counter[str]] = {
             "mechanical": Counter(),
             "semantic": Counter(),
-            "reset": Counter(),
         }
         for row in task_rows:
             by_kind[row["summary_kind"]][row["status"]] = row["count"]
@@ -304,15 +290,12 @@ class Checkpoint:
 
         missing_required_task_rows = 0
         exhausted_leaf_boundaries = 0
-        failed_reset_tasks = 0
-        ready_for_apply = True
         for leaf in leaf_rows:
             key = (leaf["conversation_id"], leaf["leaf_message_id"])
             leaf_tasks = tasks_by_leaf.get(key, [])
             lead = {
                 task["summary_kind"]: task["status"]
                 for task in leaf_tasks
-                if task["agent_name"] == "lead_agent"
             }
             required_lead_kinds = {"mechanical"}
             if leaf["is_active_branch"]:
@@ -325,31 +308,20 @@ class Checkpoint:
                 }
                 if candidate_statuses <= {None, "failed"}:
                     exhausted_leaf_boundaries += 1
-                if "succeeded" not in candidate_statuses:
-                    ready_for_apply = False
             else:
                 mechanical_status = lead.get("mechanical")
                 if mechanical_status == "failed":
                     exhausted_leaf_boundaries += 1
-                if mechanical_status != "succeeded":
-                    ready_for_apply = False
 
-            resets = [
-                task for task in leaf_tasks if task["summary_kind"] == "reset"
-            ]
-            expected_resets = max(leaf["agent_count"] - 1, 0)
-            if len(resets) < expected_resets:
-                missing_required_task_rows += expected_resets - len(resets)
-            failed_reset_tasks += sum(
-                task["status"] == "failed" for task in resets
-            )
-            if len(resets) != expected_resets or any(
-                task["status"] != "succeeded" for task in resets
-            ):
-                ready_for_apply = False
-
-        if missing_required_task_rows:
-            ready_for_apply = False
+        unfinished_tasks = sum(
+            counter["pending"] + counter["running"]
+            for counter in by_kind.values()
+        )
+        ready_for_apply = (
+            missing_required_task_rows == 0
+            and exhausted_leaf_boundaries == 0
+            and unfinished_tasks == 0
+        )
         return {
             "migration_id": migration_id,
             "created_at": run["created_at"],
@@ -358,14 +330,12 @@ class Checkpoint:
             "source": {
                 "conversations": run["conversations"],
                 "messages": run["messages"],
-                "event_agent_links": run["event_agent_links"],
                 "empty_conversations": run["empty_conversations"],
             },
             "leaves": {
                 "total": leaves["total"] or 0,
                 "active": leaves["active"] or 0,
                 "max_path_messages": leaves["max_path_messages"] or 0,
-                "max_agents": leaves["max_agents"] or 0,
             },
             "tasks": {
                 kind: dict(sorted(counter.items()))
@@ -377,7 +347,7 @@ class Checkpoint:
             "blocking": {
                 "missing_required_task_rows": missing_required_task_rows,
                 "exhausted_leaf_boundaries": exhausted_leaf_boundaries,
-                "failed_reset_tasks": failed_reset_tasks,
+                "unfinished_tasks": unfinished_tasks,
             },
             "ready_for_apply": ready_for_apply,
         }

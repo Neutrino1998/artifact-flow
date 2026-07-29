@@ -87,7 +87,7 @@ async def _source_database(tmp_path: Path) -> str:
 
 
 @pytest.mark.asyncio
-async def test_stopped_scan_enumerates_leaf_agents_and_candidate_kinds(tmp_path):
+async def test_stopped_scan_enumerates_leaf_lead_candidate_kinds(tmp_path):
     scan = await scan_database(await _source_database(tmp_path))
 
     assert scan.conversations == 2
@@ -97,24 +97,16 @@ async def test_stopped_scan_enumerates_leaf_agents_and_candidate_kinds(tmp_path)
     by_leaf = {leaf.leaf_message_id: leaf for leaf in scan.leaves}
     assert by_leaf["leaf-active"].is_active_branch is True
     assert by_leaf["leaf-active"].path_message_count == 3
-    assert by_leaf["leaf-active"].agents == (
-        "lead_agent",
-        "explore_agent",
-        "research_agent",
-    )
-    assert by_leaf["leaf-other"].agents == ("lead_agent", "research_agent")
 
     task_keys = {
-        (task.leaf_message_id, task.agent_name, task.summary_kind)
+        (task.leaf_message_id, task.summary_kind)
         for task in scan.tasks
     }
-    assert ("leaf-active", "lead_agent", "mechanical") in task_keys
-    assert ("leaf-active", "lead_agent", "semantic") in task_keys
-    assert ("leaf-other", "lead_agent", "mechanical") in task_keys
-    assert ("leaf-other", "lead_agent", "semantic") not in task_keys
-    assert ("leaf-active", "explore_agent", "reset") in task_keys
-    assert ("leaf-active", "research_agent", "reset") in task_keys
-    assert ("leaf-other", "research_agent", "reset") in task_keys
+    assert task_keys == {
+        ("leaf-active", "mechanical"),
+        ("leaf-active", "semantic"),
+        ("leaf-other", "mechanical"),
+    }
 
 
 @pytest.mark.asyncio
@@ -129,16 +121,14 @@ async def test_checkpoint_keeps_semantic_and_mechanical_as_distinct_resume_tasks
         "total": 2,
         "active": 1,
         "max_path_messages": 3,
-        "max_agents": 3,
     }
     assert report["tasks"]["mechanical"] == {"pending": 2}
     assert report["tasks"]["semantic"] == {"pending": 1}
-    assert report["tasks"]["reset"] == {"pending": 3}
     assert report["observations"] == {"failed_tasks": 0}
     assert report["blocking"] == {
         "missing_required_task_rows": 0,
         "exhausted_leaf_boundaries": 0,
-        "failed_reset_tasks": 0,
+        "unfinished_tasks": 3,
     }
     assert report["ready_for_apply"] is False
 
@@ -146,7 +136,6 @@ async def test_checkpoint_keeps_semantic_and_mechanical_as_distinct_resume_tasks
         migration_id="migration-1",
         conversation_id="conv-1",
         leaf_message_id="leaf-active",
-        agent_name="lead_agent",
         summary_kind="semantic",
         status="failed",
         attempts=2,
@@ -156,7 +145,11 @@ async def test_checkpoint_keeps_semantic_and_mechanical_as_distinct_resume_tasks
     assert failed_report["observations"]["failed_tasks"] == 1
     # Semantic failure alone is non-blocking: the mechanical task is its
     # deterministic fallback and remains independently resumable.
-    assert not any(failed_report["blocking"].values())
+    assert failed_report["blocking"] == {
+        "missing_required_task_rows": 0,
+        "exhausted_leaf_boundaries": 0,
+        "unfinished_tasks": 2,
+    }
 
     for task in scan.tasks:
         if task.summary_kind == "semantic":
@@ -165,7 +158,6 @@ async def test_checkpoint_keeps_semantic_and_mechanical_as_distinct_resume_tasks
             migration_id="migration-1",
             conversation_id=task.conversation_id,
             leaf_message_id=task.leaf_message_id,
-            agent_name=task.agent_name,
             summary_kind=task.summary_kind,
             status="succeeded",
             attempts=1,
@@ -184,7 +176,6 @@ async def test_checkpoint_keeps_semantic_and_mechanical_as_distinct_resume_tasks
             migration_id="migration-1",
             conversation_id="conv-1",
             leaf_message_id="leaf-active",
-            agent_name="lead_agent",
             summary_kind="mechanical",
             status="succeeded",
             attempts=1,
@@ -192,7 +183,7 @@ async def test_checkpoint_keeps_semantic_and_mechanical_as_distinct_resume_tasks
 
 
 @pytest.mark.asyncio
-async def test_report_detects_missing_reset_task_row(tmp_path):
+async def test_report_detects_missing_required_lead_task_row(tmp_path):
     scan = await scan_database(await _source_database(tmp_path))
     path = tmp_path / "checkpoint.sqlite"
     checkpoint = Checkpoint(path)
@@ -203,15 +194,40 @@ async def test_report_detects_missing_reset_task_row(tmp_path):
             """
             DELETE FROM summary_tasks
             WHERE migration_id = 'migration-1'
-              AND leaf_message_id = 'leaf-active'
-              AND agent_name = 'explore_agent'
-              AND summary_kind = 'reset'
+              AND leaf_message_id = 'leaf-other'
+              AND summary_kind = 'mechanical'
             """
         )
 
     report = checkpoint.report("migration-1")
 
     assert report["blocking"]["missing_required_task_rows"] == 1
+    assert report["ready_for_apply"] is False
+
+
+@pytest.mark.asyncio
+async def test_report_blocks_while_optional_candidate_is_unfinished(tmp_path):
+    scan = await scan_database(await _source_database(tmp_path))
+    checkpoint = Checkpoint(tmp_path / "checkpoint.sqlite")
+    checkpoint.create_scan("migration-1", "sqlite", scan)
+
+    for task in scan.tasks:
+        if task.summary_kind == "semantic":
+            continue
+        checkpoint.set_task_result(
+            migration_id="migration-1",
+            conversation_id=task.conversation_id,
+            leaf_message_id=task.leaf_message_id,
+            summary_kind=task.summary_kind,
+            status="succeeded",
+            attempts=1,
+            summary_content="mechanical boundary",
+        )
+
+    report = checkpoint.report("migration-1")
+
+    assert report["blocking"]["unfinished_tasks"] == 1
+    assert report["blocking"]["exhausted_leaf_boundaries"] == 0
     assert report["ready_for_apply"] is False
 
 
@@ -223,7 +239,7 @@ def test_manifest_rejects_non_leaf_active_branch():
     ]
 
     with pytest.raises(ManifestError, match="is not a leaf"):
-        build_manifest(conversations, messages, [])
+        build_manifest(conversations, messages)
 
 
 def test_manifest_rejects_parent_cycle_even_if_other_component_has_a_leaf():
@@ -236,37 +252,58 @@ def test_manifest_rejects_parent_cycle_even_if_other_component_has_a_leaf():
     ]
 
     with pytest.raises(ManifestError, match="parent cycle"):
-        build_manifest(conversations, messages, [])
+        build_manifest(conversations, messages)
+
+
+def test_manifest_resolves_long_linear_history_without_path_copies():
+    count = 5_000
+    messages = [
+        SourceMessage(
+            f"message-{index}",
+            "conv",
+            None if index == 0 else f"message-{index - 1}",
+        )
+        for index in range(count)
+    ]
+
+    scan = build_manifest(
+        [SourceConversation("conv", f"message-{count - 1}")],
+        messages,
+    )
+
+    assert len(scan.leaves) == 1
+    assert scan.leaves[0].path_message_count == count
+    assert {task.summary_kind for task in scan.tasks} == {
+        "mechanical",
+        "semantic",
+    }
 
 
 @pytest.mark.parametrize(
-    ("conversations", "messages", "event_agents", "error"),
+    ("conversations", "messages", "error"),
     [
         (
             [SourceConversation("conv", "missing")],
             [SourceMessage("leaf", "conv", None)],
-            [],
             "dangling active_branch",
         ),
         (
             [SourceConversation("conv", "leaf")],
             [SourceMessage("leaf", "conv", "missing-parent")],
-            [],
             "references missing parent",
         ),
         (
-            [SourceConversation("conv", "leaf")],
-            [SourceMessage("leaf", "conv", None)],
-            [("missing-message", "research_agent")],
-            "event agent link references missing message",
+            [],
+            [SourceMessage("leaf", "missing-conversation", None)],
+            "references missing conversation",
         ),
     ],
 )
 def test_manifest_rejects_invalid_stopped_source(
-    conversations, messages, event_agents, error
+    conversations, messages, error
 ):
     with pytest.raises(ManifestError, match=error):
-        build_manifest(conversations, messages, event_agents)
+        build_manifest(conversations, messages)
 
 
 def test_checkpoint_must_not_be_source_sqlite(tmp_path):
@@ -277,3 +314,12 @@ def test_checkpoint_must_not_be_source_sqlite(tmp_path):
         _assert_separate_checkpoint(source, url)
 
     _assert_separate_checkpoint(tmp_path / "checkpoint.sqlite", url)
+
+
+def test_checkpoint_rejects_obsolete_schema(tmp_path):
+    path = tmp_path / "checkpoint.sqlite"
+    with sqlite3.connect(path) as conn:
+        conn.execute("PRAGMA user_version=1")
+
+    with pytest.raises(CheckpointError, match="unsupported checkpoint schema version 1"):
+        Checkpoint(path).initialize()

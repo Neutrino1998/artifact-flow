@@ -1,4 +1,4 @@
-"""Read-only leaf/agent inventory for the fully stopped cutover database."""
+"""Read-only lead-history inventory for the fully stopped cutover database."""
 
 from __future__ import annotations
 
@@ -6,14 +6,13 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Iterable
 
-from sqlalchemy import distinct, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
-from db.models import Conversation, Message, MessageEvent
+from db.models import Conversation, Message
 
 
-LEAD_AGENT = "lead_agent"
-SUMMARY_KINDS = frozenset({"semantic", "mechanical", "reset"})
+SUMMARY_KINDS = frozenset({"semantic", "mechanical"})
 
 
 class ManifestError(RuntimeError):
@@ -39,16 +38,13 @@ class LeafManifest:
     leaf_message_id: str
     is_active_branch: bool
     path_message_count: int
-    agents: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class SummaryTask:
     conversation_id: str
     leaf_message_id: str
-    agent_name: str
     summary_kind: str
-    is_active_branch: bool
 
     def __post_init__(self) -> None:
         if self.summary_kind not in SUMMARY_KINDS:
@@ -59,28 +55,27 @@ class SummaryTask:
 class ScanResult:
     conversations: int
     messages: int
-    event_agent_links: int
     empty_conversations: int
     leaves: tuple[LeafManifest, ...]
     tasks: tuple[SummaryTask, ...]
 
 
-def _resolve_paths(
+def _resolve_depths(
     conversation_id: str,
     messages: dict[str, SourceMessage],
-) -> dict[str, tuple[str, ...]]:
-    """Resolve root→message paths and fail loudly on orphan/cycle corruption."""
-    cache: dict[str, tuple[str, ...]] = {}
+) -> dict[str, int]:
+    """Resolve root→message depths and fail loudly on orphan/cycle corruption."""
+    cache: dict[str, int] = {}
     for start in messages:
         if start in cache:
             continue
         chain: list[str] = []
         positions: dict[str, int] = {}
         current: str | None = start
-        prefix: tuple[str, ...] = ()
+        prefix_depth = 0
         while current is not None:
             if current in cache:
-                prefix = cache[current]
+                prefix_depth = cache[current]
                 break
             if current in positions:
                 cycle = chain[positions[current]:] + [current]
@@ -98,20 +93,18 @@ def _resolve_paths(
             current = message.parent_id
 
         for message_id in reversed(chain):
-            prefix = prefix + (message_id,)
-            cache[message_id] = prefix
+            prefix_depth += 1
+            cache[message_id] = prefix_depth
     return cache
 
 
 def build_manifest(
     conversations: Iterable[SourceConversation],
     messages: Iterable[SourceMessage],
-    event_agents: Iterable[tuple[str, str]],
 ) -> ScanResult:
     """Build the immutable stopped-database manifest and summary task roster."""
     conversation_rows = list(conversations)
     message_rows = list(messages)
-    event_agent_rows = list(event_agents)
     conversation_map = {row.conversation_id: row for row in conversation_rows}
     by_conversation: dict[str, dict[str, SourceMessage]] = defaultdict(dict)
 
@@ -124,16 +117,6 @@ def build_manifest(
         if message.message_id in by_conversation[message.conversation_id]:
             raise ManifestError(f"duplicate message id {message.message_id!r}")
         by_conversation[message.conversation_id][message.message_id] = message
-
-    agents_by_message: dict[str, set[str]] = defaultdict(set)
-    all_message_ids = {message.message_id for message in message_rows}
-    for message_id, agent_name in event_agent_rows:
-        if message_id not in all_message_ids:
-            raise ManifestError(
-                f"event agent link references missing message {message_id!r}"
-            )
-        if agent_name:
-            agents_by_message[message_id].add(agent_name)
 
     leaves: list[LeafManifest] = []
     tasks: list[SummaryTask] = []
@@ -162,7 +145,7 @@ def build_manifest(
                 f"{conversation.active_branch!r}"
             )
 
-        paths = _resolve_paths(conversation.conversation_id, conv_messages)
+        depths = _resolve_depths(conversation.conversation_id, conv_messages)
         parent_ids = {
             message.parent_id
             for message in conv_messages.values()
@@ -180,59 +163,34 @@ def build_manifest(
             )
 
         for leaf_id in leaf_ids:
-            path = paths[leaf_id]
-            path_agents = {LEAD_AGENT}
-            for message_id in path:
-                path_agents.update(agents_by_message.get(message_id, set()))
-            ordered_agents = tuple(
-                [LEAD_AGENT]
-                + sorted(agent for agent in path_agents if agent != LEAD_AGENT)
-            )
             is_active = leaf_id == conversation.active_branch
             leaves.append(LeafManifest(
                 conversation_id=conversation.conversation_id,
                 leaf_message_id=leaf_id,
                 is_active_branch=is_active,
-                path_message_count=len(path),
-                agents=ordered_agents,
+                path_message_count=depths[leaf_id],
             ))
             tasks.append(SummaryTask(
                 conversation_id=conversation.conversation_id,
                 leaf_message_id=leaf_id,
-                agent_name=LEAD_AGENT,
                 summary_kind="mechanical",
-                is_active_branch=is_active,
             ))
             if is_active:
                 tasks.append(SummaryTask(
                     conversation_id=conversation.conversation_id,
                     leaf_message_id=leaf_id,
-                    agent_name=LEAD_AGENT,
                     summary_kind="semantic",
-                    is_active_branch=True,
-                ))
-            for agent_name in ordered_agents:
-                if agent_name == LEAD_AGENT:
-                    continue
-                tasks.append(SummaryTask(
-                    conversation_id=conversation.conversation_id,
-                    leaf_message_id=leaf_id,
-                    agent_name=agent_name,
-                    summary_kind="reset",
-                    is_active_branch=is_active,
                 ))
 
     leaves.sort(key=lambda leaf: (leaf.conversation_id, leaf.leaf_message_id))
     tasks.sort(key=lambda task: (
         task.conversation_id,
         task.leaf_message_id,
-        task.agent_name,
         task.summary_kind,
     ))
     return ScanResult(
         conversations=len(conversation_rows),
         messages=len(message_rows),
-        event_agent_links=len(event_agent_rows),
         empty_conversations=empty_conversations,
         leaves=tuple(leaves),
         tasks=tuple(tasks),
@@ -256,16 +214,6 @@ async def scan_database(database_url: str) -> ScanResult:
                     .order_by(Message.conversation_id, Message.id)
                 )
             ).all()
-            event_agent_rows = (
-                await session.execute(
-                    select(
-                        distinct(MessageEvent.message_id),
-                        MessageEvent.agent_name,
-                    )
-                    .where(MessageEvent.agent_name.is_not(None))
-                    .order_by(MessageEvent.message_id, MessageEvent.agent_name)
-                )
-            ).all()
     finally:
         await engine.dispose()
 
@@ -285,10 +233,4 @@ async def scan_database(database_url: str) -> ScanResult:
             )
             for row in message_rows
         ),
-        (
-            (row[0], row.agent_name)
-            for row in event_agent_rows
-            if row.agent_name
-        ),
     )
-
