@@ -100,6 +100,22 @@ describe('fetchNotifications: schema validation', () => {
     expect(result).toHaveLength(1);
   });
 
+  test('keeps notification when backend serializes optional dates as null', async () => {
+    mockFetchJson(NOTIF_URL, [
+      {
+        id: 'n1',
+        severity: 'info',
+        title: 't',
+        body: 'b',
+        starts_at: null,
+        ends_at: null,
+        dismissible: true,
+      },
+    ]);
+    const result = await fetchNotifications(USER_ID);
+    expect(result.map((n) => n.id)).toEqual(['n1']);
+  });
+
   test('drops notification with missing required fields', async () => {
     mockFetchJson(NOTIF_URL, [
       { id: 'n1', severity: 'info' }, // missing title/body

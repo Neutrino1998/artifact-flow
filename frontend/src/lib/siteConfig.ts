@@ -98,8 +98,9 @@ type ParsedNotification = Omit<Notification, 'starts_at' | 'ends_at'> & {
 };
 
 function parseOptionalDate(value: unknown): number | undefined | null {
-  // 返回 undefined = 字段缺失（合法）；number = 解析成功；null = 字段存在但解析失败（拒绝整条）
-  if (value === undefined) return undefined;
+  // 后端响应 schema 会把未填写的 Optional 字段序列化为 null；它与字段缺失
+  // 都表示“没有时间边界”。返回 null 只保留给真正的坏值，用于拒绝整条通知。
+  if (value === undefined || value === null) return undefined;
   if (typeof value !== 'string') return null;
   const ms = Date.parse(value);
   return Number.isNaN(ms) ? null : ms;
