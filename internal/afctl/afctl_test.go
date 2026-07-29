@@ -112,6 +112,14 @@ func makeTarGz(t *testing.T, path string, files map[string]string) {
 }
 
 func makeAppBundle(t *testing.T, parent, id string) string {
+	return makeAppBundleWithInfra(t, parent, id, true)
+}
+
+func makeAppOnlyBundle(t *testing.T, parent, id string) string {
+	return makeAppBundleWithInfra(t, parent, id, false)
+}
+
+func makeAppBundleWithInfra(t *testing.T, parent, id string, withInfra bool) string {
 	t.Helper()
 	bundle := filepath.Join(parent, "bundle-"+id)
 	if err := os.MkdirAll(bundle, 0o755); err != nil {
@@ -131,9 +139,15 @@ func makeAppBundle(t *testing.T, parent, id string) string {
 		"artifactflow:" + id,
 		"artifactflow-frontend:" + id,
 		sandboxImage,
-		"artifactflow-caddy:sha256-" + strings.Repeat("a", 64),
-		"artifactflow-postgres:sha256-" + strings.Repeat("b", 64),
-		"artifactflow-redis:sha256-" + strings.Repeat("c", 64),
+	}
+	if withInfra {
+		makeTarGz(t, filepath.Join(bundle, "infra.tar.gz"), map[string]string{"images.txt": "infra"})
+		artifacts["infra"] = "infra.tar.gz"
+		images = append(images,
+			"artifactflow-caddy:sha256-"+strings.Repeat("a", 64),
+			"artifactflow-postgres:sha256-"+strings.Repeat("b", 64),
+			"artifactflow-redis:sha256-"+strings.Repeat("c", 64),
+		)
 	}
 	if err := WriteManifest(ManifestOptions{Bundle: bundle, ReleaseID: id, Kind: "app", Platform: "linux/" + runtime.GOARCH, Source: "test", SandboxImage: sandboxImage, Images: images, Artifacts: artifacts}); err != nil {
 		t.Fatal(err)
@@ -424,6 +438,139 @@ func TestManifestRejectsMutableRuntimeImageReferences(t *testing.T) {
 	}
 	if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), "content-addressed artifactflow-caddy") {
 		t.Fatalf("expected mutable infra rejection, got %v", err)
+	}
+}
+
+func TestAppOnlyManifestDeclaresNoInfrastructure(t *testing.T) {
+	bundle := makeAppOnlyBundle(t, t.TempDir(), "v2")
+	manifest, err := LoadManifest(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Images) != 3 {
+		t.Fatalf("app-only images=%v", manifest.Images)
+	}
+	if _, ok := artifactByRole(manifest, "infra"); ok {
+		t.Fatal("app-only bundle unexpectedly carries an infra artifact")
+	}
+	for _, image := range manifest.Images {
+		if contentImagePattern.MatchString(image) {
+			t.Fatalf("app-only bundle unexpectedly declares infra image %s", image)
+		}
+	}
+}
+
+func TestManifestSupportsLegacyAppOnlyAndRequiresRefsForInfraArtifact(t *testing.T) {
+	full, err := LoadManifest(makeAppBundle(t, t.TempDir(), "v1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, artifact := range full.Artifacts {
+		if artifact.Role == "infra" {
+			full.Artifacts = append(full.Artifacts[:i], full.Artifacts[i+1:]...)
+			break
+		}
+	}
+	if err := full.Validate(); err != nil {
+		t.Fatalf("legacy six-image app-only manifest must remain readable: %v", err)
+	}
+
+	appOnly, err := LoadManifest(makeAppOnlyBundle(t, t.TempDir(), "v2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	appOnly.Artifacts = append(appOnly.Artifacts, Artifact{Role: "infra", File: "infra.tar.gz", SHA256: strings.Repeat("e", 64)})
+	if err := appOnly.Validate(); err == nil || !strings.Contains(err.Error(), "with infra artifact must declare exactly six") {
+		t.Fatalf("expected missing infra image rejection, got %v", err)
+	}
+}
+
+func TestAppOnlyRequiresCurrentReleaseAndInheritsItsInfra(t *testing.T) {
+	c, runner := newTestController(t)
+	appOnly := makeAppOnlyBundle(t, t.TempDir(), "v2")
+	if _, err := c.PlanApply(appOnly); err == nil || !strings.Contains(err.Error(), "requires an existing current release") {
+		t.Fatalf("expected first-apply app-only rejection, got %v", err)
+	}
+
+	if err := c.Apply(context.Background(), makeAppBundle(t, t.TempDir(), "v1")); err != nil {
+		t.Fatal(err)
+	}
+	v1, err := c.readRelease("v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCaddy, wantPostgres, wantRedis, err := infraImageRefs(v1.Images)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := LoadManifest(makeAppBundle(t, t.TempDir(), "legacy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, artifact := range legacy.Artifacts {
+		if artifact.Role == "infra" {
+			legacy.Artifacts = append(legacy.Artifacts[:i], legacy.Artifacts[i+1:]...)
+			break
+		}
+	}
+	for i, image := range legacy.Images {
+		switch {
+		case strings.HasPrefix(image, "artifactflow-caddy:"):
+			legacy.Images[i] = "caddy:2.10-alpine"
+		case strings.HasPrefix(image, "artifactflow-postgres:"):
+			legacy.Images[i] = "postgres:16-alpine"
+		case strings.HasPrefix(image, "artifactflow-redis:"):
+			legacy.Images[i] = "redis:7-alpine"
+		}
+	}
+	if err := legacy.Validate(); err != nil {
+		t.Fatalf("ignored legacy infra refs must not invalidate app-only: %v", err)
+	}
+	legacyImages, err := c.resolveAppImages(legacy, "v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyCaddy, legacyPostgres, legacyRedis, err := infraImageRefs(legacyImages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacyCaddy != wantCaddy || legacyPostgres != wantPostgres || legacyRedis != wantRedis {
+		t.Fatalf("legacy app-only manifest refs were not ignored: %v", legacyImages)
+	}
+
+	plan, err := c.PlanApply(appOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundInheritance := false
+	for _, action := range plan.Actions {
+		if action == "inherit infrastructure image references from current release v1" {
+			foundInheritance = true
+		}
+	}
+	if !foundInheritance {
+		t.Fatalf("plan did not disclose infra inheritance: %v", plan.Actions)
+	}
+
+	runner.commands = nil
+	if err := c.Apply(context.Background(), appOnly); err != nil {
+		t.Fatal(err)
+	}
+	v2, err := c.readRelease("v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotCaddy, gotPostgres, gotRedis, err := infraImageRefs(v2.Images)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotCaddy != wantCaddy || gotPostgres != wantPostgres || gotRedis != wantRedis {
+		t.Fatalf("app-only infra drifted: got=%v want=%v", []string{gotCaddy, gotPostgres, gotRedis}, []string{wantCaddy, wantPostgres, wantRedis})
+	}
+	for _, command := range runner.commands {
+		if command.Name == "docker" && len(command.Args) >= 3 && command.Args[0] == "load" && strings.Contains(command.Args[2], "infra") {
+			t.Fatalf("app-only apply loaded an infra archive: %v", command.Args)
+		}
 	}
 }
 

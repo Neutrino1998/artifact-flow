@@ -29,6 +29,11 @@ Release 脚本拒绝 staged、unstaged 和 untracked 文件。配置临时修改
 ./scripts/release.sh 1.4.1 --app-only --platform linux/amd64
 ```
 
+app-only bundle 不声明也不读取 Caddy、PostgreSQL 或 Redis 镜像；目标机物化
+Release 时从当前已成功 Release 继承这三项精确引用。没有 current Release 的新
+站点会拒绝 app-only，首包必须使用 `--with-infra`。若要升级任一基础设施镜像，
+同样必须改用 `--with-infra`，使新镜像随 Release 一起进入离线包。
+
 输出包括：
 
 ```text
