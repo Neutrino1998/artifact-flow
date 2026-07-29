@@ -95,6 +95,10 @@ host:
 ./scripts/release.sh <version> --platform linux/arm64 --app-only
 ```
 
+app-only 构建不读取 Caddy、PostgreSQL 或 Redis 的上游标签；目标机物化新
+Release 时从 current Release 继承已经加载的精确镜像引用。没有 current Release
+的新站点会拒绝 app-only，首包必须使用 `--with-infra`。
+
 For the first deployment, include the pinned Caddy, PostgreSQL, and Redis
 images:
 
