@@ -1,6 +1,7 @@
 """HttpTool 运行期凭证注入(B-4;B-5 lazy):resolver 按 unit 解密路径 + env 回落 + 缺凭证。"""
 
 import os
+import ssl
 from unittest.mock import patch
 
 import pytest
@@ -24,9 +25,10 @@ class _CapturingResponse:
 class _CapturingClient:
     """捕获最后一次请求的 url/headers,断言凭证已被替换进出站请求。"""
     last = {}
+    init = {}
 
     def __init__(self, *args, **kwargs):
-        pass
+        _CapturingClient.init = kwargs
 
     async def __aenter__(self):
         return self
@@ -42,6 +44,7 @@ class _CapturingClient:
 @pytest.fixture
 def _fake_client(monkeypatch):
     _CapturingClient.last = {}
+    _CapturingClient.init = {}
     monkeypatch.setattr("tools.custom.http_tool.httpx.AsyncClient", _CapturingClient)
 
 
@@ -80,6 +83,11 @@ async def test_resolved_credentials_substituted_into_request(_fake_client):
     assert result.success is True
     assert _CapturingClient.last["url"] == "https://host.local/api"
     assert _CapturingClient.last["headers"]["Authorization"] == "Bearer live-key"
+    assert _CapturingClient.init["trust_env"] is False
+    context = _CapturingClient.init["verify"]
+    assert isinstance(context, ssl.SSLContext)
+    assert context.check_hostname is True
+    assert context.verify_mode == ssl.CERT_REQUIRED
 
 
 async def test_missing_credential_is_generic_error(_fake_client):

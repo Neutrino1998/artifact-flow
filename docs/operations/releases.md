@@ -79,7 +79,7 @@ Apply、rollback 和 config apply 共用一个 kernel advisory lock。不要并�
 
 `state.json` 是 current/previous 的唯一权威。没有需要同步的 `current` symlink 或第二状态文件。Release 目录是完整 effective snapshot，不应作为可写 bind mount，也不应手工修改。
 
-现场 `.env`、证书、欢迎/品牌静态内容和维护状态始终在 `control/`，不会随 Release 切换；在线通知保存在数据库中。
+现场 `.env`、入站证书、出站 CA 信任锚、欢迎/品牌静态内容和维护状态始终在 `control/`，不会随 Release 切换；在线通知保存在数据库中。
 
 ## 回滚
 
@@ -125,6 +125,8 @@ sudo /opt/artifactflow/bin/afctl --root /opt/artifactflow apply current
 ```
 
 静态证书轮换同样是在 `control/certs/` 原子替换证书和私钥后执行 `apply current`。
+内网 HTTPS Tool/MCP 的信任锚放在 `control/trust/ca-certificates/*.crt`；增加、
+替换或删除后同样执行 `apply current`，使所有 Backend 副本重建系统 CA bundle。
 
 `POSTGRES_*` 只参与空 volume 的首次初始化。已有数据库改密码时，必须先在 PostgreSQL 内修改账号密码，再同步 `.env` 中的 `POSTGRES_PASSWORD` 和应用 URL。
 

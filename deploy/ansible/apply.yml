@@ -97,6 +97,7 @@
       loop:
         - "{{ af_install_root }}/control"
         - "{{ af_install_root }}/control/certs"
+        - "{{ af_install_root }}/control/trust"
         - "{{ af_install_root }}/control/site"
         - "{{ af_install_root }}/control/caddy"
         - "{{ af_install_root }}/control/maintenance"
@@ -123,6 +124,32 @@
       when:
         - af_tls == 'static'
         - inventory_hostname in groups['lb']
+    # Stage then replace the whole directory. Incremental copy would leave a
+    # removed CA trusted on remote hosts indefinitely.
+    - name: Reset staged outbound CA directory
+      ansible.builtin.file:
+        path: "{{ af_install_root }}/control/trust/.ca-certificates.staging"
+        state: absent
+    - name: Create staged outbound CA directory
+      ansible.builtin.file:
+        path: "{{ af_install_root }}/control/trust/.ca-certificates.staging"
+        state: directory
+        mode: "0755"
+    - name: Stage target-local outbound CA certificates
+      ansible.builtin.copy:
+        src: /work/control/trust/ca-certificates/
+        dest: "{{ af_install_root }}/control/trust/.ca-certificates.staging/"
+        mode: preserve
+    - name: Remove previous outbound CA directory
+      ansible.builtin.file:
+        path: "{{ af_install_root }}/control/trust/ca-certificates"
+        state: absent
+    - name: Publish outbound CA directory
+      ansible.builtin.command:
+        argv:
+          - mv
+          - "{{ af_install_root }}/control/trust/.ca-certificates.staging"
+          - "{{ af_install_root }}/control/trust/ca-certificates"
     - name: Enable maintenance before any rolling mutation
       ansible.builtin.file:
         path: "{{ af_install_root }}/control/maintenance/MAINTENANCE_ON"

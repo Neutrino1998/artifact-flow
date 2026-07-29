@@ -2,10 +2,12 @@
 
 import asyncio
 import base64
+import ssl
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from config import config
@@ -497,6 +499,17 @@ async def test_mcp_outer_cancel_with_cleanup_error_still_propagates():
 async def test_sdk_session_accepts_streamable_http_triple_and_uses_granular_timeouts(monkeypatch):
     seen = {}
 
+    real_async_client = httpx.AsyncClient
+
+    def capturing_async_client(*args, **kwargs):
+        seen["ssl_context"] = kwargs["verify"]
+        seen["trust_env"] = kwargs["trust_env"]
+        return real_async_client(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "tools.custom.mcp_client.httpx.AsyncClient", capturing_async_client
+    )
+
     monkeypatch.setattr(config, "MCP_CONNECT_TIMEOUT", 3.0)
     monkeypatch.setattr(config, "MCP_WRITE_TIMEOUT", 40.0)
     monkeypatch.setattr(config, "MCP_POOL_TIMEOUT", 2.0)
@@ -540,6 +553,9 @@ async def test_sdk_session_accepts_streamable_http_triple_and_uses_granular_time
     assert seen["http_timeout"].read == 15.0
     assert seen["http_timeout"].write == 40.0
     assert seen["http_timeout"].pool == 2.0
+    assert seen["ssl_context"].check_hostname is True
+    assert seen["ssl_context"].verify_mode == ssl.CERT_REQUIRED
+    assert seen["trust_env"] is False
     assert seen["initialized"] is True
 
 

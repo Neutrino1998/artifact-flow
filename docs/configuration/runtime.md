@@ -6,7 +6,9 @@
 /opt/artifactflow/control/
 ├── site.toml
 ├── .env
-├── certs/
+├── certs/                       # Caddy 入站证书/私钥
+├── trust/
+│   └── ca-certificates/         # Backend 出站 HTTPS 信任锚
 ├── site/
 ├── maintenance/
 └── autoheal/
@@ -78,6 +80,36 @@ ready_timeout_seconds = 120
 
 `src/config.py` 还有算法护栏和内部实现常量。它们即使能被环境变量覆盖，也不等于常规部署契约；没有具体容量或故障证据时不要照单调大。
 
+## 出站 HTTPS 信任
+
+HTTP Tool、MCP 以及其他 Backend HTTPS 客户端默认验证服务端证书。内网服务由
+企业私有 CA 签发，或确实使用自签 leaf 时，把信任证书放在：
+
+```text
+/opt/artifactflow/control/trust/ca-certificates/<name>.crt
+```
+
+目录可为空，此时 Backend 只使用镜像默认公共 CA。证书采用 Debian
+`update-ca-certificates` 接受的 PEM `.crt` 格式，不要放私钥。优先放稳定的企业根
+CA：服务 leaf 续期后只要仍由该根签发，就不必更新 ArtifactFlow。只有没有上级 CA
+的自签 leaf 才直接放 leaf，它到期或轮换时需要同步替换。
+
+示例：
+
+```bash
+sudo install -d -m 0755 /opt/artifactflow/control/trust/ca-certificates
+sudo install -m 0644 company-root.crt \
+  /opt/artifactflow/control/trust/ca-certificates/company-root.crt
+sudo /opt/artifactflow/bin/afctl --root /opt/artifactflow site validate
+sudo /opt/artifactflow/bin/afctl --root /opt/artifactflow apply current
+```
+
+Apply 会重建所有 Backend 副本，在 Python 启动前把这些证书合入容器系统 CA
+bundle；TLS 有效期与主机名验证保持开启。不要设置 `verify=false`，也不要手工修改
+容器中的 `certifi/cacert.pem`，这些修改会在容器重建时丢失。移除一个信任锚也要
+再次执行 `apply current`，Ansible executor 会用源目录精确替换远端目录，避免旧 CA
+残留。
+
 ## 站点内容
 
 `control/site/` 可保存：
@@ -95,7 +127,7 @@ ready_timeout_seconds = 120
 
 ## 修改后的应用方式
 
-修改 `.env`、证书或 `control/site/` 后先校验：
+修改 `.env`、入站证书、出站信任锚或 `control/site/` 后先校验：
 
 ```bash
 sudo /opt/artifactflow/bin/afctl --root /opt/artifactflow site validate

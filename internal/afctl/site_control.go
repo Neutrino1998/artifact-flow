@@ -39,6 +39,7 @@ func (c *Controller) SiteInit(preset string) error {
 	}
 	_, _ = fmt.Fprintf(c.Out, "initialized %s preset at %s\n", preset, c.Root)
 	_, _ = fmt.Fprintf(c.Out, "edit %s and place TLS material under %s before apply\n", c.envPath(), filepath.Join(c.controlDir(), "certs"))
+	_, _ = fmt.Fprintf(c.Out, "optional outbound CA certificates: %s/*.crt\n", c.trustAnchorDir())
 	return nil
 }
 
@@ -105,7 +106,16 @@ func (c *Controller) SiteMigrateV1(preset, sandboxRuntime string) error {
 }
 
 func (c *Controller) initialDirectories() []string {
-	return []string{c.controlDir(), filepath.Join(c.controlDir(), "certs"), filepath.Join(c.controlDir(), "site"), filepath.Join(c.controlDir(), "maintenance"), filepath.Join(c.controlDir(), "autoheal"), c.releasesDir(), filepath.Join(c.Root, "bin")}
+	return []string{
+		c.controlDir(),
+		filepath.Join(c.controlDir(), "certs"),
+		c.trustAnchorDir(),
+		filepath.Join(c.controlDir(), "site"),
+		filepath.Join(c.controlDir(), "maintenance"),
+		filepath.Join(c.controlDir(), "autoheal"),
+		c.releasesDir(),
+		filepath.Join(c.Root, "bin"),
+	}
 }
 
 func copyLegacyCerts(source, destination string) error {

@@ -75,6 +75,7 @@ services:
     command: ["release"]
     volumes:
       - ../config:/app/config:ro
+      - ${AF_RUNTIME_DEPLOY_DIR:-.}/trust/ca-certificates:/usr/local/share/ca-certificates/artifactflow:ro
       - /etc/localtime:/etc/localtime:ro
     env_file:
       - ${AF_RUNTIME_DEPLOY_DIR:-.}/.env
@@ -99,6 +100,10 @@ services:
     volumes:
       - artifactflow_data:/app/data
       - ../config:/app/config:ro
+      # Target-local outbound trust anchors. The entrypoint folds these into
+      # Debian's system bundle before Python starts; application HTTP clients
+      # use that bundle through an explicit SSLContext.
+      - ${AF_RUNTIME_DEPLOY_DIR:-.}/trust/ca-certificates:/usr/local/share/ca-certificates/artifactflow:ro
       - /etc/localtime:/etc/localtime:ro
       # autoheal marker (Phase C):宿主 autoheal.sh 追加重启痕迹,backend 只读挂载
       # 读本机 instance_id 匹配的最近一条,经心跳 last_autoheal 在面板代报。

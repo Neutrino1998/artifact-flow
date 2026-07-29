@@ -1,6 +1,15 @@
 #!/bin/sh
 set -e
 
+# afctl mounts target-local public CA certificates here. Rebuild the Debian
+# system bundle on every container start so both force-recreate and restart
+# observe additions/removals without mutating certifi's installed package data.
+AF_CUSTOM_CA_DIR=/usr/local/share/ca-certificates/artifactflow
+if [ -d "$AF_CUSTOM_CA_DIR" ]; then
+    echo "Updating system CA bundle from $AF_CUSTOM_CA_DIR..."
+    update-ca-certificates
+fi
+
 # Release vs serve (乙2 — single-run deploy gate).
 #   - `entrypoint.sh release` → migrate + reconcile once, then EXIT (no serve). Run as a
 #     one-shot compose `release` service that backends gate on via

@@ -28,7 +28,9 @@ afctl config apply [--id ID] DIR
 │   ├── site.toml
 │   ├── .env
 │   ├── inventory.ini       # 仅实验性 Ansible executor
-│   ├── certs/
+│   ├── certs/              # Caddy 入站 server.crt/server.key
+│   ├── trust/
+│   │   └── ca-certificates/ # Backend 出站 HTTPS 信任锚（*.crt）
 │   ├── site/               # 品牌和欢迎提示的 frontend 静态内容
 │   ├── caddy/              # 实验性多机派生 upstream
 │   ├── maintenance/
@@ -45,6 +47,12 @@ afctl config apply [--id ID] DIR
 release 目录不会作为可写 bind mount。欢迎提示、品牌等 frontend 静态内容写入
 `control/site/`；在线通知写入共享数据库。实验性多机的 Caddy upstream 写入
 `control/caddy/`，升级和 rollback 都不会覆盖它们。
+
+内网 HTTPS Tool/MCP 使用的企业根 CA 或自签 leaf 放在
+`control/trust/ca-certificates/*.crt`；该目录可以为空，此时只使用镜像默认公共 CA。
+证书采用 `update-ca-certificates` 接受的 PEM `.crt` 格式，不要放私钥。
+它与 `control/certs/server.crt` 的入站 Caddy 证书语义分离；修改后执行
+`apply current`，所有 Backend 副本会在重建时更新系统信任库。
 
 `plan` 永远只读。所有 release-changing apply/rollback/config apply 都使用同一 kernel lock 和 reconcile executor。成功探活前不写 state；失败时尝试恢复上一个成功 release，恢复失败则明确报错并保留维护页。
 
