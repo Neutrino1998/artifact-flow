@@ -197,8 +197,10 @@ rm -rf "$DEPLOY_STAGE"
 
 # A single uncompressed outer tar avoids recompressing the already-compressed
 # image archives. Extract it on the control host, then pass the directory to
-# afctl. manifest.json remains the only deployment contract.
-tar -cf "$TRANSPORT" -C "$OUT_ROOT" "$VERSION"
+# afctl. macOS may attach provenance xattrs to generated files: suppress both
+# AppleDouble sidecars and libarchive PAX xattr headers so GNU tar stays quiet
+# on the Linux target. manifest.json remains the only deployment contract.
+COPYFILE_DISABLE=1 tar --no-xattrs -cf "$TRANSPORT" -C "$OUT_ROOT" "$VERSION"
 (
   cd "$(dirname "$TRANSPORT")"
   TRANSPORT_NAME="$(basename "$TRANSPORT")"

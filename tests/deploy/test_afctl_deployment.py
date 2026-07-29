@@ -42,6 +42,7 @@ def test_release_script_is_build_only_and_emits_strict_manifest() -> None:
     assert "afctl prepare" not in release
     assert 'DEPLOY_STAGE/deploy/bin' not in release
     assert "artifactflow-release-${VERSION}-${ARCH}.tar" in release
+    assert 'COPYFILE_DISABLE=1 tar --no-xattrs -cf "$TRANSPORT"' in release
     assert 'sha256sum "$TRANSPORT"' not in release
     assert 'sha256sum "$TRANSPORT_NAME"' in release
     assert 'if (( WITH_INFRA )); then' in release
