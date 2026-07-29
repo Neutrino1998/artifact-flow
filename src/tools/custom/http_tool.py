@@ -24,6 +24,7 @@ from tools.custom.secrets import (
 )
 from tools.custom.url_template import UrlTemplateError, render_url_path_template
 from utils.logger import get_logger
+from utils.tls import create_outbound_ssl_context
 
 logger = get_logger("ArtifactFlow")
 
@@ -126,10 +127,15 @@ class HttpTool(BaseTool):
         # (validate_public_url 仍守在 web_fetch,那里 URL 才是 LLM 可控的真正 SSRF 面。)
         try:
             # follow_redirects=False：杜绝 302 → 内网 / 元数据 的重定向绕过
-            # trust_env=False：httpx 默认 True 会读 HTTP(S)_PROXY/.netrc，污染后可把已校验的
-            #   公网请求改道内网代理，绕过 IP 校验。与 web_fetch(aiohttp 默认 False)对齐。
+            # trust_env=False：拒绝 HTTP(S)_PROXY/.netrc 等环境隐式改变运维配置的
+            #   目标路由或认证行为。与 web_fetch(aiohttp 默认 False)对齐。
+            # verify 显式使用系统 SSLContext，使 trust_env=False 不会挡住 afctl 挂载并在
+            # entrypoint 合入系统 bundle 的站点 CA。
             async with httpx.AsyncClient(
-                timeout=self._timeout, follow_redirects=False, trust_env=False
+                timeout=self._timeout,
+                follow_redirects=False,
+                verify=create_outbound_ssl_context(),
+                trust_env=False,
             ) as client:
                 if self._method in ("POST", "PUT", "PATCH"):
                     response = await client.request(

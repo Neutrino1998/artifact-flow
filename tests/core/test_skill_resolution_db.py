@@ -37,7 +37,8 @@ async def _tree(session):
 
 
 def _skill(slug, visibility="public", default_enabled=True):
-    return Skill(slug=slug, name=slug, description="", visibility=visibility,
+    return Skill(id=slug, slug=slug, namespace_key="", name=slug,
+                 description="", visibility=visibility,
                  default_enabled=default_enabled, source="seeded", skill_md="body",
                  bundle=b"skill-zip")
 
@@ -66,7 +67,7 @@ async def test_department_skill_granted_via_ancestor_rule(db_session):
     db_session.add(_skill("dept-skill", visibility="department"))
     await db_session.flush()
     # 规则挂在祖先 mid → 覆盖子树 leaf 用户(决策 10 父覆盖)
-    db_session.add(DepartmentSkillRule(department_id="mid", skill_slug="dept-skill"))
+    db_session.add(DepartmentSkillRule(department_id="mid", skill_id="dept-skill"))
     await db_session.flush()
 
     eff = await _resolve(db_session)
@@ -86,7 +87,7 @@ async def test_public_skill_denied_by_ancestor_rule(db_session):
     db_session.add(_skill("pub", visibility="public"))
     await db_session.flush()
     # public + 规则 = deny 例外 → leaf 用户不可见
-    db_session.add(DepartmentSkillRule(department_id="root", skill_slug="pub"))
+    db_session.add(DepartmentSkillRule(department_id="root", skill_id="pub"))
     await db_session.flush()
 
     eff = await _resolve(db_session)
@@ -97,7 +98,7 @@ async def test_user_override_persisted(db_session):
     await _tree(db_session)
     db_session.add(_skill("pub", visibility="public", default_enabled=True))
     await db_session.flush()
-    db_session.add(UserSkill(user_id="u1", skill_slug="pub", enabled=False))
+    db_session.add(UserSkill(user_id="u1", skill_id="pub", enabled=False))
     await db_session.flush()
 
     eff = await _resolve(db_session)

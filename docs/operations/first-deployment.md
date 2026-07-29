@@ -73,6 +73,18 @@ sudo install -m 0600 server.key /opt/artifactflow/control/certs/server.key
 
 ACME 则确认 `.env` 中 `AF_DOMAIN`、`AF_ACME_EMAIL` 已替换，并且公网 DNS、80/443 已生效。
 
+如果 Backend 需要连接由企业私有 CA 签发、或使用自签 leaf 的 HTTPS Tool/MCP，
+另外放置出站信任锚（不要放私钥）：
+
+```bash
+sudo install -d -m 0755 /opt/artifactflow/control/trust/ca-certificates
+sudo install -m 0644 company-root.crt \
+  /opt/artifactflow/control/trust/ca-certificates/company-root.crt
+```
+
+一文件只放一张 PEM X.509 证书。优先安装企业根 CA，而不是会频繁续期的服务
+leaf。完整规则见[出站 HTTPS 信任](../configuration/runtime.md#出站-https-信任)。
+
 ## 5. Doctor 与 Plan
 
 ```bash

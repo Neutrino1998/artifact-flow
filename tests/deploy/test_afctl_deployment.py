@@ -18,6 +18,7 @@ def test_shell_entrypoints_are_syntax_valid() -> None:
     ]
     for path in scripts:
         subprocess.run(["bash", "-n", str(path)], check=True)
+    subprocess.run(["sh", "-n", str(ROOT / "deploy/entrypoint.sh")], check=True)
 
 
 def test_fleet_is_only_a_thin_compatibility_bridge() -> None:
@@ -95,6 +96,30 @@ def test_maintenance_assets_and_target_local_state_are_separate_mounts() -> None
     assert "../config/site:/app/site-config:rw" not in base
     assert "/app/site-config" not in base
     assert "${AF_RUNTIME_DEPLOY_DIR:-.}/site:/app/public/site:ro" in base
+
+
+def test_outbound_ca_trust_is_target_local_and_rebuilt_at_startup() -> None:
+    base = (ROOT / "deploy/compose.base.yml").read_text(encoding="utf-8")
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    entrypoint = (ROOT / "deploy/entrypoint.sh").read_text(encoding="utf-8")
+    playbook = (ROOT / "deploy/ansible/apply.yml").read_text(encoding="utf-8")
+
+    mount = (
+        "${AF_RUNTIME_DEPLOY_DIR:-.}/trust/ca-certificates:"
+        "/usr/local/share/ca-certificates/artifactflow:ro"
+    )
+    assert base.count(mount) == 2  # release + every backend replica
+    assert "ca-certificates" in dockerfile
+    assert "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" in dockerfile
+    assert "REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt" in dockerfile
+    assert "openssl" in dockerfile
+    assert "update-ca-certificates" in entrypoint
+    assert 'openssl x509 -in "$af_ca_file" -noout' in entrypoint
+    assert "-checkend" not in entrypoint  # parse only; expiry remains TLS runtime policy
+    assert "Invalid outbound CA certificate" in entrypoint
+    assert "/control/trust/.ca-certificates.staging" in playbook
+    assert "/control/trust/ca-certificates" in playbook
+    assert "Remove previous outbound CA directory" in playbook
 
 
 def test_manifest_schema_example_is_strict_json_shape() -> None:

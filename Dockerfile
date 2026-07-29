@@ -43,11 +43,16 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     ARTIFACTFLOW_SANDBOX_IMAGE=${ARTIFACTFLOW_SANDBOX_IMAGE} \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
     PATH=/root/.local/bin:$PATH
 
-# Runtime system deps (pandoc for docx convert, curl for healthcheck)
+# Runtime system deps (pandoc for docx convert, curl for healthcheck,
+# ca-certificates for target-local outbound trust anchors at container start).
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
     curl \
+    openssl \
     pandoc \
     && rm -rf /var/lib/apt/lists/*
 

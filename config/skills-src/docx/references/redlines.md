@@ -73,4 +73,9 @@ comments.xml、rels、Content_Types 三处样板,脚本一次做对。
 ## 事后处置
 
 - 接受/拒绝(全部或按作者):[scripts/accept_changes.py](../scripts/accept_changes.py)。
-- 快速人查:`pandoc 文件.docx --track-changes=all -t markdown` 看标注是否符合预期。
+- `check_redlines.py` 只比较拒绝指定作者的修订后，`word/document.xml` 中可提取的段落文字
+  在空白折叠后是否与原文一致；不保证覆盖页眉页脚、脚注、字段、格式、空白变化或段落边界。
+- 查看接受修订后的文字:`pandoc 文件.docx --track-changes=accept -t markdown`；查看全部标注:
+  `pandoc 文件.docx --track-changes=all -t markdown`。
+- 不要用 `python-docx` 的 `Paragraph.text`/`Run.text` 检查修订文字；它们不会可靠包含
+  `w:ins`/`w:del` 中的内容。

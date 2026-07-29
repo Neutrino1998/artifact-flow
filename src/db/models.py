@@ -11,6 +11,7 @@ SQLAlchemy ORM 模型定义
 
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+import uuid
 
 from sqlalchemy import (
     Boolean,
@@ -60,7 +61,12 @@ class SiteNotificationConfig(Base):
 
     __tablename__ = "site_notification_config"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    # MySQL otherwise infers AUTO_INCREMENT for a lone integer PK, then rejects
+    # the singleton CHECK below (3818: CHECK cannot reference an auto-increment
+    # column). The row identity is the fixed literal 1, not a generated sequence.
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=False, default=1
+    )
     notifications: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     revision: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0"
@@ -985,8 +991,8 @@ class ToolCredential(Base):
 # ============================================================================
 # Skill 系统(Phase C)—— skill 定义 + per-user 覆盖 + 部门授权两张 FK 表。
 #   - 真相源 = config(seeded)/ 原始上传 blob(dynamic);DB 是物化缓存(决策 3/5)。
-#   - identity = natural key(slug),m2m 全按 name 引用 + DB ON DELETE CASCADE
-#     → ABA 由构造消失(决策 10/changelog 06-23)。
+#   - identity = stable id；slug 只在 namespace(shared / owner)内唯一；m2m 全按 id
+#     引用 + DB ON DELETE CASCADE → 同名私人 skill 不碰撞，ABA/孤儿由构造消失。
 #   - 6 标准字段按"系统消费与否"分流:消费列开独立列、其余归 `metadata` JSON;
 #     原始 frontmatter 结构在 bundle blob 里无损保留(决策 3/9)。
 # ============================================================================
@@ -994,7 +1000,7 @@ class ToolCredential(Base):
 
 class Skill(Base):
     """
-    Skill 定义(决策 1/3/9)。slug = natural key(PK,kebab-case,= 目录名)。
+    Skill 定义(决策 1/3/9)。`id` 是稳定身份；slug 是用户上下文内的短名。
 
     可见性两正交字段(替不透明 scope,决策 1):`visibility`(private 仅 owner /
     public 全员 / department 按 dept rule)+ `default_enabled`(shared skill 默认是否
@@ -1007,8 +1013,13 @@ class Skill(Base):
     """
     __tablename__ = "skills"
 
-    # natural key:slug 作 PK(= config 目录名 / 上传归一化名)
-    slug: Mapped[str] = mapped_column(String(64), primary_key=True)
+    id: Mapped[str] = mapped_column(
+        String(64), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    # slug 在 namespace_key 内唯一：共享 namespace=""；私人 namespace=owner_user_id。
+    # 这样共享 catalog 仍只有一个同名项，而不同用户可各自拥有同名私人 skill。
+    slug: Mapped[str] = mapped_column(String(64), nullable=False)
+    namespace_key: Mapped[str] = mapped_column(String(64), nullable=False, default="")
 
     # 展示名(frontmatter `name`,缺省回落 slug);description 折入 when_to_use
     name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
@@ -1066,8 +1077,20 @@ class Skill(Base):
         DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
+    __table_args__ = (
+        UniqueConstraint("namespace_key", "slug", name="uq_skills_namespace_slug"),
+        CheckConstraint(
+            "(owner_user_id IS NULL AND namespace_key = '') OR "
+            "(owner_user_id IS NOT NULL AND namespace_key = owner_user_id)",
+            name="ck_skills_namespace_owner",
+        ),
+    )
+
     def __repr__(self) -> str:
-        return f"<Skill(slug={self.slug}, visibility={self.visibility}, source={self.source})>"
+        return (
+            f"<Skill(id={self.id}, slug={self.slug}, visibility={self.visibility}, "
+            f"source={self.source})>"
+        )
 
 
 class UserSkill(Base):
@@ -1082,8 +1105,8 @@ class UserSkill(Base):
     user_id: Mapped[str] = mapped_column(
         String(64), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
-    skill_slug: Mapped[str] = mapped_column(
-        String(64), ForeignKey("skills.slug", ondelete="CASCADE"), primary_key=True
+    skill_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("skills.id", ondelete="CASCADE"), primary_key=True
     )
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
@@ -1095,7 +1118,7 @@ class UserSkill(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<UserSkill(user={self.user_id}, skill={self.skill_slug}, enabled={self.enabled})>"
+        return f"<UserSkill(user={self.user_id}, skill={self.skill_id}, enabled={self.enabled})>"
 
 
 class DepartmentSkillRule(Base):
@@ -1112,8 +1135,8 @@ class DepartmentSkillRule(Base):
     department_id: Mapped[str] = mapped_column(
         String(64), ForeignKey("departments.id", ondelete="CASCADE"), primary_key=True
     )
-    skill_slug: Mapped[str] = mapped_column(
-        String(64), ForeignKey("skills.slug", ondelete="CASCADE"), primary_key=True
+    skill_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("skills.id", ondelete="CASCADE"), primary_key=True
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -1121,7 +1144,7 @@ class DepartmentSkillRule(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<DepartmentSkillRule(dept={self.department_id}, skill={self.skill_slug})>"
+        return f"<DepartmentSkillRule(dept={self.department_id}, skill={self.skill_id})>"
 
 
 class DepartmentUnitRule(Base):

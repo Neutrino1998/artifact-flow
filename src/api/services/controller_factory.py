@@ -176,9 +176,7 @@ async def create_controller(
     # 换部门)的 skill 其 activate_skill 自然空操作,by-construction 消泄漏,非在恢复循环加闸。
     # active_skills 名单仍 sticky(= 用户意图),能力每轮按可见性重算 → visible=correctness /
     # enabled=UX 的切分落到工具授予轴(admin 撤后又授,下轮 slug 仍在、能力自动回来)。
-    visible_skill_snapshot = {
-        slug: skill_snapshot[slug] for slug in effective_skillset.visible
-    }
+    visible_skill_snapshot = dict(effective_skillset.visible)
     # 决策 11 单一解析点:把每 agent 的宇宙(builtin ∪ units)解析成扁平
     # {full_name: 等级};等级从工具对象取(绑定不存等级)。引擎/上下文构建全程读这个。
     # 请求级 builtin 注入(search_tools/read_skill/mount_skill)不在此手动 setdefault ——

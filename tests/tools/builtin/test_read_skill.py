@@ -40,7 +40,7 @@ class _FakeService:
 
 def _skillset(*slugs, has_extra_files=False, compatibility=None):
     visible = {
-        s: SkillInfo(slug=s, name=s, description="", visibility="public",
+        s: SkillInfo(id=s, slug=s, name=s, description="", visibility="public",
                      default_enabled=True, owner_user_id=None, allowed_tools=[],
                      has_extra_files=has_extra_files, compatibility=compatibility)
         for s in slugs

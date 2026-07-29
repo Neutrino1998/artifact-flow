@@ -55,6 +55,12 @@ ZIP 中必须能唯一定位一份 `SKILL.md`。Reconcile 会校验路径、成�
 
 Seeded Skill 没有用户 owner，因此不能设置 `visibility: private`。正文不能为空。
 
+## 同名与覆盖
+
+共享 Skill 的 slug 在共享目录中唯一；个人 Skill 的 slug 只需在该用户自己的空间内唯一。因此，不同用户可以分别导入同名个人 Skill，个人 Skill 也可以与共享 Skill 同名。
+
+当某个用户的个人 Skill 与一个对其可见的共享 Skill 同名时，运行时优先使用个人 Skill。技能管理页会同时保留两项，并用红色边框标出当前被覆盖的共享 Skill；删除或重命名个人 Skill 后，共享 Skill 自动恢复，无需同步或迁移开关状态。
+
 ## Skill 与 Agent 的关系
 
 Skill 不取代 Agent：

@@ -10,13 +10,21 @@ from reconcile.snapshot import SkillInfo
 
 def _info(slug, visibility="public", default_enabled=True, owner=None):
     return SkillInfo(
-        slug=slug, name=slug, description=f"desc-{slug}", visibility=visibility,
+        id=f"{owner or 'shared'}:{slug}", slug=slug, name=slug,
+        description=f"desc-{slug}", visibility=visibility,
         default_enabled=default_enabled, owner_user_id=owner, allowed_tools=[],
     )
 
 
 def _resolve(snapshot, user="u1", overrides=None, dept_matched=None):
-    return resolve_effective_skillset(user, snapshot, overrides or {}, dept_matched or set())
+    infos = list(snapshot.values())
+    by_slug = {info.slug: info.id for info in infos}
+    return resolve_effective_skillset(
+        user,
+        {info.id: info for info in infos},
+        {by_slug.get(key, key): value for key, value in (overrides or {}).items()},
+        {by_slug.get(key, key) for key in (dept_matched or set())},
+    )
 
 
 def test_public_visible_by_default():
@@ -75,3 +83,15 @@ def test_available_for_l1_filters_and_orders():
     eff = _resolve(snap)
     l1 = [s.slug for s in eff.available_for_l1()]
     assert l1 == ["a", "c"]  # b default-off 排除,顺序保 snapshot
+
+
+def test_private_skill_shadows_same_slug_shared_skill():
+    shared = _info("review", "public")
+    private = _info("review", "private", owner="u1")
+    eff = resolve_effective_skillset(
+        "u1", {shared.id: shared, private.id: private}, {}, set()
+    )
+
+    assert eff.visible["review"].id == private.id
+    assert shared.id in eff.shadowed
+    assert list(eff.accessible) == [shared.id, private.id]

@@ -29,8 +29,12 @@ func (c *Controller) releasesDir() string         { return filepath.Join(c.runti
 func (c *Controller) releaseDir(id string) string { return filepath.Join(c.releasesDir(), id) }
 func (c *Controller) sitePath() string            { return filepath.Join(c.controlDir(), "site.toml") }
 func (c *Controller) envPath() string             { return filepath.Join(c.controlDir(), ".env") }
-func (c *Controller) statePath() string           { return filepath.Join(c.runtimeDir(), "state.json") }
-func (c *Controller) lockPath() string            { return filepath.Join(c.runtimeDir(), "mutation.lock") }
+func (c *Controller) trustAnchorDir() string {
+	return filepath.Join(c.controlDir(), "trust", "ca-certificates")
+}
+
+func (c *Controller) statePath() string { return filepath.Join(c.runtimeDir(), "state.json") }
+func (c *Controller) lockPath() string  { return filepath.Join(c.runtimeDir(), "mutation.lock") }
 
 func (c *Controller) readState() (State, error) {
 	var state State
@@ -500,6 +504,12 @@ func (c *Controller) composeCommand(site Site, release string, meta ReleaseMetad
 }
 
 func (c *Controller) reconcile(ctx context.Context, site Site, release string, meta ReleaseMetadata) error {
+	// Existing v2 sites predate outbound CA support. Create the optional stable
+	// bind source only in the mutating Apply path; site validation and plan stay
+	// read-only. Ansible consumes the same controller-side directory via /work.
+	if err := os.MkdirAll(c.trustAnchorDir(), 0o755); err != nil {
+		return fmt.Errorf("create outbound CA directory: %w", err)
+	}
 	if site.Executor == "ansible" {
 		return c.reconcileAnsible(ctx, site, release, meta)
 	}

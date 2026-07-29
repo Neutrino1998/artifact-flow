@@ -11,7 +11,8 @@ from db.models import Department, DepartmentSkillRule, Skill, User, UserSkill
 
 
 def _skill(slug, visibility="public", default_enabled=True):
-    return Skill(slug=slug, name=slug, description="d", visibility=visibility,
+    return Skill(id=slug, slug=slug, namespace_key="", name=slug,
+                 description="d", visibility=visibility,
                  default_enabled=default_enabled, source="seeded", skill_md="body",
                  bundle=b"skill-zip")
 
@@ -57,7 +58,7 @@ async def test_toggle_writes_override_and_flips_enabled(db_session):
 async def test_toggle_upserts_existing_row(db_session):
     await _user(db_session)
     db_session.add(_skill("pub", default_enabled=True))
-    db_session.add(UserSkill(user_id="u1", skill_slug="pub", enabled=False))
+    db_session.add(UserSkill(user_id="u1", skill_id="pub", enabled=False))
     await db_session.flush()
 
     out = await SkillManager(db_session).set_enabled("u1", "pub", True)

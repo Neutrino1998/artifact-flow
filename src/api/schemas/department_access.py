@@ -17,6 +17,7 @@ class DepartmentAccessInheritedRule(BaseModel):
 
 
 class DepartmentSkillAccessItem(BaseModel):
+    id: str
     slug: str
     name: str
     description: str

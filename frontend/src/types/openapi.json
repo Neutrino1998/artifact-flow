@@ -2681,14 +2681,14 @@
         ]
       }
     },
-    "/api/v1/admin/skills/{slug}/export": {
+    "/api/v1/admin/skills/{skill_id}/export": {
       "get": {
         "tags": [
           "admin"
         ],
         "summary": "Admin Export Skill",
         "description": "\u5bfc\u51fa shared catalog skill,\u4e0d\u6309\u5f53\u524d admin \u7684\u90e8\u95e8\u53ef\u89c1\u6027\u8fc7\u6ee4\u3002",
-        "operationId": "admin_export_skill_api_v1_admin_skills__slug__export_get",
+        "operationId": "admin_export_skill_api_v1_admin_skills__skill_id__export_get",
         "security": [
           {
             "HTTPBearer": []
@@ -2696,12 +2696,12 @@
         ],
         "parameters": [
           {
-            "name": "slug",
+            "name": "skill_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Slug"
+              "title": "Skill Id"
             }
           }
         ],
@@ -2727,14 +2727,14 @@
         }
       }
     },
-    "/api/v1/admin/skills/{slug}": {
+    "/api/v1/admin/skills/{skill_id}": {
       "patch": {
         "tags": [
           "admin"
         ],
         "summary": "Admin Update Skill",
         "description": "\u7f16\u8f91 dynamic shared skill \u7684 visibility/default_enabled\u3002seeded \u4ecd config-owned\u3002",
-        "operationId": "admin_update_skill_api_v1_admin_skills__slug__patch",
+        "operationId": "admin_update_skill_api_v1_admin_skills__skill_id__patch",
         "security": [
           {
             "HTTPBearer": []
@@ -2742,12 +2742,12 @@
         ],
         "parameters": [
           {
-            "name": "slug",
+            "name": "skill_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Slug"
+              "title": "Skill Id"
             }
           }
         ],
@@ -2790,7 +2790,7 @@
         ],
         "summary": "Admin Delete Skill",
         "description": "\u5220\u9664\u4efb\u610f dynamic skill(\u7ed5\u8fc7\u53ef\u89c1\u6027;seeded \u2192 400)\u3002\u7ea7\u8054\u6e05 user_skill/dept \u89c4\u5219\u3002",
-        "operationId": "admin_delete_skill_api_v1_admin_skills__slug__delete",
+        "operationId": "admin_delete_skill_api_v1_admin_skills__skill_id__delete",
         "security": [
           {
             "HTTPBearer": []
@@ -2798,12 +2798,12 @@
         ],
         "parameters": [
           {
-            "name": "slug",
+            "name": "skill_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Slug"
+              "title": "Skill Id"
             }
           }
         ],
@@ -3637,14 +3637,14 @@
         ]
       }
     },
-    "/api/v1/skills/{slug}/export": {
+    "/api/v1/skills/{skill_id}/export": {
       "get": {
         "tags": [
           "skills"
         ],
         "summary": "Export Skill",
         "description": "\u5bfc\u51fa DB \u4e2d\u4fdd\u5b58\u7684 skill zip\u3002\u4e0d\u53ef\u89c1 \u2192 404\u3002",
-        "operationId": "export_skill_api_v1_skills__slug__export_get",
+        "operationId": "export_skill_api_v1_skills__skill_id__export_get",
         "security": [
           {
             "HTTPBearer": []
@@ -3652,12 +3652,12 @@
         ],
         "parameters": [
           {
-            "name": "slug",
+            "name": "skill_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Slug"
+              "title": "Skill Id"
             }
           }
         ],
@@ -3683,14 +3683,14 @@
         }
       }
     },
-    "/api/v1/skills/{slug}": {
+    "/api/v1/skills/{skill_id}": {
       "delete": {
         "tags": [
           "skills"
         ],
         "summary": "Delete Skill",
         "description": "\u5220\u9664\u81ea\u5df1\u5bfc\u5165\u7684 dynamic skill\u3002\u4e0d\u53ef\u89c1 \u2192 404;seeded \u2192 400;\u975e\u672c\u4eba\u5171\u4eab \u2192 403\u3002",
-        "operationId": "delete_skill_api_v1_skills__slug__delete",
+        "operationId": "delete_skill_api_v1_skills__skill_id__delete",
         "security": [
           {
             "HTTPBearer": []
@@ -3698,12 +3698,12 @@
         ],
         "parameters": [
           {
-            "name": "slug",
+            "name": "skill_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Slug"
+              "title": "Skill Id"
             }
           }
         ],
@@ -3724,14 +3724,14 @@
         }
       }
     },
-    "/api/v1/skills/{slug}/enabled": {
+    "/api/v1/skills/{skill_id}/enabled": {
       "put": {
         "tags": [
           "skills"
         ],
         "summary": "Set Skill Enabled",
         "description": "\u4e2a\u4eba\u5f00\u5173\u67d0 skill \u662f\u5426\u8fdb L1 \u7d22\u5f15(\u5199 user_skill \u8986\u76d6)\u3002",
-        "operationId": "set_skill_enabled_api_v1_skills__slug__enabled_put",
+        "operationId": "set_skill_enabled_api_v1_skills__skill_id__enabled_put",
         "security": [
           {
             "HTTPBearer": []
@@ -3739,12 +3739,12 @@
         ],
         "parameters": [
           {
-            "name": "slug",
+            "name": "skill_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Slug"
+              "title": "Skill Id"
             }
           }
         ],
@@ -4278,10 +4278,15 @@
       },
       "AdminSkillItem": {
         "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Stable skill id used by management APIs"
+          },
           "slug": {
             "type": "string",
             "title": "Slug",
-            "description": "Skill slug (natural key)"
+            "description": "Shared-catalog slug"
           },
           "name": {
             "type": "string",
@@ -4329,6 +4334,7 @@
         },
         "type": "object",
         "required": [
+          "id",
           "slug",
           "name",
           "description",
@@ -4392,7 +4398,7 @@
         },
         "type": "object",
         "title": "AdminSkillUpdateRequest",
-        "description": "PATCH /api/v1/admin/skills/{slug} request body."
+        "description": "PATCH /api/v1/admin/skills/{skill_id} request body."
       },
       "AgentListResponse": {
         "properties": {
@@ -5690,6 +5696,10 @@
       },
       "DepartmentSkillAccessItem": {
         "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
           "slug": {
             "type": "string",
             "title": "Slug"
@@ -5751,6 +5761,7 @@
         },
         "type": "object",
         "required": [
+          "id",
           "slug",
           "name",
           "description",
@@ -6490,10 +6501,15 @@
       },
       "SkillItem": {
         "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Stable skill id used by management APIs"
+          },
           "slug": {
             "type": "string",
             "title": "Slug",
-            "description": "Skill slug (natural key)"
+            "description": "User-context skill slug"
           },
           "name": {
             "type": "string",
@@ -6539,10 +6555,16 @@
             "type": "boolean",
             "title": "Is Owner",
             "description": "Whether the current user imported (owns) this dynamic skill."
+          },
+          "shadowed_by_private": {
+            "type": "boolean",
+            "title": "Shadowed By Private",
+            "description": "Whether this shared skill is currently hidden at runtime by the user's same-slug private skill."
           }
         },
         "type": "object",
         "required": [
+          "id",
           "slug",
           "name",
           "description",
@@ -6552,7 +6574,8 @@
           "source",
           "has_extra_files",
           "visibility",
-          "is_owner"
+          "is_owner",
+          "shadowed_by_private"
         ],
         "title": "SkillItem",
         "description": "\u4e00\u4e2a\u5bf9\u7528\u6237\u53ef\u89c1\u7684 skill + \u5176\u6709\u6548\u542f\u7528\u6001\u3002"
@@ -6588,7 +6611,7 @@
           "enabled"
         ],
         "title": "SkillToggleRequest",
-        "description": "PUT /api/v1/skills/{slug}/enabled request body."
+        "description": "PUT /api/v1/skills/{skill_id}/enabled request body."
       },
       "StorageUsageResponse": {
         "properties": {

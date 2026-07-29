@@ -112,7 +112,7 @@ Artifact 是任务的持久化工作成果，不等同于聊天回复。Agent �
 - `release.sh` 在构建机生成应用、配置、部署文件、Sandbox 镜像和严格 manifest；
 - `afctl` 在目标站点校验、物化并应用 Release；
 - `.artifactflow/state.json` 是当前版和上一版的唯一状态；
-- `control/` 保存不会随升级覆盖的现场配置；
+- `control/` 保存不会随升级覆盖的现场配置，包括入站 TLS 材料与 Backend 出站 HTTPS 信任锚；
 - 单机是当前正式支持路径，Ansible 多机 executor 仍是实验性能力。
 
 接下来可以阅读[配置总览](configuration/index.md)或从[主机准备](operations/host-preparation.md)开始部署。

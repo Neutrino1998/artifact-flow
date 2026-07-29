@@ -198,6 +198,34 @@ func TestSiteInitWritesIntranetModelCredentialNames(t *testing.T) {
 	}
 }
 
+func TestSiteInitCreatesOutboundTrustDirectory(t *testing.T) {
+	root := t.TempDir()
+	c := NewController(root, &bytes.Buffer{}, &bytes.Buffer{})
+	if err := c.SiteInit("intranet"); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(c.trustAnchorDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("outbound trust path is not a directory: %s", c.trustAnchorDir())
+	}
+}
+
+func TestApplyCreatesMissingOutboundTrustDirectory(t *testing.T) {
+	c, _ := newTestController(t)
+	if _, err := os.Stat(c.trustAnchorDir()); !os.IsNotExist(err) {
+		t.Fatalf("test site unexpectedly has trust directory: %v", err)
+	}
+	if err := c.Apply(context.Background(), makeAppBundle(t, t.TempDir(), "v1")); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(c.trustAnchorDir()); err != nil || !info.IsDir() {
+		t.Fatalf("apply did not create outbound trust directory: info=%v err=%v", info, err)
+	}
+}
+
 func TestAnsibleSiteValidationWarnsThatExecutorIsExperimental(t *testing.T) {
 	root := t.TempDir()
 	writeTestSite(t, root, "runc")
@@ -438,6 +466,9 @@ func TestPlanApplyIsReadOnly(t *testing.T) {
 	}
 	if _, err := os.Stat(c.lockPath()); !os.IsNotExist(err) {
 		t.Fatalf("plan took mutation lock: %v", err)
+	}
+	if _, err := os.Stat(c.trustAnchorDir()); !os.IsNotExist(err) {
+		t.Fatalf("plan created optional outbound trust directory: %v", err)
 	}
 }
 

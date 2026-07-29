@@ -151,8 +151,11 @@ async def test_skill_prune_cascades_user_and_dept_rules(db_session, cfg):
     db_session.add(User(id="u1", username="u1", hashed_password="x"))
     db_session.add(Department(id="d1", name="dept1"))
     await db_session.flush()
-    db_session.add(UserSkill(user_id="u1", skill_slug="gone", enabled=True))
-    db_session.add(DepartmentSkillRule(department_id="d1", skill_slug="gone"))
+    skill = (await db_session.execute(
+        select(Skill).where(Skill.slug == "gone")
+    )).scalar_one()
+    db_session.add(UserSkill(user_id="u1", skill_id=skill.id, enabled=True))
+    db_session.add(DepartmentSkillRule(department_id="d1", skill_id=skill.id))
     await db_session.flush()
 
     # 从 config 删掉 skill → prune + 显式删子行
@@ -163,10 +166,10 @@ async def test_skill_prune_cascades_user_and_dept_rules(db_session, cfg):
 
     assert (await db_session.execute(select(Skill).where(Skill.slug == "gone"))).first() is None
     assert (await db_session.execute(
-        select(UserSkill).where(UserSkill.skill_slug == "gone")
+        select(UserSkill).where(UserSkill.skill_id == skill.id)
     )).first() is None
     assert (await db_session.execute(
-        select(DepartmentSkillRule).where(DepartmentSkillRule.skill_slug == "gone")
+        select(DepartmentSkillRule).where(DepartmentSkillRule.skill_id == skill.id)
     )).first() is None
 
 
@@ -183,8 +186,11 @@ async def test_skill_visibility_change_clears_dept_rules_keeps_user(db_session, 
     db_session.add(User(id="u1", username="u1", hashed_password="x"))
     db_session.add(Department(id="d1", name="dept1"))
     await db_session.flush()
-    db_session.add(UserSkill(user_id="u1", skill_slug="s", enabled=False))
-    db_session.add(DepartmentSkillRule(department_id="d1", skill_slug="s"))
+    skill = (await db_session.execute(
+        select(Skill).where(Skill.slug == "s")
+    )).scalar_one()
+    db_session.add(UserSkill(user_id="u1", skill_id=skill.id, enabled=False))
+    db_session.add(DepartmentSkillRule(department_id="d1", skill_id=skill.id))
     await db_session.flush()
 
     # public → department:dept rule 方向会翻转 → 必须清,user_skill 保留
@@ -193,10 +199,10 @@ async def test_skill_visibility_change_clears_dept_rules_keeps_user(db_session, 
     assert "skill:s" in report.updated
 
     assert (await db_session.execute(
-        select(DepartmentSkillRule).where(DepartmentSkillRule.skill_slug == "s")
+        select(DepartmentSkillRule).where(DepartmentSkillRule.skill_id == skill.id)
     )).first() is None
     us = (await db_session.execute(
-        select(UserSkill).where(UserSkill.skill_slug == "s")
+        select(UserSkill).where(UserSkill.skill_id == skill.id)
     )).scalar_one()
     assert us.enabled is False
 
@@ -208,8 +214,8 @@ async def test_skill_visibility_change_clears_dept_rules_keeps_user(db_session, 
 
 async def test_seed_collides_with_dynamic_skill(db_session, cfg):
     _, _, skills = cfg
-    db_session.add(Skill(slug="dup", name="dup", source="dynamic", skill_md="x",
-                         bundle=b"skill-zip"))
+    db_session.add(Skill(slug="dup", namespace_key="", name="dup", source="dynamic",
+                         skill_md="x", bundle=b"skill-zip"))
     await db_session.flush()
 
     _write(skills / "dup" / "SKILL.md", _skill_md(name="dup"))
@@ -264,14 +270,15 @@ async def test_load_skill_snapshot_roundtrip(db_session, cfg):
     await _run(db_session, cfg)
 
     snap = await load_skill_snapshot(db_session)
-    assert set(snap) == {"a", "b"}
-    assert snap["a"].allowed_tools == ["read_artifact"]
-    assert snap["a"].visibility == "public"
-    assert snap["a"].default_enabled is True
-    assert snap["b"].visibility == "department"
-    assert snap["b"].default_enabled is False
-    assert snap["b"].allowed_tools == []
-    assert snap["a"].owner_user_id is None
+    by_slug = {info.slug: info for info in snap.values()}
+    assert set(by_slug) == {"a", "b"}
+    assert by_slug["a"].allowed_tools == ["read_artifact"]
+    assert by_slug["a"].visibility == "public"
+    assert by_slug["a"].default_enabled is True
+    assert by_slug["b"].visibility == "department"
+    assert by_slug["b"].default_enabled is False
+    assert by_slug["b"].allowed_tools == []
+    assert by_slug["a"].owner_user_id is None
 
 
 # --------------------------------------------------------------------------
@@ -357,7 +364,7 @@ async def test_bundle_zip_stored_verbatim(db_session, cfg):
     assert row.skill_md == "Mount me."         # 从 zip 内 SKILL.md 解出正文
     assert row.has_extra_files is True
     snap = await load_skill_snapshot(db_session)
-    assert snap["pack"].has_extra_files is True
+    assert next(info for info in snap.values() if info.slug == "pack").has_extra_files is True
 
 
 @pytest.mark.parametrize("wrapper", [None, "pack", "repo-main/skills/pack"])
@@ -428,7 +435,7 @@ async def test_single_file_skill_has_no_extra_files(db_session, cfg):
     assert row.bundle is not None
     assert row.has_extra_files is False
     snap = await load_skill_snapshot(db_session)
-    assert snap["solo"].has_extra_files is False
+    assert next(info for info in snap.values() if info.slug == "solo").has_extra_files is False
 
 
 async def test_bundle_idempotent_then_updated(db_session, cfg):
@@ -450,8 +457,14 @@ async def test_get_bundle_roundtrip(db_session, cfg):
     await _run(db_session, cfg)
 
     repo = SkillRepository(db_session)
-    assert await repo.get_bundle("pack") == blob
-    solo_bundle = await repo.get_bundle("solo")
+    rows = {
+        row.slug: row.id
+        for row in (await db_session.execute(
+            select(Skill).where(Skill.slug.in_(["pack", "solo"]))
+        )).scalars()
+    }
+    assert await repo.get_bundle(rows["pack"]) == blob
+    solo_bundle = await repo.get_bundle(rows["solo"])
     assert solo_bundle is not None
     with zipfile.ZipFile(io.BytesIO(solo_bundle)) as zf:
         assert zf.namelist() == ["SKILL.md"]

@@ -44,20 +44,21 @@ const VISIBILITY_OPTIONS = [
   { value: 'department', label: '部门' },
 ] as const;
 
-function mergeSkillRows(
+export function mergeSkillRows(
   visibleSkills: SkillItem[],
   adminSharedSkills: AdminSkillItem[] = [],
 ): SkillRow[] {
-  const adminBySlug = new Map(adminSharedSkills.map((s) => [s.slug, s]));
-  const visibleSlugs = new Set(visibleSkills.map((s) => s.slug));
+  const adminById = new Map(adminSharedSkills.map((s) => [s.id, s]));
+  const visibleIds = new Set(visibleSkills.map((s) => s.id));
   const rows: SkillRow[] = visibleSkills.map((skill) => ({
     ...skill,
-    adminShared: adminBySlug.get(skill.slug),
+    adminShared: adminById.get(skill.id),
   }));
 
   for (const adminSkill of adminSharedSkills) {
-    if (visibleSlugs.has(adminSkill.slug)) continue;
+    if (visibleIds.has(adminSkill.id)) continue;
     rows.push({
+      id: adminSkill.id,
       slug: adminSkill.slug,
       name: adminSkill.name,
       description: adminSkill.description,
@@ -68,12 +69,20 @@ function mergeSkillRows(
       has_extra_files: adminSkill.has_extra_files,
       visibility: adminSkill.visibility,
       is_owner: false,
+      shadowed_by_private: false,
       adminShared: adminSkill,
       adminOnly: true,
     });
   }
 
   return rows;
+}
+
+export function skillRowBorderClass(skill: SkillItem): string {
+  if (skill.shadowed_by_private) return 'border-status-error';
+  return skill.enabled
+    ? 'border-accent/60'
+    : 'border-border dark:border-border-dark';
 }
 
 // 用户侧技能管理(C-3 列举/toggle + E-2 导入/导出/删除)。中间面板接管(同
@@ -88,7 +97,7 @@ export default function SkillManagementPanel() {
   const [query, setQuery] = useState('');
   const [importOpen, setImportOpen] = useState(false);
   const [importNotice, setImportNotice] = useState<SkillImportNoticeData | null>(null);
-  // 正在写覆盖/删除的 slug 集(禁用其控件防抖动)。
+  // 正在写覆盖/删除的 skill id 集(同名行可独立操作)。
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<SkillRow | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
@@ -122,27 +131,27 @@ export default function SkillManagementPanel() {
     fetchConfig();
   }, [fetchConfig]);
 
-  const handleToggle = useCallback(async (slug: string, next: boolean) => {
+  const handleToggle = useCallback(async (skillId: string, next: boolean) => {
     // 乐观更新 + 失败回滚。pending 期禁开关避免连点。
-    setPending((p) => new Set(p).add(slug));
+    setPending((p) => new Set(p).add(skillId));
     setSkills((list) =>
-      list.map((s) => (s.slug === slug ? { ...s, enabled: next } : s)),
+      list.map((s) => (s.id === skillId ? { ...s, enabled: next } : s)),
     );
     try {
-      const updated = await setSkillEnabled(slug, next);
+      const updated = await setSkillEnabled(skillId, next);
       setSkills((list) =>
-        list.map((s) => (s.slug === slug ? { ...s, ...updated } : s)),
+        list.map((s) => (s.id === skillId ? { ...s, ...updated } : s)),
       );
     } catch (err) {
       // 回滚
       setSkills((list) =>
-        list.map((s) => (s.slug === slug ? { ...s, enabled: !next } : s)),
+        list.map((s) => (s.id === skillId ? { ...s, enabled: !next } : s)),
       );
-      console.error(`Failed to toggle skill ${slug}:`, err);
+      console.error(`Failed to toggle skill ${skillId}:`, err);
     } finally {
       setPending((p) => {
         const n = new Set(p);
-        n.delete(slug);
+        n.delete(skillId);
         return n;
       });
     }
@@ -151,7 +160,7 @@ export default function SkillManagementPanel() {
   const handleExport = useCallback(async (skill: SkillRow) => {
     setRowError(null);
     try {
-      const blob = await downloadSkillBundle(skill.slug, {
+      const blob = await downloadSkillBundle(skill.id, {
         admin: Boolean(skill.adminShared),
       });
       triggerBlobDownload(`${skill.slug}.zip`, blob);
@@ -164,16 +173,16 @@ export default function SkillManagementPanel() {
     async (skill: SkillRow, patch: AdminSkillUpdateRequest) => {
       if (!skill.adminShared?.can_edit) return;
       setRowError(null);
-      setPending((p) => new Set(p).add(skill.slug));
+      setPending((p) => new Set(p).add(skill.id));
       try {
-        await adminUpdateSkill(skill.slug, patch);
+        await adminUpdateSkill(skill.id, patch);
         await fetchSkills();
       } catch (err) {
         setRowError(err instanceof Error ? err.message : '更新共享技能失败');
       } finally {
         setPending((p) => {
           const n = new Set(p);
-          n.delete(skill.slug);
+          n.delete(skill.id);
           return n;
         });
       }
@@ -186,15 +195,17 @@ export default function SkillManagementPanel() {
       const skill = deleteTarget;
       if (!skill) return;
       setRowError(null);
-      setPending((p) => new Set(p).add(skill.slug));
+      setPending((p) => new Set(p).add(skill.id));
       try {
         // 非本人的 dynamic skill 只有 admin 通道能删(user 通道 403)
         if (skill.is_owner) {
-          await deleteSkill(skill.slug);
+          await deleteSkill(skill.id);
         } else {
-          await adminDeleteSkill(skill.slug);
+          await adminDeleteSkill(skill.id);
         }
-        setSkills((list) => list.filter((s) => s.slug !== skill.slug));
+        // 删除私人赢家后，共享同名项需要立即解除“被覆盖”状态；重新解析服务端
+        // effective set，避免只删本地行后留下红框和禁用开关。
+        await fetchSkills();
         setDeleteTarget(null);
       } catch (err) {
         const message = err instanceof Error ? err.message : '删除失败';
@@ -204,12 +215,12 @@ export default function SkillManagementPanel() {
       } finally {
         setPending((p) => {
           const n = new Set(p);
-          n.delete(skill.slug);
+          n.delete(skill.id);
           return n;
         });
       }
     },
-    [deleteTarget],
+    [deleteTarget, fetchSkills],
   );
 
   const q = query.trim().toLowerCase();
@@ -320,7 +331,7 @@ export default function SkillManagementPanel() {
           )}
 
           {!loading && !error && filtered.map((skill) => {
-            const busy = pending.has(skill.slug);
+            const busy = pending.has(skill.id);
             const deletable =
               skill.source === 'dynamic' && (skill.is_owner || isAdmin);
             const adminShared = skill.adminShared;
@@ -329,15 +340,11 @@ export default function SkillManagementPanel() {
             const exportable = !skill.adminOnly || Boolean(adminShared);
             return (
               <div
-                key={skill.slug}
-                className={`flex items-start gap-3 px-4 py-3 rounded-xl bg-surface dark:bg-surface-dark border transition-colors ${
-                  skill.enabled
-                    ? 'border-accent/60'
-                    : 'border-border dark:border-border-dark'
-                }`}
+                key={skill.id}
+                className={`flex items-start gap-3 px-4 py-3 rounded-xl bg-surface dark:bg-surface-dark border transition-colors ${skillRowBorderClass(skill)}`}
               >
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex min-h-6 items-center gap-2">
                     <span className="text-sm font-medium text-text-primary dark:text-text-primary-dark truncate">
                       {skill.name}
                     </span>
@@ -347,6 +354,14 @@ export default function SkillManagementPanel() {
                         title="当前账号不可见，但管理员仍可在共享目录中管理它"
                       >
                         管理项
+                      </PillBadge>
+                    )}
+                    {skill.shadowed_by_private && (
+                      <PillBadge
+                        tone="error"
+                        title="当前运行时会优先使用你的同名私人技能"
+                      >
+                        已被私人技能覆盖
                       </PillBadge>
                     )}
                     {skill.source === 'dynamic' && (
@@ -380,6 +395,11 @@ export default function SkillManagementPanel() {
                       title={skill.description}
                     >
                       {skill.description}
+                    </p>
+                  )}
+                  {skill.shadowed_by_private && (
+                    <p className="mt-1 text-xs text-status-error">
+                      你有一个同名私人技能；对话中使用该 slug 时，共享技能不会生效。
                     </p>
                   )}
                   {adminShared && (
@@ -424,57 +444,66 @@ export default function SkillManagementPanel() {
                   )}
                 </div>
 
-                {/* Row actions */}
-                <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
-                  {exportable && (
+                <div className="flex h-6 flex-shrink-0 items-center gap-3">
+                  {/* Row actions */}
+                  <div className="flex items-center gap-1">
+                    {exportable && (
+                      <button
+                        onClick={() => handleExport(skill)}
+                        disabled={busy}
+                        className="flex h-6 w-6 items-center justify-center rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors disabled:opacity-40"
+                        aria-label={`导出技能 ${skill.name}`}
+                        title={skill.has_extra_files ? '导出技能包' : '导出单文件技能'}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 13h11" />
+                        </svg>
+                      </button>
+                    )}
+                    {deletable && (
+                      <button
+                        onClick={() => setDeleteTarget(skill)}
+                        disabled={busy}
+                        className="flex h-6 w-6 items-center justify-center rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-status-error hover:bg-status-error/10 transition-colors disabled:opacity-40"
+                        aria-label={`删除技能 ${skill.name}`}
+                        title="删除该技能"
+                      >
+                        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                          <path d="M2.5 4h11M6.5 4V2.5h3V4M4 4l.8 9.5h6.4L12 4M6.5 7v4M9.5 7v4" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Enable switch */}
+                  {canUsePersonalToggle && !skill.shadowed_by_private ? (
                     <button
-                      onClick={() => handleExport(skill)}
+                      type="button"
+                      role="switch"
+                      aria-checked={skill.enabled}
+                      aria-label={`${skill.enabled ? '关闭' : '开启'}技能 ${skill.name}`}
                       disabled={busy}
-                      className="h-6 w-6 flex items-center justify-center rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors disabled:opacity-40"
-                      aria-label={`导出技能 ${skill.name}`}
-                      title={skill.has_extra_files ? '导出技能包' : '导出单文件技能'}
+                      onClick={() => handleToggle(skill.id, !skill.enabled)}
+                      className="inline-flex h-6 items-center disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 13h11" />
-                      </svg>
+                      <SwitchTrack checked={skill.enabled} />
                     </button>
-                  )}
-                  {deletable && (
-                    <button
-                      onClick={() => setDeleteTarget(skill)}
-                      disabled={busy}
-                      className="h-6 w-6 flex items-center justify-center rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-status-error hover:bg-status-error/10 transition-colors disabled:opacity-40"
-                      aria-label={`删除技能 ${skill.name}`}
-                      title="删除该技能"
+                  ) : skill.shadowed_by_private ? (
+                    <span
+                      className="inline-flex h-6 items-center text-[11px] text-status-error"
+                      title="删除或重命名同名私人技能后，这个共享技能会恢复"
                     >
-                      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                        <path d="M2.5 4h11M6.5 4V2.5h3V4M4 4l.8 9.5h6.4L12 4M6.5 7v4M9.5 7v4" />
-                      </svg>
-                    </button>
+                      已覆盖
+                    </span>
+                  ) : (
+                    <span
+                      className="inline-flex h-6 items-center text-[11px] text-text-tertiary dark:text-text-tertiary-dark"
+                      title="当前账号不在该 skill 的可见范围内"
+                    >
+                      不可见
+                    </span>
                   )}
                 </div>
-
-                {/* Enable switch */}
-                {canUsePersonalToggle ? (
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={skill.enabled}
-                    aria-label={`${skill.enabled ? '关闭' : '开启'}技能 ${skill.name}`}
-                    disabled={busy}
-                    onClick={() => handleToggle(skill.slug, !skill.enabled)}
-                    className="flex-shrink-0 mt-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <SwitchTrack checked={skill.enabled} />
-                  </button>
-                ) : (
-                  <span
-                    className="mt-1 flex-shrink-0 text-[11px] text-text-tertiary dark:text-text-tertiary-dark"
-                    title="当前账号不在该 skill 的可见范围内"
-                  >
-                    不可见
-                  </span>
-                )}
               </div>
             );
           })}
@@ -675,7 +704,8 @@ function SkillImportCard({
             （直接放在 ZIP 根目录也兼容）
           </li>
           <li>
-            使用 UTF-8；YAML frontmatter 填写{' '}
+            使用 UTF-8；在文件开头两行{' '}
+            <span className="font-mono">---</span> 之间的 YAML 配置区填写{' '}
             <span className="font-mono">name</span>、{' '}
             <span className="font-mono">description</span>，Markdown 正文不能为空
           </li>
@@ -783,30 +813,180 @@ export function SkillValidationNotices({
   return (
     <>
       {errors.length > 0 && (
-        <StatusNotice tone="error" title="技能包未通过校验">
-          <div className="space-y-1">
-            <div>请修复以下阻断问题后重新打包上传：</div>
-            {errors.map((finding, index) => (
-              <div key={`${finding.rule}-${index}`} className="break-words">
-                {finding.message}
-              </div>
-            ))}
+        <StatusNotice tone="error" title="技能包还不能导入">
+          <div className="space-y-3">
+            <div>
+              发现 {errors.length} 个必须修改的问题。修好后，请重新打包为 ZIP 并上传。
+            </div>
+            <SkillFindingList findings={errors} />
+            <div className="border-t border-status-error/20 pt-3 text-xs leading-5">
+              <span className="font-medium text-text-primary dark:text-text-primary-dark">
+                不确定怎么修改？
+              </span>{' '}
+              回到对话，把刚才的 ZIP 作为附件发给 Agent，并说明：
+              <span className="mt-1 block rounded-md bg-surface/70 px-2 py-1.5 text-text-secondary dark:bg-surface-dark/70 dark:text-text-secondary-dark">
+                请检查这个 Skill 为什么无法导入 ArtifactFlow，修复问题后重新打包。
+              </span>
+            </div>
           </div>
         </StatusNotice>
       )}
       {warnings.length > 0 && (
         <StatusNotice tone="warning" title="其他校验提示">
-          <div className="space-y-1">
-            <div>以下问题不阻断导入，仅供修包参考。</div>
-            {warnings.map((finding, index) => (
-              <div key={`${finding.rule}-${index}`} className="break-words">
-                {finding.message}
-              </div>
-            ))}
+          <div className="space-y-3">
+            <div>以下问题不会阻止导入，但建议一并检查。</div>
+            <SkillFindingList findings={warnings} />
           </div>
         </StatusNotice>
       )}
     </>
+  );
+}
+
+type SkillFindingCopy = {
+  title: string;
+  guidance: string;
+};
+
+const SKILL_FINDING_COPY: Record<string, SkillFindingCopy> = {
+  'zip.invalid': {
+    title: 'ZIP 文件无法读取',
+    guidance: '请确认文件没有损坏，并使用标准 ZIP 格式重新压缩。',
+  },
+  'zip.too_many_members': {
+    title: 'ZIP 内文件太多',
+    guidance: '删除不需要的文件后重新打包。',
+  },
+  'zip.uncompressed_too_large': {
+    title: '解压后的内容太大',
+    guidance: '删除不必要的大文件，或缩小 assets、references 等目录中的文件。',
+  },
+  'zip.path_traversal': {
+    title: 'ZIP 中包含不安全的文件路径',
+    guidance: '移除绝对路径、包含“..”的路径或符号链接后重新打包。',
+  },
+  'zip.skill_md_count': {
+    title: '没有找到唯一的 SKILL.md',
+    guidance: '技能包中必须且只能有一个 SKILL.md，例如 my-skill/SKILL.md。',
+  },
+  'zip.stray_files': {
+    title: '部分文件放在技能目录之外',
+    guidance: '请把 SKILL.md 和其他文件都放进同一个顶层目录，再压缩这个目录。',
+  },
+  'zip.orphan_files': {
+    title: '有些文件可能没有被使用',
+    guidance: '如果这些文件不是由脚本读取的，请删除它们；否则可以忽略这条提示。',
+  },
+  'zip.bundle_too_large': {
+    title: '技能包文件太大',
+    guidance: '删除不必要的文件或压缩大文件，使 ZIP 小于系统限制。',
+  },
+  'md.member_too_large': {
+    title: 'SKILL.md 文件太大',
+    guidance: '精简 SKILL.md，把较长的说明移到 references/ 目录。',
+  },
+  'md.not_utf8': {
+    title: 'SKILL.md 的文本编码不正确',
+    guidance: '请用编辑器将 SKILL.md 重新保存为 UTF-8 编码。',
+  },
+  'md.frontmatter_invalid': {
+    title: 'SKILL.md 开头的配置格式有误',
+    guidance: '检查两行“---”之间的 YAML，尤其是缩进、冒号和引号。',
+  },
+  'md.body_empty': {
+    title: 'SKILL.md 缺少正文说明',
+    guidance: '请在第二行“---”之后写明 Agent 应该如何使用这个技能。',
+  },
+  'md.unclosed_fence': {
+    title: '代码块可能没有闭合',
+    guidance: '检查 SKILL.md 中的 ``` 或 ~~~，确保每个代码块都有结束标记。',
+  },
+  'md.too_long': {
+    title: 'SKILL.md 正文较长',
+    guidance: '建议把详细资料移到 references/，让主说明保持简洁。',
+  },
+  'md.link_unresolved': {
+    title: 'SKILL.md 引用的文件不存在',
+    guidance: '检查相对链接是否写对，并确认对应文件已经放进 ZIP。',
+  },
+  'fm.name_invalid': {
+    title: '技能名称格式不正确',
+    guidance: '把 SKILL.md 开头配置区里的 name 设置为非空文本，例如 name: document-review。',
+  },
+  'fm.description_invalid': {
+    title: '技能描述格式不正确',
+    guidance: '把 SKILL.md 开头配置区里的 description 设置为非空文本。',
+  },
+  'fm.allowed_tools_invalid': {
+    title: '允许使用的工具配置不正确',
+    guidance: '检查 SKILL.md 开头配置区里 allowed-tools 的写法和缩进。',
+  },
+  'fm.compatibility_invalid': {
+    title: '兼容性配置格式异常',
+    guidance: '检查 compatibility 的值；不需要时可以删除这个字段。',
+  },
+  'fm.license_invalid': {
+    title: '许可证配置格式异常',
+    guidance: 'license 应填写为一段文本；不需要时可以删除这个字段。',
+  },
+  'fm.metadata_invalid': {
+    title: '附加信息格式异常',
+    guidance: 'metadata 应使用 YAML 键值结构；不需要时可以删除这个字段。',
+  },
+  'fm.cc_extension': {
+    title: '包含 ArtifactFlow 不使用的配置',
+    guidance: '这些 Claude Code 专用字段会被忽略；确认无影响后也可以保留。',
+  },
+  'fm.unknown_keys': {
+    title: '包含无法识别的配置项',
+    guidance: '这些字段会被保留但不会生效；请确认字段名是否拼写正确。',
+  },
+  'fm.name_dir_mismatch': {
+    title: '技能名称与目录名不一致',
+    guidance: '建议让顶层目录名与 SKILL.md 配置区里的 name 保持一致。',
+  },
+  'fm.import_ignored_keys': {
+    title: '包内的可见范围设置不会生效',
+    guidance: '技能的公开范围和默认开关由导入页面决定，ZIP 内对应字段会被忽略。',
+  },
+  'tools.unknown_entry': {
+    title: '引用的工具当前不存在',
+    guidance: '检查 allowed-tools 中的名称，或先让管理员安装并配置对应工具。',
+  },
+  'slug.invalid': {
+    title: '无法生成有效的技能标识',
+    guidance: '请使用以英文字母或数字开头的 name，只包含小写字母、数字、“-”或“_”。',
+  },
+};
+
+function SkillFindingList({ findings }: { findings: SkillFindingItem[] }) {
+  return (
+    <ul className="space-y-2">
+      {findings.map((finding, index) => {
+        const copy = SKILL_FINDING_COPY[finding.rule];
+        return (
+          <li
+            key={`${finding.rule}-${index}`}
+            className="rounded-lg bg-surface/70 px-3 py-2 dark:bg-surface-dark/70"
+          >
+            <div className="font-medium text-text-primary dark:text-text-primary-dark">
+              {copy?.title ?? '技能包中有一项内容需要检查'}
+            </div>
+            <div className="mt-0.5 text-xs leading-5">
+              {copy?.guidance ?? '请展开技术详情，根据具体信息修改后重试。'}
+            </div>
+            <details className="mt-1 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+              <summary className="cursor-pointer select-none hover:text-text-secondary dark:hover:text-text-secondary-dark">
+                查看技术详情
+              </summary>
+              <div className="mt-1 break-words whitespace-pre-wrap font-mono text-[11px] leading-4">
+                {finding.message}
+              </div>
+            </details>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -851,13 +1031,9 @@ function SkillImportNotice({
       </StatusNotice>
       {findings.length > 0 && (
         <StatusNotice tone="warning" title="校验提示">
-          <div className="space-y-1">
-            <div>不阻断导入，仅供修包参考。</div>
-            {findings.map((finding, index) => (
-              <div key={index} className="break-words">
-                {finding.message}
-              </div>
-            ))}
+          <div className="space-y-3">
+            <div>技能已经导入；以下问题不会阻止使用，但建议检查。</div>
+            <SkillFindingList findings={findings} />
           </div>
         </StatusNotice>
       )}

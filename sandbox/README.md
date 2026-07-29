@@ -7,7 +7,7 @@ intranet trip**, then withdraw. Background + decisions:
 
 ```
 sandbox/
-├── Dockerfile              tier-1 sandbox image (py3.11 + sci/doc stack + LibreOffice + text-edit + merman-cli + pandoc + ripgrep + zip + git,
+├── Dockerfile              tier-1 sandbox image (py3.11 + sci/doc stack + LibreOffice + text-edit + merman-cli + pandoc + ripgrep + zip + unrar-free + git,
 │                           non-root uid1000, baked offline-install stub wheel)
 ├── office_cli.py           artifactflow-office: isolated-profile convert/render/recalc wrapper
 ├── text_edit.py            text-edit: checked file-based exact/normalized/fuzzy replacement

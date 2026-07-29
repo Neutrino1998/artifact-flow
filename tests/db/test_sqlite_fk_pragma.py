@@ -40,23 +40,25 @@ async def test_core_delete_cascades_on_fresh_pool_connection(file_db):
             hashed_password=hash_password("x-pass-123"), role="user", is_active=True,
         ))
         await session.flush()  # User 先落,Skill.owner FK 才有目标(无 ORM 关系,UoW 不排序)
-        session.add(Skill(
+        skill = Skill(
             slug="fk-probe", name="fk-probe", description="d", visibility="private",
             default_enabled=True, source="dynamic", owner_user_id=user_id,
+            namespace_key=user_id,
             skill_md="body", bundle=b"skill-zip",
-        ))
+        )
+        session.add(skill)
         await session.flush()
-        session.add(UserSkill(user_id=user_id, skill_slug="fk-probe", enabled=False))
+        session.add(UserSkill(user_id=user_id, skill_id=skill.id, enabled=False))
         await session.commit()
 
     # SkillRepository.delete_skill 同款 Core DELETE:级联清理完全依赖 DB 级
     # ondelete=CASCADE(Skill 与 UserSkill 之间无 ORM relationship)
     async with file_db.session() as session:
-        await session.execute(delete(Skill).where(Skill.slug == "fk-probe"))
+        await session.execute(delete(Skill).where(Skill.id == skill.id))
         await session.commit()
 
     async with file_db.session() as session:
         orphan = (await session.execute(
-            select(UserSkill).where(UserSkill.skill_slug == "fk-probe")
+            select(UserSkill).where(UserSkill.skill_id == skill.id)
         )).scalar_one_or_none()
         assert orphan is None, "user_skill 孤儿行:FK pragma 未在该连接上生效"

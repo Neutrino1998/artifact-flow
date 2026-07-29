@@ -14,6 +14,7 @@ seeded skill 归 config 只读(删除/覆盖一律 400 指回 config);dept 授�
 ToolRegistryManager;单写用例无需跨 repo 原子性)。
 """
 
+import uuid
 from dataclasses import asdict
 from typing import Dict, List, Tuple
 
@@ -57,13 +58,22 @@ class SkillForbiddenError(SkillManagerError):
 
 
 class SkillConflictError(SkillManagerError):
-    """slug 已占用。文案保持中性(不区分 seeded/他人 private —— 轻微存在性信号,已接受;
-    自动改后缀 = 静默 rename 更坏)。默认消息在此单点,预查与并发 IntegrityError 两个
-    raise 点共享,不可漂移。"""
+    """slug 在目标 namespace 内已占用。"""
     status_code = 409
 
     def __init__(self, slug: str):
         super().__init__(f"slug '{slug}' 不可用，请修改技能的 name 后重新打包上传")
+
+
+class SkillShadowedError(SkillManagerError):
+    """共享 skill 被当前用户的同名私人 skill 覆盖，开关不会产生运行时效果。"""
+    status_code = 409
+
+    def __init__(self, slug: str):
+        super().__init__(
+            f"共享技能 '{slug}' 当前被你的同名私人技能覆盖；"
+            "请删除或重命名私人技能后再修改共享技能的启用状态"
+        )
 
 
 class SkillQuotaError(SkillManagerError):
@@ -107,8 +117,16 @@ class SkillManager:
         return eff, overrides
 
     @staticmethod
-    def _serialize(info: SkillInfo, *, enabled: bool, is_overridden: bool, user_id: str) -> dict:
+    def _serialize(
+        info: SkillInfo,
+        *,
+        enabled: bool,
+        is_overridden: bool,
+        user_id: str,
+        shadowed_by_private: bool = False,
+    ) -> dict:
         return {
+            "id": info.id,
             "slug": info.slug,
             "name": info.name,
             "description": info.description,
@@ -119,11 +137,13 @@ class SkillManager:
             "has_extra_files": info.has_extra_files,  # 是否有 SKILL.md 外文件需 mount
             "visibility": info.visibility,
             "is_owner": info.owner_user_id == user_id,
+            "shadowed_by_private": shadowed_by_private,
         }
 
     @staticmethod
     def _serialize_admin_shared(row) -> dict:
         return {
+            "id": row.id,
             "slug": row.slug,
             "name": row.name,
             "description": row.description,
@@ -137,13 +157,23 @@ class SkillManager:
     async def list_for_user(self, user_id: str) -> List[dict]:
         """列出该用户**可见**的 skill + 有效启用态(供设置页;保 snapshot 的 slug 顺序)。"""
         eff, overrides = await self._resolve(user_id)
-        return [
-            self._serialize(
-                info, enabled=slug in eff.enabled, is_overridden=slug in overrides,
+        items = []
+        for skill_id, info in eff.accessible.items():
+            shadowed = skill_id in eff.shadowed
+            winner = eff.visible.get(info.slug)
+            items.append(self._serialize(
+                info,
+                enabled=(
+                    not shadowed
+                    and winner is not None
+                    and winner.id == info.id
+                    and info.slug in eff.enabled
+                ),
+                is_overridden=skill_id in overrides,
                 user_id=user_id,
-            )
-            for slug, info in eff.visible.items()
-        ]
+                shadowed_by_private=shadowed,
+            ))
+        return items
 
     async def list_admin_shared(self) -> List[dict]:
         """Admin catalog of shared skills; not filtered by the admin user's department."""
@@ -155,7 +185,7 @@ class SkillManager:
     async def update_admin_shared(
         self,
         user_id: str,
-        slug: str,
+        identifier: str,
         *,
         visibility: str | None = None,
         default_enabled: bool | None = None,
@@ -171,7 +201,7 @@ class SkillManager:
             logger.warning(
                 "Admin shared skill update rejected (400): slug=%s no mutable fields "
                 "provided by user=%s",
-                slug, user_id,
+                identifier, user_id,
             )
             raise SkillManagerError(
                 "at least one of 'visibility' or 'default_enabled' must be provided"
@@ -180,25 +210,27 @@ class SkillManager:
             logger.warning(
                 "Admin shared skill update rejected (400): slug=%s invalid "
                 "visibility=%r by user=%s",
-                slug, visibility, user_id,
+                identifier, visibility, user_id,
             )
             raise SkillManagerError(
                 f"visibility must be one of {sorted(_ADMIN_SHARED_VISIBILITIES)}"
             )
 
-        row = await self._repo.get_skill_for_update(slug)
+        row = await self._repo.get_skill_for_update(identifier)
         if row is None:
-            raise SkillNotFoundError(f"skill '{slug}' not found")
-
+            row = await self._repo.get_shared_skill(identifier, for_update=True)
+        if row is None:
+            raise SkillNotFoundError(f"shared skill '{identifier}' not found")
         if row.owner_user_id is not None or row.visibility == "private":
             logger.warning(
-                "Admin shared skill update rejected (400): slug=%s is private/user-owned, "
+                "Admin shared skill update rejected (400): skill_id=%s is private/user-owned, "
                 "user=%s",
-                slug, user_id,
+                row.id, user_id,
             )
             raise SkillManagerError(
-                f"skill '{slug}' is user-owned and cannot be edited as a shared skill"
+                f"skill '{row.slug}' is user-owned and cannot be edited as a shared skill"
             )
+        slug = row.slug
         if row.source == "seeded":
             logger.warning(
                 "Admin shared skill update rejected (400): slug=%s is seeded "
@@ -221,7 +253,7 @@ class SkillManager:
 
         if visibility is not None and row.visibility != visibility:
             old_visibility = row.visibility
-            await self._repo.clear_dept_rules(slug)
+            await self._repo.clear_dept_rules(row.id)
             row.visibility = visibility
             logger.info(
                 "Skill '%s' visibility changed ('%s' → '%s'); department rules "
@@ -235,15 +267,24 @@ class SkillManager:
         logger.info("Admin shared skill updated: slug=%s by user=%s", slug, user_id)
         return self._serialize_admin_shared(row)
 
-    async def set_enabled(self, user_id: str, slug: str, enabled: bool) -> dict:
+    async def set_enabled(self, user_id: str, identifier: str, enabled: bool) -> dict:
         """个人 enable/disable(写 user_skill 覆盖)。不可见 → 404(不泄露存在性)。"""
         eff, _ = await self._resolve(user_id)
-        info = eff.visible.get(slug)
+        info = eff.accessible.get(identifier) or eff.visible.get(identifier)
         if info is None:
-            raise SkillNotFoundError(f"skill '{slug}' not found")
-        await self._repo.set_user_override(user_id, slug, enabled)
+            raise SkillNotFoundError(f"skill '{identifier}' not found")
+        if info.id in eff.shadowed:
+            logger.warning(
+                "Skill toggle rejected (409): shared skill_id=%s slug=%s is shadowed "
+                "by user's private skill, user=%s",
+                info.id, info.slug, user_id,
+            )
+            raise SkillShadowedError(info.slug)
+        await self._repo.set_user_override(user_id, info.id, enabled)
         await self._session.commit()
-        return self._serialize(info, enabled=enabled, is_overridden=True, user_id=user_id)
+        return self._serialize(
+            info, enabled=enabled, is_overridden=True, user_id=user_id
+        )
 
     # ------------------------------------------------------------------
     # E-2:导入 / 导出 / 删除
@@ -405,7 +446,8 @@ class SkillManager:
                     "或联系管理员将技能发布为共享技能。"
                 )
 
-        if await self._repo.slug_exists(slug):
+        owner_user_id = user_id if is_private else None
+        if await self._repo.scope_slug_exists(slug, owner_user_id):
             logger.warning(
                 "Skill import rejected (409): user=%s slug=%s already taken",
                 user_id, slug,
@@ -416,7 +458,9 @@ class SkillManager:
         # GET/list_for_user 不可能各算各的(reviewer:两处派生必漂移)。
         frontmatter = parsed.frontmatter
         meta = {k: v for k, v in frontmatter.items() if k not in _SKILL_CONSUMED_FM_KEYS} or None
+        row_id = str(uuid.uuid4())
         info = SkillInfo(
+            id=row_id,
             slug=slug,
             name=(frontmatter.get("name") or slug),
             description=frontmatter.get("description", ""),
@@ -424,14 +468,16 @@ class SkillManager:
             # private:owner-only 可见 ⇒ 直接进自己 L1,免 user_skill 行;
             # marketplace:共享发布时由 admin 决定默认是否进 L1,用户可用 user_skill 覆盖。
             default_enabled=resolved_default_enabled,
-            owner_user_id=user_id if is_private else None,
+            owner_user_id=owner_user_id,
             allowed_tools=allowed_tools,
             has_extra_files=has_extra_files(parsed.names, parsed.md_member),
             compatibility=frontmatter.get("compatibility"),
             source="dynamic",
         )
         self._repo.stage_insert_skill(
+            id=row_id,
             slug=info.slug,
+            namespace_key=owner_user_id or "",
             name=info.name,
             description=info.description,
             visibility=info.visibility,
@@ -468,37 +514,55 @@ class SkillManager:
             "findings": [asdict(f) for f in findings],
         }
 
-    async def export_bundle(self, user_id: str, slug: str) -> bytes:
+    async def export_bundle(self, user_id: str, identifier: str) -> Tuple[str, bytes]:
         """导出 skill zip。写入侧保证单文件 skill 也有 bundle;这里不重新打包。"""
         eff, _ = await self._resolve(user_id)
-        if slug not in eff.visible:
-            raise SkillNotFoundError(f"skill '{slug}' not found")
-        bundle = await self._repo.get_bundle(slug)
+        info = eff.accessible.get(identifier) or eff.visible.get(identifier)
+        if info is None:
+            raise SkillNotFoundError(f"skill '{identifier}' not found")
+        bundle = await self._repo.get_bundle(info.id)
         if bundle is None:
-            raise SkillNotFoundError(f"skill '{slug}' not found")
-        return bundle
+            raise SkillNotFoundError(f"skill '{identifier}' not found")
+        return info.slug, bundle
 
-    async def export_admin_shared_bundle(self, slug: str) -> bytes:
+    async def export_admin_shared_bundle(self, identifier: str) -> Tuple[str, bytes]:
         """Admin export for the shared catalog, bypassing the admin user's dept scope."""
-        bundle = await self._repo.get_shared_bundle(slug)
+        row = await self._repo.get_shared_skill(identifier)
+        if row is None:
+            raise SkillNotFoundError(f"shared skill '{identifier}' not found")
+        bundle = await self._repo.get_bundle(row.id)
         if bundle is None:
-            raise SkillNotFoundError(f"shared skill '{slug}' not found")
-        return bundle
+            raise SkillNotFoundError(f"shared skill '{identifier}' not found")
+        return row.slug, bundle
 
-    async def delete_skill(self, user_id: str, slug: str, *, as_admin: bool = False) -> None:
+    async def delete_skill(
+        self, user_id: str, identifier: str, *, as_admin: bool = False
+    ) -> None:
         """删除 dynamic skill。user 通道:不可见→404、seeded→400(config 所有)、
         可见共享非本人→403、own→删;admin 通道:绕过可见性,任意 dynamic 可删。
         user_skill / dept 规则随 DB FK CASCADE 消失。"""
         if as_admin:
-            row = await self._repo.get_skill_row_meta(slug)
+            row = await self._repo.get_skill_row_meta(identifier)
             if row is None:
-                raise SkillNotFoundError(f"skill '{slug}' not found")
+                shared = await self._repo.get_shared_skill(identifier)
+                if shared is not None:
+                    row = {
+                        "id": shared.id,
+                        "slug": shared.slug,
+                        "source": shared.source,
+                        "owner_user_id": shared.owner_user_id,
+                        "visibility": shared.visibility,
+                    }
+            if row is None:
+                raise SkillNotFoundError(f"skill '{identifier}' not found")
+            skill_id, slug = row["id"], row["slug"]
             source, owner = row["source"], row["owner_user_id"]
         else:
             eff, _ = await self._resolve(user_id)
-            info = eff.visible.get(slug)
+            info = eff.accessible.get(identifier) or eff.visible.get(identifier)
             if info is None:
-                raise SkillNotFoundError(f"skill '{slug}' not found")
+                raise SkillNotFoundError(f"skill '{identifier}' not found")
+            skill_id, slug = info.id, info.slug
             source, owner = info.source, info.owner_user_id
 
         if source == "seeded":
@@ -512,6 +576,6 @@ class SkillManager:
         if not as_admin and owner != user_id:
             raise SkillForbiddenError(f"skill '{slug}' 不是你导入的技能，无法删除")
 
-        await self._repo.delete_skill(slug)
+        await self._repo.delete_skill(skill_id)
         await self._session.commit()
         logger.info("Skill deleted: slug=%s by user=%s admin=%s", slug, user_id, as_admin)

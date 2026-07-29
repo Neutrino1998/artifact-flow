@@ -6,7 +6,8 @@ from pydantic import BaseModel, Field
 
 class SkillItem(BaseModel):
     """一个对用户可见的 skill + 其有效启用态。"""
-    slug: str = Field(..., description="Skill slug (natural key)")
+    id: str = Field(..., description="Stable skill id used by management APIs")
+    slug: str = Field(..., description="User-context skill slug")
     name: str = Field(..., description="Display name")
     description: str = Field(..., description="One-line description (the L1 index text)")
     enabled: bool = Field(
@@ -45,6 +46,13 @@ class SkillItem(BaseModel):
     is_owner: bool = Field(
         ..., description="Whether the current user imported (owns) this dynamic skill."
     )
+    shadowed_by_private: bool = Field(
+        ...,
+        description=(
+            "Whether this shared skill is currently hidden at runtime by the user's "
+            "same-slug private skill."
+        ),
+    )
 
 
 class SkillListResponse(BaseModel):
@@ -55,7 +63,7 @@ class SkillListResponse(BaseModel):
 
 
 class SkillToggleRequest(BaseModel):
-    """PUT /api/v1/skills/{slug}/enabled request body."""
+    """PUT /api/v1/skills/{skill_id}/enabled request body."""
     enabled: bool = Field(..., description="Personal enable/disable override for this skill.")
 
 
@@ -78,7 +86,8 @@ class SkillImportResponse(BaseModel):
 
 class AdminSkillItem(BaseModel):
     """Admin shared skill catalog item (not filtered by the admin user's department)."""
-    slug: str = Field(..., description="Skill slug (natural key)")
+    id: str = Field(..., description="Stable skill id used by management APIs")
+    slug: str = Field(..., description="Shared-catalog slug")
     name: str = Field(..., description="Display name")
     description: str = Field(..., description="One-line description")
     visibility: Literal["public", "department"] = Field(
@@ -106,7 +115,7 @@ class AdminSkillListResponse(BaseModel):
 
 
 class AdminSkillUpdateRequest(BaseModel):
-    """PATCH /api/v1/admin/skills/{slug} request body."""
+    """PATCH /api/v1/admin/skills/{skill_id} request body."""
     visibility: Optional[Literal["public", "department"]] = Field(
         None, description="New shared visibility. Changing it clears department rules."
     )

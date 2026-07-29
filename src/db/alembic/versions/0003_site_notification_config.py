@@ -24,7 +24,10 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     table = op.create_table(
         "site_notification_config",
-        sa.Column("id", sa.Integer(), nullable=False),
+        # A lone integer PK becomes AUTO_INCREMENT by default on MySQL. That is
+        # incompatible with the singleton CHECK (id = 1), so make the fixed-key
+        # semantics explicit in both migration and ORM metadata.
+        sa.Column("id", sa.Integer(), autoincrement=False, nullable=False),
         sa.Column("notifications", sa.JSON(), nullable=False),
         sa.Column("revision", sa.BigInteger(), server_default="0", nullable=False),
         sa.Column(

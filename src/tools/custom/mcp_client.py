@@ -24,6 +24,7 @@ from tools.custom.secrets import (
     substitute_templates,
 )
 from utils.logger import get_logger
+from utils.tls import create_outbound_ssl_context
 
 logger = get_logger("ArtifactFlow")
 
@@ -282,6 +283,7 @@ class _McpSessionContext:
                     write=config.MCP_WRITE_TIMEOUT,
                     pool=config.MCP_POOL_TIMEOUT,
                 ),
+                verify=create_outbound_ssl_context(),
                 trust_env=False,
             )
             await self._stack.enter_async_context(http_client)
