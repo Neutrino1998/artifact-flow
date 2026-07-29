@@ -17,7 +17,8 @@
 **系统工具(apt)**:`libreoffice-core`、`libreoffice-writer`、`libreoffice-calc`、
 `libreoffice-impress`(统一用 `artifactflow-office` 做 Office 转换/渲染/重算)、
 `fonts-liberation2`、`fonts-crosextra-carlito`、`fonts-crosextra-caladea`、
-`pandoc`(md↔docx/html 转换)、`ripgrep`、`zip`、`git`(仅本地操作);另有
+`pandoc`(md↔docx/html 转换)、`ripgrep`、`zip`、`unrar-free`(常见未加密 RAR
+的 best-effort 解压,不保证密码包/少见特性)、`git`(仅本地操作);另有
 Noto Sans CJK SC 字体(matplotlib 中文已全局配置,画图直接写中文)。镜像另提供
 `text-edit`，用于从 old/new UTF-8 文件执行有命中数校验的多行替换；源码和配置只用 exact。
 另有无浏览器的 `merman-cli`，按 `mermaid-to-png` skill 将 Mermaid 渲染为 PNG。

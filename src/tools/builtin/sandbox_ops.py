@@ -48,7 +48,7 @@ class BashTool(BaseTool):
     """
 
     def __init__(self, session: SandboxSession):
-        # 能力清单按镜像现状列全(python 科学栈+文档栈/LibreOffice/pandoc/ripgrep/zip/git)。版本号刻意
+        # 能力清单按镜像现状列全(python 科学栈+文档栈/LibreOffice/pandoc/ripgrep/zip/unrar-free/git)。版本号刻意
         # 不写 —— 会与镜像漂移,且非模型决策所需(CLAUDE.md:一次性事实进描述、
         # 克制噪声)。场景 how-to 留 skill 系统。git 仅本地仓库操作(无网下
         # clone/fetch 死属 by design,描述里无网已声明,不重复)。
@@ -62,7 +62,9 @@ class BashTool(BaseTool):
                 "stack (RapidFuzz through text-edit), LibreOffice "
                 "(libreoffice-core/libreoffice-writer/libreoffice-calc/libreoffice-impress) "
                 "through artifactflow-office, fonts-liberation2/fonts-crosextra-carlito/"
-                "fonts-crosextra-caladea, pandoc, ripgrep, zip, and git (local repository "
+                "fonts-crosextra-caladea, pandoc, ripgrep, zip, unrar-free (use "
+                "`unrar-free --extract` for best-effort extraction of common unencrypted "
+                "RAR archives), and git (local repository "
                 "operations only). Use text-edit for checked multiline replacements with "
                 "old/new text files; keep exact mode for source and configuration files. "
                 f"The working directory {WORKSPACE_MOUNT} persists across bash calls "
