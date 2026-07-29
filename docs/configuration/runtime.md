@@ -108,7 +108,8 @@ Apply 会重建所有 Backend 副本，在 Python 启动前把这些证书合入
 bundle；TLS 有效期与主机名验证保持开启。不要设置 `verify=false`，也不要手工修改
 容器中的 `certifi/cacert.pem`，这些修改会在容器重建时丢失。移除一个信任锚也要
 再次执行 `apply current`，Ansible executor 会用源目录精确替换远端目录，避免旧 CA
-残留。
+残留。容器启动只检查 `.crt` 是否恰好包含一张可解析的 PEM X.509 证书；损坏文件
+会阻断 Apply，但不会在这里检查证书有效期、SAN、证书链或远端服务可达性。
 
 ## 站点内容
 

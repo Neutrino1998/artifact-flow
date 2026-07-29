@@ -6,6 +6,24 @@ set -e
 # observe additions/removals without mutating certifi's installed package data.
 AF_CUSTOM_CA_DIR=/usr/local/share/ca-certificates/artifactflow
 if [ -d "$AF_CUSTOM_CA_DIR" ]; then
+    for af_ca_file in "$AF_CUSTOM_CA_DIR"/*.crt; do
+        [ -e "$af_ca_file" ] || continue
+        af_ca_block_shape=$(
+            awk '
+                index($0, "-----BEGIN CERTIFICATE-----") { begin_count++ }
+                index($0, "-----END CERTIFICATE-----") { end_count++ }
+                END { printf "%d:%d\n", begin_count, end_count }
+            ' "$af_ca_file"
+        ) || {
+            echo "Cannot read outbound CA certificate: $af_ca_file" >&2
+            exit 1
+        }
+        if [ "$af_ca_block_shape" != "1:1" ] || \
+           ! openssl x509 -in "$af_ca_file" -noout >/dev/null 2>&1; then
+            echo "Invalid outbound CA certificate: $af_ca_file must contain exactly one PEM X.509 certificate" >&2
+            exit 1
+        fi
+    done
     echo "Updating system CA bundle from $AF_CUSTOM_CA_DIR..."
     update-ca-certificates
 fi

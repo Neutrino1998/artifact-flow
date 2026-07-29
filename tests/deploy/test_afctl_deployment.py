@@ -112,7 +112,11 @@ def test_outbound_ca_trust_is_target_local_and_rebuilt_at_startup() -> None:
     assert "ca-certificates" in dockerfile
     assert "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" in dockerfile
     assert "REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt" in dockerfile
+    assert "openssl" in dockerfile
     assert "update-ca-certificates" in entrypoint
+    assert 'openssl x509 -in "$af_ca_file" -noout' in entrypoint
+    assert "-checkend" not in entrypoint  # parse only; expiry remains TLS runtime policy
+    assert "Invalid outbound CA certificate" in entrypoint
     assert "/control/trust/.ca-certificates.staging" in playbook
     assert "/control/trust/ca-certificates" in playbook
     assert "Remove previous outbound CA directory" in playbook
