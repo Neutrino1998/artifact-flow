@@ -832,6 +832,33 @@ func TestMaintenanceMutationUsesTheSameKernelLock(t *testing.T) {
 	}
 }
 
+func TestMaintenanceWritesAndRemovesOperatorNote(t *testing.T) {
+	c, _ := newTestController(t)
+	if err := c.Maintenance(context.Background(), "on", "planned database work"); err != nil {
+		t.Fatal(err)
+	}
+	maintenanceDir := filepath.Join(c.controlDir(), "maintenance")
+	note, err := os.ReadFile(filepath.Join(maintenanceDir, "note.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(note) != "planned database work\n" {
+		t.Fatalf("unexpected maintenance note %q", note)
+	}
+	if _, err := os.Stat(filepath.Join(maintenanceDir, "MAINTENANCE_ON")); err != nil {
+		t.Fatalf("maintenance flag missing: %v", err)
+	}
+
+	if err := c.Maintenance(context.Background(), "off", ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"note.txt", "MAINTENANCE_ON"} {
+		if _, err := os.Stat(filepath.Join(maintenanceDir, name)); !os.IsNotExist(err) {
+			t.Fatalf("maintenance off retained %s: %v", name, err)
+		}
+	}
+}
+
 func TestCLIRejectsRollbackExtraArguments(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := Run([]string{"--root", t.TempDir(), "rollback", "v1", "--dry-run"}, &out, &errOut)

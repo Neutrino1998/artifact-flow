@@ -30,7 +30,7 @@
 #
 # Contract checked (mirror of deploy/caddy/common.caddy):
 #   1. Swagger 404                          5. maintenance gate → 503 for /, /api, SSE
-#   2. /health ungated AND routed to backend   6. /__maintenance/* reachable mid-window
+#   2. /health ungated AND routed to backend   6. maintenance assets + note reachable mid-window
 #   3. routing (api & health→8000, /→3000)  7. upload: 211MiB→413, 200MiB legit→backend 200
 #   4. X-Real-IP injected + anti-spoof       8. SSE buffering off (incremental flush)
 #   9. HTTPS + both HTTP 308 entries strip technology-identifying headers
@@ -274,6 +274,12 @@ assert_maintenance() {
   [[ "$(code_of "$BASE/__maintenance/cat-sleep-dark.svg")" == "200" ]] \
     && ok "维护门: /__maintenance/* 资产窗口内可达" \
     || no "维护门: /__maintenance/* 窗口内应 200"
+  if [[ "$(code_of "$BASE/__maintenance/note.txt")" == "200" ]] \
+      && [[ "$(hc "$BASE/__maintenance/note.txt")" == "proxy-contract-note" ]]; then
+    ok "维护门: operator note 窗口内可读取"
+  else
+    no "维护门: /__maintenance/note.txt 应返回 operator note"
+  fi
 }
 
 assert_upload_cap() {
@@ -372,6 +378,7 @@ run_target() {
   HOST_HEADER="test.local"
   mkdir -p "$TMP_MAINT"
   cp -R "$ROOT/deploy/maintenance/." "$TMP_MAINT/"
+  printf '%s\n' "proxy-contract-note" > "$TMP_MAINT/note.txt"
   rm -f "$FLAG"
   start_proxy
   if ! wait_ready; then
