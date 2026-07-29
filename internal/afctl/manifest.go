@@ -102,23 +102,36 @@ func (m Manifest) Validate() error {
 			}
 			images[image] = true
 		}
-		if len(images) != 6 {
-			return fmt.Errorf("app release must declare exactly six runtime images")
-		}
 		for _, image := range []string{"artifactflow:" + m.ReleaseID, "artifactflow-frontend:" + m.ReleaseID, m.SandboxImage} {
 			if !images[image] {
 				return fmt.Errorf("app release must declare exact image %s", image)
 			}
 		}
-		for _, prefix := range []string{"artifactflow-caddy:", "artifactflow-postgres:", "artifactflow-redis:"} {
-			found := 0
-			for image := range images {
-				if strings.HasPrefix(image, prefix) && contentImagePattern.MatchString(image) {
-					found++
+		if roles["infra"] {
+			if len(images) != 6 {
+				return fmt.Errorf("app release with infra artifact must declare exactly six runtime images")
+			}
+			for _, prefix := range []string{"artifactflow-caddy:", "artifactflow-postgres:", "artifactflow-redis:"} {
+				found := 0
+				for image := range images {
+					if strings.HasPrefix(image, prefix) && contentImagePattern.MatchString(image) {
+						found++
+					}
+				}
+				if found != 1 {
+					return fmt.Errorf("app release with infra artifact requires exactly one content-addressed %s image", strings.TrimSuffix(prefix, ":"))
 				}
 			}
-			if found != 1 {
-				return fmt.Errorf("app release requires exactly one content-addressed %s image", strings.TrimSuffix(prefix, ":"))
+		} else {
+			switch len(images) {
+			case 3:
+				// Current app-only manifests declare only app/frontend/sandbox.
+			case 6:
+				// Older app-only manifests included three vestigial infra refs.
+				// Without an infra artifact they have no runtime authority; apply
+				// ignores them and inherits the target's current infra instead.
+			default:
+				return fmt.Errorf("app-only release must declare exactly three application runtime images")
 			}
 		}
 	} else {

@@ -171,6 +171,7 @@ func (c *Controller) PlanApply(input string) (Plan, error) {
 			if existing.Identity != identity {
 				return Plan{}, fmt.Errorf("immutable release collision: %s already exists with different content", manifest.ReleaseID)
 			}
+			meta = existing
 			plan.Actions = append(plan.Actions, "reuse identical materialized release "+manifest.ReleaseID)
 		} else if !errors.Is(existingErr, os.ErrNotExist) {
 			return Plan{}, existingErr
@@ -181,13 +182,24 @@ func (c *Controller) PlanApply(input string) (Plan, error) {
 			if state.Current != manifest.ExpectedBaseRelease {
 				return Plan{}, fmt.Errorf("config release expects base %s but current is %s", manifest.ExpectedBaseRelease, emptyLabel(state.Current))
 			}
-			base, err := c.readRelease(state.Current)
+			if meta.ReleaseID == "" {
+				base, err := c.readRelease(state.Current)
+				if err != nil {
+					return Plan{}, err
+				}
+				meta = ReleaseMetadata{ReleaseID: manifest.ReleaseID, Kind: "config", AppVersion: base.AppVersion, Platform: base.Platform, SandboxImage: base.SandboxImage, Images: base.Images}
+			}
+		} else if meta.ReleaseID == "" {
+			images, err := c.resolveAppImages(manifest, state.Current)
 			if err != nil {
 				return Plan{}, err
 			}
-			meta = ReleaseMetadata{ReleaseID: manifest.ReleaseID, Kind: "config", AppVersion: base.AppVersion, Platform: base.Platform, SandboxImage: base.SandboxImage, Images: base.Images}
-		} else {
-			meta = ReleaseMetadata{ReleaseID: manifest.ReleaseID, Kind: "app", AppVersion: manifest.ReleaseID, Platform: manifest.Platform, SandboxImage: manifest.SandboxImage, Images: manifest.Images}
+			meta = ReleaseMetadata{ReleaseID: manifest.ReleaseID, Kind: "app", AppVersion: manifest.ReleaseID, Platform: manifest.Platform, SandboxImage: manifest.SandboxImage, Images: images}
+			if _, carriesInfra := artifactByRole(manifest, "infra"); !carriesInfra {
+				plan.Actions = append(plan.Actions, "inherit infrastructure image references from current release "+state.Current)
+			}
+		}
+		if manifest.Kind == "app" {
 			for _, artifact := range manifest.Artifacts {
 				if artifact.Role == "app" || artifact.Role == "sandbox" || artifact.Role == "infra" {
 					plan.Actions = append(plan.Actions, "load "+artifact.Role+" image archive "+artifact.File)
@@ -347,6 +359,17 @@ func (c *Controller) materializeRelease(bundle string, manifest Manifest) error 
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	var appImages []string
+	if manifest.Kind == "app" {
+		state, err := c.readState()
+		if err != nil {
+			return err
+		}
+		appImages, err = c.resolveAppImages(manifest, state.Current)
+		if err != nil {
+			return err
+		}
+	}
 	if err := os.MkdirAll(c.releasesDir(), 0o755); err != nil {
 		return err
 	}
@@ -385,7 +408,7 @@ func (c *Controller) materializeRelease(bundle string, manifest Manifest) error 
 				return fmt.Errorf("extract %s: %w", artifact.File, err)
 			}
 		}
-		meta.AppVersion, meta.Platform, meta.SandboxImage, meta.Images = manifest.ReleaseID, manifest.Platform, manifest.SandboxImage, append([]string(nil), manifest.Images...)
+		meta.AppVersion, meta.Platform, meta.SandboxImage, meta.Images = manifest.ReleaseID, manifest.Platform, manifest.SandboxImage, appImages
 	} else {
 		base, err := c.readRelease(manifest.ExpectedBaseRelease)
 		if err != nil {
@@ -420,6 +443,28 @@ func (c *Controller) materializeRelease(bundle string, manifest Manifest) error 
 	}
 	ok = true
 	return nil
+}
+
+func (c *Controller) resolveAppImages(manifest Manifest, currentRelease string) ([]string, error) {
+	if _, carriesInfra := artifactByRole(manifest, "infra"); carriesInfra {
+		return append([]string(nil), manifest.Images...), nil
+	}
+	images := []string{"artifactflow:" + manifest.ReleaseID, "artifactflow-frontend:" + manifest.ReleaseID, manifest.SandboxImage}
+	if currentRelease == "" {
+		return nil, fmt.Errorf("app-only release %s requires an existing current release; use a --with-infra bundle for the first apply", manifest.ReleaseID)
+	}
+	current, err := c.readRelease(currentRelease)
+	if err != nil {
+		return nil, fmt.Errorf("read current release for app-only infrastructure inheritance: %w", err)
+	}
+	if current.Platform != manifest.Platform {
+		return nil, fmt.Errorf("app-only release platform %s does not match current release platform %s", manifest.Platform, current.Platform)
+	}
+	caddy, postgres, redis, err := infraImageRefs(current.Images)
+	if err != nil {
+		return nil, fmt.Errorf("current release cannot provide app-only infrastructure images: %w", err)
+	}
+	return append(images, caddy, postgres, redis), nil
 }
 
 func (c *Controller) loadReleaseImages(ctx context.Context, release string, manifest Manifest) error {

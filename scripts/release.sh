@@ -7,7 +7,9 @@ set -euo pipefail
 # application controller; configuration hotfixes belong to `afctl config`.
 #
 # Usage:
-#   ./scripts/release.sh VERSION [--app-only|--with-infra]
+#   ./scripts/release.sh VERSION --with-infra
+#                                [--platform linux/amd64|linux/arm64]
+#   ./scripts/release.sh VERSION --app-only
 #                                [--platform linux/amd64|linux/arm64]
 #
 # Output:
@@ -20,13 +22,18 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 VERSION=""
-WITH_INFRA=0
+MODE=""
 PLATFORM="linux/amd64"
+
+set_mode() {
+  [[ -z "$MODE" ]] || { echo "choose exactly one of --app-only or --with-infra" >&2; exit 2; }
+  MODE="$1"
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --with-infra) WITH_INFRA=1 ;;
-    --app-only) WITH_INFRA=0 ;;
+    --with-infra) set_mode with-infra ;;
+    --app-only) set_mode app-only ;;
     --platform)
       shift
       [[ $# -gt 0 ]] || { echo "--platform requires a value" >&2; exit 2; }
@@ -47,8 +54,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$VERSION" ]] || { echo "VERSION is required" >&2; exit 2; }
+[[ -n "$MODE" ]] || { echo "choose exactly one of --app-only or --with-infra" >&2; exit 2; }
 [[ "$VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
   || { echo "invalid VERSION: $VERSION" >&2; exit 2; }
+
+if [[ "$MODE" == "app-only" ]]; then WITH_INFRA=0; else WITH_INFRA=1; fi
 
 case "$PLATFORM" in
   linux/amd64) ARCH=amd64 ;;
@@ -128,12 +138,11 @@ docker buildx build --platform "$PLATFORM" \
 docker save "artifactflow:${VERSION}" "artifactflow-frontend:${VERSION}" \
   | gzip > "$STAGE/$APP_ARCHIVE"
 
-echo "→ pin infrastructure images by content id"
-CADDY_IMAGE="$(content_image_ref artifactflow-caddy caddy:2.10-alpine)"
-POSTGRES_IMAGE="$(content_image_ref artifactflow-postgres postgres:16-alpine)"
-REDIS_IMAGE="$(content_image_ref artifactflow-redis redis:7-alpine)"
-
 if (( WITH_INFRA )); then
+  echo "→ pin infrastructure images by content id"
+  CADDY_IMAGE="$(content_image_ref artifactflow-caddy caddy:2.10-alpine)"
+  POSTGRES_IMAGE="$(content_image_ref artifactflow-postgres postgres:16-alpine)"
+  REDIS_IMAGE="$(content_image_ref artifactflow-redis redis:7-alpine)"
   echo "→ collect infrastructure images"
   docker save "$CADDY_IMAGE" "$POSTGRES_IMAGE" "$REDIS_IMAGE" \
     | gzip > "$STAGE/$INFRA_ARCHIVE"
@@ -164,15 +173,19 @@ MANIFEST_ARGS=(
   --image "artifactflow:${VERSION}"
   --image "artifactflow-frontend:${VERSION}"
   --image "$SANDBOX_IMAGE"
-  --image "$CADDY_IMAGE"
-  --image "$POSTGRES_IMAGE"
-  --image "$REDIS_IMAGE"
   --artifact "app=$APP_ARCHIVE"
   --artifact "config=$CONFIG_ARCHIVE"
   --artifact "deploy=$DEPLOY_ARCHIVE"
   --artifact "sandbox=$SANDBOX_ARCHIVE"
 )
-if (( WITH_INFRA )); then MANIFEST_ARGS+=(--artifact "infra=$INFRA_ARCHIVE"); fi
+if (( WITH_INFRA )); then
+  MANIFEST_ARGS+=(
+    --image "$CADDY_IMAGE"
+    --image "$POSTGRES_IMAGE"
+    --image "$REDIS_IMAGE"
+    --artifact "infra=$INFRA_ARCHIVE"
+  )
+fi
 
 echo "→ finalize strict manifest"
 GOCACHE="${GOCACHE:-/tmp/artifactflow-go-build}" \

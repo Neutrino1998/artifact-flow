@@ -44,6 +44,10 @@ def test_release_script_is_build_only_and_emits_strict_manifest() -> None:
     assert "artifactflow-release-${VERSION}-${ARCH}.tar" in release
     assert 'sha256sum "$TRANSPORT"' not in release
     assert 'sha256sum "$TRANSPORT_NAME"' in release
+    assert 'if (( WITH_INFRA )); then' in release
+    assert '--image "$CADDY_IMAGE"' in release
+    assert '--artifact "infra=$INFRA_ARCHIVE"' in release
+    assert "INFRA_FROM" not in release
 
 
 def test_production_compose_has_no_build_latest_or_sandbox_fallback() -> None:
