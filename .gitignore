@@ -17,6 +17,7 @@ data/
 logs/
 *.log
 temp/
+/tmp/
 cache/
 checkpoints/
 .artifactflow/

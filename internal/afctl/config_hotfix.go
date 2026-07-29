@@ -123,5 +123,5 @@ func (c *Controller) ConfigApply(ctx context.Context, workspace, id string) erro
 		return err
 	}
 	_, _ = fmt.Fprintf(c.Out, "retained hotfix bundle: %s\n", bundle)
-	return c.applyLocked(ctx, bundle)
+	return c.applyLocked(ctx, bundle, applyOptions{})
 }
