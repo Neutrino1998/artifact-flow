@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import json
 import os
 from pathlib import Path
 from typing import Optional, Dict, Any, AsyncIterator
@@ -33,6 +34,7 @@ load_dotenv()
 
 from config import config as settings
 from utils.logger import get_logger
+from models.native_tool_stream import NativeToolCallAssembler
 
 logger = get_logger("ArtifactFlow")
 
@@ -191,6 +193,7 @@ async def astream_with_retry(
     retry_delay: float = 1.0,
     base_url: Optional[str] = None,
     api_key: Optional[str] = None,
+    tools: Optional[list[dict]] = None,
 ) -> AsyncIterator[dict]:
     """
     带重试的异步流式 LLM 调用
@@ -213,6 +216,8 @@ async def astream_with_retry(
             - {"type": "final", "content": "...", "reasoning_content": "..."} - 完整响应
     """
     params = _resolve_model_params(model, base_url, api_key)
+    if tools:
+        params["tools"] = tools
     logger.info(f"LLM call: {params['model']}")
 
     last_error = None
@@ -224,6 +229,8 @@ async def astream_with_retry(
             full_content = ""
             reasoning_content = ""
             token_usage = None
+            assembler = NativeToolCallAssembler()
+            finish_reasons: list[str] = []
 
             async for chunk in response:
                 # Token usage（通常在最后一个独立 chunk）
@@ -237,7 +244,10 @@ async def astream_with_retry(
                 if not chunk.choices:
                     continue
 
-                delta = chunk.choices[0].delta
+                choice = chunk.choices[0]
+                if choice.finish_reason is not None:
+                    finish_reasons.append(str(choice.finish_reason))
+                delta = choice.delta
 
                 if hasattr(delta, "reasoning_content") and delta.reasoning_content:
                     reasoning_content += delta.reasoning_content
@@ -247,13 +257,30 @@ async def astream_with_retry(
                     full_content += delta.content
                     yield {"type": "content", "content": delta.content}
 
+                tool_call_deltas = getattr(delta, "tool_calls", None) or []
+                if tool_call_deltas:
+                    assembler.add_many(tool_call_deltas)
+
+            tool_calls = assembler.accept(finish_reasons)
+
             # Ensure token_usage is always populated — estimate if provider didn't return it
             if not token_usage or token_usage.get("prompt_tokens", 0) == 0:
                 try:
                     from litellm import token_counter
                     model_id = params["model"]
                     est_input = token_counter(model=model_id, messages=messages)
-                    est_output = token_counter(model=model_id, text=full_content) if full_content else 0
+                    output_payload = reasoning_content + full_content
+                    if tool_calls:
+                        output_payload += json.dumps(
+                            tool_calls,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
+                    est_output = (
+                        token_counter(model=model_id, text=output_payload)
+                        if output_payload else 0
+                    )
                     token_usage = {
                         "prompt_tokens": est_input,
                         "completion_tokens": est_output,
@@ -270,6 +297,7 @@ async def astream_with_retry(
                 "type": "final",
                 "content": full_content,
                 "reasoning_content": reasoning_content or None,
+                "tool_calls": tool_calls,
                 "token_usage": token_usage,
             }
             return  # 流式完成

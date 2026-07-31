@@ -32,11 +32,14 @@ def _singleton_tool_md(name="weather", permission="confirm", desc="Get weather")
         f"permission: {permission}\n"
         f'endpoint: "https://api.example.com/{name}"\n'
         "method: GET\n"
-        "parameters:\n"
-        "  - name: city\n"
-        "    type: string\n"
-        '    description: "city name"\n'
-        "    required: true\n"
+        "input_schema:\n"
+        "  type: object\n"
+        "  properties:\n"
+        "    city:\n"
+        "      type: string\n"
+        '      description: "city name"\n'
+        "  required: [city]\n"
+        "  additionalProperties: false\n"
         'response_extract: "data.temp"\n'
         "timeout: 20\n"
         "---\n"
@@ -129,10 +132,10 @@ async def test_singleton_tool_seed(db_session, cfg):
     assert m.member_name == "weather"
     assert m.permission == "confirm"
     assert m.definition["endpoint"] == "https://api.example.com/weather"
-    assert m.definition["parameters"][0]["name"] == "city"
+    assert m.definition["input_schema"]["properties"]["city"]["type"] == "string"
 
 
-async def test_singleton_tool_seed_accepts_json_parameter(db_session, cfg):
+async def test_singleton_tool_seed_accepts_nested_json_schema(db_session, cfg):
     tools, _ = cfg
     _write(tools / "ragflow_retrieval.md", """
         ---
@@ -142,19 +145,17 @@ async def test_singleton_tool_seed_accepts_json_parameter(db_session, cfg):
         permission: auto
         endpoint: "https://ragflow.example.com/api/v1/retrieval"
         method: POST
-        parameters:
-          - name: question
-            type: string
-            required: true
-          - name: dataset_ids
-            type: json
-            required: true
-            default:
-              - c750d2f6752411f191e693d1a844b0ba
-            enum:
-              - [c750d2f6752411f191e693d1a844b0ba]
-              - dataset_ids:
-                  - c750d2f6752411f191e693d1a844b0ba
+        input_schema:
+          type: object
+          properties:
+            question: {type: string}
+            dataset_ids:
+              type: array
+              items: {type: string}
+              default: [c750d2f6752411f191e693d1a844b0ba]
+              minItems: 1
+          required: [question, dataset_ids]
+          additionalProperties: false
         ---
     """)
 
@@ -163,13 +164,12 @@ async def test_singleton_tool_seed_accepts_json_parameter(db_session, cfg):
     member = (await db_session.execute(
         select(ToolMember).where(ToolMember.unit_name == "ragflow_retrieval")
     )).scalar_one()
-    params = member.definition["parameters"]
-    assert params[1]["type"] == "json"
-    assert params[1]["default"] == ["c750d2f6752411f191e693d1a844b0ba"]
-    assert params[1]["enum"] == [
-        ["c750d2f6752411f191e693d1a844b0ba"],
-        {"dataset_ids": ["c750d2f6752411f191e693d1a844b0ba"]},
-    ]
+    schema = member.definition["input_schema"]
+    dataset_ids = schema["properties"]["dataset_ids"]
+    assert dataset_ids["type"] == "array"
+    assert dataset_ids["items"] == {"type": "string"}
+    assert dataset_ids["default"] == ["c750d2f6752411f191e693d1a844b0ba"]
+    assert dataset_ids["minItems"] == 1
 
 
 async def test_singleton_tool_seed_rejects_json_scalar_default(db_session, cfg):
@@ -180,18 +180,18 @@ async def test_singleton_tool_seed_rejects_json_scalar_default(db_session, cfg):
         description: "Bad JSON default"
         type: http
         endpoint: "https://api.example.com/retrieval"
-        parameters:
-          - name: payload
-            type: json
-            default: not-an-object
+        input_schema:
+          type: object
+          properties:
+            payload: {type: object, default: not-an-object}
         ---
     """)
 
-    with pytest.raises(SeedError, match="payload.*default.*JSON object or array"):
+    with pytest.raises(SeedError, match="default.*payload.*does not satisfy"):
         await _run(db_session, cfg)
 
 
-async def test_singleton_tool_seed_rejects_json_scalar_enum_item(db_session, cfg):
+async def test_singleton_tool_seed_rejects_invalid_json_schema(db_session, cfg):
     tools, _ = cfg
     _write(tools / "bad_json_enum.md", """
         ---
@@ -199,15 +199,14 @@ async def test_singleton_tool_seed_rejects_json_scalar_enum_item(db_session, cfg
         description: "Bad JSON enum"
         type: http
         endpoint: "https://api.example.com/retrieval"
-        parameters:
-          - name: payload
-            type: json
-            enum:
-              - not-an-object
+        input_schema:
+          type: object
+          properties:
+            payload: {type: not-a-json-schema-type}
         ---
     """)
 
-    with pytest.raises(SeedError, match="payload.*enum\\[0\\].*JSON object or array"):
+    with pytest.raises(SeedError, match="invalid JSON Schema"):
         await _run(db_session, cfg)
 
 
@@ -221,7 +220,7 @@ async def test_singleton_tool_seed_artifact_output(db_session, cfg):
         permission: auto
         endpoint: "https://api.example.com/export"
         method: GET
-        parameters: []
+        input_schema: {type: object, properties: {}, additionalProperties: false}
         artifact_output:
           enabled: true
           mode: binary
@@ -282,13 +281,12 @@ async def test_singleton_tool_seed_accepts_url_path_parameters(db_session, cfg):
         description: "RAGFlow download"
         type: http
         endpoint: "https://ragflow.example.com/api/v1/datasets/{dataset_id}/documents/{document_id}"
-        parameters:
-          - name: dataset_id
-            type: string
-            required: true
-          - name: document_id
-            type: string
-            required: true
+        input_schema:
+          type: object
+          properties:
+            dataset_id: {type: string}
+            document_id: {type: string}
+          required: [dataset_id, document_id]
         artifact_output:
           enabled: true
           mode: binary
@@ -313,13 +311,12 @@ async def test_singleton_tool_seed_rejects_url_path_parameter_in_host(db_session
         description: "Bad host"
         type: http
         endpoint: "https://{host}/api/v1/documents/{document_id}"
-        parameters:
-          - name: host
-            type: string
-            required: true
-          - name: document_id
-            type: string
-            required: true
+        input_schema:
+          type: object
+          properties:
+            host: {type: string}
+            document_id: {type: string}
+          required: [host, document_id]
         ---
     """)
 
@@ -335,14 +332,15 @@ async def test_singleton_tool_seed_rejects_undeclared_url_path_parameter(db_sess
         description: "Bad path param"
         type: http
         endpoint: "https://api.example.com/datasets/{dataset_id}/documents/{document_id}"
-        parameters:
-          - name: dataset_id
-            type: string
-            required: true
+        input_schema:
+          type: object
+          properties:
+            dataset_id: {type: string}
+          required: [dataset_id]
         ---
     """)
 
-    with pytest.raises(SeedError, match="document_id.*declared parameter"):
+    with pytest.raises(SeedError, match="document_id.*declared schema property"):
         await _run(db_session, cfg)
 
 
@@ -698,7 +696,7 @@ async def test_snapshot_reconstructs_http_tool(db_session, cfg):
     tool = snap.external_tools["weather"]
     assert tool.name == "weather"
     assert tool.permission.value == "confirm"
-    assert [p.name for p in tool.get_parameters()] == ["city"]
+    assert list(tool.get_input_schema()["properties"]) == ["city"]
 
     # unit 元数据 + 成员
     assert snap.units["weather"].kind == "tool"
@@ -770,11 +768,17 @@ async def test_snapshot_discovers_mcp_tools_when_manager_is_available(db_session
 
     await hydrate_mcp_tools(snap, mcp_manager=manager)
 
-    assert snap.units["inventory"].member_full_names == ["inventory__lookup"]
+    assert snap.units["inventory"].member_full_names == [
+        "inventory__lookup",
+        "inventory__bad_param",
+    ]
     assert "inventory__lookup" in snap.external_tools
     tool = snap.external_tools["inventory__lookup"]
     assert tool.permission.value == "confirm"
-    assert [p.name for p in tool.get_parameters()] == ["sku"]
+    assert list(tool.get_input_schema()["properties"]) == ["sku"]
+    assert list(
+        snap.external_tools["inventory__bad_param"].get_input_schema()["properties"]
+    ) == ["bad:param"]
 
 
 async def test_hydrate_mcp_tools_respects_allowed_unit_filter(db_session, cfg):

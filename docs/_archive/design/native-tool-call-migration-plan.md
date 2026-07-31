@@ -1,10 +1,10 @@
 # Native Tool Call 迁移实施计划
 
-> 状态：阶段 0 已完成；阶段 1 待开始
+> 状态：阶段 0–4 已完成；阶段 5 的停机历史切换与目标私有端点验收待执行
 >
 > 创建日期：2026-07-19
 >
-> 最后更新：2026-07-29
+> 最后更新：2026-07-31
 >
 > 相关文档：`docs/architecture/tools.md`、`docs/architecture/engine.md`、`docs/architecture/execution-lifecycle.md`、`docs/_archive/design/skill-system-implementation-plan.md`
 
@@ -37,13 +37,21 @@
 | 阶段 | 内容 | 状态 | 合并/发布条件 |
 |---|---|---|---|
 | 0 | Provider native 协议探针与迁移基线 | 已完成 | 五模型独立 probe 通过，停机扫描/checkpoint/runbook 已冻结，不发布 |
-| 1 | Native schema、命名约束与流式 codec | 待开始 | branch 内测试通过 |
-| 2 | 结构化事件、历史与 compaction 投影 | 待开始 | branch 内测试通过 |
-| 3 | Per-agent progressive state | 待开始 | branch 内测试通过 |
-| 4 | Engine 端到端切换与终态闭合 | 待开始 | native 主链路完整通过 |
-| 5 | 历史切换、删除 XML runtime、联调收尾 | 待开始 | 全量验收后整体合并 |
+| 1 | Native schema、命名约束与流式 codec | 已完成 | branch 内测试通过 |
+| 2 | 结构化事件、历史与 compaction 投影 | 已完成 | branch 内测试通过 |
+| 3 | Per-agent progressive state | 已完成 | branch 内测试通过 |
+| 4 | Engine 端到端切换与终态闭合 | 已完成 | native 主链路完整通过 |
+| 5 | 历史切换、删除 XML runtime、联调收尾 | 部分完成 | XML runtime 已删除；历史 boundary、停机 apply 与目标端点 smoke 待完成 |
 
 依赖关系：阶段 0 先确认目标模型的 native wire protocol 可用，再进入主体改造；阶段 1、2、3 可以在纯函数和 fixture 层交错推进；阶段 4 必须等待三者完成；阶段 5 必须等待 native 主链路稳定。
+
+### 2026-07-31 实施记录
+
+- 未保留旧 `parameters` 配置/API/runtime 兼容，也未增加供旧 XML Engine 测试使用的临时投影；阶段 1–4 在同一分支直接落到 native 主链路。
+- 工具业务参数统一改为 object-root Draft 2020-12 `input_schema`；嵌套对象、数组和组合约束原样保留，统一 exporter 仅在副本上注入 required `__reason`。
+- XML tool-call parser、grammar/formatter 和专属测试已删除；模型可读的 XML-like tool-result content 已拆为不参与解析的独立 renderer。
+- OpenAPI/前端类型已同步；后端全量回归为 `1936 passed, 42 skipped`，前端为 `283 passed`，lint 与 production build 通过。
+- 阶段 5 尚未完成的工作保持为部署/cutover gate：存量 leaf boundary 生成与幂等 apply、维护窗口演练、目标 raw vLLM 等私有端点 smoke。未完成这些项目之前分支不可整体发布。
 
 ## 分支策略
 
@@ -342,7 +350,7 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 ### 包含
 
 - 为 `BaseTool` 增加 OpenAI 风格 function schema 导出。
-- Builtin/HTTP tool 从现有 `ToolParameter` 生成 schema；MCP tool 以服务端返回的 `inputSchema` 为 schema source，在深拷贝上做最小规范化并保留嵌套结构和约束，不经过 `ToolParameter` 往返转换。
+- Builtin/HTTP tool 直接声明 object-root Draft 2020-12 `input_schema`，不保留旧 `ToolParameter`/`parameters` 投影；MCP tool 以服务端返回的 `inputSchema` 为 schema source，在深拷贝上做最小规范化并保留嵌套结构和约束。
 - 在统一 exporter 为所有模型侧 schema 注入 required `__reason`，并在各定义入口禁止业务 schema 占用该保留名；MCP 原始 `inputSchema` 不被修改，继续作为执行期业务参数校验依据。
 - LLM 层支持传入 `tools`，并按 call index/id 组装流式 `tool_calls` delta。
 - LLM codec 输出保留 content、reasoning content、tool calls 和 usage；final finish reason 只在 codec 内用于判断 buffered tool calls 是否因截断而不可接受，不新增持久化或观测字段。
@@ -445,7 +453,7 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 
 - 无工具、单工具、同轮多工具、subagent、权限确认/拒绝、参数错误再自愈均通过端到端测试；同轮每个 call 保留自己的 `__reason`。
 - `search_tools/read_skill` 与尚未披露工具出现在同一 assistant envelope 时，后者不执行并收到可自愈失败；下一次 LLM invocation 才能使用更新后的 native schema。
-- 业务工具可继续合法使用普通 `reason` 参数；保留的 `__reason` 不进入 `ToolParameter` 校验或 `execute()`。
+- 业务工具可继续合法使用普通 `reason` 参数；保留的 `__reason` 在业务 `input_schema` 校验前剥离，不进入 `execute()`。
 - 取消发生在执行前、工具执行中、工具之间、subagent 内，以及 timeout/error 时，所有 call id 均恰好一个 COMPLETE。
 - External cancel 的直写持久化路径同样满足闭合；provider stream 未正常结束、被截断或未通过 envelope 结构校验时，其 buffered 调用不进入闭合集合，也不被执行。
 - Engine 新主链路不 import 或调用 XML tool-call parser。

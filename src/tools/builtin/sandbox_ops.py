@@ -19,7 +19,7 @@ import os
 from typing import List, Optional, Tuple
 
 from config import config
-from tools.base import BaseTool, ToolParameter, ToolPermission, ToolResult
+from tools.base import BaseTool, ToolPermission, ToolResult
 from tools.builtin import sandbox_fs
 from tools.builtin.artifact_service import ArtifactService
 from tools.builtin.sandbox_session import (
@@ -75,15 +75,19 @@ class BashTool(BaseTool):
         )
         self._session = session
 
-    def get_parameters(self) -> List[ToolParameter]:
-        return [
-            ToolParameter(
-                name="command",
-                type="string",
-                description="The bash command to run (executed via `bash -c`).",
-                required=True,
-            ),
-        ]
+    def get_input_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The bash command to run (executed via `bash -c`).",
+                }
+            },
+            "required": ["command"],
+            "additionalProperties": False,
+        }
 
     async def execute(self, command: str) -> ToolResult:
         if not command.strip():
@@ -149,15 +153,19 @@ class MountArtifactTool(BaseTool):
         self._session = session
         self._service = service
 
-    def get_parameters(self) -> List[ToolParameter]:
-        return [
-            ToolParameter(
-                name="artifact_id",
-                type="string",
-                description="ID of the artifact to copy into the sandbox workspace.",
-                required=True,
-            ),
-        ]
+    def get_input_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "artifact_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "ID of the artifact to copy into the sandbox workspace.",
+                }
+            },
+            "required": ["artifact_id"],
+            "additionalProperties": False,
+        }
 
     async def execute(self, artifact_id: str) -> ToolResult:
         artifact_id = artifact_id.strip()
@@ -266,21 +274,22 @@ class PersistFileTool(BaseTool):
         self._session = session
         self._service = service
 
-    def get_parameters(self) -> List[ToolParameter]:
-        return [
-            ToolParameter(
-                name="path",
-                type="string",
-                description=(
+    def get_input_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": (
                     f"Path of the file to save, relative to {WORKSPACE_MOUNT} "
                     "(e.g. 'report.docx' or 'out/plot.png')."
-                ),
-                required=True,
-            ),
-            ToolParameter(
-                name="artifact_id",
-                type="string",
-                description=(
+                    ),
+                },
+                "artifact_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": (
                     "Optional: the id to give this artifact. If no artifact with "
                     "this id exists yet, it is created with this id (use it to give "
                     "an output a meaningful id you can reference as artifact://<id>). "
@@ -291,10 +300,12 @@ class PersistFileTool(BaseTool):
                     "duplicate artifacts. Overwriting a binary artifact replaces its "
                     "bytes permanently — no version history is kept for binaries; "
                     "rely on git inside the sandbox if you need history."
-                ),
-                required=False,
-            ),
-        ]
+                    ),
+                },
+            },
+            "required": ["path"],
+            "additionalProperties": False,
+        }
 
     @staticmethod
     def _persist_success(

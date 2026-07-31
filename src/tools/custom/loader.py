@@ -2,7 +2,7 @@
 自定义工具加载器 — 从 MD 文件解析 HttpToolConfig
 
 与 agents/loader.py 对称的设计：
-- YAML frontmatter: name, description, permission, type, endpoint, method, headers, parameters, ...
+- YAML frontmatter: name, description, permission, type, endpoint, method, headers, input_schema, ...
 - MD body: 扩展 description（给 LLM 的详细使用指导）
 
 示例 MD 文件：
@@ -16,16 +16,19 @@ endpoint: "https://api.example.com/stock/price"
 method: POST
 headers:
   Authorization: "Bearer {{SECRET_API_KEY}}"
-parameters:
-  - name: symbol
-    type: string
-    description: "股票代码，如 AAPL"
-    required: true
-  - name: market
-    type: string
-    description: "市场"
-    enum: [US, HK, SH]
-    default: "US"
+input_schema:
+  type: object
+  properties:
+    symbol:
+      type: string
+      description: "股票代码，如 AAPL"
+    market:
+      type: string
+      description: "市场"
+      enum: [US, HK, SH]
+      default: "US"
+  required: [symbol]
+  additionalProperties: false
 response_extract: "data.price"
 timeout: 30
 ---
@@ -43,7 +46,7 @@ from tools.base import BaseTool
 from tools.custom.http_tool import HttpTool, HttpToolConfig
 from tools.custom.secrets import assert_secret_refs_allowed
 from tools.custom.url_template import validate_url_path_template
-from tools.param_specs import normalize_parameter_specs, parameter_specs_to_tool_parameters
+from tools.input_schema import normalize_business_input_schema, validate_native_tool_name
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -86,15 +89,25 @@ def load_custom_tool(md_path: str) -> BaseTool:
 def _build_http_tool(frontmatter: dict, body: str) -> HttpTool:
     """从 frontmatter + body 构建 HttpTool"""
 
-    # 解析参数定义
-    param_specs = normalize_parameter_specs(frontmatter.get("parameters", []))
-    param_defs = parameter_specs_to_tool_parameters(param_specs)
+    if "parameters" in frontmatter:
+        raise ValueError("legacy 'parameters' is not supported; use 'input_schema'")
+
+    name = frontmatter["name"]
+    validate_native_tool_name(name)
+    input_schema = normalize_business_input_schema(
+        frontmatter.get("input_schema") or {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+        source=f"custom tool '{name}' input_schema",
+    )
 
     # SSRF-02 load-time 闸门：endpoint / headers 里的 {{VAR}} 必须用白名单前缀，
     # 否则整个工具拒绝加载（不把任意 env 变量暴露给自定义工具的注入面）。
     assert_secret_refs_allowed(frontmatter.get("endpoint", ""))
     assert_secret_refs_allowed(frontmatter.get("headers", {}))
-    validate_url_path_template(frontmatter.get("endpoint", ""), param_specs)
+    validate_url_path_template(frontmatter.get("endpoint", ""), input_schema)
     artifact_output = normalize_artifact_output_config(
         frontmatter.get("artifact_output"),
         response_extract=frontmatter.get("response_extract"),
@@ -106,13 +119,13 @@ def _build_http_tool(frontmatter: dict, body: str) -> HttpTool:
         description = f"{description}\n\n{body}" if description else body
 
     config = HttpToolConfig(
-        name=frontmatter["name"],
+        name=name,
         description=description,
         permission=frontmatter.get("permission", "confirm"),
         endpoint=frontmatter.get("endpoint", ""),
         method=frontmatter.get("method", "GET"),
         headers=frontmatter.get("headers", {}),
-        parameters=param_defs,
+        input_schema=input_schema,
         response_extract=frontmatter.get("response_extract"),
         artifact_output=artifact_output,
         timeout=frontmatter.get("timeout", 60),

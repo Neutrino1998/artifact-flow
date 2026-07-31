@@ -21,7 +21,8 @@
 # A flat .md here = a SINGLETON unit (one .md = one unit, full_name == name).
 # For a multi-tool unit, see the `_example_toolset/` directory next door.
 #
-# Supported parameter types: string, integer, number, boolean.
+# input_schema accepts JSON Schema Draft 2020-12. The root must be an object;
+# nested objects/arrays, enums, constraints, composition, and defaults are kept.
 # ============================================================================
 
 # name: the tool's registered/callable name (singleton: full_name == name).
@@ -43,8 +44,8 @@ permission: confirm
 # this template is never executed, so it points nowhere real.
 endpoint: "https://api.example.com/stock/price"
 
-# method: GET | POST | PUT | PATCH. For GET, parameters become the query
-# string; for POST/PUT/PATCH, parameters become the JSON request body.
+# method: GET | POST | PUT | PATCH. For GET, arguments become the query
+# string; for POST/PUT/PATCH, arguments become the JSON request body.
 method: POST
 
 # headers: support {{TOOL_SECRET_*}} env-var templates resolved at runtime.
@@ -63,18 +64,22 @@ timeout: 60
 # return the whole response. A bad expression is rejected at reconcile time.
 response_extract: "data.price"
 
-# parameters: each has name + type + description; optional required (default
-# true), default, and enum (allowed values).
-parameters:
-  - name: symbol
-    type: string
-    description: "Stock ticker symbol, e.g. AAPL"
-    required: true
-  - name: market
-    type: string
-    description: "Market exchange"
-    enum: [US, HK, SH]
-    default: "US"
+# input_schema: the business arguments schema. Do not declare the reserved
+# top-level __reason property; ArtifactFlow injects it only in the model-facing
+# native function schema and removes it before executing the tool.
+input_schema:
+  type: object
+  properties:
+    symbol:
+      type: string
+      description: "Stock ticker symbol, e.g. AAPL"
+    market:
+      type: string
+      description: "Market exchange"
+      enum: [US, HK, SH]
+      default: "US"
+  required: [symbol]
+  additionalProperties: false
 ---
 
 Query real-time stock price from the exchange API.

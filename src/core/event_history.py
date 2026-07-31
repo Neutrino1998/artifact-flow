@@ -49,8 +49,10 @@ def build_event_history(
         return []
 
     boundary_idx = _find_boundary(filtered, is_subagent=agent_name != LEAD_AGENT)
+    carry_event = _tool_call_carry_before_boundary(filtered, boundary_idx)
     return _events_to_messages(
-        filtered[boundary_idx:], vision_blocks or {}, vision_capable
+        filtered[boundary_idx:], vision_blocks or {}, vision_capable,
+        carry_event=carry_event,
     )
 
 
@@ -98,9 +100,10 @@ def _events_to_messages(
     events: List[ExecutionEvent],
     vision_blocks: Dict[Any, str],
     vision_capable: bool = True,
+    carry_event: ExecutionEvent | None = None,
 ) -> List[Dict[str, Any]]:
     """将事件列表转成 LLM 消息。"""
-    from tools.xml_formatter import format_result
+    from tools.tool_result_renderer import render_tool_result
 
     messages: List[Dict[str, Any]] = []
     for ev in events:
@@ -113,6 +116,9 @@ def _events_to_messages(
             content = data.get("content", "")
             if content:
                 messages.append({"role": "user", "content": content})
+            if carry_event is not None:
+                _append_assistant_message(messages, carry_event.data or {})
+                carry_event = None
 
         elif et == StreamEventType.USER_INPUT.value:
             content = data.get("content", "")
@@ -130,16 +136,7 @@ def _events_to_messages(
                 messages.append({"role": "user", "content": content})
 
         elif et == StreamEventType.LLM_COMPLETE.value:
-            content = data.get("content", "")
-            if content:
-                msg: Dict[str, Any] = {"role": "assistant", "content": content}
-                token_usage = data.get("token_usage")
-                if token_usage:
-                    msg["_meta"] = {
-                        "input_tokens": token_usage.get("input_tokens", 0),
-                        "output_tokens": token_usage.get("output_tokens", 0),
-                    }
-                messages.append(msg)
+            _append_assistant_message(messages, data)
 
         elif et == StreamEventType.TOOL_COMPLETE.value:
             tool_name = data.get("tool", "unknown")
@@ -147,9 +144,8 @@ def _events_to_messages(
                 "success": data.get("success", False),
                 "data": data.get("result_data"),
                 "error": data.get("error"),
-                "parser_warnings": data.get("parser_warnings"),
             }
-            result_text = format_result(tool_name, result_data)
+            result_text = render_tool_result(tool_name, result_data)
 
             # 识图:tool_complete 携图片引用(metadata.image,仅 id/version/content_type)。
             # 对照本 turn 的 vision_blocks 缓存还原——命中(本轮读过)→ content 扩成
@@ -162,10 +158,12 @@ def _events_to_messages(
                 # 才扩成图块列表;否则一律降级占位文本——文本模型收 image_url 块会被
                 # provider 端拒(见 model_supports_vision)。
                 if data_uri and vision_capable:
-                    messages.append({"role": "user", "content": [
-                        {"type": "text", "text": result_text},
-                        {"type": "image_url", "image_url": {"url": data_uri}},
-                    ]})
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": data.get("call_id"),
+                        "content": result_text,
+                        "_meta": {"image": {**img, "data_uri": data_uri}},
+                    })
                     continue
                 # 占位文案分两种,语义不同,绝不可混用:
                 #   - 模型识图但缓存未命中(跨轮、state 已空):重读即可重新看到 →「需要再看就重读」。
@@ -182,6 +180,49 @@ def _events_to_messages(
                     )
                 result_text = f"{result_text}\n{note}"
 
-            messages.append({"role": "user", "content": result_text})
+            messages.append({
+                "role": "tool",
+                "tool_call_id": data.get("call_id"),
+                "content": result_text,
+            })
 
     return messages
+
+
+def _append_assistant_message(
+    messages: List[Dict[str, Any]], data: Dict[str, Any]
+) -> None:
+    content = data.get("content")
+    reasoning = data.get("reasoning_content")
+    tool_calls = data.get("tool_calls") or []
+    if not content and not reasoning and not tool_calls:
+        return
+    msg: Dict[str, Any] = {
+        "role": "assistant",
+        "content": content or None,
+    }
+    if reasoning:
+        msg["reasoning_content"] = reasoning
+    if tool_calls:
+        msg["tool_calls"] = tool_calls
+    token_usage = data.get("token_usage")
+    if token_usage:
+        msg["_meta"] = {
+            "input_tokens": token_usage.get("input_tokens", 0),
+            "output_tokens": token_usage.get("output_tokens", 0),
+        }
+    messages.append(msg)
+
+
+def _tool_call_carry_before_boundary(
+    events: List[ExecutionEvent], boundary_idx: int
+) -> ExecutionEvent | None:
+    if boundary_idx <= 0:
+        return None
+    boundary = events[boundary_idx]
+    if boundary.event_type != StreamEventType.COMPACTION_SUMMARY.value:
+        return None
+    for event in reversed(events[:boundary_idx]):
+        if event.event_type == StreamEventType.LLM_COMPLETE.value:
+            return event if (event.data or {}).get("tool_calls") else None
+    return None

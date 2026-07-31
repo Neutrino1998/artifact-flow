@@ -3,8 +3,8 @@ Subagent 调用工具
 用于 Lead Agent 路由到 SubAgent，执行时验证参数有效性
 """
 
-from typing import List, Dict, Any, Optional
-from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
+from typing import List, Optional
+from tools.base import BaseTool, ToolResult, ToolPermission
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -15,7 +15,7 @@ class CallSubagentTool(BaseTool):
     Subagent 调用工具
 
     工作原理：
-    1. Lead Agent 通过 XML 格式调用此工具
+    1. Lead Agent 通过 native function call 调用此工具
     2. Engine 检测到后调用 execute() 验证参数（agent_name、instruction）
     3. 验证通过 → Engine 原地递归 await 子 agent 的循环（嵌套串行），
        子 agent 最终回复包成 <subagent_result> 作为本调用的 tool_result
@@ -31,32 +31,36 @@ class CallSubagentTool(BaseTool):
         )
         self._valid_agents = valid_agents
     
-    def get_parameters(self) -> List[ToolParameter]:
-        return [
-            ToolParameter(
-                name="agent_name",
-                type="string",
-                description="Sub-agent type: check available_subagents section for available agents",
-                required=True
-            ),
-            ToolParameter(
-                name="instruction",
-                type="string",
-                description="Specific task instruction for the sub-agent. Be concise about what you need.",
-                required=True
-            ),
-            ToolParameter(
-                name="fresh_start",
-                type="boolean",
-                description=(
+    def get_input_schema(self) -> dict:
+        agent_schema = {
+            "type": "string",
+            "description": "Sub-agent type: check available_subagents section for available agents",
+        }
+        if self._valid_agents:
+            agent_schema["enum"] = list(self._valid_agents)
+        return {
+            "type": "object",
+            "properties": {
+                "agent_name": agent_schema,
+                "instruction": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Specific task instruction for the sub-agent. Be concise about what you need.",
+                },
+                "fresh_start": {
+                    "type": "boolean",
+                    "description": (
                     "Whether the sub-agent starts with a fresh conversation context "
                     "(True, default) or continues from its prior calls within this conversation "
                     "(False). Use False only when you need the sub-agent to build on earlier "
                     "exchanges it had in this session."
-                ),
-                required=False
-            )
-        ]
+                    ),
+                    "default": True,
+                },
+            },
+            "required": ["agent_name", "instruction"],
+            "additionalProperties": False,
+        }
 
     async def execute(self, **params) -> ToolResult:
         """
@@ -89,17 +93,3 @@ class CallSubagentTool(BaseTool):
         logger.info(f"Routing to {agent_name}: {_instr_preview!r}{_truncated}")
 
         return ToolResult(success=True)
-
-    @staticmethod
-    def parse_fresh_start(params: Dict[str, Any]) -> bool:
-        """
-        Parse the `fresh_start` parameter from XML-sourced params (string-typed) into bool.
-        Default True.
-        """
-        raw = params.get("fresh_start")
-        if raw is None:
-            return True
-        if isinstance(raw, bool):
-            return raw
-        return str(raw).strip().lower() not in ("false", "0", "no", "off")
-

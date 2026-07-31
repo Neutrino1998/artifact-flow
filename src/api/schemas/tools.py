@@ -8,7 +8,7 @@ External 工具注册表管理 Pydantic schemas(B-4 admin CRUD)。
 
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from tools.artifact_output import (
     MAX_CONTENT_TYPE_LENGTH,
@@ -20,15 +20,6 @@ from tools.artifact_output import (
 # --------------------------------------------------------------------------
 # 请求
 # --------------------------------------------------------------------------
-
-
-class ToolParamSpec(BaseModel):
-    name: str = Field(..., max_length=64)
-    type: Literal["string", "integer", "number", "boolean", "json"] = "string"
-    description: str = ""
-    required: bool = True
-    default: Optional[Any] = None
-    enum: Optional[List[Any]] = None
 
 
 class ArtifactOutputSpec(BaseModel):
@@ -48,13 +39,21 @@ class McpProviderConfigSpec(BaseModel):
 
 
 class ToolMemberSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     member_name: str = Field(..., max_length=64, description="作者裸名;singleton 会被规整为 unit 名")
     permission: Literal["auto", "confirm"] = "confirm"
     description: str = ""
     endpoint: str = ""
     method: str = "GET"
     headers: Dict[str, str] = Field(default_factory=dict)
-    parameters: List[ToolParamSpec] = Field(default_factory=list)
+    input_schema: Dict[str, Any] = Field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        }
+    )
     response_extract: Optional[str] = None
     artifact_output: Optional[ArtifactOutputSpec] = None
     timeout: int = Field(60, ge=1, le=600)

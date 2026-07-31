@@ -126,7 +126,7 @@ class MessageResponse(BaseModel):
     )
     active_skills: Optional[List[str]] = Field(
         None,
-        description="Skill slugs active as of this turn (sticky, from Message.metadata_['active_skills']). The branch-tail message's list is the conversation's current active set; the composer reads it to mark already-active skills in the activation picker. Absent/empty when no skills are active.",
+        description="Lead-agent skill slugs active as of this turn, projected from Message.metadata_['agent_progressive_state']['lead_agent']['active_skills']. The branch-tail message drives the activation picker. Absent/empty when no skills are active.",
     )
 
 

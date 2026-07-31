@@ -225,7 +225,16 @@ class CompactionRunner:
         from models.llm import astream_with_retry, format_messages_for_debug
 
         # 按 agent_name 过滤 + boundary 扫描，得到用于压缩的历史 messages
-        history = build_event_history(events_to_compact, agent_name)
+        compact_input = list(events_to_compact)
+        for index in range(len(compact_input) - 1, -1, -1):
+            event = compact_input[index]
+            if event.agent_name != agent_name:
+                continue
+            if event.event_type == StreamEventType.LLM_COMPLETE.value:
+                if (event.data or {}).get("tool_calls"):
+                    del compact_input[index]
+                break
+        history = build_event_history(compact_input, agent_name)
         clean_history = [
             {k: v for k, v in m.items() if k != "_meta"} for m in history
         ]

@@ -3,16 +3,17 @@
 
 设计文档 §执行引擎设计方向：
 - 唯一的抽象是 context 构建
-- call_llm → parse_tool_calls → 串行执行 → repeat（_run_agent，每 agent 一个循环实例）
+- call_llm → 接受 native tool calls → 串行执行 → repeat（_run_agent，每 agent 一个循环实例）
 - call_subagent = 原地递归 await 子 agent 的循环，返回值即 tool_result ——
   同轮 [tool, subagent, tool] 混合调用按模型给出的自然序串行执行；
   整个 turn 单 asyncio task、单活跃 agent，事件序 = 执行序（审计线性不变量）
 - Interrupt = asyncio.Event（in-memory await）
-- 多工具支持（parse_tool_calls 返回列表，串行执行）
+- 多工具支持（provider 返回 native call 列表，引擎串行执行）
 - Tool limit → 注入 system message 提醒总结
 """
 
 import asyncio
+import json
 import math
 import time
 from dataclasses import dataclass, field
@@ -26,8 +27,8 @@ from core.effective_toolset import EffectiveToolset
 from core.compaction_runner import CompactionRunner
 from core.cancellation import CooperativeCancelled, run_cancellable
 from tools.artifact_envelope import make_preview_slice, render_artifact_slice
-from tools.xml_parser import parse_tool_calls
 from tools.base import ArtifactSpec, BaseTool, ToolExecutionContext, ToolPermission, ToolResult
+from tools.input_schema import REASON_ARGUMENT
 from utils.instance import INSTANCE_ID
 from utils.logger import get_logger, get_request_id
 from utils.time import utc_now
@@ -106,7 +107,7 @@ def create_initial_state(
     message_id: str,
     path_events: Optional[List[Any]] = None,  # List[ExecutionEvent] with is_historical=True
     always_allowed_tools: Optional[List[str]] = None,
-    active_skills: Optional[List[str]] = None,
+    agent_progressive_state: Optional[Dict[str, Dict[str, List[str]]]] = None,
     activated_skill_bodies: Optional[List[Dict[str, Any]]] = None,
     uploaded_files: Optional[List[Dict[str, Any]]] = None,
     force_compact: bool = False,
@@ -126,7 +127,7 @@ def create_initial_state(
                         ArtifactService.create_from_upload stage 进 WorkingSet（发
                         ARTIFACT_CREATED、随 turn 末 flush 落库），并据回填的 id 在
                         USER_INPUT 正文追加归属说明（仅 LLM 可见）。不在 chat 路由即时 commit。
-        active_skills: 跨 turn sticky 的已激活 skill slug(能力轴,父消息 metadata 捞回)。
+        agent_progressive_state: 按 agent 隔离的 sticky skill/tool 披露状态。
         activated_skill_bodies: 本轮按钮勾选、要注入正文的 skill [{"slug","name","body"}, ...]
                        (controller 取自 skill_md,已过可见性/空 body 过滤)。execute_loop 在
                        USER_INPUT 正文注入(仅 LLM 可见,同 force_compact/上传归属路径),让模型即刻
@@ -144,9 +145,13 @@ def create_initial_state(
         "error": False,
         "current_agent": "lead_agent",
         "always_allowed_tools": list(always_allowed_tools) if always_allowed_tools else [],
-        # 激活的 skill slug(能力轴持久化,照抄 always_allowed_tools 生命周期:回合末写
-        # Message.metadata、下回合父消息捞回;read_skill 期间 append,见 execute_loop)。
-        "active_skills": list(active_skills) if active_skills else [],
+        "agent_progressive_state": {
+            agent: {
+                "active_skills": list(value.get("active_skills", [])),
+                "disclosed_tools": list(value.get("disclosed_tools", [])),
+            }
+            for agent, value in (agent_progressive_state or {}).items()
+        },
         # 本轮新激活 skill 的正文(仅供 execute_loop 注入 USER_INPUT,不持久化 —— 正文一旦
         # 进 USER_INPUT 事件就随历史带下来,active_skills slug 名单才是 sticky 状态)。
         "activated_skill_bodies": list(activated_skill_bodies) if activated_skill_bodies else [],
@@ -407,7 +412,18 @@ async def execute_loop(
         """从合并后的 tools dict 查找工具"""
         return tools.get(name)
 
-    async def _build_context(agent_name: str) -> tuple[list, str]:
+    def _native_tools_for(agent_name: str) -> list[dict]:
+        effective = effective_toolsets[agent_name]
+        progressive = state.get("agent_progressive_state", {}).get(agent_name, {})
+        disclosed = set(progressive.get("disclosed_tools", []))
+        deferred = effective.deferred_member_names()
+        names = [
+            name for name in effective.names()
+            if name in tools and (name not in deferred or name in disclosed)
+        ]
+        return [tools[name].to_native_tool_schema() for name in names]
+
+    async def _build_context(agent_name: str) -> tuple[list, str, list[dict]]:
         """drain messages → artifacts 清单 → ContextManager.build。
 
         返回 (messages, reminder)：reminder 是并入末条消息的 <system-reminder> 原文，
@@ -456,9 +472,14 @@ async def execute_loop(
             available_skills=available_skills,
         )
 
-        return messages, reminder
+        return messages, reminder, _native_tools_for(agent_name)
 
-    async def _call_llm(messages: list, agent_name: str, model: str) -> Optional[Tuple[str, Optional[str], dict]]:
+    async def _call_llm(
+        messages: list,
+        agent_name: str,
+        model: str,
+        native_tools: list[dict],
+    ) -> Optional[Tuple[str, Optional[str], dict, list[dict]]]:
         """
         流式调用 LLM，推送 llm_chunk / llm_complete，记录 metrics。
 
@@ -470,9 +491,10 @@ async def execute_loop(
         response_content = ""
         reasoning_content = None
         token_usage = {}
+        tool_calls: list[dict] = []
 
         cancelled_mid_stream = False
-        llm_stream = astream_with_retry(messages, model=model)
+        llm_stream = astream_with_retry(messages, model=model, tools=native_tools)
         try:
             last_cancel_check = time.monotonic()
             async for chunk in llm_stream:
@@ -502,6 +524,7 @@ async def execute_loop(
                         reasoning_content = chunk["reasoning_content"]
                     if not token_usage and chunk.get("token_usage"):
                         token_usage = chunk["token_usage"]
+                    tool_calls = chunk.get("tool_calls") or []
 
                 # 流式输出期间轮询 cancel —— 节流到 CANCEL_CHECK_INTERVAL，避免每个
                 # chunk 一次 Redis GET。命中则停止消费，把已累积内容当作本次 llm_complete。
@@ -516,6 +539,21 @@ async def execute_loop(
 
         except Exception as llm_error:
             logger.exception(f"LLM call failed: {llm_error}")
+            if response_content or reasoning_content:
+                await _emit(StreamEventType.LLM_COMPLETE.value, agent_name, {
+                    "content": response_content,
+                    "reasoning_content": reasoning_content,
+                    "tool_calls": [],
+                    "token_usage": {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "total_tokens": 0,
+                    },
+                    "model": model,
+                    "duration_ms": int(
+                        (utc_now() - llm_start_time).total_seconds() * 1000
+                    ),
+                })
             # record-not-emit:错误详情记入 state,turn 末由 decide_terminal 统一发射 ERROR。
             state["error_detail"] = {
                 "error": f"LLM call failed: {str(llm_error)}",
@@ -540,17 +578,17 @@ async def execute_loop(
             await _emit(StreamEventType.LLM_COMPLETE.value, agent_name, {
                 "content": response_content,
                 "reasoning_content": reasoning_content,
+                "tool_calls": [],
                 "token_usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
                 "model": model,
                 "duration_ms": llm_duration_ms,
             })
             state["completed"] = True
             state["cancelled"] = True
-            # 只有"无工具调用的纯文本"才作为 display 快照写入 state["response"] ——
-            # 与 _run_agent 正常完成路径的不变量一致（有 tool call 的轮次从不把 XML 写进
-            # state["response"]）。半截 tool-call XML / 纯 reasoning / TTFT 阶段取消时
-            # response_content 不可呈现，留空，由 controller 兜底成占位文案。
-            if response_content and "<tool_call>" not in response_content:
+            # 只有已流出的普通文本才作为 display 快照写入 state["response"]。
+            # Native tool-call deltas 在 adapter 内尚未接受，纯 reasoning / TTFT 阶段
+            # 取消时 response_content 为空，由 controller 兜底成占位文案。
+            if response_content:
                 state["response"] = response_content
             logger.info(f"[{agent_name}] LLM stream cancelled mid-flight, partial content persisted")
             return None
@@ -568,6 +606,7 @@ async def execute_loop(
         await _emit(StreamEventType.LLM_COMPLETE.value, agent_name, {
             "content": response_content,
             "reasoning_content": reasoning_content,
+            "tool_calls": tool_calls,
             "token_usage": normalized_usage,
             "model": model,
             "duration_ms": llm_duration_ms,
@@ -601,24 +640,20 @@ async def execute_loop(
             f"{response_content[:500]}"
         )
 
-        return response_content, reasoning_content, normalized_usage
+        return response_content, reasoning_content, normalized_usage, tool_calls
 
     async def _handle_permission(
+        call_id: str,
         tool_name: str,
         params: dict,
         agent_name: str,
         permission: ToolPermission,
-        parser_warnings: Optional[List[str]] = None,
         reason: Optional[str] = None,
     ) -> bool:
         """
         处理权限中断。
 
-        parser_warnings 是本次 tool_call 的 parser 兜底提示。显式 deny 的
-        TOOL_COMPLETE 一并带回去，让模型下一轮看到 "你这次的 XML 还有 X 个
-        问题、写法应该是 Y"，与其他 TOOL_COMPLETE 路径保持对齐。
-
-        reason 是模型写的调用意图（<reason> 标签），透出到 PERMISSION_REQUEST
+        reason 是模型在 ``__reason`` 中写的调用意图，透出到 PERMISSION_REQUEST
         SSE 事件 + interrupt data，让审批弹窗显示 "模型为什么要跑这个工具"。
         缺失（None）时前端按无意图渲染即可。
 
@@ -627,6 +662,7 @@ async def execute_loop(
         """
         await _emit(StreamEventType.PERMISSION_REQUEST.value, agent_name, {
             "permission_level": permission.value,
+            "call_id": call_id,
             "tool": tool_name,
             "params": params,
             "reason": reason,
@@ -635,6 +671,7 @@ async def execute_loop(
         resume_data = await hooks.wait_for_interrupt(message_id, {
             "type": "tool_permission",
             "agent": agent_name,
+            "call_id": call_id,
             "tool_name": tool_name,
             "params": params,
             "reason": reason,
@@ -645,16 +682,17 @@ async def execute_loop(
         if resume_data is None:
             logger.warning(f"Permission timeout for tool '{tool_name}' after {config.PERMISSION_TIMEOUT}s, treating as denied")
             await _emit(StreamEventType.PERMISSION_RESULT.value, agent_name, {
-                "approved": False, "tool": tool_name, "reason": "timeout",
+                "approved": False, "call_id": call_id,
+                "tool": tool_name, "reason": "timeout",
             })
             # 与显式 deny 路径一样配对发 TOOL_START + TOOL_COMPLETE：否则超时
             # 这次 tool_call 在 event history 里没有 TOOL_COMPLETE，下一轮模型只看到
             # 自己发过 call、却看不到任何结果，可能原样重发。
             await _emit(StreamEventType.TOOL_START.value, agent_name, {
-                "tool": tool_name, "params": params, "reason": reason,
+                "call_id": call_id, "tool": tool_name, "params": params, "reason": reason,
             })
             await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
-                "tool": tool_name, "success": False,
+                "call_id": call_id, "tool": tool_name, "success": False,
                 "error": (
                     f"Permission request expired after {config.PERMISSION_TIMEOUT}s "
                     "without user approval. The user may be away or unavailable. "
@@ -664,25 +702,23 @@ async def execute_loop(
                     "want to approve and retry; otherwise continue without it."
                 ),
                 "duration_ms": 0,
-                "parser_warnings": parser_warnings,
             })
             return False
 
         is_approved = resume_data.get("approved", False)
 
         await _emit(StreamEventType.PERMISSION_RESULT.value, agent_name, {
-            "approved": is_approved, "tool": tool_name,
+            "approved": is_approved, "call_id": call_id, "tool": tool_name,
         })
 
         if not is_approved:
             await _emit(StreamEventType.TOOL_START.value, agent_name, {
-                "tool": tool_name, "params": params, "reason": reason,
+                "call_id": call_id, "tool": tool_name, "params": params, "reason": reason,
             })
             await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
-                "tool": tool_name, "success": False,
+                "call_id": call_id, "tool": tool_name, "success": False,
                 "error": "Permission denied by user. You do not have permission to use this tool.",
                 "duration_ms": 0,
-                "parser_warnings": parser_warnings,
             })
             return False
 
@@ -808,7 +844,11 @@ async def execute_loop(
         persisted.metadata["original_size_chars"] = len(data)
         return persisted
 
-    async def _execute_tools(tool_calls: list, agent_name: str) -> None:
+    async def _execute_tools(
+        tool_calls: list,
+        agent_name: str,
+        invocation_tool_names: set[str],
+    ) -> None:
         """按模型给出的自然序串行执行工具列表，处理权限中断。
         call_subagent 与常规工具同一条流水线：原地递归 await 子 agent，返回后
         继续执行同轮剩余工具（[tool, subagent, tool] 混合序成立）。
@@ -818,43 +858,53 @@ async def execute_loop(
             if await _check_cancelled():
                 break
 
-            # Parser 返回的解析错误 → 直接反馈给 agent
-            # 配对发 TOOL_START + TOOL_COMPLETE，与 permission-denied / not-allowed
-            # 路径保持一致；让消费者（live SSE / 历史重放）可以无条件假设 START 在
-            # COMPLETE 之前，无需 orphan 兜底。
-            # Parser 兜底修复登记的提示（截断 / 语法瑕疵等）—— 每个 tool_complete 都带上，
-            # 让模型在下一轮看到 "这次解析时我做了什么、你下次应该怎么写"。
-            parser_warnings = tool_call.warnings or None
-
-            if tool_call.error:
+            call_id = tool_call["id"]
+            function = tool_call["function"]
+            tool_name = function["name"]
+            raw_arguments = function.get("arguments", "")
+            fallback_reason = f"模型请求调用 {tool_name}"
+            try:
+                params = json.loads(raw_arguments)
+                if not isinstance(params, dict):
+                    raise ValueError("arguments must decode to a JSON object")
+            except (json.JSONDecodeError, ValueError) as exc:
                 await _emit(StreamEventType.TOOL_START.value, agent_name, {
-                    "tool": tool_call.name,
-                    "params": tool_call.params,
+                    "call_id": call_id,
+                    "tool": tool_name,
+                    "params": {},
+                    "reason": fallback_reason,
                 })
                 await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
-                    "tool": tool_call.name,
+                    "call_id": call_id,
+                    "tool": tool_name,
                     "success": False,
-                    "error": tool_call.error,
+                    "error": f"Invalid native tool arguments: {exc}",
                     "duration_ms": 0,
-                    "parser_warnings": parser_warnings,
                 })
                 tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                 continue
 
-            tool_name = tool_call.name
-            params = tool_call.params
-            reason = tool_call.reason  # 模型写的调用意图，透出到审批弹窗（display-only）
+            raw_reason = params.pop(REASON_ARGUMENT, None)
+            reason = (
+                raw_reason.strip()
+                if isinstance(raw_reason, str) and raw_reason.strip()
+                else fallback_reason
+            )
 
-            # Agent 工具白名单校验（决策 11:可调集 = EffectiveToolset 解析结果）
-            if tool_name not in effective_toolsets[agent_name]:
+            # 冻结在本次请求实际发送的 native schemas；同 envelope 里更早的
+            # read_skill/search_tools 不能追溯放行 sibling call。
+            if tool_name not in invocation_tool_names:
                 await _emit(StreamEventType.TOOL_START.value, agent_name, {
-                    "tool": tool_name, "params": params,
+                    "call_id": call_id, "tool": tool_name,
+                    "params": params, "reason": reason,
                 })
                 await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
-                    "tool": tool_name, "success": False,
-                    "error": f"Tool '{tool_name}' not available for '{agent_name}'",
+                    "call_id": call_id, "tool": tool_name, "success": False,
+                    "error": (
+                        f"Tool '{tool_name}' was not exposed in this LLM invocation. "
+                        "Load or activate it first, then call it in the next response."
+                    ),
                     "duration_ms": 0,
-                    "parser_warnings": parser_warnings,
                 })
                 tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                 continue
@@ -863,13 +913,13 @@ async def execute_loop(
             tool = _resolve_tool(tool_name)
             if not tool:
                 await _emit(StreamEventType.TOOL_START.value, agent_name, {
-                    "tool": tool_name, "params": params,
+                    "call_id": call_id, "tool": tool_name,
+                    "params": params, "reason": reason,
                 })
                 await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
-                    "tool": tool_name, "success": False,
+                    "call_id": call_id, "tool": tool_name, "success": False,
                     "error": f"Tool '{tool_name}' not found",
                     "duration_ms": 0,
-                    "parser_warnings": parser_warnings,
                 })
                 tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                 continue
@@ -883,14 +933,13 @@ async def execute_loop(
                     result = ToolResult(success=False, error=str(e))
 
                 if result.success:
-                    from tools.builtin.call_subagent import CallSubagentTool
-
                     target_agent = params["agent_name"]
                     instruction = params["instruction"]
-                    fresh_start = CallSubagentTool.parse_fresh_start(params)
+                    fresh_start = params.get("fresh_start", True)
 
                     subagent_start_time = utc_now()
                     await _emit(StreamEventType.TOOL_START.value, agent_name, {
+                        "call_id": call_id,
                         "tool": "call_subagent",
                         "params": {
                             "agent_name": target_agent,
@@ -918,8 +967,8 @@ async def execute_loop(
 
                     if sub_response is None:
                         # turn 已在子 agent 内终止（cancel / error，state 标志已由
-                        # 故障点设好）。与 cancel-between-tools 一致：orphan TOOL_START
-                        # = 调用未完成，不补 TOOL_COMPLETE，剩余工具不再执行。
+                        # 故障点设好）。剩余工具不再执行；controller 在任何持久化前
+                        # 统一为本调用和未开始的 sibling calls 补齐失败结果。
                         break
 
                     tool_duration_ms = int(
@@ -941,6 +990,7 @@ async def execute_loop(
                         "call_subagent", tool, subagent_result
                     )
                     await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
+                        "call_id": call_id,
                         "tool": "call_subagent",
                         "success": subagent_result.success,
                         "result_data": (
@@ -951,20 +1001,20 @@ async def execute_loop(
                         ),
                         "duration_ms": tool_duration_ms,
                         "metadata": subagent_result.metadata or None,
-                        "parser_warnings": parser_warnings,
                     })
                     tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                     continue
                 else:
                     await _emit(StreamEventType.TOOL_START.value, agent_name, {
-                        "tool": "call_subagent", "params": params,
+                        "call_id": call_id, "tool": "call_subagent",
+                        "params": params, "reason": reason,
                     })
                     await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
+                        "call_id": call_id,
                         "tool": "call_subagent",
                         "success": False,
                         "error": result.error or "call_subagent failed",
                         "duration_ms": 0,
-                        "parser_warnings": parser_warnings,
                     })
                     tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                     continue
@@ -975,7 +1025,7 @@ async def execute_loop(
             if effective_permission == ToolPermission.CONFIRM:
                 if tool_name not in state.get("always_allowed_tools", []):
                     approved = await _handle_permission(
-                        tool_name, params, agent_name, effective_permission, parser_warnings, reason
+                        call_id, tool_name, params, agent_name, effective_permission, reason
                     )
                     if not approved:
                         tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
@@ -984,7 +1034,8 @@ async def execute_loop(
             # 执行工具
             tool_start_time = utc_now()
             await _emit(StreamEventType.TOOL_START.value, agent_name, {
-                "tool": tool_name, "params": params, "reason": reason,
+                "call_id": call_id, "tool": tool_name,
+                "params": params, "reason": reason,
             })
 
             # 可打断 await：cancel flag 在工具在飞期间按 CANCEL_CHECK_INTERVAL 被轮询，
@@ -1006,6 +1057,11 @@ async def execute_loop(
                         agent_name=agent_name,
                         effective_toolset=effective_toolsets[agent_name],
                         tools=tools,
+                        disclosed_tools=set(
+                            state.get("agent_progressive_state", {})
+                            .get(agent_name, {})
+                            .get("disclosed_tools", [])
+                        ),
                     ), **params)
                     if getattr(tool, "wants_context", False)
                     else tool(**params)
@@ -1050,30 +1106,34 @@ async def execute_loop(
                     "image": {k: v for k, v in _img.items() if k != "data_uri"},
                 }
 
-            # skill 激活(决策 11/原则 8):read_skill 声明式回填 metadata.activated_skill →
-            # append 进 active_skills(能力轴持久化,回合末写 metadata、下回合捞回)+ 在**所有**
-            # agent 已算好的 EffectiveToolset 上 merge 该 skill 的预烤 skill_grants(全 agent 可见、
-            # 各自宇宙收窄)。纯字典操作、本回合即生效,不回 snapshot、不持闭包。仅成功调用、
-            # 仅新激活时动手(幂等)。
+            progressive = state.setdefault("agent_progressive_state", {}).setdefault(
+                agent_name, {"active_skills": [], "disclosed_tools": []}
+            )
             _activated = (tool_result.metadata or {}).get("activated_skill") if tool_result.success else None
             if _activated:
-                active_list = state.setdefault("active_skills", [])
+                active_list = progressive.setdefault("active_skills", [])
                 if _activated not in active_list:
                     active_list.append(_activated)
-                    _granted: set = set()
-                    for ets in effective_toolsets.values():
-                        _grant = ets.skill_grants.get(_activated)
-                        if _grant is not None:
-                            _granted.update(_grant.permissions)
-                        ets.activate_skill(_activated)
-                    # obs:能力变更审计(info)—— skill 激活把 agent-disabled 工具翻开。仅本轮
-                    # 新激活打一次(sticky 重放不到这条路径);无授予=其 allowed-tools 本就可调。
+                    ets = effective_toolsets[agent_name]
+                    grant = ets.skill_grants.get(_activated)
+                    granted = set(grant.permissions) if grant is not None else set()
+                    ets.activate_skill(_activated)
                     logger.info(
-                        "Skill %r activated via read_skill (message %s); enabled tools: %s",
-                        _activated, message_id, sorted(_granted) or "(none)",
+                        "Skill %r activated for %s via read_skill (message %s); enabled tools: %s",
+                        _activated, agent_name, message_id, sorted(granted) or "(none)",
                     )
 
+            disclosed = (
+                (tool_result.metadata or {}).get("disclosed_tools", [])
+                if tool_result.success else []
+            )
+            disclosed_list = progressive.setdefault("disclosed_tools", [])
+            for full_name in disclosed:
+                if full_name not in disclosed_list:
+                    disclosed_list.append(full_name)
+
             await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
+                "call_id": call_id,
                 "tool": tool_name,
                 "success": tool_result.success,
                 "result_data": tool_result.data if tool_result.success else None,
@@ -1081,7 +1141,6 @@ async def execute_loop(
                 "duration_ms": tool_duration_ms,
                 "params": params,
                 "metadata": tc_metadata,
-                "parser_warnings": parser_warnings,
             })
 
 
@@ -1132,7 +1191,7 @@ async def execute_loop(
             if await _check_cancelled():
                 return None
 
-            messages, reminder = await _build_context(agent_name)
+            messages, reminder, native_tools = await _build_context(agent_name)
 
             # agent_start 持久化「发给模型的非历史输入」：静态 system_prompt + 动态 reminder。
             # 历史可由 event 流确定性重放，这两块（尤其 reminder：现拼即丢、不入 event）补上后，
@@ -1150,11 +1209,16 @@ async def execute_loop(
                 logger.debug(f"[{agent_name}] Messages:\n{format_messages_for_debug(messages)}")
 
             # 调用 LLM（流式）
-            llm_result = await _call_llm(messages, agent_name, agents[agent_name].model)
+            llm_result = await _call_llm(
+                messages,
+                agent_name,
+                agents[agent_name].model,
+                native_tools,
+            )
             if llm_result is None:
                 return None
 
-            response_content, reasoning_content, normalized_usage = llm_result
+            response_content, reasoning_content, normalized_usage, tool_calls = llm_result
 
             # 引擎内 compaction 检查：本次 LLM 调用 input+output 超阈值则立即压缩。
             # 触发点选「每次 LLM call 后」是两点工程选择：
@@ -1202,9 +1266,6 @@ async def execute_loop(
                 state["response"] = f"Compaction failed: {str(compact_error)}"
                 return None
 
-            # 解析工具调用
-            tool_calls = parse_tool_calls(response_content)
-
             if not tool_calls:
                 # Lead 无工具调用但队列中有待处理消息 → 不退出，继续循环
                 # 这处理了 inject 消息在最后一次 LLM 调用期间到达的情况
@@ -1232,7 +1293,10 @@ async def execute_loop(
 
             # 串行执行工具（内部可能递归 _run_agent；turn 终止由 while 顶部条件
             # + _check_cancelled 收口）
-            await _execute_tools(tool_calls, agent_name)
+            invocation_tool_names = {
+                schema["function"]["name"] for schema in native_tools
+            }
+            await _execute_tools(tool_calls, agent_name, invocation_tool_names)
 
         return None  # while 因 state["completed"]（cancel / 递归内 error）退出
 

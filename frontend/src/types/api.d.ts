@@ -1890,7 +1890,10 @@ export interface components {
         };
         /** Body_admin_import_skill_api_v1_admin_skills_import_post */
         Body_admin_import_skill_api_v1_admin_skills_import_post: {
-            /** File */
+            /**
+             * File
+             * Format: binary
+             */
             file: string;
             /**
              * Visibility
@@ -1906,17 +1909,26 @@ export interface components {
         };
         /** Body_bulk_import_users_api_v1_admin_users_bulk_import_post */
         Body_bulk_import_users_api_v1_admin_users_bulk_import_post: {
-            /** File */
+            /**
+             * File
+             * Format: binary
+             */
             file: string;
         };
         /** Body_import_skill_api_v1_skills_import_post */
         Body_import_skill_api_v1_skills_import_post: {
-            /** File */
+            /**
+             * File
+             * Format: binary
+             */
             file: string;
         };
         /** Body_import_unit_seed_api_v1_admin_tools_units_import_post */
         Body_import_unit_seed_api_v1_admin_tools_units_import_post: {
-            /** File */
+            /**
+             * File
+             * Format: binary
+             */
             file: string;
         };
         /** Body_send_message_api_v1_chat_post */
@@ -2719,7 +2731,7 @@ export interface components {
             uploaded_files: components["schemas"]["UploadedFileRef"][] | null;
             /**
              * Active Skills
-             * @description Skill slugs active as of this turn (sticky, from Message.metadata_['active_skills']). The branch-tail message's list is the conversation's current active set; the composer reads it to mark already-active skills in the activation picker. Absent/empty when no skills are active.
+             * @description Lead-agent skill slugs active as of this turn, projected from Message.metadata_['agent_progressive_state']['lead_agent']['active_skills']. The branch-tail message drives the activation picker. Absent/empty when no skills are active.
              */
             active_skills: string[] | null;
         };
@@ -3033,8 +3045,10 @@ export interface components {
             headers: {
                 [key: string]: string;
             };
-            /** Parameters */
-            parameters: components["schemas"]["ToolParamSpec"][];
+            /** Input Schema */
+            input_schema: {
+                [key: string]: unknown;
+            };
             /** Response Extract */
             response_extract: string | null;
             artifact_output: components["schemas"]["ArtifactOutputSpec"] | null;
@@ -3043,31 +3057,6 @@ export interface components {
              * @default 60
              */
             timeout: number;
-        };
-        /** ToolParamSpec */
-        ToolParamSpec: {
-            /** Name */
-            name: string;
-            /**
-             * Type
-             * @default string
-             * @enum {string}
-             */
-            type: "string" | "integer" | "number" | "boolean" | "json";
-            /**
-             * Description
-             * @default
-             */
-            description: string;
-            /**
-             * Required
-             * @default true
-             */
-            required: boolean;
-            /** Default */
-            default: unknown | null;
-            /** Enum */
-            enum: unknown[] | null;
         };
         /** ToolUnitImportResponse */
         ToolUnitImportResponse: {
@@ -3334,10 +3323,6 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
-            /** Input */
-            input: unknown;
-            /** Context */
-            ctx: Record<string, never>;
         };
         /**
          * VersionDetailResponse

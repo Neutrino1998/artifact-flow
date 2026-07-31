@@ -26,7 +26,11 @@ from tools.base import BUILTIN_TOOL_NAMES, is_builtin_name, resolve_allowed_tool
 from tools.custom.http_tool import validate_response_extract
 from tools.custom.secrets import assert_secret_refs_allowed
 from tools.custom.url_template import validate_url_path_template
-from tools.param_specs import normalize_parameter_specs
+from tools.input_schema import (
+    InputSchemaError,
+    normalize_business_input_schema,
+    validate_native_tool_name,
+)
 from utils.frontmatter import FrontmatterError, normalize_allowed_tools, parse_frontmatter_text
 from utils.logger import get_logger
 from utils.skill_validator import validate_skill_zip
@@ -60,7 +64,7 @@ class MemberSeed:
     member_name: str          # 作者裸名
     full_name: str            # 注册/可调名:set=<unit>__<member>;singleton==unit_name
     permission: str           # auto | confirm —— 等级唯一来源(决策 11)
-    definition: Dict          # http 配置(endpoint/method/headers/parameters/...)+ description
+    definition: Dict          # http 配置(endpoint/method/headers/input_schema/...)+ description
 
 
 @dataclass
@@ -194,17 +198,28 @@ def _build_http_member(frontmatter: dict, body: str, *, unit_name: str,
             f"{source}: invalid permission '{permission}' (expected auto|confirm)"
         )
 
-    # 参数定义校验(同 dynamic CRUD / legacy loader)
+    if "parameters" in frontmatter:
+        raise SeedError(
+            f"{source}: legacy 'parameters' is not supported; use 'input_schema'"
+        )
+
     try:
-        params = normalize_parameter_specs(frontmatter.get("parameters", []) or [])
-    except ValueError as e:
+        input_schema = normalize_business_input_schema(
+            frontmatter.get("input_schema") or {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+            source=f"{source}: input_schema",
+        )
+    except InputSchemaError as e:
         raise SeedError(f"{source}: {e}") from e
 
     # SSRF-02 load-time 闸门:endpoint/headers 的 {{VAR}} 必须白名单前缀
     assert_secret_refs_allowed(frontmatter.get("endpoint", ""))
     assert_secret_refs_allowed(frontmatter.get("headers", {}) or {})
     try:
-        validate_url_path_template(frontmatter.get("endpoint", ""), params)
+        validate_url_path_template(frontmatter.get("endpoint", ""), input_schema)
     except ValueError as e:
         raise SeedError(f"{source}: {e}") from e
 
@@ -227,6 +242,10 @@ def _build_http_member(frontmatter: dict, body: str, *, unit_name: str,
         description = f"{description}\n\n{body}" if description else body
 
     full_name = member_name if is_singleton else f"{unit_name}__{member_name}"
+    try:
+        validate_native_tool_name(full_name)
+    except InputSchemaError as e:
+        raise SeedError(f"{source}: {e}") from e
 
     # method/timeout 归一化与 dynamic CRUD(tool_registry_manager._build_definition)同口径:
     # 同一工具经 MD vs API 落库的 definition 必须一致,否则 seed_hash / GET 展示漂移
@@ -236,7 +255,7 @@ def _build_http_member(frontmatter: dict, body: str, *, unit_name: str,
         "endpoint": frontmatter.get("endpoint", ""),
         "method": (frontmatter.get("method", "GET") or "GET").upper(),
         "headers": frontmatter.get("headers", {}) or {},
-        "parameters": params,
+        "input_schema": input_schema,
         "response_extract": frontmatter.get("response_extract"),
         "artifact_output": artifact_output,
         "timeout": _read_timeout(frontmatter, source),

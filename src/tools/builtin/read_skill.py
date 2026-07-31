@@ -29,7 +29,6 @@ from tools.base import (
     MOUNT_SKILL_NAME,
     READ_SKILL_NAME,
     BaseTool,
-    ToolParameter,
     ToolPermission,
     ToolResult,
 )
@@ -88,15 +87,19 @@ class ReadSkillTool(BaseTool):
         self._service = service
         self._skillset = skillset
 
-    def get_parameters(self) -> List[ToolParameter]:
-        return [
-            ToolParameter(
-                name="slug",
-                type="string",
-                description="Skill slug to load (as shown in <available_skills>).",
-                required=True,
-            )
-        ]
+    def get_input_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "slug": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Skill slug to load (as shown in <available_skills>).",
+                }
+            },
+            "required": ["slug"],
+            "additionalProperties": False,
+        }
 
     async def execute(self, **params) -> ToolResult:
         slug = (params.get("slug") or "").strip()
@@ -150,15 +153,19 @@ class MountSkillTool(BaseTool):
         self._service = service
         self._skillset = skillset
 
-    def get_parameters(self) -> List[ToolParameter]:
-        return [
-            ToolParameter(
-                name="slug",
-                type="string",
-                description="Skill slug to mount (as shown in <available_skills>).",
-                required=True,
-            )
-        ]
+    def get_input_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "slug": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Skill slug to mount (as shown in <available_skills>).",
+                }
+            },
+            "required": ["slug"],
+            "additionalProperties": False,
+        }
 
     async def execute(self, **params) -> ToolResult:
         slug = (params.get("slug") or "").strip()

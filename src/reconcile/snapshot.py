@@ -20,7 +20,7 @@ from db.models import (
     ToolMember,
     ToolUnit,
 )
-from tools.base import BaseTool, ToolParameter, is_builtin_name
+from tools.base import BaseTool, is_builtin_name
 from tools.custom.credentials import CredentialResolver
 from tools.custom.http_tool import HttpTool, HttpToolConfig
 from tools.custom.mcp_tool import build_mcp_tool
@@ -96,17 +96,6 @@ def build_http_tool(
     unit_name + credential_resolver 灌入运行期凭证通路(B-4;B-5 lazy):execute 期按 unit
     从 tool_credentials 开短 session 解密填 {{NAME}}。两者缺省(测试直接调)→ 回落 env。
     """
-    params = [
-        ToolParameter(
-            name=p["name"],
-            type=p.get("type", "string"),
-            description=p.get("description", ""),
-            required=p.get("required", True),
-            default=p.get("default"),
-            enum=p.get("enum"),
-        )
-        for p in (definition.get("parameters") or [])
-    ]
     config = HttpToolConfig(
         name=full_name,
         description=definition.get("description", ""),
@@ -114,7 +103,7 @@ def build_http_tool(
         endpoint=definition.get("endpoint", ""),
         method=definition.get("method", "GET"),
         headers=definition.get("headers", {}) or {},
-        parameters=params,
+        input_schema=definition["input_schema"],
         response_extract=definition.get("response_extract"),
         artifact_output=definition.get("artifact_output"),
         timeout=definition.get("timeout", 60),

@@ -51,7 +51,6 @@ export type ResolveDepartmentResponse = S['ResolveDepartmentResponse'];
 // Tool Registry Types (Admin) — B-4 工具 unit 管理
 // ============================================================
 
-export type ToolParamSpec = S['ToolParamSpec'];
 export type ToolMemberSpec = S['ToolMemberSpec'];
 export type CreateToolUnitRequest = S['CreateToolUnitRequest'];
 export type UpdateToolUnitRequest = S['UpdateToolUnitRequest'];

@@ -16,7 +16,7 @@ from utils.text_match import (
     find_fuzzy_match as _shared_find_fuzzy_match,
     normalize_for_match as _normalize_for_match,
 )
-from tools.base import BaseTool, ToolParameter, ToolPermission, ToolResult
+from tools.base import BaseTool, ToolPermission, ToolResult
 from utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -138,27 +138,17 @@ class UpdateArtifactTool(BaseTool):
     def set_service(self, service: "ArtifactService") -> None:
         self._service = service
 
-    def get_parameters(self) -> List[ToolParameter]:
-        return [
-            ToolParameter(
-                name="id",
-                type="string",
-                description="Artifact ID to update",
-                required=True,
-            ),
-            ToolParameter(
-                name="old_str",
-                type="string",
-                description="Text to be replaced",
-                required=True,
-            ),
-            ToolParameter(
-                name="new_str",
-                type="string",
-                description="New text to replace with",
-                required=True,
-            ),
-        ]
+    def get_input_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string", "description": "Artifact ID to update"},
+                "old_str": {"type": "string", "description": "Text to be replaced"},
+                "new_str": {"type": "string", "description": "New text to replace with"},
+            },
+            "required": ["id", "old_str", "new_str"],
+            "additionalProperties": False,
+        }
 
     async def execute(self, **params) -> ToolResult:
         if not self._service:
@@ -213,20 +203,3 @@ class UpdateArtifactTool(BaseTool):
             xml = f'<artifact version="{version}"><id>{params["id"]}</id> {message}</artifact>'
 
         return ToolResult(success=True, data=xml, metadata=(match_info or {}))
-
-    def to_xml_example(self) -> str:
-        return """<tool_call>
-  <reason><![CDATA[mark research topic X as completed in the task plan]]></reason>
-  <name>update_artifact</name>
-  <params>
-    <id><![CDATA[task_plan]]></id>
-    <old_str><![CDATA[1. [✗] Research topic X
-   - Status: pending
-   - Assigned: research_agent
-   - Notes: N/A]]></old_str>
-    <new_str><![CDATA[1. [✓] Research topic X
-   - Status: completed
-   - Assigned: research_agent
-   - Notes: See artifact research_topic_x]]></new_str>
-  </params>
-</tool_call>"""

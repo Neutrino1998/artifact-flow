@@ -246,15 +246,17 @@ class TestMessageConversion:
         assert msgs[0]["role"] == "user"
         assert msgs[1]["role"] == "assistant"
 
-    def test_tool_complete_renders_as_user_with_xml(self):
+    def test_tool_complete_renders_as_bound_native_tool_message(self):
         events = [
             _ev(StreamEventType.TOOL_COMPLETE.value, "lead_agent", {
+                "call_id": "call_search",
                 "tool": "web_search", "success": True, "result_data": "found",
             }),
         ]
         msgs = build_event_history(events, "lead_agent")
         assert len(msgs) == 1
-        assert msgs[0]["role"] == "user"
+        assert msgs[0]["role"] == "tool"
+        assert msgs[0]["tool_call_id"] == "call_search"
         assert "<tool_result" in msgs[0]["content"]
 
     def test_empty_events_returns_empty(self):
@@ -279,6 +281,7 @@ class TestVisionImageBlock:
     """识图 tool_complete 携图片引用 + vision_blocks 缓存 → 块列表 vs 占位文本门控。"""
 
     _IMG_EVENT = dict(
+        call_id="call_image",
         tool="read_artifact", success=True, result_data="[image artifact 'shot' v1, image/png]",
         metadata={"image": {"artifact_id": "shot", "version": 1, "content_type": "image/png"}},
     )
@@ -287,15 +290,16 @@ class TestVisionImageBlock:
     def _events(self):
         return [_ev(StreamEventType.TOOL_COMPLETE.value, "lead_agent", dict(self._IMG_EVENT))]
 
-    def test_hit_and_vision_capable_expands_to_block_list(self):
+    def test_hit_and_vision_capable_attaches_ephemeral_image_metadata(self):
         msgs = build_event_history(
             self._events(), "lead_agent",
             vision_blocks={("shot", 1): self._DATA_URI}, vision_capable=True,
         )
         assert len(msgs) == 1
-        content = msgs[0]["content"]
-        assert isinstance(content, list)
-        assert any(b["type"] == "image_url" and b["image_url"]["url"] == self._DATA_URI for b in content)
+        assert msgs[0]["role"] == "tool"
+        assert msgs[0]["tool_call_id"] == "call_image"
+        assert isinstance(msgs[0]["content"], str)
+        assert msgs[0]["_meta"]["image"]["data_uri"] == self._DATA_URI
 
     def test_hit_but_not_vision_capable_falls_back_to_placeholder(self):
         """文本模型(vision_capable=False)即便缓存命中也只得占位文本 —— 不注入 image_url 块。

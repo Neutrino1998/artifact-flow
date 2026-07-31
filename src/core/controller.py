@@ -16,6 +16,11 @@ from sqlalchemy.exc import IntegrityError
 from config import config
 from core.engine import EmptyTurnInputError, EngineHooks, create_initial_state, execute_loop, finalize_metrics, turn_has_content
 from core.events import StreamEventType
+from core.native_call_closure import (
+    assert_native_calls_closed,
+    close_open_native_calls,
+    terminal_reason_from_state,
+)
 from core.conversation_manager import ConversationManager
 from core.post_processing import (
     PostProcessState,
@@ -233,15 +238,23 @@ class ExecutionController:
         if self.artifact_service:
             self.artifact_service.set_session(session_id)
 
-        # 从父消息 metadata 中恢复 always_allowed_tools + active_skills(同生命周期)
+        # 从父消息 metadata 中恢复权限与按 agent 隔离的渐进状态。
         parent_always_allowed = []
-        parent_active_skills = []
+        agent_progressive_state: Dict[str, Dict[str, List[str]]] = {}
         if resolved_parent:
             parent_meta = await self._with_db_retry(
                 lambda cm, er: cm.get_message_metadata_async(resolved_parent)
             )
             parent_always_allowed = parent_meta.get("always_allowed_tools", [])
-            parent_active_skills = parent_meta.get("active_skills", [])
+            raw_progressive = parent_meta.get("agent_progressive_state", {})
+            if isinstance(raw_progressive, dict):
+                for agent_name, value in raw_progressive.items():
+                    if not isinstance(value, dict):
+                        continue
+                    agent_progressive_state[agent_name] = {
+                        "active_skills": list(value.get("active_skills", [])),
+                        "disclosed_tools": list(value.get("disclosed_tools", [])),
+                    }
 
         # 用户点按钮激活(C-3):activate_skills 经 EffectiveSkillSet.visible 校验(可见=正确性,
         # 不要求 enabled —— 显式激活自己关掉的可见 skill 是合法 opt-in;不可见的静默丢弃,不 404
@@ -252,21 +265,29 @@ class ExecutionController:
         #      (agent 自调 read_skill 本就每次返回正文,此举把按钮对齐到同一自由度)。
         #   ② sticky 名单 active_skills = parent ∪ to_inject 去重(名单不堆重复;能力 grant 幂等)。
         visible = self.effective_skillset.visible if self.effective_skillset else {}
-        to_inject, active_skills = resolve_skill_activation(
-            activate_skills, visible, parent_active_skills
+        lead_state = agent_progressive_state.setdefault(
+            "lead_agent", {"active_skills": [], "disclosed_tools": []}
         )
+        parent_lead_skills = list(lead_state["active_skills"])
+        to_inject, active_skills = resolve_skill_activation(
+            activate_skills, visible, parent_lead_skills
+        )
+        lead_state["active_skills"] = active_skills
 
         # 能力轴 sticky 跨 turn:在已算好的字典上 merge 预烤 skill_grants(全 agent),与 mid-turn
         # read_skill 同入口。activate_skill 幂等,对全量 active_skills(parent∪注入)跑一遍即可。
         # 工具能力跨 turn 持有 ≠ L3 mount 跨 turn(沙盒 per-turn 销毁,原则 8 护栏)。
-        for slug in active_skills:
-            for ets in self.effective_toolsets.values():
+        for agent_name, progressive in agent_progressive_state.items():
+            ets = self.effective_toolsets.get(agent_name)
+            if ets is None:
+                continue
+            for slug in progressive.get("active_skills", []):
                 ets.activate_skill(slug)
 
         # obs:能力变更审计(info)—— 只记本轮**新**授予能力的 skill(button/sticky-new),
         # 不含 parent 已激活的重放(那非新事件、每轮都有 = 噪音)。无授予=其 allowed-tools 本就可调。
         for slug in to_inject:
-            if slug in parent_active_skills:
+            if slug in parent_lead_skills:
                 continue
             granted: set = set()
             for ets in self.effective_toolsets.values():
@@ -332,7 +353,7 @@ class ExecutionController:
             message_id=message_id,
             path_events=path_events,
             always_allowed_tools=parent_always_allowed,
-            active_skills=active_skills,
+            agent_progressive_state=agent_progressive_state,
             activated_skill_bodies=activated_skill_bodies,
             uploaded_files=uploaded_files,
             force_compact=force_compact,
@@ -432,6 +453,9 @@ class ExecutionController:
                         f"finalize_metrics failed on cancel for {message_id}: {fm_err}",
                         exc_info=True,
                     )
+                close_open_native_calls(
+                    initial_state, "execution was cancelled externally"
+                )
                 initial_state["events"].append(make_external_cancelled_event(
                     conversation_id=conversation_id,
                     message_id=message_id,
@@ -607,6 +631,17 @@ class ExecutionController:
                         logger.exception(f"Artifact flush failed after retries: {flush_err}")
                         pp.flush_error = f"Artifact persistence failed: {flush_err}"
 
+                closure_events = close_open_native_calls(
+                    pp.final_state, terminal_reason_from_state(pp.final_state)
+                )
+                for closure_event in closure_events:
+                    yield {
+                        "type": closure_event.event_type,
+                        "agent": closure_event.agent_name,
+                        "timestamp": utc_now().isoformat(),
+                        "data": closure_event.data,
+                    }
+
                 # 决定 terminal（纯函数,无 IO）。统一后 engine/controller 的内部错误只把
                 # 详情记进 state["error_detail"],由 decide_terminal 在 flush 之后构建唯一的
                 # 终态事件(含 ERROR),controller 下面统一 append + yield。
@@ -682,10 +717,9 @@ class ExecutionController:
                 always_allowed = pp.final_state.get("always_allowed_tools", [])
                 if always_allowed:
                     metadata_updates["always_allowed_tools"] = always_allowed
-                # active_skills 能力轴持久化(append-only sticky,照抄 always_allowed_tools)
-                active_skills = pp.final_state.get("active_skills", [])
-                if active_skills:
-                    metadata_updates["active_skills"] = active_skills
+                progressive = pp.final_state.get("agent_progressive_state", {})
+                if progressive:
+                    metadata_updates["agent_progressive_state"] = progressive
                 execution_metrics = pp.final_state.get("execution_metrics", {})
                 if execution_metrics:
                     metadata_updates["execution_metrics"] = execution_metrics
@@ -754,6 +788,9 @@ class ExecutionController:
         """
         # Phase 1: ensure events are in DB
         if not pp.events_persisted:
+            close_open_native_calls(
+                pp.final_state, terminal_reason_from_state(pp.final_state)
+            )
             ensure_terminal(pp)
             try:
                 pp.events_persisted = await self._persist_events(
@@ -829,6 +866,7 @@ class ExecutionController:
             return True
 
         all_events = final_state.get("events", [])
+        assert_native_calls_closed(final_state)
         # 只持久化本轮新产生的 events（历史 events 是 turn 开始时从 DB 载入的快照，
         # 已经在 DB 里，不要重复写）
         new_events = [e for e in all_events if not getattr(e, "is_historical", False)]

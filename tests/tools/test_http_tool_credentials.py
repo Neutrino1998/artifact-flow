@@ -68,7 +68,7 @@ def _tool(values):
             endpoint="https://{{TOOL_SECRET_HOST}}/api",
             method="GET",
             headers={"Authorization": "Bearer {{TOOL_SECRET_KEY}}"},
-            parameters=[],
+            input_schema={"type": "object", "properties": {}},
         ),
         unit_name="ragflow",
         credential_resolver=_FakeResolver(values),
@@ -107,7 +107,7 @@ async def test_env_fallback_when_no_resolver(_fake_client):
         permission="auto",
         endpoint="https://api/{{TOOL_SECRET_PATH}}",
         method="GET",
-        parameters=[],
+        input_schema={"type": "object", "properties": {}},
     ))
     with patch.dict(os.environ, {"TOOL_SECRET_PATH": "v1"}):
         result = await tool.execute()

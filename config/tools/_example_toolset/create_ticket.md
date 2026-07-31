@@ -10,22 +10,25 @@ permission: confirm
 # Fake/illustrative endpoint — never executed.
 endpoint: "https://api.example.com/tickets"
 
-# POST: parameters become the JSON request body (not the query string).
+# POST: arguments become the JSON request body (not the query string).
 method: POST
 
 # JMESPath into the (illustrative) JSON response.
 response_extract: "id"
 
-parameters:
-  - name: title
-    type: string
-    description: "Short summary of the issue"
-    required: true
-  - name: priority
-    type: string
-    description: "Ticket priority"
-    enum: [low, medium, high]
-    default: "medium"
+input_schema:
+  type: object
+  properties:
+    title:
+      type: string
+      description: "Short summary of the issue"
+    priority:
+      type: string
+      description: "Ticket priority"
+      enum: [low, medium, high]
+      default: "medium"
+  required: [title]
+  additionalProperties: false
 ---
 
 Create a support ticket with the given title and priority.

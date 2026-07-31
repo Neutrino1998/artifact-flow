@@ -45,6 +45,7 @@ class DeferredUnit:
     description: str
     discovery_error: Optional[str] = None
     member_full_names: List[str] = field(default_factory=list)
+    defer: bool = True
 
     @classmethod
     def from_unit(cls, unit: UnitInfo, present_members: List[str]) -> "DeferredUnit":
@@ -55,6 +56,7 @@ class DeferredUnit:
             description=unit.description,
             discovery_error=unit.discovery_error,
             member_full_names=present_members,
+            defer=unit.defer,
         )
 
 
@@ -68,6 +70,7 @@ class SkillGrant:
     """
     permissions: Dict[str, ToolPermission] = field(default_factory=dict)
     deferred_units: Dict[str, DeferredUnit] = field(default_factory=dict)
+    tool_units: Dict[str, DeferredUnit] = field(default_factory=dict)
 
 
 @dataclass
@@ -93,6 +96,7 @@ class EffectiveToolset:
     # mount_skill 仅当有可见 (bundle) skill 时才被建(见 create_skill_tools),不在此 dict =
     # 本 turn 没那道能力,对应规则自然不触发。只存等级、不持工具对象/闭包。
     injectable_builtins: Dict[str, ToolPermission] = field(default_factory=dict)
+    tool_units: Dict[str, DeferredUnit] = field(default_factory=dict)
 
     def __contains__(self, full_name: str) -> bool:
         return full_name in self.permissions
@@ -110,6 +114,8 @@ class EffectiveToolset:
         self.permissions.update(grant.permissions)
         for unit_name, du in grant.deferred_units.items():
             self.deferred_units.setdefault(unit_name, du)
+        for unit_name, unit in grant.tool_units.items():
+            self.tool_units.setdefault(unit_name, unit)
         self.apply_injection_invariants()
 
     def apply_injection_invariants(self) -> None:
@@ -196,6 +202,7 @@ def resolve_effective_toolset(
     """
     permissions: Dict[str, ToolPermission] = {}
     deferred_units: Dict[str, DeferredUnit] = {}
+    tool_units: Dict[str, DeferredUnit] = {}
 
     # ① builtin 轴:enabled 的 builtin,等级取工具对象
     for name, member_state in agent.builtin_tools.items():
@@ -225,6 +232,8 @@ def resolve_effective_toolset(
         # 中显式可见,而不是静默消失。
         if unit.defer and (present_members or unit.discovery_error):
             deferred_units[unit_name] = DeferredUnit.from_unit(unit, present_members)
+        if present_members or unit.discovery_error:
+            tool_units[unit_name] = DeferredUnit.from_unit(unit, present_members)
 
     # ③ 请求级 builtin 注入上下文(F-0):从本 turn 的 tools 烤入三个可注入 builtin 的
     # 等级(presence 即闸:read_skill/mount_skill 只在有可见 (bundle) skill 时存在)。
@@ -241,7 +250,13 @@ def resolve_effective_toolset(
         agent, snapshot, tools, skill_snapshot, dept_matched_units
     )
 
-    ets = EffectiveToolset(permissions, deferred_units, skill_grants, injectable)
+    ets = EffectiveToolset(
+        permissions=permissions,
+        deferred_units=deferred_units,
+        skill_grants=skill_grants,
+        injectable_builtins=injectable,
+        tool_units=tool_units,
+    )
     ets.apply_injection_invariants()
     return ets
 
@@ -294,6 +309,8 @@ def _bake_skill_grants(
                             present.append(fn)
                     if u.defer and (present or u.discovery_error):
                         grant.deferred_units[unit] = DeferredUnit.from_unit(u, present)
+                    if present or u.discovery_error:
+                        grant.tool_units[unit] = DeferredUnit.from_unit(u, present)
         if grant.permissions:
             grants_by_slug[slug] = grant
     return grants_by_slug

@@ -11,6 +11,7 @@ schema)。模型要调用前先用 `search_tools` 把完整 schema 取回来 —
 仍无状态(context 调用时注入)。
 """
 
+import json
 from typing import Dict, List, Optional
 
 from config import config
@@ -18,11 +19,9 @@ from tools.base import (
     SEARCH_TOOLS_NAME,
     BaseTool,
     ToolExecutionContext,
-    ToolParameter,
     ToolPermission,
     ToolResult,
 )
-from tools.xml_formatter import render_tool_docs
 
 _SELECT_PREFIX = "select:"
 
@@ -46,18 +45,22 @@ class SearchToolsTool(BaseTool):
             permission=ToolPermission.AUTO,
         )
 
-    def get_parameters(self) -> List[ToolParameter]:
-        return [
-            ToolParameter(
-                name="query",
-                type="string",
-                description=(
+    def get_input_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": (
                     "`select:full_name,full_name` for exact tools by name, or a keyword "
                     "to search tool names and descriptions."
-                ),
-                required=True,
-            )
-        ]
+                    ),
+                }
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        }
 
     async def execute(self, _context: Optional[ToolExecutionContext] = None, **params) -> ToolResult:
         if _context is None:
@@ -67,7 +70,10 @@ class SearchToolsTool(BaseTool):
                 error="search_tools requires engine context but none was injected (engine wiring bug).",
             )
         return search_tools_result(
-            params.get("query", ""), _context.effective_toolset, _context.tools
+            params.get("query", ""),
+            _context.effective_toolset,
+            _context.tools,
+            disclosed_tools=_context.disclosed_tools,
         )
 
 
@@ -75,6 +81,7 @@ def search_tools_result(
     query: str,
     effective_toolset,
     tools: Dict[str, BaseTool],
+    disclosed_tools: Optional[set[str]] = None,
 ) -> ToolResult:
     """渲染当前 agent 可调集里匹配工具的完整 doc(纯函数,execute / 测试共用)。
 
@@ -130,7 +137,21 @@ def search_tools_result(
     overflow = matched[cap:]
     shown = matched[:cap]
 
-    body = render_tool_docs([tools[n] for n in shown])
+    deferred_names = effective_toolset.deferred_member_names()
+    disclosed_tools = disclosed_tools or set()
+    newly_disclosed = [
+        name for name in shown
+        if name in deferred_names and name not in disclosed_tools
+    ]
+    already_loaded = [name for name in shown if name not in newly_disclosed]
+    body = json.dumps(
+        {
+            "tools": [tools[n].to_native_tool_schema() for n in newly_disclosed],
+            "already_loaded": already_loaded,
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
     notes = []
     if overflow:
         notes.append(
@@ -142,7 +163,8 @@ def search_tools_result(
         notes.append("Not found or not available to you (skipped): " + ", ".join(unknown))
     if notes:
         body += "\n\n" + "\n".join(notes)
-    return ToolResult(success=True, data=body)
+    metadata = {"disclosed_tools": newly_disclosed} if newly_disclosed else {}
+    return ToolResult(success=True, data=body, metadata=metadata)
 
 
 def _matching_deferred_unit_error(query: str, effective_toolset) -> Optional[str]:
