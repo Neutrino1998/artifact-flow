@@ -28,7 +28,7 @@ def _call(call_id, name="tool", arguments=None):
         "function": {
             "name": name,
             "arguments": json.dumps(
-                arguments or {"__reason": "needed", "value": 1}
+                arguments or {"value": 1}
             ),
         },
     }
@@ -55,7 +55,7 @@ def test_closes_never_started_and_interrupted_calls_exactly_once():
     first_start = generated[0].data
     assert first_start["call_id"] == "call_1"
     assert first_start["params"] == {"value": 1}
-    assert first_start["reason"] == "needed"
+    assert first_start["reason"] == "模型请求调用 a"
     interrupted = generated[-1].data
     assert interrupted["call_id"] == "call_2"
     assert "side effects may or may not" in interrupted["error"]

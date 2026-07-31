@@ -101,7 +101,6 @@ def _llm_text(text: str):
 
 def _tool_call_chunks(tool_name: str, **params):
     usage = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
-    arguments = {"__reason": f"test {tool_name}", **params}
     return [
         {"type": "usage", "token_usage": usage},
         {
@@ -113,7 +112,7 @@ def _tool_call_chunks(tool_name: str, **params):
                 "type": "function",
                 "function": {
                     "name": tool_name,
-                    "arguments": json.dumps(arguments),
+                    "arguments": json.dumps(params),
                 },
             }],
             "token_usage": usage,

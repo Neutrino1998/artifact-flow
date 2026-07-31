@@ -19,20 +19,11 @@ def _get(value: Any, key: str, default: Any = None) -> Any:
     return getattr(value, key, default)
 
 
-def _merge_fragment(current: str, fragment: Any) -> str:
-    """Merge both true deltas and provider-emitted cumulative strings."""
+def _append_delta(current: str, fragment: Any) -> str:
+    """Append one LiteLLM/OpenAI stream delta without inspecting its content."""
     if fragment is None:
         return current
-    incoming = str(fragment)
-    if not incoming:
-        return current
-    if not current:
-        return incoming
-    if incoming == current or current.startswith(incoming):
-        return current
-    if incoming.startswith(current):
-        return incoming
-    return current + incoming
+    return current + str(fragment)
 
 
 @dataclass
@@ -45,19 +36,14 @@ class _PartialNativeToolCall:
 
     def add(self, delta: Any) -> None:
         incoming_id = _get(delta, "id")
-        if incoming_id and self.call_id and incoming_id != self.call_id:
+        if incoming_id:
             incoming = str(incoming_id)
-            if (
-                self.call_id.startswith("call_")
-                and incoming.startswith("call_")
-                and not self.call_id.startswith(incoming)
-                and not incoming.startswith(self.call_id)
-            ):
+            if self.call_id and incoming != self.call_id:
                 raise NativeToolStreamError(
                     f"conflicting tool call ids at index {self.index}: "
                     f"{self.call_id!r} vs {incoming!r}"
                 )
-        self.call_id = _merge_fragment(self.call_id, incoming_id)
+            self.call_id = incoming
 
         incoming_type = _get(delta, "type")
         if incoming_type:
@@ -70,8 +56,8 @@ class _PartialNativeToolCall:
             self.call_type = incoming_type
 
         function = _get(delta, "function") or {}
-        self.name = _merge_fragment(self.name, _get(function, "name"))
-        self.arguments = _merge_fragment(
+        self.name = _append_delta(self.name, _get(function, "name"))
+        self.arguments = _append_delta(
             self.arguments, _get(function, "arguments")
         )
 

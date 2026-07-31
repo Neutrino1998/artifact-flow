@@ -39,7 +39,6 @@ def test_legacy_parameters_convert_to_object_schema_without_stringifying_json():
 @pytest.mark.parametrize(
     "parameters, message",
     [
-        ([{"name": "__reason", "type": "string"}], "reserved"),
         (
             [
                 {"name": "x", "type": "string"},
@@ -58,15 +57,13 @@ def test_migration_rejects_ambiguous_or_invalid_legacy_definitions(parameters, m
         migration._parameters_to_schema(parameters, "bad")
 
 
-def test_migration_validates_preexisting_native_schema_and_reserved_reason():
-    with pytest.raises(RuntimeError, match="reserved"):
-        migration._validate_input_schema(
-            {
-                "type": "object",
-                "properties": {"__reason": {"type": "string"}},
-            },
-            "bad",
-        )
+def test_migration_preserves_double_underscore_business_property():
+    schema = {
+        "type": "object",
+        "properties": {"__reason": {"type": "string"}},
+    }
+
+    assert migration._validate_input_schema(schema, "tool") == schema
 
 
 @pytest.mark.parametrize(
@@ -76,7 +73,7 @@ def test_migration_validates_preexisting_native_schema_and_reserved_reason():
             {
                 "type": "object",
                 "properties": {"known": {"type": "string"}},
-                "required": ["missing"],
+                "required": ["known", "known"],
             },
             "required",
         ),
@@ -92,6 +89,16 @@ def test_migration_validates_preexisting_native_schema_and_reserved_reason():
 def test_migration_rejects_native_schema_runtime_would_reject(schema, message):
     with pytest.raises(RuntimeError, match=message):
         migration._validate_input_schema(schema, "bad")
+
+
+def test_migration_accepts_required_name_without_properties_declaration():
+    schema = {
+        "type": "object",
+        "required": ["item_1"],
+        "patternProperties": {"^item_[0-9]+$": {"type": "string"}},
+    }
+
+    assert migration._validate_input_schema(schema, "tool") == schema
 
 
 def test_downgrade_refuses_advanced_schema_instead_of_losing_information():

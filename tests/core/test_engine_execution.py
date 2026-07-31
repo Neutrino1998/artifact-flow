@@ -93,14 +93,12 @@ def _simple_llm_chunks(text: str, input_tokens: int = 10, output_tokens: int = 5
 
 def _native_tool_call(tool_name: str, **params) -> list[dict]:
     """Build one normalized native tool call."""
-    reason = params.pop("__reason", f"test call to {tool_name}")
-    arguments = {"__reason": reason, **params}
     return [{
         "id": f"call_{tool_name}_{next(_CALL_IDS)}",
         "type": "function",
         "function": {
             "name": tool_name,
-            "arguments": json.dumps(arguments),
+            "arguments": json.dumps(params),
         },
     }]
 

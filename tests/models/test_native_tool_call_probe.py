@@ -24,14 +24,14 @@ def _delta(index, *, call_id=None, name=None, arguments=None):
     }
 
 
-def test_probe_assembler_handles_split_and_cumulative_deltas():
+def test_probe_assembler_handles_parallel_append_only_deltas():
     assembler = ToolCallAssembler()
     assembler.add_many([
         _delta(0, call_id="call_a", name="probe_", arguments='{"query":'),
-        _delta(1, call_id="call_b", name="probe_beta", arguments='{"value":"B"}'),
+        _delta(1, call_id="call_b", name="probe_", arguments='{"payload":'),
         _delta(0, name="alpha", arguments='"A"}'),
-        # Some provider adapters repeat a cumulative arguments value.
-        _delta(1, call_id="call_b", arguments='{"value":"B"}'),
+        _delta(1, name="beta", arguments="{"),
+        _delta(1, arguments='"value":"B"}}'),
     ])
 
     calls = assembler.complete()
@@ -42,7 +42,7 @@ def test_probe_assembler_handles_split_and_cumulative_deltas():
         "arguments": '{"query":"A"}',
     }
     assert calls[0]["decoded_arguments"] == {"query": "A"}
-    assert calls[1]["decoded_arguments"] == {"value": "B"}
+    assert calls[1]["decoded_arguments"] == {"payload": {"value": "B"}}
 
 
 def test_probe_assembler_rejects_missing_index_and_conflicting_ids():
@@ -63,8 +63,8 @@ def test_capture_report_never_contains_reasoning_text():
             "index": 0,
             "id": "call_a",
             "type": "function",
-            "function": {"name": "probe", "arguments": '{"__reason":"safe"}'},
-            "decoded_arguments": {"__reason": "safe"},
+            "function": {"name": "probe", "arguments": '{"value":"safe"}'},
+            "decoded_arguments": {"value": "safe"},
         }],
     )
 

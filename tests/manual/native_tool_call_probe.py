@@ -130,20 +130,11 @@ def redact_error(value: Any) -> str:
     return text[:4000]
 
 
-def _merge_delta(current: str, fragment: Any) -> str:
-    """Merge either true deltas or provider-emitted cumulative strings."""
+def _append_delta(current: str, fragment: Any) -> str:
+    """Append one LiteLLM/OpenAI stream delta without content heuristics."""
     if fragment is None:
         return current
-    incoming = str(fragment)
-    if not incoming:
-        return current
-    if not current:
-        return incoming
-    if incoming == current or current.startswith(incoming):
-        return current
-    if incoming.startswith(current):
-        return incoming
-    return current + incoming
+    return current + str(fragment)
 
 
 @dataclass
@@ -156,26 +147,26 @@ class PartialToolCall:
 
     def add(self, delta: Any) -> None:
         incoming_id = _get(delta, "id")
-        if incoming_id and self.call_id and incoming_id != self.call_id:
-            # IDs are normally delivered once and whole.  Support cumulative or
-            # genuinely fragmented IDs, but reject two distinct complete-looking
-            # call IDs instead of silently gluing them together.
+        if incoming_id:
             incoming = str(incoming_id)
-            if (
-                self.call_id.startswith("call_")
-                and incoming.startswith("call_")
-                and not self.call_id.startswith(incoming)
-                and not incoming.startswith(self.call_id)
-            ):
+            if self.call_id and incoming != self.call_id:
                 raise ValueError(
                     f"conflicting tool call ids at index {self.index}: "
                     f"{self.call_id!r} vs {incoming!r}"
                 )
-        self.call_id = _merge_delta(self.call_id, incoming_id)
-        self.call_type = _get(delta, "type", self.call_type) or self.call_type
+            self.call_id = incoming
+        incoming_type = _get(delta, "type")
+        if incoming_type:
+            incoming_type = str(incoming_type)
+            if self.call_type and incoming_type != self.call_type:
+                raise ValueError(
+                    f"conflicting tool call types at index {self.index}: "
+                    f"{self.call_type!r} vs {incoming_type!r}"
+                )
+            self.call_type = incoming_type
         function = _get(delta, "function") or {}
-        self.name = _merge_delta(self.name, _get(function, "name"))
-        self.arguments = _merge_delta(
+        self.name = _append_delta(self.name, _get(function, "name"))
+        self.arguments = _append_delta(
             self.arguments, _get(function, "arguments")
         )
 
@@ -496,16 +487,12 @@ def _function_tool(name: str, description: str, value_name: str = "query") -> di
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "__reason": {
-                        "type": "string",
-                        "description": "Brief user-visible reason for making this call.",
-                    },
                     value_name: {
                         "type": "string",
                         "description": f"Synthetic probe {value_name}.",
                     },
                 },
-                "required": ["__reason", value_name],
+                "required": [value_name],
                 "additionalProperties": False,
             },
         },
@@ -523,15 +510,6 @@ def _result_message(call: dict[str, Any], data: str) -> dict[str, Any]:
             "</tool_result>"
         ),
     }
-
-
-def _reason_observations(calls: Sequence[dict[str, Any]]) -> list[str]:
-    observations = []
-    for call in calls:
-        reason = call.get("decoded_arguments", {}).get("__reason")
-        if not isinstance(reason, str) or not reason.strip():
-            observations.append(f"{call.get('id')}: missing/non-string __reason")
-    return observations
 
 
 def _validate_calls(
@@ -558,7 +536,7 @@ async def run_minimal(candidate: Candidate, timeout: float) -> dict[str, Any]:
         "role": "user",
         "content": (
             "Call probe_lookup exactly once with query='native-protocol'. "
-            "Include a short __reason. Do not answer from memory."
+            "Do not answer from memory."
         ),
     }]
     calls: list[dict[str, Any]] = []
@@ -571,7 +549,6 @@ async def run_minimal(candidate: Candidate, timeout: float) -> dict[str, Any]:
         errors = _validate_calls(
             first, allowed_names={"probe_lookup"}, require_any=True
         )
-        observations.extend(_reason_observations(first.tool_calls))
         if errors:
             return {"status": "fail", "errors": errors, "observations": observations, "calls": calls}
 
@@ -620,7 +597,7 @@ async def run_multi_content(candidate: Candidate, timeout: float) -> dict[str, A
         "content": (
             "First write a very short visible preface, then in the same assistant "
             "turn call probe_alpha with value='A' and probe_beta with value='B'. "
-            "Each call must have its own __reason."
+            "Use one native call for each value."
         ),
     }]
     calls: list[dict[str, Any]] = []
@@ -752,7 +729,7 @@ async def run_vision(
         "role": "user",
         "content": (
             f"Call probe_prepare_images exactly once with count='{len(numbers)}'. "
-            "Include __reason and wait for the image carrier."
+            "Wait for the image carrier."
         ),
     }]
     calls: list[dict[str, Any]] = []
@@ -765,7 +742,6 @@ async def run_vision(
         errors = _validate_calls(
             first, allowed_names={"probe_prepare_images"}, require_any=True
         )
-        observations.extend(_reason_observations(first.tool_calls))
         if errors:
             return {"name": scenario, "status": "fail", "errors": errors, "observations": observations, "calls": calls}
 

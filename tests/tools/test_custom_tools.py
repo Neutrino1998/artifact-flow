@@ -43,7 +43,7 @@ class TestResolveSecrets:
 
 
 class TestDefinitionLoading:
-    def test_loads_full_json_schema_and_exports_reason(self, tmp_path):
+    def test_loads_and_exports_full_json_schema_without_control_properties(self, tmp_path):
         path = tmp_path / "lookup.md"
         path.write_text(
             """---
@@ -79,10 +79,8 @@ Detailed usage.
         assert "Detailed usage" in tool.description
         business = tool.get_input_schema()
         assert business["properties"]["filters"]["type"] == "object"
-        assert "__reason" not in business["properties"]
         exported = tool.to_native_tool_schema()["function"]["parameters"]
-        assert exported["properties"]["__reason"]["type"] == "string"
-        assert exported["required"] == ["__reason", "sku"]
+        assert exported == business
 
     def test_legacy_parameters_are_rejected(self, tmp_path):
         path = tmp_path / "legacy.md"
@@ -99,11 +97,11 @@ parameters: []
         with pytest.raises(ValueError, match="legacy 'parameters'"):
             load_custom_tool(str(path))
 
-    def test_reserved_reason_is_rejected(self, tmp_path):
-        path = tmp_path / "bad.md"
+    def test_double_underscore_property_is_an_ordinary_business_parameter(self, tmp_path):
+        path = tmp_path / "ordinary.md"
         path.write_text(
             """---
-name: bad
+name: ordinary
 type: http
 endpoint: https://api.example.com
 input_schema:
@@ -114,8 +112,9 @@ input_schema:
 """,
             encoding="utf-8",
         )
-        with pytest.raises(ValueError, match="reserved"):
-            load_custom_tool(str(path))
+        tool = load_custom_tool(str(path))
+
+        assert "__reason" in tool.get_input_schema()["properties"]
 
     def test_loader_skips_hidden_disabled_and_invalid_files(self, tmp_path):
         valid = """---

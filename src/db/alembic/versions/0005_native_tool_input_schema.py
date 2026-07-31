@@ -49,10 +49,6 @@ def _parameters_to_schema(parameters: Any, full_name: str) -> dict[str, Any]:
         name = raw.get("name")
         if not isinstance(name, str) or not name:
             raise RuntimeError(f"tool {full_name!r} has a parameter without a name")
-        if name == "__reason":
-            raise RuntimeError(
-                f"tool {full_name!r} declares reserved parameter '__reason'"
-            )
         if name in properties:
             raise RuntimeError(f"tool {full_name!r} repeats parameter {name!r}")
 
@@ -102,19 +98,14 @@ def _validate_input_schema(schema: Any, full_name: str) -> dict[str, Any]:
     properties = schema.get("properties", {})
     if not isinstance(properties, Mapping):
         raise RuntimeError(f"tool {full_name!r} input_schema properties must be an object")
-    if "__reason" in properties:
-        raise RuntimeError(
-            f"tool {full_name!r} declares reserved property '__reason'"
-        )
     required = schema.get("required", [])
     if (
         not isinstance(required, list)
         or any(not isinstance(name, str) for name in required)
         or len(set(required)) != len(required)
-        or any(name not in properties for name in required)
     ):
         raise RuntimeError(
-            f"tool {full_name!r} input_schema required must contain unique property names"
+            f"tool {full_name!r} input_schema required must contain unique strings"
         )
     try:
         Draft202012Validator.check_schema(dict(schema))

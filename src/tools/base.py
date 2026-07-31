@@ -90,7 +90,7 @@ class BaseTool(ABC):
 
     子类需要实现:
     - execute(): 执行工具的核心逻辑
-    - get_input_schema(): 返回业务参数 JSON Schema（不含 ``__reason``）
+    - get_input_schema(): 返回业务参数 JSON Schema
     """
 
     # opt-in:True → 引擎在正常执行路径里给 execute 多注入一个 `_context`
@@ -146,7 +146,7 @@ class BaseTool(ABC):
         获取业务输入 JSON Schema。
         
         Returns:
-            根节点 ``type=object`` 的 JSON Schema；不得声明顶层 ``__reason``。
+            根节点 ``type=object`` 的 JSON Schema。
         """
         pass
 

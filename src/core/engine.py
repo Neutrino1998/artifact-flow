@@ -28,7 +28,6 @@ from core.compaction_runner import CompactionRunner
 from core.cancellation import CooperativeCancelled, run_cancellable
 from tools.artifact_envelope import make_preview_slice, render_artifact_slice
 from tools.base import ArtifactSpec, BaseTool, ToolExecutionContext, ToolPermission, ToolResult
-from tools.input_schema import REASON_ARGUMENT
 from utils.instance import INSTANCE_ID
 from utils.logger import get_logger, get_request_id
 from utils.time import utc_now
@@ -653,9 +652,8 @@ async def execute_loop(
         """
         处理权限中断。
 
-        reason 是模型在 ``__reason`` 中写的调用意图，透出到 PERMISSION_REQUEST
-        SSE 事件 + interrupt data，让审批弹窗显示 "模型为什么要跑这个工具"。
-        缺失（None）时前端按无意图渲染即可。
+        reason 是平台生成的确定性调用说明，透出到 PERMISSION_REQUEST SSE 事件
+        和 interrupt data；不从隐藏 reasoning 或业务参数中提取。
 
         Returns:
             True — approved, False — denied（含超时和客户端断开）
@@ -884,12 +882,7 @@ async def execute_loop(
                 tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                 continue
 
-            raw_reason = params.pop(REASON_ARGUMENT, None)
-            reason = (
-                raw_reason.strip()
-                if isinstance(raw_reason, str) and raw_reason.strip()
-                else fallback_reason
-            )
+            reason = fallback_reason
 
             # 冻结在本次请求实际发送的 native schemas；同 envelope 里更早的
             # read_skill/search_tools 不能追溯放行 sibling call。

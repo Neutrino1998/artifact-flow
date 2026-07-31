@@ -277,12 +277,13 @@ export function draftToRequest(d: UnitDraft): CreateToolUnitRequest {
     if (inputSchema.type !== 'object') {
       throw new Error(`成员「${memberName}」的 input_schema 根 type 必须是 object`);
     }
-    const properties = inputSchema.properties;
+    let properties = inputSchema.properties;
+    if (properties === undefined) {
+      properties = {};
+      inputSchema.properties = properties;
+    }
     if (properties === null || typeof properties !== 'object' || Array.isArray(properties)) {
       throw new Error(`成员「${memberName}」的 input_schema.properties 必须是对象`);
-    }
-    if (Object.prototype.hasOwnProperty.call(properties, '__reason')) {
-      throw new Error(`成员「${memberName}」不能声明保留参数 __reason`);
     }
 
     return {
@@ -737,7 +738,7 @@ function MemberCard({
           className={`${INPUT_ON_PANEL} font-mono resize-y`}
         />
         <p className="text-xs text-text-tertiary dark:text-text-tertiary-dark mt-1">
-          Draft 2020-12；根 type 必须是 object。支持嵌套对象、数组和组合约束；顶层 __reason 为系统保留。
+          Draft 2020-12；根 type 必须是 object。支持嵌套对象、数组、组合约束和根级对象约束。
         </p>
       </div>
 

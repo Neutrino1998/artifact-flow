@@ -96,7 +96,7 @@ Non-obvious design choices you won't infer from reading one file.
 
 ## Conventions
 
-- **Tool I/O contract**: model calls use OpenAI-compatible native function calls. Each tool owns a root-object JSON Schema Draft 2020-12 business `input_schema`; the exporter injects required `__reason`, and the engine strips it before validating typed JSON arguments and calling the tool. Tools return `ToolResult` (`src/tools/base.py`). Agents are data (MD files), not classes. All streaming uses the unified `StreamEventType` from `core/events.py`.
+- **Tool I/O contract**: model calls use OpenAI-compatible native function calls. Each tool owns a root-object JSON Schema Draft 2020-12 business `input_schema`; the exporter deep-copies it unchanged, and runtime validates typed JSON arguments against the same schema before calling the tool. LiteLLM/OpenAI streamed function names and arguments are append-only deltas—never infer cumulative snapshots from string content. Tools return `ToolResult` (`src/tools/base.py`). Agents are data (MD files), not classes. All streaming uses the unified `StreamEventType` from `core/events.py`.
 
 - **Model-facing XML-like text is not a tool-call protocol.** Native function calls and `tool_call_id` provide the machine-parsed outer protocol. XML-like artifact slices and tool-result envelopes are only loose model-facing text and are never parsed by the backend. Escape only what's free and doesn't break semantics (`<title>` via `_text` — untrusted filenames, not match-bearing); artifact `body` stays raw because `update_artifact` matches `old_string` against it.
 

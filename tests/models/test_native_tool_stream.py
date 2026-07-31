@@ -43,16 +43,22 @@ def test_assembles_fragmented_parallel_calls_into_standard_wire_shape():
     ]
 
 
-def test_accepts_provider_cumulative_fragments_without_duplication():
+def test_appends_nested_json_fragments_without_content_based_deduplication():
     assembler = NativeToolCallAssembler()
-    assembler.add_many([_delta(0, call_id="call_", name="get", arguments="{")])
     assembler.add_many([
-        _delta(0, call_id="call_123", name="get_item", arguments='{"id":1}')
+        _delta(0, call_id="call_123", name="get_", arguments='{"payload":')
+    ])
+    assembler.add_many([
+        _delta(0, name="item", arguments="{"),
+        _delta(0, arguments='"id":1}}'),
     ])
 
     call = assembler.accept(["stop"])[0]
     assert call["id"] == "call_123"
-    assert call["function"] == {"name": "get_item", "arguments": '{"id":1}'}
+    assert call["function"] == {
+        "name": "get_item",
+        "arguments": '{"payload":{"id":1}}',
+    }
     assert "index" not in call
 
 
@@ -101,7 +107,7 @@ async def test_llm_adapter_sends_schemas_and_emits_only_accepted_wire_calls(monk
             reasoning="checking",
             tool_calls=[SimpleNamespace(
                 index=0,
-                id="call_",
+                id="call_7",
                 type="function",
                 function=SimpleNamespace(name="look", arguments='{"q":'),
             )],
@@ -109,9 +115,9 @@ async def test_llm_adapter_sends_schemas_and_emits_only_accepted_wire_calls(monk
         yield chunk(
             tool_calls=[SimpleNamespace(
                 index=0,
-                id="call_7",
+                id=None,
                 type=None,
-                function=SimpleNamespace(name="lookup", arguments='{"q":"x"}'),
+                function=SimpleNamespace(name="up", arguments='"x"}'),
             )],
             finish_reason="tool_calls",
             usage=SimpleNamespace(

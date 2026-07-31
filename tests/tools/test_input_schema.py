@@ -49,7 +49,7 @@ class _RecordingTool(BaseTool):
         return ToolResult(success=True, data="ok")
 
 
-def test_native_export_injects_required_reason_without_mutating_business_schema():
+def test_native_export_preserves_business_schema_without_mutating_it():
     original = copy.deepcopy(SCHEMA)
 
     native = build_native_function_schema(
@@ -58,9 +58,40 @@ def test_native_export_injects_required_reason_without_mutating_business_schema(
 
     assert SCHEMA == original
     parameters = native["function"]["parameters"]
-    assert list(parameters["properties"])[0] == "__reason"
-    assert parameters["required"] == ["__reason", "query", "options"]
-    assert parameters["properties"]["options"] == SCHEMA["properties"]["options"]
+    assert parameters == SCHEMA
+    assert parameters is not SCHEMA
+
+
+def test_native_export_preserves_root_object_constraints_exactly():
+    schema = {
+        "type": "object",
+        "properties": {"__reason": {"type": "string"}},
+        "required": ["__reason"],
+        "minProperties": 1,
+        "maxProperties": 1,
+        "propertyNames": {"pattern": "^__[a-z]+$"},
+        "additionalProperties": False,
+    }
+
+    native = build_native_function_schema(
+        name="lookup", description="Lookup things", business_schema=schema
+    )
+
+    assert native["function"]["parameters"] == schema
+
+
+def test_required_name_may_be_governed_without_properties_keyword():
+    schema = {
+        "type": "object",
+        "required": ["item_1"],
+        "patternProperties": {"^item_[0-9]+$": {"type": "string"}},
+        "additionalProperties": False,
+    }
+
+    assert normalize_business_input_schema(schema, source="test") == {
+        **schema,
+        "properties": {},
+    }
 
 
 async def test_runtime_keeps_native_types_applies_defaults_and_validates_nested_schema():
@@ -84,8 +115,6 @@ async def test_runtime_keeps_native_types_applies_defaults_and_validates_nested_
     "schema, message",
     [
         ({"type": "array"}, "root type"),
-        ({"type": "object", "properties": {"__reason": {"type": "string"}}}, "reserved"),
-        ({"type": "object", "properties": {}, "required": ["missing"]}, "not declared"),
         (
             {
                 "type": "object",

@@ -1,9 +1,8 @@
 """Native tool input-schema helpers.
 
-The business schema is the single source of truth for model disclosure and
-runtime validation.  It never contains ArtifactFlow's model-only ``__reason``
-argument; that property is injected into a deep copy at the native-schema
-export boundary and stripped by the engine before business validation.
+The business schema is the single source of truth for both model disclosure
+and runtime validation. Native export deep-copies it without adding control
+properties, so whole-object JSON Schema constraints retain identical meaning.
 """
 
 from __future__ import annotations
@@ -17,13 +16,6 @@ from jsonschema import Draft202012Validator, ValidationError
 
 NATIVE_TOOL_NAME_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
 NATIVE_TOOL_NAME_RE = re.compile(NATIVE_TOOL_NAME_PATTERN)
-REASON_ARGUMENT = "__reason"
-REASON_PROPERTY_SCHEMA = {
-    "type": "string",
-    "description": "Brief user-visible reason for making this call.",
-}
-
-
 class InputSchemaError(ValueError):
     """A tool definition does not provide a usable business input schema."""
 
@@ -46,10 +38,8 @@ def normalize_business_input_schema(
 ) -> dict[str, Any]:
     """Return a validated deep copy of an object-root business schema.
 
-    ArtifactFlow function calls always decode to one arguments object.  Nested
-    properties may use the full JSON Schema vocabulary, but the root itself is
-    deliberately explicit so ``__reason`` can be injected without composition
-    tricks or a second schema path.
+    ArtifactFlow function calls always decode to one arguments object. Nested
+    properties and the root object may use the full JSON Schema vocabulary.
     """
     if not isinstance(schema, Mapping):
         raise InputSchemaError(f"{source}: input_schema must be an object")
@@ -68,16 +58,6 @@ def normalize_business_input_schema(
         raise InputSchemaError(f"{source}: input_schema.required must be an array of strings")
     if len(required) != len(set(required)):
         raise InputSchemaError(f"{source}: input_schema.required contains duplicates")
-
-    unknown_required = [name for name in required if name not in properties]
-    if unknown_required:
-        raise InputSchemaError(
-            f"{source}: required properties are not declared: {unknown_required}"
-        )
-    if REASON_ARGUMENT in properties:
-        raise InputSchemaError(
-            f"{source}: top-level property {REASON_ARGUMENT!r} is reserved by ArtifactFlow"
-        )
 
     try:
         Draft202012Validator.check_schema(normalized)
@@ -108,14 +88,6 @@ def build_native_function_schema(
     parameters = normalize_business_input_schema(
         business_schema, source=f"tool {name!r}"
     )
-    parameters["properties"] = {
-        REASON_ARGUMENT: copy.deepcopy(REASON_PROPERTY_SCHEMA),
-        **parameters["properties"],
-    }
-    parameters["required"] = [
-        REASON_ARGUMENT,
-        *[item for item in parameters.get("required", []) if item != REASON_ARGUMENT],
-    ]
     return {
         "type": "function",
         "function": {

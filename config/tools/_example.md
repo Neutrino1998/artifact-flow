@@ -64,9 +64,8 @@ timeout: 60
 # return the whole response. A bad expression is rejected at reconcile time.
 response_extract: "data.price"
 
-# input_schema: the business arguments schema. Do not declare the reserved
-# top-level __reason property; ArtifactFlow injects it only in the model-facing
-# native function schema and removes it before executing the tool.
+# input_schema: the business arguments schema. ArtifactFlow exports a deep copy
+# unchanged to the native function schema and validates the same schema at runtime.
 input_schema:
   type: object
   properties:

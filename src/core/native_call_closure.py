@@ -6,7 +6,6 @@ import json
 from typing import Any, Dict, List
 
 from core.events import ExecutionEvent, StreamEventType
-from tools.input_schema import REASON_ARGUMENT
 
 
 class NativeCallClosureError(RuntimeError):
@@ -153,10 +152,4 @@ def _display_arguments(raw: Any, tool_name: str) -> tuple[dict[str, Any], str]:
                 params = dict(decoded)
         except json.JSONDecodeError:
             pass
-    raw_reason = params.pop(REASON_ARGUMENT, None)
-    reason = (
-        raw_reason.strip()
-        if isinstance(raw_reason, str) and raw_reason.strip()
-        else f"模型请求调用 {tool_name}"
-    )
-    return params, reason
+    return params, f"模型请求调用 {tool_name}"

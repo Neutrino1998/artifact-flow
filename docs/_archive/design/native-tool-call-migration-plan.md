@@ -28,7 +28,7 @@
 - 取消与异常：确保每个已生成的 native tool call 都有且仅有一个结束结果。
 - 历史切换：维护窗口内完全停止 backend writer 后为所有既有 leaf 的 lead 生成并追加 compaction boundary；subagent 默认 fresh start，不增加 legacy runtime。
 - 工具命名与 schema：收紧为各私有推理端普遍可接受的 native function 约束。
-- 工具目录与调用意图：保留 unit 级发现语义，并把现有单次调用理由迁移为保留参数。
+- 工具目录与权限提示：保留 unit 级发现语义；权限提示使用确定性工具名文案，不向业务参数注入控制字段。
 
 建议在基线准备后按 5 个实现阶段推进，但只在一个分支完成最终切换。熟悉现有 engine 的工程师预计约需 **12–20 个工程日**，另需停机窗口内的 active branch 语义摘要生成和私有推理端联调时间；供应商流式 chunk、chat template 差异、存量 conversation 数量和模型摘要吞吐是主要不确定项。其余 leaf 使用机械摘要，不消耗模型调用。完全停机方案有意用更长的维护窗口换取更小、更可验证的一次性迁移程序；阶段 0 的规模报告必须据 semantic task 数量评估窗口是否可接受。
 
@@ -48,9 +48,9 @@
 ### 2026-07-31 实施记录
 
 - 未保留旧 `parameters` 配置/API/runtime 兼容，也未增加供旧 XML Engine 测试使用的临时投影；阶段 1–4 在同一分支直接落到 native 主链路。
-- 工具业务参数统一改为 object-root Draft 2020-12 `input_schema`；嵌套对象、数组和组合约束原样保留，统一 exporter 仅在副本上注入 required `__reason`。
+- 工具业务参数统一改为 object-root Draft 2020-12 `input_schema`；统一 exporter 只做深拷贝无损导出，不注入控制属性，根级与嵌套约束在模型侧和运行时语义一致。
 - XML tool-call parser、grammar/formatter 和专属测试已删除；模型可读的 XML-like tool-result content 已拆为不参与解析的独立 renderer。
-- OpenAPI/前端类型已同步；后端全量回归为 `1936 passed, 42 skipped`，前端为 `283 passed`，lint 与 production build 通过。
+- OpenAPI/前端类型已同步；review 收口后端全量回归为 `1935 passed, 42 skipped`，前端为 `285 passed`，lint 与 production build 通过。
 - 阶段 5 尚未完成的工作保持为部署/cutover gate：存量 leaf boundary 生成与幂等 apply、维护窗口演练、目标 raw vLLM 等私有端点 smoke。未完成这些项目之前分支不可整体发布。
 
 ## 分支策略
@@ -72,7 +72,7 @@
 - 所有当前可访问的 tool unit 继续以 unit description + 成员名形成轻量目录；只有 loaded 工具向 native `tools` 发送完整 schema。
 - Skills、有效工具集、权限中断、事件溯源、compaction 和自愈反馈继续工作。
 - Thinking 模型的 tool-calling assistant 以 `content + reasoning_content + tool_calls` 原样回传。
-- 每个 native tool schema 都携带保留参数 `__reason`，延续现有用户可见的单次调用意图。
+- Native tool schema 与业务 `input_schema` 保持一致，不携带 ArtifactFlow 私有控制参数。
 - 新协议中的每个 tool call 在历史和事件中结构闭合。
 
 ## 不在本次范围
@@ -82,7 +82,7 @@
 - 不保证从迁移前的任意非 leaf 内部消息节点重新分叉；迁移时存在的所有 leaf head 均可继续。
 - 不依赖 vLLM/DashScope 等供应商私有的 `defer_loading`、`tool_reference` 扩展。
 - 不引入宏大的“统一 schema 平台”；只提供 `BaseTool` native schema 导出和保留 MCP `inputSchema` 结构的派生通路。
-- 不把模型原始思维链当作调用理由，也不向用户暴露隐藏 reasoning；旧 `<reason>` 的产品语义由保留参数 `__reason` 承接。
+- 不把模型原始思维链当作调用理由，也不向用户暴露隐藏 reasoning；旧 `<reason>` 不迁移，权限 UI 使用确定性工具名文案。
 - 不持久化每次请求的完整 native tools schema 快照；现有 admin prompt reconstruction 只保证 cutover 后请求的 native messages 正确，不宣称还原包含 tools schema 在内的完整请求。迁移前请求不作正确性承诺，也不增加识别、特殊响应或 legacy formatter。
 - 不在首轮实现 provider capability matrix、strict mode 或自动供应商探测。
 - 不新增 `tool_disclosure` 模型配置；现有静态 `defer` 即为唯一披露策略输入。
@@ -96,7 +96,7 @@
 3. 历史中新的工具调用表现为携带 content/reasoning/tool calls 的 assistant 与对应的 `role=tool` 消息。
 4. `read_skill`/`search_tools` 的效果只持久作用于调用它的 agent，并随对话分支继承。
 5. Reminder 为所有当前可访问的 unit 展示 unit description、成员名和 loaded/deferred 状态，但不重复完整工具 schema。
-6. 每次工具调用的 `__reason` 可用于权限确认、事件和前端展示，且不会传给业务工具。
+6. 模型侧 Schema 与运行时业务 Schema 对同一参数对象语义一致；权限确认不依赖模型生成的隐藏或控制字段。
 7. 取消、超时、错误和 subagent 中止后不存在 orphan tool call。
 8. Compaction 后最近一组真实 tool call/result 仍保持结构闭合且未被摘要替代。
 9. 每次模型调用前都会在完整 tool-result 组之后追加一条 synthetic user reminder；图片也通过这条 user 消息传入。
@@ -159,7 +159,7 @@ content + reasoning_content + tool_calls
 - reasoning 只回传模型并沿用现有受控 UI 展示，不作为 permission 文案，也不混入工具参数。
 - ArtifactFlow 内部统一使用现有 `reasoning_content` 字段；所有收发都经过唯一 LLM adapter 和 LiteLLM，但不假定任意 provider adapter 都天然正确保留/映射该字段。不要增加 `reasoning_replay_field` 一类 per-model 配置。
 - DeepSeek、DashScope/Qwen 和 raw vLLM 的实际兼容性必须由连续 tool-call smoke 验证。若目标端点出现可复现的问题，优先升级 LiteLLM 或在唯一 LLM adapter 边界修复；不要把供应商分支扩散到 engine、history 或模型配置。
-- `reasoning_content` 与用户可见的单次工具调用理由是两种数据。前者按 assistant envelope 回放；后者由第 8 节的 `__reason` 承接。
+- `reasoning_content` 只按 assistant envelope 回放，不作为 permission 文案，也不混入工具参数。
 - Token usage 正常路径保持现状：直接采用推理端经 LiteLLM 返回的 `prompt_tokens`、`completion_tokens`、`total_tokens`，再沿用当前 `input_tokens`/`output_tokens` 映射；不新增 reasoning breakdown 的读取、持久化或观测字段。
 - 推理端不返回可用 usage 时，沿用现有 fallback，只把 output estimate 的输入补全为 `reasoning_content + content + serialized native tool_calls`，不能继续只计算 content；不新增 `estimated` 标记或 usage/event 字段。该估算只用于现有记账、上下文水位和 compaction 的 best-effort 判断。
 
@@ -273,26 +273,14 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 - 若模型在后续 round 再次调用图片工具，则每个完整调用组各有自己的 carrier message，按真实轮次交错；新的 carrier 只携带该组图片，不复制所有旧 vision blocks。现有跨回合 vision placeholder 与 text-only 模型降级语义保持不变。
 - Synthetic message 不成为新的 MessageEvent 历史事实；实际发送的 reminder 继续随 `AGENT_START` 持久化，以支持 cutover 后请求的 messages 级 admin reconstruction。
 
-### 8. 用保留参数承接单次工具调用理由
+### 8. 不向业务参数注入调用理由
 
-标准 native tool call 没有与 function name 平级的“调用理由”字段，但现有 `<reason>` 已证明对权限确认、前端展示和错误自愈有价值。Native schema exporter 为每个工具统一注入：
+标准 native tool call 没有与 function name 平级的逐调用理由字段。把 ArtifactFlow 私有字段注入同一个 arguments 对象会改变 `minProperties`、`maxProperties`、`propertyNames`、组合 Schema 等根级业务约束的语义，因此不迁移旧 XML `<reason>` 参数。
 
-```json
-{
-  "__reason": {
-    "type": "string",
-    "description": "Brief user-visible reason for making this call."
-  }
-}
-```
-
-- `__reason` 在 schema 中列为 required，提升模型稳定生成的概率；runtime 对缺失或非字符串仍宽容，使用确定性 fallback，不因此拒绝本可执行的工具调用。
-- Engine 在业务参数校验和 `execute()` 前提取并删除 `__reason`；工具自身若合法声明业务参数 `reason`，保持原样，不发生冲突。
-- `__reason` 写入 `TOOL_START`、permission request/interrupt、可观察事件和前端展示；不写入工具实际参数，也不使用隐藏 reasoning 替代。
-- Builtin/HTTP schema 与从 MCP 原始 `inputSchema` 深拷贝得到的模型侧 schema 都在统一 exporter 边界注入该属性，并正确更新 `required`；MCP 原始 schema 保持不变，Engine 剥离 `__reason` 后仍用它校验业务参数。即使原 schema 为 `additionalProperties: false`，派生后的模型侧 schema 也必须合法。
-- Registry/config/MCP 外部定义不得占用保留名 `__reason`；在各自写入或 discovery 边界校验，MCP 冲突项跳过并 warning。
-
-这会为每个工具增加少量 schema token，但配合渐进披露仍可控，且保留了 ArtifactFlow 已打磨的 per-call explanation 能力。
+- Native exporter 深拷贝业务 `input_schema` 后原样发送；模型侧和运行时校验同一个参数对象。
+- Engine 不提取或删除任何控制属性；所有声明参数均按业务 Schema 校验并交给工具。
+- Permission UI、`TOOL_START` 和 orphan closure 使用确定性文案“模型请求调用 X”，不读取隐藏 reasoning，也不要求模型生成额外字段。
+- `__reason` 不再是保留名；若业务工具显式声明它，就只是普通业务参数。
 
 ### 9. 工具名按 native 约束从入口保证
 
@@ -351,8 +339,8 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 
 - 为 `BaseTool` 增加 OpenAI 风格 function schema 导出。
 - Builtin/HTTP tool 直接声明 object-root Draft 2020-12 `input_schema`，不保留旧 `ToolParameter`/`parameters` 投影；MCP tool 以服务端返回的 `inputSchema` 为 schema source，在深拷贝上做最小规范化并保留嵌套结构和约束。
-- 在统一 exporter 为所有模型侧 schema 注入 required `__reason`，并在各定义入口禁止业务 schema 占用该保留名；MCP 原始 `inputSchema` 不被修改，继续作为执行期业务参数校验依据。
-- LLM 层支持传入 `tools`，并按 call index/id 组装流式 `tool_calls` delta。
+- 统一 exporter 深拷贝并无损导出业务 `input_schema`，不注入控制属性；MCP 原始 `inputSchema` 不被修改，并继续作为执行期业务参数校验依据。
+- LLM 层支持传入 `tools`，并按 call index/id 组装流式 `tool_calls` delta；LiteLLM/OpenAI 的 name/arguments 明确按 append-only delta 处理，不根据字符串前缀猜测累计快照。
 - LLM codec 输出保留 content、reasoning content、tool calls 和 usage；final finish reason 只在 codec 内用于判断 buffered tool calls 是否因截断而不可接受，不新增持久化或观测字段。
 - 正常 usage 完全沿用当前 LiteLLM/provider 的 `prompt_tokens`、`completion_tokens`、`total_tokens` 读取与 `input_tokens`/`output_tokens` 映射，不新增 reasoning breakdown 字段或计算分支。
 - Provider usage 缺失时，沿用现有 fallback，并把 output estimate 补全为 `reasoning_content + content + serialized native tool_calls`；不新增 `estimated` 标记或 usage/event 字段。
@@ -370,8 +358,8 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 ### 验收
 
 - 单调用、多调用、分片 name/arguments、空 content、非法 JSON、重复/乱序 delta、缺失/重复 call id、截断 finish reason 以及流式中途取消均有单元测试；只有正常、非截断 terminal 且结构完整的 envelope 才接受 tool calls，非法 JSON arguments 则形成绑定 call id 的失败结果。
-- 所有生成的 schema 可被目标 OpenAI-compatible 接口接受；MCP 的嵌套 schema 约束不因导出丢失，原始 `inputSchema` 不被修改，`additionalProperties: false` 的模型侧派生 schema 仍合法包含 required `__reason`。
-- 不合法工具名或保留参数冲突在配置/写入边界失败，MCP 动态发现按约定跳过并记录 warning。
+- 所有生成的 schema 可被目标 OpenAI-compatible 接口接受；MCP 的根级及嵌套 schema 约束不因导出丢失，原始 `inputSchema` 不被修改。
+- 不合法工具名在配置/写入边界失败，MCP 动态发现按约定跳过并记录 warning。
 - DeepSeek reasoning 必须回放且不返回 400；DashScope 与 raw vLLM 经 LiteLLM 使用同一 ArtifactFlow message shape，无 per-model 字段分支。
 - Usage fixture 覆盖 provider 正常返回、仅 reasoning、reasoning + content + tool calls，以及 provider usage 缺失；正常路径的既有 input/output 计算保持不变，fallback 不漏算 reasoning/tool-call payload。
 
@@ -436,10 +424,10 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 ### 包含
 
 - `_call_llm` 传入当前 native tools，并返回结构化 tool calls。
-- Engine 以 name、arguments、call id 驱动现有权限确认、串行执行、subagent 调用和结果记录；每个调用先经过本次 LLM invocation 实际发送的 native tool-name 集合校验，再做当前权限校验，并在业务参数校验前提取保留的 `__reason`。
+- Engine 以 name、arguments、call id 驱动现有权限确认、串行执行、subagent 调用和结果记录；每个调用先经过本次 LLM invocation 实际发送的 native tool-name 集合校验，再做当前权限与业务参数校验。
 - 移除 engine 对 assistant XML tool-call parser 的调用。
 - 工具校验/权限/执行错误统一返回与真实 call id 绑定的失败 tool result，保留现有自愈语义。
-- Permission UI、`TOOL_START` 和前端展示优先使用调用自己的 `__reason`；缺失或非字符串时使用确定性文案“模型请求调用 X”，不读取原始 reasoning，也不阻止执行。
+- Permission UI、`TOOL_START` 和前端展示使用确定性文案“模型请求调用 X”，不读取原始 reasoning 或业务参数，也不阻止执行。
 - 加入唯一、幂等的 orphan closure helper，并让正常后处理、cooperative cancel、external `CancelledError`、late cancel、shutdown/lease fencing 和 subagent unwind 都在任何事件持久化前经过它。
 - `_persist_events` 断言 accepted native calls 已闭合，但不生成修复事件。
 - 对仍连接的 SSE 发送 closure 生成的配对事件；transport 已断开时仍保证数据库与后续 replay 闭合。
@@ -451,9 +439,9 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 
 ### 验收
 
-- 无工具、单工具、同轮多工具、subagent、权限确认/拒绝、参数错误再自愈均通过端到端测试；同轮每个 call 保留自己的 `__reason`。
+- 无工具、单工具、同轮多工具、subagent、权限确认/拒绝、参数错误再自愈均通过端到端测试。
 - `search_tools/read_skill` 与尚未披露工具出现在同一 assistant envelope 时，后者不执行并收到可自愈失败；下一次 LLM invocation 才能使用更新后的 native schema。
-- 业务工具可继续合法使用普通 `reason` 参数；保留的 `__reason` 在业务 `input_schema` 校验前剥离，不进入 `execute()`。
+- 业务工具可合法使用 `reason`、`__reason` 或其他 Schema 属性；Engine 不剥离业务参数。
 - 取消发生在执行前、工具执行中、工具之间、subagent 内，以及 timeout/error 时，所有 call id 均恰好一个 COMPLETE。
 - External cancel 的直写持久化路径同样满足闭合；provider stream 未正常结束、被截断或未通过 envelope 结构校验时，其 buffered 调用不进入闭合集合，也不被执行。
 - Engine 新主链路不 import 或调用 XML tool-call parser。
@@ -507,7 +495,7 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 | 场景 | 必须验证的结果 |
 |---|---|
 | 无工具回复 | content/reasoning/usage 正常，历史无伪 tool message |
-| 单/多工具调用 | name、arguments、call id 正确组装，每个 call 的 `__reason` 独立展示，串行执行语义不变 |
+| 单/多工具调用 | name、append-only arguments delta、call id 正确组装，串行执行语义不变 |
 | Thinking 回放 | 同回合工具循环、下一用户回合及 compaction carry 都原样回传 assistant `reasoning_content`；DeepSeek/DashScope/vLLM 均经 LiteLLM 使用同一内部字段 |
 | Token usage | Provider 正常 usage 与现有 input/output 计算保持不变；无 usage 时仅补全现有 assistant output fallback 对 reasoning/content/tool calls 的估算，不增加 usage 字段 |
 | 流式中途取消/截断 | 正常、非截断 terminal 且结构校验通过前的任何 delta 都不进入 `LLM_COMPLETE.tool_calls`、不执行、也不制造 closure pair；已流出 content/reasoning 可按现状保存 |
@@ -533,7 +521,7 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 
 | 风险 | 影响 | 控制方式 |
 |---|---|---|
-| LiteLLM/供应商流式 chunk 形态差异 | arguments 丢片或 call 归属错误 | codec fixture 覆盖实际响应；最终端点 smoke |
+| LiteLLM/供应商流式 chunk 形态差异 | arguments 丢片或 call 归属错误 | 唯一 adapter 明确 append-only delta 契约，codec fixture 覆盖嵌套 JSON 分片与实际响应；最终端点 smoke |
 | 私有模型 chat template 不支持标准 tools | 请求失败或模型输出普通文本 | Cutover 前显式端点 smoke 并响亮失败；不引入 runtime capability 探测或 XML fallback |
 | Thinking assistant 未回放或 LiteLLM provider mapping 漂移 | DeepSeek 等端点后续请求 400 | 完整 assistant envelope fixture + DeepSeek/DashScope/vLLM smoke；问题收敛在 LiteLLM/LLM adapter |
 | Provider 缺失 usage 时 fallback 漏算 reasoning/tool calls | Context 水位偏低，compaction 触发过晚 | 补全现有 assistant output estimate 的输入；不新增标记，也不承诺请求前精确预测 |
@@ -550,15 +538,12 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 | Deferred/skill 工具在披露前被同 envelope 调用 | 绕过 native schema 与渐进披露边界 | 执行前按本次请求实际发送的 native tool-name 集合校验；状态变更只作用下一次 LLM invocation |
 | Tool-role 图片被 provider 拒绝 | 多模态工具历史不可消费 | `role=tool` 仅文本，图片统一放在全部 results 后的 synthetic user message |
 | MCP 外部名称不兼容 | schema 被推理端拒绝 | discovery 时校验并 warning 跳过 |
-| 模型遗漏/错写 `__reason` | Permission UI 缺少调用意图或工具误收内部参数 | Schema required 但 runtime 宽容 fallback；业务校验/执行前统一剥离保留参数 |
-| 外部 schema 占用 `__reason` | 覆盖业务参数或 exporter 生成非法 schema | 配置/写入/discovery 入口拒绝冲突；普通业务参数 `reason` 不受影响 |
 
 ## 开放项
 
 以下已明确归入阶段 5，不阻塞阶段 0 闭合或阶段 1–4 的架构实现：
 
 - 最终私有部署使用的 raw vLLM 版本、模型和 chat template；DashScope 阶段 0 候选模型已经确定。
-- `__reason` 缺失时 Permission UI 的最终 fallback 文案；协议策略已经确定，不影响执行结构。
 - Cutover smoke 使用现有模型调用边界显式执行，不增加启动自检、首次调用探测或 provider capability 状态。
 - Mechanical summary 的 token/字符上限、保留最近对数，以及 semantic `--concurrency` 默认值；算法、checkpoint 字段和 fallback 顺序已经确定，具体值随目标模型联调确定。
 - 目标部署的可接受维护窗口；阶段 0 已验证规模报告能给出 semantic task 数量，阶段 5 在停机扫描后结合目标模型实测吞吐确认窗口。若不可接受，重新安排 cutover，不给停机脚本补在线同步逻辑。
@@ -568,7 +553,7 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 只有同时满足以下条件，迁移才算完成：
 
 - 唯一运行时协议为 native tool calls。
-- Per-agent deferred disclosure、unit catalog、skills、`__reason`、permissions、subagents、reasoning replay、multimodal、compaction 和取消语义均已迁移并有回归测试。
+- Per-agent deferred disclosure、unit catalog、skills、permissions、subagents、reasoning replay、multimodal、compaction 和取消语义均已迁移并有回归测试。
 - Runtime 无 XML tool-call parser、调用 grammar/tool-doc formatter 或调用语法 prompt 残留；独立的模型可读 XML-like tool-result renderer 明确保留且不参与解析。一次性迁移程序不被 runtime import，也不随服务发布。
 - 无协议 feature flag、legacy compatibility adapter 或自动 XML fallback。
 - 所有现存 leaf 的 lead 已按 semantic/mechanical 规则追加成功 summary boundary；旧事件未被改写，lead 不读取 boundary 之前事件，subagent 依赖默认 fresh start 隔离旧 session。
@@ -586,3 +571,4 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 | 2026-07-27 | 明确 unit 轻量目录与 native schema 双投影；`reasoning_content` 作为内部统一字段并在唯一 LLM adapter/LiteLLM 边界验证；usage 正常路径保持现状；以 required-but-tolerant `__reason` 承接调用意图；MCP 保留原始 `inputSchema` 并从深拷贝派生模型 schema；保留并拆分 XML-like tool-result renderer；旧历史改为 active semantic + 全 leaf mechanical + subagent reset，并加入在线生成、SQLite checkpoint、有界并发、ETA 与停写复核；accepted call 增加非截断与结构完整性门槛；执行以本次 native tool-name 集合为闸；迁移 apply 降为完整 pair + best-effort resume，允许重复成功 boundary；admin 仅保证 cutover 后 messages reconstruction。 |
 | 2026-07-28 | 删除无收益的 reasoning breakdown、usage estimate 标记、finish-reason 事件字段、parser warnings 迁移、boundary 半对检测与过细 checkpoint 指标；compaction carry 改为从事件结构推导，`search_tools` 沿用现有 ToolResult 协议；阶段 0 增加五个 DashScope 模型的独立 native protocol probe，并覆盖 reasoning 原样回放、`__reason`、多调用和 Qwen/Kimi 图片 carrier，阶段 5 再做 ArtifactFlow/raw vLLM 完整链路验收。 |
 | 2026-07-29 | 迁移执行改为完全停机：维护页阻断新请求、drain active executions、停止全部 backend writer、数据库快照后再 scan/generate/apply/verify；删除在线预生成、head fingerprint、停写重扫和变化 leaf 补算。Checkpoint 仅承担停机窗口内摘要任务恢复，task key 增加 `summary_kind`；boundary pair 使用确定性 event id + 单事务实现幂等重试。阶段 0 已实现五模型 probe、只读 scan/report、独立 checkpoint、cutover runbook 与 `afctl apply --keep-maintenance`；五模型 wire-protocol gate 通过。Review 后进一步将一次性迁移收敛为全 leaf lead boundary，删除 subagent 扫描/reset；subagent 默认 fresh start，首次跨迁移 `fresh_start=false` 仅作 best-effort。 |
+| 2026-07-31 | Reviewer 复核后将 LiteLLM/OpenAI name/arguments 明确为 append-only delta，删除基于字符串前缀猜测累计快照的合并；同时取消 `__reason` 私有参数，Schema exporter 改为无损深拷贝，确保根级 JSON Schema 与运行时语义一致，权限提示统一使用确定性工具名文案。 |
