@@ -50,7 +50,9 @@
 - 未保留旧 `parameters` 配置/API/runtime 兼容，也未增加供旧 XML Engine 测试使用的临时投影；阶段 1–4 在同一分支直接落到 native 主链路。
 - 工具业务参数统一改为 object-root Draft 2020-12 `input_schema`；统一 exporter 只做深拷贝无损导出，不注入控制属性，根级与嵌套约束在模型侧和运行时语义一致。
 - XML tool-call parser、grammar/formatter 和专属测试已删除；模型可读的 XML-like tool-result content 已拆为不参与解析的独立 renderer。
-- OpenAPI/前端类型已同步；review 收口后端全量回归为 `1935 passed, 42 skipped`，前端为 `285 passed`，lint 与 production build 通过。
+- OpenAPI/前端类型已同步；review 收口后端全量回归为 `1939 passed, 42 skipped`，前端为 `287 passed`，lint 与 production build 通过。
+- 前端执行流已删除 XML-era `llmOutput`/`<tool_call>` 展示状态，单个 agent segment 精确对应一次 native LLM invocation；普通 content 只渲染一次，工具卡以 provider `call_id` 关联 START/COMPLETE，RAF chunk 更新绑定原 segment。
+- Admin 监控完整展示 `LLM_COMPLETE.tool_calls` 与工具事件 `call_id`/可选 `reason`；模型输入重建扩展为当次持久化的 `model + messages + tools` 语义快照，不声称还原 provider chat template 后的 token 序列。
 - 阶段 5 尚未完成的工作保持为部署/cutover gate：存量 leaf boundary 生成与幂等 apply、维护窗口演练、目标 raw vLLM 等私有端点 smoke。未完成这些项目之前分支不可整体发布。
 
 ## 分支策略
@@ -305,10 +307,10 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 - 记录当前 engine、history、compaction、skills、permissions 和 cancellation 相关测试基线。
 - 在改动 Engine 前实现独立的 `tests/manual/native_tool_call_probe.py`，使用项目锁定的同一 LiteLLM 版本和实际 provider 配置直接发请求；不经过 ArtifactFlow runtime，不把探针实现演变成第二套 adapter。
 - 先对当前 DashScope key 可访问的 `qwen3.7-plus`、`deepseek-v4-flash`、`glm-5.2`、`kimi-k2.6`、`MiniMax-M2.5` 全部执行文本 native tool-call probe；raw `openai/` + vLLM 保留为目标私有环境的部署前必测项。
-- 所有文本模型执行同一最小闭环：首请求以 `stream=true` 发送 OpenAI-compatible `tools`（包含 required `__reason`）→ 组装 assistant `content + reasoning_content? + tool_calls` → 发送绑定原 `tool_call_id` 的 XML-like 文本 `role=tool` result → 追加独立 synthetic user reminder → 发起下一请求。模型返回了 `reasoning_content` 时必须在内存中原样回放；未返回时不伪造。
+- 所有文本模型执行同一最小闭环：首请求以 `stream=true` 发送 OpenAI-compatible `tools`（业务 schema 无控制参数注入）→ 组装 assistant `content + reasoning_content? + tool_calls` → 发送绑定原 `tool_call_id` 的 XML-like 文本 `role=tool` result → 追加独立 synthetic user reminder → 发起下一请求。模型返回了 `reasoning_content` 时必须在内存中原样回放；未返回时不伪造。
 - 所有文本模型再尝试同轮多调用及 `content + tool_calls` 组合，检查每个 id/name/arguments 的流式归属和回放；模型没有按提示产生该形态只记录行为差异，产生了却无法组装或回放才算协议失败。
 - 对具备视觉能力的 `qwen3.7-plus` 与 `kimi-k2.6` 增加图片 carrier probe：先闭合一个或多个文本 `role=tool` result，再通过同一条 synthetic user message 发送带来源标签的一张/多张图片和 reminder，确认下一响应可消费图片且不拒绝消息顺序。
-- Probe 记录脱敏后的请求/normalized message 结构、raw chunk 形态、finish reason、usage 是否存在以及 pass/fail；完整 reasoning 只在单次进程内用于回放，不写报告或 fixture。Provider usage 缺失、偶发遗漏 `__reason`、未主动产生多调用属于非阻塞观察项，不新增 runtime usage 或 capability 状态。
+- Probe 记录脱敏后的请求/normalized message 结构、raw chunk 形态、finish reason、usage 是否存在以及 pass/fail；完整 reasoning 只在单次进程内用于回放，不写报告或 fixture。Provider usage 缺失、未主动产生多调用属于非阻塞观察项，不新增 runtime usage 或 capability 状态。
 - 盘点全部 conversation leaf 和各 conversation 的 `active_branch`，定义停机扫描 manifest 和迁移规模报告；报告必须给出 semantic task 数量，供运维评估完全停机窗口。
 - 定义 SQLite checkpoint schema、`--resume`、有界并发、重试、滚动吞吐和 ETA 的 CLI 契约边界；具体 generate 默认值与目标环境吞吐在阶段 5 联调时确定。
 - 明确 cutover 维护窗口、active execution drain、全部 backend writer 停止方式、数据库快照和迁移失败回滚流程。
@@ -323,7 +325,7 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 
 - 分支干净建立，现有相关测试可重复通过。
 - 五个 DashScope 候选模型均形成探针报告；任何拟继续声明支持的模型都必须接受 native tools、产出可组装的流式调用，并能消费完整 assistant/tool 后续历史。失败模型须在主体改造前解决 provider/template 配置或从本次支持范围移除；若它是必需模型则阻塞阶段 1。
-- 任一模型返回 `reasoning_content` 时，原样回放不会导致第二次请求 400；Qwen 与 Kimi 的单图/多图 synthetic carrier 均被接受。Usage 缺失和 `__reason` 遵循率只进入报告，不作为协议 gate。
+- 任一模型返回 `reasoning_content` 时，原样回放不会导致第二次请求 400；Qwen 与 Kimi 的单图/多图 synthetic carrier 均被接受。Usage 缺失只进入报告，不作为协议 gate。
 - 明确最终还需覆盖至少一个 raw `openai/` + vLLM 实际目标端点；环境当前不可用时列为阶段 5 cutover 阻塞项，而不是据此假定兼容。
 - 迁移脚本能在停机数据库上稳定枚举全部 leaf、标记 active branch，且 checkpoint/report 能发现遗漏、未完成任务和摘要失败；checkpoint 的 task identity 能区分同一 active lead 的 semantic/mechanical 候选。
 

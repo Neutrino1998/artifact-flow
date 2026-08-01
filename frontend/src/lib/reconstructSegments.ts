@@ -14,10 +14,6 @@ import type { TokenUsage, LLMCompleteData } from '@/types/events';
  */
 export function reconstructSegments(events: MessageEventItem[]): ExecutionSegment[] {
   const segments: ExecutionSegment[] = [];
-  // Monotonic suffix keeping each tool-call id unique within a reconstruction.
-  // `created_at` alone collides when the same tool runs twice in one turn at the
-  // same timestamp granularity → duplicate React keys (mirrors useSSE._toolCallSeq).
-  let toolCallSeq = 0;
   // Latched on permission_result, consumed by the next tool_start. Mirrors
   // useSSE._pendingPermissionResult — engine emits permission_result
   // immediately before the relevant tool_start, so serial pairing is correct.
@@ -40,7 +36,6 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
           isThinking: false,
           toolCalls: [],
           content: '',
-          llmOutput: '',
         });
         break;
       }
@@ -54,9 +49,6 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
         if (d.reasoning_content) {
           seg.reasoningContent = d.reasoning_content;
           seg.isThinking = false; // historical — already complete
-        }
-        if (content.includes('<tool_call>') && !seg.llmOutput) {
-          seg.llmOutput = content;
         }
         if (d.token_usage) seg.tokenUsage = d.token_usage;
         if (d.model) seg.model = d.model;
@@ -79,19 +71,20 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
         }
         if (!seg) seg = current();
         if (!seg) break;
+        const callId = data?.call_id as string | undefined;
         const toolName = (data?.tool as string) ?? '';
-        // Preserve LLM output before clearing content
-        if (seg.content && !seg.llmOutput) {
-          seg.llmOutput = seg.content;
+        if (!callId) {
+          console.error('[reconstructSegments] tool_start missing native call_id');
+          break;
         }
         const permission = pendingPermission ?? undefined;
         pendingPermission = null;
         // TWIN: keep this field set identical to useSSE.ts TOOL_START. `reason`
-        // is the model's stated intent (display-only) and must survive reload —
-        // omitting it here is the live/replay drift the twin comments guard against.
+        // is an optional backend-supplied display explanation and must survive
+        // reload; it is not the model's reasoning channel.
         const reason = data?.reason as string | undefined;
         seg.toolCalls.push({
-          id: `${toolName}-${evt.created_at}-${toolCallSeq++}`,
+          id: callId,
           toolName,
           params: (data?.params as Record<string, unknown>) ?? {},
           agent: agent_name ?? '',
@@ -99,7 +92,6 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
           ...(reason ? { reason } : {}),
           ...(permission ? { permission } : {}),
         });
-        seg.content = '';
         break;
       }
 
@@ -111,6 +103,7 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
       }
 
       case 'tool_complete': {
+        const callId = data?.call_id as string | undefined;
         const toolName = (data?.tool as string) ?? '';
         const success = (data?.success as boolean) ?? true;
         const result = typeof data?.result_data === 'string'
@@ -120,20 +113,25 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
             : JSON.stringify(data?.result_data ?? '');
         const durationMs = data?.duration_ms as number | undefined;
 
-        // Engine guarantees a paired TOOL_START precedes every TOOL_COMPLETE
-        // (see engine.py _execute_tools — normal exec, whitelist-rejected,
-        // permission-denied, and parser-error all emit START first). If no
-        // running tool matches, the contract is broken upstream — log and skip.
+        // Native call_id, not the function name, is the structural join key.
+        // If no running call matches, the producer contract is broken upstream.
+        let matched = false;
         for (const seg of segments) {
           const tc = seg.toolCalls.find(
-            (t) => t.toolName === toolName && t.status === 'running'
+            (t) => t.id === callId && t.status === 'running'
           );
           if (tc) {
             tc.status = success ? 'success' : 'error';
             tc.result = result;
             tc.durationMs = durationMs;
+            matched = true;
             break;
           }
+        }
+        if (!callId || !matched) {
+          console.error(
+            `[reconstructSegments] tool_complete for "${toolName}" has no matching running call_id`
+          );
         }
         break;
       }

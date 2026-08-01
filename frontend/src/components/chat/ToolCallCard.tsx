@@ -45,7 +45,7 @@ function ToolCallCard({ toolCall }: ToolCallCardProps) {
       headerClassName="text-text-secondary dark:text-text-secondary-dark"
       bodyClassName="pl-5 pt-1 pb-2 space-y-2 text-xs"
     >
-      {/* Reason — the model's stated intent for this call (display-only, md-rendered) */}
+      {/* Optional backend-supplied call explanation (display-only, md-rendered). */}
       {reason && (
         <div>
           <div className="text-text-tertiary dark:text-text-tertiary-dark mb-1">

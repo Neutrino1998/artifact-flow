@@ -220,6 +220,42 @@ class TestFreshStartBoundary:
 
 class TestMessageConversion:
 
+    def test_native_assistant_calls_and_results_keep_structural_ids(self):
+        calls = [
+            {
+                "id": "call_one",
+                "type": "function",
+                "function": {"name": "search", "arguments": '{"q":"one"}'},
+            },
+            {
+                "id": "call_two",
+                "type": "function",
+                "function": {"name": "search", "arguments": '{"q":"two"}'},
+            },
+        ]
+        events = [
+            _ev(StreamEventType.LLM_COMPLETE.value, "lead_agent", {
+                "content": "I will search twice.",
+                "tool_calls": calls,
+            }),
+            _ev(StreamEventType.TOOL_COMPLETE.value, "lead_agent", {
+                "call_id": "call_one", "tool": "search",
+                "success": True, "result_data": "one",
+            }),
+            _ev(StreamEventType.TOOL_COMPLETE.value, "lead_agent", {
+                "call_id": "call_two", "tool": "search",
+                "success": True, "result_data": "two",
+            }),
+        ]
+
+        messages = build_event_history(events, "lead_agent")
+
+        assert messages[0]["role"] == "assistant"
+        assert messages[0]["tool_calls"] == calls
+        assert [message["tool_call_id"] for message in messages[1:]] == [
+            "call_one", "call_two",
+        ]
+
     def test_llm_complete_carries_meta(self):
         events = [
             _ev(StreamEventType.LLM_COMPLETE.value, "lead_agent", {

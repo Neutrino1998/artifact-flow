@@ -2,7 +2,7 @@
 ContextManager — 为每次 LLM 调用构建完整的 messages 列表
 
 职责：
-1. 拼接 system prompt —— 仅放全 session 稳定的内容（role_prompt + agents + tools），
+1. 拼接 system prompt —— 仅放全 session 稳定的内容（role_prompt + agents），
    作为 prompt cache 的可缓存前缀。
 2. 通过 EventHistory 从 state["events"] 构建历史 messages（含 compaction_summary boundary）。
 3. 把每轮刷新的动态上下文（system_time + task_plan + artifact 清单）包裹成 ephemeral
@@ -73,7 +73,8 @@ class ContextManager:
         agent_config = agents[agent_name]
 
         # ========== System Prompt（全 session 稳定 → 可缓存前缀）==========
-        # 只放真正不随轮次变化的内容：角色提示词、可用 agent、工具说明。系统时间 /
+        # 只放真正不随轮次变化的内容：角色提示词、可用 agent。工具 schema 由引擎
+        # 作为 native `tools` 独立传递。系统时间 /
         # task_plan / artifact 清单等每轮刷新的动态上下文一律移到消息尾部的
         # <system-reminder>（见下），避免它们坐在前缀里把后续历史的 prompt cache 全打掉。
         system_parts = []

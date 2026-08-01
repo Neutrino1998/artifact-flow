@@ -1,6 +1,8 @@
-import { describe, test, expect, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
+  cancelPendingFlush,
   interleaveFlowItems,
+  scheduleContentUpdate,
   useStreamStore,
   type ExecutionSegment,
   type NonAgentBlock,
@@ -19,7 +21,6 @@ function seg(id: string, overrides: Partial<ExecutionSegment> = {}): ExecutionSe
     isThinking: false,
     toolCalls: [],
     content: '',
-    llmOutput: '',
     ...overrides,
   };
 }
@@ -92,6 +93,7 @@ describe('interleaveFlowItems', () => {
 
 describe('streamStore actions', () => {
   beforeEach(() => {
+    cancelPendingFlush();
     // Reset all mutable state — including the snapshot Maps — so tests are
     // order-independent. Forgetting completedSegments / completedNonAgentBlocks
     // here would let snapshot entries leak between cases and silently mask
@@ -103,6 +105,29 @@ describe('streamStore actions', () => {
       completedSegments: new Map(),
       completedNonAgentBlocks: new Map(),
     });
+  });
+
+  afterEach(() => {
+    cancelPendingFlush();
+    vi.unstubAllGlobals();
+  });
+
+  test('RAF content snapshot remains bound to its originating segment', () => {
+    let flush: FrameRequestCallback | undefined;
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      flush = callback;
+      return 1;
+    }));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    useStreamStore.setState({ segments: [seg('old')] });
+
+    scheduleContentUpdate('old', 'old invocation content');
+    useStreamStore.setState({ segments: [seg('old'), seg('new')] });
+    flush?.(0);
+
+    const segments = useStreamStore.getState().segments;
+    expect(segments[0].content).toBe('old invocation content');
+    expect(segments[1].content).toBe('');
   });
 
   describe('pending injects', () => {

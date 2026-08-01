@@ -24,6 +24,7 @@ import type {
   AdminConversationEventsResponse,
 } from '@/lib/api';
 import type { ArtifactSummary, ArtifactDetail, VersionDetail } from '@/types';
+import type { NativeToolCall } from '@/types/events';
 import { useUIStore } from '@/stores/uiStore';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 import { connectSSE } from '@/lib/sse';
@@ -56,6 +57,28 @@ function compactText(value: unknown, max = 96): string {
   if (typeof value !== 'string') return '';
   const oneLine = value.replace(/\s+/g, ' ').trim();
   return oneLine.length > max ? `${oneLine.slice(0, max)}...` : oneLine;
+}
+
+function nativeToolCalls(data: Record<string, unknown> | null): NativeToolCall[] {
+  return Array.isArray(data?.tool_calls) ? data.tool_calls as NativeToolCall[] : [];
+}
+
+function formatNativeToolCalls(calls: NativeToolCall[]): string {
+  const diagnostic = calls.map((call) => {
+    let parsedArguments: unknown;
+    try {
+      parsedArguments = JSON.parse(call.function.arguments);
+    } catch {
+      parsedArguments = undefined;
+    }
+    return {
+      id: call.id,
+      type: call.type,
+      function: call.function,
+      ...(parsedArguments !== undefined ? { parsed_arguments: parsedArguments } : {}),
+    };
+  });
+  return JSON.stringify(diagnostic, null, 2);
 }
 
 function isToolFailure(event: AdminEventItem): boolean {
@@ -94,7 +117,11 @@ function eventSummary(event: AdminEventItem): string {
       const tokens = d.token_usage as Record<string, number> | undefined;
       const model = (d.model as string) || '';
       const dur = d.duration_ms as number | undefined;
-      return `${model} | ${tokens?.input_tokens ?? 0}/${tokens?.output_tokens ?? 0} tokens | ${dur ?? 0}ms`;
+      const calls = nativeToolCalls(d);
+      const callSummary = calls.length > 0
+        ? ` | ${calls.length} call${calls.length === 1 ? '' : 's'}: ${calls.map((call) => call.function.name).join(', ')}`
+        : '';
+      return `${model} | ${tokens?.input_tokens ?? 0}/${tokens?.output_tokens ?? 0} tokens | ${dur ?? 0}ms${callSummary}`;
     }
     case 'tool_start':
       return `${d.tool as string}`;
@@ -104,8 +131,11 @@ function eventSummary(event: AdminEventItem): string {
       const err = compactText(d.error, 90);
       return `${d.tool as string} ${ok ? 'OK' : 'FAIL'} ${dur ?? 0}ms${!ok && err ? ` | ${err}` : ''}`;
     }
-    case 'agent_start':
-      return d.agent as string;
+    case 'agent_start': {
+      const tools = Array.isArray(d.tools) ? d.tools : null;
+      const model = d.model as string | undefined;
+      return `${d.agent as string}${model ? ` | ${model}` : ''}${tools ? ` | ${tools.length} tools` : ''}`;
+    }
     case 'agent_complete':
       return `${d.agent as string} done`;
     case 'error':
@@ -645,9 +675,13 @@ function serializeEventToText(event: AdminEventItem): string {
     }
     if (d.reasoning_content != null) lines.push(`\n--- Reasoning ---\n${d.reasoning_content as string}`);
     if (d.content != null) lines.push(`\n--- Response ---\n${d.content as string}`);
+    const calls = nativeToolCalls(d);
+    if (calls.length > 0) lines.push(`\n--- Tool Calls ---\n${formatNativeToolCalls(calls)}`);
   }
   if (d != null && (event.event_type === 'tool_start' || event.event_type === 'tool_complete')) {
+    if (d.call_id != null) lines.push(`Call ID: ${d.call_id as string}`);
     lines.push(`工具: ${(d.tool as string) || '-'}`);
+    if (d.reason != null) lines.push(`调用说明: ${d.reason as string}`);
     if (d.duration_ms != null) lines.push(`耗时: ${d.duration_ms}ms`);
     if (d.success != null) lines.push(`状态: ${d.success ? 'OK' : 'FAIL'}`);
     if (d.params != null) lines.push(`\n--- Params ---\n${JSON.stringify(d.params, null, 2)}`);
@@ -660,6 +694,10 @@ function serializeEventToText(event: AdminEventItem): string {
   }
   if (d != null && event.event_type === 'agent_start' && d.reminder != null) {
     lines.push(`\n--- Reminder ---\n${d.reminder as string}`);
+  }
+  if (d != null && event.event_type === 'agent_start') {
+    if (d.model != null) lines.push(`模型: ${d.model as string}`);
+    if (Array.isArray(d.tools)) lines.push(`\n--- Tools ---\n${JSON.stringify(d.tools, null, 2)}`);
   }
   if (d != null && event.event_type === 'error') {
     lines.push(`\n--- Error ---\n${(d.error as string) || JSON.stringify(d, null, 2)}`);
@@ -1080,12 +1118,17 @@ function EventDetail({
           {d.content != null ? (
             <DetailBlock label="Response" content={d.content as string} />
           ) : null}
+          {nativeToolCalls(d).length > 0 ? (
+            <DetailBlock label="Tool Calls" content={formatNativeToolCalls(nativeToolCalls(d))} />
+          ) : null}
         </div>
       ) : null}
 
       {d != null && (event.event_type === 'tool_start' || event.event_type === 'tool_complete') ? (
         <div className="space-y-2">
+          {d.call_id != null ? <DetailRow label="Call ID" value={d.call_id as string} /> : null}
           <DetailRow label="工具" value={(d.tool as string) || '-'} />
+          {d.reason != null ? <DetailBlock label="调用说明" content={d.reason as string} /> : null}
           {d.duration_ms != null ? <DetailRow label="耗时" value={`${d.duration_ms}ms`} /> : null}
           {d.success != null ? <DetailRow label="状态" value={d.success ? 'OK' : 'FAIL'} /> : null}
           {d.params != null ? (
@@ -1105,6 +1148,10 @@ function EventDetail({
 
       {event.event_type === 'agent_start' ? (
         <>
+          {d?.model != null ? <DetailRow label="Model" value={d.model as string} /> : null}
+          {Array.isArray(d?.tools) ? (
+            <DetailBlock label="Native Tools" content={JSON.stringify(d.tools, null, 2)} />
+          ) : null}
           {d?.system_prompt != null ? (
             <DetailBlock label="System Prompt" content={d.system_prompt as string} />
           ) : null}
@@ -1389,9 +1436,9 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
   );
 }
 
-// ── Prompt Reconstruction (admin forensics) ──
-// 重建某发 agent_start 后 LLM 调用实际发出的完整 prompt：后端走分支正确的 path，
-// 用持久化的 system_prompt + reminder + 重放历史合成，不重新生成动态内容。
+// ── Model Input Reconstruction (admin forensics) ──
+// 重建某发 agent_start 后 LLM 调用的 OpenAI-compatible 语义输入：messages 走
+// 分支正确的历史重放，model/tools 使用当次持久化快照，不重新生成动态内容。
 function PromptReconstructSection({
   convId,
   messageId,
@@ -1420,16 +1467,20 @@ function PromptReconstructSection({
 
   const handleDownload = useCallback(() => {
     if (!result) return;
-    const blob = new Blob([JSON.stringify(result.messages, null, 2)], {
+    const blob = new Blob([JSON.stringify({
+      model: result.model,
+      messages: result.messages,
+      tools: result.tools,
+    }, null, 2)], {
       type: 'application/json;charset=utf-8',
     });
-    triggerBlobDownload(`prompt-${messageId ?? 'msg'}-${eventId ?? 'evt'}.json`, blob);
+    triggerBlobDownload(`model-input-${messageId ?? 'msg'}-${eventId ?? 'evt'}.json`, blob);
   }, [result, messageId, eventId]);
 
   return (
     <div className="space-y-2 border-t border-border dark:border-border-dark pt-3">
       <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-        重建此发实际发给模型的完整 prompt（持久化重放，不重新生成；忠实性为版本内）
+        重建此发 OpenAI-compatible 模型输入（messages + tools；不包含 provider chat template 后的 token 序列）
       </div>
       <div className="flex items-center gap-2 flex-wrap">
         <button
@@ -1437,7 +1488,7 @@ function PromptReconstructSection({
           disabled={!canReconstruct || loading}
           className="px-2 py-1 rounded-md text-xs bg-accent/10 text-accent hover:bg-accent/20 disabled:opacity-50 transition-colors"
         >
-          {loading ? '重建中…' : '重建 Prompt'}
+          {loading ? '重建中…' : '重建模型输入'}
         </button>
         {result ? (
           <button onClick={handleDownload} className="text-xs text-accent">
@@ -1460,8 +1511,15 @@ function PromptReconstructSection({
                 无持久化 reminder（旧事件：仅 system + 历史）
               </span>
             ) : null}
+            {!result.has_tools_snapshot ? (
+              <span className="px-1 py-px rounded bg-status-warning/10 text-status-warning text-[10px]">
+                无持久化 tools 快照（旧事件）
+              </span>
+            ) : null}
           </div>
+          <DetailRow label="Model" value={result.model ?? '-'} />
           <DetailBlock label="重建 Messages" content={JSON.stringify(result.messages, null, 2)} />
+          <DetailBlock label="Tools" content={JSON.stringify(result.tools, null, 2)} />
         </div>
       ) : null}
     </div>

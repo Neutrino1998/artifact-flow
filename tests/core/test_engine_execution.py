@@ -280,6 +280,22 @@ class TestLeadCompletion:
         assert len(completes) == 1
         assert starts[0]["agent"] == "lead_agent"
         assert completes[0]["agent"] == "lead_agent"
+        assert starts[0]["data"]["model"] == "openai/fake-model"
+        assert starts[0]["data"]["tools"] == []
+
+    async def test_agent_start_snapshots_exact_native_tools(self):
+        agent = _FakeAgentConfig(tools={"my_tool": "auto"})
+        tool = _FakeTool("my_tool")
+
+        _, emitted, _ = await _run_engine(
+            _make_fake_stream(_simple_llm_chunks("ok")),
+            agents={"lead_agent": agent},
+            tools={"my_tool": tool},
+        )
+
+        start = _events_of_type(emitted, "agent_start")[0]
+        assert start["data"]["model"] == agent.model
+        assert start["data"]["tools"] == [tool.to_native_tool_schema()]
 
 
 # ============================================================

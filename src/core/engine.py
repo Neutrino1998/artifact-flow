@@ -1194,6 +1194,11 @@ async def execute_loop(
                 "agent": agent_name,
                 "system_prompt": messages[0]["content"] if messages and messages[0].get("role") == "system" else None,
                 "reminder": reminder,
+                # Native tool schemas are a top-level model input, not part of
+                # messages. Persist the exact invocation snapshot so admin
+                # reconstruction never consults a later, drifted registry.
+                "model": agents[agent_name].model,
+                "tools": native_tools,
             })
 
             # 守卫:format_messages_for_debug 会遍历 messages,识图块列表里若有图(已压成

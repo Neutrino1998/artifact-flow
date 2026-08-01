@@ -37,8 +37,8 @@ describe('reconstructSegments', () => {
   test('tool_start + tool_complete pair → tool call success', () => {
     const events = [
       makeEvent('agent_start', {}, 'lead'),
-      makeEvent('tool_start', { tool: 'search', params: { q: 'foo' } }, 'lead'),
-      makeEvent('tool_complete', { tool: 'search', success: true, result_data: '{"hits":1}', duration_ms: 42 }, 'lead'),
+      makeEvent('tool_start', { call_id: 'call-search', tool: 'search', params: { q: 'foo' } }, 'lead'),
+      makeEvent('tool_complete', { call_id: 'call-search', tool: 'search', success: true, result_data: '{"hits":1}', duration_ms: 42 }, 'lead'),
       makeEvent('agent_complete', {}, 'lead'),
     ];
     const segs = reconstructSegments(events);
@@ -52,14 +52,14 @@ describe('reconstructSegments', () => {
     });
   });
 
-  // Replay parity with the live useSSE TOOL_START handler — the model's stated
-  // <reason> intent must survive history reload, not just live SSE. Regression
+  // Replay parity with the live useSSE TOOL_START handler — the backend-supplied
+  // display explanation must survive history reload, not just live SSE. Regression
   // guard for the live/replay drift where replay dropped `reason`.
   test('tool_start carries reason → ToolCallInfo.reason', () => {
     const events = [
       makeEvent('agent_start', {}, 'lead'),
-      makeEvent('tool_start', { tool: 'bash', params: { command: 'ls' }, reason: 'list the files' }, 'lead'),
-      makeEvent('tool_complete', { tool: 'bash', success: true, result_data: 'ok', duration_ms: 5 }, 'lead'),
+      makeEvent('tool_start', { call_id: 'call-bash', tool: 'bash', params: { command: 'ls' }, reason: 'list the files' }, 'lead'),
+      makeEvent('tool_complete', { call_id: 'call-bash', tool: 'bash', success: true, result_data: 'ok', duration_ms: 5 }, 'lead'),
       makeEvent('agent_complete', {}, 'lead'),
     ];
     const segs = reconstructSegments(events);
@@ -69,8 +69,8 @@ describe('reconstructSegments', () => {
   test('tool_start without reason → reason undefined', () => {
     const events = [
       makeEvent('agent_start', {}, 'lead'),
-      makeEvent('tool_start', { tool: 'search', params: {} }, 'lead'),
-      makeEvent('tool_complete', { tool: 'search', success: true, result_data: '', duration_ms: 1 }, 'lead'),
+      makeEvent('tool_start', { call_id: 'call-search', tool: 'search', params: {} }, 'lead'),
+      makeEvent('tool_complete', { call_id: 'call-search', tool: 'search', success: true, result_data: '', duration_ms: 1 }, 'lead'),
     ];
     const segs = reconstructSegments(events);
     expect(segs[0].toolCalls[0].reason).toBeUndefined();
@@ -79,25 +79,31 @@ describe('reconstructSegments', () => {
   test('tool_complete success=false → status=error, result from data.error', () => {
     const events = [
       makeEvent('agent_start', {}, 'lead'),
-      makeEvent('tool_start', { tool: 'search' }, 'lead'),
-      makeEvent('tool_complete', { tool: 'search', success: false, error: 'timeout' }, 'lead'),
+      makeEvent('tool_start', { call_id: 'call-search', tool: 'search' }, 'lead'),
+      makeEvent('tool_complete', { call_id: 'call-search', tool: 'search', success: false, error: 'timeout' }, 'lead'),
     ];
     const segs = reconstructSegments(events);
     expect(segs[0].toolCalls[0].status).toBe('error');
     expect(segs[0].toolCalls[0].result).toBe('timeout');
   });
 
-  test('llm_complete content with <tool_call> preserves to llmOutput', () => {
+  test('native tool round preserves ordinary content alongside the tool card', () => {
     const events = [
       makeEvent('agent_start', {}, 'lead'),
-      makeEvent('llm_complete', { content: 'I will <tool_call>do_thing</tool_call>' }, 'lead'),
-      makeEvent('tool_start', { tool: 'do_thing' }, 'lead'),
-      makeEvent('tool_complete', { tool: 'do_thing', success: true, result_data: 'done' }, 'lead'),
+      makeEvent('llm_complete', {
+        content: 'I will do the thing.',
+        tool_calls: [{
+          id: 'call-do-thing',
+          type: 'function',
+          function: { name: 'do_thing', arguments: '{}' },
+        }],
+      }, 'lead'),
+      makeEvent('tool_start', { call_id: 'call-do-thing', tool: 'do_thing' }, 'lead'),
+      makeEvent('tool_complete', { call_id: 'call-do-thing', tool: 'do_thing', success: true, result_data: 'done' }, 'lead'),
     ];
     const segs = reconstructSegments(events);
-    expect(segs[0].llmOutput).toBe('I will <tool_call>do_thing</tool_call>');
-    // content cleared by tool_start
-    expect(segs[0].content).toBe('');
+    expect(segs[0].content).toBe('I will do the thing.');
+    expect(segs[0].toolCalls[0].id).toBe('call-do-thing');
   });
 
   test('tokenUsage / model / duration_ms fields attached', () => {
@@ -119,8 +125,8 @@ describe('reconstructSegments', () => {
   test('segment still running at end → forced to complete', () => {
     const events = [
       makeEvent('agent_start', {}, 'lead'),
-      makeEvent('tool_start', { tool: 'search' }, 'lead'),
-      makeEvent('tool_complete', { tool: 'search', success: true, result_data: 'x' }, 'lead'),
+      makeEvent('tool_start', { call_id: 'call-search', tool: 'search' }, 'lead'),
+      makeEvent('tool_complete', { call_id: 'call-search', tool: 'search', success: true, result_data: 'x' }, 'lead'),
       // no agent_complete
     ];
     const segs = reconstructSegments(events);
@@ -130,12 +136,12 @@ describe('reconstructSegments', () => {
   test('two consecutive agent_start → two segments', () => {
     const events = [
       makeEvent('agent_start', {}, 'lead'),
-      makeEvent('tool_start', { tool: 'a' }, 'lead'),
-      makeEvent('tool_complete', { tool: 'a', success: true, result_data: 'x' }, 'lead'),
+      makeEvent('tool_start', { call_id: 'call-a', tool: 'a' }, 'lead'),
+      makeEvent('tool_complete', { call_id: 'call-a', tool: 'a', success: true, result_data: 'x' }, 'lead'),
       makeEvent('agent_complete', {}, 'lead'),
       makeEvent('agent_start', {}, 'search'),
-      makeEvent('tool_start', { tool: 'b' }, 'search'),
-      makeEvent('tool_complete', { tool: 'b', success: true, result_data: 'y' }, 'search'),
+      makeEvent('tool_start', { call_id: 'call-b', tool: 'b' }, 'search'),
+      makeEvent('tool_complete', { call_id: 'call-b', tool: 'b', success: true, result_data: 'y' }, 'search'),
     ];
     const segs = reconstructSegments(events);
     expect(segs).toHaveLength(2);
@@ -148,9 +154,9 @@ describe('reconstructSegments', () => {
     // arrives. The matching tool is in seg 0 — it should be found and finalized.
     const events = [
       makeEvent('agent_start', {}, 'lead'),
-      makeEvent('tool_start', { tool: 'slow_op' }, 'lead'),
+      makeEvent('tool_start', { call_id: 'call-slow', tool: 'slow_op' }, 'lead'),
       makeEvent('agent_start', {}, 'search'),
-      makeEvent('tool_complete', { tool: 'slow_op', success: true, result_data: 'done' }, 'lead'),
+      makeEvent('tool_complete', { call_id: 'call-slow', tool: 'slow_op', success: true, result_data: 'done' }, 'lead'),
     ];
     const segs = reconstructSegments(events);
     // Both segments may exist (search seg has no toolcalls/reasoning so filtered)
@@ -165,16 +171,16 @@ describe('reconstructSegments', () => {
   test('mixed serial delegation → later caller tools lane back to caller segment', () => {
     const events = [
       makeEvent('agent_start', {}, 'lead'),
-      makeEvent('llm_complete', { content: '<tool_call>…</tool_call>' }, 'lead'),
-      makeEvent('tool_start', { tool: 'tool_a' }, 'lead'),
-      makeEvent('tool_complete', { tool: 'tool_a', success: true, result_data: 'A-ok' }, 'lead'),
-      makeEvent('tool_start', { tool: 'call_subagent', params: { agent_name: 'sub' } }, 'lead'),
+      makeEvent('llm_complete', { content: 'Working through the calls.' }, 'lead'),
+      makeEvent('tool_start', { call_id: 'call-a', tool: 'tool_a' }, 'lead'),
+      makeEvent('tool_complete', { call_id: 'call-a', tool: 'tool_a', success: true, result_data: 'A-ok' }, 'lead'),
+      makeEvent('tool_start', { call_id: 'call-sub', tool: 'call_subagent', params: { agent_name: 'sub' } }, 'lead'),
       makeEvent('agent_start', {}, 'sub'),
       makeEvent('llm_complete', { content: 'sub answer', reasoning_content: 'sub thinking' }, 'sub'),
       makeEvent('agent_complete', {}, 'sub'),
-      makeEvent('tool_complete', { tool: 'call_subagent', success: true, result_data: '<subagent_result>…</subagent_result>' }, 'lead'),
-      makeEvent('tool_start', { tool: 'tool_b' }, 'lead'),
-      makeEvent('tool_complete', { tool: 'tool_b', success: true, result_data: 'B-ok' }, 'lead'),
+      makeEvent('tool_complete', { call_id: 'call-sub', tool: 'call_subagent', success: true, result_data: '<subagent_result>…</subagent_result>' }, 'lead'),
+      makeEvent('tool_start', { call_id: 'call-b', tool: 'tool_b' }, 'lead'),
+      makeEvent('tool_complete', { call_id: 'call-b', tool: 'tool_b', success: true, result_data: 'B-ok' }, 'lead'),
       makeEvent('agent_start', {}, 'lead'),
       makeEvent('llm_complete', { content: 'final' }, 'lead'),
       makeEvent('agent_complete', {}, 'lead'),

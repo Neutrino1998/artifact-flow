@@ -544,10 +544,11 @@ class ConversationManager:
         message_id: str,
         agent_start_event_id: str,
     ) -> Optional[Dict[str, Any]]:
-        """Admin 取证：重建某一发 LLM 调用实际发出的完整 prompt（messages 列表）。
+        """Admin 取证：重建某一发 LLM 调用的语义输入快照。
 
         忠实性策略 = 持久化后纯重放，不重新生成动态内容：
           - 静态 system_prompt + 动态 reminder 取自锚 agent_start 事件的持久化原值；
+          - model + native tools 同样取自锚事件，避免当前配置覆盖历史调用；
           - 历史 messages 用 build_event_history 在「锚之前的 path 事件」上确定性重放；
           - 两者经 ContextManager.assemble（与 live build 同一拼接叶子）合成。
         分支安全：按 message_id 走 load_event_history_async（分支正确的 path），锚事件
@@ -582,6 +583,9 @@ class ConversationManager:
         data = anchor.data or {}
         system_prompt = data.get("system_prompt") or ""
         reminder = data.get("reminder")  # 旧事件无此字段 → None
+        model = data.get("model")
+        has_tools_snapshot = "tools" in data
+        native_tools = data.get("tools") or []
         agent_name = anchor.agent_name
 
         history = build_event_history(events[:anchor_idx], agent_name)
@@ -600,8 +604,11 @@ class ConversationManager:
             "message_id": message_id,
             "agent_start_event_id": agent_start_event_id,
             "agent_name": agent_name,
+            "model": model,
             "has_reminder": reminder is not None,
+            "has_tools_snapshot": has_tools_snapshot,
             "messages": messages,
+            "tools": native_tools,
         }
 
     async def delete_conversation(self, conversation_id: str) -> bool:

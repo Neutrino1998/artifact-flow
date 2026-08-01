@@ -493,10 +493,11 @@ export interface paths {
         };
         /**
          * Reconstruct Admin Prompt
-         * @description 重建某一发 LLM 调用实际发出的完整 prompt（admin 取证，按 agent_start 锚定）。
+         * @description 重建某一发 LLM 调用的语义输入（admin 取证，按 agent_start 锚定）。
          *
          *     锚 = 该次调用前发出的 agent_start 事件（其 event_id 由 events 端点返回）。重建走
-         *     分支正确的 path，复用引擎同一套装配逻辑，不重新生成动态内容 —— 详见
+         *     分支正确的 path，复用引擎同一套 messages 装配逻辑，并返回当次持久化的 model +
+         *     native tools；不重新生成动态内容 —— 详见
          *     ConversationManager.reconstruct_prompt。
          */
         get: operations["reconstruct_admin_prompt_api_v1_admin_conversations__conv_id__messages__message_id__reconstruct_get"];
@@ -1613,10 +1614,11 @@ export interface components {
         };
         /**
          * AdminPromptReconstructResponse
-         * @description GET .../messages/{message_id}/reconstruct response — 重建某发 LLM 调用的完整 prompt。
+         * @description 重建某发 LLM 调用的 OpenAI-compatible 语义输入。
          *
          *     has_reminder=False 表示该 agent_start 早于 reminder 持久化（只重建了 system_prompt +
-         *     历史，无动态 reminder）。messages 的 content 可能是 str 或块列表（识图块降级为占位文本）。
+         *     历史，无动态 reminder）。has_tools_snapshot=False 表示事件早于 native tools 快照。
+         *     messages 的 content 可能是 str 或块列表（识图块降级为占位文本）。
          */
         AdminPromptReconstructResponse: {
             /** Conversation Id */
@@ -1627,13 +1629,24 @@ export interface components {
             agent_start_event_id: string;
             /** Agent Name */
             agent_name: string | null;
+            /** Model */
+            model: string | null;
             /**
              * Has Reminder
              * @default false
              */
             has_reminder: boolean;
+            /**
+             * Has Tools Snapshot
+             * @default false
+             */
+            has_tools_snapshot: boolean;
             /** Messages */
             messages: {
+                [key: string]: unknown;
+            }[];
+            /** Tools */
+            tools: {
                 [key: string]: unknown;
             }[];
         };

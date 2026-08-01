@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { ExecutionMetrics, TokenUsage } from '@/types/events';
 
 export interface ToolCallInfo {
+  /** Provider-issued native tool-call id; joins llm_complete/start/complete. */
   id: string;
   toolName: string;
   params: Record<string, unknown>;
@@ -9,7 +10,7 @@ export interface ToolCallInfo {
   status: 'running' | 'success' | 'error';
   result?: string;
   durationMs?: number;
-  /** The model's stated intent for this call (<reason> tag); display-only.
+  /** Optional backend-supplied display explanation; not model reasoning.
    *  Distinct from `permission.reason` below, which is the decision outcome. */
   reason?: string;
   /** Set only for CONFIRM-level tools — the user's response (or timeout).
@@ -21,7 +22,7 @@ export interface ToolCallInfo {
 export interface PermissionRequest {
   toolName: string;
   params: Record<string, unknown>;
-  /** The model's stated intent for this call (<reason> tag); display-only. */
+  /** Optional backend-supplied display explanation; not model reasoning. */
   reason?: string;
 }
 
@@ -114,7 +115,6 @@ export interface ExecutionSegment {
   isThinking: boolean;
   toolCalls: ToolCallInfo[];
   content: string;
-  llmOutput: string;             // raw LLM output preserved before content is cleared at tool_start
   tokenUsage?: TokenUsage;
   model?: string;
   llmDurationMs?: number;
@@ -195,8 +195,7 @@ interface StreamState {
   // Segment actions
   pushSegment: (agent: string) => void;
   updateCurrentSegment: (update: Partial<ExecutionSegment>) => void;
-  updateAgentSegment: (agent: string, update: Partial<ExecutionSegment>) => void;
-  appendCurrentSegmentContent: (content: string) => void;
+  updateSegmentContent: (segmentId: string, content: string) => void;
   addToolCallToSegment: (tc: ToolCallInfo) => void;
   updateToolCallInSegment: (id: string, update: Partial<ToolCallInfo>) => void;
 
@@ -234,13 +233,13 @@ interface StreamState {
 
 // RAF-based throttle for segment content updates
 let _rafId: number | null = null;
-let _pendingContent: string | null = null;
-let _appendFn: ((content: string) => void) | null = null;
+let _pendingContent: { segmentId: string; content: string } | null = null;
+let _appendFn: ((segmentId: string, content: string) => void) | null = null;
 let _pendingInjectSeq = 0;
 
 function flushContent() {
   if (_pendingContent !== null && _appendFn) {
-    _appendFn(_pendingContent);
+    _appendFn(_pendingContent.segmentId, _pendingContent.content);
     _pendingContent = null;
   }
   _rafId = null;
@@ -255,8 +254,8 @@ export function cancelPendingFlush() {
   _pendingContent = null;
 }
 
-export function scheduleContentUpdate(content: string) {
-  _pendingContent = content;
+export function scheduleContentUpdate(segmentId: string, content: string) {
+  _pendingContent = { segmentId, content };
   if (_rafId === null && typeof requestAnimationFrame !== 'undefined') {
     _rafId = requestAnimationFrame(flushContent);
   } else if (typeof requestAnimationFrame === 'undefined') {
@@ -265,10 +264,12 @@ export function scheduleContentUpdate(content: string) {
 }
 
 export const useStreamStore = create<StreamState>((set, get) => {
-  // Capture appendCurrentSegmentContent for RAF throttle after store creation
+  // Capture the id-targeted content action for RAF throttling. Binding a
+  // snapshot to its segment makes a late frame unable to mutate a newer LLM
+  // invocation after AGENT_START has advanced the timeline.
   // We use a wrapper that calls get() to always get the latest action reference
-  _appendFn = (content: string) => {
-    get().appendCurrentSegmentContent(content);
+  _appendFn = (segmentId: string, content: string) => {
+    get().updateSegmentContent(segmentId, content);
   };
 
   return {
@@ -352,7 +353,6 @@ export const useStreamStore = create<StreamState>((set, get) => {
             isThinking: false,
             toolCalls: [],
             content: '',
-            llmOutput: '',
           },
         ],
       })),
@@ -367,27 +367,14 @@ export const useStreamStore = create<StreamState>((set, get) => {
         };
       }),
 
-    appendCurrentSegmentContent: (content) =>
+    updateSegmentContent: (segmentId, content) =>
       set((s) => {
         const segs = s.segments;
-        if (segs.length === 0) return s;
-        const last = segs[segs.length - 1];
-        return {
-          segments: [...segs.slice(0, -1), { ...last, content }],
-        };
-      }),
-
-    updateAgentSegment: (agent, update) =>
-      set((s) => {
-        const segs = s.segments;
-        for (let i = segs.length - 1; i >= 0; i--) {
-          if (segs[i].agent === agent) {
-            const newSegs = [...segs];
-            newSegs[i] = { ...newSegs[i], ...update };
-            return { segments: newSegs };
-          }
-        }
-        return s;
+        const idx = segs.findIndex((seg) => seg.id === segmentId);
+        if (idx === -1) return s;
+        const newSegs = [...segs];
+        newSegs[idx] = { ...newSegs[idx], content };
+        return { segments: newSegs };
       }),
 
     addToolCallToSegment: (tc) =>

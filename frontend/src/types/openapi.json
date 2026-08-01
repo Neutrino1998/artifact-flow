@@ -1210,7 +1210,7 @@
           "admin"
         ],
         "summary": "Reconstruct Admin Prompt",
-        "description": "\u91cd\u5efa\u67d0\u4e00\u53d1 LLM \u8c03\u7528\u5b9e\u9645\u53d1\u51fa\u7684\u5b8c\u6574 prompt\uff08admin \u53d6\u8bc1\uff0c\u6309 agent_start \u951a\u5b9a\uff09\u3002\n\n\u951a = \u8be5\u6b21\u8c03\u7528\u524d\u53d1\u51fa\u7684 agent_start \u4e8b\u4ef6\uff08\u5176 event_id \u7531 events \u7aef\u70b9\u8fd4\u56de\uff09\u3002\u91cd\u5efa\u8d70\n\u5206\u652f\u6b63\u786e\u7684 path\uff0c\u590d\u7528\u5f15\u64ce\u540c\u4e00\u5957\u88c5\u914d\u903b\u8f91\uff0c\u4e0d\u91cd\u65b0\u751f\u6210\u52a8\u6001\u5185\u5bb9 \u2014\u2014 \u8be6\u89c1\nConversationManager.reconstruct_prompt\u3002",
+        "description": "\u91cd\u5efa\u67d0\u4e00\u53d1 LLM \u8c03\u7528\u7684\u8bed\u4e49\u8f93\u5165\uff08admin \u53d6\u8bc1\uff0c\u6309 agent_start \u951a\u5b9a\uff09\u3002\n\n\u951a = \u8be5\u6b21\u8c03\u7528\u524d\u53d1\u51fa\u7684 agent_start \u4e8b\u4ef6\uff08\u5176 event_id \u7531 events \u7aef\u70b9\u8fd4\u56de\uff09\u3002\u91cd\u5efa\u8d70\n\u5206\u652f\u6b63\u786e\u7684 path\uff0c\u590d\u7528\u5f15\u64ce\u540c\u4e00\u5957 messages \u88c5\u914d\u903b\u8f91\uff0c\u5e76\u8fd4\u56de\u5f53\u6b21\u6301\u4e45\u5316\u7684 model +\nnative tools\uff1b\u4e0d\u91cd\u65b0\u751f\u6210\u52a8\u6001\u5185\u5bb9 \u2014\u2014 \u8be6\u89c1\nConversationManager.reconstruct_prompt\u3002",
         "operationId": "reconstruct_admin_prompt_api_v1_admin_conversations__conv_id__messages__message_id__reconstruct_get",
         "security": [
           {
@@ -4250,9 +4250,25 @@
             ],
             "title": "Agent Name"
           },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
           "has_reminder": {
             "type": "boolean",
             "title": "Has Reminder",
+            "default": false
+          },
+          "has_tools_snapshot": {
+            "type": "boolean",
+            "title": "Has Tools Snapshot",
             "default": false
           },
           "messages": {
@@ -4262,6 +4278,14 @@
             },
             "type": "array",
             "title": "Messages"
+          },
+          "tools": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Tools"
           }
         },
         "type": "object",
@@ -4270,11 +4294,14 @@
           "message_id",
           "agent_start_event_id",
           "agent_name",
+          "model",
           "has_reminder",
-          "messages"
+          "has_tools_snapshot",
+          "messages",
+          "tools"
         ],
         "title": "AdminPromptReconstructResponse",
-        "description": "GET .../messages/{message_id}/reconstruct response \u2014 \u91cd\u5efa\u67d0\u53d1 LLM \u8c03\u7528\u7684\u5b8c\u6574 prompt\u3002\n\nhas_reminder=False \u8868\u793a\u8be5 agent_start \u65e9\u4e8e reminder \u6301\u4e45\u5316\uff08\u53ea\u91cd\u5efa\u4e86 system_prompt +\n\u5386\u53f2\uff0c\u65e0\u52a8\u6001 reminder\uff09\u3002messages \u7684 content \u53ef\u80fd\u662f str \u6216\u5757\u5217\u8868\uff08\u8bc6\u56fe\u5757\u964d\u7ea7\u4e3a\u5360\u4f4d\u6587\u672c\uff09\u3002"
+        "description": "\u91cd\u5efa\u67d0\u53d1 LLM \u8c03\u7528\u7684 OpenAI-compatible \u8bed\u4e49\u8f93\u5165\u3002\n\nhas_reminder=False \u8868\u793a\u8be5 agent_start \u65e9\u4e8e reminder \u6301\u4e45\u5316\uff08\u53ea\u91cd\u5efa\u4e86 system_prompt +\n\u5386\u53f2\uff0c\u65e0\u52a8\u6001 reminder\uff09\u3002has_tools_snapshot=False \u8868\u793a\u4e8b\u4ef6\u65e9\u4e8e native tools \u5feb\u7167\u3002\nmessages \u7684 content \u53ef\u80fd\u662f str \u6216\u5757\u5217\u8868\uff08\u8bc6\u56fe\u5757\u964d\u7ea7\u4e3a\u5360\u4f4d\u6587\u672c\uff09\u3002"
       },
       "AdminSkillItem": {
         "properties": {

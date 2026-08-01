@@ -61,9 +61,20 @@ export interface LLMChunkData {
   reasoning_content?: string;
 }
 
+export interface NativeToolCall {
+  id: string;
+  type: 'function';
+  function: {
+    name: string;
+    /** OpenAI-compatible wire shape keeps arguments as encoded JSON text. */
+    arguments: string;
+  };
+}
+
 export interface LLMCompleteData {
   content: string;
   reasoning_content?: string;
+  tool_calls?: NativeToolCall[];
   model?: string;
   duration_ms?: number;
   token_usage?: TokenUsage;
@@ -75,13 +86,15 @@ export interface AgentCompleteData {
 }
 
 export interface ToolStartData {
+  call_id: string;
   tool: string;
   params: Record<string, unknown>;
-  /** The model's stated intent for this call (<reason> tag); display-only. */
+  /** Optional backend-supplied display explanation; not model reasoning. */
   reason?: string;
 }
 
 export interface ToolCompleteData {
+  call_id: string;
   tool: string;
   success: boolean;
   result_data?: unknown;
@@ -140,14 +153,18 @@ export interface ArtifactUpdatedData {
 
 export interface PermissionRequestData {
   permission_level: string;
+  call_id: string;
   tool: string;
   params: Record<string, unknown>;
-  /** The model's stated intent for this call (<reason> tag); display-only. */
+  /** Optional backend-supplied display explanation; not model reasoning. */
   reason?: string;
 }
 
 export interface PermissionResultData {
   approved: boolean;
+  call_id: string;
+  tool: string;
+  reason?: string;
 }
 
 export interface TokenUsage {
