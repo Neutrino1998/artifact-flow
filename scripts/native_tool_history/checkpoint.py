@@ -13,7 +13,7 @@ from utils.time import utc_now
 from .manifest import ScanResult
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 TASK_STATUSES = frozenset({"pending", "running", "succeeded", "failed"})
 RUN_STATUSES = frozenset({"scanned", "generating", "ready", "applied"})
 
@@ -70,6 +70,7 @@ class Checkpoint:
                     migration_id TEXT PRIMARY KEY,
                     created_at TEXT NOT NULL,
                     source_database_kind TEXT NOT NULL,
+                    source_database_fingerprint TEXT NOT NULL,
                     conversations INTEGER NOT NULL,
                     messages INTEGER NOT NULL,
                     empty_conversations INTEGER NOT NULL,
@@ -166,6 +167,7 @@ class Checkpoint:
         self,
         migration_id: str,
         source_database_kind: str,
+        source_database_fingerprint: str,
         scan: ScanResult,
     ) -> None:
         self.initialize()
@@ -177,13 +179,15 @@ class Checkpoint:
                     """
                     INSERT INTO migration_runs (
                         migration_id, created_at, source_database_kind,
+                        source_database_fingerprint,
                         conversations, messages, empty_conversations, status
-                    ) VALUES (?, ?, ?, ?, ?, ?, 'scanned')
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'scanned')
                     """,
                     (
                         migration_id,
                         utc_now().isoformat(),
                         source_database_kind,
+                        source_database_fingerprint,
                         scan.conversations,
                         scan.messages,
                         scan.empty_conversations,
@@ -541,6 +545,7 @@ class Checkpoint:
             "migration_id": migration_id,
             "created_at": run["created_at"],
             "source_database_kind": run["source_database_kind"],
+            "source_database_fingerprint": run["source_database_fingerprint"],
             "status": run["status"],
             "source": {
                 "conversations": run["conversations"],

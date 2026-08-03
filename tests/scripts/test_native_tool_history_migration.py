@@ -17,6 +17,8 @@ from native_tool_history.boundaries import (
     COMPACTION_SUMMARY,
     SUMMARY_FRAME,
     apply_boundaries,
+    assert_source_database,
+    source_database_fingerprint,
     verify_boundaries,
 )
 from native_tool_history.checkpoint import Checkpoint, CheckpointError
@@ -35,6 +37,7 @@ from native_tool_history.transcript import (
 from scripts.native_tool_history_migration import (
     _assert_separate_checkpoint,
     _generate,
+    _generate_semantic,
 )
 from core.event_history import build_event_history
 from core.events import ExecutionEvent
@@ -106,6 +109,19 @@ async def _source_database(tmp_path: Path) -> str:
     return url
 
 
+def _create_scan(
+    checkpoint: Checkpoint,
+    database_url: str,
+    scan,
+) -> None:
+    checkpoint.create_scan(
+        "migration-1",
+        "sqlite",
+        source_database_fingerprint(database_url),
+        scan,
+    )
+
+
 @pytest.mark.asyncio
 async def test_stopped_scan_enumerates_leaf_lead_candidate_kinds(tmp_path):
     scan = await scan_database(await _source_database(tmp_path))
@@ -131,9 +147,10 @@ async def test_stopped_scan_enumerates_leaf_lead_candidate_kinds(tmp_path):
 
 @pytest.mark.asyncio
 async def test_checkpoint_keeps_semantic_and_mechanical_as_distinct_resume_tasks(tmp_path):
-    scan = await scan_database(await _source_database(tmp_path))
+    database_url = await _source_database(tmp_path)
+    scan = await scan_database(database_url)
     checkpoint = Checkpoint(tmp_path / "checkpoint.sqlite")
-    checkpoint.create_scan("migration-1", "sqlite", scan)
+    _create_scan(checkpoint, database_url, scan)
 
     report = checkpoint.report("migration-1")
 
@@ -189,7 +206,7 @@ async def test_checkpoint_keeps_semantic_and_mechanical_as_distinct_resume_tasks
     assert ready_report["ready_for_apply"] is True
 
     with pytest.raises(CheckpointError, match="already exists"):
-        checkpoint.create_scan("migration-1", "sqlite", scan)
+        _create_scan(checkpoint, database_url, scan)
 
     with pytest.raises(CheckpointError, match="requires non-blank summary_content"):
         checkpoint.set_task_result(
@@ -204,10 +221,11 @@ async def test_checkpoint_keeps_semantic_and_mechanical_as_distinct_resume_tasks
 
 @pytest.mark.asyncio
 async def test_report_detects_missing_required_lead_task_row(tmp_path):
-    scan = await scan_database(await _source_database(tmp_path))
+    database_url = await _source_database(tmp_path)
+    scan = await scan_database(database_url)
     path = tmp_path / "checkpoint.sqlite"
     checkpoint = Checkpoint(path)
-    checkpoint.create_scan("migration-1", "sqlite", scan)
+    _create_scan(checkpoint, database_url, scan)
 
     with sqlite3.connect(path) as conn:
         conn.execute(
@@ -227,9 +245,10 @@ async def test_report_detects_missing_required_lead_task_row(tmp_path):
 
 @pytest.mark.asyncio
 async def test_report_blocks_while_optional_candidate_is_unfinished(tmp_path):
-    scan = await scan_database(await _source_database(tmp_path))
+    database_url = await _source_database(tmp_path)
+    scan = await scan_database(database_url)
     checkpoint = Checkpoint(tmp_path / "checkpoint.sqlite")
-    checkpoint.create_scan("migration-1", "sqlite", scan)
+    _create_scan(checkpoint, database_url, scan)
 
     for task in scan.tasks:
         if task.summary_kind == "semantic":
@@ -336,6 +355,33 @@ def test_checkpoint_must_not_be_source_sqlite(tmp_path):
     _assert_separate_checkpoint(tmp_path / "checkpoint.sqlite", url)
 
 
+@pytest.mark.asyncio
+async def test_checkpoint_is_bound_to_the_scanned_database_target(tmp_path):
+    database_url = await _source_database(tmp_path)
+    scan = await scan_database(database_url)
+    checkpoint = Checkpoint(tmp_path / "checkpoint.sqlite")
+    _create_scan(checkpoint, database_url, scan)
+
+    assert_source_database(checkpoint, "migration-1", database_url)
+    other_url = f"sqlite+aiosqlite:///{tmp_path / 'other.db'}"
+    with pytest.raises(BoundaryError, match="different source database target"):
+        assert_source_database(checkpoint, "migration-1", other_url)
+
+
+def test_database_target_fingerprint_excludes_postgres_credentials():
+    first = source_database_fingerprint(
+        "postgresql+asyncpg://operator:first@db.internal/artifactflow"
+    )
+    second = source_database_fingerprint(
+        "postgresql+asyncpg://other:second@db.internal:5432/artifactflow"
+    )
+
+    assert first == second
+    assert first != source_database_fingerprint(
+        "postgresql+asyncpg://operator:first@db.internal/other"
+    )
+
+
 def test_checkpoint_rejects_obsolete_schema(tmp_path):
     path = tmp_path / "checkpoint.sqlite"
     with sqlite3.connect(path) as conn:
@@ -439,12 +485,35 @@ def test_bounded_transcript_keeps_first_and_latest_complete_turns():
 
 
 @pytest.mark.asyncio
-async def test_generate_skip_semantic_builds_mechanical_fallbacks(tmp_path, monkeypatch):
+async def test_semantic_summary_uses_complete_final_after_stream_retry(monkeypatch):
+    async def fake_stream(*args, **kwargs):
+        yield {"type": "content", "content": "partial-attempt\n"}
+        yield {
+            "type": "final",
+            "content": "complete-retry",
+            "tool_calls": [],
+        }
+
+    monkeypatch.setattr("models.llm.astream_with_retry", fake_stream)
+
+    result = await _generate_semantic(
+        [{"role": "user", "content": "summarize"}],
+        model="compact",
+        max_retries=2,
+    )
+
+    assert result == "complete-retry"
+
+
+@pytest.mark.asyncio
+async def test_generate_skip_semantic_builds_mechanical_fallbacks(
+    tmp_path, monkeypatch, capsys
+):
     database_url = await _source_database(tmp_path)
     scan = await scan_database(database_url)
     checkpoint_path = tmp_path / "checkpoint.sqlite"
     checkpoint = Checkpoint(checkpoint_path)
-    checkpoint.create_scan("migration-1", "sqlite", scan)
+    _create_scan(checkpoint, database_url, scan)
     monkeypatch.setenv("ARTIFACTFLOW_DATABASE_URL", database_url)
     monkeypatch.delenv("ARTIFACTFLOW_DATABASE_URLS", raising=False)
 
@@ -471,13 +540,16 @@ async def test_generate_skip_semantic_builds_mechanical_fallbacks(tmp_path, monk
     assert report["tasks"]["mechanical"] == {"succeeded": 2}
     assert report["tasks"]["semantic"] == {"failed": 1}
     assert checkpoint.selected_boundaries("migration-1")[0].summary_kind == "mechanical"
+    stderr = capsys.readouterr().err
+    assert "WARNING generate task failed" in stderr
+    assert "leaf='leaf-active' kind='semantic'" in stderr
 
 
 async def _ready_checkpoint(tmp_path: Path) -> tuple[str, Checkpoint]:
     database_url = await _source_database(tmp_path)
     scan = await scan_database(database_url)
     checkpoint = Checkpoint(tmp_path / "checkpoint.sqlite")
-    checkpoint.create_scan("migration-1", "sqlite", scan)
+    _create_scan(checkpoint, database_url, scan)
     for task in checkpoint.list_tasks("migration-1"):
         if task.summary_kind == "semantic":
             checkpoint.set_task_result(

@@ -34,7 +34,8 @@ from config import config
 from native_tool_history.boundaries import (
     BoundaryError,
     apply_boundaries,
-    assert_source_database_kind,
+    assert_source_database,
+    source_database_fingerprint,
     verify_boundaries,
 )
 from native_tool_history.checkpoint import (
@@ -165,6 +166,7 @@ async def _scan(args: argparse.Namespace) -> int:
     checkpoint.create_scan(
         args.migration_id,
         make_url(database_url).get_backend_name(),
+        source_database_fingerprint(database_url),
         scan,
     )
     _print_report(checkpoint.report(args.migration_id))
@@ -195,7 +197,7 @@ async def _generate_semantic(
 ) -> str:
     from models.llm import astream_with_retry
 
-    content = ""
+    content: str | None = None
     final_tool_calls: list[dict[str, Any]] = []
 
     async def stream() -> None:
@@ -205,17 +207,16 @@ async def _generate_semantic(
             model=model,
             max_retries=max_retries,
         ):
-            if chunk.get("type") == "content":
-                content += chunk.get("content") or ""
-            elif chunk.get("type") == "final":
-                if not content:
-                    content = chunk.get("content") or ""
+            if chunk.get("type") == "final":
+                content = chunk.get("content") or ""
                 final_tool_calls = chunk.get("tool_calls") or []
 
     async with asyncio.timeout(config.COMPACTION_TIMEOUT):
         await stream()
     if final_tool_calls:
         raise RuntimeError("compact model returned tool calls despite receiving no tools")
+    if content is None:
+        raise RuntimeError("compact model stream ended without a final response")
     content = content.strip()
     if not content:
         raise RuntimeError("compact model produced an empty summary")
@@ -292,6 +293,7 @@ async def _run_generate_task(
     except asyncio.CancelledError:
         raise
     except Exception as exc:
+        error = _checkpoint_error(exc)
         checkpoint.set_task_result(
             migration_id=task.migration_id,
             conversation_id=task.conversation_id,
@@ -299,7 +301,16 @@ async def _run_generate_task(
             summary_kind=task.summary_kind,
             status="failed",
             attempts=attempts,
-            error=_checkpoint_error(exc),
+            error=error,
+        )
+        print(
+            "WARNING generate task failed: "
+            f"migration={task.migration_id!r} "
+            f"conversation={task.conversation_id!r} "
+            f"leaf={task.leaf_message_id!r} kind={task.summary_kind!r} "
+            f"attempt={attempts} error={error}",
+            file=sys.stderr,
+            flush=True,
         )
     finally:
         await progress.task_finished(success=success)
@@ -311,7 +322,7 @@ async def _generate(args: argparse.Namespace) -> int:
     database_url = resolve_database_url()
     _assert_separate_checkpoint(args.checkpoint, database_url)
     checkpoint = Checkpoint(args.checkpoint.resolve())
-    assert_source_database_kind(checkpoint, args.migration_id, database_url)
+    assert_source_database(checkpoint, args.migration_id, database_url)
     run_status = checkpoint.get_run_status(args.migration_id)
     if run_status == "applied":
         raise CheckpointError("migration is already applied; generation is closed")
@@ -411,7 +422,7 @@ async def _apply(args: argparse.Namespace) -> int:
     database_url = resolve_database_url()
     _assert_separate_checkpoint(args.checkpoint, database_url)
     checkpoint = Checkpoint(args.checkpoint.resolve())
-    assert_source_database_kind(checkpoint, args.migration_id, database_url)
+    assert_source_database(checkpoint, args.migration_id, database_url)
     engine = create_async_engine(database_url, pool_pre_ping=True)
     try:
         result = await apply_boundaries(engine, checkpoint, args.migration_id)
@@ -428,7 +439,7 @@ async def _verify(args: argparse.Namespace) -> int:
     database_url = resolve_database_url()
     _assert_separate_checkpoint(args.checkpoint, database_url)
     checkpoint = Checkpoint(args.checkpoint.resolve())
-    assert_source_database_kind(checkpoint, args.migration_id, database_url)
+    assert_source_database(checkpoint, args.migration_id, database_url)
     engine = create_async_engine(database_url, pool_pre_ping=True)
     try:
         result = await verify_boundaries(engine, checkpoint, args.migration_id)

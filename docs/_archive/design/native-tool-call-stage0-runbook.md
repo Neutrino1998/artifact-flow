@@ -135,6 +135,9 @@ python scripts/native_tool_history_migration.py verify \
 两个事件都存在且内容完全一致即 no-op；只存在半对、内容漂移或 leaf/active branch 在 scan
 后变化都会响亮失败。Checkpoint 可作为只读文件挂入新应用镜像之外的独立持久路径；迁移
 脚本已作为 dormant operator CLI 随应用镜像提供，runtime 不 import 或调用它。
+Checkpoint 还保存不含凭据的数据库连接目标指纹；后续 generate/apply/verify 连到不同
+host、port 或 database 时会拒绝继续。它是防止现场拿错 checkpoint 的轻量护栏，不承诺
+识别在同一连接地址原地恢复的旧副本。
 
 `report` 只有在 `ready_for_apply=true` 时退出 0；尚有 pending/running task、候选
 boundary 已耗尽或缺少 task row 时均退出 1。Semantic 单独失败仍可由

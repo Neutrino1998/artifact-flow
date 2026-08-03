@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import exists, select
@@ -100,15 +101,37 @@ def _normalize_backend_name(name: str) -> str:
     return "postgresql" if name in {"postgres", "postgresql"} else name
 
 
-def assert_source_database_kind(checkpoint: Checkpoint, migration_id: str, database_url: str) -> None:
-    expected = _normalize_backend_name(
-        str(checkpoint.report(migration_id)["source_database_kind"])
-    )
-    actual = _normalize_backend_name(make_url(database_url).get_backend_name())
-    if expected != actual:
+def source_database_fingerprint(database_url: str) -> str:
+    """Identify the configured database target without retaining credentials."""
+    url = make_url(database_url)
+    backend = _normalize_backend_name(url.get_backend_name())
+    database = url.database
+    if backend == "sqlite" and database:
+        database = str(Path(database).resolve())
+    identity = json.dumps(
+        {
+            "backend": backend,
+            "host": url.host.lower() if url.host else None,
+            "port": url.port or (5432 if backend == "postgresql" else None),
+            "database": database,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(identity).hexdigest()
+
+
+def assert_source_database(checkpoint: Checkpoint, migration_id: str, database_url: str) -> None:
+    report = checkpoint.report(migration_id)
+    expected_kind = _normalize_backend_name(str(report["source_database_kind"]))
+    actual_kind = _normalize_backend_name(make_url(database_url).get_backend_name())
+    if expected_kind != actual_kind:
         raise BoundaryError(
-            f"checkpoint source database kind is {expected!r}, but target is {actual!r}"
+            f"checkpoint source database kind is {expected_kind!r}, "
+            f"but target is {actual_kind!r}"
         )
+    if report["source_database_fingerprint"] != source_database_fingerprint(database_url):
+        raise BoundaryError("checkpoint belongs to a different source database target")
 
 
 async def _assert_leaf_still_matches(session, boundary: SelectedBoundary) -> None:
