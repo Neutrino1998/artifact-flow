@@ -131,7 +131,7 @@ describe('ToolUnitEditor input schema modes', () => {
     await act(async () => enumToggle?.click());
 
     expect(enumToggle?.checked).toBe(false);
-    expect(container.textContent).toContain('空字符串或多行 enum 需要在高级 JSON Schema 中编辑');
+    expect(container.textContent).toContain('空字符串或含换行 enum 需要在高级 JSON Schema 中编辑');
   });
 
   it('initializes a newly enabled default from the first enum value', async () => {
@@ -150,5 +150,38 @@ describe('ToolUnitEditor input schema modes', () => {
     expect(container.querySelector<HTMLTextAreaElement>(
       'textarea[aria-label="参数 query 默认值"]',
     )?.value).toBe('allowed');
+  });
+
+  it('routes CR strings to JSON mode before textarea normalization', async () => {
+    const draft = emptyUnitDraft();
+    draft.name = 'cr-description';
+    draft.members[0].input_schema = JSON.stringify({
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '第一行\r\n第二行' },
+      },
+    }, null, 2);
+
+    await act(async () => root.render(<Harness initial={draft} />));
+
+    expect(container.querySelector('textarea[aria-label="输入参数 JSON Schema"]')).not.toBeNull();
+    expect(container.textContent).toContain('description 含有 CR 换行');
+    expect(container.querySelector('textarea[aria-label="参数 query 说明"]')).toBeNull();
+  });
+
+  it('does not hide falsey or prototype-named required constraints', async () => {
+    const draft = emptyUnitDraft();
+    draft.name = 'special-required';
+    draft.members[0].input_schema = JSON.stringify({
+      type: 'object',
+      properties: {},
+      required: ['constructor'],
+    }, null, 2);
+
+    await act(async () => root.render(<Harness initial={draft} />));
+
+    expect(container.querySelector('textarea[aria-label="输入参数 JSON Schema"]')).not.toBeNull();
+    expect(container.textContent).toContain('required 中的 "constructor" 未在 properties 声明');
+    expect(container.textContent).not.toContain('这个工具暂时没有输入参数');
   });
 });

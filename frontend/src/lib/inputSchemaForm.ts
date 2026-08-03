@@ -53,6 +53,10 @@ function isObject(value: unknown): value is JsonObject {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function hasOwn(object: object, key: PropertyKey): boolean {
+  return Object.prototype.hasOwnProperty.call(object, key);
+}
+
 function isSimpleParameterType(value: unknown): value is SimpleParameterType {
   return typeof value === 'string'
     && SIMPLE_PARAMETER_TYPES.includes(value as SimpleParameterType);
@@ -63,6 +67,14 @@ function simpleParameterNameError(name: string): string | null {
   if (name.trim() !== name) return '参数名首尾不能包含空白字符';
   if (CONTROL_CHARACTER_RE.test(name)) return '参数名不能包含换行或控制字符';
   return null;
+}
+
+function isTextareaRoundTripSafe(value: string): boolean {
+  return !value.includes('\r');
+}
+
+function isLineEnumRoundTripSafe(value: string): boolean {
+  return value !== '' && !/[\r\n]/u.test(value);
 }
 
 function jsonValuesEqual(left: unknown, right: unknown): boolean {
@@ -78,7 +90,7 @@ function jsonValuesEqual(left: unknown, right: unknown): boolean {
   const rightKeys = Object.keys(right);
   return leftKeys.length === rightKeys.length
     && leftKeys.every((key) => (
-      Object.prototype.hasOwnProperty.call(right, key)
+      hasOwn(right, key)
       && jsonValuesEqual(left[key], right[key])
     ));
 }
@@ -156,11 +168,12 @@ export function inspectInputSchema(schemaText: string): InputSchemaInspection {
   if (new Set(required).size !== required.length) {
     return { kind: 'invalid', reason: 'Schema required 不能包含重复参数名' };
   }
-  const unknownRequired = required.find((name) => !(name in properties));
-  if (unknownRequired) {
+  const unknownRequiredIndex = required.findIndex((name) => !hasOwn(properties, name));
+  if (unknownRequiredIndex >= 0) {
+    const unknownRequired = required[unknownRequiredIndex];
     return {
       kind: 'advanced',
-      reason: `required 中的 ${unknownRequired} 未在 properties 声明，无法用参数表单无损表达`,
+      reason: `required 中的 ${JSON.stringify(unknownRequired)} 未在 properties 声明，无法用参数表单无损表达`,
     };
   }
 
@@ -173,7 +186,7 @@ export function inspectInputSchema(schemaText: string): InputSchemaInspection {
         reason: `${nameError}；参数 ${JSON.stringify(name)} 需要在高级 JSON Schema 中编辑`,
       };
     }
-    if (Object.prototype.hasOwnProperty.call(Object.prototype, name)) {
+    if (hasOwn(Object.prototype, name)) {
       return { kind: 'advanced', reason: `参数名 ${name} 需要在高级 JSON Schema 中编辑` };
     }
     if (!isObject(rawProperty)) {
@@ -191,6 +204,12 @@ export function inspectInputSchema(schemaText: string): InputSchemaInspection {
       && typeof rawProperty.description !== 'string'
     ) {
       return { kind: 'invalid', reason: `参数 ${name} 的 description 必须是字符串` };
+    }
+    if (
+      typeof rawProperty.description === 'string'
+      && !isTextareaRoundTripSafe(rawProperty.description)
+    ) {
+      return { kind: 'advanced', reason: `参数 ${name} 的 description 含有 CR 换行，需要在高级 JSON Schema 中编辑` };
     }
 
     let itemType: SimpleArrayItemType = 'any';
@@ -213,9 +232,17 @@ export function inspectInputSchema(schemaText: string): InputSchemaInspection {
       return { kind: 'invalid', reason: `非数组参数 ${name} 不能声明 items` };
     }
 
-    const hasDefault = Object.prototype.hasOwnProperty.call(rawProperty, 'default');
+    const hasDefault = hasOwn(rawProperty, 'default');
     if (hasDefault && !valueMatchesParameter(rawProperty.default, rawProperty)) {
       return { kind: 'invalid', reason: `参数 ${name} 的默认值与类型不匹配` };
+    }
+    if (
+      hasDefault
+      && rawProperty.type === 'string'
+      && typeof rawProperty.default === 'string'
+      && !isTextareaRoundTripSafe(rawProperty.default)
+    ) {
+      return { kind: 'advanced', reason: `参数 ${name} 的字符串默认值含有 CR 换行，需要在高级 JSON Schema 中编辑` };
     }
     if (rawProperty.enum !== undefined && !Array.isArray(rawProperty.enum)) {
       return { kind: 'invalid', reason: `参数 ${name} 的 enum 必须是数组` };
@@ -232,9 +259,11 @@ export function inspectInputSchema(schemaText: string): InputSchemaInspection {
     if (
       rawProperty.type === 'string'
       && Array.isArray(rawProperty.enum)
-      && rawProperty.enum.some((value) => value === '' || (typeof value === 'string' && value.includes('\n')))
+      && rawProperty.enum.some((value) => (
+        typeof value === 'string' && !isLineEnumRoundTripSafe(value)
+      ))
     ) {
-      return { kind: 'advanced', reason: `参数 ${name} 的空字符串或多行 enum 需要在高级 JSON Schema 中编辑` };
+      return { kind: 'advanced', reason: `参数 ${name} 的空字符串或含换行 enum 需要在高级 JSON Schema 中编辑` };
     }
     if (
       hasDefault
@@ -288,6 +317,7 @@ function mutateSimpleSchema(
 }
 
 function propertyFor(properties: JsonObject, name: string): JsonObject {
+  if (!hasOwn(properties, name)) throw new Error(`参数 ${name} 不存在`);
   const property = properties[name];
   if (!isObject(property)) throw new Error(`参数 ${name} 不存在`);
   return property;
@@ -297,7 +327,7 @@ export function addSimpleParameter(schemaText: string): string {
   return mutateSimpleSchema(schemaText, (_schema, properties) => {
     let index = Object.keys(properties).length + 1;
     let name = `param_${index}`;
-    while (name in properties) {
+    while (hasOwn(properties, name)) {
       index += 1;
       name = `param_${index}`;
     }
@@ -321,7 +351,7 @@ export function renameSimpleParameter(
   const nameError = simpleParameterNameError(nextName);
   if (nameError) throw new Error(nameError);
   return mutateSimpleSchema(schemaText, (_schema, properties, required) => {
-    if (nextName !== oldName && nextName in properties) {
+    if (nextName !== oldName && hasOwn(properties, nextName)) {
       throw new Error(`参数名 ${nextName} 已存在`);
     }
     const entries = Object.entries(properties);
@@ -369,7 +399,7 @@ export function setSimpleParameterType(
     if (type === 'array') property.items = { type: 'string' };
     else delete property.items;
     if (
-      Object.prototype.hasOwnProperty.call(property, 'default')
+      hasOwn(property, 'default')
       && !valueMatchesParameter(property.default, property)
     ) {
       delete property.default;
@@ -393,7 +423,7 @@ export function setSimpleArrayItemType(
     if (itemType === 'any') delete property.items;
     else property.items = { type: itemType };
     if (
-      Object.prototype.hasOwnProperty.call(property, 'default')
+      hasOwn(property, 'default')
       && !valueMatchesParameter(property.default, property)
     ) {
       delete property.default;
@@ -444,7 +474,7 @@ export function setSimpleParameterEnum(
       throw new Error('可选值与参数类型不匹配');
     }
     if (
-      Object.prototype.hasOwnProperty.call(property, 'default')
+      hasOwn(property, 'default')
       && !enumContains(values, property.default)
     ) {
       throw new Error('可选值必须包含当前默认值');

@@ -111,6 +111,68 @@ describe('inputSchemaForm inspection', () => {
       }))).toMatchObject({ kind: 'advanced' });
     }
   });
+
+  it('only projects strings that their form controls can round-trip', () => {
+    for (const lineEnding of ['\r', '\r\n']) {
+      expect(inspectInputSchema(JSON.stringify({
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: `第一行${lineEnding}第二行` },
+        },
+      }))).toMatchObject({ kind: 'advanced' });
+      expect(inspectInputSchema(JSON.stringify({
+        type: 'object',
+        properties: {
+          query: { type: 'string', default: `第一行${lineEnding}第二行` },
+        },
+      }))).toMatchObject({ kind: 'advanced' });
+    }
+
+    for (const lineEnding of ['\r', '\n', '\r\n']) {
+      expect(inspectInputSchema(JSON.stringify({
+        type: 'object',
+        properties: {
+          query: { type: 'string', enum: [`第一行${lineEnding}第二行`] },
+        },
+      }))).toMatchObject({ kind: 'advanced' });
+    }
+
+    expect(inspectInputSchema(JSON.stringify({
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: '第一行\n第二行',
+          default: '默认第一行\n默认第二行',
+        },
+      },
+    }))).toMatchObject({ kind: 'simple' });
+    expect(inspectInputSchema(JSON.stringify({
+      type: 'object',
+      properties: {
+        payload: { type: 'object', default: { text: '第一行\r\n第二行' } },
+      },
+    }))).toMatchObject({ kind: 'simple' });
+  });
+
+  it('detects every required name missing from properties as an advanced constraint', () => {
+    for (const name of ['', 'constructor', 'toString']) {
+      expect(inspectInputSchema(JSON.stringify({
+        type: 'object',
+        properties: {},
+        required: [name],
+      }))).toMatchObject({
+        kind: 'advanced',
+        reason: `required 中的 ${JSON.stringify(name)} 未在 properties 声明，无法用参数表单无损表达`,
+      });
+    }
+
+    expect(inspectInputSchema(JSON.stringify({
+      type: 'object',
+      properties: { query: { type: 'string' } },
+      required: ['query'],
+    }))).toMatchObject({ kind: 'simple' });
+  });
 });
 
 describe('inputSchemaForm mutations', () => {
