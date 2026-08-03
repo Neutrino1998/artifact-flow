@@ -3,6 +3,7 @@
 import { INPUT_ON_PANEL, LABEL_CLASS } from '@/lib/styles';
 import { SELECT_CHEVRON } from '@/components/ui/SelectChevron';
 import Checkbox from '@/components/forms/Checkbox';
+import InputSchemaEditor from '@/components/forms/InputSchemaEditor';
 import type { CreateToolUnitRequest, ToolUnitResponse } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -727,20 +728,13 @@ function MemberCard({
         onChange={(headers) => onChange({ headers })}
       />
 
-      <div>
-        <label className={LABEL_CLASS}>输入参数 JSON Schema</label>
-        <textarea
-          value={member.input_schema}
-          onChange={(e) => onChange({ input_schema: e.target.value })}
-          disabled={readOnly}
-          rows={12}
-          spellCheck={false}
-          className={`${INPUT_ON_PANEL} font-mono resize-y`}
-        />
-        <p className="text-xs text-text-tertiary dark:text-text-tertiary-dark mt-1">
-          Draft 2020-12；根 type 必须是 object。支持嵌套对象、数组、组合约束和根级对象约束。
-        </p>
-      </div>
+      <InputSchemaEditor
+        value={member.input_schema}
+        endpoint={member.endpoint}
+        method={member.method}
+        readOnly={readOnly}
+        onChange={(input_schema) => onChange({ input_schema })}
+      />
 
       <div>
         <label className={LABEL_CLASS}>响应提取（response_extract，可选）</label>

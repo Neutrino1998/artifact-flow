@@ -11,7 +11,7 @@ describe('draftToRequest input_schema normalization', () => {
 
     const request = draftToRequest(draft);
 
-    expect(request.members[0].input_schema).toEqual({
+    expect(request.members?.[0].input_schema).toEqual({
       type: 'object',
       properties: {},
     });
