@@ -1,6 +1,6 @@
 # Native Tool Call 阶段 0 基线与 Cutover Runbook
 
-> 状态：阶段 0 实现与开发环境验证完成
+> 状态：阶段 0 基线完成；阶段 5 迁移 CLI 已实现，外网服务完整彩排待执行
 >
 > 日期：2026-07-29
 >
@@ -12,7 +12,9 @@
 
 历史迁移采用**完全停机**模式：维护页阻断新请求，等待执行清空，停止全部 backend writer，完成数据库快照后，才开始 scan/generate/apply/verify。迁移程序不实现在线预生成、head fingerprint、二次重扫或变化 leaf 补算。
 
-阶段 0 只提供 `scan` 和 `report`；不会生成摘要，也不会写 `MessageEvent`。
+迁移 CLI 已提供 `scan`、`generate`、`report`、`apply` 和 `verify`。只有 `apply`
+会写应用数据库；它按 leaf 在单个事务内追加确定性 `COMPACTION_START` /
+`COMPACTION_SUMMARY` pair。其余命令只读应用数据库或写独立 SQLite checkpoint。
 
 ## 已冻结基线
 
@@ -89,6 +91,50 @@ python scripts/native_tool_history_migration.py report \
   --checkpoint /secure/operator/native-tool-cutover.sqlite \
   --migration-id native-tool-cutover-2026-07 --json
 ```
+
+完全停机并完成 scan 后生成候选摘要。默认先为全部 leaf 生成纯机械摘要，再以有界并发为
+active leaf 生成 semantic 摘要；semantic 失败稳定回退 mechanical。两类摘要都只读取
+`Conversation.title` 和 path 上的 `Message.user_input/response`，不读取或解析旧 XML
+事件。取消、超时和失败 message 不过滤；缺少完整 response 的旧记录会在机械摘要中明确
+标记。
+
+```bash
+python scripts/native_tool_history_migration.py generate \
+  --checkpoint /secure/operator/native-tool-cutover.sqlite \
+  --migration-id native-tool-cutover-2026-07 \
+  --semantic-model TARGET_COMPACTION_MODEL \
+  --concurrency 2
+
+# 进程中断后恢复；只重跑 pending/running，不重复 succeeded task
+python scripts/native_tool_history_migration.py generate \
+  --checkpoint /secure/operator/native-tool-cutover.sqlite \
+  --migration-id native-tool-cutover-2026-07 \
+  --semantic-model TARGET_COMPACTION_MODEL \
+  --concurrency 2 --resume
+```
+
+`--semantic-model` 省略时使用 `config/agents/compact_agent.md` 中的模型。它会接收存量
+active branch 的 display transcript，现场必须确认该模型获准处理这些数据。若明确只保留
+机械续聊，可使用 `--skip-semantic`；checkpoint 会把 semantic 记为失败候选，但只要
+mechanical 成功仍可 apply。
+
+`report` 显示 `ready_for_apply=true` 后执行：
+
+```bash
+python scripts/native_tool_history_migration.py apply \
+  --checkpoint /secure/operator/native-tool-cutover.sqlite \
+  --migration-id native-tool-cutover-2026-07 \
+  --confirm-backend-stopped
+
+python scripts/native_tool_history_migration.py verify \
+  --checkpoint /secure/operator/native-tool-cutover.sqlite \
+  --migration-id native-tool-cutover-2026-07
+```
+
+每个 event ID 从 migration/conv/leaf/selected-kind/event-type 确定性派生。Apply 重试时，
+两个事件都存在且内容完全一致即 no-op；只存在半对、内容漂移或 leaf/active branch 在 scan
+后变化都会响亮失败。Checkpoint 可作为只读文件挂入新应用镜像之外的独立持久路径；迁移
+脚本已作为 dormant operator CLI 随应用镜像提供，runtime 不 import 或调用它。
 
 `report` 只有在 `ready_for_apply=true` 时退出 0；尚有 pending/running task、候选
 boundary 已耗尽或缺少 task row 时均退出 1。Semantic 单独失败仍可由
@@ -169,7 +215,7 @@ sudo /opt/artifactflow/bin/afctl --root /opt/artifactflow \
 2. 生成全 leaf mechanical 与 active semantic；
 3. Semantic 失败自动选择 mechanical；
 4. 使用确定性 event ID，在一个事务中追加每个 START/SUMMARY pair；
-5. 验证所有 leaf 都有可用的 lead boundary；
+5. 运行 `verify`，验证所有 leaf 都有最新、内容精确匹配的 lead boundary；
 6. Backend 在全过程保持停止。
 
 Checkpoint 只负责停机期间模型任务的中断恢复。若进程崩溃，保持服务停机并使用 `--resume`；不要重启旧 backend 后继续复用 checkpoint。
@@ -203,7 +249,10 @@ sudo /opt/artifactflow/bin/afctl --root /opt/artifactflow maintenance off
 - 扫描/checkpoint/report 单元测试和当前 SQLite 一致性快照盘点通过；
 - 当前快照只有 2 个 semantic task，无阶段 0 规模阻塞；目标环境若数据规模不同，必须在
   cutover 停机扫描后以实际 task 数量重新核对维护窗口；
-- generate 的并发默认值、429/5xx 重试参数、mechanical summary 上限及目标环境吞吐测量
-  归入阶段 5；阶段 0 已冻结 checkpoint identity、resume、进度/ETA 输出边界；
+- generate 默认并发为 2，复用统一 LLM adapter 的 429/5xx 有界重试；mechanical 输出默认
+  20,000 字符、保留首轮与最近 8 轮，semantic 输入默认 60,000 字符、保留首轮与最近
+  20 轮。外网彩排需记录实际吞吐并确认正式窗口参数；
+- SQLite 单测覆盖取消 leaf、mechanical fallback、中断恢复状态、半对拒绝、幂等 apply 和
+  EventHistory boundary；临时 PostgreSQL 16 实测已通过首次 apply、重复 apply 与 verify；
 - 目标 raw vLLM 版本、模型、chat template 仍是阶段 5 部署前 blocker；
 - `--keep-maintenance` 已实现，覆盖成功 apply、失败回退和 CLI 参数验证。

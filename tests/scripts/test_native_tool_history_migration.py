@@ -1,14 +1,24 @@
 import sqlite3
 import sys
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from native_tool_history.boundaries import (
+    BoundaryError,
+    COMPACTION_START,
+    COMPACTION_SUMMARY,
+    SUMMARY_FRAME,
+    apply_boundaries,
+    verify_boundaries,
+)
 from native_tool_history.checkpoint import Checkpoint, CheckpointError
 from native_tool_history.manifest import (
     ManifestError,
@@ -17,7 +27,17 @@ from native_tool_history.manifest import (
     build_manifest,
     scan_database,
 )
-from scripts.native_tool_history_migration import _assert_separate_checkpoint
+from native_tool_history.transcript import (
+    TranscriptReader,
+    build_mechanical_summary,
+    build_semantic_messages,
+)
+from scripts.native_tool_history_migration import (
+    _assert_separate_checkpoint,
+    _generate,
+)
+from core.event_history import build_event_history
+from core.events import ExecutionEvent
 from db.models import Base, Conversation, Message, MessageEvent
 
 
@@ -57,7 +77,7 @@ async def _source_database(tmp_path: Path) -> str:
                 conversation_id="conv-1",
                 parent_id="root",
                 user_input="other",
-                response="other response",
+                response="*Task cancelled by user*",
             ),
         ])
         await session.flush()
@@ -323,3 +343,229 @@ def test_checkpoint_rejects_obsolete_schema(tmp_path):
 
     with pytest.raises(CheckpointError, match="unsupported checkpoint schema version 1"):
         Checkpoint(path).initialize()
+
+
+def test_offline_boundary_event_names_match_runtime_contract():
+    from core.events import StreamEventType
+
+    assert COMPACTION_START == StreamEventType.COMPACTION_START.value
+    assert COMPACTION_SUMMARY == StreamEventType.COMPACTION_SUMMARY.value
+
+
+@pytest.mark.asyncio
+async def test_transcript_uses_display_fields_and_keeps_cancelled_leaf(tmp_path):
+    database_url = await _source_database(tmp_path)
+    engine = create_async_engine(database_url)
+    try:
+        transcript = await TranscriptReader(engine).load(
+            conversation_id="conv-1",
+            leaf_message_id="leaf-other",
+            expected_path_message_count=2,
+        )
+    finally:
+        await engine.dispose()
+
+    summary = build_mechanical_summary(
+        transcript,
+        max_chars=5_000,
+        recent_turns=4,
+        field_max_chars=500,
+    )
+
+    assert [turn.message_id for turn in transcript.turns] == ["root", "leaf-other"]
+    assert "*Task cancelled by user*" in summary
+    assert "subagent_instruction" not in summary
+    assert "Tool execution details are intentionally omitted" in summary
+
+
+@pytest.mark.asyncio
+async def test_transcript_fails_if_leaf_changed_after_scan(tmp_path):
+    database_url = await _source_database(tmp_path)
+    engine = create_async_engine(database_url)
+    async with AsyncSession(engine) as session:
+        session.add(Message(
+            id="new-child",
+            conversation_id="conv-1",
+            parent_id="leaf-other",
+            user_input="new",
+            response="new response",
+        ))
+        await session.commit()
+
+    try:
+        with pytest.raises(RuntimeError, match="no longer a leaf"):
+            await TranscriptReader(engine).load(
+                conversation_id="conv-1",
+                leaf_message_id="leaf-other",
+                expected_path_message_count=2,
+            )
+    finally:
+        await engine.dispose()
+
+
+def test_bounded_transcript_keeps_first_and_latest_complete_turns():
+    from native_tool_history.transcript import LeafTranscript, TranscriptTurn
+
+    transcript = LeafTranscript(
+        conversation_id="conv",
+        leaf_message_id="m4",
+        title="topic",
+        turns=tuple(
+            TranscriptTurn(f"m{i}", f"user-{i}-" + "u" * 250, f"assistant-{i}-" + "a" * 250)
+            for i in range(1, 5)
+        ),
+    )
+
+    summary = build_mechanical_summary(
+        transcript,
+        max_chars=2_000,
+        recent_turns=3,
+        field_max_chars=220,
+    )
+    semantic = build_semantic_messages(
+        transcript,
+        system_prompt="compact",
+        max_chars=2_000,
+        recent_turns=3,
+        field_max_chars=220,
+    )
+
+    assert len(summary) <= 2_000
+    assert "user-1" in summary
+    assert "user-4" in summary
+    assert "omitted" in summary
+    assert semantic[0] == {"role": "system", "content": "compact"}
+    assert "user-4" in semantic[1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_generate_skip_semantic_builds_mechanical_fallbacks(tmp_path, monkeypatch):
+    database_url = await _source_database(tmp_path)
+    scan = await scan_database(database_url)
+    checkpoint_path = tmp_path / "checkpoint.sqlite"
+    checkpoint = Checkpoint(checkpoint_path)
+    checkpoint.create_scan("migration-1", "sqlite", scan)
+    monkeypatch.setenv("ARTIFACTFLOW_DATABASE_URL", database_url)
+    monkeypatch.delenv("ARTIFACTFLOW_DATABASE_URLS", raising=False)
+
+    args = Namespace(
+        checkpoint=checkpoint_path,
+        migration_id="migration-1",
+        resume=False,
+        retry_failed=False,
+        skip_semantic=True,
+        semantic_model=None,
+        concurrency=2,
+        max_retries=1,
+        mechanical_max_chars=5_000,
+        mechanical_recent_turns=8,
+        mechanical_field_max_chars=500,
+        semantic_input_max_chars=5_000,
+        semantic_recent_turns=8,
+        semantic_field_max_chars=500,
+    )
+
+    assert await _generate(args) == 0
+    report = checkpoint.report("migration-1")
+    assert report["status"] == "ready"
+    assert report["tasks"]["mechanical"] == {"succeeded": 2}
+    assert report["tasks"]["semantic"] == {"failed": 1}
+    assert checkpoint.selected_boundaries("migration-1")[0].summary_kind == "mechanical"
+
+
+async def _ready_checkpoint(tmp_path: Path) -> tuple[str, Checkpoint]:
+    database_url = await _source_database(tmp_path)
+    scan = await scan_database(database_url)
+    checkpoint = Checkpoint(tmp_path / "checkpoint.sqlite")
+    checkpoint.create_scan("migration-1", "sqlite", scan)
+    for task in checkpoint.list_tasks("migration-1"):
+        if task.summary_kind == "semantic":
+            checkpoint.set_task_result(
+                migration_id=task.migration_id,
+                conversation_id=task.conversation_id,
+                leaf_message_id=task.leaf_message_id,
+                summary_kind=task.summary_kind,
+                status="failed",
+                attempts=1,
+                error="semantic unavailable",
+            )
+        else:
+            checkpoint.set_task_result(
+                migration_id=task.migration_id,
+                conversation_id=task.conversation_id,
+                leaf_message_id=task.leaf_message_id,
+                summary_kind=task.summary_kind,
+                status="succeeded",
+                attempts=1,
+                summary_content=f"summary for {task.leaf_message_id}",
+            )
+    checkpoint.set_run_status("migration-1", "ready")
+    return database_url, checkpoint
+
+
+@pytest.mark.asyncio
+async def test_apply_is_transactional_idempotent_and_forms_history_boundary(tmp_path):
+    database_url, checkpoint = await _ready_checkpoint(tmp_path)
+    engine = create_async_engine(database_url)
+    try:
+        first = await apply_boundaries(engine, checkpoint, "migration-1")
+        second = await apply_boundaries(engine, checkpoint, "migration-1")
+        verified = await verify_boundaries(engine, checkpoint, "migration-1")
+        async with AsyncSession(engine) as session:
+            rows = list((await session.execute(
+                select(MessageEvent)
+                .where(MessageEvent.message_id == "leaf-other")
+                .order_by(MessageEvent.id)
+            )).scalars())
+    finally:
+        await engine.dispose()
+
+    assert first.inserted == 2
+    assert first.already_present == 0
+    assert second.inserted == 0
+    assert second.already_present == 2
+    assert verified.verified == 2
+    assert len(rows) == 2
+    events = [
+        ExecutionEvent(
+            event_type="llm_complete",
+            agent_name="lead_agent",
+            data={"content": "legacy <tool_call>xml</tool_call>"},
+            is_historical=True,
+        ),
+        *[
+            ExecutionEvent(
+                event_type=row.event_type,
+                agent_name=row.agent_name,
+                data=row.data,
+                event_id=row.event_id,
+                is_historical=True,
+            )
+            for row in rows
+        ],
+    ]
+    history = build_event_history(events, "lead_agent")
+    assert history == [{
+        "role": "user",
+        "content": f"{SUMMARY_FRAME}\n\nsummary for leaf-other",
+    }]
+
+
+@pytest.mark.asyncio
+async def test_apply_rejects_incomplete_existing_pair(tmp_path):
+    database_url, checkpoint = await _ready_checkpoint(tmp_path)
+    engine = create_async_engine(database_url)
+    try:
+        await apply_boundaries(engine, checkpoint, "migration-1")
+        async with AsyncSession(engine) as session:
+            await session.execute(
+                delete(MessageEvent).where(
+                    MessageEvent.message_id == "leaf-other",
+                    MessageEvent.event_type == "compaction_summary",
+                )
+            )
+            await session.commit()
+        with pytest.raises(BoundaryError, match="incomplete"):
+            await apply_boundaries(engine, checkpoint, "migration-1")
+    finally:
+        await engine.dispose()

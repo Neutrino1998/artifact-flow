@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -14,10 +15,34 @@ from .manifest import ScanResult
 
 SCHEMA_VERSION = 2
 TASK_STATUSES = frozenset({"pending", "running", "succeeded", "failed"})
+RUN_STATUSES = frozenset({"scanned", "generating", "ready", "applied"})
 
 
 class CheckpointError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class CheckpointTask:
+    migration_id: str
+    conversation_id: str
+    leaf_message_id: str
+    summary_kind: str
+    status: str
+    attempts: int
+    summary_content: str | None
+    error: str | None
+
+
+@dataclass(frozen=True)
+class SelectedBoundary:
+    migration_id: str
+    conversation_id: str
+    leaf_message_id: str
+    is_active_branch: bool
+    path_message_count: int
+    summary_kind: str
+    summary_content: str
 
 
 class Checkpoint:
@@ -113,6 +138,29 @@ class Checkpoint:
                 (migration_id,),
             ).fetchone()
             return row is not None
+
+    def get_run_status(self, migration_id: str) -> str:
+        self.initialize()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT status FROM migration_runs WHERE migration_id = ?",
+                (migration_id,),
+            ).fetchone()
+        if row is None:
+            raise CheckpointError(f"migration {migration_id!r} not found")
+        return str(row["status"])
+
+    def set_run_status(self, migration_id: str, status: str) -> None:
+        if status not in RUN_STATUSES:
+            raise CheckpointError(f"invalid migration status: {status!r}")
+        self.initialize()
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE migration_runs SET status = ? WHERE migration_id = ?",
+                (status, migration_id),
+            )
+            if cursor.rowcount != 1:
+                raise CheckpointError(f"migration {migration_id!r} not found")
 
     def create_scan(
         self,
@@ -233,6 +281,173 @@ class Checkpoint:
             )
             if cursor.rowcount != 1:
                 raise CheckpointError("summary task not found")
+
+    def list_tasks(
+        self,
+        migration_id: str,
+        *,
+        statuses: set[str] | frozenset[str] | None = None,
+    ) -> list[CheckpointTask]:
+        self.initialize()
+        if statuses is not None:
+            unknown = set(statuses) - TASK_STATUSES
+            if unknown:
+                raise CheckpointError(f"invalid task statuses: {sorted(unknown)!r}")
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT migration_id, conversation_id, leaf_message_id,
+                       summary_kind, status, attempts, summary_content, error
+                FROM summary_tasks
+                WHERE migration_id = ?
+                ORDER BY conversation_id, leaf_message_id, summary_kind
+                """,
+                (migration_id,),
+            ).fetchall()
+        if not self.run_exists(migration_id):
+            raise CheckpointError(f"migration {migration_id!r} not found")
+        return [
+            CheckpointTask(
+                migration_id=row["migration_id"],
+                conversation_id=row["conversation_id"],
+                leaf_message_id=row["leaf_message_id"],
+                summary_kind=row["summary_kind"],
+                status=row["status"],
+                attempts=row["attempts"],
+                summary_content=row["summary_content"],
+                error=row["error"],
+            )
+            for row in rows
+            if statuses is None or row["status"] in statuses
+        ]
+
+    def manifest_path_counts(self, migration_id: str) -> dict[tuple[str, str], int]:
+        self.initialize()
+        with self._connect() as conn:
+            run = conn.execute(
+                "SELECT 1 FROM migration_runs WHERE migration_id = ?",
+                (migration_id,),
+            ).fetchone()
+            if run is None:
+                raise CheckpointError(f"migration {migration_id!r} not found")
+            rows = conn.execute(
+                """
+                SELECT conversation_id, leaf_message_id, path_message_count
+                FROM manifest_leaves WHERE migration_id = ?
+                """,
+                (migration_id,),
+            ).fetchall()
+        return {
+            (row["conversation_id"], row["leaf_message_id"]): int(
+                row["path_message_count"]
+            )
+            for row in rows
+        }
+
+    def claim_task(self, task: CheckpointTask, *, retry_failed: bool = False) -> int | None:
+        """Atomically mark one resumable task running and return its new attempt."""
+        eligible = {"pending", "running"}
+        if retry_failed:
+            eligible.add("failed")
+        placeholders = ", ".join("?" for _ in eligible)
+        self.initialize()
+        with self._connect() as conn:
+            row = conn.execute(
+                f"""
+                SELECT status, attempts FROM summary_tasks
+                WHERE migration_id = ? AND conversation_id = ?
+                  AND leaf_message_id = ? AND summary_kind = ?
+                  AND status IN ({placeholders})
+                """,
+                (
+                    task.migration_id,
+                    task.conversation_id,
+                    task.leaf_message_id,
+                    task.summary_kind,
+                    *sorted(eligible),
+                ),
+            ).fetchone()
+            if row is None:
+                return None
+            attempts = int(row["attempts"]) + 1
+            cursor = conn.execute(
+                f"""
+                UPDATE summary_tasks
+                SET status = 'running', attempts = ?, summary_content = NULL, error = NULL
+                WHERE migration_id = ? AND conversation_id = ?
+                  AND leaf_message_id = ? AND summary_kind = ?
+                  AND status IN ({placeholders})
+                """,
+                (
+                    attempts,
+                    task.migration_id,
+                    task.conversation_id,
+                    task.leaf_message_id,
+                    task.summary_kind,
+                    *sorted(eligible),
+                ),
+            )
+            if cursor.rowcount != 1:
+                return None
+            return attempts
+
+    def selected_boundaries(self, migration_id: str) -> list[SelectedBoundary]:
+        """Resolve the deterministic semantic-first/mechanical-fallback choice."""
+        self.initialize()
+        with self._connect() as conn:
+            leaves = conn.execute(
+                """
+                SELECT conversation_id, leaf_message_id, is_active_branch,
+                       path_message_count
+                FROM manifest_leaves
+                WHERE migration_id = ?
+                ORDER BY conversation_id, leaf_message_id
+                """,
+                (migration_id,),
+            ).fetchall()
+            tasks = conn.execute(
+                """
+                SELECT conversation_id, leaf_message_id, summary_kind,
+                       status, summary_content
+                FROM summary_tasks
+                WHERE migration_id = ?
+                """,
+                (migration_id,),
+            ).fetchall()
+        if not self.run_exists(migration_id):
+            raise CheckpointError(f"migration {migration_id!r} not found")
+
+        by_leaf = {
+            (row["conversation_id"], row["leaf_message_id"], row["summary_kind"]): row
+            for row in tasks
+        }
+        selected: list[SelectedBoundary] = []
+        for leaf in leaves:
+            key = (leaf["conversation_id"], leaf["leaf_message_id"])
+            semantic = by_leaf.get((*key, "semantic"))
+            mechanical = by_leaf.get((*key, "mechanical"))
+            choice = None
+            if leaf["is_active_branch"] and semantic is not None:
+                if semantic["status"] == "succeeded":
+                    choice = semantic
+            if choice is None and mechanical is not None:
+                if mechanical["status"] == "succeeded":
+                    choice = mechanical
+            if choice is None:
+                raise CheckpointError(
+                    "leaf has no successful boundary candidate: "
+                    f"conversation={key[0]!r} leaf={key[1]!r}"
+                )
+            selected.append(SelectedBoundary(
+                migration_id=migration_id,
+                conversation_id=key[0],
+                leaf_message_id=key[1],
+                is_active_branch=bool(leaf["is_active_branch"]),
+                path_message_count=int(leaf["path_message_count"]),
+                summary_kind=choice["summary_kind"],
+                summary_content=choice["summary_content"],
+            ))
+        return selected
 
     def report(self, migration_id: str) -> dict[str, Any]:
         self.initialize()

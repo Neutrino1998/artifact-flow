@@ -71,7 +71,8 @@ COPY src ./src
 # in the image. Build/release helpers stay in the source/deploy bundle.
 COPY scripts/create_admin.py scripts/inspect_tool_failures.py \
      scripts/migrate_users_csv.py scripts/observability_report.py \
-     scripts/reconcile_config.py ./scripts/
+     scripts/reconcile_config.py scripts/native_tool_history_migration.py ./scripts/
+COPY scripts/native_tool_history ./scripts/native_tool_history
 COPY deploy/entrypoint.sh ./deploy/entrypoint.sh
 
 # Register the local package (no deps — already installed via builder). Disable
