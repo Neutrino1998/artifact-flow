@@ -10,6 +10,7 @@ import {
   setRejectUnknownParameters,
   setSimpleArrayItemType,
   setSimpleParameterDefault,
+  setSimpleParameterDescription,
   setSimpleParameterEnum,
   setSimpleParameterRequired,
   setSimpleParameterType,
@@ -78,6 +79,38 @@ describe('inputSchemaForm inspection', () => {
       kind: 'invalid',
     });
   });
+
+  it('rejects a default outside enum while accepting deep-equal structured values', () => {
+    expect(inspectInputSchema(JSON.stringify({
+      type: 'object',
+      properties: {
+        query: { type: 'string', default: '', enum: ['value'] },
+      },
+    }))).toMatchObject({
+      kind: 'invalid',
+      reason: '参数 query 的默认值必须是可选值之一',
+    });
+
+    expect(inspectInputSchema(JSON.stringify({
+      type: 'object',
+      properties: {
+        filters: {
+          type: 'object',
+          default: { region: 'cn', active: true },
+          enum: [{ active: true, region: 'cn' }],
+        },
+      },
+    }))).toMatchObject({ kind: 'simple' });
+  });
+
+  it('routes parameter names that a single-line form cannot preserve to JSON mode', () => {
+    for (const name of [' user_id ', 'user\nid']) {
+      expect(inspectInputSchema(JSON.stringify({
+        type: 'object',
+        properties: { [name]: { type: 'string' } },
+      }))).toMatchObject({ kind: 'advanced' });
+    }
+  });
 });
 
 describe('inputSchemaForm mutations', () => {
@@ -134,6 +167,51 @@ describe('inputSchemaForm mutations', () => {
   it('refuses defaults that do not match the selected type', () => {
     expect(() => setSimpleParameterDefault(base, 'query', true, 3)).toThrow(
       '默认值与参数类型不匹配',
+    );
+  });
+
+  it('keeps default and enum compatible in both mutation directions', () => {
+    const withEnum = JSON.stringify({
+      type: 'object',
+      properties: { query: { type: 'string', enum: ['allowed'] } },
+    });
+    expect(() => setSimpleParameterDefault(withEnum, 'query', true, 'other')).toThrow(
+      '默认值必须是可选值之一',
+    );
+
+    const withDefault = JSON.stringify({
+      type: 'object',
+      properties: { query: { type: 'string', default: 'allowed' } },
+    });
+    expect(() => setSimpleParameterEnum(withDefault, 'query', ['other'])).toThrow(
+      '可选值必须包含当前默认值',
+    );
+    expect(inspectInputSchema(
+      setSimpleParameterEnum(withDefault, 'query', ['allowed', 'other']),
+    )).toMatchObject({ kind: 'simple' });
+  });
+
+  it('preserves multiline descriptions and string defaults', () => {
+    let schema = setSimpleParameterDescription(base, 'query', '第一行\n第二行');
+    schema = setSimpleParameterDefault(schema, 'query', true, '默认第一行\n默认第二行');
+
+    expect(parse(schema)).toMatchObject({
+      properties: {
+        query: {
+          description: '第一行\n第二行',
+          default: '默认第一行\n默认第二行',
+        },
+      },
+    });
+    expect(inspectInputSchema(schema)).toMatchObject({ kind: 'simple' });
+  });
+
+  it('rejects parameter names that would be silently normalized', () => {
+    expect(() => renameSimpleParameter(base, 'query', ' question ')).toThrow(
+      '参数名首尾不能包含空白字符',
+    );
+    expect(() => renameSimpleParameter(base, 'query', 'question\nnext')).toThrow(
+      '参数名不能包含换行或控制字符',
     );
   });
 });

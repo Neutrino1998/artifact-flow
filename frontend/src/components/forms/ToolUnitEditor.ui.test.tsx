@@ -73,4 +73,82 @@ describe('ToolUnitEditor input schema modes', () => {
     expect(container.textContent).toContain('当前 Schema 包含高级约束');
     expect(container.textContent).toContain('根级字段 minProperties');
   });
+
+  it('renders multiline descriptions and string defaults with lossless controls', async () => {
+    const draft = emptyUnitDraft();
+    draft.name = 'multiline';
+    draft.members[0].input_schema = JSON.stringify({
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: '说明第一行\n说明第二行',
+          default: '默认第一行\n默认第二行',
+        },
+      },
+    }, null, 2);
+
+    await act(async () => root.render(<Harness initial={draft} />));
+
+    expect(container.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="参数 query 说明"]',
+    )?.value).toBe('说明第一行\n说明第二行');
+    expect(container.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="参数 query 默认值"]',
+    )?.value).toBe('默认第一行\n默认第二行');
+  });
+
+  it('keeps unsafe parameter names exclusively in lossless JSON mode', async () => {
+    const draft = emptyUnitDraft();
+    draft.name = 'unsafe-name';
+    draft.members[0].input_schema = JSON.stringify({
+      type: 'object',
+      properties: { ' user_id ': { type: 'string' } },
+    }, null, 2);
+
+    await act(async () => root.render(<Harness initial={draft} />));
+
+    expect(container.querySelector('textarea[aria-label="输入参数 JSON Schema"]')).not.toBeNull();
+    expect(container.textContent).toContain('参数名首尾不能包含空白字符');
+
+    await act(async () => buttonByText(container, '参数表单')?.click());
+    expect(container.textContent).toContain('当前 Schema 包含高级约束');
+    expect(container.querySelector('input[aria-label="参数名  user_id "]')).toBeNull();
+  });
+
+  it('never creates an enum that excludes the current default', async () => {
+    const draft = emptyUnitDraft();
+    draft.name = 'default-enum';
+    draft.members[0].input_schema = JSON.stringify({
+      type: 'object',
+      properties: { query: { type: 'string', default: '' } },
+    }, null, 2);
+
+    await act(async () => root.render(<Harness initial={draft} />));
+    const enumToggle = container.querySelector<HTMLInputElement>(
+      'input[aria-label="限制可选值"]',
+    );
+    await act(async () => enumToggle?.click());
+
+    expect(enumToggle?.checked).toBe(false);
+    expect(container.textContent).toContain('空字符串或多行 enum 需要在高级 JSON Schema 中编辑');
+  });
+
+  it('initializes a newly enabled default from the first enum value', async () => {
+    const draft = emptyUnitDraft();
+    draft.name = 'enum-default';
+    draft.members[0].input_schema = JSON.stringify({
+      type: 'object',
+      properties: { query: { type: 'string', enum: ['allowed', 'other'] } },
+    }, null, 2);
+
+    await act(async () => root.render(<Harness initial={draft} />));
+    await act(async () => container.querySelector<HTMLInputElement>(
+      'input[aria-label="设置默认值"]',
+    )?.click());
+
+    expect(container.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="参数 query 默认值"]',
+    )?.value).toBe('allowed');
+  });
 });

@@ -304,8 +304,7 @@ function SimpleParameterCard({
 
       <div>
         <label className={LABEL_CLASS}>参数说明</label>
-        <input
-          type="text"
+        <textarea
           value={parameter.description}
           onChange={(event) => onChange(setSimpleParameterDescription(
             schemaText,
@@ -313,8 +312,10 @@ function SimpleParameterCard({
             event.target.value,
           ))}
           disabled={readOnly}
+          rows={2}
+          aria-label={`参数 ${parameter.name} 说明`}
           placeholder="告诉模型这个参数的含义和填写方式"
-          className={INPUT_ON_PANEL}
+          className={`${INPUT_ON_PANEL} resize-y`}
         />
       </div>
 
@@ -351,11 +352,14 @@ function SimpleParameterCard({
           value={parameter.defaultValue}
           type={parameter.type}
           readOnly={readOnly}
+          ariaLabel={`参数 ${parameter.name} 默认值`}
           onToggle={(enabled) => onChange(setSimpleParameterDefault(
             schemaText,
             parameter.name,
             enabled,
-            enabled ? defaultValueForType(parameter.type) : undefined,
+            enabled
+              ? (parameter.enumValues?.[0] ?? defaultValueForType(parameter.type))
+              : undefined,
           ))}
           onCommit={(nextValue) => onChange(setSimpleParameterDefault(
             schemaText,
@@ -371,7 +375,11 @@ function SimpleParameterCard({
           onToggle={(enabled) => onChange(setSimpleParameterEnum(
             schemaText,
             parameter.name,
-            enabled ? [parameter.type === 'string' ? 'value' : defaultValueForType(parameter.type)] : null,
+            enabled
+              ? [parameter.hasDefault
+                ? parameter.defaultValue
+                : parameter.type === 'string' ? 'value' : defaultValueForType(parameter.type)]
+              : null,
           ))}
           onCommit={(values) => onChange(setSimpleParameterEnum(
             schemaText,
@@ -402,7 +410,7 @@ function ParameterNameEditor({
   }, [name]);
 
   const commit = () => {
-    if (draft.trim() === name) {
+    if (draft === name) {
       setDraft(name);
       return;
     }
@@ -440,6 +448,7 @@ function OptionalTypedValueEditor({
   value,
   type,
   readOnly,
+  ariaLabel,
   onToggle,
   onCommit,
 }: {
@@ -448,25 +457,43 @@ function OptionalTypedValueEditor({
   value: unknown;
   type: SimpleParameterType;
   readOnly: boolean;
+  ariaLabel: string;
   onToggle: (enabled: boolean) => void;
   onCommit: (value: unknown) => void;
 }) {
+  const [error, setError] = useState<string | null>(null);
+  const attempt = (action: () => void) => {
+    try {
+      action();
+      setError(null);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : String(actionError));
+    }
+  };
+
   return (
     <div className="rounded-md border border-border/70 dark:border-border-dark/70 p-2 space-y-2">
       <label className="flex items-center gap-2 text-xs text-text-secondary dark:text-text-secondary-dark select-none">
         <Checkbox
           checked={enabled}
-          onChange={onToggle}
+          onChange={(nextEnabled) => attempt(() => onToggle(nextEnabled))}
           disabled={readOnly}
           ariaLabel={`设置${label}`}
         />
         设置{label}
       </label>
       {enabled ? (
-        <TypedValueEditor value={value} type={type} readOnly={readOnly} onCommit={onCommit} />
+        <TypedValueEditor
+          value={value}
+          type={type}
+          readOnly={readOnly}
+          ariaLabel={ariaLabel}
+          onCommit={(nextValue) => attempt(() => onCommit(nextValue))}
+        />
       ) : (
         <p className="text-[10px] text-text-tertiary dark:text-text-tertiary-dark">未设置</p>
       )}
+      {error ? <p className="text-[10px] text-status-error">{error}</p> : null}
     </div>
   );
 }
@@ -475,11 +502,13 @@ function TypedValueEditor({
   value,
   type,
   readOnly,
+  ariaLabel,
   onCommit,
 }: {
   value: unknown;
   type: SimpleParameterType;
   readOnly: boolean;
+  ariaLabel: string;
   onCommit: (value: unknown) => void;
 }) {
   const serializedValue = typedValueToText(value, type);
@@ -501,6 +530,7 @@ function TypedValueEditor({
             onCommit(event.target.value === 'true');
           }}
           disabled={readOnly}
+          aria-label={ariaLabel}
           className={`${INPUT_ON_PANEL} appearance-none pr-9`}
         >
           <option value="false">false</option>
@@ -519,11 +549,12 @@ function TypedValueEditor({
       setError(commitError instanceof Error ? commitError.message : String(commitError));
     }
   };
+  const usesTextarea = type === 'string' || type === 'array' || type === 'object';
   const isStructured = type === 'array' || type === 'object';
 
   return (
     <div>
-      {isStructured ? (
+      {usesTextarea ? (
         <textarea
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
@@ -531,7 +562,8 @@ function TypedValueEditor({
           disabled={readOnly}
           rows={2}
           spellCheck={false}
-          className={`${INPUT_ON_PANEL} font-mono resize-y`}
+          aria-label={ariaLabel}
+          className={`${INPUT_ON_PANEL} ${isStructured ? 'font-mono ' : ''}resize-y`}
         />
       ) : (
         <input
@@ -541,6 +573,7 @@ function TypedValueEditor({
           onChange={(event) => setDraft(event.target.value)}
           onBlur={commit}
           disabled={readOnly}
+          aria-label={ariaLabel}
           className={INPUT_ON_PANEL}
         />
       )}
@@ -562,22 +595,38 @@ function OptionalEnumEditor({
   onToggle: (enabled: boolean) => void;
   onCommit: (values: unknown[]) => void;
 }) {
+  const [error, setError] = useState<string | null>(null);
+  const attempt = (action: () => void) => {
+    try {
+      action();
+      setError(null);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : String(actionError));
+    }
+  };
+
   return (
     <div className="rounded-md border border-border/70 dark:border-border-dark/70 p-2 space-y-2">
       <label className="flex items-center gap-2 text-xs text-text-secondary dark:text-text-secondary-dark select-none">
         <Checkbox
           checked={values !== null}
-          onChange={onToggle}
+          onChange={(enabled) => attempt(() => onToggle(enabled))}
           disabled={readOnly}
           ariaLabel="限制可选值"
         />
         限制可选值
       </label>
       {values !== null ? (
-        <EnumValuesEditor values={values} type={type} readOnly={readOnly} onCommit={onCommit} />
+        <EnumValuesEditor
+          values={values}
+          type={type}
+          readOnly={readOnly}
+          onCommit={(nextValues) => attempt(() => onCommit(nextValues))}
+        />
       ) : (
         <p className="text-[10px] text-text-tertiary dark:text-text-tertiary-dark">不限制</p>
       )}
+      {error ? <p className="text-[10px] text-status-error">{error}</p> : null}
     </div>
   );
 }

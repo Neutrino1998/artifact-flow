@@ -47,6 +47,7 @@ const SIMPLE_PROPERTY_KEYS = new Set([
   'items',
 ]);
 const SIMPLE_ITEM_KEYS = new Set(['type']);
+const CONTROL_CHARACTER_RE = /[\u0000-\u001f\u007f]/u;
 
 function isObject(value: unknown): value is JsonObject {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -55,6 +56,35 @@ function isObject(value: unknown): value is JsonObject {
 function isSimpleParameterType(value: unknown): value is SimpleParameterType {
   return typeof value === 'string'
     && SIMPLE_PARAMETER_TYPES.includes(value as SimpleParameterType);
+}
+
+function simpleParameterNameError(name: string): string | null {
+  if (!name) return '参数名不能为空';
+  if (name.trim() !== name) return '参数名首尾不能包含空白字符';
+  if (CONTROL_CHARACTER_RE.test(name)) return '参数名不能包含换行或控制字符';
+  return null;
+}
+
+function jsonValuesEqual(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => jsonValuesEqual(value, right[index]));
+  }
+  if (!isObject(left) || !isObject(right)) return false;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key) => (
+      Object.prototype.hasOwnProperty.call(right, key)
+      && jsonValuesEqual(left[key], right[key])
+    ));
+}
+
+function enumContains(enumValues: unknown[], value: unknown): boolean {
+  return enumValues.some((candidate) => jsonValuesEqual(candidate, value));
 }
 
 function valueMatchesType(
@@ -136,6 +166,13 @@ export function inspectInputSchema(schemaText: string): InputSchemaInspection {
 
   const parameters: SimpleSchemaParameter[] = [];
   for (const [name, rawProperty] of Object.entries(properties)) {
+    const nameError = simpleParameterNameError(name);
+    if (nameError) {
+      return {
+        kind: 'advanced',
+        reason: `${nameError}；参数 ${JSON.stringify(name)} 需要在高级 JSON Schema 中编辑`,
+      };
+    }
     if (Object.prototype.hasOwnProperty.call(Object.prototype, name)) {
       return { kind: 'advanced', reason: `参数名 ${name} 需要在高级 JSON Schema 中编辑` };
     }
@@ -199,6 +236,13 @@ export function inspectInputSchema(schemaText: string): InputSchemaInspection {
     ) {
       return { kind: 'advanced', reason: `参数 ${name} 的空字符串或多行 enum 需要在高级 JSON Schema 中编辑` };
     }
+    if (
+      hasDefault
+      && Array.isArray(rawProperty.enum)
+      && !enumContains(rawProperty.enum, rawProperty.default)
+    ) {
+      return { kind: 'invalid', reason: `参数 ${name} 的默认值必须是可选值之一` };
+    }
 
     parameters.push({
       name,
@@ -235,7 +279,12 @@ function mutateSimpleSchema(
   schema.required = required;
   mutate(schema, properties, required);
   if (required.length === 0) delete schema.required;
-  return JSON.stringify(schema, null, 2);
+  const nextSchemaText = JSON.stringify(schema, null, 2);
+  const nextInspection = inspectInputSchema(nextSchemaText);
+  if (nextInspection.kind !== 'simple') {
+    throw new Error(nextInspection.reason);
+  }
+  return nextSchemaText;
 }
 
 function propertyFor(properties: JsonObject, name: string): JsonObject {
@@ -269,19 +318,19 @@ export function renameSimpleParameter(
   oldName: string,
   nextName: string,
 ): string {
-  const trimmed = nextName.trim();
-  if (!trimmed) throw new Error('参数名不能为空');
+  const nameError = simpleParameterNameError(nextName);
+  if (nameError) throw new Error(nameError);
   return mutateSimpleSchema(schemaText, (_schema, properties, required) => {
-    if (trimmed !== oldName && trimmed in properties) {
-      throw new Error(`参数名 ${trimmed} 已存在`);
+    if (nextName !== oldName && nextName in properties) {
+      throw new Error(`参数名 ${nextName} 已存在`);
     }
     const entries = Object.entries(properties);
     for (const key of Object.keys(properties)) delete properties[key];
     for (const [name, property] of entries) {
-      properties[name === oldName ? trimmed : name] = property;
+      properties[name === oldName ? nextName : name] = property;
     }
     const requiredIndex = required.indexOf(oldName);
-    if (requiredIndex >= 0) required[requiredIndex] = trimmed;
+    if (requiredIndex >= 0) required[requiredIndex] = nextName;
   });
 }
 
@@ -372,6 +421,9 @@ export function setSimpleParameterDefault(
     if (!valueMatchesParameter(value, property)) {
       throw new Error('默认值与参数类型不匹配');
     }
+    if (Array.isArray(property.enum) && !enumContains(property.enum, value)) {
+      throw new Error('默认值必须是可选值之一');
+    }
     property.default = value;
   });
 }
@@ -390,6 +442,12 @@ export function setSimpleParameterEnum(
     if (values.length === 0) throw new Error('可选值至少需要一项');
     if (values.some((value) => !valueMatchesParameter(value, property))) {
       throw new Error('可选值与参数类型不匹配');
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(property, 'default')
+      && !enumContains(values, property.default)
+    ) {
+      throw new Error('可选值必须包含当前默认值');
     }
     property.enum = values;
   });
