@@ -1,3 +1,4 @@
+import asyncio
 import sqlite3
 import sys
 from argparse import Namespace
@@ -35,9 +36,11 @@ from native_tool_history.transcript import (
     build_semantic_messages,
 )
 from scripts.native_tool_history_migration import (
-    _assert_separate_checkpoint,
+    ProgressReporter,
     _generate,
     _generate_semantic,
+    _require_postgresql_source,
+    _run_generate_task,
 )
 from core.event_history import build_event_history
 from core.events import ExecutionEvent
@@ -345,16 +348,6 @@ def test_manifest_rejects_invalid_stopped_source(
         build_manifest(conversations, messages)
 
 
-def test_checkpoint_must_not_be_source_sqlite(tmp_path):
-    source = tmp_path / "source.db"
-    url = f"sqlite+aiosqlite:///{source}"
-
-    with pytest.raises(RuntimeError, match="must not be the source"):
-        _assert_separate_checkpoint(source, url)
-
-    _assert_separate_checkpoint(tmp_path / "checkpoint.sqlite", url)
-
-
 @pytest.mark.asyncio
 async def test_checkpoint_is_bound_to_the_scanned_database_target(tmp_path):
     database_url = await _source_database(tmp_path)
@@ -380,6 +373,16 @@ def test_database_target_fingerprint_excludes_postgres_credentials():
     assert first != source_database_fingerprint(
         "postgresql+asyncpg://operator:first@db.internal/other"
     )
+    with pytest.raises(BoundaryError, match="supports PostgreSQL"):
+        source_database_fingerprint("mysql+aiomysql://db.internal/artifactflow")
+
+
+def test_migration_cli_requires_postgresql_source():
+    _require_postgresql_source(
+        "postgresql+asyncpg://operator:secret@db.internal/artifactflow"
+    )
+    with pytest.raises(RuntimeError, match="supports PostgreSQL"):
+        _require_postgresql_source("sqlite+aiosqlite:///source.db")
 
 
 def test_checkpoint_rejects_obsolete_schema(tmp_path):
@@ -516,6 +519,10 @@ async def test_generate_skip_semantic_builds_mechanical_fallbacks(
     _create_scan(checkpoint, database_url, scan)
     monkeypatch.setenv("ARTIFACTFLOW_DATABASE_URL", database_url)
     monkeypatch.delenv("ARTIFACTFLOW_DATABASE_URLS", raising=False)
+    monkeypatch.setattr(
+        "scripts.native_tool_history_migration._require_postgresql_source",
+        lambda _database_url: None,
+    )
 
     args = Namespace(
         checkpoint=checkpoint_path,
@@ -543,6 +550,51 @@ async def test_generate_skip_semantic_builds_mechanical_fallbacks(
     stderr = capsys.readouterr().err
     assert "WARNING generate task failed" in stderr
     assert "leaf='leaf-active' kind='semantic'" in stderr
+
+
+@pytest.mark.asyncio
+async def test_generate_task_preserves_traceback_for_programming_error(
+    tmp_path, capsys
+):
+    database_url = await _source_database(tmp_path)
+    scan = await scan_database(database_url)
+    checkpoint = Checkpoint(tmp_path / "checkpoint.sqlite")
+    _create_scan(checkpoint, database_url, scan)
+    task = next(
+        task
+        for task in checkpoint.list_tasks("migration-1")
+        if task.summary_kind == "mechanical"
+    )
+
+    class BrokenReader:
+        async def load(self, **kwargs):
+            raise KeyError("broken transcript code")
+
+    args = Namespace(
+        retry_failed=False,
+        path_counts=checkpoint.manifest_path_counts("migration-1"),
+        mechanical_max_chars=5_000,
+        mechanical_recent_turns=8,
+        mechanical_field_max_chars=500,
+    )
+    await _run_generate_task(
+        task=task,
+        checkpoint=checkpoint,
+        reader=BrokenReader(),
+        args=args,
+        compact_agent=None,
+        semantic_model="",
+        semaphore=asyncio.Semaphore(1),
+        progress=ProgressReporter(1),
+    )
+
+    stderr = capsys.readouterr().err
+    assert "ERROR generate task failed" in stderr
+    assert "Traceback (most recent call last)" in stderr
+    assert "KeyError: 'broken transcript code'" in stderr
+    assert checkpoint.list_tasks(
+        "migration-1", statuses={"failed"}
+    )[0].leaf_message_id == task.leaf_message_id
 
 
 async def _ready_checkpoint(tmp_path: Path) -> tuple[str, Checkpoint]:

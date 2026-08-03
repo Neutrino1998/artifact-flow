@@ -10,7 +10,7 @@
 
 本文记录阶段 0 的可重复基线、Provider probe 运行方式、停机迁移规模盘点，以及阶段 5 cutover 的运维契约。
 
-历史迁移采用**完全停机**模式：维护页阻断新请求，等待执行清空，停止全部 backend writer，完成数据库快照后，才开始 scan/generate/apply/verify。迁移程序不实现在线预生成、head fingerprint、二次重扫或变化 leaf 补算。
+历史迁移采用**完全停机**模式，且应用源数据库仅支持 PostgreSQL：维护页阻断新请求，等待执行清空，停止全部 backend writer，完成数据库快照后，才开始 scan/generate/apply/verify。迁移程序不实现在线预生成、head fingerprint、二次重扫或变化 leaf 补算。SQLite 只用于本地自动化测试和独立 checkpoint，不是现场源数据库。
 
 迁移 CLI 已提供 `scan`、`generate`、`report`、`apply` 和 `verify`。只有 `apply`
 会写应用数据库；它按 leaf 在单个事务内追加确定性 `COMPACTION_START` /
@@ -145,9 +145,9 @@ mechanical candidate 回退。
 
 扫描器会响亮拒绝：
 
+- 非 PostgreSQL 应用源数据库；
 - active branch 缺失、悬空或不是 leaf；
-- message parent 缺失或形成环；
-- checkpoint 与应用 SQLite DB 指向同一文件。
+- message parent 缺失或形成环。
 
 任务构造：
 
@@ -198,7 +198,7 @@ sudo /opt/artifactflow/bin/afctl --root /opt/artifactflow \
 
 完成后再次确认：
 
-- 没有 backend 进程持有应用 SQLite/数据库连接；
+- 没有 backend 进程持有应用数据库连接；
 - RuntimeStore 不存在 active conversation lease；
 - 维护页仍开启。
 
@@ -206,8 +206,7 @@ sudo /opt/artifactflow/bin/afctl --root /opt/artifactflow \
 
 ### 4. 数据库快照
 
-- SQLite：backend 停止后使用 SQLite backup API/`.backup`，不要只复制主 `.db` 而遗漏 WAL；
-- PostgreSQL/MySQL：使用现场数据库备份体系生成一致性快照，并在隔离环境验证可恢复；
+- PostgreSQL：使用现场数据库备份体系生成一致性快照，并在隔离环境验证可恢复；
 - 记录快照标识、时间和当前 release ID。
 
 在快照完成前不得运行任何迁移写入。

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Fully stopped native tool-call history migration.
 
-The source application database must have no backend writers from ``scan``
-through ``verify``.  ``generate`` stores resumable summary candidates in a
-separate SQLite checkpoint.  ``apply`` is the only command that writes the
-application database; it appends one deterministic, transactional compaction
-boundary pair per scanned conversation leaf.
+The source PostgreSQL database must have no backend writers from ``scan``
+through ``verify``. Other application database backends are intentionally not
+supported. ``generate`` stores resumable summary candidates in a separate
+SQLite checkpoint. ``apply`` is the only command that writes the application
+database; it appends one deterministic, transactional compaction boundary pair
+per scanned conversation leaf.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import json
 import os
 import sys
 import time
+import traceback
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -73,15 +75,12 @@ def resolve_database_url() -> str:
     return url
 
 
-def _assert_separate_checkpoint(checkpoint: Path, database_url: str) -> None:
-    url = make_url(database_url)
-    if not url.get_backend_name().startswith("sqlite") or not url.database:
-        return
-    source = Path(url.database)
-    if not source.is_absolute():
-        source = ROOT / source
-    if checkpoint.resolve() == source.resolve():
-        raise RuntimeError("checkpoint must not be the source application database")
+def _require_postgresql_source(database_url: str) -> None:
+    backend = make_url(database_url).get_backend_name()
+    if not backend.startswith("postgres"):
+        raise RuntimeError(
+            "native history migration supports PostgreSQL source databases only"
+        )
 
 
 def _print_report(report: dict[str, Any]) -> None:
@@ -148,7 +147,7 @@ class ProgressReporter:
 
 async def _scan(args: argparse.Namespace) -> int:
     database_url = resolve_database_url()
-    _assert_separate_checkpoint(args.checkpoint, database_url)
+    _require_postgresql_source(database_url)
     checkpoint = Checkpoint(args.checkpoint.resolve())
     if checkpoint.run_exists(args.migration_id):
         if not args.resume:
@@ -174,8 +173,6 @@ async def _scan(args: argparse.Namespace) -> int:
 
 
 def _report(args: argparse.Namespace) -> int:
-    database_url = resolve_database_url()
-    _assert_separate_checkpoint(args.checkpoint, database_url)
     report = Checkpoint(args.checkpoint.resolve()).report(args.migration_id)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -187,6 +184,16 @@ def _report(args: argparse.Namespace) -> int:
 def _checkpoint_error(exc: BaseException) -> str:
     value = f"{type(exc).__name__}: {exc}".strip()
     return value[:MAX_CHECKPOINT_ERROR_CHARS] or type(exc).__name__
+
+
+def _is_expected_task_failure(exc: Exception) -> bool:
+    if isinstance(exc, (RuntimeError, TimeoutError)):
+        return True
+    # LiteLLM maps provider/network/status failures onto OpenAI's typed error
+    # hierarchy. Import it only on a failure path so the dormant CLI stays light.
+    from openai import OpenAIError
+
+    return isinstance(exc, OpenAIError)
 
 
 async def _generate_semantic(
@@ -294,6 +301,7 @@ async def _run_generate_task(
         raise
     except Exception as exc:
         error = _checkpoint_error(exc)
+        expected_failure = _is_expected_task_failure(exc)
         checkpoint.set_task_result(
             migration_id=task.migration_id,
             conversation_id=task.conversation_id,
@@ -304,7 +312,7 @@ async def _run_generate_task(
             error=error,
         )
         print(
-            "WARNING generate task failed: "
+            f"{'WARNING' if expected_failure else 'ERROR'} generate task failed: "
             f"migration={task.migration_id!r} "
             f"conversation={task.conversation_id!r} "
             f"leaf={task.leaf_message_id!r} kind={task.summary_kind!r} "
@@ -312,6 +320,10 @@ async def _run_generate_task(
             file=sys.stderr,
             flush=True,
         )
+        if not expected_failure:
+            traceback.print_exception(
+                type(exc), exc, exc.__traceback__, file=sys.stderr
+            )
     finally:
         await progress.task_finished(success=success)
         if acquired:
@@ -320,7 +332,7 @@ async def _run_generate_task(
 
 async def _generate(args: argparse.Namespace) -> int:
     database_url = resolve_database_url()
-    _assert_separate_checkpoint(args.checkpoint, database_url)
+    _require_postgresql_source(database_url)
     checkpoint = Checkpoint(args.checkpoint.resolve())
     assert_source_database(checkpoint, args.migration_id, database_url)
     run_status = checkpoint.get_run_status(args.migration_id)
@@ -420,7 +432,7 @@ async def _apply(args: argparse.Namespace) -> int:
     if not args.confirm_backend_stopped:
         raise RuntimeError("apply requires --confirm-backend-stopped")
     database_url = resolve_database_url()
-    _assert_separate_checkpoint(args.checkpoint, database_url)
+    _require_postgresql_source(database_url)
     checkpoint = Checkpoint(args.checkpoint.resolve())
     assert_source_database(checkpoint, args.migration_id, database_url)
     engine = create_async_engine(database_url, pool_pre_ping=True)
@@ -437,7 +449,7 @@ async def _apply(args: argparse.Namespace) -> int:
 
 async def _verify(args: argparse.Namespace) -> int:
     database_url = resolve_database_url()
-    _assert_separate_checkpoint(args.checkpoint, database_url)
+    _require_postgresql_source(database_url)
     checkpoint = Checkpoint(args.checkpoint.resolve())
     assert_source_database(checkpoint, args.migration_id, database_url)
     engine = create_async_engine(database_url, pool_pre_ping=True)

@@ -105,6 +105,12 @@ def source_database_fingerprint(database_url: str) -> str:
     """Identify the configured database target without retaining credentials."""
     url = make_url(database_url)
     backend = _normalize_backend_name(url.get_backend_name())
+    # SQLite keeps the pure helper testable without a PostgreSQL service; the
+    # operator CLI rejects it before calling this function.
+    if backend not in {"postgresql", "sqlite"}:
+        raise BoundaryError(
+            "native history migration supports PostgreSQL source databases only"
+        )
     database = url.database
     if backend == "sqlite" and database:
         database = str(Path(database).resolve())
