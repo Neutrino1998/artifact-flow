@@ -627,9 +627,7 @@ export interface AdminPromptReconstructResponse {
   agent_name: string | null;
   model: string | null;
   has_reminder: boolean;
-  has_tools_snapshot: boolean;
   messages: Record<string, unknown>[];
-  tools: Record<string, unknown>[];
 }
 
 export interface AdminConversationEventsResponse {

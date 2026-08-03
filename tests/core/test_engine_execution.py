@@ -281,9 +281,9 @@ class TestLeadCompletion:
         assert starts[0]["agent"] == "lead_agent"
         assert completes[0]["agent"] == "lead_agent"
         assert starts[0]["data"]["model"] == "openai/fake-model"
-        assert starts[0]["data"]["tools"] == []
+        assert "tools" not in starts[0]["data"]
 
-    async def test_agent_start_snapshots_exact_native_tools(self):
+    async def test_agent_start_does_not_persist_native_tool_schemas(self):
         agent = _FakeAgentConfig(tools={"my_tool": "auto"})
         tool = _FakeTool("my_tool")
 
@@ -295,7 +295,7 @@ class TestLeadCompletion:
 
         start = _events_of_type(emitted, "agent_start")[0]
         assert start["data"]["model"] == agent.model
-        assert start["data"]["tools"] == [tool.to_native_tool_schema()]
+        assert "tools" not in start["data"]
 
 
 # ============================================================

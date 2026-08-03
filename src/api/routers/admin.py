@@ -207,11 +207,11 @@ async def reconstruct_admin_prompt(
     _admin: TokenPayload = Depends(require_admin),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
-    """重建某一发 LLM 调用的语义输入（admin 取证，按 agent_start 锚定）。
+    """重建某一发 LLM 调用的 messages 语义输入（admin 取证，按 agent_start 锚定）。
 
     锚 = 该次调用前发出的 agent_start 事件（其 event_id 由 events 端点返回）。重建走
-    分支正确的 path，复用引擎同一套 messages 装配逻辑，并返回当次持久化的 model +
-    native tools；不重新生成动态内容 —— 详见
+    分支正确的 path，复用引擎同一套 messages 装配逻辑，并返回当次持久化的 model；
+    不重新生成动态内容，也不声称还原未持久化的 native tools schema —— 详见
     ConversationManager.reconstruct_prompt。
     """
     result = await conversation_manager.reconstruct_prompt(

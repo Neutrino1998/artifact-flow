@@ -7,19 +7,7 @@ from core.events import ExecutionEvent, StreamEventType
 
 
 @pytest.mark.asyncio
-async def test_reconstruct_model_input_keeps_native_tools_and_call_ids():
-    native_tools = [{
-        "type": "function",
-        "function": {
-            "name": "search",
-            "description": "Search",
-            "parameters": {
-                "type": "object",
-                "properties": {"q": {"type": "string"}},
-                "required": ["q"],
-            },
-        },
-    }]
+async def test_reconstruct_model_messages_keeps_native_call_ids():
     native_calls = [{
         "id": "call_search",
         "type": "function",
@@ -56,7 +44,6 @@ async def test_reconstruct_model_input_keeps_native_tools_and_call_ids():
                 "system_prompt": "system",
                 "reminder": "current context",
                 "model": "openai/test-model",
-                "tools": native_tools,
             },
             event_id="evt-anchor",
         ),
@@ -68,9 +55,8 @@ async def test_reconstruct_model_input_keeps_native_tools_and_call_ids():
 
     assert result is not None
     assert result["model"] == "openai/test-model"
-    assert result["tools"] == native_tools
-    assert result["has_tools_snapshot"] is True
     assert result["has_reminder"] is True
+    assert "tools" not in result
     assert [message["role"] for message in result["messages"]] == [
         "system", "user", "assistant", "tool", "user",
     ]

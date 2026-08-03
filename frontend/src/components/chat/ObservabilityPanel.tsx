@@ -132,9 +132,8 @@ function eventSummary(event: AdminEventItem): string {
       return `${d.tool as string} ${ok ? 'OK' : 'FAIL'} ${dur ?? 0}ms${!ok && err ? ` | ${err}` : ''}`;
     }
     case 'agent_start': {
-      const tools = Array.isArray(d.tools) ? d.tools : null;
       const model = d.model as string | undefined;
-      return `${d.agent as string}${model ? ` | ${model}` : ''}${tools ? ` | ${tools.length} tools` : ''}`;
+      return `${d.agent as string}${model ? ` | ${model}` : ''}`;
     }
     case 'agent_complete':
       return `${d.agent as string} done`;
@@ -697,7 +696,6 @@ function serializeEventToText(event: AdminEventItem): string {
   }
   if (d != null && event.event_type === 'agent_start') {
     if (d.model != null) lines.push(`模型: ${d.model as string}`);
-    if (Array.isArray(d.tools)) lines.push(`\n--- Tools ---\n${JSON.stringify(d.tools, null, 2)}`);
   }
   if (d != null && event.event_type === 'error') {
     lines.push(`\n--- Error ---\n${(d.error as string) || JSON.stringify(d, null, 2)}`);
@@ -1149,9 +1147,6 @@ function EventDetail({
       {event.event_type === 'agent_start' ? (
         <>
           {d?.model != null ? <DetailRow label="Model" value={d.model as string} /> : null}
-          {Array.isArray(d?.tools) ? (
-            <DetailBlock label="Native Tools" content={JSON.stringify(d.tools, null, 2)} />
-          ) : null}
           {d?.system_prompt != null ? (
             <DetailBlock label="System Prompt" content={d.system_prompt as string} />
           ) : null}
@@ -1436,9 +1431,9 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
   );
 }
 
-// ── Model Input Reconstruction (admin forensics) ──
-// 重建某发 agent_start 后 LLM 调用的 OpenAI-compatible 语义输入：messages 走
-// 分支正确的历史重放，model/tools 使用当次持久化快照，不重新生成动态内容。
+// ── Model Messages Reconstruction (admin forensics) ──
+// 重建某发 agent_start 后 LLM 调用的 OpenAI-compatible messages：messages 走
+// 分支正确的历史重放，model 使用当次持久化值，不重新生成动态内容。
 function PromptReconstructSection({
   convId,
   messageId,
@@ -1470,17 +1465,16 @@ function PromptReconstructSection({
     const blob = new Blob([JSON.stringify({
       model: result.model,
       messages: result.messages,
-      tools: result.tools,
     }, null, 2)], {
       type: 'application/json;charset=utf-8',
     });
-    triggerBlobDownload(`model-input-${messageId ?? 'msg'}-${eventId ?? 'evt'}.json`, blob);
+    triggerBlobDownload(`model-messages-${messageId ?? 'msg'}-${eventId ?? 'evt'}.json`, blob);
   }, [result, messageId, eventId]);
 
   return (
     <div className="space-y-2 border-t border-border dark:border-border-dark pt-3">
       <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-        重建此发 OpenAI-compatible 模型输入（messages + tools；不包含 provider chat template 后的 token 序列）
+        重建此发 OpenAI-compatible messages（不包含 tools schema 或 provider chat template 后的 token 序列）
       </div>
       <div className="flex items-center gap-2 flex-wrap">
         <button
@@ -1488,7 +1482,7 @@ function PromptReconstructSection({
           disabled={!canReconstruct || loading}
           className="px-2 py-1 rounded-md text-xs bg-accent/10 text-accent hover:bg-accent/20 disabled:opacity-50 transition-colors"
         >
-          {loading ? '重建中…' : '重建模型输入'}
+          {loading ? '重建中…' : '重建 Messages'}
         </button>
         {result ? (
           <button onClick={handleDownload} className="text-xs text-accent">
@@ -1511,15 +1505,9 @@ function PromptReconstructSection({
                 无持久化 reminder（旧事件：仅 system + 历史）
               </span>
             ) : null}
-            {!result.has_tools_snapshot ? (
-              <span className="px-1 py-px rounded bg-status-warning/10 text-status-warning text-[10px]">
-                无持久化 tools 快照（旧事件）
-              </span>
-            ) : null}
           </div>
           <DetailRow label="Model" value={result.model ?? '-'} />
           <DetailBlock label="重建 Messages" content={JSON.stringify(result.messages, null, 2)} />
-          <DetailBlock label="Tools" content={JSON.stringify(result.tools, null, 2)} />
         </div>
       ) : null}
     </div>

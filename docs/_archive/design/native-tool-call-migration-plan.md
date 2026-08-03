@@ -52,7 +52,7 @@
 - XML tool-call parser、grammar/formatter 和专属测试已删除；模型可读的 XML-like tool-result content 已拆为不参与解析的独立 renderer。
 - OpenAPI/前端类型已同步；review 收口后端全量回归为 `1939 passed, 42 skipped`，前端为 `287 passed`，lint 与 production build 通过。
 - 前端执行流已删除 XML-era `llmOutput`/`<tool_call>` 展示状态，单个 agent segment 精确对应一次 native LLM invocation；普通 content 只渲染一次，工具卡以 provider `call_id` 关联 START/COMPLETE，RAF chunk 更新绑定原 segment。
-- Admin 监控完整展示 `LLM_COMPLETE.tool_calls` 与工具事件 `call_id`/可选 `reason`；模型输入重建扩展为当次持久化的 `model + messages + tools` 语义快照，不声称还原 provider chat template 后的 token 序列。
+- Admin 监控完整展示 `LLM_COMPLETE.tool_calls` 与工具事件 `call_id`/可选 `reason`；仅持久化体积很小的 model 标识及 messages 重建所需上下文，不重复保存完整 tools schema，也不声称还原完整 provider 请求或 chat template 后的 token 序列。
 - 阶段 5 尚未完成的工作保持为部署/cutover gate：存量 leaf boundary 生成与幂等 apply、维护窗口演练、目标 raw vLLM 等私有端点 smoke。未完成这些项目之前分支不可整体发布。
 
 ## 分支策略
@@ -261,7 +261,7 @@ tool:      real result bound to tool_call_id
 - **有界并发与 ETA**：语义摘要使用 `--concurrency N`，对 429/5xx 有界重试；持续报告 total/completed/success/failed/inflight、滚动吞吐和基于剩余任务数的 ETA。服务保持停机直到 generate、apply、verify 和 native runtime smoke 全部完成。
 - **确定性、事务性的成对追加**：最终校验每个 leaf 的 lead 均有候选 boundary 后，把 `COMPACTION_START` 与成功 `COMPACTION_SUMMARY` 作为完整 pair 在同一数据库事务中追加。两条事件的 `event_id` 从 `migration_id + leaf + selected summary task` 确定性派生；若数据库已提交但 checkpoint 未更新，resume 重试命中同一组 event id 而不是追加重复 pair。事务性写入使半对不可表示，确定性 event id 使同一任务的重复 pair 不可表示；缺少成功 boundary 或 apply 失败才阻止部署，semantic 失败本身不阻塞。
 
-Boundary 成为 lead EventHistory 自右向左扫描的终点；lead 不再看到此前 XML event，因此 runtime 不需要 legacy XML parser、formatter 或历史分支。Subagent 依靠默认 `fresh_start=true` 隔离旧 session，而非迁移 boundary。迁移程序可携带独立 legacy 读取逻辑，但 runtime 不得 import 或调用。Cutover 时从缺省空 `agent_progressive_state` 开始，模型需要时重新 read/search。旧事件继续沿用既有 UI 展示；admin 对 cutover 后 `AGENT_START` 的 reconstruction 使用 native messages 投影，迁移前锚点的结果不保证正确，并且不识别旧请求、不返回专属状态、不保留 legacy 投影逻辑。
+Boundary 成为 lead EventHistory 自右向左扫描的终点；lead 不再看到此前 XML event，因此 runtime 不需要 legacy XML parser、formatter 或历史分支。Subagent 依靠默认 `fresh_start=true` 隔离旧 session，而非迁移 boundary。迁移程序可携带独立 legacy 读取逻辑，但 runtime 不得 import 或调用。Cutover 时从缺省空 `agent_progressive_state` 开始，模型需要时重新 read/search。旧 `Message.user_input/response` 继续用于对话列表和消息正文展示；迁移前不带 native `call_id` 的执行细节、工具卡和中间 segment 不作回放兼容承诺。Admin 对 cutover 后 `AGENT_START` 的 reconstruction 使用 native messages 投影，迁移前锚点的结果不保证正确，并且不识别旧请求、不返回专属状态、不保留 legacy 投影逻辑。
 
 ### 7. Reminder 与多模态使用统一的 synthetic user 消息
 
@@ -458,7 +458,7 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 - 扫描前启用维护页、等待 active executions 清空、停止全部 backend writer 并完成数据库快照；迁移期间不再运行在线变化检测或补算分支。
 - 在维护窗口的 apply 阶段按 leaf 事务性追加 lead 的完整 `COMPACTION_START`/`COMPACTION_SUMMARY` pair；两条事件使用由最终任务键派生的确定性 `event_id`，checkpoint 提交状态不确定时可幂等重试。
 - Native 部署前验证所有 leaf 的 lead 至少存在一个成功 boundary，任何遗漏或 apply 失败都阻止部署；单纯 semantic 失败不阻塞，稳定回退 mechanical。
-- Cutover 后初始化空的 `agent_progressive_state`；旧原始事件继续沿用既有 UI 展示。更新 Admin API/frontend 文案与测试：现有 reconstruction 只保证 cutover 后 native messages 正确，不宣称包含 tools schema 的完整请求取证，也不为 pre-cutover 请求增加 detection、legacy reconstruction 或特殊响应分支。
+- Cutover 后初始化空的 `agent_progressive_state`；旧 `Message.user_input/response` 继续展示，但迁移前执行细节、工具卡和中间 segment 不作回放兼容。更新 Admin API/frontend 文案与测试：现有 reconstruction 只保证 cutover 后 native messages 正确，不宣称包含 tools schema 的完整请求取证，也不为 pre-cutover 请求增加 detection、legacy reconstruction 或特殊响应分支。
 - 将迁移程序所需的 legacy rendering 与 runtime 隔离；迁移完成并验证后删除 runtime 的 XML tool-call parser、formatter、调用语法 prompt 和专属测试。
 - 更新 tools、engine、history、compaction、execution lifecycle 等活动架构文档。
 - 更新模型配置示例，明确私有部署必须提供兼容的 native tool-call chat template/parser。

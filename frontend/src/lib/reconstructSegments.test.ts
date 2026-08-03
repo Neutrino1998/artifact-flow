@@ -9,7 +9,7 @@ describe('reconstructSegments', () => {
     expect(reconstructSegments([])).toEqual([]);
   });
 
-  test('agent_start with no tools and no reasoning → filtered out', () => {
+  test('plain content with no reasoning or tool calls → filtered out', () => {
     // llm_complete content alone (no tool_call marker, no reasoning) doesn't
     // make a segment "meaningful" — the final filter drops it.
     const events = [

@@ -425,8 +425,9 @@ async def execute_loop(
     async def _build_context(agent_name: str) -> tuple[list, str, list[dict]]:
         """drain messages → artifacts 清单 → ContextManager.build。
 
-        返回 (messages, reminder)：reminder 是并入末条消息的 <system-reminder> 原文，
-        供调用处落进 agent_start 事件（持久化动态上下文，admin 据此重建 prompt）。
+        返回 (messages, reminder, native_tools)：reminder 是并入末条消息的
+        <system-reminder> 原文，供调用处落进 agent_start 事件（持久化动态上下文，
+        admin 据此重建 messages）；native_tools 只在本次调用内使用。
         """
         if agent_name == "lead_agent":
             for msg in await hooks.drain_messages(message_id):
@@ -1186,19 +1187,14 @@ async def execute_loop(
 
             messages, reminder, native_tools = await _build_context(agent_name)
 
-            # agent_start 持久化「发给模型的非历史输入」：静态 system_prompt + 动态 reminder。
-            # 历史可由 event 流确定性重放，这两块（尤其 reminder：现拼即丢、不入 event）补上后，
-            # admin 即可零重生成、忠实重建这一发的完整 prompt。reminder 不进 LLM 输入缓存前缀，
-            # 落进事件 payload 对 prompt cache 零影响。
+            # agent_start 持久化 messages 重建所需的非历史输入：静态 system_prompt +
+            # 动态 reminder，以及体积很小的 model 标识。历史可由 event 流确定性重放；
+            # native_tools 只属于本次内存调用，不重复写入事件/SSE。
             await _emit(StreamEventType.AGENT_START.value, agent_name, {
                 "agent": agent_name,
                 "system_prompt": messages[0]["content"] if messages and messages[0].get("role") == "system" else None,
                 "reminder": reminder,
-                # Native tool schemas are a top-level model input, not part of
-                # messages. Persist the exact invocation snapshot so admin
-                # reconstruction never consults a later, drifted registry.
                 "model": agents[agent_name].model,
-                "tools": native_tools,
             })
 
             # 守卫:format_messages_for_debug 会遍历 messages,识图块列表里若有图(已压成
