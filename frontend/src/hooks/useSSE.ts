@@ -7,7 +7,7 @@ import { useArtifactStore } from '@/stores/artifactStore';
 import { useUIStore } from '@/stores/uiStore';
 import { connectSSE } from '@/lib/sse';
 import { StreamEventType } from '@/types/events';
-import type { SSEEvent, LLMCompleteData, ArtifactCreatedData, ArtifactUpdatedData } from '@/types/events';
+import type { SSEEvent, LLMCompleteData, ToolCallProgressData, ArtifactCreatedData, ArtifactUpdatedData } from '@/types/events';
 import * as api from '@/lib/api';
 import { refreshArtifactList } from '@/lib/refreshArtifactList';
 import { bumpArtifactFetchGen } from '@/lib/artifactFetchGen';
@@ -267,6 +267,22 @@ export function useSSE() {
             updateCurrentSegment({ reasoningContent: reasoning, isThinking: true });
           }
 
+          const rawToolProgress = data?.tool_call_progress;
+          if (Array.isArray(rawToolProgress)) {
+            updateCurrentSegment({
+              toolCallProgress: (rawToolProgress as ToolCallProgressData[]).map((progress) => ({
+                index: progress.index,
+                ...(progress.call_id ? { callId: progress.call_id } : {}),
+                ...(progress.name ? { toolName: progress.name } : {}),
+                argumentsChars: progress.arguments_chars,
+                status: 'generating' as const,
+              })),
+              // Native-call output follows reasoning semantically, just like
+              // ordinary content, so the thinking indicator is no longer live.
+              isThinking: false,
+            });
+          }
+
           const content = data?.content as string | undefined;
           if (content !== undefined) {
             // Auto-fold thinking when content starts arriving
@@ -292,6 +308,15 @@ export function useSSE() {
           updateCurrentSegment({
             ...(d.content !== undefined ? { content: d.content } : {}),
             isThinking: false,
+            // The accepted envelope is authoritative.  Keep calls visible as
+            // queued until their serial TOOL_START replaces each draft card.
+            toolCallProgress: (d.tool_calls ?? []).map((call, index) => ({
+              index,
+              callId: call.id,
+              toolName: call.function.name,
+              argumentsChars: call.function.arguments.length,
+              status: 'queued' as const,
+            })),
             // Backfill reasoning when the provider only delivers it on the
             // final event (no llm_chunk reasoning_content stream). Without
             // this, live shows blank reasoning while replay can — same gap

@@ -35,6 +35,7 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
           reasoningContent: '',
           isThinking: false,
           toolCalls: [],
+          toolCallProgress: [],
           content: '',
         });
         break;

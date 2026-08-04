@@ -414,9 +414,28 @@ class TestReplay:
             "agent": "research_agent",
             "data": {"content": "subagent snapshot"},
         })
+        await sm.push_event("msg-1", {
+            "type": "llm_chunk",
+            "agent": "lead_agent",
+            "data": {"tool_call_progress": [{
+                "index": 0,
+                "name": "update_",
+                "arguments_chars": 100,
+            }]},
+        })
+        await sm.push_event("msg-1", {
+            "type": "llm_chunk",
+            "agent": "lead_agent",
+            "data": {"tool_call_progress": [{
+                "index": 0,
+                "call_id": "call_1",
+                "name": "update_artifact",
+                "arguments_chars": 50000,
+            }]},
+        })
 
         retained = list(ctx.history.values())
-        assert len(retained) == 3
+        assert len(retained) == 4
         assert sum(
             len(value)
             for event in retained
@@ -430,9 +449,21 @@ class TestReplay:
             "llm_chunk",
             "llm_chunk",
             "llm_chunk",
+            "llm_chunk",
             "complete",
         ]
         assert events[0]["data"]["content"] == final_content
+        progress = [
+            event["data"]["tool_call_progress"]
+            for event in events
+            if "tool_call_progress" in event.get("data", {})
+        ]
+        assert progress == [[{
+            "index": 0,
+            "call_id": "call_1",
+            "name": "update_artifact",
+            "arguments_chars": 50000,
+        }]]
 
     async def test_resume_from_replaced_snapshot_id_gets_newer_snapshot(self):
         """Deleting an old snapshot keeps Last-Event-ID continuity by ID order."""

@@ -277,6 +277,8 @@ async def astream_with_retry(
         dict: chunk 字典
             - {"type": "reasoning", "content": "..."} - 推理内容片段
             - {"type": "content", "content": "..."} - 回答内容片段
+            - {"type": "tool_call_progress", "tool_call_progress": [...]} -
+              函数调用的轻量累计进度（不含未完整 arguments）
             - {"type": "usage", "token_usage": {...}} - Token 使用统计
             - {"type": "final", "content": "...", "reasoning_content": "..."} - 完整响应
     """
@@ -330,6 +332,10 @@ async def astream_with_retry(
                 tool_call_deltas = getattr(delta, "tool_calls", None) or []
                 if tool_call_deltas:
                     assembler.add_many(tool_call_deltas)
+                    yield {
+                        "type": "tool_call_progress",
+                        "tool_call_progress": assembler.progress_snapshot(),
+                    }
 
             tool_calls = assembler.accept(finish_reasons)
 

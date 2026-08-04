@@ -520,6 +520,14 @@ async def execute_loop(
                         "reasoning_content": reasoning_content,
                     }, sse_only=True)
 
+                elif chunk_type == "tool_call_progress":
+                    # UI-only liveness snapshot.  Partial native arguments are
+                    # deliberately not exposed or parsed; only accept()'s full
+                    # envelope below is allowed to reach execution/history.
+                    await _emit(StreamEventType.LLM_CHUNK.value, agent_name, {
+                        "tool_call_progress": chunk["tool_call_progress"],
+                    }, sse_only=True)
+
                 elif chunk_type == "usage":
                     token_usage = chunk["token_usage"]
 

@@ -59,6 +59,16 @@ export interface AgentStartData {
 export interface LLMChunkData {
   content?: string;
   reasoning_content?: string;
+  /** Cumulative, display-only progress for streamed native tool calls.
+   *  Partial arguments are intentionally represented only by their length. */
+  tool_call_progress?: ToolCallProgressData[];
+}
+
+export interface ToolCallProgressData {
+  index: number;
+  call_id?: string;
+  name?: string;
+  arguments_chars: number;
 }
 
 export interface NativeToolCall {

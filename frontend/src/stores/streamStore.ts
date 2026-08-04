@@ -20,6 +20,15 @@ export interface ToolCallInfo {
   permission?: { approved: boolean; reason?: string };
 }
 
+/** Transient native-call output that has not reached TOOL_START yet. */
+export interface ToolCallProgressInfo {
+  index: number;
+  callId?: string;
+  toolName?: string;
+  argumentsChars: number;
+  status: 'generating' | 'queued';
+}
+
 export interface PermissionRequest {
   toolName: string;
   params: Record<string, unknown>;
@@ -115,6 +124,8 @@ export interface ExecutionSegment {
   reasoningContent: string;
   isThinking: boolean;
   toolCalls: ToolCallInfo[];
+  /** SSE-only; never reconstructed or cached as execution history. */
+  toolCallProgress: ToolCallProgressInfo[];
   content: string;
   tokenUsage?: TokenUsage;
   model?: string;
@@ -361,6 +372,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
             reasoningContent: '',
             isThinking: false,
             toolCalls: [],
+            toolCallProgress: [],
             content: '',
           },
         ],
@@ -404,7 +416,16 @@ export const useStreamStore = create<StreamState>((set, get) => {
         }
         const target = segs[idx];
         const newSegs = [...segs];
-        newSegs[idx] = { ...target, toolCalls: [...target.toolCalls, tc] };
+        newSegs[idx] = {
+          ...target,
+          toolCalls: [...target.toolCalls, tc],
+          // LLM_COMPLETE promotes every accepted draft to queued; the native
+          // call id then lets TOOL_START atomically replace exactly one draft
+          // even when the response contains several serial tool calls.
+          toolCallProgress: (target.toolCallProgress ?? []).filter(
+            (progress) => progress.callId !== tc.id
+          ),
+        };
         return { segments: newSegs };
       }),
 
@@ -478,7 +499,12 @@ export const useStreamStore = create<StreamState>((set, get) => {
       const segsToSnapshot = state.segments
         .filter((seg) => seg.toolCalls.length > 0 || seg.reasoningContent)
         // Execution is done — mark any remaining 'running' segments as 'complete'
-        .map((seg) => seg.status === 'running' ? { ...seg, status: 'complete' as const } : seg);
+        // and discard UI-only native-call drafts even on an abnormal transport exit.
+        .map((seg) => ({
+          ...seg,
+          status: seg.status === 'running' ? 'complete' as const : seg.status,
+          toolCallProgress: [],
+        }));
       if (segsToSnapshot.length > 0) {
         const newMap = new Map(state.completedSegments);
         // Deep copy to prevent stale references

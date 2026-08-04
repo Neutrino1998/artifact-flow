@@ -31,12 +31,13 @@ _TERMINAL_EVENTS = ("complete", "cancelled", "timed_out", "error")
 def replay_snapshot_key(event: Dict[str, Any]) -> Optional[str]:
     """Return the replaceable replay slot for a cumulative ``llm_chunk``.
 
-    The engine deliberately emits cumulative content so a consumer can render
-    any snapshot without applying deltas.  Keeping every cumulative snapshot in
-    replay history would amplify one response quadratically, however.  Live
-    observers are woken for every coalesced push; a slow observer may skip a
-    stale intermediate snapshot, whose content is subsumed by the next one.
-    Only the retained replay copy is replaced per agent and channel.
+    The engine deliberately emits cumulative content, reasoning, and tool-call
+    progress so a consumer can render any snapshot without applying deltas.
+    Keeping every cumulative snapshot in replay history would amplify one
+    response quadratically, however.  Live observers are woken for every
+    coalesced push; a slow observer may skip a stale intermediate snapshot,
+    whose state is subsumed by the next one.  Only the retained replay copy is
+    replaced per agent and channel.
     """
     if event.get("type") != "llm_chunk":
         return None
@@ -44,7 +45,9 @@ def replay_snapshot_key(event: Dict[str, Any]) -> Optional[str]:
     data = event.get("data")
     if not isinstance(data, dict):
         return None
-    if "reasoning_content" in data:
+    if "tool_call_progress" in data:
+        channel = "tool_call_progress"
+    elif "reasoning_content" in data:
         channel = "reasoning_content"
     elif "content" in data:
         channel = "content"

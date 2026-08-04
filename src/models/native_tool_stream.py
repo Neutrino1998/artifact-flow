@@ -104,6 +104,28 @@ class NativeToolCallAssembler:
             )
             partial.add(delta)
 
+    def progress_snapshot(self) -> list[dict[str, Any]]:
+        """Return a small cumulative UI snapshot without exposing partial JSON.
+
+        Streamed ``function.arguments`` is append-only but usually invalid JSON
+        until the provider sends its terminal chunk.  The execution path must
+        therefore continue to use :meth:`accept`; this snapshot is only a
+        liveness signal for SSE observers while a large call is being built.
+        """
+        snapshots: list[dict[str, Any]] = []
+        for index in sorted(self._calls):
+            partial = self._calls[index]
+            item: dict[str, Any] = {
+                "index": index,
+                "arguments_chars": len(partial.arguments),
+            }
+            if partial.call_id:
+                item["call_id"] = partial.call_id
+            if partial.name:
+                item["name"] = partial.name
+            snapshots.append(item)
+        return snapshots
+
     def accept(self, finish_reasons: Iterable[str]) -> list[dict[str, Any]]:
         reasons = list(finish_reasons)
         if not self.saw_delta:

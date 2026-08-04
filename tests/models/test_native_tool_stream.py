@@ -62,6 +62,50 @@ def test_appends_nested_json_fragments_without_content_based_deduplication():
     assert "index" not in call
 
 
+def test_progress_snapshot_is_sorted_cumulative_and_omits_partial_arguments():
+    assembler = NativeToolCallAssembler()
+    assembler.add_many([
+        _delta(1, call_id="call_b", name="sea", arguments='{"q":'),
+        _delta(0, call_id="call_a", name="read_", arguments='{"id":"'),
+    ])
+
+    first = assembler.progress_snapshot()
+    assert first == [
+        {
+            "index": 0,
+            "call_id": "call_a",
+            "name": "read_",
+            "arguments_chars": 7,
+        },
+        {
+            "index": 1,
+            "call_id": "call_b",
+            "name": "sea",
+            "arguments_chars": 5,
+        },
+    ]
+    assert all("arguments" not in item for item in first)
+
+    assembler.add_many([
+        _delta(0, name="artifact", arguments='a1"}'),
+        _delta(1, name="rch", arguments='"x"}'),
+    ])
+    assert assembler.progress_snapshot() == [
+        {
+            "index": 0,
+            "call_id": "call_a",
+            "name": "read_artifact",
+            "arguments_chars": 11,
+        },
+        {
+            "index": 1,
+            "call_id": "call_b",
+            "name": "search",
+            "arguments_chars": 9,
+        },
+    ]
+
+
 @pytest.mark.parametrize("reasons", [[], ["length"], ["content_filter"]])
 def test_rejects_unaccepted_or_missing_terminal_reason(reasons):
     assembler = NativeToolCallAssembler()
@@ -148,6 +192,27 @@ async def test_llm_adapter_sends_schemas_and_emits_only_accepted_wire_calls(monk
     ]
 
     assert captured["tools"] == schemas
+    progress = [item for item in chunks if item["type"] == "tool_call_progress"]
+    assert progress == [
+        {
+            "type": "tool_call_progress",
+            "tool_call_progress": [{
+                "index": 0,
+                "call_id": "call_7",
+                "name": "look",
+                "arguments_chars": 5,
+            }],
+        },
+        {
+            "type": "tool_call_progress",
+            "tool_call_progress": [{
+                "index": 0,
+                "call_id": "call_7",
+                "name": "lookup",
+                "arguments_chars": 9,
+            }],
+        },
+    ]
     final = chunks[-1]
     assert final["type"] == "final"
     assert final["reasoning_content"] == "checking"

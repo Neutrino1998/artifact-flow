@@ -20,6 +20,7 @@ function seg(id: string, overrides: Partial<ExecutionSegment> = {}): ExecutionSe
     reasoningContent: '',
     isThinking: false,
     toolCalls: [],
+    toolCallProgress: [],
     content: '',
     ...overrides,
   };
@@ -245,6 +246,28 @@ describe('streamStore actions', () => {
     });
   });
 
+  describe('tool-call progress transition', () => {
+    test('TOOL_START replacement removes only the matching queued draft', () => {
+      useStreamStore.setState({
+        segments: [seg('s1', {
+          agent: 'lead',
+          toolCallProgress: [
+            { index: 0, callId: 'call-a', toolName: 'a', argumentsChars: 2, status: 'queued' },
+            { index: 1, callId: 'call-b', toolName: 'b', argumentsChars: 4, status: 'queued' },
+          ],
+        })],
+      });
+
+      useStreamStore.getState().addToolCallToSegment({
+        id: 'call-a', toolName: 'a', params: {}, agent: 'lead', status: 'running',
+      });
+
+      const segment = useStreamStore.getState().segments[0];
+      expect(segment.toolCalls.map((call) => call.id)).toEqual(['call-a']);
+      expect(segment.toolCallProgress.map((progress) => progress.callId)).toEqual(['call-b']);
+    });
+  });
+
   describe('snapshotSegments', () => {
     test('filters segments without toolCalls or reasoning, forces running→complete', () => {
       const segs: ExecutionSegment[] = [
@@ -278,6 +301,26 @@ describe('streamStore actions', () => {
 
       const blockSnap = useStreamStore.getState().completedNonAgentBlocks.get('msg-2');
       expect(blockSnap).toEqual(blocks);
+    });
+
+    test('does not cache SSE-only tool-call progress', () => {
+      useStreamStore.setState({
+        segments: [seg('s1', {
+          reasoningContent: 'thinking',
+          toolCallProgress: [{
+            index: 0,
+            callId: 'call-draft',
+            toolName: 'draft',
+            argumentsChars: 99,
+            status: 'generating',
+          }],
+        })],
+      });
+
+      useStreamStore.getState().snapshotSegments('msg-progress');
+
+      const snap = useStreamStore.getState().completedSegments.get('msg-progress');
+      expect(snap?.[0].toolCallProgress).toEqual([]);
     });
 
     test('no segments to snapshot → completedSegments unchanged', () => {

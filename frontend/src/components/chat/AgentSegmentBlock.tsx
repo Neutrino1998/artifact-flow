@@ -8,6 +8,11 @@ import { PillBadge } from '@/components/ui/PillBadge';
 import ThinkingBlock from './ThinkingBlock';
 import ToolCallCard from './ToolCallCard';
 
+function formatArgumentChars(count: number): string {
+  if (count < 1000) return `${count}`;
+  return `${(count / 1000).toFixed(1)}k`;
+}
+
 interface AgentSegmentBlockProps {
   segment: ExecutionSegment;
   isActive: boolean;       // true = currently executing segment (last + isStreaming)
@@ -19,7 +24,12 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
   const [expanded, setExpanded] = useState(defaultExpanded);
 
   const isExpanded = isActive || expanded;
-  const hasBody = !!(segment.reasoningContent || segment.toolCalls.length > 0 || segment.content);
+  const hasBody = !!(
+    segment.reasoningContent
+    || segment.toolCalls.length > 0
+    || segment.toolCallProgress.length > 0
+    || segment.content
+  );
 
   return (
     <div className="bg-chat dark:bg-chat-dark border border-border dark:border-border-dark rounded-card overflow-hidden">
@@ -80,7 +90,10 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
         <div className="px-3 pb-3 space-y-3">
           {/* Thinking block */}
           {segment.reasoningContent && (() => {
-            const isThinkingLive = isActive && !segment.content && segment.toolCalls.length === 0;
+            const isThinkingLive = isActive
+              && !segment.content
+              && segment.toolCalls.length === 0
+              && segment.toolCallProgress.length === 0;
             return (
               <ThinkingBlock
                 content={segment.reasoningContent}
@@ -101,6 +114,24 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
           {/* Tool calls */}
           {segment.toolCalls.map((tc) => (
             <ToolCallCard key={tc.id} toolCall={tc} />
+          ))}
+
+          {/* Native tool-call arguments may take a long time to stream.  Show a
+              bounded liveness row; never render the incomplete JSON itself. */}
+          {segment.toolCallProgress.map((progress) => (
+            <div
+              key={progress.callId ?? progress.index}
+              className="flex items-center gap-2 pl-1 text-xs text-text-secondary dark:text-text-secondary-dark"
+            >
+              <span className="w-2 h-2 rounded-full bg-accent animate-pulse flex-shrink-0" />
+              <span>{progress.status === 'generating' ? 'Preparing' : 'Waiting to run'}</span>
+              <code className="font-mono text-text-primary dark:text-text-primary-dark">
+                {progress.toolName || 'tool call'}
+              </code>
+              <span className="text-text-tertiary dark:text-text-tertiary-dark font-mono">
+                · {formatArgumentChars(progress.argumentsChars)} chars
+              </span>
+            </div>
           ))}
 
         </div>

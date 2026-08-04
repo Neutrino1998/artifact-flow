@@ -228,7 +228,8 @@ async def run_and_push(
     """
     stream_closed = False
     # llm_chunk coalescing: 保留最新快照，定时 flush（80ms）
-    pending_chunks: dict[str, dict] = {}  # "content" | "reasoning_content" → latest event
+    pending_chunks: dict[str, dict] = {}
+    # channel (content | reasoning_content | tool_call_progress) → latest event
     last_flush_time = 0.0
 
     async def flush_pending():
@@ -253,7 +254,12 @@ async def run_and_push(
 
             if event.get("type") == "llm_chunk":
                 data = event.get("data", {})
-                chunk_key = "reasoning_content" if "reasoning_content" in data else "content"
+                if "tool_call_progress" in data:
+                    chunk_key = "tool_call_progress"
+                elif "reasoning_content" in data:
+                    chunk_key = "reasoning_content"
+                else:
+                    chunk_key = "content"
                 pending_chunks[chunk_key] = event
                 now = asyncio.get_event_loop().time()
                 if now - last_flush_time >= 0.08:

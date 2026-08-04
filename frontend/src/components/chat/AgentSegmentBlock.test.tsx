@@ -30,6 +30,7 @@ describe('AgentSegmentBlock', () => {
       reasoningContent: '',
       isThinking: false,
       content,
+      toolCallProgress: [],
       toolCalls: [{
         id: 'call-bash',
         toolName: 'bash',
@@ -51,5 +52,39 @@ describe('AgentSegmentBlock', () => {
 
     expect(container.textContent?.split(content)).toHaveLength(2);
     expect(container.textContent).toContain('bash');
+  });
+
+  test('renders bounded tool-call generation progress without partial arguments', async () => {
+    const segment: ExecutionSegment = {
+      id: 'lead-progress',
+      agent: 'lead_agent',
+      status: 'running',
+      reasoningContent: '',
+      isThinking: false,
+      content: '',
+      toolCalls: [],
+      toolCallProgress: [{
+        index: 0,
+        callId: 'call-update',
+        toolName: 'update_artifact',
+        argumentsChars: 18432,
+        status: 'generating',
+      }],
+    };
+
+    await act(async () => {
+      root.render(
+        <AgentSegmentBlock
+          segment={segment}
+          isActive
+          defaultExpanded
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('Preparing');
+    expect(container.textContent).toContain('update_artifact');
+    expect(container.textContent).toContain('18.4k chars');
+    expect(container.textContent).not.toContain('{');
   });
 });
