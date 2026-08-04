@@ -1,8 +1,10 @@
 """
 PR2a — controller post-processing skip-on-delete tests.
 
-Covers the scenario where the conversation row is deleted (DELETE /chat/{id}
-or PR2b CASCADE from hard-delete user) while the engine is still running.
+Covers the defensive scenario where the conversation row is deleted by an
+admin hard-delete CASCADE or an out-of-band writer while the engine is running.
+The user-facing conversation DELETE now serializes with execution through the
+conversation lease, but this lower-layer guard remains necessary.
 Expected behavior: post-processing detects the deletion and skips all
 persistence phases instead of raising FK errors that get logged as scary
 ERROR terminal events.
@@ -20,6 +22,7 @@ from sqlalchemy.exc import IntegrityError
 from core.controller import ExecutionController
 from core.engine import EngineHooks
 from core.events import StreamEventType
+from repositories.base import NotFoundError
 
 
 # ============================================================
@@ -133,6 +136,56 @@ class TestMetadataPreview:
         assert metadata["data"]["user_input"] == "review this"
         assert metadata["data"]["uploaded_files"] == [{"filename": "Brief.docx"}]
         assert "content" not in metadata["data"]["uploaded_files"][0]
+
+
+class TestSetupNoResurrection:
+
+    async def test_missing_conversation_aborts_before_setup(self):
+        """A queued turn must not recreate a conversation deleted before it starts."""
+        cm = _make_mock_conversation_manager()
+        cm.ensure_conversation_exists.side_effect = NotFoundError(
+            "Conversation", "conv-test"
+        )
+        ctrl = _make_controller(cm, _make_mock_event_repo(), _make_mock_artifact_service())
+
+        execute = AsyncMock()
+        with patch("core.controller.execute_loop", execute):
+            events = await _consume(ctrl.stream_execute(
+                user_input="hi",
+                conversation_id="conv-test",
+                parent_message_id=None,
+                message_id="msg-test",
+            ))
+
+        assert events == []
+        cm.ensure_conversation_exists.assert_awaited_once_with(
+            "conv-test", create_if_missing=False
+        )
+        cm.add_message_async.assert_not_awaited()
+        execute.assert_not_awaited()
+
+    async def test_delete_between_setup_and_message_insert_aborts(self):
+        """The second write boundary also fails closed on a concurrent DELETE."""
+        cm = _make_mock_conversation_manager()
+        cm.add_message_async.side_effect = NotFoundError(
+            "Conversation", "conv-test"
+        )
+        ctrl = _make_controller(cm, _make_mock_event_repo(), _make_mock_artifact_service())
+
+        execute = AsyncMock()
+        with patch("core.controller.execute_loop", execute):
+            events = await _consume(ctrl.stream_execute(
+                user_input="hi",
+                conversation_id="conv-test",
+                parent_message_id=None,
+                message_id="msg-test",
+            ))
+
+        assert [event["type"] for event in events] == [StreamEventType.METADATA.value]
+        assert cm.add_message_async.await_args.kwargs[
+            "create_conversation_if_missing"
+        ] is False
+        execute.assert_not_awaited()
 
 
 class TestPostProcessingSkipOnDelete:

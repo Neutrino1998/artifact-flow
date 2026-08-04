@@ -231,8 +231,8 @@ export interface paths {
          * @description 批量删除对话（用户视角，仅删自己的）
          *
          *     Best-effort 范围：cross-user / 不存在的 id 走 `failed.reason="not_found"`，
-         *     遵循 "404 not 403" 安全策略避免泄漏会话存在。引擎正在执行的会话同样直接
-         *     DELETE — 引擎 post-processing 在 PR2a 里 fail-soft 兜底。
+         *     遵循 "404 not 403" 安全策略避免泄漏会话存在。持有 execution lease
+         *     （含 QUEUED / RUNNING）的会话走 `failed.reason="active_execution"`，不删除。
          *
          *     单行 FK 违规这条路径不存在，因此不需要 IntegrityError + rollback：所有指向
          *     `conversations.id` 的外键（Message / ArtifactSession）都是 ondelete=CASCADE，
@@ -2064,7 +2064,7 @@ export interface components {
             id: string;
             /**
              * Reason
-             * @description Failure reason: 'not_found'
+             * @description Failure reason: 'not_found' or 'active_execution'
              */
             reason: string;
         };

@@ -479,12 +479,43 @@ async def delete_conversation(
     conv_id: str,
     current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
+    runner: ExecutionRunner = Depends(get_execution_runner),
 ):
     """删除对话"""
     try:
         await _verify_ownership(conv_id, current_user, conversation_manager)
 
-        success = await conversation_manager.delete_conversation(conv_id)
+        # Use the execution lease as the delete mutex, not a read-then-delete
+        # check. Otherwise a concurrent send can acquire the lease between the
+        # check and DELETE, leaving a live engine whose conversation disappears.
+        delete_lease_owner = f"delete:{conv_id}"
+        active_message_id = await runner.store.try_acquire_lease(
+            conv_id, delete_lease_owner
+        )
+        if active_message_id:
+            logger.warning(
+                "Conversation delete rejected (409): active execution "
+                f"(conv={conv_id}, msg={active_message_id})"
+            )
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Conversation has an active execution. Wait for it to finish, "
+                    "or cancel it once running, before deleting."
+                ),
+            )
+
+        try:
+            success = await conversation_manager.delete_conversation(conv_id)
+        finally:
+            try:
+                await runner.store.release_lease(conv_id, delete_lease_owner)
+            except Exception:
+                # DELETE may already have committed. Do not turn a successful,
+                # irreversible delete into a misleading 5xx; the lease has a TTL.
+                logger.exception(
+                    f"Failed to release conversation delete lease (conv={conv_id})"
+                )
         if not success:
             raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
 
@@ -499,13 +530,14 @@ async def bulk_delete_conversations(
     request: BulkDeleteRequest,
     current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
+    runner: ExecutionRunner = Depends(get_execution_runner),
 ):
     """
     批量删除对话（用户视角，仅删自己的）
 
     Best-effort 范围：cross-user / 不存在的 id 走 `failed.reason="not_found"`，
-    遵循 "404 not 403" 安全策略避免泄漏会话存在。引擎正在执行的会话同样直接
-    DELETE — 引擎 post-processing 在 PR2a 里 fail-soft 兜底。
+    遵循 "404 not 403" 安全策略避免泄漏会话存在。持有 execution lease
+    （含 QUEUED / RUNNING）的会话走 `failed.reason="active_execution"`，不删除。
 
     单行 FK 违规这条路径不存在，因此不需要 IntegrityError + rollback：所有指向
     `conversations.id` 的外键（Message / ArtifactSession）都是 ondelete=CASCADE，
@@ -532,7 +564,29 @@ async def bulk_delete_conversations(
                 failed.append(BulkDeleteFailedItem(id=conv_id, reason="not_found"))
                 continue
 
-            success = await conversation_manager.delete_conversation(conv_id)
+            delete_lease_owner = f"delete:{conv_id}"
+            active_message_id = await runner.store.try_acquire_lease(
+                conv_id, delete_lease_owner
+            )
+            if active_message_id:
+                logger.warning(
+                    "Bulk conversation delete skipped active execution "
+                    f"(conv={conv_id}, msg={active_message_id})"
+                )
+                failed.append(
+                    BulkDeleteFailedItem(id=conv_id, reason="active_execution")
+                )
+                continue
+
+            try:
+                success = await conversation_manager.delete_conversation(conv_id)
+            finally:
+                try:
+                    await runner.store.release_lease(conv_id, delete_lease_owner)
+                except Exception:
+                    logger.exception(
+                        f"Failed to release conversation delete lease (conv={conv_id})"
+                    )
             if success:
                 deleted.append(conv_id)
             else:

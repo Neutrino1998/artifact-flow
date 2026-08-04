@@ -207,7 +207,9 @@ class ConversationDetailResponse(BaseModel):
 class BulkDeleteFailedItem(BaseModel):
     """One failed item in BulkDeleteResponse.failed."""
     id: str = Field(..., description="Conversation ID that failed to delete")
-    reason: str = Field(..., description="Failure reason: 'not_found'")
+    reason: str = Field(
+        ..., description="Failure reason: 'not_found' or 'active_execution'"
+    )
 
 
 class BulkDeleteResponse(BaseModel):

@@ -38,6 +38,9 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onDelete: (id: string) => void | Promise<void>;
+  // Backend lease remains authoritative; this mirrors the active hint so the
+  // common path does not offer an action that will be rejected with 409.
+  deleteDisabled?: boolean;
   // kebab 在行内的绝对定位(两处 right-2 / right-3 不同,由父级传入)。
   wrapperClassName: string;
   // 触发器样式:两处所在表面不同(侧栏 accent 底 / 面板底),各传各的;
@@ -57,6 +60,7 @@ export default function ConversationActionsMenu({
   open,
   onOpenChange,
   onDelete,
+  deleteDisabled = false,
   wrapperClassName,
   triggerClassName = `${BUTTON_GHOST_ICON} p-1.5`,
 }: Props) {
@@ -193,10 +197,17 @@ export default function ConversationActionsMenu({
           <button
             onClick={(e) => {
               e.stopPropagation();
+              if (deleteDisabled) return;
               onOpenChange(false);
               setConfirmDelete(true);
             }}
-            className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-sm font-medium text-status-error rounded-md ${MENU_ROW_DANGER_HOVER}`}
+            disabled={deleteDisabled}
+            title={deleteDisabled ? '任务运行中，完成或取消后才能删除' : undefined}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-sm font-medium text-status-error rounded-md ${
+              deleteDisabled
+                ? 'opacity-40 cursor-not-allowed'
+                : MENU_ROW_DANGER_HOVER
+            }`}
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6" />

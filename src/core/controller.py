@@ -635,8 +635,9 @@ class ExecutionController:
                 await self._on_engine_exit(conversation_id, message_id)
 
             # Layer 1: 早判 conversation 是否仍存在。
-            # 删除路径不抢 lease，conv 行可能在 engine 跑完前消失（DELETE /chat/{id}
-            # 或硬删用户触发的 CASCADE）。早返回跳过后续三段写库，避免撞 FK。
+            # 用户会话 DELETE 已用 execution lease 互斥，但管理员硬删用户的
+            # CASCADE / 库外删除仍可以让 conv 行在 engine 跑完前消失。早返回
+            # 跳过后续三段写库，避免撞 FK。
             try:
                 pp.conv_alive = await self._with_db_retry(
                     lambda cm, er: cm.exists_async(conversation_id)

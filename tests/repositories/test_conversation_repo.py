@@ -508,6 +508,25 @@ class TestRetryIdempotency:
         assert conv is not None
         assert conv.title == "Untitled"
 
+    async def test_add_message_can_require_existing_conversation(
+        self, conversation_repo: ConversationRepository
+    ):
+        """Execution callers can fail closed instead of resurrecting a deleted row."""
+        from core.conversation_manager import ConversationManager
+
+        mgr = ConversationManager(conversation_repo)
+        conv_id = f"conv-{uuid.uuid4().hex}"
+
+        with pytest.raises(NotFoundError):
+            await mgr.add_message_async(
+                conv_id=conv_id,
+                message_id=f"msg-{uuid.uuid4().hex}",
+                user_input="hi",
+                create_conversation_if_missing=False,
+            )
+
+        assert await conversation_repo.get_conversation(conv_id) is None
+
     async def test_start_conversation_async_idempotent_on_same_id(
         self, conversation_repo: ConversationRepository, test_user: User
     ):

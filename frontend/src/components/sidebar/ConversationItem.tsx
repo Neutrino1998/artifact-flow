@@ -72,6 +72,7 @@ function ConversationItem({ conversation, isActive, onSelect }: ConversationItem
         open={menuOpen}
         onOpenChange={setMenuOpen}
         onDelete={handleDelete}
+        deleteDisabled={Boolean(conversation.active_message_id)}
         wrapperClassName="absolute right-2 top-1/2 -translate-y-1/2"
       />
     </div>
