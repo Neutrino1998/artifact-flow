@@ -96,14 +96,6 @@
   }
 }
 
-@layer components {
-  /* Streaming cursor */
-  .streaming-cursor::after {
-    content: '\25AE';
-    @apply text-accent animate-pulse ml-0.5;
-  }
-}
-
 /* Match newsprint theme: tighter line-height (1.5) */
 .prose :where(p, li, blockquote):not(:where([class~="not-prose"] *)) {
   line-height: 1.5;

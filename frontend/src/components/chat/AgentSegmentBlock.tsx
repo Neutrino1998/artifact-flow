@@ -25,7 +25,6 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
 
   const isExpanded = isActive || expanded;
   const isToolPhase = segment.toolCalls.length > 0 || segment.toolCallProgress.length > 0;
-  const showContentCursor = isActive && !isToolPhase;
   const hasBody = !!(
     segment.reasoningContent
     || segment.toolCalls.length > 0
@@ -107,7 +106,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
           {/* One segment is one native LLM invocation. Ordinary content may
               coexist with structured calls and is rendered exactly once. */}
           {segment.content && (
-            <MarkdownBlock className={`${PROSE_CLASSES} ${showContentCursor ? 'streaming-cursor' : ''}`}>
+            <MarkdownBlock className={PROSE_CLASSES}>
               {segment.content}
             </MarkdownBlock>
           )}
