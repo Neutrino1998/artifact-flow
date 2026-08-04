@@ -65,6 +65,8 @@ ArtifactFlow 会把 LiteLLM 上报的缓存命中量记录为 `cached_input_toke
 会话和管理员会话监控中用 `↻` 展示。vLLM 还必须以
 `--enable-prompt-tokens-details` 启动才会返回该明细；未开启或其他 provider 未上报时，
 界面不显示缓存数字（与明确上报的 `0` 个命中 token 区分）。
+当一个 turn 或管理员会话汇总中只有部分 LLM 调用上报该字段时，汇总值以 `≥`
+开头，表示这是已知下界；单次调用的缓存量仍按 provider 原值显示。
 
 Ollama：
 

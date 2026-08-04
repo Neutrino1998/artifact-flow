@@ -3,7 +3,7 @@
 import { memo, useState, useEffect } from 'react';
 import { MENU_ROW_HOVER } from '@/lib/styles';
 import CyclingDots from './CyclingDots';
-import { formatTokens } from '@/lib/formatTokens';
+import { formatCachedTokens, formatTokens } from '@/lib/formatTokens';
 import { formatDuration } from '@/lib/formatDuration';
 
 interface ProcessingFlowProps {
@@ -17,6 +17,8 @@ interface ProcessingFlowProps {
   totalTokens?: number | null;
   /** Provider-reported cached input tokens summed across calls. */
   cachedInputTokens?: number | null;
+  /** The cached-input sum is a lower bound because some calls did not report it. */
+  cachedInputTokensPartial?: boolean;
   /** When set, the header shows a queued state instead of Processing/Error/Completed.
    *  Value = upper-bound count of tasks ahead in the concurrency queue. Step count
    *  is hidden (it's always 0 in this state). */
@@ -24,7 +26,7 @@ interface ProcessingFlowProps {
   children: React.ReactNode;
 }
 
-function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, hasError, totalDurationMs, totalTokens, cachedInputTokens, queuedAhead, children }: ProcessingFlowProps) {
+function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, hasError, totalDurationMs, totalTokens, cachedInputTokens, cachedInputTokensPartial = false, queuedAhead, children }: ProcessingFlowProps) {
   const isQueued = queuedAhead != null;
   const [expanded, setExpanded] = useState(defaultExpanded);
 
@@ -91,10 +93,14 @@ function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, hasError, t
             {!isActive && totalTokens != null && totalTokens > 0 && (
               <span
                 className="font-mono"
-                title={cachedInputTokens != null ? '↻ cached input tokens' : undefined}
+                title={cachedInputTokens != null
+                  ? cachedInputTokensPartial
+                    ? '↻ cached input tokens (partial reporting; actual total may be higher)'
+                    : '↻ cached input tokens'
+                  : undefined}
               >
                 {formatTokens(totalTokens)} tokens
-                {cachedInputTokens != null ? ` (${formatTokens(cachedInputTokens)} ↻)` : ''}
+                {cachedInputTokens != null ? ` (${formatCachedTokens(cachedInputTokens, cachedInputTokensPartial)})` : ''}
                 {' · '}
               </span>
             )}

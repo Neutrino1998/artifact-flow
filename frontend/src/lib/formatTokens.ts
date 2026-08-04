@@ -11,6 +11,10 @@ export function formatTokens(n: number): string {
   return `${m < 10 ? m.toFixed(1) : Math.round(m)}M`;
 }
 
+export function formatCachedTokens(n: number, partial = false): string {
+  return `${partial ? '≥' : ''}${formatTokens(n)} ↻`;
+}
+
 type DisplayTokenUsage = {
   input_tokens: number;
   output_tokens: number;
@@ -21,7 +25,7 @@ type DisplayTokenUsage = {
 // input instead of presenting the three values as additive peers.
 export function formatTokenUsage(usage: DisplayTokenUsage): string {
   const cached = usage.cached_input_tokens != null
-    ? ` (${formatTokens(usage.cached_input_tokens)} ↻)`
+    ? ` (${formatCachedTokens(usage.cached_input_tokens)})`
     : '';
   return `${formatTokens(usage.input_tokens)} ↑${cached} · ${formatTokens(usage.output_tokens)} ↓`;
 }

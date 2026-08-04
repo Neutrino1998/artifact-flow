@@ -12,7 +12,7 @@ import * as api from '@/lib/api';
 import { isCsvMime } from '@/lib/artifactPreview';
 import { parseUtcIso } from '@/lib/time';
 import { formatDuration } from '@/lib/formatDuration';
-import { formatTokens } from '@/lib/formatTokens';
+import { formatCachedTokens, formatTokens } from '@/lib/formatTokens';
 import { triggerBlobDownload } from '@/lib/download';
 import ArtifactPreviewContent from '@/components/artifact/ArtifactPreviewContent';
 import PanelSearchBar from './PanelSearchBar';
@@ -154,6 +154,13 @@ function eventSummary(event: AdminEventItem): string {
     default:
       return '';
   }
+}
+
+export function formatLlmTokenUsage(tokens: Record<string, number>): string {
+  const cached = tokens.cached_input_tokens != null
+    ? ` | cached: ${tokens.cached_input_tokens} ↻`
+    : '';
+  return `in: ${tokens.input_tokens ?? 0}${cached} | out: ${tokens.output_tokens ?? 0}`;
 }
 
 function formatTime(iso: string): string {
@@ -599,7 +606,10 @@ export default function ObservabilityPanel() {
                 <StatCard label="Events" value={String(eventsData.messages.reduce((n, m) => n + m.events.length, 0))} />
                 <StatCard label="Tokens In" value={formatNumber(stats.inputTokens)} />
                 {stats.cacheReportedCalls > 0 ? (
-                  <StatCard label="Cached In ↻" value={formatNumber(stats.cachedInputTokens)} />
+                  <StatCard
+                    label="Cached In ↻"
+                    value={`${stats.cacheReportedCalls < stats.llmCalls ? '≥' : ''}${formatNumber(stats.cachedInputTokens)}`}
+                  />
                 ) : null}
                 <StatCard label="Tokens Out" value={formatNumber(stats.outputTokens)} />
                 <StatCard label="LLM Calls" value={String(stats.llmCalls)} />
@@ -670,7 +680,7 @@ export default function ObservabilityPanel() {
   );
 }
 
-function serializeEventToText(event: AdminEventItem): string {
+export function serializeEventToText(event: AdminEventItem): string {
   const lines: string[] = [];
   const d = event.data;
   lines.push(`ID: ${event.id}`);
@@ -683,7 +693,7 @@ function serializeEventToText(event: AdminEventItem): string {
     lines.push(`耗时: ${d.duration_ms as number}ms`);
     if (d.token_usage != null) {
       const t = d.token_usage as Record<string, number>;
-      lines.push(`Tokens: in: ${t.input_tokens} | out: ${t.output_tokens}`);
+      lines.push(`Tokens: ${formatLlmTokenUsage(t)}`);
     }
     if (d.reasoning_content != null) lines.push(`\n--- Reasoning ---\n${d.reasoning_content as string}`);
     if (d.content != null) lines.push(`\n--- Response ---\n${d.content as string}`);
@@ -973,6 +983,7 @@ function MessageGroupView({
   const visibleEvents = issuesOnly ? group.events.filter(isIssueEvent) : group.events;
   const executionMetrics = group.execution_metrics as {
     total_duration_ms?: number | null;
+    cached_input_tokens_partial?: boolean;
     total_token_usage?: {
       total_tokens?: number | null;
       cached_input_tokens?: number | null;
@@ -981,6 +992,9 @@ function MessageGroupView({
   const totalDurationMs = executionMetrics?.total_duration_ms;
   const totalTokens = executionMetrics?.total_token_usage?.total_tokens;
   const cachedInputTokens = executionMetrics?.total_token_usage?.cached_input_tokens;
+  // Old persisted aggregates have no coverage bit, so treat them conservatively.
+  const cachedInputTokensPartial = cachedInputTokens != null
+    && executionMetrics?.cached_input_tokens_partial !== false;
 
   return (
     <div className="mb-3">
@@ -1025,10 +1039,14 @@ function MessageGroupView({
           {totalTokens != null && totalTokens > 0 ? (
             <span
               className="font-mono"
-              title={cachedInputTokens != null ? '↻ cached input tokens' : undefined}
+              title={cachedInputTokens != null
+                ? cachedInputTokensPartial
+                  ? '↻ cached input tokens (partial reporting; actual total may be higher)'
+                  : '↻ cached input tokens'
+                : undefined}
             >
               {formatTokens(totalTokens)} tokens
-              {cachedInputTokens != null ? ` (${formatTokens(cachedInputTokens)} ↻)` : ''}
+              {cachedInputTokens != null ? ` (${formatCachedTokens(cachedInputTokens, cachedInputTokensPartial)})` : ''}
               {' · '}
             </span>
           ) : null}
@@ -1131,7 +1149,7 @@ function EventDetail({
           {d.token_usage != null ? (
             <DetailRow
               label="Tokens"
-              value={`in: ${(d.token_usage as Record<string, number>).input_tokens} | out: ${(d.token_usage as Record<string, number>).output_tokens}`}
+              value={formatLlmTokenUsage(d.token_usage as Record<string, number>)}
             />
           ) : null}
           {d.reasoning_content != null ? (

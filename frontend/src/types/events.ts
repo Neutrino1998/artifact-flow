@@ -190,6 +190,8 @@ export interface ExecutionMetrics {
   completed_at?: string;
   total_duration_ms?: number;
   total_token_usage: TokenUsage;
+  /** True when the cached-input aggregate is a lower bound because some calls did not report it. */
+  cached_input_tokens_partial?: boolean;
   /** input tokens of the turn's last LLM call = context size carried into the
    *  next turn. Used by the composer's context-usage gauge (vs the compaction
    *  threshold). Optional: pre-existing records / partial turns may omit it. */

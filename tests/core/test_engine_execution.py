@@ -108,15 +108,27 @@ def _native_tool_call(tool_name: str, **params) -> list[dict]:
     }]
 
 
-def _tool_call_chunks(tool_calls, input_tokens: int = 10, output_tokens: int = 5):
+def _tool_call_chunks(
+    tool_calls,
+    input_tokens: int = 10,
+    output_tokens: int = 5,
+    cached_input_tokens: int | None = None,
+):
     """Build adapter chunks for an accepted native tool-call envelope."""
     if isinstance(tool_calls, str):
-        return _simple_llm_chunks(tool_calls, input_tokens, output_tokens)
+        return _simple_llm_chunks(
+            tool_calls,
+            input_tokens,
+            output_tokens,
+            cached_input_tokens,
+        )
     usage = {
         "prompt_tokens": input_tokens,
         "completion_tokens": output_tokens,
         "total_tokens": input_tokens + output_tokens,
     }
+    if cached_input_tokens is not None:
+        usage["cached_input_tokens"] = cached_input_tokens
     return [
         {"type": "usage", "token_usage": usage},
         {
@@ -1262,6 +1274,38 @@ class TestMetrics:
         assert total["output_tokens"] == 80
         assert total["total_tokens"] == 380
         assert total["cached_input_tokens"] == 120
+        assert result["execution_metrics"]["cached_input_tokens_partial"] is True
+
+    async def test_cached_token_aggregation_is_exact_when_all_calls_report(self):
+        """An explicit zero is a report, so full coverage stays exact."""
+        agent = _FakeAgentConfig(tools={"my_tool": "auto"})
+        tool = _FakeTool("my_tool")
+        xml = _native_tool_call("my_tool", query="test")
+
+        rounds = [
+            _tool_call_chunks(
+                xml,
+                input_tokens=100,
+                output_tokens=50,
+                cached_input_tokens=0,
+            ),
+            _simple_llm_chunks(
+                "Done",
+                input_tokens=200,
+                output_tokens=30,
+                cached_input_tokens=120,
+            ),
+        ]
+
+        result, _, store = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": agent},
+            tools={"my_tool": tool},
+        )
+
+        metrics = result["execution_metrics"]
+        assert metrics["total_token_usage"]["cached_input_tokens"] == 120
+        assert metrics["cached_input_tokens_partial"] is False
 
     async def test_per_turn_token_metrics(self):
         """first_input_tokens, last_output_tokens, last_input_tokens should be tracked for lead_agent."""

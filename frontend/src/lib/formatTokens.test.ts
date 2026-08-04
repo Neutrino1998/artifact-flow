@@ -1,5 +1,15 @@
 import { describe, expect, test } from 'vitest';
-import { formatTokenUsage } from './formatTokens';
+import { formatCachedTokens, formatTokenUsage } from './formatTokens';
+
+describe('formatCachedTokens', () => {
+  test('marks a partial aggregate as a lower bound', () => {
+    expect(formatCachedTokens(8_200, true)).toBe('≥8.2K ↻');
+  });
+
+  test('leaves a complete aggregate exact', () => {
+    expect(formatCachedTokens(8_200)).toBe('8.2K ↻');
+  });
+});
 
 describe('formatTokenUsage', () => {
   test('shows an explicitly reported zero cache hit', () => {

@@ -20,6 +20,7 @@ interface AssistantMessageProps {
   /** Persisted turn metrics from the message row; shape matches ExecutionMetrics in events.ts. */
   executionMetrics?: {
     total_duration_ms?: number | null;
+    cached_input_tokens_partial?: boolean;
     total_token_usage?: {
       total_tokens?: number | null;
       cached_input_tokens?: number | null;
@@ -87,6 +88,7 @@ function AssistantMessage({ content, messageId, executionMetrics }: AssistantMes
             totalDurationMs={executionMetrics?.total_duration_ms ?? null}
             totalTokens={executionMetrics?.total_token_usage?.total_tokens ?? null}
             cachedInputTokens={executionMetrics?.total_token_usage?.cached_input_tokens ?? null}
+            cachedInputTokensPartial={executionMetrics?.cached_input_tokens_partial !== false}
           >
             {flowItems.map((item) => {
               if (item.kind === 'agent') {

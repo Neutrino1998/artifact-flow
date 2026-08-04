@@ -79,6 +79,8 @@ class ExecutionMetrics(TypedDict):
     last_output_tokens: int
     last_input_tokens: int
     total_token_usage: TokenUsage
+    # True when at least one accumulated LLM call omitted cache-token details.
+    cached_input_tokens_partial: bool
 
 
 def create_initial_metrics() -> ExecutionMetrics:
@@ -90,6 +92,7 @@ def create_initial_metrics() -> ExecutionMetrics:
         "last_output_tokens": 0,
         "last_input_tokens": 0,
         "total_token_usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+        "cached_input_tokens_partial": False,
     }
 
 
@@ -113,6 +116,8 @@ def accumulate_token_usage(metrics: ExecutionMetrics, usage: dict) -> None:
                 total.get("cached_input_tokens", 0)
                 + usage["cached_input_tokens"]
             )
+        else:
+            metrics["cached_input_tokens_partial"] = True
 
 
 # ============================================================
