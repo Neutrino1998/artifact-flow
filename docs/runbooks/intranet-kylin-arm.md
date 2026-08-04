@@ -2,25 +2,38 @@
 
 This runbook records the current intranet deployment target facts for the
 Kylin ARM machines. It is the short operational view: what is already known,
-what must be checked again, and what must be true before production rollout.
+what must be checked again, and how routine v2 upgrades are performed.
 
 ## Target
 
 - Deployment target: two Kylin V10 SP3 ARM / Kunpeng hosts, 16c / 32G. One
   known hostname is `ai-agent-app`.
-- Role: sandbox-enabled ArtifactFlow app hosts, with later two-host HA
-  validation.
-- The single-host production install root is `/root/workspace/artifactflow`.
+- Role: sandbox-enabled ArtifactFlow app hosts in a two-host target topology.
+  Check each host's live status before a coordinated change; one successful
+  host upgrade does not prove the other host is current.
+- Each host's production install root is `/root/workspace/artifactflow`.
   Release transfer media stays outside it under
   `/root/workspace/releases/<version>`.
 - The old CentOS 7 host `bsyshealthyapc` is retired for this deployment. Do not
   apply its Docker, NTP, or network conclusions to these Kylin hosts unless
   re-verified on the Kylin machines.
 
-The production app host has an existing Fleet v1 deployment at that install
-root. When `deploy/.env` exists and `control/site.toml` does not, preserve the
-running target and use `site migrate-v1`; do not treat it as a fresh site or
-run `site init` over its credentials.
+## Current Operational Status
+
+- Production has completed the Fleet v1 to afctl v2 migration. The existing
+  site has a v2 `current` Release and routine upgrades use ARM64 app-only
+  bundles unless infrastructure images are intentionally being upgraded.
+- Release `2026.08.05-intranet.1` was successfully applied on 2026-08-05 as a
+  `linux/arm64` app-only update.
+- `/root/workspace/artifactflow/.artifactflow/state.json` is the current /
+  previous Release authority. Use `afctl status` for the live operator view;
+  this runbook's release history is an audit note, not a second state source.
+- `ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD` and
+  `ARTIFACTFLOW_RENDER_TOOL_EXAMPLES` have been removed from the production
+  `control/.env`. Do not reintroduce either obsolete setting.
+- Do not run `site init` or `site migrate-v1` on the existing production site.
+  Those commands are retained below only for a genuinely new or independently
+  discovered legacy host.
 
 ## Hard Facts
 
@@ -36,7 +49,8 @@ run `site init` over its credentials.
 - gVisor uses the userspace `systrap` platform here; it does not need `/dev/kvm`.
 - The arm smoke path verified `89.11(64K) -> 89.38.4k`, then `run-all.sh` passed.
 
-The production-host pre-migration probe also verified the durable target shape:
+Production commissioning and subsequent v2 deployments verified this durable
+target shape:
 
 - `aarch64` with `PAGE_SIZE=4096`
 - Docker Compose v2 and `runsc` registered in Docker
@@ -86,10 +100,10 @@ docker info | grep -i 'Docker Root Dir'   # expect /data/docker
 
 ## Build Media
 
-Build a normal application update for an already-provisioned ARM host. Every
-release includes the content-addressed Sandbox image; an app-only release
-reuses the runsc runtime and infrastructure images already installed on the
-host:
+Build routine production updates as app-only ARM bundles. Every release still
+includes the content-addressed Sandbox image; app-only reuses the runsc runtime
+and the exact infrastructure image references inherited from the current v2
+Release:
 
 ```bash
 ./scripts/release.sh <version> --platform linux/arm64 --app-only
@@ -99,8 +113,8 @@ app-only 构建不读取 Caddy、PostgreSQL 或 Redis 的上游标签；目标�
 Release 时从 current Release 继承已经加载的精确镜像引用。没有 current Release
 的新站点会拒绝 app-only，首包必须使用 `--with-infra`。
 
-For the first deployment, include the pinned Caddy, PostgreSQL, and Redis
-images:
+For a genuinely new site, or when intentionally upgrading Caddy, PostgreSQL,
+or Redis images, build with infrastructure:
 
 ```bash
 ./scripts/release.sh <version> --platform linux/arm64 --with-infra
@@ -129,31 +143,30 @@ step.
 
 ## Operator Paths and Retention
 
-Keep transport media, mutable operator workspaces, backups, and retired Fleet
-v1 files outside the install root:
+Keep transport media, mutable operator workspaces, and backups outside the
+install root:
 
 ```text
 /root/workspace/releases/<version>/
     extracted, immutable transport bundle used by that bundle's afctl
-/root/workspace/releases/legacy/<old>-before-<new>/
-    retired Fleet v1 files moved only after v2 acceptance
 /root/workspace/backups/pre-<version>/
-    pre-cutover backup material plus plan/apply/hotfix/rollback logs
+    pre-upgrade backup material plus plan/apply/rollback logs
 /root/workspace/hotfixes/<name>/
     editable workspace created by `afctl config checkout`
+/root/workspace/releases/legacy/
+    historical Fleet v1 migration material, not an active Release source
 ```
 
 The pre-release backup directory should be mode `0700` because it can contain
 the target-local environment and database dump. Retain at least:
 
 ```text
-v1-config.tar.gz
+state.before.json
 postgres.sql.gz
 containers.before.txt
 volumes.before.json
 plan.log
 apply.log
-config-hotfix.log
 rollback.log
 ```
 
@@ -162,16 +175,19 @@ The hotfix checkout is only an editable workspace. After a successful
 under `.artifactflow/hotfix-bundles/` and `.artifactflow/releases/`; do not
 edit either tree in place.
 
-Move the old top-level `config/`, `deploy/`, commissioning kits, and legacy
-`.artifactflow/current` only after `afctl status`, application smoke tests, and
-container-mount inspection all pass. Never move the whole `.artifactflow`
-directory: v2 `state.json` and immutable releases live there. Keep old images
-through the initial observation window; moving files to `legacy/` is
-recoverable, deleting images is not equivalent to a v2 rollback.
+Existing Fleet v1 archives may remain under `releases/legacy/`, but routine v2
+upgrades do not create a new `v1-config.tar.gz`. If old top-level `config/`,
+`deploy/`, commissioning kits, or legacy `.artifactflow/current` still exist,
+treat moving them as one-time housekeeping after confirming no active container
+mount references them. Never move the whole `.artifactflow` directory: v2
+`state.json`, immutable releases, and hotfix bundles live there. Deleting old
+images is not equivalent to a v2 rollback.
 
-## Host Preflight
+## Host Commissioning and Hardware Preflight
 
-Run these on each target host before deployment:
+Run the full hardware preflight for a new host, after kernel / Docker / storage
+changes, or when diagnosing a failed `doctor`. Routine app-only upgrades use
+the shorter v2 flow in the next section.
 
 ```bash
 uname -m                 # expect aarch64
@@ -209,7 +225,7 @@ sudo systemctl reload docker
 sudo ./smoke-test.sh
 ```
 
-## Site Initialization and Sandbox Configuration
+## Existing v2 Site and Routine Upgrade
 
 Keep transferred release bundles separate from target-local control state:
 
@@ -221,24 +237,19 @@ Keep transferred release bundles separate from target-local control state:
 /root/workspace/artifactflow/.artifactflow   # immutable releases and state.json
 ```
 
-Provision `/data/artifactflow/sandbox-scratch` as a dedicated mounted
-filesystem before initializing the site. `afctl` validates this mount but
-deliberately does not create a loop device, format storage, edit `/etc/fstab`,
-or install runsc.
-
-Initialize a fresh intranet target with the release's own controller:
+The existing production site already has a v2 current Release. Confirm that
+state before an upgrade with the stable controller:
 
 ```bash
-sudo /root/workspace/releases/<version>/afctl \
-  --root /root/workspace/artifactflow site init --preset intranet
+sudo /root/workspace/artifactflow/bin/afctl \
+  --root /root/workspace/artifactflow status
 ```
 
-For the existing Fleet v1 installation with
-`/root/workspace/artifactflow/deploy/.env`, use
-`site migrate-v1 --preset intranet --sandbox-runtime runsc` instead;
-initialization will refuse to overwrite the legacy credentials.
+`/data/artifactflow/sandbox-scratch` remains a dedicated mounted filesystem.
+`afctl` validates this mount but deliberately does not create a loop device,
+format storage, edit `/etc/fstab`, or install runsc.
 
-Keep the generated `control/site.toml` aligned with the host:
+Keep production `control/site.toml` aligned with the host:
 
 ```toml
 executor = "local"
@@ -249,8 +260,8 @@ scratch_root = "/data/artifactflow/sandbox-scratch"
 backend_replicas = 2
 ```
 
-Then place the static certificate under `control/certs/` and fill the internal
-model credentials generated in `control/.env`:
+Static certificates under `control/certs/` and internal model credentials in
+`control/.env` are target-local state. Preserve them across Releases:
 
 ```bash
 GPUSTACK_DEEPSEEK_API_KEY=
@@ -268,15 +279,14 @@ ARTIFACTFLOW_DATABASE_POOL_SIZE=5
 ARTIFACTFLOW_DATABASE_MAX_OVERFLOW=10
 ```
 
-Before applying this release to an existing target, remove the obsolete
-`ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD` line from `control/.env`; the setting
-no longer exists. If that file ever received a manual
-`ARTIFACTFLOW_RENDER_TOOL_EXAMPLES` override, remove it too: native function
-calls replaced the old XML tool examples. Do not replace the old threshold with
-a reserve override unless the deployment intentionally needs a non-default
-value. The service default reserve is 20K, so DeepSeek's 260K window triggers at
-240K and Qwen 27B's 128K window at 108K. Any future explicit reserve override
-lives in target-local `control/.env`, so afctl apply and rollback preserve it.
+Production `control/.env` has already been cleaned of the obsolete
+`ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD` and
+`ARTIFACTFLOW_RENDER_TOOL_EXAMPLES` settings. Do not reintroduce them. Native
+function calls replaced the old XML tool examples, and the service now derives
+the compaction trigger from each model's context window. The default reserve is
+20K, so DeepSeek's 260K window triggers at 240K and Qwen 27B's 128K window at
+108K. Any intentional future reserve override remains target-local in
+`control/.env`, so afctl apply and rollback preserve it.
 
 Validate the complete target state before applying the release:
 
@@ -291,6 +301,8 @@ sudo /root/workspace/releases/<version>/afctl --root /root/workspace/artifactflo
   apply /root/workspace/releases/<version>
 sudo install -m 0755 /root/workspace/releases/<version>/afctl \
   /root/workspace/artifactflow/bin/afctl
+sudo /root/workspace/artifactflow/bin/afctl \
+  --root /root/workspace/artifactflow status
 ```
 
 For a target-local config hotfix, bind the checkout to the current release and
@@ -316,6 +328,41 @@ strict `site.toml` runtime and scratch fields are the single source of truth.
 Production uses `runsc`; `runc` is only an explicit reduced-isolation choice
 for trusted development targets.
 
+## New Site and Historical Fleet v1 Migration
+
+This section is not part of routine production upgrades. Use it only for a
+genuinely new host or an independently discovered legacy installation.
+
+A new site has no current Release, so its first bundle must be built with
+`--with-infra`. Provision the dedicated scratch filesystem and other host
+prerequisites first, then initialize it with that bundle's controller:
+
+```bash
+sudo /root/workspace/releases/<version>/afctl \
+  --root /root/workspace/artifactflow site init --preset intranet
+```
+
+For a legacy host where `deploy/.env` exists and `control/site.toml` does not,
+preserve the running credentials and use the one-time migration path:
+
+```bash
+sudo /root/workspace/releases/<version>/afctl \
+  --root /root/workspace/artifactflow site migrate-v1 \
+  --preset intranet --sandbox-runtime runsc
+```
+
+Never run either command on the current production v2 site. After migration,
+run `site validate`, `doctor`, and `plan apply` before the first v2 Apply.
+
+## Release Acceptance History
+
+This table records operator acceptance, while `state.json` and `afctl status`
+remain authoritative for the live current / previous edge.
+
+| Date | Release | Bundle | Result | Notes |
+| --- | --- | --- | --- | --- |
+| 2026-08-05 | `2026.08.05-intranet.1` | `linux/arm64`, app-only | Success | Existing v2 site upgraded normally; obsolete environment variables had already been removed. Exact host scope and state generation were not captured in this record. |
+
 ## Previously Verified
 
 The 2026-06-12 ARM smoke on `ai-agent-app` verified:
@@ -340,25 +387,25 @@ introduced for the retired CentOS host because that machine conflicted with
 corporate `172.16/12` routes. Keep it for now, but treat it as inherited
 deployment-specific configuration rather than a proven Kylin requirement.
 
-Before the first production cutover on the Kylin hosts, confirm the selected
-Docker subnet does not overlap host routes, libvirt bridges, Kubernetes /
-Calico ranges, or corporate client/server ranges.
+The initial production cutover is complete. Recheck the selected Docker subnet
+against host routes, libvirt bridges, Kubernetes / Calico ranges, and corporate
+client/server ranges whenever host networking changes or a connectivity issue
+appears; do not assume the retired CentOS host's conflict applies unchanged.
 
-## Go / No-Go
+## Routine Upgrade Checklist
 
-- [ ] Both target hosts are the intended Kylin ARM machines, not the retired
-  CentOS 7 test host.
-- [ ] `uname -m` is `aarch64`.
-- [ ] `getconf PAGE_SIZE` is `4096`.
-- [ ] Docker and Compose are installed from the controlled offline package or
-  otherwise verified.
-- [ ] `docker info --format '{{.DockerRootDir}}'` returns `/data/docker`.
-- [ ] `runsc` is registered and `smoke-test.sh` passes.
-- [ ] A `/data` disk is mounted and has enough space for Docker, Postgres, and
-  sandbox scratch.
-- [ ] The release bundle is built with `--platform linux/arm64`.
-- [ ] `/data/artifactflow/sandbox-scratch` is a dedicated mounted filesystem
-      and matches `control/site.toml` exactly.
-- [ ] The fixed Docker subnet has been checked against this host's actual
-      routing table.
-- [ ] `site validate`, `doctor`, and `plan apply` pass before `apply`.
+- [ ] Confirm the intended host set and record `afctl status` from each host in
+      scope; do not infer two-host convergence from one successful Apply.
+- [ ] Verify the transport checksum and manifest platform `linux/arm64`.
+- [ ] Create the pre-upgrade database / state backup and retain the plan/apply
+      logs under `backups/pre-<version>/`.
+- [ ] Run `site validate`, `doctor`, and `plan apply` with the new bundle's
+      `afctl`; stop on any failure.
+- [ ] Apply the Release, install its `afctl` as the stable controller, and run
+      `afctl status` again.
+- [ ] Verify the expected Backend replicas are healthy, then exercise login, a
+      minimal real-model conversation, and a Sandbox / Artifact write-back.
+- [ ] Record Release ID, date, `state.json` generation, per-host result, and any
+      rollback or follow-up action in the acceptance history.
+- [ ] If kernel, Docker, storage, runsc, or host networking changed, rerun the
+      full commissioning preflight instead of relying on the routine checklist.
