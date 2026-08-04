@@ -266,19 +266,17 @@ ARTIFACTFLOW_MAX_CONCURRENT_TASKS=16
 ARTIFACTFLOW_REDIS_MAX_CONNECTIONS=32
 ARTIFACTFLOW_DATABASE_POOL_SIZE=5
 ARTIFACTFLOW_DATABASE_MAX_OVERFLOW=10
-ARTIFACTFLOW_COMPACTION_RESERVE_TOKENS=40000
 ```
 
 Before applying this release to an existing target, remove the obsolete
 `ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD` line from `control/.env`; the setting
 no longer exists. If that file ever received a manual
 `ARTIFACTFLOW_RENDER_TOOL_EXAMPLES` override, remove it too: native function
-calls replaced the old XML tool examples. Compaction now triggers at each model's `context_window`
-minus `ARTIFACTFLOW_COMPACTION_RESERVE_TOKENS`: with the intranet 40K reserve,
-DeepSeek's 260K window triggers at 220K and Qwen 27B's 128K window at 88K.
-These values live in target-local `control/.env`, so afctl rollback does not
-restore older values automatically. Fresh `site init --preset intranet` and
-new v1 migrations write the 40K reserve automatically.
+calls replaced the old XML tool examples. Do not replace the old threshold with
+a reserve override unless the deployment intentionally needs a non-default
+value. The service default reserve is 20K, so DeepSeek's 260K window triggers at
+240K and Qwen 27B's 128K window at 108K. Any future explicit reserve override
+lives in target-local `control/.env`, so afctl apply and rollback preserve it.
 
 Validate the complete target state before applying the release:
 

@@ -210,7 +210,6 @@ func TestSiteInitWritesIntranetModelCredentialNames(t *testing.T) {
 	for _, key := range []string{
 		"GPUSTACK_DEEPSEEK_API_KEY=",
 		"GPUSTACK_VISION_API_KEY=",
-		"ARTIFACTFLOW_COMPACTION_RESERVE_TOKENS=40000",
 	} {
 		if !strings.Contains(env, key) {
 			t.Fatalf("generated intranet environment is missing %s: %s", key, env)
@@ -218,6 +217,9 @@ func TestSiteInitWritesIntranetModelCredentialNames(t *testing.T) {
 	}
 	if strings.Contains(env, "DASHSCOPE_API_KEY=") {
 		t.Fatalf("generated intranet environment contains an unused cloud credential: %s", env)
+	}
+	if strings.Contains(env, "ARTIFACTFLOW_COMPACTION_RESERVE_TOKENS=") {
+		t.Fatalf("generated intranet environment must use the service default reserve: %s", env)
 	}
 }
 
@@ -356,7 +358,7 @@ func TestSiteMigrateV1PreservesSecretsAndDropsOldSandboxSwitch(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(legacy, "certs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	env := "ARTIFACTFLOW_JWT_SECRET=keep-me\nAF_ENABLE_SANDBOX=0\nARTIFACTFLOW_DATABASE_URL=postgres://db\nARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD=100000\nARTIFACTFLOW_RENDER_TOOL_EXAMPLES=false\n"
+	env := "ARTIFACTFLOW_JWT_SECRET=keep-me\nAF_ENABLE_SANDBOX=0\nARTIFACTFLOW_DATABASE_URL=postgres://db\nARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD=100000\nARTIFACTFLOW_COMPACTION_RESERVE_TOKENS=40000\nARTIFACTFLOW_RENDER_TOOL_EXAMPLES=false\n"
 	if err := os.WriteFile(filepath.Join(legacy, ".env"), []byte(env), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -381,8 +383,9 @@ func TestSiteMigrateV1PreservesSecretsAndDropsOldSandboxSwitch(t *testing.T) {
 	if !strings.Contains(string(got), "keep-me") ||
 		strings.Contains(string(got), "AF_ENABLE_SANDBOX") ||
 		strings.Contains(string(got), "ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD") ||
+		strings.Contains(string(got), "ARTIFACTFLOW_COMPACTION_RESERVE_TOKENS") ||
 		strings.Contains(string(got), "ARTIFACTFLOW_RENDER_TOOL_EXAMPLES") ||
-		!strings.Contains(string(got), "ARTIFACTFLOW_COMPACTION_RESERVE_TOKENS=40000") {
+		!strings.Contains(string(got), "ARTIFACTFLOW_DATABASE_URL=postgres://db") {
 		t.Fatalf("unexpected migrated env: %s", got)
 	}
 	site, err := LoadSite(c.sitePath())

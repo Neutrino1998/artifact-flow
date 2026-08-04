@@ -86,9 +86,6 @@ func (c *Controller) SiteMigrateV1(preset, sandboxRuntime string) error {
 		}
 		lines = append(lines, line)
 	}
-	if preset == "intranet" {
-		lines = append(lines, "ARTIFACTFLOW_COMPACTION_RESERVE_TOKENS=40000")
-	}
 	if err := os.WriteFile(c.envPath(), []byte(strings.Join(lines, "\n")), 0o600); err != nil {
 		return err
 	}
@@ -205,10 +202,6 @@ func (c *Controller) writeInitialEnv(preset string) error {
 	if preset == "public" {
 		tls = "AF_DOMAIN=CHANGE_ME\nAF_ACME_EMAIL=CHANGE_ME\n"
 	}
-	var compaction string
-	if preset == "intranet" {
-		compaction = "ARTIFACTFLOW_COMPACTION_RESERVE_TOKENS=40000\n"
-	}
 	content := fmt.Sprintf(`ARTIFACTFLOW_JWT_SECRET=%s
 ARTIFACTFLOW_CREDENTIAL_KEY=%s
 ARTIFACTFLOW_REDIS_URL=redis://redis:6379
@@ -217,9 +210,9 @@ POSTGRES_DB=artifactflow
 POSTGRES_USER=artifactflow
 POSTGRES_PASSWORD=%s
 ARTIFACTFLOW_DATABASE_URL=postgresql+asyncpg://artifactflow:%s@postgres:5432/artifactflow
-%s%sGPUSTACK_DEEPSEEK_API_KEY=
+%sGPUSTACK_DEEPSEEK_API_KEY=
 GPUSTACK_VISION_API_KEY=
-`, jwt, credential, pg, pg, tls, compaction)
+`, jwt, credential, pg, pg, tls)
 	return os.WriteFile(c.envPath(), []byte(content), 0o600)
 }
 
