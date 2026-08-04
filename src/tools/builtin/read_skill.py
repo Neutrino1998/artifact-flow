@@ -319,7 +319,7 @@ def create_skill_tools(
         return []
     tools: List[BaseTool] = [ReadSkillTool(service, skillset)]
     # mount_skill 只在(有沙盒 + 至少一个可见 skill 有附属文件)时才建 —— 全是
-    # SKILL.md-only 时它没东西可挂,建了只是给每个 bash agent 加一条死工具行。
+    # SKILL.md-only 时它没东西可挂；即使 agent 配置了该 builtin，本轮也应收窄掉。
     if sandbox_session is not None and any(
         info.has_extra_files for info in skillset.visible.values()
     ):

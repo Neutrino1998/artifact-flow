@@ -944,7 +944,7 @@ async def execute_loop(
             reason = fallback_reason
 
             # 冻结在本次请求实际发送的 native schemas；同 envelope 里更早的
-            # read_skill/search_tools 不能追溯放行 sibling call。
+            # skill 激活或 deferred 披露不能追溯放行 sibling call。
             if tool_name not in invocation_tool_names:
                 availability_reason = unexposed_tool_reasons.get(
                     tool_name, "unavailable"
@@ -1276,7 +1276,7 @@ async def execute_loop(
             ]
 
             # 冻结这次 provider invocation 生成时的工具可用性。同一响应里
-            # 较早的 read_skill/search_tools 即使改变 effective toolset，也不能
+            # 较早的 skill 激活或 deferred 披露即使改变下一轮 schema，也不能
             # 改写模型已经生成 sibling call 时看到的 schema 集。
             effective = effective_toolsets[agent_name]
             invocation_names = set(exposed_tool_names)

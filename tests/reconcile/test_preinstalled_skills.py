@@ -23,6 +23,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from agents.loader import load_agent
 from reconcile.seeds import parse_skill_seeds
 from utils.skill_validator import validate_skill_zip
 
@@ -110,6 +111,18 @@ def test_seed_parse_clean_and_defaults():
         assert seed.has_extra_files is (not is_single_file)
         assert _zip_manifest(seed.bundle)
         assert seed.skill_md.strip()
+
+
+def test_preinstalled_agents_configure_helper_tools_explicitly():
+    helper_tools = {"read_skill", "mount_skill", "search_tools"}
+    for filename in ("lead_agent.md", "explore_agent.md", "research_agent.md"):
+        agent = load_agent(str(ROOT / "config" / "agents" / filename))
+        assert helper_tools.issubset(agent.tools)
+        assert all(agent.tools[name] == "enabled" for name in helper_tools)
+
+    for filename in ("_vision_agent.md", "compact_agent.md"):
+        agent = load_agent(str(ROOT / "config" / "agents" / filename))
+        assert helper_tools.isdisjoint(agent.tools)
 
 
 def test_mermaid_to_png_routing_contract():

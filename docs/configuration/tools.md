@@ -40,7 +40,7 @@ Use this tool for current stock prices.
 | `name` | — | 全局唯一名称，不能与 Builtin/Reserved 名冲突 |
 | `type` | `http` | 当前 HTTP 定义只接受 `http` |
 | `visibility` | `public` | `public` 或 `department` |
-| `defer` | `false` | 为 `true` 时仅注入索引，模型通过 `search_tools` 按需展开 |
+| `defer` | `false` | 为 `true` 且 Agent 配置了 `search_tools` 时仅注入索引；否则回退为完整 schema |
 | `permission` | `confirm` | `auto` 或 `confirm`；这是执行权限唯一来源 |
 | `endpoint` | — | 固定 URL，可包含参数路径模板和 Secret 占位符 |
 | `method` | `GET` | `POST` / `PUT` / `PATCH` 使用 JSON body，其他方法使用 query string |

@@ -56,8 +56,14 @@ Toolset 或 MCP 以 unit 为授权粒度。引用某个成员的完整名称也�
 - Artifact：`create_artifact`、`update_artifact`、`rewrite_artifact`、`read_artifact`、`grep_artifact`
 - 协作与网络：`call_subagent`、`web_search`、`web_fetch`
 - Sandbox：`bash`、`mount`、`persist`
+- Skill：`read_skill`、`mount_skill`
+- 渐进式工具发现：`search_tools`
 
-`search_tools`、`read_skill`、`mount_skill` 会根据 deferred Tool 和 Skill 状态按规则注入，通常不需要手工配置。
+Builtin 不会根据其它工具或运行时状态自动加入 Agent。配置决定 Agent 的工具宇宙，
+本轮是否成功创建工具对象只会进一步收窄它：例如没有可见 Skill 时，即使配置了
+`read_skill`，本轮也不会暴露。`mount_skill` 通常与 `bash` 一起配置；需要按需展开
+deferred Tool 的 Agent 应显式配置 `search_tools`。未配置 `search_tools` 时，deferred
+unit 会回退为完整 schema，不影响调用能力。
 
 ## Description 与 Prompt
 

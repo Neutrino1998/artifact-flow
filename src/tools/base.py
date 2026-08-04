@@ -192,8 +192,7 @@ class BaseTool(ABC):
             )
     
 # skill 工具的注册名(单一来源,同 SEARCH_TOOLS_NAME 姿态)—— 工具定义(read_skill.py
-# 两处 name=)/ RESERVED 集 / resolver 注入不变量(effective_toolset)共用,改名只此一处
-# (否则 tools.get(字面量) 返回 None → 注入静默跳过,无错无日志,F-0 reviewer #1)。
+# 两处 name=)/ RESERVED 集 / agent 配置共用,改名只此一处。
 READ_SKILL_NAME = "read_skill"
 MOUNT_SKILL_NAME = "mount_skill"
 
@@ -201,8 +200,8 @@ MOUNT_SKILL_NAME = "mount_skill"
 # 工具同名冲突。
 RESERVED_TOOL_NAMES = {"create_artifact", "update_artifact", "rewrite_artifact", "read_artifact", "grep_artifact", "bash", "mount", "persist", READ_SKILL_NAME, MOUNT_SKILL_NAME}
 
-# 渐进式披露检索器的注册名(单一来源)—— 引擎注入 / self-exclusion / ctor / resolver
-# 自动注入四处共用,改名只此一处(否则 routing/self-exclusion 会静默跟丢)。
+# 渐进式披露检索器的注册名(单一来源)—— 引擎上下文注入 / self-exclusion / ctor /
+# resolver 的显式成员判断共用,改名只此一处。
 SEARCH_TOOLS_NAME = "search_tools"
 
 # 进程级 builtin 工具(代码定义、for-everyone、不入 DB 注册表)。与 RESERVED(请求级

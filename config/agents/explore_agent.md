@@ -19,6 +19,9 @@ tools:
   rewrite_artifact: enabled
   read_artifact: enabled
   grep_artifact: enabled
+  search_tools: enabled
+  read_skill: enabled
+  mount_skill: enabled
   bash: enabled
   mount: enabled
   persist: enabled

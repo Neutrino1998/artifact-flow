@@ -341,8 +341,9 @@ class ExecutionController:
                 "produced nothing to inject (not visible / empty body)"
             )
 
-        # L1:enabled 可见 skill(全 agent 同一份)→ <available_skills>。effective_skillset
-        # 缺省(无 skill / 测试)→ 空列表,不注入。
+        # L1 候选:enabled 可见 skill 先算同一份；ContextManager 再按各 agent 是否
+        # 显式拥有 read_skill 决定是否注入 <available_skills>。effective_skillset
+        # 缺省(无 skill / 测试)→ 空列表。
         available_skills = (
             [
                 {"slug": info.slug, "name": info.name, "description": info.description}

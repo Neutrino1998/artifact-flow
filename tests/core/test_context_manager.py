@@ -164,7 +164,7 @@ class TestSystemPrompt:
 
     def test_available_skills_in_trailing_reminder(self):
         """C-2:L1 <available_skills> 在尾部 reminder(slug + description),非 system prompt。"""
-        agent = _FakeAgentConfig()
+        agent = _FakeAgentConfig(tools={"read_skill": "auto"})
         state = _make_state(events=[
             _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
         ])
@@ -178,6 +178,18 @@ class TestSystemPrompt:
         assert 'slug="precise-edits"' in reminder
         assert "Use when revising an artifact." in reminder
         assert "read_skill" in reminder  # 引导调用提示
+
+    def test_available_skills_hidden_without_read_skill_membership(self):
+        agent = _FakeAgentConfig()
+        state = _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+        ])
+        skills = [{"slug": "precise-edits", "name": "precise-edits",
+                   "description": "Use when revising an artifact."}]
+
+        messages = _build(agent, state=state, tools={}, available_skills=skills)
+
+        assert "<available_skills>" not in messages[-1]["content"]
 
     def test_no_available_skills_no_block(self):
         agent = _FakeAgentConfig()
