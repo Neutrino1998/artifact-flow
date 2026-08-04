@@ -181,6 +181,8 @@ export interface TokenUsage {
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
+  /** Provider-reported prefix-cache reads; absent means the provider did not report it. */
+  cached_input_tokens?: number;
 }
 
 export interface ExecutionMetrics {

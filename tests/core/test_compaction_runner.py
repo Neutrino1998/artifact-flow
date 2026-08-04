@@ -44,7 +44,12 @@ def _ev(event_type, agent_name="lead_agent", data=None, is_historical=False):
 async def _fake_stream_ok(messages, model=None):
     """Yields a valid compact-agent style response with <summary> wrapped content."""
     yield {"type": "content", "content": "<summary>mocked summary text</summary>"}
-    yield {"type": "usage", "token_usage": {"prompt_tokens": 500, "completion_tokens": 100, "total_tokens": 600}}
+    yield {"type": "usage", "token_usage": {
+        "prompt_tokens": 500,
+        "completion_tokens": 100,
+        "total_tokens": 600,
+        "cached_input_tokens": 400,
+    }}
 
 
 async def _fake_stream_raises(messages, model=None):
@@ -117,6 +122,7 @@ class TestAppendSemantics:
         assert summary_ev.data["success"] is True
         assert summary_ev.data["error"] is None
         assert summary_ev.data["model"] == "openai/fake-model"
+        assert summary_ev.data["token_usage"]["cached_input_tokens"] == 400
         assert summary_ev.agent_name == "lead_agent"
         assert summary_ev.is_historical is False
 

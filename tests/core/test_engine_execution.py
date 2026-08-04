@@ -75,20 +75,24 @@ def _make_cancelling_stream(chunks: list[dict], store, message_id: str, cancel_b
     return fake
 
 
-def _simple_llm_chunks(text: str, input_tokens: int = 10, output_tokens: int = 5):
+def _simple_llm_chunks(
+    text: str,
+    input_tokens: int = 10,
+    output_tokens: int = 5,
+    cached_input_tokens: int | None = None,
+):
     """Build standard LLM chunks for a simple text response."""
+    usage = {
+        "prompt_tokens": input_tokens,
+        "completion_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+    }
+    if cached_input_tokens is not None:
+        usage["cached_input_tokens"] = cached_input_tokens
     return [
         {"type": "content", "content": text},
-        {"type": "usage", "token_usage": {
-            "prompt_tokens": input_tokens,
-            "completion_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens,
-        }},
-        {"type": "final", "content": text, "reasoning_content": None, "token_usage": {
-            "prompt_tokens": input_tokens,
-            "completion_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens,
-        }},
+        {"type": "usage", "token_usage": usage},
+        {"type": "final", "content": text, "reasoning_content": None, "token_usage": usage},
     ]
 
 
@@ -1239,7 +1243,12 @@ class TestMetrics:
 
         rounds = [
             _tool_call_chunks(xml, input_tokens=100, output_tokens=50),
-            _simple_llm_chunks("Done", input_tokens=200, output_tokens=30),
+            _simple_llm_chunks(
+                "Done",
+                input_tokens=200,
+                output_tokens=30,
+                cached_input_tokens=120,
+            ),
         ]
 
         result, _, store = await _run_engine(
@@ -1252,6 +1261,7 @@ class TestMetrics:
         assert total["input_tokens"] == 300
         assert total["output_tokens"] == 80
         assert total["total_tokens"] == 380
+        assert total["cached_input_tokens"] == 120
 
     async def test_per_turn_token_metrics(self):
         """first_input_tokens, last_output_tokens, last_input_tokens should be tracked for lead_agent."""

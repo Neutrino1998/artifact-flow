@@ -117,11 +117,13 @@ function eventSummary(event: AdminEventItem): string {
       const tokens = d.token_usage as Record<string, number> | undefined;
       const model = (d.model as string) || '';
       const dur = d.duration_ms as number | undefined;
+      const cached = tokens?.cached_input_tokens;
+      const cacheSummary = cached != null ? ` | ${cached} ↻ cached` : '';
       const calls = nativeToolCalls(d);
       const callSummary = calls.length > 0
         ? ` | ${calls.length} call${calls.length === 1 ? '' : 's'}: ${calls.map((call) => call.function.name).join(', ')}`
         : '';
-      return `${model} | ${tokens?.input_tokens ?? 0}/${tokens?.output_tokens ?? 0} tokens | ${dur ?? 0}ms${callSummary}`;
+      return `${model} | ${tokens?.input_tokens ?? 0}/${tokens?.output_tokens ?? 0} tokens${cacheSummary} | ${dur ?? 0}ms${callSummary}`;
     }
     case 'tool_start':
       return `${d.tool as string}`;
@@ -166,6 +168,8 @@ function formatTime(iso: string): string {
 // ── Stats helpers ──
 interface AggregatedStats {
   inputTokens: number;
+  cachedInputTokens: number;
+  cacheReportedCalls: number;
   outputTokens: number;
   llmCalls: number;
   toolCalls: number;
@@ -179,9 +183,11 @@ interface AggregatedStats {
   totalDurationMs: number;
 }
 
-function aggregateStats(messages: AdminMessageGroup[]): AggregatedStats {
+export function aggregateStats(messages: AdminMessageGroup[]): AggregatedStats {
   const stats: AggregatedStats = {
     inputTokens: 0,
+    cachedInputTokens: 0,
+    cacheReportedCalls: 0,
     outputTokens: 0,
     llmCalls: 0,
     toolCalls: 0,
@@ -211,6 +217,10 @@ function aggregateStats(messages: AdminMessageGroup[]): AggregatedStats {
         if (tokens) {
           stats.inputTokens += tokens.input_tokens ?? 0;
           stats.outputTokens += tokens.output_tokens ?? 0;
+          if (tokens.cached_input_tokens != null) {
+            stats.cachedInputTokens += tokens.cached_input_tokens;
+            stats.cacheReportedCalls++;
+          }
         }
       } else if (ev.event_type === 'tool_complete') {
         stats.toolCalls++;
@@ -588,6 +598,9 @@ export default function ObservabilityPanel() {
                 <StatCard label="Messages" value={String(eventsData.messages.length)} />
                 <StatCard label="Events" value={String(eventsData.messages.reduce((n, m) => n + m.events.length, 0))} />
                 <StatCard label="Tokens In" value={formatNumber(stats.inputTokens)} />
+                {stats.cacheReportedCalls > 0 ? (
+                  <StatCard label="Cached In ↻" value={formatNumber(stats.cachedInputTokens)} />
+                ) : null}
                 <StatCard label="Tokens Out" value={formatNumber(stats.outputTokens)} />
                 <StatCard label="LLM Calls" value={String(stats.llmCalls)} />
                 <StatCard
@@ -960,10 +973,14 @@ function MessageGroupView({
   const visibleEvents = issuesOnly ? group.events.filter(isIssueEvent) : group.events;
   const executionMetrics = group.execution_metrics as {
     total_duration_ms?: number | null;
-    total_token_usage?: { total_tokens?: number | null } | null;
+    total_token_usage?: {
+      total_tokens?: number | null;
+      cached_input_tokens?: number | null;
+    } | null;
   } | null;
   const totalDurationMs = executionMetrics?.total_duration_ms;
   const totalTokens = executionMetrics?.total_token_usage?.total_tokens;
+  const cachedInputTokens = executionMetrics?.total_token_usage?.cached_input_tokens;
 
   return (
     <div className="mb-3">
@@ -1006,7 +1023,14 @@ function MessageGroupView({
         {issues.compactionFails > 0 ? <PillBadge tone="warning">compaction fail</PillBadge> : null}
         <span className="ml-auto flex-shrink-0 text-xs text-text-tertiary dark:text-text-tertiary-dark">
           {totalTokens != null && totalTokens > 0 ? (
-            <span className="font-mono">{formatTokens(totalTokens)} tokens · </span>
+            <span
+              className="font-mono"
+              title={cachedInputTokens != null ? '↻ cached input tokens' : undefined}
+            >
+              {formatTokens(totalTokens)} tokens
+              {cachedInputTokens != null ? ` (${formatTokens(cachedInputTokens)} ↻)` : ''}
+              {' · '}
+            </span>
           ) : null}
           {issuesOnly ? `${visibleEvents.length}/${group.events.length} events` : `${group.events.length} events`}
           {totalDurationMs != null && totalDurationMs > 0 ? (

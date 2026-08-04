@@ -409,6 +409,21 @@ async def astream_with_retry(
                         "completion_tokens": getattr(chunk.usage, "completion_tokens", 0),
                         "total_tokens": getattr(chunk.usage, "total_tokens", 0),
                     }
+                    # LiteLLM 将 OpenAI-compatible/vLLM、DeepSeek、Anthropic 的
+                    # cache-read token 统一到 prompt_tokens_details.cached_tokens。
+                    # None 表示 provider 未报告，必须与明确报告的 0 区分；因此只在
+                    # 字段实际存在时向下游加入可选键。
+                    prompt_details = getattr(
+                        chunk.usage, "prompt_tokens_details", None
+                    )
+                    if isinstance(prompt_details, dict):
+                        cached_input_tokens = prompt_details.get("cached_tokens")
+                    else:
+                        cached_input_tokens = getattr(
+                            prompt_details, "cached_tokens", None
+                        )
+                    if cached_input_tokens is not None:
+                        token_usage["cached_input_tokens"] = cached_input_tokens
 
                 if not chunk.choices:
                     continue

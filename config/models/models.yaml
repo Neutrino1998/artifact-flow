@@ -84,6 +84,7 @@ models:
   #   base_url: http://localhost:8000/v1
   #   api_key_env: MY_QWEN_API_KEY
   #   cache_salt_field: cache_salt  # 按认证用户隔离 vLLM prefix cache；不配则不发送
+  #   # 若要在会话与监控界面看到命中 token，vLLM serve 还需加 --enable-prompt-tokens-details
 
   # # 任意 OpenAI 兼容接口（无 litellm provider 前缀会自动加 openai/）
   # my-custom:

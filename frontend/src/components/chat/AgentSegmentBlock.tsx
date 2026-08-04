@@ -3,6 +3,7 @@
 import { memo, useState } from 'react';
 import type { ExecutionSegment } from '@/stores/streamStore';
 import { PROSE_CLASSES, MENU_ROW_HOVER } from '@/lib/styles';
+import { formatTokenUsage } from '@/lib/formatTokens';
 import MarkdownBlock from '@/components/markdown/MarkdownBlock';
 import { PillBadge } from '@/components/ui/PillBadge';
 import ThinkingBlock from './ThinkingBlock';
@@ -76,10 +77,13 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
 
         {/* Compact metadata — only shown when segment is done */}
         {segment.status === 'complete' && (segment.model || segment.tokenUsage || segment.llmDurationMs) && (
-          <span className="ml-auto text-xs text-text-tertiary dark:text-text-tertiary-dark font-mono">
+          <span
+            className="ml-auto text-xs text-text-tertiary dark:text-text-tertiary-dark font-mono"
+            title={segment.tokenUsage?.cached_input_tokens != null ? '↻ cached input tokens' : undefined}
+          >
             {[
               segment.model,
-              segment.tokenUsage && `${(segment.tokenUsage.input_tokens / 1000).toFixed(1)}k ↑ · ${(segment.tokenUsage.output_tokens / 1000).toFixed(1)}k ↓`,
+              segment.tokenUsage && formatTokenUsage(segment.tokenUsage),
               segment.llmDurationMs != null && `${(segment.llmDurationMs / 1000).toFixed(1)}s`,
             ].filter(Boolean).join(' · ')}
           </span>

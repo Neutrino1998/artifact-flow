@@ -61,6 +61,11 @@ compaction 请求都会在 provider request body 中携带该字段。字段值�
 不同用户不同，日志也只记录启用的字段名。配置了该字段但调用链缺少认证用户时会
 直接失败，避免静默退化为未隔离缓存。轮换 JWT secret 会使旧 prefix cache 自然失效。
 
+ArtifactFlow 会把 LiteLLM 上报的缓存命中量记录为 `cached_input_tokens`，并在普通
+会话和管理员会话监控中用 `↻` 展示。vLLM 还必须以
+`--enable-prompt-tokens-details` 启动才会返回该明细；未开启或其他 provider 未上报时，
+界面不显示缓存数字（与明确上报的 `0` 个命中 token 区分）。
+
 Ollama：
 
 ```yaml

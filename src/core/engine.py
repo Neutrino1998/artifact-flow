@@ -17,7 +17,18 @@ import json
 import math
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, Callable, Awaitable, List, Tuple, TypedDict, Union
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    NotRequired,
+    Optional,
+    Tuple,
+    TypedDict,
+    Union,
+)
 from datetime import datetime
 
 from config import config
@@ -55,6 +66,9 @@ class TokenUsage(TypedDict):
     input_tokens: int
     output_tokens: int
     total_tokens: int
+    # Provider-reported cache reads. Optional preserves the semantic difference
+    # between "not reported" and an explicit cache miss (0).
+    cached_input_tokens: NotRequired[int]
 
 
 class ExecutionMetrics(TypedDict):
@@ -94,6 +108,11 @@ def accumulate_token_usage(metrics: ExecutionMetrics, usage: dict) -> None:
         total["input_tokens"] += usage.get("input_tokens", 0)
         total["output_tokens"] += usage.get("output_tokens", 0)
         total["total_tokens"] += usage.get("total_tokens", 0)
+        if "cached_input_tokens" in usage:
+            total["cached_input_tokens"] = (
+                total.get("cached_input_tokens", 0)
+                + usage["cached_input_tokens"]
+            )
 
 
 # ============================================================
@@ -630,6 +649,10 @@ async def execute_loop(
             "output_tokens": token_usage.get("completion_tokens", 0),
             "total_tokens": token_usage.get("total_tokens", 0),
         }
+        if "cached_input_tokens" in token_usage:
+            normalized_usage["cached_input_tokens"] = token_usage[
+                "cached_input_tokens"
+            ]
 
         await _emit(StreamEventType.LLM_COMPLETE.value, agent_name, {
             "content": response_content,

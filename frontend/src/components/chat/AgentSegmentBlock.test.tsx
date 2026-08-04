@@ -116,4 +116,35 @@ describe('AgentSegmentBlock', () => {
     expect(cursorHost).not.toBeNull();
     expect(cursorHost?.lastElementChild?.tagName).toBe('P');
   });
+
+  test('shows cached input as a parenthesized subset of input tokens', async () => {
+    const segment: ExecutionSegment = {
+      id: 'lead-cached',
+      agent: 'lead_agent',
+      status: 'complete',
+      reasoningContent: 'done',
+      isThinking: false,
+      content: '',
+      toolCalls: [],
+      toolCallProgress: [],
+      tokenUsage: {
+        input_tokens: 12_400,
+        cached_input_tokens: 8_200,
+        output_tokens: 600,
+        total_tokens: 13_000,
+      },
+    };
+
+    await act(async () => {
+      root.render(
+        <AgentSegmentBlock
+          segment={segment}
+          isActive={false}
+          defaultExpanded={false}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('12K ↑ (8.2K ↻) · 600 ↓');
+  });
 });

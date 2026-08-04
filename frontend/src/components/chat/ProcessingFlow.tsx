@@ -15,6 +15,8 @@ interface ProcessingFlowProps {
   totalDurationMs?: number | null;
   /** Cumulative token usage for the turn; only shown when not active. */
   totalTokens?: number | null;
+  /** Provider-reported cached input tokens summed across calls. */
+  cachedInputTokens?: number | null;
   /** When set, the header shows a queued state instead of Processing/Error/Completed.
    *  Value = upper-bound count of tasks ahead in the concurrency queue. Step count
    *  is hidden (it's always 0 in this state). */
@@ -22,7 +24,7 @@ interface ProcessingFlowProps {
   children: React.ReactNode;
 }
 
-function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, hasError, totalDurationMs, totalTokens, queuedAhead, children }: ProcessingFlowProps) {
+function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, hasError, totalDurationMs, totalTokens, cachedInputTokens, queuedAhead, children }: ProcessingFlowProps) {
   const isQueued = queuedAhead != null;
   const [expanded, setExpanded] = useState(defaultExpanded);
 
@@ -87,7 +89,14 @@ function ProcessingFlow({ agentStepCount, isActive, defaultExpanded, hasError, t
         {!isQueued && (
           <span className="ml-auto text-text-tertiary dark:text-text-tertiary-dark">
             {!isActive && totalTokens != null && totalTokens > 0 && (
-              <span className="font-mono">{formatTokens(totalTokens)} tokens · </span>
+              <span
+                className="font-mono"
+                title={cachedInputTokens != null ? '↻ cached input tokens' : undefined}
+              >
+                {formatTokens(totalTokens)} tokens
+                {cachedInputTokens != null ? ` (${formatTokens(cachedInputTokens)} ↻)` : ''}
+                {' · '}
+              </span>
             )}
             {agentStepCount} {agentStepCount === 1 ? 'step' : 'steps'}
             {!isActive && totalDurationMs != null && totalDurationMs > 0 && (

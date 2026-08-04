@@ -165,7 +165,10 @@ async def test_llm_adapter_sends_schemas_and_emits_only_accepted_wire_calls(monk
             )],
             finish_reason="tool_calls",
             usage=SimpleNamespace(
-                prompt_tokens=12, completion_tokens=4, total_tokens=16
+                prompt_tokens=12,
+                completion_tokens=4,
+                total_tokens=16,
+                prompt_tokens_details=SimpleNamespace(cached_tokens=8),
             ),
         )
 
@@ -216,6 +219,12 @@ async def test_llm_adapter_sends_schemas_and_emits_only_accepted_wire_calls(monk
     final = chunks[-1]
     assert final["type"] == "final"
     assert final["reasoning_content"] == "checking"
+    assert final["token_usage"] == {
+        "prompt_tokens": 12,
+        "completion_tokens": 4,
+        "total_tokens": 16,
+        "cached_input_tokens": 8,
+    }
     assert final["tool_calls"] == [{
         "id": "call_7",
         "type": "function",

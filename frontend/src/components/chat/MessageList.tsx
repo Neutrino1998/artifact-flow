@@ -57,7 +57,7 @@ export default function MessageList() {
                 <AssistantMessage
                   content={node.response}
                   messageId={node.id}
-                  executionMetrics={node.execution_metrics as { total_duration_ms?: number | null; total_token_usage?: { total_tokens?: number | null } | null } | null | undefined}
+                  executionMetrics={node.execution_metrics as { total_duration_ms?: number | null; total_token_usage?: { total_tokens?: number | null; cached_input_tokens?: number | null } | null } | null | undefined}
                 />
               )}
             </div>

@@ -40,6 +40,22 @@ _SUMMARY_FRAME = (
 )
 
 
+def _normalize_token_usage(token_usage: Dict[str, Any]) -> Dict[str, int]:
+    """Map adapter usage into the event/metrics token shape.
+
+    ``cached_input_tokens`` stays optional so old providers and estimated usage
+    remain distinguishable from an explicit zero cache hit.
+    """
+    normalized = {
+        "input_tokens": token_usage.get("prompt_tokens", 0),
+        "output_tokens": token_usage.get("completion_tokens", 0),
+        "total_tokens": token_usage.get("total_tokens", 0),
+    }
+    if "cached_input_tokens" in token_usage:
+        normalized["cached_input_tokens"] = token_usage["cached_input_tokens"]
+    return normalized
+
+
 class CompactionRunner:
     """
     引擎内 compaction 执行器。
@@ -352,21 +368,13 @@ class CompactionRunner:
                     response += chunk["content"]
                 elif ct == "usage":
                     tu = chunk.get("token_usage") or {}
-                    usage = {
-                        "input_tokens": tu.get("prompt_tokens", 0),
-                        "output_tokens": tu.get("completion_tokens", 0),
-                        "total_tokens": tu.get("total_tokens", 0),
-                    }
+                    usage = _normalize_token_usage(tu)
                 elif ct == "final":
                     if not response and chunk.get("content"):
                         response = chunk["content"]
                     tu = chunk.get("token_usage")
                     if tu and not usage["total_tokens"]:
-                        usage = {
-                            "input_tokens": tu.get("prompt_tokens", 0),
-                            "output_tokens": tu.get("completion_tokens", 0),
-                            "total_tokens": tu.get("total_tokens", 0),
-                        }
+                        usage = _normalize_token_usage(tu)
 
         async def _guarded_stream():
             async with asyncio.timeout(config.COMPACTION_TIMEOUT):
