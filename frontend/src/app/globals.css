@@ -96,6 +96,21 @@
   }
 }
 
+@layer components {
+  /* Attach the cursor inside ReactMarkdown's final block (normally <p>) so it
+     stays on the last text line.  An em-sized CSS caret avoids font-dependent
+     glyph metrics from the old \25AE character. */
+  .streaming-cursor > :last-child::after {
+    content: '';
+    display: inline-block;
+    width: 0.38em;
+    height: 0.9em;
+    margin-left: 0.18em;
+    vertical-align: -0.08em;
+    @apply bg-accent animate-pulse;
+  }
+}
+
 /* Match newsprint theme: tighter line-height (1.5) */
 .prose :where(p, li, blockquote):not(:where([class~="not-prose"] *)) {
   line-height: 1.5;

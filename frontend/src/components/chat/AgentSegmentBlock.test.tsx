@@ -52,6 +52,7 @@ describe('AgentSegmentBlock', () => {
 
     expect(container.textContent?.split(content)).toHaveLength(2);
     expect(container.textContent).toContain('bash');
+    expect(container.querySelector('.streaming-cursor')).toBeNull();
   });
 
   test('renders bounded tool-call generation progress without partial arguments', async () => {
@@ -86,5 +87,33 @@ describe('AgentSegmentBlock', () => {
     expect(container.textContent).toContain('update_artifact');
     expect(container.textContent).toContain('18.4k chars');
     expect(container.textContent).not.toContain('{');
+    expect(container.querySelector('.streaming-cursor')).toBeNull();
+  });
+
+  test('shows the cursor only while ordinary model content is streaming', async () => {
+    const segment: ExecutionSegment = {
+      id: 'lead-content',
+      agent: 'lead_agent',
+      status: 'running',
+      reasoningContent: '',
+      isThinking: false,
+      content: 'Still writing',
+      toolCalls: [],
+      toolCallProgress: [],
+    };
+
+    await act(async () => {
+      root.render(
+        <AgentSegmentBlock
+          segment={segment}
+          isActive
+          defaultExpanded
+        />,
+      );
+    });
+
+    const cursorHost = container.querySelector('.streaming-cursor');
+    expect(cursorHost).not.toBeNull();
+    expect(cursorHost?.lastElementChild?.tagName).toBe('P');
   });
 });
