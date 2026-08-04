@@ -7,24 +7,8 @@ const ROTATE_MS = 8000;
 const FADE_MS = 300; // 单侧淡入/淡出时长,须与 tailwind tip-in/tip-out 动画时长一致
 const FALLBACK = '开始对话，探索更多可能';
 
-function LightbulbIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M8 1.5a4.5 4.5 0 0 0-2.7 8.1c.4.3.7.8.7 1.4v.5h4v-.5c0-.6.3-1.1.7-1.4A4.5 4.5 0 0 0 8 1.5z" />
-      <path d="M6 13h4M6.5 14.5h3" />
-    </svg>
-  );
+function displayTip(tip: string): string {
+  return `TIPS：${tip}`;
 }
 
 /**
@@ -74,7 +58,7 @@ export default function WelcomeTips() {
   if (tips.length === 0) {
     return (
       <div className="text-text-tertiary dark:text-text-tertiary-dark">
-        {FALLBACK}
+        {displayTip(FALLBACK)}
       </div>
     );
   }
@@ -82,10 +66,7 @@ export default function WelcomeTips() {
   if (tips.length === 1) {
     return (
       <div className="flex max-w-full items-center justify-center px-2 text-center text-text-tertiary dark:text-text-tertiary-dark">
-        <span className="inline-flex max-w-full items-center justify-center gap-2">
-          <LightbulbIcon className="shrink-0" />
-          <span className="min-w-0">{tips[0]}</span>
-        </span>
+        {displayTip(tips[0])}
       </div>
     );
   }
@@ -100,10 +81,9 @@ export default function WelcomeTips() {
           animation-name 变化(tip-in↔tip-out)触发重播。 */}
       <span
         key={idx}
-        className={`inline-flex max-w-full items-center justify-center gap-2 ${phase === 'out' ? 'animate-tip-out' : 'animate-tip-in'}`}
+        className={`inline-block ${phase === 'out' ? 'animate-tip-out' : 'animate-tip-in'}`}
       >
-        <LightbulbIcon className="shrink-0" />
-        <span className="min-w-0">{tips[idx]}</span>
+        {displayTip(tips[idx])}
       </span>
     </div>
   );
