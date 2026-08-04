@@ -50,7 +50,7 @@ class ContextManager:
         model: Optional[str] = None,
         sandbox_status: Optional[Dict] = None,
         tool_round_count: int = 0,
-        available_skills: Optional[List[Dict]] = None,  # L1 注入(enabled 可见 skill,全 agent 同)
+        available_skills: Optional[List[Dict]] = None,  # L1 候选；仅 read_skill 可调时注入
     ) -> tuple[List[Dict[str, Any]], str]:
         """
         构建 LLM 调用所需的完整 messages
@@ -124,7 +124,9 @@ class ContextManager:
             last_usage=last_usage,
             sandbox_status=sandbox_status,
             tool_round_count=tool_round_count,
-            available_skills=available_skills,
+            available_skills=(
+                available_skills if "read_skill" in effective_toolset else None
+            ),
             disclosed_tools=set(
                 state.get("agent_progressive_state", {})
                 .get(agent_name, {})
@@ -236,9 +238,11 @@ class ContextManager:
         if available_tools:
             parts.append(available_tools)
 
-        # 可用 skill 列表(L1,C-2)—— 与 catalog 同处尾部 reminder 而非 system 前缀:
+        # 可用 skill 列表(L1,C-2)—— 调用方已按 read_skill 成员关系过滤；未配置该
+        # builtin 的 agent 不应看到一个要求它调用不可用工具的目录。与 catalog 同处
+        # 尾部 reminder 而非 system 前缀:
         # active skill / user toggle 改的是注入集,放前缀会 toggle 一次打掉整条历史 APC
-        # (同 catalog 的处置)。全 agent 注入(skill 全 agent 可见,效果按宇宙收窄)。
+        # (同 catalog 的处置)。
         available_skills_block = cls._build_available_skills(available_skills)
         if available_skills_block:
             parts.append(available_skills_block)

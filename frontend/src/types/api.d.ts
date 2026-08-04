@@ -231,8 +231,8 @@ export interface paths {
          * @description 批量删除对话（用户视角，仅删自己的）
          *
          *     Best-effort 范围：cross-user / 不存在的 id 走 `failed.reason="not_found"`，
-         *     遵循 "404 not 403" 安全策略避免泄漏会话存在。引擎正在执行的会话同样直接
-         *     DELETE — 引擎 post-processing 在 PR2a 里 fail-soft 兜底。
+         *     遵循 "404 not 403" 安全策略避免泄漏会话存在。持有 execution lease
+         *     （含 QUEUED / RUNNING）的会话走 `failed.reason="active_execution"`，不删除。
          *
          *     单行 FK 违规这条路径不存在，因此不需要 IntegrityError + rollback：所有指向
          *     `conversations.id` 的外键（Message / ArtifactSession）都是 ondelete=CASCADE，
@@ -837,6 +837,34 @@ export interface paths {
          *         }
          */
         get: operations["list_instances_api_v1_admin_instances_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/instances/{instance_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Instance Events
+         * @description Return a bounded, admin-only diagnostic timeline for one instance.
+         *
+         *     ERROR entries come from the same dedicated ERROR log that feeds the card's
+         *     counter; loop events and nearby metrics come from their existing JSONL
+         *     files.  File IO and parsing run off the event loop.  On a multi-host fleet,
+         *     ``sources.*.available=false`` explicitly reports that this responder cannot
+         *     see the selected host's local volume instead of pretending there were no
+         *     incidents.  ``kind`` is applied before ``limit`` so an exact historical
+         *     wedge lookup cannot be displaced by newer ERROR or soft-lag records.
+         */
+        get: operations["get_instance_events_api_v1_admin_instances__instance_id__events_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1599,6 +1627,20 @@ export interface components {
             created_at: string;
         };
         /**
+         * AdminInstanceEventsResponse
+         * @description GET /api/v1/admin/instances/{instance_id}/events response.
+         */
+        AdminInstanceEventsResponse: {
+            /** Instance Id */
+            instance_id: string;
+            /** Events */
+            events: components["schemas"]["InstanceDiagnosticEvent"][];
+            /** Sources */
+            sources: {
+                [key: string]: components["schemas"]["InstanceEventSourceStatus"];
+            };
+        };
+        /**
          * AdminMessageGroup
          * @description Events grouped by message
          */
@@ -1647,6 +1689,11 @@ export interface components {
             agent_name: string | null;
             /** Model */
             model: string | null;
+            /**
+             * Exposed Tool Names
+             * @description Exact native function names exposed to the anchored LLM invocation. None means the legacy event predates collection; an empty list means no tools were exposed. Full tool schemas are not persisted.
+             */
+            exposed_tool_names: string[] | null;
             /**
              * Has Reminder
              * @default false
@@ -2017,7 +2064,7 @@ export interface components {
             id: string;
             /**
              * Reason
-             * @description Failure reason: 'not_found'
+             * @description Failure reason: 'not_found' or 'active_execution'
              */
             reason: string;
         };
@@ -2573,6 +2620,17 @@ export interface components {
             effective_allowed: boolean;
         };
         /**
+         * ErrorResponse
+         * @description Standard FastAPI error response with a string detail.
+         */
+        ErrorResponse: {
+            /**
+             * Detail
+             * @description Human-readable error detail
+             */
+            detail: string;
+        };
+        /**
          * FindingItem
          * @description 一条 validator finding(E-1 硬门产出;rule id 稳定,前端按 severity 渲染)。
          */
@@ -2624,6 +2682,143 @@ export interface components {
              * @description Existing SSE stream URL (already connected, do not reconnect)
              */
             stream_url: string;
+        };
+        /** InstanceDbPoolMetrics */
+        InstanceDbPoolMetrics: {
+            /** In Use */
+            in_use: number | null;
+            /** Size */
+            size: number | null;
+            /** Overflow */
+            overflow: number | null;
+        };
+        /**
+         * InstanceDiagnosticEvent
+         * @description One normalized ERROR, hard wedge, or soft loop-lag record.
+         */
+        InstanceDiagnosticEvent: {
+            /** Id */
+            id: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "error" | "wedge" | "loop_lag";
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "runtime_log" | "loop_lag";
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "warning" | "error";
+            /** Ts */
+            ts: string;
+            /** Summary */
+            summary: string;
+            /** Level */
+            level: string | null;
+            /** Detail */
+            detail: string | null;
+            /** Location */
+            location: string | null;
+            /** Lag Ms */
+            lag_ms: number | null;
+            /**
+             * Lower Bound
+             * @default false
+             */
+            lower_bound: boolean;
+            /** Warn Ms */
+            warn_ms: number | null;
+            /** Request Id */
+            request_id: string | null;
+            /** Conversation Id */
+            conversation_id: string | null;
+            /** Message Id */
+            message_id: string | null;
+            /** Instance Id */
+            instance_id: string;
+            /** Tasks */
+            tasks: components["schemas"]["InstanceEventStackOwner"][];
+            /** Threads */
+            threads: components["schemas"]["InstanceEventStackOwner"][];
+            metrics_before: components["schemas"]["InstanceEventMetricSnapshot"] | null;
+            metrics_after: components["schemas"]["InstanceEventMetricSnapshot"] | null;
+        };
+        /**
+         * InstanceEventMetricSnapshot
+         * @description Runtime sample immediately before or after a loop incident.
+         */
+        InstanceEventMetricSnapshot: {
+            /** Ts */
+            ts: string | null;
+            loop_lag_ms: components["schemas"]["InstanceLoopLagMetrics"];
+            /** In Flight */
+            in_flight: number | null;
+            /** Tasks Long Running */
+            tasks_long_running: number | null;
+            process: components["schemas"]["InstanceProcessMetrics"];
+            db_pool: components["schemas"]["InstanceDbPoolMetrics"];
+            redis: components["schemas"]["InstanceRedisMetrics"];
+        };
+        /**
+         * InstanceEventSourceStatus
+         * @description Readability state for one local diagnostic-file source.
+         */
+        InstanceEventSourceStatus: {
+            /**
+             * Configured
+             * @default true
+             */
+            configured: boolean;
+            /** Available */
+            available: boolean;
+            /** Truncated */
+            truncated: boolean;
+        };
+        /**
+         * InstanceEventStackOwner
+         * @description One bounded task or thread stack captured by the watchdog.
+         */
+        InstanceEventStackOwner: {
+            /** Name */
+            name: string;
+            /** Stack */
+            stack: string[];
+            /** Done */
+            done: boolean | null;
+            /** Event Loop */
+            event_loop: boolean | null;
+        };
+        /** InstanceLoopLagMetrics */
+        InstanceLoopLagMetrics: {
+            /** P50 Ms */
+            p50_ms: number | null;
+            /** P99 Ms */
+            p99_ms: number | null;
+            /** Max 1M Ms */
+            max_1m_ms: number | null;
+            /** Samples */
+            samples: number | null;
+        };
+        /** InstanceProcessMetrics */
+        InstanceProcessMetrics: {
+            /** Rss Mb */
+            rss_mb: number | null;
+            /** Cpu Pct */
+            cpu_pct: number | null;
+            /** Open Fds */
+            open_fds: number | null;
+        };
+        /** InstanceRedisMetrics */
+        InstanceRedisMetrics: {
+            /** Used Mb */
+            used_mb: number | null;
+            /** Maxmemory Mb */
+            maxmemory_mb: number | null;
         };
         /**
          * LoginRequest
@@ -3750,6 +3945,15 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Conversation has an active execution */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -4606,6 +4810,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_instance_events_api_v1_admin_instances__instance_id__events_get: {
+        parameters: {
+            query?: {
+                kind?: "all" | "error" | "wedge" | "loop_lag";
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminInstanceEventsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

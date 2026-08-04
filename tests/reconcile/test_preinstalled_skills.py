@@ -23,6 +23,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from agents.loader import load_agent
 from reconcile.seeds import parse_skill_seeds
 from utils.skill_validator import validate_skill_zip
 
@@ -112,6 +113,18 @@ def test_seed_parse_clean_and_defaults():
         assert seed.skill_md.strip()
 
 
+def test_preinstalled_agents_configure_helper_tools_explicitly():
+    helper_tools = {"read_skill", "mount_skill", "search_tools"}
+    for filename in ("lead_agent.md", "explore_agent.md", "_research_agent.md"):
+        agent = load_agent(str(ROOT / "config" / "agents" / filename))
+        assert helper_tools.issubset(agent.tools)
+        assert all(agent.tools[name] == "enabled" for name in helper_tools)
+
+    for filename in ("vision_agent.md", "compact_agent.md"):
+        agent = load_agent(str(ROOT / "config" / "agents" / filename))
+        assert helper_tools.isdisjoint(agent.tools)
+
+
 def test_mermaid_to_png_routing_contract():
     skill_md = (SRC_DIR / "mermaid-to-png" / "SKILL.md").read_text(encoding="utf-8")
     lead_md = (ROOT / "config" / "agents" / "lead_agent.md").read_text(
@@ -186,8 +199,12 @@ def test_document_skills_use_risk_bounded_visual_verification():
     assert "document.ast.json" not in docx_decompose
     assert "--pages 5,8" in docx_md
     assert "不要因演示文稿含图片就把所有页面交给视觉能力" in pptx_md
+    assert "persist` 为 image artifacts" in pptx_md
+    assert "不能读取调用方沙盒中的 `/workspace/...` 路径" in pptx_md
     assert "普通数据读取、公式分析和值修改默认不渲染" in xlsx_md
     assert "source-format skill decides whether to extract" in vision_md
+    assert "pass image artifact id(s) only" in vision_md
+    assert "Do not try to recover with `bash`, `mount`, `read_skill`" in vision_md
     assert "report the actual page/title cues briefly and stop" in vision_md
 
 

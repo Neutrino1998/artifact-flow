@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from config import config
 from core.engine import EmptyTurnInputError, EngineHooks, create_initial_state, execute_loop, finalize_metrics, turn_has_content
 from core.events import StreamEventType
-from core.skill_guidance import render_skill_guidance
+from core.skill_guidance import can_access_skill_bundle, render_skill_guidance
 from core.native_call_closure import (
     assert_native_calls_closed,
     close_open_native_calls,
@@ -32,6 +32,7 @@ from core.post_processing import (
 )
 from tools.base import BaseTool
 from tools.builtin.artifact_service import ArtifactService
+from repositories.base import NotFoundError
 from utils.instance import INSTANCE_ID
 from utils.logger import get_logger, get_request_id
 from utils.time import utc_now
@@ -186,9 +187,18 @@ class ExecutionController:
                 lambda cm, er: cm.start_conversation_async(conversation_id)
             )
         else:
-            await self._with_db_retry(
-                lambda cm, er: cm.ensure_conversation_exists(conversation_id)
-            )
+            try:
+                await self._with_db_retry(
+                    lambda cm, er: cm.ensure_conversation_exists(
+                        conversation_id, create_if_missing=False
+                    )
+                )
+            except NotFoundError:
+                logger.info(
+                    f"Conversation {conversation_id} deleted before execution setup; "
+                    f"aborting turn {message_id or '(message id pending)'}"
+                )
+                return
 
         # Auto-detect parent
         if parent_message_id is _UNSET:
@@ -302,8 +312,9 @@ class ExecutionController:
                 slug, message_id, sorted(granted) or "(none)",
             )
 
-        # 注入集正文:短 session 取 skill_md(B-5),用与 read_skill 相同的 renderer 补齐条件化
-        # mount 提醒后供 engine 注入 USER_INPUT。空正文 skip(不注入 None);查不到=脏 slug,
+        # 注入集正文:短 session 取 skill_md(B-5),用与 read_skill 相同的 renderer 按
+        # lead 激活后的实际 sandbox 能力补齐 bundle 提醒，再供 engine 注入 USER_INPUT。
+        # 空正文 skip(不注入 None);查不到=脏 slug,
         # 静默略过。重勾已激活 → 完整指导重注入(对齐 agent read_skill)。
         activated_skill_bodies: List[Dict[str, Any]] = []
         if to_inject and self._db_manager:
@@ -322,7 +333,11 @@ class ExecutionController:
                             "slug": slug,
                             "name": getattr(info, "name", slug),
                             "body": render_skill_guidance(
-                                body, has_extra_files=info.has_extra_files
+                                body,
+                                has_extra_files=info.has_extra_files,
+                                bundle_accessible=can_access_skill_bundle(
+                                    self.effective_toolsets.get("lead_agent"), slug
+                                ),
                             ),
                         })
                 return out
@@ -341,8 +356,9 @@ class ExecutionController:
                 "produced nothing to inject (not visible / empty body)"
             )
 
-        # L1:enabled 可见 skill(全 agent 同一份)→ <available_skills>。effective_skillset
-        # 缺省(无 skill / 测试)→ 空列表,不注入。
+        # L1 候选:enabled 可见 skill 先算同一份；ContextManager 再按各 agent 是否
+        # 显式拥有 read_skill 决定是否注入 <available_skills>。effective_skillset
+        # 缺省(无 skill / 测试)→ 空列表。
         available_skills = (
             [
                 {"slug": info.slug, "name": info.name, "description": info.description}
@@ -376,18 +392,28 @@ class ExecutionController:
         ]
 
         # 添加消息到 conversation (after all pre-engine setup to avoid orphaned rows on failure)
-        await self._with_db_retry(
-            lambda cm, er: cm.add_message_async(
-                conv_id=conversation_id,
-                message_id=message_id,
-                user_input=user_input,
-                parent_id=resolved_parent,
-                metadata=(
-                    {"activated_skills": activated_skills}
-                    if activated_skills else None
-                ),
+        try:
+            await self._with_db_retry(
+                lambda cm, er: cm.add_message_async(
+                    conv_id=conversation_id,
+                    message_id=message_id,
+                    user_input=user_input,
+                    parent_id=resolved_parent,
+                    metadata=(
+                        {"activated_skills": activated_skills}
+                        if activated_skills else None
+                    ),
+                    create_conversation_if_missing=False,
+                )
             )
-        )
+        except NotFoundError:
+            # Initial existence check and message INSERT are separate short
+            # transactions. A DELETE can land between them; never resurrect it.
+            logger.info(
+                f"Conversation {conversation_id} deleted during execution setup; "
+                f"aborting turn {message_id} before engine start"
+            )
+            return
 
         # ========== 执行引擎 ==========
         event_queue: asyncio.Queue = asyncio.Queue()
@@ -609,8 +635,9 @@ class ExecutionController:
                 await self._on_engine_exit(conversation_id, message_id)
 
             # Layer 1: 早判 conversation 是否仍存在。
-            # 删除路径不抢 lease，conv 行可能在 engine 跑完前消失（DELETE /chat/{id}
-            # 或硬删用户触发的 CASCADE）。早返回跳过后续三段写库，避免撞 FK。
+            # 用户会话 DELETE 已用 execution lease 互斥，但管理员硬删用户的
+            # CASCADE / 库外删除仍可以让 conv 行在 engine 跑完前消失。早返回
+            # 跳过后续三段写库，避免撞 FK。
             try:
                 pp.conv_alive = await self._with_db_retry(
                     lambda cm, er: cm.exists_async(conversation_id)

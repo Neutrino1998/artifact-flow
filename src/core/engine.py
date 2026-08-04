@@ -904,6 +904,7 @@ async def execute_loop(
         tool_calls: list,
         agent_name: str,
         invocation_tool_names: set[str],
+        unexposed_tool_reasons: Dict[str, str],
     ) -> None:
         """按模型给出的自然序串行执行工具列表，处理权限中断。
         call_subagent 与常规工具同一条流水线：原地递归 await 子 agent，返回后
@@ -943,18 +944,41 @@ async def execute_loop(
             reason = fallback_reason
 
             # 冻结在本次请求实际发送的 native schemas；同 envelope 里更早的
-            # read_skill/search_tools 不能追溯放行 sibling call。
+            # skill 激活或 deferred 披露不能追溯放行 sibling call。
             if tool_name not in invocation_tool_names:
+                availability_reason = unexposed_tool_reasons.get(
+                    tool_name, "unavailable"
+                )
+                if availability_reason == "deferred":
+                    error = (
+                        f"Tool '{tool_name}' is enabled but its schema was deferred in "
+                        "this LLM invocation. Disclose it with search_tools if needed, "
+                        "then retry in the next response."
+                    )
+                elif availability_reason == "disabled_activatable":
+                    error = (
+                        f"Tool '{tool_name}' was disabled when this LLM invocation "
+                        "began but can be activated by a relevant skill. Activate that "
+                        "skill if needed, then retry in the next response."
+                    )
+                elif availability_reason == "disabled":
+                    error = (
+                        f"Tool '{tool_name}' is disabled for this agent and cannot be "
+                        "called in the current configuration. Do not retry it."
+                    )
+                else:
+                    error = (
+                        f"Tool '{tool_name}' is unavailable to this agent. "
+                        "Do not retry it."
+                    )
                 await _emit(StreamEventType.TOOL_START.value, agent_name, {
                     "call_id": call_id, "tool": tool_name,
                     "params": params, "reason": reason,
                 })
                 await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
                     "call_id": call_id, "tool": tool_name, "success": False,
-                    "error": (
-                        f"Tool '{tool_name}' was not exposed in this LLM invocation. "
-                        "Load or activate it first, then call it in the next response."
-                    ),
+                    "error": error,
+                    "availability_reason": availability_reason,
                     "duration_ms": 0,
                 })
                 tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
@@ -1247,15 +1271,37 @@ async def execute_loop(
                 return None
 
             messages, reminder, native_tools, compaction_threshold = await _build_context(agent_name)
+            exposed_tool_names = [
+                schema["function"]["name"] for schema in native_tools
+            ]
+
+            # 冻结这次 provider invocation 生成时的工具可用性。同一响应里
+            # 较早的 skill 激活或 deferred 披露即使改变下一轮 schema，也不能
+            # 改写模型已经生成 sibling call 时看到的 schema 集。
+            effective = effective_toolsets[agent_name]
+            invocation_names = set(exposed_tool_names)
+            unexposed_tool_reasons = {
+                name: "disabled"
+                for name in effective.disabled_tool_names
+                if name not in invocation_names and name not in effective.permissions
+            }
+            for name in effective.activatable_tool_names():
+                if name not in invocation_names and name not in effective.permissions:
+                    unexposed_tool_reasons[name] = "disabled_activatable"
+            for name in effective.deferred_member_names():
+                if name not in invocation_names:
+                    unexposed_tool_reasons[name] = "deferred"
 
             # agent_start 持久化 messages 重建所需的非历史输入：静态 system_prompt +
-            # 动态 reminder，以及体积很小的 model 标识。历史可由 event 流确定性重放；
-            # native_tools 只属于本次内存调用，不重复写入事件/SSE。
+            # 动态 reminder，以及体积很小的 model / exposed tool names。历史可由
+            # event 流确定性重放；完整 native schemas 仍只属于本次内存调用，
+            # 不重复写入事件/SSE。
             await _emit(StreamEventType.AGENT_START.value, agent_name, {
                 "agent": agent_name,
                 "system_prompt": messages[0]["content"] if messages and messages[0].get("role") == "system" else None,
                 "reminder": reminder,
                 "model": agents[agent_name].model,
+                "exposed_tool_names": exposed_tool_names,
                 "replay_reasoning": model_replays_reasoning(agents[agent_name].model),
             })
 
@@ -1400,10 +1446,12 @@ async def execute_loop(
 
             # 串行执行工具（内部可能递归 _run_agent；turn 终止由 while 顶部条件
             # + _check_cancelled 收口）
-            invocation_tool_names = {
-                schema["function"]["name"] for schema in native_tools
-            }
-            await _execute_tools(tool_calls, agent_name, invocation_tool_names)
+            await _execute_tools(
+                tool_calls,
+                agent_name,
+                invocation_names,
+                unexposed_tool_reasons,
+            )
 
         return None  # while 因 state["completed"]（cancel / 递归内 error）退出
 

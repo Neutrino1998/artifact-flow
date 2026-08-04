@@ -116,19 +116,31 @@ class ConversationManager:
         return conv_id
 
     async def ensure_conversation_exists(
-        self, conversation_id: str, user_id: Optional[str] = None
+        self,
+        conversation_id: str,
+        user_id: Optional[str] = None,
+        *,
+        create_if_missing: bool = True,
     ) -> None:
         """
-        确保对话存在（不存在则创建）
+        确保对话存在。
+
+        ``create_if_missing=False`` 用于已有对话的执行路径：路由层已经
+        建好并校验过对话，后台任务若再发现它不存在，只能说明用户
+        在 submit 后删除了它。此时必须 fail closed，不能用缺省
+        ``user_id=None`` 把已删对话复活成孤儿。
 
         Args:
             conversation_id: 对话ID
             user_id: 用户ID（创建时使用）
+            create_if_missing: 不存在时是否创建；False 则抛 NotFoundError
         """
         if self.repository:
             existing = await self.repository.get_conversation(conversation_id)
             if existing:
                 return
+        if not create_if_missing:
+            raise NotFoundError("Conversation", conversation_id)
         await self.start_conversation_async(conversation_id, user_id=user_id)
 
     # ========================================
@@ -142,6 +154,8 @@ class ConversationManager:
         user_input: str,
         parent_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        *,
+        create_conversation_if_missing: bool = True,
     ) -> Dict:
         """
         添加消息到对话（支持持久化）
@@ -152,11 +166,16 @@ class ConversationManager:
             user_input: 消息内容
             parent_id: 父消息ID（分支时使用）
             metadata: 与用户输入同时确定的 display-only 快照
+            create_conversation_if_missing: 保留旧调用方的自动创建语义；
+                已有对话的执行路径应传 False，防止删除后复活
 
         Returns:
             消息对象字典
         """
-        await self.ensure_conversation_exists(conv_id)
+        await self.ensure_conversation_exists(
+            conv_id,
+            create_if_missing=create_conversation_if_missing,
+        )
 
         now = utc_now().isoformat()
 
@@ -613,6 +632,8 @@ class ConversationManager:
             "agent_start_event_id": agent_start_event_id,
             "agent_name": agent_name,
             "model": model,
+            # None = legacy agent_start 没有采集；[] = 当次确实没有向模型暴露工具。
+            "exposed_tool_names": data.get("exposed_tool_names"),
             "has_reminder": reminder is not None,
             "messages": messages,
         }

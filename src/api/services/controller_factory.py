@@ -179,10 +179,8 @@ async def create_controller(
     visible_skill_snapshot = dict(effective_skillset.visible)
     # 决策 11 单一解析点:把每 agent 的宇宙(builtin ∪ units)解析成扁平
     # {full_name: 等级};等级从工具对象取(绑定不存等级)。引擎/上下文构建全程读这个。
-    # 请求级 builtin 注入(search_tools/read_skill/mount_skill)不在此手动 setdefault ——
-    # 已收进 resolver 的 apply_injection_invariants(F-0):all_tools 里有哪个、哪个 agent
-    # 配 bash/deferred,resolve 期与 activate_skill 变异后跑同一份规则,mid-turn skill
-    # 翻开 bash/defer unit 时 mount_skill/search_tools 连动注入。
+    # Builtin 成员关系只来自 agent 配置。all_tools 中请求级 read_skill/mount_skill
+    # 对象的存在只能收窄配置，不能替 agent 扩权；search_tools 同样必须显式配置。
     effective_toolsets = resolve_all(
         snapshot, all_tools, skill_snapshot=visible_skill_snapshot,
         dept_matched_units=dept_matched_units,

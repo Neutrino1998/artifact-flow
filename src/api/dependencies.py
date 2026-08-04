@@ -204,8 +204,8 @@ def _load_tools() -> Dict[str, BaseTool]:
 
     external 工具(config/tools/*.md)不在此加载 —— 它们物化进 DB(reconcile),由
     controller_factory 每 turn 从注册表快照重建。这里只留真正进程级、无状态的
-    builtin(web_search / web_fetch / call_subagent)；请求级 artifact / 沙盒工具仍在
-    controller_factory 现造。
+    builtin(web_search / web_fetch / call_subagent / search_tools)；请求级 artifact /
+    沙盒工具仍在 controller_factory 现造。
     """
     from tools.builtin.call_subagent import CallSubagentTool
     from tools.builtin.web_search import WebSearchTool
@@ -219,8 +219,8 @@ def _load_tools() -> Dict[str, BaseTool]:
         CallSubagentTool(valid_agents=valid_agents),
         WebSearchTool(),
         WebFetchTool(),
-        # 渐进式披露检索器(B-3):resolver 在 agent 有 deferred unit 时自动注入到可调集,
-        # 引擎特殊路由渲染。进程级注册即可,无 per-turn 状态。
+        # 渐进式披露检索器(B-3):进程级注册、无 per-turn 状态；只有显式配置
+        # search_tools 的 agent 才会获得它。未配置时 deferred unit 回退为完整 schema。
         SearchToolsTool(),
     ]
 

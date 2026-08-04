@@ -81,6 +81,7 @@ def test_disabled_builtin_absent():
     eff = resolve_effective_toolset(agent, _snapshot(), tools)
     assert "web_search" in eff
     assert "bash" not in eff
+    assert eff.disabled_tool_names == {"bash"}
 
 
 def test_undeclared_tool_absent():
@@ -91,6 +92,7 @@ def test_undeclared_tool_absent():
     }
     eff = resolve_effective_toolset(agent, _snapshot(), tools)
     assert "web_fetch" not in eff  # 未声明 = 不在宇宙
+    assert "web_fetch" not in eff.disabled_tool_names
 
 
 def test_singleton_unit_enabled():
@@ -122,6 +124,7 @@ def test_disabled_unit_members_absent():
     tools = {"github__search_repos": _Tool("github__search_repos", ToolPermission.AUTO)}
     eff = resolve_effective_toolset(agent, snap, tools)
     assert eff.names() == []
+    assert eff.disabled_tool_names == {"github__search_repos"}
 
 
 def test_unit_missing_from_snapshot_skipped():
@@ -162,13 +165,16 @@ def test_has_any():
 
 
 # ============================================================
-# B-3 渐进式披露:deferred_units + search_tools 自动注入
+# B-3 渐进式披露:deferred_units + 显式 search_tools 配置
 # ============================================================
 
 
 def test_deferred_unit_members_callable_and_grouped():
     # defer 的 unit:成员仍可调(进 permissions),且记进 deferred_units 供索引行渲染
-    agent = _agent(units={"github": "enabled"})
+    agent = _agent(
+        builtin_tools={"search_tools": "enabled"},
+        units={"github": "enabled"},
+    )
     snap = _snapshot(units=[
         _unit("github", ["github__a", "github__b"], kind="toolset",
               defer=True, description="GitHub API"),
@@ -190,7 +196,10 @@ def test_deferred_unit_members_callable_and_grouped():
 
 
 def test_non_deferred_unit_not_grouped():
-    agent = _agent(units={"github": "enabled"})
+    agent = _agent(
+        builtin_tools={"search_tools": "enabled"},
+        units={"github": "enabled"},
+    )
     snap = _snapshot(units=[_unit("github", ["github__a"], kind="toolset", defer=False)])
     tools = {"github__a": _Tool("github__a", ToolPermission.AUTO)}
     eff = resolve_effective_toolset(agent, snap, tools)
@@ -200,7 +209,10 @@ def test_non_deferred_unit_not_grouped():
 
 def test_deferred_unit_only_present_members_grouped():
     # 索引行只列工具对象存在的成员(不挂死链)
-    agent = _agent(units={"github": "enabled"})
+    agent = _agent(
+        builtin_tools={"search_tools": "enabled"},
+        units={"github": "enabled"},
+    )
     snap = _snapshot(units=[_unit("github", ["github__a", "github__b"],
                                   kind="toolset", defer=True)])
     tools = {
@@ -211,8 +223,8 @@ def test_deferred_unit_only_present_members_grouped():
     assert eff.deferred_units["github"].member_full_names == ["github__a"]
 
 
-def test_search_tools_auto_injected_when_deferred_present():
-    # 有 deferred unit → resolver 自动把 search_tools 加进可调集(by-construction)
+def test_deferred_unit_without_configured_search_tools_uses_full_schema():
+    # defer 是 best-effort 优化；未配置 search_tools 时不扩权，成员按完整 schema 暴露。
     agent = _agent(units={"github": "enabled"})
     snap = _snapshot(units=[_unit("github", ["github__a"], kind="toolset", defer=True)])
     tools = {
@@ -220,12 +232,17 @@ def test_search_tools_auto_injected_when_deferred_present():
         "search_tools": _Tool("search_tools", ToolPermission.AUTO),
     }
     eff = resolve_effective_toolset(agent, snap, tools)
-    assert "search_tools" in eff
-    assert eff.level("search_tools") == ToolPermission.AUTO
+    assert "search_tools" not in eff
+    assert "github__a" in eff
+    assert eff.deferred_units == {}
+    assert eff.deferred_member_names() == set()
 
 
 def test_deferred_unit_with_discovery_error_still_registers_index_row():
-    agent = _agent(units={"inventory": "enabled"})
+    agent = _agent(
+        builtin_tools={"search_tools": "enabled"},
+        units={"inventory": "enabled"},
+    )
     snap = _snapshot(units=[
         _unit(
             "inventory",
@@ -245,39 +262,50 @@ def test_deferred_unit_with_discovery_error_still_registers_index_row():
     assert eff.deferred_units["inventory"].discovery_error == "MCP server is unavailable"
 
 
-def test_search_tools_not_injected_without_deferred():
-    # 无 deferred unit → 不平白注入 search_tools
-    agent = _agent(units={"github": "enabled"})
+def test_configured_search_tools_remains_available_without_deferred_unit():
+    # Agent 配置是成员关系唯一来源；没有 deferred unit 也不自动删已配置 builtin。
+    agent = _agent(
+        builtin_tools={"search_tools": "enabled"},
+        units={"github": "enabled"},
+    )
     snap = _snapshot(units=[_unit("github", ["github__a"], kind="toolset", defer=False)])
     tools = {
         "github__a": _Tool("github__a", ToolPermission.AUTO),
         "search_tools": _Tool("search_tools", ToolPermission.AUTO),
     }
     eff = resolve_effective_toolset(agent, snap, tools)
-    assert "search_tools" not in eff
+    assert "search_tools" in eff
+    assert eff.level("search_tools") == ToolPermission.AUTO
 
 
-def test_search_tools_absent_with_deferred_fails_loud():
-    # deferred unit 存在但 tools 没 search_tools = 它没注册 = 硬 bug。下标取 → KeyError
-    # 当场炸(builtin 假定存在,不静默 skip)。prod 不可达;此处证明它响亮失败而非带病运行。
-    import pytest
-    agent = _agent(units={"github": "enabled"})
+def test_configured_search_tools_object_absent_falls_back_to_full_schema():
+    # 请求级对象缺席只能收窄配置；deferred unit 仍可用，改为完整 schema。
+    agent = _agent(
+        builtin_tools={"search_tools": "enabled"},
+        units={"github": "enabled"},
+    )
     snap = _snapshot(units=[_unit("github", ["github__a"], kind="toolset", defer=True)])
     tools = {"github__a": _Tool("github__a", ToolPermission.AUTO)}
-    with pytest.raises(KeyError):
-        resolve_effective_toolset(agent, snap, tools)
+    eff = resolve_effective_toolset(agent, snap, tools)
+    assert "search_tools" not in eff
+    assert eff.deferred_units == {}
+    assert "github__a" in eff
 
 
-def test_explicit_search_tools_not_double_added():
-    # agent 已显式声明 search_tools(builtin)+ 又有 deferred unit → 不重复(等级仍取工具对象)
-    agent = _agent(builtin_tools={"search_tools": "enabled"}, units={"github": "enabled"})
+def test_disabled_search_tools_is_not_injected_for_deferred_unit():
+    agent = _agent(
+        builtin_tools={"search_tools": "disabled"},
+        units={"github": "enabled"},
+    )
     snap = _snapshot(units=[_unit("github", ["github__a"], kind="toolset", defer=True)])
     tools = {
         "github__a": _Tool("github__a", ToolPermission.AUTO),
         "search_tools": _Tool("search_tools", ToolPermission.AUTO),
     }
     eff = resolve_effective_toolset(agent, snap, tools)
-    assert "search_tools" in eff
+    assert "search_tools" not in eff
+    assert "search_tools" in eff.disabled_tool_names
+    assert eff.deferred_units == {}
 
 
 # ============================================================
@@ -294,6 +322,7 @@ def test_public_unit_denied_by_department_match():
     eff = resolve_effective_toolset(agent, snap, tools, dept_matched_units={"weather"})
 
     assert "weather" not in eff
+    assert "weather" not in eff.disabled_tool_names
 
 
 def test_department_unit_requires_department_match():
@@ -306,6 +335,7 @@ def test_department_unit_requires_department_match():
     granted = resolve_effective_toolset(agent, snap, tools, dept_matched_units={"reports"})
 
     assert "reports" not in denied
+    assert "reports" not in denied.disabled_tool_names
     assert "reports" in granted
 
 
@@ -330,3 +360,4 @@ def test_skill_grant_cannot_reopen_dept_denied_unit():
     eff.activate_skill("s")
 
     assert "weather" not in eff
+    assert "weather" not in eff.disabled_tool_names

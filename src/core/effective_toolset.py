@@ -14,9 +14,10 @@ EffectiveToolset —— agent 的「可调工具集 + 等级」唯一解析点�
 
 dept/skill/MCP 是后续阶段各加一个输入层(不再碰这些读点);本解析只做静态两样。
 
-请求级 builtin 注入(search_tools/read_skill/mount_skill)= permissions 每次变异后都
-必须成立的不变量(F-0):resolve 末尾与 activate_skill 变异后跑同一份
-`apply_injection_invariants`,注入上下文(`injectable_builtins`)在 resolve 期烤入。
+Builtin 成员关系只来自 agent 配置。请求级工具对象是否存在只能收窄配置（例如本轮
+没有可见 skill 就没有 read_skill 对象），不能根据 bash/deferred/skill 状态扩张 agent
+宇宙。deferred 是 best-effort 的上下文优化：agent 未显式配置 search_tools 时回退为
+完整 schema，不制造无法披露的死工具。
 """
 
 from dataclasses import dataclass, field
@@ -24,8 +25,6 @@ from typing import Dict, Iterable, List, Optional, Set
 
 from reconcile.snapshot import AgentSnapshot, RegistrySnapshot, SkillInfo, UnitInfo
 from tools.base import (
-    MOUNT_SKILL_NAME,
-    READ_SKILL_NAME,
     SEARCH_TOOLS_NAME,
     BaseTool,
     ToolPermission,
@@ -50,7 +49,8 @@ class DeferredUnit:
     @classmethod
     def from_unit(cls, unit: UnitInfo, present_members: List[str]) -> "DeferredUnit":
         """从 unit + 本 turn 可建成员构造索引行(「只列可建成员、不挂死链」契约的单一
-        出口)—— resolve ② 与 _bake_skill_grants 共用,判据同为 `unit.defer and present`。"""
+        出口)—— resolve ② 与 _bake_skill_grants 共用。是否真正 defer 由调用方根据
+        search_tools 的显式成员关系决定。"""
         return cls(
             name=unit.name,
             description=unit.description,
@@ -62,14 +62,14 @@ class DeferredUnit:
 
 @dataclass
 class SkillGrant:
-    """一个 skill 激活时预烤好的授予(F-0 前 = 裸 {full_name: level} 字典)。
+    """一个 skill 激活时预烤好的授予。
 
     `permissions`:翻开哪些工具(该 skill allowed-tools ∩ 本 agent disabled 池)。
-    `deferred_units`:授予涉及 `defer=True` 的 unit 时随之注册的索引行 —— 激活后保持
-    渐进式披露(索引行 + search_tools 按需补 schema),不把整组 schema 灌进上下文。
+    `tool_units`:授予涉及的 external unit 目录信息。激活后若 search_tools 已经通过
+    agent 配置或同一个 skill 显式启用，defer=True 的 unit 才进入渐进式披露；否则
+    完整 schema 直接暴露。
     """
     permissions: Dict[str, ToolPermission] = field(default_factory=dict)
-    deferred_units: Dict[str, DeferredUnit] = field(default_factory=dict)
     tool_units: Dict[str, DeferredUnit] = field(default_factory=dict)
 
 
@@ -88,61 +88,36 @@ class EffectiveToolset:
     deferred_units: Dict[str, DeferredUnit] = field(default_factory=dict)
     # 预烤的 skill 能力授予(决策 11/changelog 06-30):`{slug: SkillGrant}` —— 每个 skill
     # 若激活会「翻开」哪些(= 该 skill 的 allowed-tools ∩ 本 agent 的 disabled 池,等级取自
-    # 工具定义)+ 随之注册哪些 deferred 索引行。激活 = merge 进 permissions/deferred_units,
-    # 引擎不回 snapshot、不持闭包(纯字典操作,见 activate_skill)。
+    # 工具定义)+ 随之注册哪些 external unit。激活只 merge 配置里显式 disabled 的成员，
+    # 不连带注入其它 builtin。
     skill_grants: Dict[str, SkillGrant] = field(default_factory=dict)
-    # 请求级 builtin 的注入上下文(F-0):`{tool_name: 等级}`,resolve 期从本 turn 的 tools
-    # 烤入(⊆ {search_tools, read_skill, mount_skill})。**presence 即闸** —— read_skill/
-    # mount_skill 仅当有可见 (bundle) skill 时才被建(见 create_skill_tools),不在此 dict =
-    # 本 turn 没那道能力,对应规则自然不触发。只存等级、不持工具对象/闭包。
-    injectable_builtins: Dict[str, ToolPermission] = field(default_factory=dict)
     tool_units: Dict[str, DeferredUnit] = field(default_factory=dict)
+    # Agent 宇宙内显式 disabled、且本 turn 有工具对象的成员。它们不在 permissions，
+    # 但执行闸需要区分「可经 skill 激活的 disabled」与「根本不属于该 agent 的 absent」。
+    # 部门规则已在 resolver 中先收窄，因此这里不会泄露 dept-denied unit。
+    disabled_tool_names: Set[str] = field(default_factory=set)
 
     def __contains__(self, full_name: str) -> bool:
         return full_name in self.permissions
 
     def activate_skill(self, slug: str) -> None:
         """激活一个 skill:把它预烤的授予 merge 进可调集(只翻 disabled 池、不碰等级),
-        并注册授予携带的 deferred 索引行,再重跑注入不变量(F-0:skill 可能翻开 bash/
-        defer unit → mount_skill/search_tools 必须连动)。
+        并注册授予携带的 external unit。Builtin 不做连带注入；只有 allowed-tools
+        直接点名、且 agent 配置为 disabled 的同名工具会被翻开。
 
-        幂等(merge 同值 + setdefault + 不变量幂等);未知 slug / 无授予 = no-op。
+        deferred 只在 search_tools 已显式可调时启用；否则保留完整 schema。这是展示
+        优化，不改变工具成员关系。幂等(merge 同值 + setdefault);未知 slug / 无授予 = no-op。
         inbound(回合起点恢复)与 mid-turn(read_skill)走同一入口。"""
         grant = self.skill_grants.get(slug)
         if grant is None:
             return
         self.permissions.update(grant.permissions)
-        for unit_name, du in grant.deferred_units.items():
-            self.deferred_units.setdefault(unit_name, du)
         for unit_name, unit in grant.tool_units.items():
             self.tool_units.setdefault(unit_name, unit)
-        self.apply_injection_invariants()
-
-    def apply_injection_invariants(self) -> None:
-        """请求级 builtin 注入 = permissions 每次变异后都必须成立的不变量(F-0)。
-
-        resolve 末尾与 activate_skill 变异后跑**同一份规则**,收拢原先散在 resolver
-        (search_tools)与 controller_factory(read_skill/mount_skill setdefault)的两家
-        注入 —— 修两条运行时不对称:skill 翻开 defer unit 后 search_tools 不注入 /
-        翻开 bash 后 mount_skill 不连动。将来 MCP 注入作第三个消费方接进这里,不打
-        新补丁(新可注入 builtin 须同步进 resolve ③ 的烤入元组,见该处注释)。
-        setdefault 语义:已在集内的不覆盖(等级唯一来源仍是工具定义)。
-        """
-        # deferred ⟹ search_tools(2026-06-26 决策):有 ≥1 deferred unit 的 agent 必须能
-        # search,否则 deferred 工具成死工具。search_tools 是常驻 builtin,有 deferred unit
-        # 它就**必须**已烤进 injectable_builtins;缺席 = 没注册 = 硬 bug,下标取当场
-        # KeyError 炸出来,不静默 skip(builtin 一律假定存在,不写防御性 is-not-None)。
-        if self.deferred_units and SEARCH_TOOLS_NAME not in self.permissions:
-            self.permissions[SEARCH_TOOLS_NAME] = self.injectable_builtins[SEARCH_TOOLS_NAME]
-        # 有可见 skill ⟹ read_skill:自包含(进 slug 出文本)→ 每个 agent 都注入。
-        read_perm = self.injectable_builtins.get(READ_SKILL_NAME)
-        if read_perm is not None:
-            self.permissions.setdefault(READ_SKILL_NAME, read_perm)
-        # bash ∧ 有可见 bundle skill ⟹ mount_skill:产物只有配 bash 才用得上(cat
-        # references / 跑 scripts),无 bash 的 agent 不给死能力(按需注入)。
-        mount_perm = self.injectable_builtins.get(MOUNT_SKILL_NAME)
-        if mount_perm is not None and "bash" in self.permissions:
-            self.permissions.setdefault(MOUNT_SKILL_NAME, mount_perm)
+        if SEARCH_TOOLS_NAME in self.permissions:
+            for unit_name, unit in self.tool_units.items():
+                if unit.defer:
+                    self.deferred_units.setdefault(unit_name, unit)
 
     def names(self) -> List[str]:
         return list(self.permissions.keys())
@@ -159,6 +134,14 @@ class EffectiveToolset:
         for unit in self.deferred_units.values():
             names.update(unit.member_full_names)
         return names
+
+    def activatable_tool_names(self) -> set[str]:
+        """可由任一当前可见 skill 从 disabled 池翻开的工具名。"""
+        return {
+            name
+            for grant in self.skill_grants.values()
+            for name in grant.permissions
+        }
 
 
 def unit_visible_by_department(
@@ -203,23 +186,35 @@ def resolve_effective_toolset(
     permissions: Dict[str, ToolPermission] = {}
     deferred_units: Dict[str, DeferredUnit] = {}
     tool_units: Dict[str, DeferredUnit] = {}
+    disabled_tool_names: Set[str] = set()
 
     # ① builtin 轴:enabled 的 builtin,等级取工具对象
     for name, member_state in agent.builtin_tools.items():
+        tool = tools.get(name)
+        if member_state == "disabled":
+            if tool is not None:
+                disabled_tool_names.add(name)
+            continue
         if member_state != "enabled":
             continue
-        tool = tools.get(name)
         if tool is not None:
             permissions[name] = tool.permission
 
     # ② external 轴:enabled 的 unit → 展开成员 full_name,逐个取等级
     for unit_name, member_state in agent.units.items():
-        if member_state != "enabled":
+        if member_state not in {"enabled", "disabled"}:
             continue
         unit = snapshot.units.get(unit_name)
         if unit is None:
             continue
         if not unit_visible_by_department(unit, dept_matched_units):
+            continue
+        if member_state == "disabled":
+            disabled_tool_names.update(
+                full_name
+                for full_name in unit.member_full_names
+                if tools.get(full_name) is not None
+            )
             continue
         present_members: List[str] = []
         for full_name in unit.member_full_names:
@@ -230,21 +225,14 @@ def resolve_effective_toolset(
         # defer 的 unit:成员仍可调(已进 permissions),但只渲索引行 → 记进 deferred_units。
         # 只在有可调成员或 discovery_error 时记;后者让 MCP server 不可达时在目录/search_tools
         # 中显式可见,而不是静默消失。
-        if unit.defer and (present_members or unit.discovery_error):
+        if (
+            unit.defer
+            and SEARCH_TOOLS_NAME in permissions
+            and (present_members or unit.discovery_error)
+        ):
             deferred_units[unit_name] = DeferredUnit.from_unit(unit, present_members)
         if present_members or unit.discovery_error:
             tool_units[unit_name] = DeferredUnit.from_unit(unit, present_members)
-
-    # ③ 请求级 builtin 注入上下文(F-0):从本 turn 的 tools 烤入三个可注入 builtin 的
-    # 等级(presence 即闸:read_skill/mount_skill 只在有可见 (bundle) skill 时存在)。
-    # 注入本身收进 apply_injection_invariants —— resolve 与 activate_skill 跑同一份规则。
-    # F-2 接 MCP 注入时:此元组与 apply_injection_invariants 的分支集是一对同步编辑点,
-    # 新可注入 builtin 两处都要加(烤不进 = 规则永不触发,加规则不烤 = 静默 no-op)。
-    injectable: Dict[str, ToolPermission] = {}
-    for name in (SEARCH_TOOLS_NAME, READ_SKILL_NAME, MOUNT_SKILL_NAME):
-        tool = tools.get(name)
-        if tool is not None:
-            injectable[name] = tool.permission
 
     skill_grants = _bake_skill_grants(
         agent, snapshot, tools, skill_snapshot, dept_matched_units
@@ -254,10 +242,9 @@ def resolve_effective_toolset(
         permissions=permissions,
         deferred_units=deferred_units,
         skill_grants=skill_grants,
-        injectable_builtins=injectable,
         tool_units=tool_units,
+        disabled_tool_names=disabled_tool_names,
     )
-    ets.apply_injection_invariants()
     return ets
 
 
@@ -270,8 +257,8 @@ def _bake_skill_grants(
 ) -> Dict[str, SkillGrant]:
     """预烤 `{slug: SkillGrant}` —— 每个 skill 激活会翻开的工具(只在本 agent 的 disabled
     池里取)。enabled 的 unit 已在 permissions(no-op);absent 不在池(翻不开)。授予涉及
-    `defer=True` 的 unit 时,随授予携带其 DeferredUnit(与 resolve ② 同判据)—— 激活时
-    注册索引行,保持渐进式披露(否则翻开的成员被当 non-deferred 全 schema 渲染,F-0)。"""
+    external unit 时随授予携带目录信息。激活时只有显式可调的 search_tools 才会让
+    defer=True 的 unit 进入渐进式披露；否则完整 schema 直接暴露。"""
     if not skill_snapshot:
         return {}
 
@@ -307,11 +294,11 @@ def _bake_skill_grants(
                         if tool is not None:
                             grant.permissions[fn] = tool.permission
                             present.append(fn)
-                    if u.defer and (present or u.discovery_error):
-                        grant.deferred_units[unit] = DeferredUnit.from_unit(u, present)
                     if present or u.discovery_error:
                         grant.tool_units[unit] = DeferredUnit.from_unit(u, present)
-        if grant.permissions:
+        # discovery_error-only unit 没有可建 member，因此 permissions 为空，但激活后
+        # 仍须把 server unavailable 显式放进工具目录，不能把这个可观察结果丢掉。
+        if grant.permissions or grant.tool_units:
             grants_by_slug[slug] = grant
     return grants_by_slug
 

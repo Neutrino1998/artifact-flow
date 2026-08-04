@@ -33,8 +33,7 @@ def test_snapshot_empty_before_start(tmp_path):
 
 
 def test_last_wedge_only_set_on_hard_wedge(tmp_path):
-    """#1 回归:软告警(wedged=False)不得写 last_wedge —— 否则一次 routine lag 抖动
-    把实例永久钉黄 + 假报「抓到 wedge」。只有硬 wedge(wedged=True)才留摘要。"""
+    """软告警(wedged=False)不得写 last_wedge；只有 hard wedge 才留历史摘要。"""
     loop = asyncio.new_event_loop()
     sink = JsonlSink(tmp_path / "loop-lag.jsonl", max_mb=1, backups=1, mirror_stdout=False)
     try:
@@ -130,6 +129,28 @@ def test_collect_task_stacks_format(tmp_path):
                 await idle
             except asyncio.CancelledError:
                 pass
+        finally:
+            sink.close()
+
+    asyncio.run(runner())
+
+
+def test_collect_thread_stacks_marks_event_loop_thread_without_private_loop_id(tmp_path):
+    """uvloop 无 ``_thread_id`` 时，hard wedge 仍应标出 event-loop 线程。"""
+
+    class LoopWithoutThreadId:
+        pass
+
+    async def runner():
+        sink = JsonlSink(tmp_path / "loop-lag.jsonl", max_mb=1, backups=1, mirror_stdout=False)
+        loop = LoopWithoutThreadId()
+        wd = LoopLagWatchdog(loop, sink, warn_ms=500, interval_sec=1.0)
+        try:
+            threads = wd._collect_thread_stacks()
+            loop_thread = next(t for t in threads if t["event_loop"])
+            assert loop_thread["name"]
+            assert loop_thread["stack"]
+            assert len(loop_thread["stack"]) <= wd._STACK_FRAMES
         finally:
             sink.close()
 

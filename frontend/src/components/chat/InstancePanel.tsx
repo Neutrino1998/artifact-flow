@@ -7,6 +7,7 @@ import { parseUtcIso } from '@/lib/time';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 import { useUIStore } from '@/stores/uiStore';
 import { PillBadge } from '@/components/ui/PillBadge';
+import InstanceEventDrawer from './InstanceEventDrawer';
 
 // 实例监控面板轮询周期。心跳 sample 周期是 30s,面板 10s 轮询让状态色(尤其
 // 陈旧→红)在心跳停更后一个 sample 周期内可见,又不过度打后端。
@@ -83,10 +84,10 @@ function reasonText(inst: InstanceHeartbeat, reason: StatusReason, nowMs: number
     return loop.max_1m_ms != null ? `${reason.label} · ${Math.round(loop.max_1m_ms)}ms` : reason.label;
   }
   if (reason.code === 'recent_error') return `${reason.label} · ${ago(inst.last_error_ts, nowMs)}`;
-  if (reason.code === 'wedge_seen') {
+  if (reason.code === 'wedge_recent' || reason.code === 'wedge_seen') {
     const wedge = inst.last_wedge ?? null;
     return wedge?.lag_ms != null
-      ? `${reason.label} · ${ago(wedge.ts, nowMs)} · ${Math.round(wedge.lag_ms)}ms`
+      ? `${reason.label} · ${ago(wedge.ts, nowMs)} · ≥${Math.round(wedge.lag_ms)}ms`
       : reason.label;
   }
   if (reason.code === 'autoheal_recent') {
@@ -98,7 +99,17 @@ function reasonText(inst: InstanceHeartbeat, reason: StatusReason, nowMs: number
   return reason.label;
 }
 
-function InstanceCard({ inst, nowMs, isSelf }: { inst: InstanceHeartbeat; nowMs: number; isSelf: boolean }) {
+export function InstanceCard({
+  inst,
+  nowMs,
+  isSelf,
+  onOpenEvents,
+}: {
+  inst: InstanceHeartbeat;
+  nowMs: number;
+  isSelf: boolean;
+  onOpenEvents: (instance: InstanceHeartbeat) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const meta = STATUS_META[inst.status] ?? STATUS_META.red;
 
@@ -106,62 +117,100 @@ function InstanceCard({ inst, nowMs, isSelf }: { inst: InstanceHeartbeat; nowMs:
   const proc = inst.process ?? {};
   const errCount = inst.error_count ?? 0;
   const reasons = inst.status_reasons ?? [];
+  // wedge_seen is accepted for rolling-upgrade compatibility with an older backend.
+  const wedgeIsCurrentReason = reasons.some(
+    (reason) => reason.code === 'wedge_recent' || reason.code === 'wedge_seen',
+  );
+  const autohealIsCurrentReason = reasons.some((reason) => reason.code === 'autoheal_recent');
+  const showHistoricalWedge = Boolean(inst.last_wedge && !wedgeIsCurrentReason);
+  const showHistoricalAutoheal = Boolean(inst.last_autoheal?.ts && !autohealIsCurrentReason);
+  const hasBadges = reasons.length > 0 || showHistoricalWedge || showHistoricalAutoheal;
 
   return (
     <div className="rounded-xl border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-3.5 shadow-float">
-      {/* Header: status dot + id + version + self marker */}
-      <div className="flex items-center gap-2">
-        <span className={`inline-block w-2.5 h-2.5 rounded-full ${meta.dot} ${inst.status === 'red' ? '' : 'shadow-sm'}`} />
-        <span className="font-medium text-text-primary dark:text-text-primary-dark truncate" title={inst.instance_id}>
-          {inst.instance_id}
-        </span>
-        {isSelf && (
-          <PillBadge tone="accent">本机</PillBadge>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label={`查看 ${inst.instance_id} 全部实例事件`}
+        onClick={() => onOpenEvents(inst)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onOpenEvents(inst);
+          }
+        }}
+        className="cursor-pointer rounded-lg outline-none transition-colors hover:bg-bg/60 dark:hover:bg-bg-dark/60 focus-visible:ring-2 focus-visible:ring-accent"
+      >
+        {/* Header: status dot + id + version + self marker */}
+        <div className="flex items-center gap-2">
+          <span className={`inline-block w-2.5 h-2.5 rounded-full ${meta.dot} ${inst.status === 'red' ? '' : 'shadow-sm'}`} />
+          <span className="font-medium text-text-primary dark:text-text-primary-dark truncate" title={inst.instance_id}>
+            {inst.instance_id}
+          </span>
+          {isSelf && (
+            <PillBadge tone="accent">本机</PillBadge>
+          )}
+          <span className={`text-xs ml-auto shrink-0 ${meta.text}`}>{meta.label}</span>
+        </div>
+
+        {/* Sub-header: version + heartbeat freshness + uptime */}
+        <div className="mt-1 flex items-center gap-3 text-xs text-text-secondary dark:text-text-secondary-dark">
+          <span title="镜像版本">{inst.version ?? 'dev'}</span>
+          <span title="最近心跳">心跳 {ago(inst.ts, nowMs)}</span>
+          <span title="运行时长">上线 {uptime(inst.started_at, nowMs)}</span>
+        </div>
+
+        {/* Metrics grid — 数值 tile 一律中性色,健康颜色只由后端算好的 status 圆点承载
+            (前端不再自判阈:旧的 loop≥500 高亮复制了 LOOP_LAG_WARN_MS、errCount>0 红
+            又与窗口化的绿点矛盾——lifetime 计数 hours 后仍红。单点归后端 = by-construction
+            消除两处漂移)。*/}
+        <div className="mt-3 grid grid-cols-9 gap-3">
+          {/* loop 值(p50/max)比其它 tile 长,给它 1.5 倍宽(3 份)防折行挤歪整排;
+              其它三个各 2 份 → 3 + 2×3 = 9。 */}
+          <div className="col-span-2 min-w-0">
+            <Metric label="RSS" value={proc.rss_mb != null ? `${proc.rss_mb}M` : '—'} />
+          </div>
+          <div className="col-span-3 min-w-0">
+            <Metric
+              label="loop p50/max"
+              value={`${loop.p50_ms ?? '—'}/${loop.max_1m_ms ?? '—'}`}
+            />
+          </div>
+          <div className="col-span-2 min-w-0">
+            <Metric label="在途" value={String(inst.in_flight ?? 0)} />
+          </div>
+          <div className="col-span-2 min-w-0">
+            <Metric label="ERROR" value={String(errCount)} />
+          </div>
+        </div>
+
+        {/* Anomaly badges — backend owns the status decision; UI only renders reasons. */}
+        {hasBadges && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {reasons.map((reason) => (
+              <PillBadge
+                key={reason.code}
+                tone={reasonTone(reason.code)}
+                size="regular"
+              >
+                {reasonText(inst, reason, nowMs)}
+              </PillBadge>
+            ))}
+            {showHistoricalWedge && inst.last_wedge && (
+              <PillBadge tone="neutral" size="regular">
+                历史 wedge · {ago(inst.last_wedge.ts, nowMs)}
+                {inst.last_wedge.lag_ms != null ? ` · ≥${Math.round(inst.last_wedge.lag_ms)}ms` : ''}
+              </PillBadge>
+            )}
+            {showHistoricalAutoheal && inst.last_autoheal && (
+              <PillBadge tone="neutral" size="regular">
+                历史 autoheal · {ago(inst.last_autoheal.ts, nowMs)}
+                {inst.last_autoheal.count != null ? ` ×${inst.last_autoheal.count}` : ''}
+              </PillBadge>
+            )}
+          </div>
         )}
-        <span className={`text-xs ml-auto shrink-0 ${meta.text}`}>{meta.label}</span>
       </div>
-
-      {/* Sub-header: version + heartbeat freshness + uptime */}
-      <div className="mt-1 flex items-center gap-3 text-xs text-text-secondary dark:text-text-secondary-dark">
-        <span title="镜像版本">{inst.version ?? 'dev'}</span>
-        <span title="最近心跳">心跳 {ago(inst.ts, nowMs)}</span>
-        <span title="运行时长">上线 {uptime(inst.started_at, nowMs)}</span>
-      </div>
-
-      {/* Metrics grid — 数值 tile 一律中性色,健康颜色只由后端算好的 status 圆点承载
-          (前端不再自判阈:旧的 loop≥500 高亮复制了 LOOP_LAG_WARN_MS、errCount>0 红
-          又与窗口化的绿点矛盾——lifetime 计数 hours 后仍红。单点归后端 = by-construction
-          消除两处漂移)。*/}
-      <div className="mt-3 grid grid-cols-9 gap-3">
-        {/* loop 值(p50/max)比其它 tile 长,给它 1.5 倍宽(3 份)防折行挤歪整排;
-            其它三个各 2 份 → 3 + 2×3 = 9。 */}
-        <div className="col-span-2 min-w-0">
-          <Metric label="RSS" value={proc.rss_mb != null ? `${proc.rss_mb}M` : '—'} />
-        </div>
-        <div className="col-span-3 min-w-0">
-          <Metric
-            label="loop p50/max"
-            value={`${loop.p50_ms ?? '—'}/${loop.max_1m_ms ?? '—'}`}
-          />
-        </div>
-        <div className="col-span-2 min-w-0">
-          <Metric label="在途" value={String(inst.in_flight ?? 0)} />
-        </div>
-        <div className="col-span-2 min-w-0">
-          <Metric label="ERROR" value={String(errCount)} />
-        </div>
-      </div>
-
-      {/* Anomaly badges — backend owns the status decision; UI only renders reasons. */}
-      {reasons.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {reasons.map((reason) => (
-            <PillBadge key={reason.code} tone={reasonTone(reason.code)} size="regular">
-              {reasonText(inst, reason, nowMs)}
-            </PillBadge>
-          ))}
-        </div>
-      )}
 
       {/* Expandable detail */}
       <button
@@ -191,9 +240,12 @@ export default function InstancePanel() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [drawer, setDrawer] = useState<InstanceHeartbeat | null>(null);
   const claim = useLatestOnly();
   // 刷新按钮已上移到侧栏(与会话监控一致);bump 这个 tick 触发一次 reload。
   const refreshTick = useUIStore((s) => s.instancesRefreshTick);
+  const setActiveMode = useUIStore((s) => s.setActiveMode);
+  const setObservabilitySelectedConvId = useUIStore((s) => s.setObservabilitySelectedConvId);
 
   const load = useCallback(async () => {
     const isLatest = claim();
@@ -219,6 +271,16 @@ export default function InstancePanel() {
 
   const instances = data?.instances ?? [];
   const selfId = data?.instance_id;
+  const drawerInstance = drawer
+    ? instances.find((instance) => instance.instance_id === drawer.instance_id) ?? drawer
+    : null;
+
+  const openConversation = useCallback((conversationId: string) => {
+    // setActiveMode resets per-mode child state by construction, so select only
+    // after entering observability mode.
+    setActiveMode('observability');
+    setObservabilitySelectedConvId(conversationId);
+  }, [setActiveMode, setObservabilitySelectedConvId]);
 
   return (
     <div className="flex-1 flex flex-col bg-chat dark:bg-chat-dark overflow-hidden">
@@ -237,10 +299,24 @@ export default function InstancePanel() {
         )}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {instances.map((inst) => (
-            <InstanceCard key={inst.instance_id} inst={inst} nowMs={nowMs} isSelf={inst.instance_id === selfId} />
+            <InstanceCard
+              key={inst.instance_id}
+              inst={inst}
+              nowMs={nowMs}
+              isSelf={inst.instance_id === selfId}
+              onOpenEvents={setDrawer}
+            />
           ))}
         </div>
       </div>
+      {drawer && drawerInstance && (
+        <InstanceEventDrawer
+          instance={drawerInstance}
+          initialFilter="all"
+          onClose={() => setDrawer(null)}
+          onOpenConversation={openConversation}
+        />
+      )}
     </div>
   );
 }

@@ -13,13 +13,15 @@ DeadmanSwitch 的 stderr dump + docker healthcheck 状态 + `kill -USR1 <pid>`
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from config import config
+from api.schemas.admin import AdminInstanceEventsResponse
 from api.dependencies import (
     get_runtime_store,
     get_execution_runner,
@@ -27,6 +29,7 @@ from api.dependencies import (
     require_admin,
 )
 from observability.heartbeat import HeartbeatWriter
+from observability.instance_events import InstanceEventKind, read_instance_events
 from utils.instance import INSTANCE_ID
 from utils.logger import get_logger
 from utils.time import utc_now
@@ -114,8 +117,8 @@ def _compute_status_reasons(payload: dict, now: datetime) -> list[dict[str, str]
 
     - red:ts 缺失或陈旧(≥ STALE_SEC)。心跳是 asyncio task,loop wedge → ts 停更
       → 陈旧 → 红(key 仍在册,给 autoheal 留窗口;key 真过期则整条从 scan 消失)。
-    - yellow:活着但有异常信号之一 —— loop_lag 近一分钟峰值超 warn 阈 / 窗口内出过
-      ERROR / watchdog 抓到过 wedge / 近期被 autoheal 重启过。
+    - yellow:活着但有近期异常信号之一 —— loop_lag 近一分钟峰值超 warn 阈 / 窗口内
+      出过 ERROR 或 hard wedge / 近期被 autoheal 重启过。
     - green:新鲜且无上述信号。
     """
     ts = _parse_ts(payload.get("ts"))
@@ -134,9 +137,12 @@ def _compute_status_reasons(payload: dict, now: datetime) -> list[dict[str, str]
     if last_error is not None and (now - last_error).total_seconds() <= config.OBS_ERROR_WINDOW_SEC:
         reasons.append({"code": "recent_error", "label": "近期 ERROR"})
 
-    # watchdog 抓到过 wedge(进程生命周期内曾发生即黄,与 plan「是否抓到过」一致)
-    if payload.get("last_wedge"):
-        reasons.append({"code": "wedge_seen", "label": "watchdog wedge"})
+    # hard wedge 与 ERROR 用同一近期窗口。last_wedge 仍在心跳里保留到进程重启,
+    # 供 UI 作为可点击的历史事件展示；但已恢复数天的实例不应被永久钉黄。
+    last_wedge = payload.get("last_wedge") or {}
+    wedge_ts = _parse_ts(last_wedge.get("ts"))
+    if wedge_ts is not None and (now - wedge_ts).total_seconds() <= config.OBS_ERROR_WINDOW_SEC:
+        reasons.append({"code": "wedge_recent", "label": "watchdog wedge"})
 
     # 近期被 autoheal 重启过
     autoheal = payload.get("last_autoheal") or {}
@@ -247,3 +253,35 @@ async def list_instances(
         "shared": True,
         "instances": instances,
     }
+
+
+@router.get(
+    "/instances/{instance_id}/events",
+    response_model=AdminInstanceEventsResponse,
+)
+async def get_instance_events(
+    instance_id: str,
+    kind: InstanceEventKind = Query(default="all"),
+    limit: int = Query(default=30, ge=1, le=config.OBS_ADMIN_EVENT_LIMIT_MAX),
+    _admin: TokenPayload = Depends(require_admin),
+):
+    """Return a bounded, admin-only diagnostic timeline for one instance.
+
+    ERROR entries come from the same dedicated ERROR log that feeds the card's
+    counter; loop events and nearby metrics come from their existing JSONL
+    files.  File IO and parsing run off the event loop.  On a multi-host fleet,
+    ``sources.*.available=false`` explicitly reports that this responder cannot
+    see the selected host's local volume instead of pretending there were no
+    incidents.  ``kind`` is applied before ``limit`` so an exact historical
+    wedge lookup cannot be displaced by newer ERROR or soft-lag records.
+    """
+    try:
+        return await asyncio.to_thread(read_instance_events, instance_id, limit, kind)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid instance ID")
+    except Exception as exc:
+        # 5xx: always retain the stack for ops; ordinary response remains
+        # sanitized unless DEBUG, matching the rest of the API.
+        logger.exception(f"Failed to read diagnostic events for instance {instance_id}")
+        detail = str(exc) if config.DEBUG else "Internal server error"
+        raise HTTPException(status_code=500, detail=detail)

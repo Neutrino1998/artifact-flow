@@ -13,6 +13,7 @@ import { BUTTON_DANGER, MENU_ROW_HOVER } from '@/lib/styles';
 import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
 import ConversationActionsMenu from '@/components/sidebar/ConversationActionsMenu';
 import Checkbox from '@/components/forms/Checkbox';
+import { StatusNotice } from '@/components/ui/StatusNotice';
 import PanelSearchBar from './PanelSearchBar';
 import Pagination from './Pagination';
 
@@ -37,6 +38,7 @@ export default function ConversationBrowser() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [bulkDeleteNotice, setBulkDeleteNotice] = useState<string | null>(null);
 
   const currentId = useConversationStore((s) => s.current?.id);
   const removeConversation = useConversationStore((s) => s.removeConversation);
@@ -99,18 +101,16 @@ export default function ConversationBrowser() {
   }, [switchConversation, setActiveMode]);
 
   const handleDelete = useCallback(async (id: string) => {
-    try {
-      await deleteConversation(id);
-      removeConversation(id);
-      // Re-fetch current page so the empty slot fills from the next page;
-      // step back if we just emptied the last page.
-      const lastPage = Math.max(1, Math.ceil((total - 1) / pageSize));
-      const nextPage = Math.min(page, lastPage);
-      if (nextPage !== page) setPage(nextPage);
-      fetchConversations(query, nextPage, pageSize);
-    } catch (err) {
-      console.error('Failed to delete conversation:', err);
-    }
+    // 让失败冒泡到 ConversationActionsMenu 的 DangerConfirmModal；它负责将
+    // stale active hint 导致的 409 显示给用户并保持弹窗，而不是静默关闭。
+    await deleteConversation(id);
+    removeConversation(id);
+    // Re-fetch current page so the empty slot fills from the next page;
+    // step back if we just emptied the last page.
+    const lastPage = Math.max(1, Math.ceil((total - 1) / pageSize));
+    const nextPage = Math.min(page, lastPage);
+    if (nextPage !== page) setPage(nextPage);
+    fetchConversations(query, nextPage, pageSize);
   }, [removeConversation, total, page, pageSize, query, fetchConversations]);
 
   const handleClose = useCallback(() => {
@@ -120,26 +120,31 @@ export default function ConversationBrowser() {
   const exitSelectionMode = useCallback(() => {
     setSelectionMode(false);
     setSelectedIds(new Set());
+    setBulkDeleteNotice(null);
   }, []);
 
   const enterSelectionMode = useCallback(() => {
     setSelectionMode(true);
     setSelectedIds(new Set());
+    setBulkDeleteNotice(null);
   }, []);
 
   const toggleSelection = useCallback((id: string) => {
+    if (conversations.some((c) => c.id === id && c.active_message_id)) return;
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  }, []);
+  }, [conversations]);
 
   const selectAllOnPage = useCallback(() => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      for (const c of conversations) next.add(c.id);
+      for (const c of conversations) {
+        if (!c.active_message_id) next.add(c.id);
+      }
       return next;
     });
   }, [conversations]);
@@ -150,16 +155,38 @@ export default function ConversationBrowser() {
     const res = await bulkDeleteConversations(ids);
     for (const id of res.deleted) removeConversation(id);
     setConfirmBulkDelete(false);
-    exitSelectionMode();
+
+    const activeFailures = res.failed.filter(
+      (item) => item.reason === 'active_execution',
+    );
     if (res.failed.length > 0) {
-      console.warn(`Bulk delete: ${res.failed.length} failed`, res.failed);
+      // active_message_id 只是选择时的 best-effort 提示；服务端 lease 才是
+      // authority。竞态失败的活跃项保留选择，其他 not_found 项刷新后会消失。
+      setSelectedIds(new Set(activeFailures.map((item) => item.id)));
+      setSelectionMode(activeFailures.length > 0);
+
+      const messages = [`已删除 ${res.deleted.length} 条。`];
+      if (activeFailures.length > 0) {
+        messages.push(
+          `${activeFailures.length} 条任务正在运行，已保留选择，完成或取消后可重试。`,
+        );
+      }
+      const unavailableCount = res.failed.length - activeFailures.length;
+      if (unavailableCount > 0) {
+        messages.push(`${unavailableCount} 条已不存在或无权访问。`);
+      }
+      setBulkDeleteNotice(messages.join(''));
+    } else {
+      setSelectionMode(false);
+      setSelectedIds(new Set());
+      setBulkDeleteNotice(null);
     }
     // Re-fetch — total may have shifted enough to invalidate the current page.
     const lastPage = Math.max(1, Math.ceil((total - res.deleted.length) / pageSize));
     const nextPage = Math.min(page, lastPage);
     if (nextPage !== page) setPage(nextPage);
     fetchConversations(query, nextPage, pageSize);
-  }, [selectedIds, removeConversation, exitSelectionMode, total, page, pageSize, query, fetchConversations]);
+  }, [selectedIds, removeConversation, total, page, pageSize, query, fetchConversations]);
 
   // Esc to exit selection mode (when no modal is open — modals own their own Esc)
   useEffect(() => {
@@ -172,8 +199,9 @@ export default function ConversationBrowser() {
   }, [selectionMode, confirmBulkDelete, exitSelectionMode]);
 
   const selectedCount = selectedIds.size;
-  const allOnPageSelected = conversations.length > 0
-    && conversations.every((c) => selectedIds.has(c.id));
+  const deletableOnPage = conversations.filter((c) => !c.active_message_id);
+  const allOnPageSelected = deletableOnPage.length > 0
+    && deletableOnPage.every((c) => selectedIds.has(c.id));
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
@@ -201,6 +229,19 @@ export default function ConversationBrowser() {
         onClose={handleClose}
       />
 
+      {bulkDeleteNotice && (
+        <div className="px-4 pb-3">
+          <div className="max-w-3xl mx-auto">
+            <StatusNotice
+              tone="warning"
+              onDismiss={() => setBulkDeleteNotice(null)}
+            >
+              {bulkDeleteNotice}
+            </StatusNotice>
+          </div>
+        </div>
+      )}
+
       {/* List */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4">
         <div className="max-w-3xl mx-auto">
@@ -211,7 +252,7 @@ export default function ConversationBrowser() {
             </span>
             <button
               onClick={selectAllOnPage}
-              disabled={allOnPageSelected || conversations.length === 0}
+              disabled={allOnPageSelected || deletableOnPage.length === 0}
               className="min-h-11 sm:min-h-0 px-3 py-1 text-xs rounded-md border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               全选当前页
@@ -335,12 +376,15 @@ function BrowserItem({
       >
         <div className="flex items-center gap-3">
           {selectionMode && (
-            <Checkbox
-              checked={selected}
-              onChange={() => onToggleSelect(conversation.id)}
-              onClick={(e) => e.stopPropagation()}
-              ariaLabel={`选中 ${title}`}
-            />
+            <span title={conversation.active_message_id ? '任务运行中，暂不能删除' : undefined}>
+              <Checkbox
+                checked={selected}
+                disabled={Boolean(conversation.active_message_id)}
+                onChange={() => onToggleSelect(conversation.id)}
+                onClick={(e) => e.stopPropagation()}
+                ariaLabel={`选中 ${title}`}
+              />
+            </span>
           )}
           <div className="flex-1 min-w-0">
             <div className={`font-medium text-text-primary dark:text-text-primary-dark truncate ${(showMenu || menuOpen) && !selectionMode ? 'pr-8' : ''}`}>
@@ -365,6 +409,7 @@ function BrowserItem({
           open={menuOpen}
           onOpenChange={setMenuOpen}
           onDelete={onDelete}
+          deleteDisabled={Boolean(conversation.active_message_id)}
           wrapperClassName="absolute right-3 top-1/2 -translate-y-1/2"
           triggerClassName="p-1.5 rounded-md text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-surface dark:hover:bg-surface-dark transition-colors"
         />

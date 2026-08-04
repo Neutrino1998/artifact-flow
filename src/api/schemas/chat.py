@@ -82,6 +82,11 @@ class BulkDeleteRequest(BaseModel):
 # Response Models
 # ============================================================
 
+class ErrorResponse(BaseModel):
+    """Standard FastAPI error response with a string detail."""
+    detail: str = Field(..., description="Human-readable error detail")
+
+
 class ChatResponse(BaseModel):
     """POST /api/v1/chat response"""
     conversation_id: str = Field(..., description="Conversation ID")
@@ -207,7 +212,9 @@ class ConversationDetailResponse(BaseModel):
 class BulkDeleteFailedItem(BaseModel):
     """One failed item in BulkDeleteResponse.failed."""
     id: str = Field(..., description="Conversation ID that failed to delete")
-    reason: str = Field(..., description="Failure reason: 'not_found'")
+    reason: str = Field(
+        ..., description="Failure reason: 'not_found' or 'active_execution'"
+    )
 
 
 class BulkDeleteResponse(BaseModel):

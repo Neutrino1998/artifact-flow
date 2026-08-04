@@ -159,8 +159,10 @@ class ReadArtifactTool(BaseTool):
                 "PNG/JPEG image artifacts (e.g. an uploaded photo or screenshot) "
                 "are returned as the actual image so you can see it. Other "
                 "binary/image formats (gif/webp/tiff, docx, pdf, archives...) "
-                "cannot be viewed directly — mount them into the sandbox and "
-                "convert via bash (e.g. to PNG, then persist and read it)."
+                "cannot be viewed directly — an agent with exposed sandbox tools "
+                "must convert them (e.g. to PNG), persist the result, and pass the "
+                "new artifact ID. If you do not have sandbox tools exposed, ask the "
+                "caller to prepare that artifact instead of inventing a tool call."
             ),
             permission=ToolPermission.AUTO,
             # Infinity = 永不落盘。read_artifact 自身的输出若被中间件再次落盘，
@@ -224,8 +226,9 @@ class ReadArtifactTool(BaseTool):
                 success=False,
                 error=(
                     f"Artifact '{params['id']}' not found. Note: files created in "
-                    "the sandbox are not artifacts — read them with bash, or "
-                    "persist them first."
+                    "a sandbox are not artifact IDs. If you do not have sandbox "
+                    "tools exposed, ask the caller to persist the file and pass its "
+                    "artifact ID; do not invent or retry unavailable tools."
                 ),
             )
 
@@ -249,14 +252,15 @@ class ReadArtifactTool(BaseTool):
             if bct.startswith("image/"):
                 how = (
                     "Only PNG/JPEG images can be viewed directly with read_artifact. "
-                    "To view this image, mount it into the sandbox with the `mount` "
-                    "tool, convert it to PNG via bash, persist the result, then read "
-                    "the new artifact."
+                    "An agent with exposed sandbox tools must convert it to PNG, "
+                    "persist the result, and pass the new artifact ID. If those tools "
+                    "are not exposed to you, ask the caller to prepare it."
                 )
             else:
                 how = (
-                    "To inspect or convert it, mount it into the sandbox with the "
-                    "`mount` tool and process it via bash."
+                    "An agent with exposed sandbox tools must inspect or convert it. "
+                    "If those tools are not exposed to you, ask the caller to prepare "
+                    "a directly readable artifact."
                 )
             return ToolResult(
                 success=True,
@@ -339,8 +343,9 @@ class ReadArtifactTool(BaseTool):
                 success=False,
                 error=(
                     f"Failed to prepare image '{artifact_id}' for viewing: {e}. "
-                    "If the format cannot be decoded, mount it into the sandbox "
-                    "with the `mount` tool and convert it (e.g. to PNG) via bash."
+                    "An agent with exposed sandbox tools must convert an undecodable "
+                    "file to PNG and persist it. If those tools are not exposed to "
+                    "you, ask the caller to prepare the converted image artifact."
                 ),
             )
         ct = blob["content_type"]

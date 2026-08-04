@@ -80,6 +80,17 @@ export type AdminSkillListResponse = S['AdminSkillListResponse'];
 export type AdminSkillUpdateRequest = S['AdminSkillUpdateRequest'];
 
 // ============================================================
+// Instance Diagnostics (Admin)
+// ============================================================
+
+export type InstanceEventSourceStatus = S['InstanceEventSourceStatus'];
+export type InstanceEventStackOwner = S['InstanceEventStackOwner'];
+export type InstanceEventMetricSnapshot = S['InstanceEventMetricSnapshot'];
+export type InstanceDiagnosticEvent = S['InstanceDiagnosticEvent'];
+export type InstanceDiagnosticEventType = InstanceDiagnosticEvent['type'];
+export type AdminInstanceEventsResponse = S['AdminInstanceEventsResponse'];
+
+// ============================================================
 // Chat Types
 // ============================================================
 

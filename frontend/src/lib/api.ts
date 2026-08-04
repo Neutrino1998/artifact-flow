@@ -54,6 +54,7 @@ import type {
   AdminSkillItem,
   SiteNotificationsResponse,
   UpdateSiteNotificationsRequest,
+  AdminInstanceEventsResponse,
 } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
 import { API_URL } from './apiBase';
@@ -626,6 +627,7 @@ export interface AdminPromptReconstructResponse {
   agent_start_event_id: string;
   agent_name: string | null;
   model: string | null;
+  exposed_tool_names: string[] | null;
   has_reminder: boolean;
   messages: Record<string, unknown>[];
 }
@@ -682,7 +684,13 @@ export interface InstanceHeartbeat {
   data_dir_mb?: number;
   error_count?: number;
   last_error_ts?: string | null;
-  last_wedge?: { ts?: string; lag_ms?: number; wedged?: boolean } | null;
+  last_wedge?: {
+    ts?: string;
+    lag_ms?: number;
+    wedged?: boolean;
+    location?: string | null;
+    message_id?: string | null;
+  } | null;
   last_autoheal?: { ts?: string; reason?: string; count?: number } | null;
   status: 'green' | 'yellow' | 'red';
   status_reasons?: { code: string; label: string }[];
@@ -697,6 +705,19 @@ export interface AdminInstancesResponse {
 
 export function getAdminInstances() {
   return request<AdminInstancesResponse>('/api/v1/admin/instances');
+}
+
+export type InstanceEventKind = 'all' | 'error' | 'wedge' | 'loop_lag';
+
+export function getAdminInstanceEvents(
+  instanceId: string,
+  kind: InstanceEventKind = 'all',
+  limit = 30,
+) {
+  const params = new URLSearchParams({ kind, limit: String(limit) });
+  return request<AdminInstanceEventsResponse>(
+    `/api/v1/admin/instances/${encodeURIComponent(instanceId)}/events?${params}`
+  );
 }
 
 export function getAdminPromptReconstruct(

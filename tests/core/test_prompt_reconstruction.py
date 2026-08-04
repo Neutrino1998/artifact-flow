@@ -44,6 +44,7 @@ async def test_reconstruct_model_messages_keeps_native_call_ids():
                 "system_prompt": "system",
                 "reminder": "current context",
                 "model": "openai/test-model",
+                "exposed_tool_names": ["search"],
             },
             event_id="evt-anchor",
         ),
@@ -55,6 +56,7 @@ async def test_reconstruct_model_messages_keeps_native_call_ids():
 
     assert result is not None
     assert result["model"] == "openai/test-model"
+    assert result["exposed_tool_names"] == ["search"]
     assert result["has_reminder"] is True
     assert "tools" not in result
     assert [message["role"] for message in result["messages"]] == [
@@ -103,6 +105,7 @@ async def test_reconstruct_prompt_uses_persisted_reasoning_replay_policy():
     result = await manager.reconstruct_prompt("conv-1", "msg-1", "evt-anchor")
 
     assert result is not None
+    assert result["exposed_tool_names"] is None
     assistant = next(m for m in result["messages"] if m["role"] == "assistant")
     assert assistant["content"] == "answer"
     assert "reasoning_content" not in assistant

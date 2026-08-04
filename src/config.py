@@ -177,6 +177,13 @@ class Settings(BaseSettings):
     OBS_HEARTBEAT_STALE_SEC: int = 60          # ts 超此值 = 陈旧 → 面板红(wedge/停更);约 2× sample interval
     OBS_ERROR_WINDOW_SEC: int = 300            # last_error 在此窗口内 → 面板黄(近期出过 ERROR)
     OBS_AUTOHEAL_MARKER_PATH: str = ""         # 宿主 autoheal marker(JSONL)容器内只读路径;空=未挂载,面板不显示重启轨迹
+    # 管理员实例事件详情。读取现有轮转日志/JSONL,不新建第二份观测存储；所有读取都在
+    # to_thread 中执行。扫描字节与响应明细分别封顶,避免一次 UI 点击把 observer 变成
+    # observee 的新负载源。limit 是 API 可见分页意图，下面三项是隐藏实现 envelope。
+    OBS_ADMIN_EVENT_LIMIT_MAX: int = Field(default=100, ge=1, le=500)
+    OBS_ADMIN_EVENT_SCAN_MAX_BYTES: int = Field(default=8 * 1024 * 1024, ge=64 * 1024)
+    OBS_ADMIN_EVENT_DETAIL_MAX_CHARS: int = Field(default=20_000, ge=1_000)
+    OBS_ADMIN_EVENT_MAX_TASKS: int = Field(default=50, ge=1, le=500)
 
     # Redis（空 = InMemory fallback，非空 = Redis）
     REDIS_URL: str = ""

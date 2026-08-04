@@ -544,6 +544,16 @@
               }
             }
           },
+          "409": {
+            "description": "Conversation has an active execution",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -563,7 +573,7 @@
           "chat"
         ],
         "summary": "Bulk Delete Conversations",
-        "description": "\u6279\u91cf\u5220\u9664\u5bf9\u8bdd\uff08\u7528\u6237\u89c6\u89d2\uff0c\u4ec5\u5220\u81ea\u5df1\u7684\uff09\n\nBest-effort \u8303\u56f4\uff1across-user / \u4e0d\u5b58\u5728\u7684 id \u8d70 `failed.reason=\"not_found\"`\uff0c\n\u9075\u5faa \"404 not 403\" \u5b89\u5168\u7b56\u7565\u907f\u514d\u6cc4\u6f0f\u4f1a\u8bdd\u5b58\u5728\u3002\u5f15\u64ce\u6b63\u5728\u6267\u884c\u7684\u4f1a\u8bdd\u540c\u6837\u76f4\u63a5\nDELETE \u2014 \u5f15\u64ce post-processing \u5728 PR2a \u91cc fail-soft \u515c\u5e95\u3002\n\n\u5355\u884c FK \u8fdd\u89c4\u8fd9\u6761\u8def\u5f84\u4e0d\u5b58\u5728\uff0c\u56e0\u6b64\u4e0d\u9700\u8981 IntegrityError + rollback\uff1a\u6240\u6709\u6307\u5411\n`conversations.id` \u7684\u5916\u952e\uff08Message / ArtifactSession\uff09\u90fd\u662f ondelete=CASCADE\uff0c\n\u4e0b\u6e38\u94fe messages / events / artifacts / artifact_versions \u4e5f\u5168\u662f CASCADE\n\uff08src/db/models.py\uff09\uff0c\u5220 conversation \u4e0d\u4f1a\u56e0\u5b50\u884c\u6b8b\u7559\u800c\u5931\u8d25\uff0csession \u72b6\u6001\n\u4e0d\u4f1a\u88ab\u67d0\u4e00\u884c\u6c61\u67d3\u5230\u5f71\u54cd\u540e\u7eed\u884c\u3002\n\n\u5176\u4ed6\u5f02\u5e38\uff08OperationalError \u7b49\u57fa\u7840\u8bbe\u65bd\u7ea7\u6545\u969c\uff09\u5192\u6ce1\u4e3a 5xx loud failure \u2014\n\u6b64\u65f6\u7b2c 1 \u6761\u5c31\u4f1a\u5931\u8d25\u3001\u5faa\u73af\u672c\u5c31\u8fdb\u4e0d\u4e0b\u53bb\uff1b\u4e0e CLAUDE.md \"\u4e0d\u4e3a\u4e0d\u4f1a\u53d1\u751f\u7684\u573a\u666f\n\u52a0\u9632\u5fa1\u4ee3\u7801\" \u4e00\u81f4\uff0c\u6545\u4e0d\u505a\u5e7f\u6cdb except\u3002",
+        "description": "\u6279\u91cf\u5220\u9664\u5bf9\u8bdd\uff08\u7528\u6237\u89c6\u89d2\uff0c\u4ec5\u5220\u81ea\u5df1\u7684\uff09\n\nBest-effort \u8303\u56f4\uff1across-user / \u4e0d\u5b58\u5728\u7684 id \u8d70 `failed.reason=\"not_found\"`\uff0c\n\u9075\u5faa \"404 not 403\" \u5b89\u5168\u7b56\u7565\u907f\u514d\u6cc4\u6f0f\u4f1a\u8bdd\u5b58\u5728\u3002\u6301\u6709 execution lease\n\uff08\u542b QUEUED / RUNNING\uff09\u7684\u4f1a\u8bdd\u8d70 `failed.reason=\"active_execution\"`\uff0c\u4e0d\u5220\u9664\u3002\n\n\u5355\u884c FK \u8fdd\u89c4\u8fd9\u6761\u8def\u5f84\u4e0d\u5b58\u5728\uff0c\u56e0\u6b64\u4e0d\u9700\u8981 IntegrityError + rollback\uff1a\u6240\u6709\u6307\u5411\n`conversations.id` \u7684\u5916\u952e\uff08Message / ArtifactSession\uff09\u90fd\u662f ondelete=CASCADE\uff0c\n\u4e0b\u6e38\u94fe messages / events / artifacts / artifact_versions \u4e5f\u5168\u662f CASCADE\n\uff08src/db/models.py\uff09\uff0c\u5220 conversation \u4e0d\u4f1a\u56e0\u5b50\u884c\u6b8b\u7559\u800c\u5931\u8d25\uff0csession \u72b6\u6001\n\u4e0d\u4f1a\u88ab\u67d0\u4e00\u884c\u6c61\u67d3\u5230\u5f71\u54cd\u540e\u7eed\u884c\u3002\n\n\u5176\u4ed6\u5f02\u5e38\uff08OperationalError \u7b49\u57fa\u7840\u8bbe\u65bd\u7ea7\u6545\u969c\uff09\u5192\u6ce1\u4e3a 5xx loud failure \u2014\n\u6b64\u65f6\u7b2c 1 \u6761\u5c31\u4f1a\u5931\u8d25\u3001\u5faa\u73af\u672c\u5c31\u8fdb\u4e0d\u4e0b\u53bb\uff1b\u4e0e CLAUDE.md \"\u4e0d\u4e3a\u4e0d\u4f1a\u53d1\u751f\u7684\u573a\u666f\n\u52a0\u9632\u5fa1\u4ee3\u7801\" \u4e00\u81f4\uff0c\u6545\u4e0d\u505a\u5e7f\u6cdb except\u3002",
         "operationId": "bulk_delete_conversations_api_v1_chat_bulk_delete_post",
         "requestBody": {
           "content": {
@@ -2010,6 +2020,82 @@
             "HTTPBearer": []
           }
         ]
+      }
+    },
+    "/api/v1/admin/instances/{instance_id}/events": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Instance Events",
+        "description": "Return a bounded, admin-only diagnostic timeline for one instance.\n\nERROR entries come from the same dedicated ERROR log that feeds the card's\ncounter; loop events and nearby metrics come from their existing JSONL\nfiles.  File IO and parsing run off the event loop.  On a multi-host fleet,\n``sources.*.available=false`` explicitly reports that this responder cannot\nsee the selected host's local volume instead of pretending there were no\nincidents.  ``kind`` is applied before ``limit`` so an exact historical\nwedge lookup cannot be displaced by newer ERROR or soft-lag records.",
+        "operationId": "get_instance_events_api_v1_admin_instances__instance_id__events_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "instance_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance Id"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "all",
+                "error",
+                "wedge",
+                "loop_lag"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 30,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminInstanceEventsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/admin/tools/units": {
@@ -4160,6 +4246,36 @@
         "title": "AdminEventItem",
         "description": "Single event in admin event timeline"
       },
+      "AdminInstanceEventsResponse": {
+        "properties": {
+          "instance_id": {
+            "type": "string",
+            "title": "Instance Id"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/InstanceDiagnosticEvent"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "sources": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/InstanceEventSourceStatus"
+            },
+            "type": "object",
+            "title": "Sources"
+          }
+        },
+        "type": "object",
+        "required": [
+          "instance_id",
+          "events",
+          "sources"
+        ],
+        "title": "AdminInstanceEventsResponse",
+        "description": "GET /api/v1/admin/instances/{instance_id}/events response."
+      },
       "AdminMessageGroup": {
         "properties": {
           "message_id": {
@@ -4282,6 +4398,21 @@
             ],
             "title": "Model"
           },
+          "exposed_tool_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exposed Tool Names",
+            "description": "Exact native function names exposed to the anchored LLM invocation. None means the legacy event predates collection; an empty list means no tools were exposed. Full tool schemas are not persisted."
+          },
           "has_reminder": {
             "type": "boolean",
             "title": "Has Reminder",
@@ -4303,6 +4434,7 @@
           "agent_start_event_id",
           "agent_name",
           "model",
+          "exposed_tool_names",
           "has_reminder",
           "messages"
         ],
@@ -4932,7 +5064,7 @@
           "reason": {
             "type": "string",
             "title": "Reason",
-            "description": "Failure reason: 'not_found'"
+            "description": "Failure reason: 'not_found' or 'active_execution'"
           }
         },
         "type": "object",
@@ -5937,6 +6069,21 @@
         ],
         "title": "DepartmentUnitAccessItem"
       },
+      "ErrorResponse": {
+        "properties": {
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Human-readable error detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "ErrorResponse",
+        "description": "Standard FastAPI error response with a string detail."
+      },
       "FindingItem": {
         "properties": {
           "rule": {
@@ -6016,6 +6163,511 @@
         ],
         "title": "InjectResponse",
         "description": "POST /api/v1/chat/{conv_id}/inject response"
+      },
+      "InstanceDbPoolMetrics": {
+        "properties": {
+          "in_use": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "In Use"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "overflow": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overflow"
+          }
+        },
+        "type": "object",
+        "title": "InstanceDbPoolMetrics",
+        "required": [
+          "in_use",
+          "size",
+          "overflow"
+        ]
+      },
+      "InstanceDiagnosticEvent": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "error",
+              "wedge",
+              "loop_lag"
+            ],
+            "title": "Type"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "runtime_log",
+              "loop_lag"
+            ],
+            "title": "Source"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "warning",
+              "error"
+            ],
+            "title": "Severity"
+          },
+          "ts": {
+            "type": "string",
+            "title": "Ts"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "lag_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lag Ms"
+          },
+          "lower_bound": {
+            "type": "boolean",
+            "title": "Lower Bound",
+            "default": false
+          },
+          "warn_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warn Ms"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Id"
+          },
+          "instance_id": {
+            "type": "string",
+            "title": "Instance Id"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/InstanceEventStackOwner"
+            },
+            "type": "array",
+            "title": "Tasks"
+          },
+          "threads": {
+            "items": {
+              "$ref": "#/components/schemas/InstanceEventStackOwner"
+            },
+            "type": "array",
+            "title": "Threads"
+          },
+          "metrics_before": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InstanceEventMetricSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metrics_after": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InstanceEventMetricSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "source",
+          "severity",
+          "ts",
+          "summary",
+          "level",
+          "detail",
+          "location",
+          "lag_ms",
+          "lower_bound",
+          "warn_ms",
+          "request_id",
+          "conversation_id",
+          "message_id",
+          "instance_id",
+          "tasks",
+          "threads",
+          "metrics_before",
+          "metrics_after"
+        ],
+        "title": "InstanceDiagnosticEvent",
+        "description": "One normalized ERROR, hard wedge, or soft loop-lag record."
+      },
+      "InstanceEventMetricSnapshot": {
+        "properties": {
+          "ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ts"
+          },
+          "loop_lag_ms": {
+            "$ref": "#/components/schemas/InstanceLoopLagMetrics"
+          },
+          "in_flight": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "In Flight"
+          },
+          "tasks_long_running": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tasks Long Running"
+          },
+          "process": {
+            "$ref": "#/components/schemas/InstanceProcessMetrics"
+          },
+          "db_pool": {
+            "$ref": "#/components/schemas/InstanceDbPoolMetrics"
+          },
+          "redis": {
+            "$ref": "#/components/schemas/InstanceRedisMetrics"
+          }
+        },
+        "type": "object",
+        "title": "InstanceEventMetricSnapshot",
+        "description": "Runtime sample immediately before or after a loop incident.",
+        "required": [
+          "ts",
+          "loop_lag_ms",
+          "in_flight",
+          "tasks_long_running",
+          "process",
+          "db_pool",
+          "redis"
+        ]
+      },
+      "InstanceEventSourceStatus": {
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "title": "Configured",
+            "default": true
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "configured",
+          "available",
+          "truncated"
+        ],
+        "title": "InstanceEventSourceStatus",
+        "description": "Readability state for one local diagnostic-file source."
+      },
+      "InstanceEventStackOwner": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "stack": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Stack"
+          },
+          "done": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Done"
+          },
+          "event_loop": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Loop"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "stack",
+          "done",
+          "event_loop"
+        ],
+        "title": "InstanceEventStackOwner",
+        "description": "One bounded task or thread stack captured by the watchdog."
+      },
+      "InstanceLoopLagMetrics": {
+        "properties": {
+          "p50_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P50 Ms"
+          },
+          "p99_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P99 Ms"
+          },
+          "max_1m_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max 1M Ms"
+          },
+          "samples": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Samples"
+          }
+        },
+        "type": "object",
+        "title": "InstanceLoopLagMetrics",
+        "required": [
+          "p50_ms",
+          "p99_ms",
+          "max_1m_ms",
+          "samples"
+        ]
+      },
+      "InstanceProcessMetrics": {
+        "properties": {
+          "rss_mb": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rss Mb"
+          },
+          "cpu_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Pct"
+          },
+          "open_fds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open Fds"
+          }
+        },
+        "type": "object",
+        "title": "InstanceProcessMetrics",
+        "required": [
+          "rss_mb",
+          "cpu_pct",
+          "open_fds"
+        ]
+      },
+      "InstanceRedisMetrics": {
+        "properties": {
+          "used_mb": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Used Mb"
+          },
+          "maxmemory_mb": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maxmemory Mb"
+          }
+        },
+        "type": "object",
+        "title": "InstanceRedisMetrics",
+        "required": [
+          "used_mb",
+          "maxmemory_mb"
+        ]
       },
       "LoginRequest": {
         "properties": {

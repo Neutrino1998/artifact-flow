@@ -516,8 +516,8 @@ class TestChatStreamE2E:
         """POST /chat returns stream_url; GET /stream yields metadata → ... → complete.
 
         The activated skill also covers the composer-button path end to end: it
-        uses the same mount-aware guidance as read_skill and freezes a per-turn
-        display snapshot on Message metadata.
+        uses the same capability-aware bundle guidance as read_skill and freezes
+        a per-turn display snapshot on Message metadata.
         """
         fake_agents = {"lead_agent": _FakeAgentConfig()}
         runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
@@ -615,7 +615,8 @@ class TestChatStreamE2E:
                     observed_llm_messages["messages"], ensure_ascii=False
                 )
                 assert "DOCX GUIDANCE" in model_context
-                assert "mount_skill" in model_context
+                assert "does not have the sandbox capabilities" in model_context
+                assert "mount_skill" not in model_context
                 assert observed_llm_messages["user_id"]
 
                 detail = (await client.get(f"/api/v1/chat/{conv_id}")).json()

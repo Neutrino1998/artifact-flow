@@ -21,12 +21,10 @@ function ConversationItem({ conversation, isActive, onSelect }: ConversationItem
 
   // 侧栏自持删除:调 API + 本地 store 摘除(浏览器那侧是委派父级刷新,故删除动作注入)。
   const handleDelete = async (id: string) => {
-    try {
-      await deleteConversation(id);
-      removeConversation(id);
-    } catch (err) {
-      console.error('Failed to delete conversation:', err);
-    }
+    // 失败必须继续抛给 ConversationActionsMenu 的 DangerConfirmModal，后者会
+    // 保持弹窗并显示 ApiError；吞掉异常会让 409 看起来像删除成功。
+    await deleteConversation(id);
+    removeConversation(id);
   };
 
   const title = conversation.title || 'Untitled';
@@ -72,6 +70,7 @@ function ConversationItem({ conversation, isActive, onSelect }: ConversationItem
         open={menuOpen}
         onOpenChange={setMenuOpen}
         onDelete={handleDelete}
+        deleteDisabled={Boolean(conversation.active_message_id)}
         wrapperClassName="absolute right-2 top-1/2 -translate-y-1/2"
       />
     </div>

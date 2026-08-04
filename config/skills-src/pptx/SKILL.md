@@ -101,6 +101,10 @@ artifactflow-office convert /workspace/输出.pptx /workspace/输出.pdf
 当前模型看不到图片时，按部署能力委派视觉子代理；未做完整检查时按 best-effort 交付，
 不宣称已逐页验证或视觉完全正确，也不能把静态几何通过等同于视觉通过。
 
+委派视觉检查前，先把选定页面的 PNG 分别 `persist` 为 image artifacts，再把这些 artifact ID
+交给视觉子代理。视觉子代理不能读取调用方沙盒中的 `/workspace/...` 路径，也不接收 PPT/PDF
+源文件；不要把渲染目录或文件系统路径直接写进委派指令。
+
 ## 边界
 
 - LibreOffice 用于渲染和转换，不用于反复打开并保存模板；往返保存可能改变版式。

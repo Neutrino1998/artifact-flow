@@ -314,6 +314,7 @@ class TestLeadCompletion:
         assert starts[0]["agent"] == "lead_agent"
         assert completes[0]["agent"] == "lead_agent"
         assert starts[0]["data"]["model"] == "deepseek-v4-flash"
+        assert starts[0]["data"]["exposed_tool_names"] == []
         assert starts[0]["data"]["replay_reasoning"] is True
         assert "tools" not in starts[0]["data"]
 
@@ -329,6 +330,7 @@ class TestLeadCompletion:
 
         start = _events_of_type(emitted, "agent_start")[0]
         assert start["data"]["model"] == agent.model
+        assert start["data"]["exposed_tool_names"] == ["my_tool"]
         assert "tools" not in start["data"]
 
 
@@ -588,7 +590,8 @@ class TestToolExecution:
         completes = [e for e in emitted if e["type"] == "tool_complete" and e["data"]["tool"] == "search_tools"]
         assert len(completes) == 1
         assert completes[0]["data"]["success"] is False
-        assert "not exposed" in completes[0]["data"]["error"]
+        assert completes[0]["data"]["availability_reason"] == "unavailable"
+        assert "unavailable to this agent" in completes[0]["data"]["error"]
 
     async def test_tool_not_in_whitelist(self):
         agent = _FakeAgentConfig(tools={})  # empty whitelist
@@ -608,7 +611,99 @@ class TestToolExecution:
         completes = [e for e in emitted if e["type"] == "tool_complete" and e["data"]["tool"] == "my_tool"]
         assert len(completes) == 1
         assert completes[0]["data"]["success"] is False
-        assert "not exposed" in completes[0]["data"]["error"]
+        assert completes[0]["data"]["availability_reason"] == "unavailable"
+        assert "Do not retry" in completes[0]["data"]["error"]
+
+    async def test_disabled_tool_reports_inactive_configuration(self):
+        from core.effective_toolset import EffectiveToolset
+
+        agent = _FakeAgentConfig(tools={})
+        tool = _FakeTool("my_tool")
+        effective = EffectiveToolset(
+            permissions={}, disabled_tool_names={"my_tool"}
+        )
+        rounds = [
+            _tool_call_chunks(_native_tool_call("my_tool")),
+            _simple_llm_chunks("ok"),
+        ]
+
+        _, emitted, _ = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": agent},
+            tools={"my_tool": tool},
+            effective_toolsets={"lead_agent": effective},
+        )
+
+        complete = next(
+            e for e in emitted
+            if e["type"] == "tool_complete" and e["data"]["tool"] == "my_tool"
+        )
+        assert complete["data"]["availability_reason"] == "disabled"
+        assert "disabled for this agent" in complete["data"]["error"]
+
+    async def test_skill_activatable_tool_reports_recovery_path(self):
+        from core.effective_toolset import EffectiveToolset, SkillGrant
+
+        agent = _FakeAgentConfig(tools={})
+        tool = _FakeTool("my_tool")
+        effective = EffectiveToolset(
+            permissions={},
+            skill_grants={
+                "skill": SkillGrant(
+                    permissions={"my_tool": ToolPermission.AUTO}
+                )
+            },
+            disabled_tool_names={"my_tool"},
+        )
+        rounds = [
+            _tool_call_chunks(_native_tool_call("my_tool")),
+            _simple_llm_chunks("ok"),
+        ]
+
+        _, emitted, _ = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": agent},
+            tools={"my_tool": tool},
+            effective_toolsets={"lead_agent": effective},
+        )
+
+        complete = next(
+            e for e in emitted
+            if e["type"] == "tool_complete" and e["data"]["tool"] == "my_tool"
+        )
+        assert complete["data"]["availability_reason"] == "disabled_activatable"
+        assert "relevant skill" in complete["data"]["error"]
+
+    async def test_deferred_tool_reports_search_tools_recovery(self):
+        from core.effective_toolset import DeferredUnit, EffectiveToolset
+
+        agent = _FakeAgentConfig(tools={})
+        tool = _FakeTool("my_tool")
+        deferred = DeferredUnit(
+            name="unit", description="Deferred tools", member_full_names=["my_tool"]
+        )
+        effective = EffectiveToolset(
+            permissions={"my_tool": ToolPermission.AUTO},
+            deferred_units={"unit": deferred},
+        )
+        rounds = [
+            _tool_call_chunks(_native_tool_call("my_tool")),
+            _simple_llm_chunks("ok"),
+        ]
+
+        _, emitted, _ = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": agent},
+            tools={"my_tool": tool},
+            effective_toolsets={"lead_agent": effective},
+        )
+
+        complete = next(
+            e for e in emitted
+            if e["type"] == "tool_complete" and e["data"]["tool"] == "my_tool"
+        )
+        assert complete["data"]["availability_reason"] == "deferred"
+        assert "search_tools" in complete["data"]["error"]
 
     async def test_tool_raises_exception(self):
         agent = _FakeAgentConfig(tools={"bad_tool": "auto"})
@@ -1882,7 +1977,9 @@ class TestSkillActivation:
                     "slug": "s",
                     "name": "My Skill",
                     "body": render_skill_guidance(
-                        "DO THE THING", has_extra_files=True
+                        "DO THE THING",
+                        has_extra_files=True,
+                        bundle_accessible=True,
                     ),
                 }
             ],

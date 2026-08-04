@@ -16,8 +16,9 @@ import pytest
 
 from config import config
 from core.effective_skillset import EffectiveSkillSet
+from core.effective_toolset import EffectiveToolset, SkillGrant
 from reconcile.snapshot import SkillInfo
-from tools.base import ToolPermission
+from tools.base import ToolExecutionContext, ToolPermission
 from tools.builtin.read_skill import (
     MountSkillTool,
     ReadSkillTool,
@@ -52,6 +53,17 @@ def _tool(bodies, *visible):
     return ReadSkillTool(_FakeService(bodies), _skillset(*visible))
 
 
+def _context(*enabled, skill_grants=None):
+    return ToolExecutionContext(
+        agent_name="lead_agent",
+        effective_toolset=EffectiveToolset(
+            permissions={name: ToolPermission.AUTO for name in enabled},
+            skill_grants=skill_grants or {},
+        ),
+        tools={},
+    )
+
+
 def _make_zip(members: dict) -> bytes:
     """{name: text} → zip 字节。"""
     buf = io.BytesIO()
@@ -71,11 +83,12 @@ def test_read_skill_uses_common_inline_limit():
     assert t.permission == ToolPermission.AUTO
     assert t.max_result_size_chars == config.TOOL_RESULT_INLINE_MAX_CHARS
     assert t.name == "read_skill"
+    assert "cannot add tools outside the agent's tool universe" in t.description
 
 
 async def test_visible_no_bundle_says_complete():
     t = _tool({"a": "GUIDANCE BODY"}, "a")   # 默认 has_extra_files=False
-    res = await t.execute(slug="a")
+    res = await t(_context=_context(), slug="a")
     assert res.success
     assert "GUIDANCE BODY" in res.data
     assert "complete" in res.data.lower()       # 「这就是完整技能」
@@ -86,15 +99,46 @@ async def test_visible_no_bundle_says_complete():
 async def test_visible_with_extra_files_points_to_mount():
     svc = _FakeService({"a": "GUIDANCE BODY"})
     t = ReadSkillTool(svc, _skillset("a", has_extra_files=True))
-    res = await t.execute(slug="a")
+    res = await t(_context=_context("mount_skill", "bash"), slug="a")
     assert res.success
     assert "mount_skill" in res.data            # 有附属文件 → 指向 mount_skill
     assert res.metadata["activated_skill"] == "a"
 
 
+async def test_visible_with_extra_files_reports_inaccessible_without_sandbox_tools():
+    svc = _FakeService({"a": "GUIDANCE BODY"})
+    t = ReadSkillTool(svc, _skillset("a", has_extra_files=True))
+
+    res = await t(_context=_context(), slug="a")
+
+    assert res.success
+    assert "does not have the sandbox capabilities" in res.data
+    assert "mount_skill" not in res.data
+    assert "bash" not in res.data
+
+
+async def test_bundle_guidance_counts_tools_granted_by_current_skill():
+    svc = _FakeService({"a": "GUIDANCE BODY"})
+    t = ReadSkillTool(svc, _skillset("a", has_extra_files=True))
+    grants = {
+        "a": SkillGrant(
+            permissions={
+                "mount_skill": ToolPermission.AUTO,
+                "bash": ToolPermission.CONFIRM,
+            }
+        )
+    }
+
+    res = await t(_context=_context(skill_grants=grants), slug="a")
+
+    assert res.success
+    assert "mount_skill" in res.data
+    assert "bash" in res.data
+
+
 async def test_invisible_is_not_found():
     t = _tool({"secret": "x"}, "a")   # secret 存在但不在该用户 visible 集
-    res = await t.execute(slug="secret")
+    res = await t(_context=_context(), slug="secret")
     assert not res.success
     assert "not found" in res.error.lower()
     assert res.metadata.get("activated_skill") is None
@@ -102,14 +146,14 @@ async def test_invisible_is_not_found():
 
 async def test_visible_but_no_content_errors():
     t = _tool({}, "a")    # a 可见但 service 取不到正文
-    res = await t.execute(slug="a")
+    res = await t(_context=_context(), slug="a")
     assert not res.success
     assert "no content" in res.error.lower()
 
 
 async def test_empty_slug_errors():
     t = _tool({"a": "x"}, "a")
-    res = await t.execute(slug="  ")
+    res = await t(_context=_context(), slug="  ")
     assert not res.success
     assert "slug" in res.error.lower()
 
