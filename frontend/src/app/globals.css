@@ -97,12 +97,9 @@
 }
 
 @layer components {
-  /* Best-effort attachment to ReactMarkdown's common final text leaves. Code,
-     tables, and custom blocks intentionally omit the cursor instead of placing
-     it on a misleading new line below the block. */
-  .streaming-cursor > :where(p, h1, h2, h3, h4, h5, h6):last-child::after,
-  .streaming-cursor > :is(ul, ol):last-child > li:last-child::after,
-  .streaming-cursor > blockquote:last-child > :last-child::after {
+  /* Best effort: only simple top-level text blocks get a cursor. Structured
+     Markdown intentionally omits it rather than guessing at its final leaf. */
+  .streaming-cursor > :where(p, h1, h2, h3, h4, h5, h6):last-child::after {
     content: '';
     display: inline-block;
     width: 0.38em;

@@ -143,9 +143,10 @@ describe('AgentSegmentBlock', () => {
   });
 
   test.each([
-    ['list', '- first\n- second', '.streaming-cursor > ul:last-child > li:last-child'],
-    ['quote', '> final quote', '.streaming-cursor > blockquote:last-child > p:last-child'],
-  ])('exposes the final %s text leaf for best-effort cursor placement', async (_kind, content, selector) => {
+    ['nested list', '- parent\n  - child'],
+    ['loose list', '- first paragraph\n\n  second paragraph'],
+    ['quoted list', '> - final item'],
+  ])('omits best-effort cursor placement for a %s', async (_kind, content) => {
     const segment: ExecutionSegment = {
       id: `lead-${_kind}`,
       agent: 'lead_agent',
@@ -167,7 +168,9 @@ describe('AgentSegmentBlock', () => {
       );
     });
 
-    expect(container.querySelector(selector)).not.toBeNull();
+    expect(container.querySelector(
+      '.streaming-cursor > :where(p, h1, h2, h3, h4, h5, h6):last-child',
+    )).toBeNull();
   });
 
   test('shows cached input as a parenthesized subset of input tokens', async () => {
