@@ -82,6 +82,11 @@ class BulkDeleteRequest(BaseModel):
 # Response Models
 # ============================================================
 
+class ErrorResponse(BaseModel):
+    """Standard FastAPI error response with a string detail."""
+    detail: str = Field(..., description="Human-readable error detail")
+
+
 class ChatResponse(BaseModel):
     """POST /api/v1/chat response"""
     conversation_id: str = Field(..., description="Conversation ID")

@@ -33,6 +33,7 @@ from api.schemas.chat import (
     CancelResponse,
     ChatRequest,
     ChatResponse,
+    ErrorResponse,
     ActiveStreamResponse,
     InjectRequest,
     InjectResponse,
@@ -139,15 +140,16 @@ async def send_message(
         )
 
     # 为新消息准备 ID
+    is_new_conversation = not request.conversation_id
     conversation_id = request.conversation_id
-    if not conversation_id:
+    if is_new_conversation:
         conversation_id = f"conv-{uuid4().hex}"
 
     message_id = f"msg-{uuid4().hex}"
     user_id = current_user.user_id
 
     # 已有会话：校验归属（只读检查，尽早拒绝；不在此创建任何行）
-    if request.conversation_id:
+    if not is_new_conversation:
         await _verify_ownership(conversation_id, current_user, conversation_manager)
 
     if (
@@ -199,9 +201,21 @@ async def send_message(
                 ),
             )
 
-    # 确保 conversation 存在（失败需返回 HTTP 错误，保留在路由层；FK: artifact_session
-    # → conversation，但 artifact 现在 turn 末才落库，ensure 仍需在 submit 前建好会话行）
-    await conversation_manager.ensure_conversation_exists(conversation_id, user_id=user_id)
+    # 只有本请求分配 ID 的新 conversation 才允许创建。已有 conversation 的 ownership
+    # 检查与这里之间可能并发 DELETE；此时必须 404，不能把同 ID 的已删 conversation
+    # 复活。submit 取得 lease 后 controller 还会再做一次 no-create 检查，覆盖这里与
+    # lease 获取之间的更窄窗口。
+    try:
+        await conversation_manager.ensure_conversation_exists(
+            conversation_id,
+            user_id=user_id,
+            create_if_missing=is_new_conversation,
+        )
+    except NotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Conversation '{conversation_id}' not found",
+        )
 
     # 转换后内容打包 closure-carry 给控制器（不 commit）。
     uploaded_files: List[dict] = [
@@ -474,7 +488,15 @@ async def get_conversation(
         raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
 
 
-@router.delete("/{conv_id}")
+@router.delete(
+    "/{conv_id}",
+    responses={
+        409: {
+            "model": ErrorResponse,
+            "description": "Conversation has an active execution",
+        }
+    },
+)
 async def delete_conversation(
     conv_id: str,
     current_user: TokenPayload = Depends(get_current_user),

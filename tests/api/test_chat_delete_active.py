@@ -1,11 +1,15 @@
 """Deletion contract for conversations that still own an execution lease."""
 
+import asyncio
+import json
 import uuid
+from unittest.mock import patch
 
 from sqlalchemy import select
 
 from api.dependencies import get_execution_runner
 from api.services.execution_runner import ExecutionRunner
+from core.conversation_manager import ConversationManager
 from db.models import Conversation, User
 from repositories.conversation_repo import ConversationRepository
 
@@ -70,3 +74,72 @@ async def test_bulk_delete_skips_active_and_deletes_inactive(
         assert not await _exists(db_manager, inactive_id)
     finally:
         await runner.store.release_lease(active_id, message_id)
+
+
+async def test_send_cannot_resurrect_conversation_deleted_after_ownership_check(
+    client, app, db_manager, test_user: User
+):
+    """Existing send must fail closed if DELETE wins before its final ensure."""
+    conv_id = await _seed_conversation(db_manager, test_user.id)
+    reached_final_ensure = asyncio.Event()
+    continue_send = asyncio.Event()
+    original_ensure = ConversationManager.ensure_conversation_exists
+
+    async def blocked_ensure(
+        manager,
+        conversation_id,
+        user_id=None,
+        *,
+        create_if_missing=True,
+    ):
+        if conversation_id == conv_id:
+            reached_final_ensure.set()
+            await continue_send.wait()
+        return await original_ensure(
+            manager,
+            conversation_id,
+            user_id=user_id,
+            create_if_missing=create_if_missing,
+        )
+
+    with patch.object(
+        ConversationManager,
+        "ensure_conversation_exists",
+        new=blocked_ensure,
+    ):
+        send_task = asyncio.create_task(
+            client.post(
+                "/api/v1/chat",
+                files={
+                    "payload": (
+                        None,
+                        json.dumps({
+                            "user_input": "continue",
+                            "conversation_id": conv_id,
+                        }),
+                    ),
+                },
+            )
+        )
+        try:
+            await asyncio.wait_for(reached_final_ensure.wait(), timeout=2)
+            delete_response = await client.delete(f"/api/v1/chat/{conv_id}")
+            assert delete_response.status_code == 200
+        finally:
+            continue_send.set()
+
+        send_response = await send_task
+
+    assert send_response.status_code == 404
+    assert not await _exists(db_manager, conv_id)
+    runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+    assert await runner.store.get_leased_message_id(conv_id) is None
+
+
+def test_single_delete_openapi_declares_active_execution_conflict(app):
+    response = app.openapi()["paths"]["/api/v1/chat/{conv_id}"]["delete"]["responses"]["409"]
+
+    assert response["description"] == "Conversation has an active execution"
+    assert response["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ErrorResponse"
+    }

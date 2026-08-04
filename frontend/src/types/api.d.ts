@@ -2620,6 +2620,17 @@ export interface components {
             effective_allowed: boolean;
         };
         /**
+         * ErrorResponse
+         * @description Standard FastAPI error response with a string detail.
+         */
+        ErrorResponse: {
+            /**
+             * Detail
+             * @description Human-readable error detail
+             */
+            detail: string;
+        };
+        /**
          * FindingItem
          * @description 一条 validator finding(E-1 硬门产出;rule id 稳定,前端按 severity 渲染)。
          */
@@ -3932,6 +3943,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Conversation has an active execution */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Validation Error */

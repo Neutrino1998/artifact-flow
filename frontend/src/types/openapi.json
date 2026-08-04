@@ -544,6 +544,16 @@
               }
             }
           },
+          "409": {
+            "description": "Conversation has an active execution",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -6058,6 +6068,21 @@
           "effective_allowed"
         ],
         "title": "DepartmentUnitAccessItem"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Human-readable error detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "ErrorResponse",
+        "description": "Standard FastAPI error response with a string detail."
       },
       "FindingItem": {
         "properties": {

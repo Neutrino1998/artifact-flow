@@ -7,6 +7,7 @@ Request and response models for the API.
 from .chat import (
     ChatRequest,
     ChatResponse,
+    ErrorResponse,
     ResumeRequest,
     ResumeResponse,
     ConversationListResponse,
@@ -36,6 +37,7 @@ __all__ = [
     # Chat schemas
     "ChatRequest",
     "ChatResponse",
+    "ErrorResponse",
     "ResumeRequest",
     "ResumeResponse",
     "ConversationListResponse",
