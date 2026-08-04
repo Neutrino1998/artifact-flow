@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from config import config
 from core.engine import EmptyTurnInputError, EngineHooks, create_initial_state, execute_loop, finalize_metrics, turn_has_content
 from core.events import StreamEventType
+from core.skill_guidance import render_skill_guidance
 from core.native_call_closure import (
     assert_native_calls_closed,
     close_open_native_calls,
@@ -299,8 +300,9 @@ class ExecutionController:
                 slug, message_id, sorted(granted) or "(none)",
             )
 
-        # 注入集正文:短 session 取 skill_md(B-5),供 engine 注入 USER_INPUT。空正文 skip(不注
-        # 入 None);查不到=脏 slug,静默略过。重勾已激活 → 正文重注入(对齐 agent read_skill)。
+        # 注入集正文:短 session 取 skill_md(B-5),用与 read_skill 相同的 renderer 补齐条件化
+        # mount 提醒后供 engine 注入 USER_INPUT。空正文 skip(不注入 None);查不到=脏 slug,
+        # 静默略过。重勾已激活 → 完整指导重注入(对齐 agent read_skill)。
         activated_skill_bodies: List[Dict[str, Any]] = []
         if to_inject and self._db_manager:
             from repositories.skill_repo import SkillRepository
@@ -317,7 +319,9 @@ class ExecutionController:
                         out.append({
                             "slug": slug,
                             "name": getattr(info, "name", slug),
-                            "body": body,
+                            "body": render_skill_guidance(
+                                body, has_extra_files=info.has_extra_files
+                            ),
                         })
                 return out
 
@@ -361,6 +365,14 @@ class ExecutionController:
 
         logger.info(f"Processing new message (streaming) in conversation {conversation_id}")
 
+        # 本轮按钮激活是 Message 的 display-only 输入快照，与 user_input 同时已知、同生共死；
+        # 直接随 Message 创建落 metadata，避免终态补写失败后历史 chips 消失。只存已通过
+        # 可见性 + 非空正文解析的技能，不把模型自己调用 read_skill 记成用户点击。
+        activated_skills = [
+            {"slug": skill["slug"], "name": skill["name"]}
+            for skill in activated_skill_bodies
+        ]
+
         # 添加消息到 conversation (after all pre-engine setup to avoid orphaned rows on failure)
         await self._with_db_retry(
             lambda cm, er: cm.add_message_async(
@@ -368,6 +380,10 @@ class ExecutionController:
                 message_id=message_id,
                 user_input=user_input,
                 parent_id=resolved_parent,
+                metadata=(
+                    {"activated_skills": activated_skills}
+                    if activated_skills else None
+                ),
             )
         )
 

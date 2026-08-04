@@ -70,7 +70,16 @@ async def seed_conversation(
         msg1_id = f"msg-{uuid.uuid4().hex}"
         msg2_id = f"msg-{uuid.uuid4().hex}"
 
-        await repo.add_message(conv_id, msg1_id, "first message")
+        await repo.add_message(
+            conv_id,
+            msg1_id,
+            "first message",
+            metadata={
+                "activated_skills": [
+                    {"slug": "docx", "name": "Word documents"}
+                ]
+            },
+        )
         await repo.update_response(msg1_id, "first response")
 
         await repo.add_message(
@@ -197,6 +206,12 @@ class TestConversationDetail:
         assert body["active_branch"] is not None
         assert body["session_id"] == conv_id
         assert len(body["messages"]) == 2
+        first = next(message for message in body["messages"] if message["id"] == msg_ids[0])
+        assert first["activated_skills"] == [
+            {"slug": "docx", "name": "Word documents"}
+        ]
+        # Per-turn user intent is distinct from the cumulative lead-agent state.
+        assert first["active_skills"] is None
 
     async def test_get_cross_user_returns_404(
         self,

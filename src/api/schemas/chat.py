@@ -108,6 +108,13 @@ class UploadedFileRef(BaseModel):
     filename: str = Field(..., description="Original filename")
 
 
+class ActivatedSkillRef(BaseModel):
+    """Skill the user explicitly activated on one message (display snapshot)."""
+
+    slug: str = Field(..., description="Skill slug resolved for this turn")
+    name: str = Field(..., description="Skill display name frozen at activation time")
+
+
 class MessageResponse(BaseModel):
     """Message in conversation detail response"""
     id: str = Field(..., description="Message ID")
@@ -123,6 +130,10 @@ class MessageResponse(BaseModel):
     uploaded_files: Optional[List[UploadedFileRef]] = Field(
         None,
         description="Files the user attached this turn, from Message.metadata_['uploaded_files']. Display-only (best-effort): absent for turns that failed before artifact flush.",
+    )
+    activated_skills: Optional[List[ActivatedSkillRef]] = Field(
+        None,
+        description="Skills the user explicitly activated on this turn, from Message.metadata_['activated_skills']. This is a per-message display snapshot, unlike cumulative active_skills; model-initiated read_skill calls are excluded.",
     )
     active_skills: Optional[List[str]] = Field(
         None,

@@ -3817,6 +3817,27 @@
   },
   "components": {
     "schemas": {
+      "ActivatedSkillRef": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug",
+            "description": "Skill slug resolved for this turn"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Skill display name frozen at activation time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "name"
+        ],
+        "title": "ActivatedSkillRef",
+        "description": "Skill the user explicitly activated on one message (display snapshot)."
+      },
       "ActiveStreamResponse": {
         "properties": {
           "active": {
@@ -4718,7 +4739,7 @@
         "properties": {
           "file": {
             "type": "string",
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "File"
           },
           "visibility": {
@@ -4748,7 +4769,7 @@
         "properties": {
           "file": {
             "type": "string",
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "File"
           }
         },
@@ -4762,7 +4783,7 @@
         "properties": {
           "file": {
             "type": "string",
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "File"
           }
         },
@@ -4776,7 +4797,7 @@
         "properties": {
           "file": {
             "type": "string",
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "File"
           }
         },
@@ -4795,7 +4816,7 @@
           "files": {
             "items": {
               "type": "string",
-              "format": "binary"
+              "contentMediaType": "application/octet-stream"
             },
             "type": "array",
             "title": "Files",
@@ -6172,6 +6193,21 @@
             "title": "Uploaded Files",
             "description": "Files the user attached this turn, from Message.metadata_['uploaded_files']. Display-only (best-effort): absent for turns that failed before artifact flush."
           },
+          "activated_skills": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ActivatedSkillRef"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activated Skills",
+            "description": "Skills the user explicitly activated on this turn, from Message.metadata_['activated_skills']. This is a per-message display snapshot, unlike cumulative active_skills; model-initiated read_skill calls are excluded."
+          },
           "active_skills": {
             "anyOf": [
               {
@@ -6198,6 +6234,7 @@
           "children",
           "execution_metrics",
           "uploaded_files",
+          "activated_skills",
           "active_skills"
         ],
         "title": "MessageResponse",
@@ -7303,13 +7340,22 @@
           "type": {
             "type": "string",
             "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
           }
         },
         "type": "object",
         "required": [
           "loc",
           "msg",
-          "type"
+          "type",
+          "input",
+          "ctx"
         ],
         "title": "ValidationError"
       },

@@ -140,7 +140,8 @@ class ConversationManager:
         conv_id: str,
         message_id: str,
         user_input: str,
-        parent_id: Optional[str] = None
+        parent_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict:
         """
         添加消息到对话（支持持久化）
@@ -150,6 +151,7 @@ class ConversationManager:
             message_id: 消息ID
             user_input: 消息内容
             parent_id: 父消息ID（分支时使用）
+            metadata: 与用户输入同时确定的 display-only 快照
 
         Returns:
             消息对象字典
@@ -164,7 +166,8 @@ class ConversationManager:
                     conversation_id=conv_id,
                     message_id=message_id,
                     user_input=user_input,
-                    parent_id=parent_id
+                    parent_id=parent_id,
+                    metadata=metadata,
                 )
             except DuplicateError:
                 # 幂等(with_retry 契约):本方法被 _with_db_retry 包裹,瞬断会从头重跑;
@@ -185,7 +188,7 @@ class ConversationManager:
             "user_input": user_input,
             "timestamp": now,
             "response": None,
-            "metadata": {}
+            "metadata": metadata or {},
         }
 
     async def update_response_async(

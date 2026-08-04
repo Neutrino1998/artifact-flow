@@ -352,6 +352,37 @@ class TestMessageCRUD:
         conv = await conversation_repo.get_conversation(sample_conversation.id)
         assert conv.updated_at > old_time
 
+    async def test_update_metadata_merges_over_nonempty_json_and_persists(
+        self,
+        conversation_repo: ConversationRepository,
+        sample_conversation: Conversation,
+        db_manager,
+    ):
+        """A display snapshot written at message creation must not prevent the
+        later terminal metadata merge from being detected by SQLAlchemy."""
+        msg_id = f"msg-{uuid.uuid4().hex}"
+        activated = [{"slug": "docx", "name": "Word documents"}]
+        await conversation_repo.add_message(
+            sample_conversation.id,
+            msg_id,
+            "hello",
+            metadata={"activated_skills": activated},
+        )
+
+        await conversation_repo.update_message_metadata(
+            msg_id,
+            {"execution_metrics": {"total_duration_ms": 123}},
+        )
+
+        # A fresh session distinguishes a real committed write from an identity-map
+        # object that was only mutated in memory.
+        async with db_manager.session() as session:
+            persisted = await ConversationRepository(session).get_message(msg_id)
+            assert persisted.metadata_ == {
+                "activated_skills": activated,
+                "execution_metrics": {"total_duration_ms": 123},
+            }
+
     async def test_get_conversation_messages_ordered(
         self, conversation_repo: ConversationRepository, sample_conversation: Conversation
     ):
@@ -439,11 +470,24 @@ class TestRetryIdempotency:
         conv_id = f"conv-{uuid.uuid4().hex}"
         msg_id = f"msg-{uuid.uuid4().hex}"
 
-        await mgr.add_message_async(conv_id=conv_id, message_id=msg_id, user_input="hi")
+        activated = [{"slug": "docx", "name": "Word documents"}]
+        await mgr.add_message_async(
+            conv_id=conv_id,
+            message_id=msg_id,
+            user_input="hi",
+            metadata={"activated_skills": activated},
+        )
         # 第二遍(= retry 从头重跑)不得抛
-        await mgr.add_message_async(conv_id=conv_id, message_id=msg_id, user_input="hi")
+        await mgr.add_message_async(
+            conv_id=conv_id,
+            message_id=msg_id,
+            user_input="hi",
+            metadata={"activated_skills": activated},
+        )
 
-        assert await conversation_repo.get_message(msg_id) is not None
+        message = await conversation_repo.get_message(msg_id)
+        assert message is not None
+        assert message.metadata_["activated_skills"] == activated
 
     async def test_add_message_async_blank_root_title_falls_back(
         self, conversation_repo: ConversationRepository, test_user: User

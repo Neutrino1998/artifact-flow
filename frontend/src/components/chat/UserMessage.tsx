@@ -6,6 +6,7 @@ import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { useStreamStore } from '@/stores/streamStore';
 import { BUTTON_PRIMARY } from '@/lib/styles';
 import { CopyIcon } from '@/components/ui/CopyIcon';
+import type { ActivatedSkillRef } from '@/types';
 import BranchNavigator from './BranchNavigator';
 
 interface UserMessageProps {
@@ -33,9 +34,11 @@ interface UserMessageProps {
    * filenames mirrored from the send-local staged files (streamStore.pendingUserFiles).
    */
   attachments?: { filename: string }[] | null;
+  /** Skills explicitly selected by the user for this turn (not cumulative/model-read). */
+  activatedSkills?: ActivatedSkillRef[] | null;
 }
 
-function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCount = 1, pending = false, attachments = null }: UserMessageProps) {
+function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCount = 1, pending = false, attachments = null, activatedSkills = null }: UserMessageProps) {
   const { copied, copy } = useCopyFeedback();
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(content);
@@ -43,6 +46,9 @@ function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCo
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { sendMessage } = useChat();
   const isStreaming = useStreamStore((s) => s.isStreaming);
+  const hasAttachments = Boolean(attachments?.length);
+  const hasActivatedSkills = Boolean(activatedSkills?.length);
+  const hasContextChips = hasAttachments || hasActivatedSkills;
 
   useEffect(() => {
     if (editing && textareaRef.current) {
@@ -132,9 +138,9 @@ function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCo
   return (
     <div className="flex justify-end group">
       <div className="relative max-w-[80%]">
-        {attachments && attachments.length > 0 && (
+        {hasContextChips && (
           <div className={`flex flex-wrap justify-end gap-1.5 ${content ? 'mb-1.5' : ''}`}>
-            {attachments.map((f, i) => (
+            {attachments?.map((f, i) => (
               <span
                 key={`${f.filename}-${i}`}
                 className="inline-flex min-w-0 items-center gap-1 max-w-[16rem] px-2 py-1 rounded-lg bg-panel-accent dark:bg-surface-dark text-xs text-text-secondary dark:text-text-secondary-dark"
@@ -147,12 +153,24 @@ function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCo
                 <span className="min-w-0 truncate">{f.filename}</span>
               </span>
             ))}
+            {activatedSkills?.map((skill) => (
+              <span
+                key={skill.slug}
+                className="inline-flex min-w-0 items-center gap-1 max-w-[16rem] px-2 py-1 rounded-lg bg-accent/10 border border-accent/30 text-xs text-accent"
+                title={`已激活技能：${skill.name}`}
+              >
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                  <path d="M6.5 2l1 2.7 2.7 1-2.7 1-1 2.7-1-2.7-2.7-1 2.7-1z" />
+                  <path d="M11.5 9.5l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z" />
+                </svg>
+                <span className="min-w-0 truncate">{skill.name}</span>
+              </span>
+            ))}
           </div>
         )}
-        {/* Attachment-only message: chips carry the whole content, skip the empty
-            bubble. Compact-only (no text, no attachments) keeps its empty bubble —
-            pre-chips behavior, unchanged. */}
-        {(content || !(attachments && attachments.length > 0)) && (
+        {/* Attachment/skill-only messages use chips as their visible content.
+            Compact-only (no text or chips) keeps its legacy empty bubble. */}
+        {(content || !hasContextChips) && (
           <div className="ml-auto w-fit max-w-full bg-panel-accent dark:bg-surface-dark rounded-bubble px-4 py-3 text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words">
             {content}
           </div>

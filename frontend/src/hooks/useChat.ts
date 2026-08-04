@@ -7,7 +7,7 @@ import { useArtifactStore } from '@/stores/artifactStore';
 import { useStagedFilesStore } from '@/stores/stagedFilesStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useSSE } from '@/hooks/useSSE';
-import type { ChatRequest } from '@/types';
+import type { ActivatedSkillRef, ChatRequest } from '@/types';
 import * as api from '@/lib/api';
 import type { UploadEvent } from '@/lib/api';
 import { getNavGen, bumpNavGen } from '@/lib/navGen';
@@ -24,6 +24,7 @@ export function useChat() {
   const setConversationActiveMessage = useConversationStore((s) => s.setConversationActiveMessage);
   const setPendingUserMessage = useStreamStore((s) => s.setPendingUserMessage);
   const setPendingUserFiles = useStreamStore((s) => s.setPendingUserFiles);
+  const setPendingUserSkills = useStreamStore((s) => s.setPendingUserSkills);
   const setStreamParentId = useStreamStore((s) => s.setStreamParentId);
   const setSendError = useStreamStore((s) => s.setSendError);
   const resetStream = useStreamStore((s) => s.reset);
@@ -48,10 +49,10 @@ export function useChat() {
       // Only meaningful when files.length > 0 — for a text-only send the
       // request body is tiny and the events fire once and finish instantly.
       onUpload?: (ev: UploadEvent) => void,
-      // Skill slugs the user activated for this turn (composer picker). Ride the
-      // request as activate_skills; the backend injects each skill's body +
-      // enables its tools. Sticky across the conversation thereafter.
-      activateSkills?: string[],
+      // Skills the user activated for this turn (composer picker). Only slugs
+      // ride the request; names are a send-local display snapshot for the live
+      // bubble until the backend-resolved Message metadata is refreshed.
+      activateSkills?: ActivatedSkillRef[],
     ): Promise<boolean> => {
       // Capture nav-gen BEFORE the await. If the user clicks New Chat or
       // switches to another conversation while api.sendMessage() is in
@@ -84,7 +85,9 @@ export function useChat() {
         if (forceCompact) body.force_compact = true;
         // Skills the user activated via the composer picker ride along; like
         // compact, an activation-only send (empty text) is allowed.
-        if (activateSkills && activateSkills.length) body.activate_skills = activateSkills;
+        if (activateSkills && activateSkills.length) {
+          body.activate_skills = activateSkills.map((skill) => skill.slug);
+        }
 
         let resolvedParentMessageId: string | null = null;
         if (parentMessageId === undefined) {
@@ -149,6 +152,9 @@ export function useChat() {
         // Always set (null when no files) so a follow-up text-only send doesn't
         // inherit the previous turn's attachment chips on its live bubble.
         setPendingUserFiles(files && files.length > 0 ? files.map((f) => f.name) : null);
+        // Always set, including null, so a later send cannot inherit the prior
+        // turn's skill chips in its live bubble.
+        setPendingUserSkills(activateSkills?.length ? activateSkills : null);
         // Track the exact parent sent to the backend for live truncation and
         // terminal snapshots. This must be stable even if the user switches
         // branches while the turn is running.
@@ -183,7 +189,7 @@ export function useChat() {
         return false;
       }
     },
-    [current?.id, lastMessageId, setPendingUserMessage, setPendingUserFiles, setStreamParentId, connect, setSendError, setConversations, setConversationActiveMessage, setArtifactSessionId, setArtifactPanelVisible]
+    [current?.id, lastMessageId, setPendingUserMessage, setPendingUserFiles, setPendingUserSkills, setStreamParentId, connect, setSendError, setConversations, setConversationActiveMessage, setArtifactSessionId, setArtifactPanelVisible]
   );
 
   // Switch to an existing conversation: tear down the previous conversation's

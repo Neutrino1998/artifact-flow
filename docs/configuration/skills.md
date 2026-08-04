@@ -38,7 +38,13 @@ report-kit.zip
 └── templates/report.docx
 ```
 
-ZIP 中必须能唯一定位一份 `SKILL.md`。Reconcile 会校验路径、成员数量、声明解压大小和正文，然后原样保存 bundle；需要处理附件时，Agent 使用 `mount_skill` 把它显式挂入 Sandbox。
+ZIP 中必须能唯一定位一份 `SKILL.md`。Reconcile 会校验路径、成员数量、声明解压大小和正文，然后原样保存 bundle；需要使用 bundle 中的附属文件时，Agent 使用 `mount_skill` 把它显式挂入 Sandbox。
+
+## 激活与 Sandbox
+
+用户在输入框选择 Skill，以及模型自行调用 `read_skill`，是同一个激活语义的两个入口：两者都会向当前 Agent 提供完整 `SKILL.md` 指导、打开该 Skill 声明的可用能力，并根据是否含附属文件给出相同的条件化提示。
+
+激活本身不会启动 Sandbox，也不会自动挂载文件。只有 bundle 含附属文件且当前任务确实需要它们时，Agent 才调用 `mount_skill`，将目录解到 `/workspace/.skills/<slug>/`；Sandbox 按 turn 销毁，后续 turn 如需再次访问，应重新挂载。只有用户明确选择的 Skill 会作为 chip 显示在该条用户消息上；模型自行 `read_skill` 不会被记成用户选择。
 
 ## Frontmatter
 

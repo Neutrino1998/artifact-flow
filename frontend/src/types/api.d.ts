@@ -1451,6 +1451,22 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * ActivatedSkillRef
+         * @description Skill the user explicitly activated on one message (display snapshot).
+         */
+        ActivatedSkillRef: {
+            /**
+             * Slug
+             * @description Skill slug resolved for this turn
+             */
+            slug: string;
+            /**
+             * Name
+             * @description Skill display name frozen at activation time
+             */
+            name: string;
+        };
+        /**
          * ActiveStreamResponse
          * @description GET /api/v1/chat/{conv_id}/active-stream response
          */
@@ -1894,10 +1910,7 @@ export interface components {
         };
         /** Body_admin_import_skill_api_v1_admin_skills_import_post */
         Body_admin_import_skill_api_v1_admin_skills_import_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
             /**
              * Visibility
@@ -1913,26 +1926,17 @@ export interface components {
         };
         /** Body_bulk_import_users_api_v1_admin_users_bulk_import_post */
         Body_bulk_import_users_api_v1_admin_users_bulk_import_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /** Body_import_skill_api_v1_skills_import_post */
         Body_import_skill_api_v1_skills_import_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /** Body_import_unit_seed_api_v1_admin_tools_units_import_post */
         Body_import_unit_seed_api_v1_admin_tools_units_import_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /** Body_send_message_api_v1_chat_post */
@@ -2734,6 +2738,11 @@ export interface components {
              */
             uploaded_files: components["schemas"]["UploadedFileRef"][] | null;
             /**
+             * Activated Skills
+             * @description Skills the user explicitly activated on this turn, from Message.metadata_['activated_skills']. This is a per-message display snapshot, unlike cumulative active_skills; model-initiated read_skill calls are excluded.
+             */
+            activated_skills: components["schemas"]["ActivatedSkillRef"][] | null;
+            /**
              * Active Skills
              * @description Lead-agent skill slugs active as of this turn, projected from Message.metadata_['agent_progressive_state']['lead_agent']['active_skills']. The branch-tail message drives the activation picker. Absent/empty when no skills are active.
              */
@@ -3327,6 +3336,10 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+            /** Input */
+            input: unknown;
+            /** Context */
+            ctx: Record<string, never>;
         };
         /**
          * VersionDetailResponse

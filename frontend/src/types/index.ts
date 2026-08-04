@@ -107,6 +107,7 @@ export type CancelResponse = S['CancelResponse'];
 export type ResumeRequest = S['ResumeRequest'];
 export type ResumeResponse = S['ResumeResponse'];
 export type MessageResponse = S['MessageResponse'];
+export type ActivatedSkillRef = S['ActivatedSkillRef'];
 export type ConversationSummary = S['ConversationSummary'];
 export type ConversationListResponse = S['ConversationListResponse'];
 export type ConversationDetail = S['ConversationDetailResponse'];

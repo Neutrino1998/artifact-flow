@@ -36,6 +36,7 @@ export default function ChatPanel() {
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const pendingUserMessage = useStreamStore((s) => s.pendingUserMessage);
   const pendingUserFiles = useStreamStore((s) => s.pendingUserFiles);
+  const pendingUserSkills = useStreamStore((s) => s.pendingUserSkills);
   const sendError = useStreamStore((s) => s.sendError);
 
   const activeMode = useUIStore((s) => s.activeMode);
@@ -136,6 +137,7 @@ export default function ChatPanel() {
                 parentId={null}
                 pending
                 attachments={pendingUserFiles?.map((filename) => ({ filename }))}
+                activatedSkills={pendingUserSkills}
               />
             )}
             <StreamingMessage />

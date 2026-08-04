@@ -276,6 +276,10 @@ export default function MessageInput() {
     // Snapshot armed skills for this send (cleared on success below). An
     // activation-only send (no text/files) is allowed, same as compact.
     const skillsToActivate = activeSkills;
+    const skillRefsToActivate = skillsToActivate.map((slug) => {
+      const info = enabledSkills.find((skill) => skill.slug === slug);
+      return { slug, name: info?.name ?? slug };
+    });
     await submit(async (text, files) => {
       // Only show progress for sends that actually carry files — a text-only
       // POST's body is small enough that the bar would flash and vanish.
@@ -296,7 +300,7 @@ export default function MessageInput() {
       try {
         const ok = await sendMessage(
           text, undefined, files, compact, onUpload,
-          skillsToActivate.length ? skillsToActivate : undefined,
+          skillRefsToActivate.length ? skillRefsToActivate : undefined,
         );
         if (ok && forceCompact) setForceCompact(false);
         if (ok && skillsToActivate.length) setActiveSkills([]);
@@ -309,7 +313,7 @@ export default function MessageInput() {
         setUploadProgress(null);
       }
     }, compact || skillsToActivate.length > 0);
-  }, [content, isStreaming, cancelling, setCancelling, conversationId, streamConversationId, inject, submit, sendMessage, forceCompact, effectiveForceCompact, activeSkills, addPendingInject, removePendingInject]);
+  }, [content, isStreaming, cancelling, setCancelling, conversationId, streamConversationId, inject, submit, sendMessage, forceCompact, effectiveForceCompact, activeSkills, enabledSkills, addPendingInject, removePendingInject]);
 
   const handleCompositionStart = useCallback(() => {
     isComposingRef.current = true;

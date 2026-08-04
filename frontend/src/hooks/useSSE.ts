@@ -95,6 +95,7 @@ export function useSSE() {
           ? metrics as Record<string, unknown>
           : null,
         uploadedFiles: streamState.pendingUserFiles?.map((filename) => ({ filename })) ?? null,
+        activatedSkills: streamState.pendingUserSkills,
       });
     },
     [applyTerminalMessageSnapshot],

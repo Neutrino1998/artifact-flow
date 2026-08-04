@@ -16,7 +16,7 @@ from unittest.mock import patch
 import pytest
 from httpx import AsyncClient
 
-from db.models import User
+from db.models import Skill, User
 from db.database import DatabaseManager
 from repositories.conversation_repo import ConversationRepository
 from api.services.execution_runner import ExecutionRunner
@@ -513,9 +513,38 @@ class TestChatStreamE2E:
     async def test_chat_and_stream_happy_path(
         self, client: AsyncClient, app, db_manager: DatabaseManager
     ):
-        """POST /chat returns stream_url; GET /stream yields metadata → ... → complete."""
+        """POST /chat returns stream_url; GET /stream yields metadata → ... → complete.
+
+        The activated skill also covers the composer-button path end to end: it
+        uses the same mount-aware guidance as read_skill and freezes a per-turn
+        display snapshot on Message metadata.
+        """
         fake_agents = {"lead_agent": _FakeAgentConfig()}
         runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        observed_llm_messages: dict = {}
+
+        async with db_manager.session() as session:
+            session.add(Skill(
+                id="skill-docx",
+                slug="docx",
+                namespace_key="",
+                name="Word documents",
+                description="Work with Word files",
+                visibility="public",
+                default_enabled=True,
+                owner_user_id=None,
+                allowed_tools=[],
+                skill_md="DOCX GUIDANCE",
+                bundle=b"unused-by-this-test",
+                has_extra_files=True,
+                source="seeded",
+            ))
+            await session.commit()
+
+        async def fake_llm(messages, **kwargs):
+            observed_llm_messages["messages"] = messages
+            async for chunk in _make_fake_llm_stream("Hello from agent")(messages, **kwargs):
+                yield chunk
 
         # _create_controller() calls get_execution_runner/get_agents/get_tools directly,
         # so we must set the module-level globals (not just dependency_overrides).
@@ -527,14 +556,17 @@ class TestChatStreamE2E:
         deps._execution_runner = runner
 
         try:
-            with patch("models.llm.astream_with_retry", _make_fake_llm_stream("Hello from agent")), \
+            with patch("models.llm.astream_with_retry", fake_llm), \
                  _patch_snapshot(fake_agents):
                 # 1. POST /chat — multipart: `payload` form field carries the
                 # ChatRequest JSON; (None, value) sends it as a form field (no
                 # file attachments here). Starts background execution.
                 resp = await client.post(
                     "/api/v1/chat",
-                    files={"payload": (None, json.dumps({"user_input": "Hi there"}))},
+                    files={"payload": (None, json.dumps({
+                        "user_input": "Hi there",
+                        "activate_skills": ["docx"],
+                    }))},
                 )
                 assert resp.status_code == 200
                 body = resp.json()
@@ -574,6 +606,24 @@ class TestChatStreamE2E:
                     assert msg.user_input == "Hi there"
                     assert msg.response is not None
                     assert "Hello from agent" in msg.response
+                    assert msg.metadata_["activated_skills"] == [
+                        {"slug": "docx", "name": "Word documents"}
+                    ]
+
+                model_context = json.dumps(
+                    observed_llm_messages["messages"], ensure_ascii=False
+                )
+                assert "DOCX GUIDANCE" in model_context
+                assert "mount_skill" in model_context
+
+                detail = (await client.get(f"/api/v1/chat/{conv_id}")).json()
+                persisted = next(
+                    message for message in detail["messages"]
+                    if message["id"] == message_id
+                )
+                assert persisted["activated_skills"] == [
+                    {"slug": "docx", "name": "Word documents"}
+                ]
 
                 # 4. Verify events were persisted
                 from repositories.message_event_repo import MessageEventRepository

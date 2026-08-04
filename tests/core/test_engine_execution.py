@@ -1725,6 +1725,7 @@ class TestSkillActivation:
         """C-3:用户按钮激活 → controller 传 activated_skill_bodies → engine 注入 USER_INPUT
         正文(仅 LLM 可见,同 force_compact/上传路径),让模型即刻看到 skill 指令。"""
         from core.effective_toolset import EffectiveToolset
+        from core.skill_guidance import render_skill_guidance
 
         state = create_initial_state(
             task="use it", session_id="sess", message_id="msg-b",
@@ -1732,7 +1733,13 @@ class TestSkillActivation:
                 "lead_agent": {"active_skills": ["s"], "disclosed_tools": []}
             },
             activated_skill_bodies=[
-                {"slug": "s", "name": "My Skill", "body": "DO THE THING"}
+                {
+                    "slug": "s",
+                    "name": "My Skill",
+                    "body": render_skill_guidance(
+                        "DO THE THING", has_extra_files=True
+                    ),
+                }
             ],
         )
         rounds = [_simple_llm_chunks("Done")]
@@ -1759,6 +1766,7 @@ class TestSkillActivation:
         assert "use it" in content              # 原始输入保留
         assert "My Skill" in content            # skill 名注入
         assert "DO THE THING" in content        # skill 正文注入
+        assert "mount_skill" in content          # 与 read_skill 同一条件化提醒
 
     async def test_activation_only_turn_body_becomes_content(self):
         """纯激活轮(无文本):skill 正文即 USER_INPUT 正文,让 lead 总有可回应输入。"""
