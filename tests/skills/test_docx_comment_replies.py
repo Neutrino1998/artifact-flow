@@ -51,7 +51,7 @@ def _xml_bytes(root):
     )
 
 
-def _write_fixture(path: Path) -> None:
+def _write_fixture(path: Path, compatibility_mode: int | None = 15) -> None:
     document = etree.Element(W + "document", nsmap={"w": NS_W})
     body = etree.SubElement(document, W + "body")
     for comment_id, text in (("0", "Alpha"), ("1", "Beta")):
@@ -76,6 +76,18 @@ def _write_fixture(path: Path) -> None:
         run = etree.SubElement(paragraph, W + "r")
         etree.SubElement(run, W + "t").text = text
 
+    settings = etree.Element(W + "settings", nsmap={"w": NS_W})
+    compatibility = etree.SubElement(settings, W + "compat")
+    if compatibility_mode is not None:
+        compatibility_setting = etree.SubElement(
+            compatibility, W + "compatSetting"
+        )
+        compatibility_setting.set(W + "name", "compatibilityMode")
+        compatibility_setting.set(
+            W + "uri", "http://schemas.microsoft.com/office/word"
+        )
+        compatibility_setting.set(W + "val", str(compatibility_mode))
+
     rels = etree.Element(R + "Relationships", nsmap={None: NS_REL})
     rel = etree.SubElement(rels, R + "Relationship")
     rel.set("Id", "rId1")
@@ -84,6 +96,13 @@ def _write_fixture(path: Path) -> None:
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments",
     )
     rel.set("Target", "comments.xml")
+    settings_rel = etree.SubElement(rels, R + "Relationship")
+    settings_rel.set("Id", "rId2")
+    settings_rel.set(
+        "Type",
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings",
+    )
+    settings_rel.set("Target", "settings.xml")
 
     content_types = etree.Element(C + "Types", nsmap={None: NS_CT})
     for part_name, content_type in (
@@ -95,6 +114,10 @@ def _write_fixture(path: Path) -> None:
             "/word/comments.xml",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml",
         ),
+        (
+            "/word/settings.xml",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml",
+        ),
     ):
         override = etree.SubElement(content_types, C + "Override")
         override.set("PartName", part_name)
@@ -103,6 +126,7 @@ def _write_fixture(path: Path) -> None:
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as package:
         package.writestr("word/document.xml", _xml_bytes(document))
         package.writestr("word/comments.xml", _xml_bytes(comments))
+        package.writestr("word/settings.xml", _xml_bytes(settings))
         package.writestr("word/_rels/document.xml.rels", _xml_bytes(rels))
         package.writestr("[Content_Types].xml", _xml_bytes(content_types))
 
@@ -157,11 +181,11 @@ def _move_comment_markers_to_header(path: Path, comment_id: str) -> None:
     section = etree.SubElement(body, W + "sectPr")
     header_reference = etree.SubElement(section, W + "headerReference")
     header_reference.set(W + "type", "default")
-    header_reference.set(DOC_REL + "id", "rId2")
+    header_reference.set(DOC_REL + "id", "rId3")
 
     rels = etree.fromstring(members["word/_rels/document.xml.rels"])
     rel = etree.SubElement(rels, R + "Relationship")
-    rel.set("Id", "rId2")
+    rel.set("Id", "rId3")
     rel.set(
         "Type",
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header",
@@ -180,6 +204,28 @@ def _move_comment_markers_to_header(path: Path, comment_id: str) -> None:
     members["word/header1.xml"] = _xml_bytes(header)
     members["word/_rels/document.xml.rels"] = _xml_bytes(rels)
     members["[Content_Types].xml"] = _xml_bytes(content_types)
+    _write_members(path, members)
+
+
+def _set_comment_resolved(path: Path, comment_id: str) -> None:
+    members = _read_members(path)
+    comments = etree.fromstring(members["word/comments.xml"])
+    target = next(
+        comment
+        for comment in comments.iter(W + "comment")
+        if comment.get(W + "id") == comment_id
+    )
+    paragraphs = list(target.iter(W + "p"))
+    para_id = paragraphs[-1].get(W14 + "paraId")
+
+    extended = etree.fromstring(members["word/commentsExtended.xml"])
+    item = next(
+        comment_ex
+        for comment_ex in extended.iter(W15 + "commentEx")
+        if comment_ex.get(W15 + "paraId") == para_id
+    )
+    item.set(W15 + "done", "1")
+    members["word/commentsExtended.xml"] = _xml_bytes(extended)
     _write_members(path, members)
 
 
@@ -425,6 +471,76 @@ class DocxCommentReplyTests(unittest.TestCase):
             result, {"parent_comment_id": "000", "reply_comment_id": "2"}
         )
         self.assertTrue(output.exists())
+
+    def test_unsupported_compatibility_modes_are_unreplyable(self):
+        for label, mode, expected_mode in (
+            ("word-2010", 14, 14),
+            ("default", None, 12),
+        ):
+            with self.subTest(label=label):
+                source = self.tmp_path / f"{label}.docx"
+                invalid = self.tmp_path / f"{label}-invalid.docx"
+                _write_fixture(source, compatibility_mode=mode)
+
+                listed = {
+                    item["id"]: item for item in reply_comment.list_comments(source)
+                }
+                self.assertIs(listed["0"]["replyable"], False)
+
+                with self.assertRaisesRegex(
+                    reply_comment.CommentReplyError,
+                    f"兼容模式 {expected_mode} 不支持批注回复",
+                ):
+                    reply_comment.reply_to_comment(
+                        source,
+                        invalid,
+                        reply_to="0",
+                        text="Reply",
+                        author="Assistant",
+                        initials="AI",
+                    )
+
+                self.assertFalse(invalid.exists())
+
+    def test_resolved_thread_is_unreplyable_and_not_reopened(self):
+        source = self.tmp_path / "source.docx"
+        threaded = self.tmp_path / "threaded.docx"
+        invalid = self.tmp_path / "invalid.docx"
+        _write_fixture(source)
+        reply_comment.reply_to_comment(
+            source,
+            threaded,
+            reply_to="0",
+            text="First reply",
+            author="Assistant",
+            initials="AI",
+        )
+        _set_comment_resolved(threaded, "0")
+
+        listed = {
+            item["id"]: item for item in reply_comment.list_comments(threaded)
+        }
+        self.assertIs(listed["0"]["resolved"], True)
+        self.assertIs(listed["0"]["replyable"], False)
+
+        with self.assertRaisesRegex(
+            reply_comment.CommentReplyError, "批注 ID 0 已解决"
+        ):
+            reply_comment.reply_to_comment(
+                threaded,
+                invalid,
+                reply_to="0",
+                text="Late reply",
+                author="Assistant",
+                initials="AI",
+            )
+
+        self.assertFalse(invalid.exists())
+        extended = _read_part(threaded, "word/commentsExtended.xml")
+        self.assertIn(
+            "1",
+            [item.get(W15 + "done") for item in extended.iter(W15 + "commentEx")],
+        )
 
     def test_empty_reply_fails_without_output(self):
         source = self.tmp_path / "source.docx"

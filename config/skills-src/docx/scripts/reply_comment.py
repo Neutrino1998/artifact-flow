@@ -12,7 +12,7 @@
 每次调用只追加一条回复。父批注必须由 ``--reply-to`` 精确指定；脚本不会按
 文字或位置猜测，也不会默认使用第一条批注。仅支持 word/document.xml 中的
 主批注及 Office 2013 commentsExtended 一级回复结构；回复已有回复、页眉页脚
-批注、现代批注扩展和损坏的线程关系会受控失败。
+批注、已解决线程、不兼容的文档模式、现代批注扩展和损坏的线程关系会受控失败。
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ import time
 import zipfile
 from collections import defaultdict
 from pathlib import Path
+from typing import cast
 
 from lxml import etree
 
@@ -52,6 +53,12 @@ COMMENTS_EXTENDED_REL_TYPE = (
     "http://schemas.microsoft.com/office/2011/relationships/commentsExtended"
 )
 COMMENTS_EXTENDED_CONTENT_TYPE = "application/vnd.ms-word.commentsExtended+xml"
+SETTINGS_REL_TYPE = (
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings"
+)
+WORD_COMPATIBILITY_URI = "http://schemas.microsoft.com/office/word"
+DEFAULT_COMPATIBILITY_MODE = 12
+MIN_REPLY_COMPATIBILITY_MODE = 15
 UNSUPPORTED_MODERN_COMMENT_PARTS = {
     "commentsextensible.xml",
     "commentsid.xml",
@@ -180,14 +187,14 @@ def _extended_by_para_id(
     return out
 
 
-def _relationship_target_path(target: str) -> str:
+def _relationship_target_path(target: str, *, label: str) -> str:
     if target.startswith("/"):
         path = posixpath.normpath(target.lstrip("/"))
     else:
         path = posixpath.normpath(posixpath.join("word", target))
     if not path.startswith("word/") or path.startswith("word/../"):
         raise CommentReplyError(
-            f"commentsExtended relationship 指向不支持的位置：{target}"
+            f"{label} relationship 指向不支持的位置：{target}"
         )
     return path
 
@@ -214,10 +221,56 @@ def _find_comments_extended_part(
     target = rel.get("Target")
     if not target:
         raise CommentReplyError("commentsExtended relationship 缺少 Target")
-    part = _relationship_target_path(target)
+    part = _relationship_target_path(target, label="commentsExtended")
     if part not in members:
         raise CommentReplyError(f"commentsExtended relationship 缺少目标部件：{part}")
     return part
+
+
+def _compatibility_mode(
+    members: dict[str, bytes], rels_root: etree._Element
+) -> int:
+    matches = [
+        rel
+        for rel in rels_root.iter(R + "Relationship")
+        if rel.get("Type") == SETTINGS_REL_TYPE
+    ]
+    if len(matches) > 1:
+        raise CommentReplyError("文档包含多个 settings relationship")
+    if not matches:
+        return DEFAULT_COMPATIBILITY_MODE
+    rel = matches[0]
+    if rel.get("TargetMode") == "External":
+        raise CommentReplyError("settings relationship 不能是外部关系")
+    target = rel.get("Target")
+    if not target:
+        raise CommentReplyError("settings relationship 缺少 Target")
+    part = _relationship_target_path(target, label="settings")
+    if part not in members:
+        raise CommentReplyError(f"settings relationship 缺少目标部件：{part}")
+    settings_root = _parse_xml(members[part], part)
+    if settings_root.tag != W + "settings":
+        raise CommentReplyError("settings 部件的根元素不是 w:settings")
+    compatibility_settings = [
+        item
+        for item in settings_root.iter(W + "compatSetting")
+        if item.get(W + "name") == "compatibilityMode"
+        and item.get(W + "uri") == WORD_COMPATIBILITY_URI
+    ]
+    if not compatibility_settings:
+        return DEFAULT_COMPATIBILITY_MODE
+    if len(compatibility_settings) > 1:
+        raise CommentReplyError("settings 中存在多个 compatibilityMode")
+    raw = compatibility_settings[0].get(W + "val")
+    try:
+        mode = int(raw) if raw is not None else -1
+    except ValueError as exc:
+        raise CommentReplyError(
+            "settings 中的 compatibilityMode 不是非负整数"
+        ) from exc
+    if mode < 0:
+        raise CommentReplyError("settings 中的 compatibilityMode 不是非负整数")
+    return mode
 
 
 def _ensure_comments_extended_relationship(
@@ -345,6 +398,35 @@ def _supported_body_comment_ids(document_root: etree._Element) -> set[str]:
     return supported
 
 
+def _comment_ex_resolved(item: etree._Element | None) -> bool | None:
+    if item is None:
+        return None
+    done = item.get(W15 + "done")
+    return done in {"1", "true", "on"} if done is not None else False
+
+
+def _reply_block_reason(
+    comment_id: str,
+    *,
+    is_reply: bool,
+    has_paragraph: bool,
+    in_supported_body: bool,
+    compatibility_mode: int,
+    resolved: bool | None,
+) -> str | None:
+    if is_reply:
+        return f"仅支持回复主批注，不能回复已有回复（批注 ID {comment_id}）"
+    if not has_paragraph:
+        return f"父批注 ID {comment_id} 没有可关联的段落"
+    if not in_supported_body:
+        return f"父批注 ID {comment_id} 不在受支持的正文中"
+    if compatibility_mode < MIN_REPLY_COMPATIBILITY_MODE:
+        return f"文档兼容模式 {compatibility_mode} 不支持批注回复"
+    if resolved is True:
+        return f"批注 ID {comment_id} 已解决，请先重新打开该线程"
+    return None
+
+
 def _thread_info(
     comments: dict[str, etree._Element],
     extended_root: etree._Element | None,
@@ -371,8 +453,7 @@ def _thread_info(
                     f"批注 ID {comment_id} 指向不存在的父 paraId {parent_para}"
                 )
             parents[comment_id] = parent_id
-        done = item.get(W15 + "done")
-        resolved[comment_id] = done in {"1", "true", "on"} if done is not None else False
+        resolved[comment_id] = _comment_ex_resolved(item)
     return parents, resolved
 
 
@@ -396,10 +477,19 @@ def list_comments(path: Path) -> list[dict[str, object]]:
     parents, resolved = _thread_info(comments, extended_root)
     anchors = _anchor_text_by_comment(document_root)
     supported_ids = _supported_body_comment_ids(document_root)
+    compatibility_mode = _compatibility_mode(members, rels_root)
     result = []
     for comment_id, comment in comments.items():
         paragraph = _last_paragraph(comment)
         parent_id = parents[comment_id]
+        block_reason = _reply_block_reason(
+            comment_id,
+            is_reply=parent_id is not None,
+            has_paragraph=paragraph is not None,
+            in_supported_body=comment_id in supported_ids,
+            compatibility_mode=compatibility_mode,
+            resolved=resolved[comment_id],
+        )
         result.append(
             {
                 "id": comment_id,
@@ -410,11 +500,7 @@ def list_comments(path: Path) -> list[dict[str, object]]:
                 "text": _comment_text(comment),
                 "anchor": anchors.get(comment_id, ""),
                 "resolved": resolved[comment_id],
-                "replyable": (
-                    parent_id is None
-                    and paragraph is not None
-                    and comment_id in supported_ids
-                ),
+                "replyable": block_reason is None,
             }
         )
     return result
@@ -447,8 +533,6 @@ def reply_to_comment(
     if parent is None:
         raise CommentReplyError(f"找不到父批注 ID {reply_to}")
     parent_paragraph = _last_paragraph(parent)
-    if parent_paragraph is None:
-        raise CommentReplyError(f"父批注 ID {reply_to} 没有可关联的段落")
 
     rels_root = _parse_xml(members[RELS_PART], RELS_PART)
     extended_part = _find_comments_extended_part(members, rels_root)
@@ -460,16 +544,30 @@ def reply_to_comment(
 
     _, used_para_ids = _paragraph_ids(comments)
     extended = _extended_by_para_id(extended_root)
-    parent_para_id = parent_paragraph.get(W14 + "paraId")
-    parent_item = None
+    parent_para_id = (
+        parent_paragraph.get(W14 + "paraId")
+        if parent_paragraph is not None
+        else None
+    )
+    parent_item = extended.get(parent_para_id.upper()) if parent_para_id else None
+    is_reply = (
+        parent_item is not None
+        and parent_item.get(W15 + "paraIdParent") is not None
+    )
     if parent_para_id is not None:
         parent_para_id = parent_para_id.upper()
-        parent_item = extended.get(parent_para_id)
-        if parent_item is not None and parent_item.get(W15 + "paraIdParent") is not None:
-            raise CommentReplyError("仅支持回复主批注，不能回复已有回复")
     document_root = _parse_xml(members[DOCUMENT_PART], DOCUMENT_PART)
-    if reply_to not in _supported_body_comment_ids(document_root):
-        raise CommentReplyError(f"父批注 ID {reply_to} 不在受支持的正文中")
+    block_reason = _reply_block_reason(
+        reply_to,
+        is_reply=is_reply,
+        has_paragraph=parent_paragraph is not None,
+        in_supported_body=reply_to in _supported_body_comment_ids(document_root),
+        compatibility_mode=_compatibility_mode(members, rels_root),
+        resolved=_comment_ex_resolved(parent_item),
+    )
+    if block_reason is not None:
+        raise CommentReplyError(block_reason)
+    parent_paragraph = cast(etree._Element, parent_paragraph)
     if parent_para_id is None:
         parent_para_id = _new_para_id(used_para_ids)
         parent_paragraph.set(W14 + "paraId", parent_para_id)
