@@ -21,7 +21,7 @@ from config import config
 from core.effective_toolset import EffectiveToolset
 from core.event_history import build_event_history, last_llm_usage
 from utils.image import VISION_VIEWABLE_MIMES
-from models.llm import model_supports_vision
+from models.llm import model_replays_reasoning, model_supports_vision
 from tools.artifact_envelope import make_preview_slice, render_artifact_slice
 from utils.logger import get_logger
 
@@ -98,6 +98,7 @@ class ContextManager:
         all_messages = build_event_history(
             state.get("events", []), agent_name, state.get("vision_blocks"),
             vision_capable=model_supports_vision(agent_config.model),
+            replay_reasoning=model_replays_reasoning(agent_config.model),
         )
 
         # 动态上下文（系统时间 / task_plan / artifact 清单）作为 ephemeral

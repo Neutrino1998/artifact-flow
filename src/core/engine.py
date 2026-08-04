@@ -264,6 +264,7 @@ async def execute_loop(
         format_messages_for_debug,
         get_compaction_threshold,
         get_litellm_model_id,
+        model_replays_reasoning,
     )
 
     message_id = state["message_id"]
@@ -1255,6 +1256,7 @@ async def execute_loop(
                 "system_prompt": messages[0]["content"] if messages and messages[0].get("role") == "system" else None,
                 "reminder": reminder,
                 "model": agents[agent_name].model,
+                "replay_reasoning": model_replays_reasoning(agents[agent_name].model),
             })
 
             # 守卫:format_messages_for_debug 会遍历 messages,识图块列表里若有图(已压成

@@ -29,11 +29,18 @@ model: my-model
 | `api_key` | 否 | 显式密钥；通常应改用环境变量 |
 | `api_key_env` | 否 | 承载该模型密钥的环境变量名；避免把真实密钥写入 YAML |
 | `vision` | 否 | 是否允许 `read_artifact` 向模型发送图片块，默认 `false` |
+| `replay_reasoning` | 否 | 是否把历史 assistant 的 `reasoning_content` 回传给该模型，默认 `true` |
 | `cache_salt_field` | 否 | 按认证用户隔离 prefix cache 时注入的请求字段名；vLLM 使用 `cache_salt`，不配置则不发送 |
 | `params` | 否 | 透传给 LiteLLM 的模型参数 |
 | `defaults` | 否 | 所有 alias 共用的参数；model 级 `params` 覆盖同名默认值 |
 
 未配置的采样参数不会由 ArtifactFlow 强行补默认值，而是交给模型供应商。常见参数包括 `temperature`、`top_p`、`max_tokens`、`timeout`，以及供应商特有的 `enable_thinking`。
+
+`replay_reasoning` 是 ArtifactFlow 的历史构建策略，不会作为参数传给 LiteLLM。设为
+`false` 时，推理内容仍会正常流式返回并持久化到事件中，只是不再进入该模型后续调用的
+assistant messages；普通回复文本和原生工具调用结构不受影响。需要 preserved/interleaved
+thinking 的 Agent 模型应保留默认值 `true`，并另行在 `params` 中配置供应商要求的
+thinking 开关；不接受或不需要历史推理的模型可显式设为 `false`。
 
 ## 自部署模型
 

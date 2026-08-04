@@ -24,6 +24,7 @@ def build_event_history(
     agent_name: str,
     vision_blocks: Dict[Any, str] | None = None,
     vision_capable: bool = True,
+    replay_reasoning: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     从事件列表构建指定 agent 的 LLM messages。
@@ -39,6 +40,8 @@ def build_event_history(
             False 时即便命中缓存也**不**注入图块,降级为占位文本——文本模型收到
             image_url 块会被 provider 端拒。默认 True 便于直接调用/测试(生产由
             context_manager 据 agent 模型显式计算后传入)。
+        replay_reasoning: 是否把 assistant 的 ``reasoning_content`` 放回 messages。
+            默认 True 保持历史行为；生产由目标模型 alias 的配置显式决定。
 
     Returns:
         LLM 消息列表 [{"role": "user"/"assistant", "content": ..., "_meta"?: {...}}]
@@ -52,7 +55,7 @@ def build_event_history(
     carry_event = _tool_call_carry_before_boundary(filtered, boundary_idx)
     return _events_to_messages(
         filtered[boundary_idx:], vision_blocks or {}, vision_capable,
-        carry_event=carry_event,
+        replay_reasoning=replay_reasoning, carry_event=carry_event,
     )
 
 
@@ -100,6 +103,7 @@ def _events_to_messages(
     events: List[ExecutionEvent],
     vision_blocks: Dict[Any, str],
     vision_capable: bool = True,
+    replay_reasoning: bool = True,
     carry_event: ExecutionEvent | None = None,
 ) -> List[Dict[str, Any]]:
     """将事件列表转成 LLM 消息。"""
@@ -117,7 +121,9 @@ def _events_to_messages(
             if content:
                 messages.append({"role": "user", "content": content})
             if carry_event is not None:
-                _append_assistant_message(messages, carry_event.data or {})
+                _append_assistant_message(
+                    messages, carry_event.data or {}, replay_reasoning
+                )
                 carry_event = None
 
         elif et == StreamEventType.USER_INPUT.value:
@@ -136,7 +142,7 @@ def _events_to_messages(
                 messages.append({"role": "user", "content": content})
 
         elif et == StreamEventType.LLM_COMPLETE.value:
-            _append_assistant_message(messages, data)
+            _append_assistant_message(messages, data, replay_reasoning)
 
         elif et == StreamEventType.TOOL_COMPLETE.value:
             tool_name = data.get("tool", "unknown")
@@ -190,10 +196,12 @@ def _events_to_messages(
 
 
 def _append_assistant_message(
-    messages: List[Dict[str, Any]], data: Dict[str, Any]
+    messages: List[Dict[str, Any]],
+    data: Dict[str, Any],
+    replay_reasoning: bool = True,
 ) -> None:
     content = data.get("content")
-    reasoning = data.get("reasoning_content")
+    reasoning = data.get("reasoning_content") if replay_reasoning else None
     tool_calls = data.get("tool_calls") or []
     if not content and not reasoning and not tool_calls:
         return

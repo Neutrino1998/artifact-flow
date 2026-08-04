@@ -15,6 +15,7 @@ from models.llm import (
     format_messages_for_debug,
     get_compaction_threshold,
     get_model_context_window,
+    model_replays_reasoning,
     model_supports_vision,
     validate_agent_model_config,
     validate_model_config,
@@ -32,6 +33,24 @@ def test_context_window_is_required_for_every_configured_model(monkeypatch):
     )
 
     with pytest.raises(ValueError, match="context_window.*positive integer"):
+        validate_model_config()
+
+
+def test_replay_reasoning_must_be_boolean(monkeypatch):
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "bad-replay-flag": {
+                    "model": "openai/private",
+                    "context_window": 32768,
+                    "replay_reasoning": "false",
+                }
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="replay_reasoning.*boolean"):
         validate_model_config()
 
 
@@ -245,6 +264,45 @@ def test_vision_flag_false_for_text_alias():
 def test_vision_flag_false_for_unknown_alias():
     """未知别名 → False(降级占位,不冒险把图块注入可能不识图的直传模型)。"""
     assert model_supports_vision("totally-made-up") is False
+
+
+# ============================================================
+# Reasoning 历史回传:model_replays_reasoning
+# ============================================================
+
+def test_replay_reasoning_defaults_true_for_compatibility(monkeypatch):
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "default-replay": {
+                    "model": "openai/private",
+                    "context_window": 32768,
+                }
+            }
+        },
+    )
+
+    assert model_replays_reasoning("default-replay") is True
+
+
+def test_replay_reasoning_false_is_app_metadata_not_litellm_param(monkeypatch):
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "defaults": {},
+            "models": {
+                "no-replay": {
+                    "model": "openai/private",
+                    "context_window": 32768,
+                    "replay_reasoning": False,
+                }
+            },
+        },
+    )
+
+    assert model_replays_reasoning("no-replay") is False
+    assert "replay_reasoning" not in _resolve_model_params("no-replay")
 
 
 # ============================================================

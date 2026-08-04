@@ -108,6 +108,9 @@ def _validate_model_config(
                 f"{alias}: context_window ({context_window}) must exceed "
                 f"COMPACTION_RESERVE_TOKENS ({settings.COMPACTION_RESERVE_TOKENS})"
             )
+        replay_reasoning = entry.get("replay_reasoning", True)
+        if not isinstance(replay_reasoning, bool):
+            errors.append(f"{alias}: 'replay_reasoning' must be a boolean")
 
     required = set(required_models or ())
     missing = sorted(name for name in required if name not in models)
@@ -639,12 +642,14 @@ def get_model_info(model: str) -> Dict[str, Any]:
             "model_id": model_config["model"],
             "is_reasoning": is_reasoning,
             "supports_vision": bool(model_config.get("vision", False)),
+            "replay_reasoning": model_config.get("replay_reasoning", True),
             "context_window": get_model_context_window(model),
         }
     return {
         "model_id": model,
         "is_reasoning": False,
         "supports_vision": False,
+        "replay_reasoning": True,
         "context_window": None,
     }
 
@@ -657,3 +662,13 @@ def model_supports_vision(model: str) -> bool:
     报错,也让任意私有部署「配什么模型就有什么能力」而非崩溃。未知/未声明 → False。
     """
     return get_model_info(model)["supports_vision"]
+
+
+def model_replays_reasoning(model: str) -> bool:
+    """Whether assistant reasoning is replayed into this model's message history.
+
+    The alias-level flag is application metadata, not a LiteLLM parameter. Unknown
+    direct-passthrough models retain the historical behavior (True); runtime Agents
+    are separately required to use configured aliases.
+    """
+    return get_model_info(model)["replay_reasoning"]

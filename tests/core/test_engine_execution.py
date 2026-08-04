@@ -314,6 +314,7 @@ class TestLeadCompletion:
         assert starts[0]["agent"] == "lead_agent"
         assert completes[0]["agent"] == "lead_agent"
         assert starts[0]["data"]["model"] == "gpt-4o-mini"
+        assert starts[0]["data"]["replay_reasoning"] is True
         assert "tools" not in starts[0]["data"]
 
     async def test_agent_start_does_not_persist_native_tool_schemas(self):

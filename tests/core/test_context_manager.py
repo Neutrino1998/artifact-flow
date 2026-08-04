@@ -127,6 +127,26 @@ class TestSystemPrompt:
         assert system_msg["role"] == "system"
         assert "research assistant" in system_msg["content"]
 
+    def test_target_model_can_disable_reasoning_history_replay(self):
+        agent = _FakeAgentConfig()
+        state = _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+            _make_event(StreamEventType.LLM_COMPLETE.value, data={
+                "content": "answer",
+                "reasoning_content": "private reasoning",
+            }),
+            _tool_complete(),
+        ])
+
+        with patch(
+            "core.context_manager.model_replays_reasoning", return_value=False
+        ):
+            messages = _build(agent, state=state, tools={})
+
+        assistant = next(m for m in messages if m["role"] == "assistant")
+        assert assistant["content"] == "answer"
+        assert "reasoning_content" not in assistant
+
     def test_system_time_in_trailing_reminder_not_system_prompt(self):
         agent = _FakeAgentConfig()
         state = _make_state(events=[

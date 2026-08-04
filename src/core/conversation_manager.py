@@ -590,7 +590,13 @@ class ConversationManager:
         model = data.get("model")
         agent_name = anchor.agent_name
 
-        history = build_event_history(events[:anchor_idx], agent_name)
+        history = build_event_history(
+            events[:anchor_idx],
+            agent_name,
+            # Old agent_start events predate the field and were generated while
+            # reasoning replay was unconditional.
+            replay_reasoning=data.get("replay_reasoning", True),
+        )
         if not history:
             # 锚前无本 agent 历史 = 数据异常（正常下至少有 user_input / subagent_instruction）。
             # 取证场景、admin 会上报，记一笔便于排查。

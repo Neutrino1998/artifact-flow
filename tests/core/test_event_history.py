@@ -255,6 +255,45 @@ class TestFreshStartBoundary:
 
 class TestMessageConversion:
 
+    def test_reasoning_replay_can_be_disabled_without_dropping_answer_or_tools(self):
+        calls = [{
+            "id": "call_one",
+            "type": "function",
+            "function": {"name": "search", "arguments": "{}"},
+        }]
+        events = [
+            _ev(StreamEventType.LLM_COMPLETE.value, data={
+                "content": "I will search.",
+                "reasoning_content": "private reasoning",
+                "tool_calls": calls,
+            }),
+        ]
+
+        messages = build_event_history(
+            events, "lead_agent", replay_reasoning=False
+        )
+
+        assert messages == [{
+            "role": "assistant",
+            "content": "I will search.",
+            "tool_calls": calls,
+        }]
+
+    def test_reasoning_only_message_is_omitted_when_replay_is_disabled(self):
+        events = [
+            _ev(StreamEventType.USER_INPUT.value, data={"content": "question"}),
+            _ev(StreamEventType.LLM_COMPLETE.value, data={
+                "content": "",
+                "reasoning_content": "reasoning without a visible answer",
+            }),
+        ]
+
+        messages = build_event_history(
+            events, "lead_agent", replay_reasoning=False
+        )
+
+        assert messages == [{"role": "user", "content": "question"}]
+
     def test_native_assistant_calls_and_results_keep_structural_ids(self):
         calls = [
             {

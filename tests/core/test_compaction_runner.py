@@ -433,3 +433,40 @@ class TestCacheSaltScope:
             )
 
         assert captured["user_id"] == "user-123"
+
+
+class TestReasoningReplayPolicy:
+
+    async def test_compactor_model_can_disable_reasoning_history_replay(self):
+        captured_messages = []
+
+        async def fake_stream(messages, **kwargs):
+            captured_messages.extend(messages)
+            async for chunk in _fake_stream_ok(messages, model=kwargs.get("model")):
+                yield chunk
+
+        agents = {"compact_agent": _FakeAgent()}
+        runner = CompactionRunner(agents, emit=None)
+        state = _make_state([
+            _ev(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+            _ev(StreamEventType.LLM_COMPLETE.value, data={
+                "content": "answer",
+                "reasoning_content": "private reasoning",
+            }),
+        ])
+
+        with (
+            patch("models.llm.astream_with_retry", fake_stream),
+            patch("models.llm.model_replays_reasoning", return_value=False),
+        ):
+            await runner.maybe_trigger(
+                state, "lead_agent", input_tokens=80, output_tokens=30,
+                compaction_threshold=100,
+            )
+
+        assistant = next(
+            message for message in captured_messages
+            if message["role"] == "assistant"
+        )
+        assert assistant["content"] == "answer"
+        assert "reasoning_content" not in assistant

@@ -315,7 +315,11 @@ class CompactionRunner:
         调用 compact_agent LLM，返回 (summary_content, duration_ms, token_usage)。
         """
         from core.event_history import build_event_history
-        from models.llm import astream_with_retry, format_messages_for_debug
+        from models.llm import (
+            astream_with_retry,
+            format_messages_for_debug,
+            model_replays_reasoning,
+        )
 
         # 按 agent_name 过滤 + boundary 扫描，得到用于压缩的历史 messages
         compact_input = list(events_to_compact)
@@ -328,7 +332,11 @@ class CompactionRunner:
                     if (event.data or {}).get("tool_calls"):
                         del compact_input[index]
                     break
-        history = build_event_history(compact_input, agent_name)
+        history = build_event_history(
+            compact_input,
+            agent_name,
+            replay_reasoning=model_replays_reasoning(compact_agent.model),
+        )
         clean_history = [
             {k: v for k, v in m.items() if k != "_meta"} for m in history
         ]
