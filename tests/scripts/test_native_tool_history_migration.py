@@ -489,7 +489,10 @@ def test_bounded_transcript_keeps_first_and_latest_complete_turns():
 
 @pytest.mark.asyncio
 async def test_semantic_summary_uses_complete_final_after_stream_retry(monkeypatch):
+    seen_kwargs = {}
+
     async def fake_stream(*args, **kwargs):
+        seen_kwargs.update(kwargs)
         yield {"type": "content", "content": "partial-attempt\n"}
         yield {
             "type": "final",
@@ -503,9 +506,11 @@ async def test_semantic_summary_uses_complete_final_after_stream_retry(monkeypat
         [{"role": "user", "content": "summarize"}],
         model="compact",
         max_retries=2,
+        cache_salt_subject="native-history-migration:conv-1",
     )
 
     assert result == "complete-retry"
+    assert seen_kwargs["user_id"] == "native-history-migration:conv-1"
 
 
 @pytest.mark.asyncio

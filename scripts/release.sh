@@ -149,16 +149,16 @@ if (( WITH_INFRA )); then
 fi
 
 echo "→ package config"
-COPYFILE_DISABLE=1 tar --exclude='.DS_Store' --exclude='._*' \
+COPYFILE_DISABLE=1 tar --no-xattrs --exclude='.DS_Store' --exclude='._*' \
   -czf "$STAGE/$CONFIG_ARCHIVE" config
 
 echo "→ package deploy unit"
 (
   git ls-files -z deploy \
-    | COPYFILE_DISABLE=1 tar --null -T - -cf - \
+    | COPYFILE_DISABLE=1 tar --no-xattrs --null -T - -cf - \
     | tar -xf - -C "$DEPLOY_STAGE"
 )
-COPYFILE_DISABLE=1 tar --exclude='.DS_Store' --exclude='._*' \
+COPYFILE_DISABLE=1 tar --no-xattrs --exclude='.DS_Store' --exclude='._*' \
   -czf "$STAGE/$DEPLOY_ARCHIVE" -C "$DEPLOY_STAGE" deploy
 
 SOURCE="$(git rev-parse --abbrev-ref HEAD)@$(git rev-parse HEAD)"

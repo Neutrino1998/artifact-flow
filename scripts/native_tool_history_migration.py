@@ -201,6 +201,7 @@ async def _generate_semantic(
     *,
     model: str,
     max_retries: int,
+    cache_salt_subject: str,
 ) -> str:
     from models.llm import astream_with_retry
 
@@ -213,6 +214,7 @@ async def _generate_semantic(
             messages,
             model=model,
             max_retries=max_retries,
+            user_id=cache_salt_subject,
         ):
             if chunk.get("type") == "final":
                 content = chunk.get("content") or ""
@@ -286,6 +288,13 @@ async def _run_generate_task(
                 messages,
                 model=semantic_model,
                 max_retries=args.max_retries,
+                # The stopped migration has no authenticated request user. Use a
+                # deterministic per-conversation isolation principal instead:
+                # this is stricter than per-user sharing and still produces the
+                # same opaque HMAC cache salt on retries/resume.
+                cache_salt_subject=(
+                    f"native-history-migration:{task.conversation_id}"
+                ),
             )
         checkpoint.set_task_result(
             migration_id=task.migration_id,
