@@ -2190,7 +2190,7 @@ export interface components {
         ClientConfigResponse: {
             /**
              * Compaction Token Threshold
-             * @description Token sum (a single LLM call's input+output) at which the engine auto-compacts. Used by the frontend as the context-usage gauge denominator so it doesn't hardcode a value that could drift from the server.
+             * @description Effective token sum at which the lead model auto-compacts, calculated as its configured context_window minus the service reserve. Used by the frontend as the context-usage gauge denominator.
              */
             compaction_token_threshold: number;
             /**

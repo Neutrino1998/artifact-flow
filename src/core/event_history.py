@@ -222,6 +222,12 @@ def _tool_call_carry_before_boundary(
     boundary = events[boundary_idx]
     if boundary.event_type != StreamEventType.COMPACTION_SUMMARY.value:
         return None
+    # Historical summaries predate this field and were all created at the
+    # post-LLM/pre-tool boundary, so default True preserves their semantics.
+    # Overflow recovery compacts already-completed pairs and explicitly writes
+    # False; carrying only their assistant half would orphan it after the boundary.
+    if not (boundary.data or {}).get("carry_tool_call", True):
+        return None
     for event in reversed(events[:boundary_idx]):
         if event.event_type == StreamEventType.LLM_COMPLETE.value:
             return event if (event.data or {}).get("tool_calls") else None

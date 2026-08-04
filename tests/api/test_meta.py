@@ -22,7 +22,7 @@ async def materialized_lead_agent(db_session: AsyncSession):
         Agent(
             name="lead_agent",
             description="test lead",
-            model="db-lead-model",
+            model="gpt-4o-mini",
             max_tool_rounds=3,
             internal=False,
             role_prompt="test",
@@ -59,12 +59,14 @@ async def test_meta_returns_full_shape(client: AsyncClient):
     # compaction_token_threshold — context-usage gauge denominator
     assert "compaction_token_threshold" in data
     assert isinstance(data["compaction_token_threshold"], int)
-    assert data["compaction_token_threshold"] == config.COMPACTION_TOKEN_THRESHOLD
+    assert data["compaction_token_threshold"] == (
+        128_000 - config.COMPACTION_RESERVE_TOKENS
+    )
 
     # lead_agent_model — composer model badge
     assert "lead_agent_model" in data
     assert isinstance(data["lead_agent_model"], str)
-    assert data["lead_agent_model"] == "db-lead-model"
+    assert data["lead_agent_model"] == "gpt-4o-mini"
 
     # max_upload_size — composer's per-file size pre-gate (mirrors MAX_UPLOAD_SIZE)
     assert "max_upload_size" in data

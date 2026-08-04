@@ -234,7 +234,13 @@ async def execute_loop(
     Returns:
         最终执行状态
     """
-    from models.llm import astream_with_retry, format_messages_for_debug, get_litellm_model_id
+    from models.llm import (
+        LLMContextOverflowError,
+        astream_with_retry,
+        format_messages_for_debug,
+        get_compaction_threshold,
+        get_litellm_model_id,
+    )
 
     message_id = state["message_id"]
     tool_round_count: Dict[str, int] = {}  # per-agent tool round counter
@@ -425,10 +431,10 @@ async def execute_loop(
         ]
         return [tools[name].to_native_tool_schema() for name in names]
 
-    async def _build_context(agent_name: str) -> tuple[list, str, list[dict]]:
+    async def _build_context(agent_name: str) -> tuple[list, str, list[dict], int]:
         """drain messages → artifacts 清单 → ContextManager.build。
 
-        返回 (messages, reminder, native_tools)：reminder 是并入末条消息的
+        返回 (messages, reminder, native_tools, compaction_threshold)：reminder 是并入末条消息的
         <system-reminder> 原文，供调用处落进 agent_start 事件（持久化动态上下文，
         admin 据此重建 messages）；native_tools 只在本次调用内使用。
         """
@@ -462,12 +468,14 @@ async def execute_loop(
 
         # max_tool_rounds 收尾提示已并入 reminder（见 ContextManager._build_dynamic_context
         # 的 <tool_budget>）——引擎只把 live 工具轮数传进去，不再在 build 后追加独立 system 消息。
+        compaction_threshold = get_compaction_threshold(agents[agent_name].model)
         messages, reminder = ContextManager.build(
             state=state,
             agent_name=agent_name,
             agents=agents,
             tools=tools,
             effective_toolset=effective_toolsets[agent_name],
+            compaction_threshold=compaction_threshold,
             artifacts_inventory=artifacts_inventory,
             model=get_litellm_model_id(agents[agent_name].model),
             sandbox_status=sandbox_status,
@@ -475,7 +483,7 @@ async def execute_loop(
             available_skills=available_skills,
         )
 
-        return messages, reminder, _native_tools_for(agent_name)
+        return messages, reminder, _native_tools_for(agent_name), compaction_threshold
 
     async def _call_llm(
         messages: list,
@@ -487,7 +495,8 @@ async def execute_loop(
         流式调用 LLM，推送 llm_chunk / llm_complete，记录 metrics。
 
         Returns:
-            (response_content, reasoning_content, token_usage) 或 None（LLM 出错，state 已设置）
+            (response_content, reasoning_content, token_usage, tool_calls) 或 None
+            （LLM 出错，state 已设置）
         """
         llm_start_time = utc_now()
 
@@ -551,6 +560,11 @@ async def execute_loop(
                         cancelled_mid_stream = True
                         break
 
+        except LLMContextOverflowError:
+            # Typed, deterministic provider rejection. No llm_complete was accepted;
+            # let _run_agent compact this agent's event history and retry this exact
+            # logical step once. All other adapter errors keep the terminal path below.
+            raise
         except Exception as llm_error:
             logger.exception(f"LLM call failed: {llm_error}")
             if response_content or reasoning_content:
@@ -1194,12 +1208,16 @@ async def execute_loop(
             return None
 
         state["current_agent"] = agent_name  # 错误归因 + 外部观察
+        # Exactly-once guard for one logical provider invocation. A successful
+        # retry resets it, so a later tool round may independently recover from
+        # its own overflow; a second consecutive overflow fails loudly.
+        overflow_retry_attempted = False
 
         while not state["completed"]:
             if await _check_cancelled():
                 return None
 
-            messages, reminder, native_tools = await _build_context(agent_name)
+            messages, reminder, native_tools, compaction_threshold = await _build_context(agent_name)
 
             # agent_start 持久化 messages 重建所需的非历史输入：静态 system_prompt +
             # 动态 reminder，以及体积很小的 model 标识。历史可由 event 流确定性重放；
@@ -1217,14 +1235,64 @@ async def execute_loop(
                 logger.debug(f"[{agent_name}] Messages:\n{format_messages_for_debug(messages)}")
 
             # 调用 LLM（流式）
-            llm_result = await _call_llm(
-                messages,
-                agent_name,
-                agents[agent_name].model,
-                native_tools,
-            )
+            try:
+                llm_result = await _call_llm(
+                    messages,
+                    agent_name,
+                    agents[agent_name].model,
+                    native_tools,
+                )
+            except LLMContextOverflowError as overflow_error:
+                if overflow_retry_attempted:
+                    message = (
+                        "LLM context overflow recovery failed after one "
+                        f"compact-and-retry attempt: {overflow_error}"
+                    )
+                    logger.error(f"[{agent_name}] {message}")
+                    state["error_detail"] = {
+                        "error": message,
+                        "agent": agent_name,
+                        "request_id": get_request_id() or None,
+                    }
+                    state["completed"] = True
+                    state["error"] = True
+                    state["response"] = message
+                    return None
+
+                overflow_retry_attempted = True
+                logger.warning(
+                    f"[{agent_name}] LLM context overflow; compacting history and "
+                    f"retrying once: {overflow_error}"
+                )
+                try:
+                    await compaction_runner.compact_for_overflow(state, agent_name)
+                except CooperativeCancelled:
+                    logger.info(
+                        f"Overflow compaction for {agent_name} interrupted by user cancel"
+                    )
+                    state["completed"] = True
+                    state["cancelled"] = True
+                    state["response"] = state.get("response", "") or ""
+                    return None
+                except Exception as compact_error:
+                    logger.exception(
+                        f"Overflow compaction failed for {agent_name}: {compact_error}"
+                    )
+                    message = f"Context overflow recovery failed: {compact_error}"
+                    state["error_detail"] = {
+                        "error": message,
+                        "agent": agent_name,
+                        "request_id": get_request_id() or None,
+                    }
+                    state["completed"] = True
+                    state["error"] = True
+                    state["response"] = message
+                    return None
+                continue
+
             if llm_result is None:
                 return None
+            overflow_retry_attempted = False
 
             response_content, reasoning_content, normalized_usage, tool_calls = llm_result
 
@@ -1247,6 +1315,7 @@ async def execute_loop(
                     agent_name=agent_name,
                     input_tokens=normalized_usage["input_tokens"],
                     output_tokens=normalized_usage["output_tokens"],
+                    compaction_threshold=compaction_threshold,
                 )
             except CooperativeCancelled:
                 # 用户 cancel 落在 compaction LLM 调用期间（原本是最长的盲窗：

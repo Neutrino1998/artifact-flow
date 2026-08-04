@@ -13,12 +13,60 @@ from types import SimpleNamespace
 from models.llm import (
     _resolve_model_params,
     format_messages_for_debug,
+    get_compaction_threshold,
+    get_model_context_window,
     model_supports_vision,
+    validate_model_config,
 )
 
 
 def test_known_alias_resolves():
     assert _resolve_model_params("gpt-4o-mini")["model"] == "gpt-4o-mini"
+
+
+def test_context_window_is_required_for_every_configured_model(monkeypatch):
+    monkeypatch.setattr(
+        "models.llm._config",
+        {"models": {"missing-window": {"model": "openai/private"}}},
+    )
+
+    with pytest.raises(ValueError, match="context_window.*positive integer"):
+        validate_model_config()
+
+
+def test_agent_models_must_use_configured_aliases(monkeypatch):
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "configured": {
+                    "model": "openai/private",
+                    "context_window": 32768,
+                }
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="must use configured aliases"):
+        validate_model_config(["openai/direct-model"])
+
+
+def test_compaction_threshold_is_model_window_minus_global_reserve(monkeypatch):
+    monkeypatch.setattr("models.llm.settings.COMPACTION_RESERVE_TOKENS", 4096)
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "private": {
+                    "model": "openai/private",
+                    "context_window": 32768,
+                }
+            }
+        },
+    )
+
+    assert get_model_context_window("private") == 32768
+    assert get_compaction_threshold("private") == 28672
 
 
 def test_default_timeout_is_split_by_http_phase(monkeypatch):
@@ -209,9 +257,13 @@ def test_debug_formatter_still_handles_plain_string():
 # astream_with_retry:仅瞬态错误重试,确定性错误立即 loud-fail
 # ============================================================
 
-from litellm.exceptions import BadRequestError, RateLimitError
+from litellm.exceptions import (
+    BadRequestError,
+    ContextWindowExceededError,
+    RateLimitError,
+)
 
-from models.llm import astream_with_retry
+from models.llm import LLMContextOverflowError, astream_with_retry
 
 
 async def _drain(gen):
@@ -342,6 +394,29 @@ async def test_bad_request_fails_fast_no_retry(monkeypatch):
         await _drain(astream_with_retry([{"role": "user", "content": "x"}],
                                         model="gpt-4o-mini", max_retries=3, retry_delay=0))
     assert calls["n"] == 1  # 立即抛,无重试
+
+
+async def test_context_window_error_maps_to_engine_recovery_signal(monkeypatch):
+    """Typed overflow is not retried in the adapter; the engine owns one compact+retry."""
+    calls = {"n": 0}
+
+    async def fake_acompletion(**kwargs):
+        calls["n"] += 1
+        raise ContextWindowExceededError(
+            message="maximum context length exceeded",
+            model="m",
+            llm_provider="p",
+        )
+
+    monkeypatch.setattr("models.llm.acompletion", fake_acompletion)
+    with pytest.raises(LLMContextOverflowError):
+        await _drain(astream_with_retry(
+            [{"role": "user", "content": "x"}],
+            model="gpt-4o-mini",
+            max_retries=3,
+            retry_delay=0,
+        ))
+    assert calls["n"] == 1
 
 
 async def test_rate_limit_is_retried(monkeypatch):

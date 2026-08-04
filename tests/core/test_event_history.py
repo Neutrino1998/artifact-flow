@@ -150,6 +150,41 @@ class TestCompactionSummaryBoundary:
         assert "lead-a" in contents
         assert "sub-summary" not in contents
 
+    def test_overflow_summary_does_not_carry_completed_tool_request_half(self):
+        """Overflow compacts before a provider call, after prior tool pairs may
+        already be complete. Carrying only the pre-boundary assistant request would
+        leave an orphan tool call because its result was compacted into the summary.
+        """
+        events = [
+            _ev(StreamEventType.USER_INPUT.value, data={"content": "old task"}),
+            _ev(StreamEventType.LLM_COMPLETE.value, data={
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_done",
+                    "type": "function",
+                    "function": {"name": "search", "arguments": "{}"},
+                }],
+            }),
+            _ev(StreamEventType.TOOL_COMPLETE.value, data={
+                "call_id": "call_done",
+                "tool": "search",
+                "success": True,
+                "result_data": "done",
+            }),
+            _ev(StreamEventType.COMPACTION_SUMMARY.value, data={
+                "success": True,
+                "content": "summary including completed search",
+                "carry_tool_call": False,
+            }),
+        ]
+
+        msgs = build_event_history(events, "lead_agent")
+
+        assert msgs == [{
+            "role": "user",
+            "content": "summary including completed search",
+        }]
+
 
 class TestFreshStartBoundary:
 

@@ -29,7 +29,7 @@ class _FakeAgentConfig:
     name: str = "lead_agent"
     description: str = "test lead"
     tools: dict = field(default_factory=dict)
-    model: str = "openai/fake-model"
+    model: str = "gpt-4o-mini"
     max_tool_rounds: int = 3
     role_prompt: str = "You are a test agent."
     internal: bool = False

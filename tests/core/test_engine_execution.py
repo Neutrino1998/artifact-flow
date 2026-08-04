@@ -17,6 +17,7 @@ import pytest
 
 from core.engine import EngineHooks, create_initial_state, execute_loop
 from core.events import StreamEventType, ExecutionEvent
+from models.llm import LLMContextOverflowError
 from tests.core._toolset import effective_for
 from api.services.runtime_store import InMemoryRuntimeStore
 from tools.base import ArtifactSpec, BaseTool, ToolPermission, ToolResult
@@ -34,7 +35,7 @@ class _FakeAgentConfig:
     name: str = "lead_agent"
     description: str = "test lead"
     tools: dict = field(default_factory=dict)
-    model: str = "openai/fake-model"
+    model: str = "gpt-4o-mini"
     max_tool_rounds: int = 3
     role_prompt: str = "You are a test agent."
     internal: bool = False
@@ -200,6 +201,7 @@ async def _run_engine(
     effective_toolsets=None,
     agent_progressive_state=None,
     user_id=None,
+    compaction_threshold=100_000,
 ):
     """Helper to run engine with given LLM factory and return (state, emitted).
 
@@ -228,6 +230,7 @@ async def _run_engine(
         agents = {"lead_agent": _FakeAgentConfig()}
 
     with patch("models.llm.astream_with_retry", llm_factory), \
+         patch("models.llm.get_compaction_threshold", return_value=compaction_threshold), \
          patch("core.engine.config") as mock_config:
         # Copy real config values then override permission_timeout for fast tests
         from config import config as real_config
@@ -294,7 +297,7 @@ class TestLeadCompletion:
         assert len(completes) == 1
         assert starts[0]["agent"] == "lead_agent"
         assert completes[0]["agent"] == "lead_agent"
-        assert starts[0]["data"]["model"] == "openai/fake-model"
+        assert starts[0]["data"]["model"] == "gpt-4o-mini"
         assert "tools" not in starts[0]["data"]
 
     async def test_agent_start_does_not_persist_native_tool_schemas(self):
@@ -1349,11 +1352,11 @@ class TestInEngineCompaction:
             ],
         ]
 
-        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
-            result, emitted, _ = await _run_engine(
-                _make_fake_stream_sequence(rounds),
-                agents={"lead_agent": lead, "compact_agent": compact},
-            )
+        result, emitted, _ = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": lead, "compact_agent": compact},
+            compaction_threshold=100,
+        )
 
         # Both events should end up in persisted state
         event_types = [e.event_type for e in result["events"]]
@@ -1371,7 +1374,7 @@ class TestInEngineCompaction:
         # Content = memory-aid frame + raw summary from compact_agent
         assert summary_ev.data["content"].startswith("[Prior conversation has been compacted")
         assert "compacted prior turn" in summary_ev.data["content"]
-        assert summary_ev.data["model"] == "openai/fake-model"
+        assert summary_ev.data["model"] == "gpt-4o-mini"
         assert summary_ev.data["error"] is None
 
     async def test_under_threshold_no_compaction(self):
@@ -1381,11 +1384,11 @@ class TestInEngineCompaction:
 
         rounds = [_simple_llm_chunks("Done", input_tokens=10, output_tokens=5)]
 
-        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 1000):
-            result, emitted, _ = await _run_engine(
-                _make_fake_stream_sequence(rounds),
-                agents={"lead_agent": lead, "compact_agent": compact},
-            )
+        result, emitted, _ = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": lead, "compact_agent": compact},
+            compaction_threshold=1000,
+        )
 
         event_types = [e.event_type for e in result["events"]]
         assert "compaction_start" not in event_types
@@ -1424,13 +1427,13 @@ class TestInEngineCompaction:
         lead = _FakeAgentConfig(tools={})
         compact = _FakeAgentConfig(name="compact_agent", role_prompt="Compactor.", tools={})
 
-        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100), \
-             patch("core.compaction_runner.config.CANCEL_CHECK_INTERVAL", 0.01):
+        with patch("core.compaction_runner.config.CANCEL_CHECK_INTERVAL", 0.01):
             result, emitted, _ = await _run_engine(
                 fake_llm,
                 agents={"lead_agent": lead, "compact_agent": compact},
                 message_id=message_id,
                 store=store,
+                compaction_threshold=100,
             )
 
         assert result["completed"] is True
@@ -1452,11 +1455,11 @@ class TestInEngineCompaction:
 
         rounds = [_simple_llm_chunks("Done", input_tokens=80, output_tokens=30)]
 
-        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
-            result, emitted, _ = await _run_engine(
-                _make_fake_stream_sequence(rounds),
-                agents={"lead_agent": lead},
-            )
+        result, emitted, _ = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": lead},
+            compaction_threshold=100,
+        )
 
         # Engine should complete normally
         assert result["completed"] is True
@@ -1489,12 +1492,12 @@ class TestInEngineCompaction:
         ]
 
         # Threshold deliberately way above usage — only the force flag can fire compaction.
-        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100_000):
-            result, _, _ = await _run_engine(
-                _make_fake_stream_sequence(rounds),
-                agents={"lead_agent": lead, "compact_agent": compact},
-                force_compact=True,
-            )
+        result, _, _ = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": lead, "compact_agent": compact},
+            force_compact=True,
+            compaction_threshold=100_000,
+        )
 
         event_types = [e.event_type for e in result["events"]]
         assert "compaction_start" in event_types
@@ -1534,13 +1537,13 @@ class TestInEngineCompaction:
             _simple_llm_chunks("Final after tool", input_tokens=15, output_tokens=8),
         ]
 
-        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100_000):
-            result, _, _ = await _run_engine(
-                _make_fake_stream_sequence(rounds),
-                agents={"lead_agent": lead, "compact_agent": compact},
-                tools={"echo": echo_tool},
-                force_compact=True,
-            )
+        result, _, _ = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": lead, "compact_agent": compact},
+            tools={"echo": echo_tool},
+            force_compact=True,
+            compaction_threshold=100_000,
+        )
 
         event_types = [e.event_type for e in result["events"]]
         summary_idx = event_types.index("compaction_summary")
@@ -1596,12 +1599,12 @@ class TestInEngineCompaction:
             ],
         ]
 
-        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100_000):
-            result, _, _ = await _run_engine(
-                _make_fake_stream_sequence(rounds),
-                agents={"lead_agent": lead, "compact_agent": compact},
-                force_compact=True,
-            )
+        result, _, _ = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": lead, "compact_agent": compact},
+            force_compact=True,
+            compaction_threshold=100_000,
+        )
 
         # Pre-condition: compaction actually ran.
         event_types = [e.event_type for e in result["events"]]
@@ -1616,6 +1619,76 @@ class TestInEngineCompaction:
             "if this is 12345, the post-compaction write in compaction_runner is gone "
             "and the gauge will show stale pre-compaction tokens."
         )
+
+    async def test_context_overflow_compacts_and_retries_once(self):
+        """A typed provider overflow gets one compaction and one successful retry."""
+        lead = _FakeAgentConfig(tools={})
+        compact = _FakeAgentConfig(
+            name="compact_agent", role_prompt="Compactor.", tools={}
+        )
+        calls = {"n": 0}
+
+        async def fake_llm(messages, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise LLMContextOverflowError("too many tokens")
+            chunks = (
+                _simple_llm_chunks("overflow summary", 50, 20)
+                if calls["n"] == 2
+                else _simple_llm_chunks("Recovered", 30, 5)
+            )
+            for chunk in chunks:
+                yield chunk
+
+        result, _, _ = await _run_engine(
+            fake_llm,
+            agents={"lead_agent": lead, "compact_agent": compact},
+        )
+
+        assert calls["n"] == 3  # failed lead + compact + retried lead
+        assert result["completed"] is True
+        assert result["response"] == "Recovered"
+        assert not result.get("error")
+        starts = [
+            e for e in result["events"]
+            if e.event_type == StreamEventType.COMPACTION_START.value
+        ]
+        assert len(starts) == 1
+        assert starts[0].data["reason"] == "overflow"
+        summary = next(
+            e for e in result["events"]
+            if e.event_type == StreamEventType.COMPACTION_SUMMARY.value
+        )
+        assert summary.data["carry_tool_call"] is False
+
+    async def test_second_context_overflow_fails_without_compaction_loop(self):
+        """If the immediate retry also overflows, terminate instead of compacting forever."""
+        lead = _FakeAgentConfig(tools={})
+        compact = _FakeAgentConfig(
+            name="compact_agent", role_prompt="Compactor.", tools={}
+        )
+        calls = {"n": 0}
+
+        async def fake_llm(messages, **kwargs):
+            calls["n"] += 1
+            if calls["n"] in (1, 3):
+                raise LLMContextOverflowError("still too many tokens")
+            for chunk in _simple_llm_chunks("overflow summary", 50, 20):
+                yield chunk
+
+        result, _, _ = await _run_engine(
+            fake_llm,
+            agents={"lead_agent": lead, "compact_agent": compact},
+        )
+
+        assert calls["n"] == 3
+        assert result["completed"] is True
+        assert result["error"] is True
+        assert "after one compact-and-retry attempt" in result["response"]
+        assert sum(
+            e.event_type == StreamEventType.COMPACTION_START.value
+            for e in result["events"]
+        ) == 1
 
 
 # ============================================================

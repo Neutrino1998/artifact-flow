@@ -53,7 +53,10 @@ class Settings(BaseSettings):
     MCP_POOL_TIMEOUT: float = Field(default=5.0, gt=0)
 
     # Compaction / Context 配置
-    COMPACTION_TOKEN_THRESHOLD: int = 100000  # tokens, LLM 单次调用 input+output 超此值触发引擎内 compaction
+    # 每个模型的 context_window 在 config/models/models.yaml 显式声明；引擎以
+    # context_window - reserve 作为该模型自己的 compaction 阈值。reserve 是服务级
+    # 隐藏旋钮，不进入模型参数，也不暴露给 agent。
+    COMPACTION_RESERVE_TOKENS: int = Field(default=20_000, gt=0)
     # 上一轮 input+output / 阈值 ≥ 此比例时，向 agent 注入 <context_usage> 预警(临近 compaction
     # → 提示把要据此动作的状态落 artifact)。隐藏实现旋钮，模型不可见(见 CLAUDE.md 工具参数面最小化)。
     CONTEXT_USAGE_WARN_RATIO: float = 0.8

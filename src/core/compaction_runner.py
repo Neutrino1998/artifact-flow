@@ -68,6 +68,7 @@ class CompactionRunner:
         agent_name: str,
         input_tokens: int,
         output_tokens: int,
+        compaction_threshold: int,
     ) -> None:
         """
         LLM 调用完成后的 compaction 检查入口。
@@ -82,20 +83,72 @@ class CompactionRunner:
         if forced:
             state["force_compact"] = False
 
-        if not forced and input_tokens + output_tokens <= config.COMPACTION_TOKEN_THRESHOLD:
+        if not forced and input_tokens + output_tokens <= compaction_threshold:
             return
+
+        await self._compact(
+            state,
+            agent_name,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            reason="forced" if forced else "threshold",
+            compaction_threshold=compaction_threshold,
+            missing_compactor_is_error=False,
+        )
+
+    async def compact_for_overflow(
+        self,
+        state: Dict[str, Any],
+        agent_name: str,
+    ) -> None:
+        """Compact after an explicit provider context-window rejection.
+
+        Unlike the proactive threshold path, a missing compact_agent is fatal: the
+        failed provider call cannot make progress without a new history boundary.
+        The caller owns the exactly-once retry guard.
+        """
+        if agent_name == "lead_agent":
+            # Overflow recovery fulfills a pending manual compaction request too;
+            # leaving the flag set would compact a second time after the retry.
+            state["force_compact"] = False
+
+        await self._compact(
+            state,
+            agent_name,
+            input_tokens=0,
+            output_tokens=0,
+            reason="overflow",
+            compaction_threshold=None,
+            missing_compactor_is_error=True,
+        )
+
+    async def _compact(
+        self,
+        state: Dict[str, Any],
+        agent_name: str,
+        *,
+        input_tokens: int,
+        output_tokens: int,
+        reason: str,
+        compaction_threshold: Optional[int],
+        missing_compactor_is_error: bool,
+    ) -> None:
+        """Run one compaction and append its paired start/summary events."""
 
         compact_agent = self._agents.get("compact_agent")
         if not compact_agent:
-            logger.warning("compact_agent not configured, skipping compaction")
+            message = "compact_agent not configured"
+            if missing_compactor_is_error:
+                raise RuntimeError(f"{message}; cannot recover from context overflow")
+            logger.warning(f"{message}, skipping compaction")
             return
 
         # 提到 INFO:compaction 触发条件是关键状态转移,事故诊断必需(对齐
         # "工具完成/状态转移"分级原则;尺寸字段而非大体积内容,可常驻 INFO)。
         logger.info(
             f"[compaction] triggered for {agent_name}: "
-            f"trigger={'forced' if forced else 'threshold'}, "
-            f"threshold={config.COMPACTION_TOKEN_THRESHOLD}, "
+            f"trigger={reason}, "
+            f"threshold={compaction_threshold}, "
             f"last_call input={input_tokens} output={output_tokens} "
             f"(sum={input_tokens + output_tokens}), "
             f"events_in_state={len(state['events'])}"
@@ -107,7 +160,9 @@ class CompactionRunner:
         start_data = {
             "last_input_tokens": input_tokens,
             "last_output_tokens": output_tokens,
-            "forced": forced,
+            "forced": reason == "forced",
+            "reason": reason,
+            "compaction_threshold": compaction_threshold,
         }
         start_event = ExecutionEvent(
             event_type=StreamEventType.COMPACTION_START.value,
@@ -123,10 +178,19 @@ class CompactionRunner:
         # compaction_start 也在快照里 —— 它会被 EventHistory 的过滤器自然忽略（不是 history-building
         # 关心的事件类型），所以不影响压缩输入。
         events_to_compact = list(state["events"])
+        # Proactive/manual compaction runs immediately after an accepted assistant
+        # tool-call envelope, before its tools execute; that envelope must bridge the
+        # new boundary so later results still have a request half. Overflow recovery
+        # happens before a provider call and may already include completed tool pairs,
+        # so carrying only the old request half would create an orphan after summary.
+        carry_tool_call = reason != "overflow"
 
         try:
             content, duration_ms, usage = await self._run_compact_llm(
-                events_to_compact, agent_name, compact_agent
+                events_to_compact,
+                agent_name,
+                compact_agent,
+                carry_tool_call=carry_tool_call,
             )
         except asyncio.CancelledError:
             raise
@@ -151,6 +215,7 @@ class CompactionRunner:
                 "duration_ms": 0,
                 "model": compact_agent.model,
                 "error": str(e),
+                "carry_tool_call": carry_tool_call,
             }
             state["events"].append(ExecutionEvent(
                 event_type=StreamEventType.COMPACTION_SUMMARY.value,
@@ -179,6 +244,7 @@ class CompactionRunner:
                 "duration_ms": duration_ms,
                 "model": compact_agent.model,
                 "error": None,
+                "carry_tool_call": carry_tool_call,
             },
             is_historical=False,
         )
@@ -219,6 +285,8 @@ class CompactionRunner:
         events_to_compact: List[ExecutionEvent],
         agent_name: str,
         compact_agent: Any,
+        *,
+        carry_tool_call: bool = True,
     ) -> Tuple[str, int, Dict[str, int]]:
         """
         调用 compact_agent LLM，返回 (summary_content, duration_ms, token_usage)。
@@ -228,14 +296,15 @@ class CompactionRunner:
 
         # 按 agent_name 过滤 + boundary 扫描，得到用于压缩的历史 messages
         compact_input = list(events_to_compact)
-        for index in range(len(compact_input) - 1, -1, -1):
-            event = compact_input[index]
-            if event.agent_name != agent_name:
-                continue
-            if event.event_type == StreamEventType.LLM_COMPLETE.value:
-                if (event.data or {}).get("tool_calls"):
-                    del compact_input[index]
-                break
+        if carry_tool_call:
+            for index in range(len(compact_input) - 1, -1, -1):
+                event = compact_input[index]
+                if event.agent_name != agent_name:
+                    continue
+                if event.event_type == StreamEventType.LLM_COMPLETE.value:
+                    if (event.data or {}).get("tool_calls"):
+                        del compact_input[index]
+                    break
         history = build_event_history(compact_input, agent_name)
         clean_history = [
             {k: v for k, v in m.items() if k != "_meta"} for m in history

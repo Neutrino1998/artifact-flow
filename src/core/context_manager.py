@@ -45,6 +45,7 @@ class ContextManager:
         agents: Dict[str, Any],  # {name: AgentSnapshot}
         tools: Dict[str, Any],   # {name: BaseTool}
         effective_toolset: EffectiveToolset,  # 当前 agent 解析后的可调集 + 等级(决策 11)
+        compaction_threshold: int,
         artifacts_inventory: Optional[List[Dict]] = None,
         model: Optional[str] = None,
         sandbox_status: Optional[Dict] = None,
@@ -61,6 +62,8 @@ class ContextManager:
             agent_name: 当前 agent 名称
             agents: 所有 agent 配置 {name: AgentConfig}
             tools: 所有可用工具 {name: BaseTool}
+            compaction_threshold: 当前 agent 模型的有效阈值
+                (models.yaml context_window - 服务级 reserve)
             artifacts_inventory: 预加载的 artifacts 清单（含完整内容）
             tool_round_count: 本 agent 已用的工具轮数（命中 max_tool_rounds 时 reminder
                 里出现 <tool_budget> 收尾提示，见 _build_dynamic_context）
@@ -115,8 +118,11 @@ class ContextManager:
         # 「content 空则丢 _meta」影响(高 input+空 content 也能预警)。
         last_usage = last_llm_usage(state.get("events", []), agent_name)
         reminder = cls._build_dynamic_context(
-            agent_config, effective_toolset, tools, artifacts_inventory, last_usage,
-            sandbox_status, tool_round_count=tool_round_count,
+            agent_config, effective_toolset, tools, artifacts_inventory,
+            compaction_threshold=compaction_threshold,
+            last_usage=last_usage,
+            sandbox_status=sandbox_status,
+            tool_round_count=tool_round_count,
             available_skills=available_skills,
             disclosed_tools=set(
                 state.get("agent_progressive_state", {})
@@ -192,6 +198,7 @@ class ContextManager:
         effective_toolset: EffectiveToolset,
         tools: Dict[str, Any],
         artifacts_inventory: Optional[List[Dict]],
+        compaction_threshold: int,
         last_usage: Optional[int] = None,
         sandbox_status: Optional[Dict] = None,
         tool_round_count: int = 0,
@@ -274,7 +281,7 @@ class ContextManager:
         # Context 水位预警（仅临近 compaction 时整段出现）—— last_usage 是上一轮 call 的
         # input+output（compaction 触发值），≥ WARN_RATIO×阈值才注入；水位以下完全不出现，
         # 避免每轮 cry-wolf。band 内每轮都出、不设次数上限（数字每轮刷新）。
-        context_usage = cls._build_context_usage(last_usage)
+        context_usage = cls._build_context_usage(last_usage, compaction_threshold)
         if context_usage:
             parts.append(context_usage)
 
@@ -360,18 +367,21 @@ class ContextManager:
         return "\n".join(lines)
 
     @classmethod
-    def _build_context_usage(cls, last_usage: Optional[int]) -> Optional[str]:
+    def _build_context_usage(
+        cls, last_usage: Optional[int], compaction_threshold: int
+    ) -> Optional[str]:
         """临近 compaction 的水位预警段；水位以下返回 None（整段不出现）。
 
         分子 last_usage = 上一轮 call 的 input+output（compaction 触发值，见
-        compaction_runner.maybe_trigger）；分母 = COMPACTION_TOKEN_THRESHOLD（与前端
-        gauge、与真正绊倒 compaction 的判定同源）。≥ WARN_RATIO 才注入。
+        compaction_runner.maybe_trigger）；分母 = 当前模型的 compaction_threshold
+        （context_window - reserve，与前端 gauge、真正触发 compaction 的判定同源）。
+        ≥ WARN_RATIO 才注入。
 
         advice 措辞刻意指向「要据此**动作**的状态」（plans / 收集的数据 / 中间结果）
         而非「瞄一眼的上下文」：artifact 活在 compaction 边界之外（每轮在 inventory 里），
         summary 则可能丢细节 —— 对齐「act vs glance」分界。
         """
-        threshold = config.COMPACTION_TOKEN_THRESHOLD
+        threshold = compaction_threshold
         if not last_usage or threshold <= 0:
             return None
         if last_usage < config.CONTEXT_USAGE_WARN_RATIO * threshold:

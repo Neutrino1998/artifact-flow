@@ -15,6 +15,8 @@ from core.context_manager import ContextManager
 from core.events import StreamEventType, ExecutionEvent
 from tests.core._toolset import effective_one
 
+TEST_COMPACTION_THRESHOLD = 100_000
+
 
 # ============================================================
 # Helpers
@@ -88,6 +90,7 @@ def _build(agent, agents=None, **kwargs):
         agents = {agent.name: agent}
     elif agent.name not in agents:
         agents[agent.name] = agent
+    kwargs.setdefault("compaction_threshold", TEST_COMPACTION_THRESHOLD)
     messages, _reminder = ContextManager.build(
         agent_name=agent.name,
         agents=agents,
@@ -583,6 +586,7 @@ class TestDynamicContextReminder:
         ContextManager.build(
             agent_name=agent.name, agents={agent.name: agent}, state=state, tools={},
             effective_toolset=effective_one(agent, {}),
+            compaction_threshold=TEST_COMPACTION_THRESHOLD,
         )
         # build 不得把 reminder 写回 event —— 否则过期时间/清单会冻进历史
         assert user_event.data["content"] == "hi"
@@ -793,6 +797,7 @@ class TestAvailableTools:
         messages, reminder = ContextManager.build(
             agent_name=agent.name, agents={agent.name: agent},
             state=state, tools=tools, effective_toolset=eff,
+            compaction_threshold=TEST_COMPACTION_THRESHOLD,
         )
         system_content = messages[0]["content"]
         # system prompt has no textual tool protocol or member schemas.
@@ -822,7 +827,7 @@ class TestContextUsageWarning:
 
     def test_absent_below_band(self):
         # 上一次 call input+output < 0.8×阈值 → 不出现，避免每轮 cry-wolf
-        threshold = config.COMPACTION_TOKEN_THRESHOLD
+        threshold = TEST_COMPACTION_THRESHOLD
         below = int(config.CONTEXT_USAGE_WARN_RATIO * threshold) - 1
         agent = _FakeAgentConfig()
         state = _make_state(events=[
@@ -836,7 +841,7 @@ class TestContextUsageWarning:
     def test_present_at_band_uses_input_plus_output(self):
         # input+output 达到 band → 整段出现，含水位数字 + 落 artifact 的 advice。
         # 关键：分子是 input+output（触发口径），不是 input-only。
-        threshold = config.COMPACTION_TOKEN_THRESHOLD
+        threshold = TEST_COMPACTION_THRESHOLD
         at = int(config.CONTEXT_USAGE_WARN_RATIO * threshold)
         in_tok, out_tok = at - 500, 500   # input-only(at-500) 低于 band，但 input+output=at 达标
         agent = _FakeAgentConfig()
@@ -855,7 +860,7 @@ class TestContextUsageWarning:
         # 回归(reviewer P3)：高 input + 空 content（如仅 reasoning 的回复）也要预警。
         # build_event_history 在 content 空时会丢弃该 llm_complete（连同 _meta），但
         # last_llm_usage 直接读原始事件 token_usage，不受影响。
-        threshold = config.COMPACTION_TOKEN_THRESHOLD
+        threshold = TEST_COMPACTION_THRESHOLD
         high = threshold
         agent = _FakeAgentConfig()
         state = _make_state(events=[
@@ -869,7 +874,7 @@ class TestContextUsageWarning:
 
     def test_uses_most_recent_call_not_earlier(self):
         # 多次 call 取最近一次：早期高位、最近低位（如压缩后）→ 不出现
-        threshold = config.COMPACTION_TOKEN_THRESHOLD
+        threshold = TEST_COMPACTION_THRESHOLD
         agent = _FakeAgentConfig()
         state = _make_state(events=[
             _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
@@ -887,7 +892,7 @@ class TestContextUsageWarning:
             current_agent="research_agent",
             events=[
                 # lead 高位 —— 对 sub 不可见
-                _llm_complete(config.COMPACTION_TOKEN_THRESHOLD, 1000, agent_name="lead_agent"),
+                _llm_complete(TEST_COMPACTION_THRESHOLD, 1000, agent_name="lead_agent"),
                 _make_event(StreamEventType.SUBAGENT_INSTRUCTION.value, "research_agent",
                             {"instruction": "go"}),
                 _llm_complete(2000, 200, agent_name="research_agent"),  # sub 低位
@@ -899,13 +904,14 @@ class TestContextUsageWarning:
 
     def test_warning_is_ephemeral_not_written_to_events(self):
         # 与其余动态上下文一致：预警不得写回 event
-        threshold = config.COMPACTION_TOKEN_THRESHOLD
+        threshold = TEST_COMPACTION_THRESHOLD
         user_event = _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"})
         agent = _FakeAgentConfig()
         state = _make_state(events=[user_event, _llm_complete(threshold, 0), _tool_complete()])
         ContextManager.build(
             agent_name=agent.name, agents={agent.name: agent}, state=state, tools={},
             effective_toolset=effective_one(agent, {}),
+            compaction_threshold=TEST_COMPACTION_THRESHOLD,
         )
         assert "<context_usage>" not in user_event.data["content"]
 
@@ -1020,6 +1026,7 @@ class TestPromptReconstructionFidelity:
         live_messages, reminder = ContextManager.build(
             agent_name=agent.name, agents={agent.name: agent},
             state=state, tools={}, effective_toolset=effective_one(agent, {}),
+            compaction_threshold=TEST_COMPACTION_THRESHOLD,
             **build_kwargs,
         )
         system_prompt = live_messages[0]["content"]
@@ -1059,6 +1066,7 @@ class TestPromptReconstructionFidelity:
             agent_name=agent.name, agents={agent.name: agent},
             state=state, tools={}, tool_round_count=2,
             effective_toolset=effective_one(agent, {}),
+            compaction_threshold=TEST_COMPACTION_THRESHOLD,
         )
         assert "<tool_budget>" in reminder
         # 重建端拿持久化 reminder 直接拼，等价

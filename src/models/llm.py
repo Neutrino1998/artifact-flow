@@ -11,7 +11,7 @@ import hmac
 import json
 import os
 from pathlib import Path
-from typing import Optional, Dict, Any, AsyncIterator
+from typing import Optional, Dict, Any, AsyncIterator, Iterable
 
 import httpx
 import yaml
@@ -26,6 +26,7 @@ os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 from litellm import acompletion
 from litellm.exceptions import (
     APIConnectionError,
+    ContextWindowExceededError,
     InternalServerError,
     RateLimitError,
     ServiceUnavailableError,
@@ -41,8 +42,9 @@ from models.native_tool_stream import NativeToolCallAssembler
 logger = get_logger("ArtifactFlow")
 
 # 仅**瞬态/基础设施**错误才重试:网络断连、超时、429 限流、5xx 服务端错误 —— 重试有望
-# 成功。其余一律确定性失败(BadRequest/400 含「图块发给文本模型」、ContextWindowExceeded、
-# ContentPolicy、Auth、NotFound 等),重试改变不了结果,只拖延 loud-fail + 烧 token,故立即抛。
+# 成功。ContextWindowExceeded 转成 engine 专用信号（由引擎 compact + retry once）；
+# 其余确定性失败(BadRequest/400 含「图块发给文本模型」、ContentPolicy、Auth、NotFound
+# 等),重试改变不了结果,只拖延 loud-fail + 烧 token,故立即抛。
 # 旧实现按 str(e) 子串匹配,会把 "context length limit" 误判成限流去重试 —— 改用 litellm
 # 的**类型化异常**根治。
 _RETRYABLE_LLM_ERRORS = (
@@ -61,6 +63,67 @@ _RETRYABLE_LLM_ERRORS = (
 _config: Optional[Dict[str, Any]] = None
 
 
+class LLMContextOverflowError(RuntimeError):
+    """Provider explicitly rejected a call because its context window overflowed."""
+
+
+def _validate_model_config(
+    raw_config: Any,
+    required_models: Optional[Iterable[str]] = None,
+) -> None:
+    """Validate engine-owned model capability metadata.
+
+    ``context_window`` is deliberately required instead of inferred from LiteLLM's
+    public-model catalog: private deployments can override the serving limit, and a
+    stale/default guess makes compaction fire after the provider has already rejected
+    the request.  Validation happens at startup; the accessors below repeat the local
+    entry check for scripts/tests that bypass the application lifespan.
+    """
+    if not isinstance(raw_config, dict):
+        raise ValueError("models.yaml root must be an object")
+    models = raw_config.get("models")
+    if not isinstance(models, dict) or not models:
+        raise ValueError("models.yaml must define a non-empty 'models' object")
+
+    errors: list[str] = []
+    for alias, entry in models.items():
+        if not isinstance(alias, str) or not alias:
+            errors.append(f"invalid model alias {alias!r}")
+            continue
+        if not isinstance(entry, dict):
+            errors.append(f"{alias}: configuration must be an object")
+            continue
+        model_id = entry.get("model")
+        if not isinstance(model_id, str) or not model_id:
+            errors.append(f"{alias}: missing required non-empty 'model'")
+        context_window = entry.get("context_window")
+        if (
+            not isinstance(context_window, int)
+            or isinstance(context_window, bool)
+            or context_window <= 0
+        ):
+            errors.append(f"{alias}: 'context_window' must be a positive integer")
+        elif context_window <= settings.COMPACTION_RESERVE_TOKENS:
+            errors.append(
+                f"{alias}: context_window ({context_window}) must exceed "
+                f"COMPACTION_RESERVE_TOKENS ({settings.COMPACTION_RESERVE_TOKENS})"
+            )
+
+    required = set(required_models or ())
+    missing = sorted(name for name in required if name not in models)
+    if missing:
+        errors.append(
+            "agent model(s) must use configured aliases with context_window: "
+            + ", ".join(missing)
+        )
+
+    if errors:
+        raise ValueError(
+            "Invalid model configuration — fix before startup:\n  "
+            + "\n  ".join(errors)
+        )
+
+
 def _load_config() -> Dict[str, Any]:
     """加载并缓存 models.yaml"""
     global _config
@@ -68,8 +131,42 @@ def _load_config() -> Dict[str, Any]:
         # 从项目根目录 config/models/ 加载
         config_path = Path(__file__).parent.parent.parent / "config" / "models" / "models.yaml"
         with open(config_path, "r", encoding="utf-8") as f:
-            _config = yaml.safe_load(f)
+            loaded = yaml.safe_load(f)
+        _validate_model_config(loaded)
+        _config = loaded
     return _config
+
+
+def validate_model_config(required_models: Optional[Iterable[str]] = None) -> None:
+    """Startup validation for models.yaml and every agent-referenced alias."""
+    _validate_model_config(_load_config(), required_models)
+
+
+def get_model_context_window(model: str) -> int:
+    """Return the explicitly configured total input+output context window."""
+    models = _load_config().get("models", {})
+    model_config = models.get(model)
+    if not isinstance(model_config, dict):
+        raise ValueError(
+            f"Model '{model}' has no configured context_window; agents must use a "
+            "models.yaml alias"
+        )
+    context_window = model_config.get("context_window")
+    if (
+        not isinstance(context_window, int)
+        or isinstance(context_window, bool)
+        or context_window <= settings.COMPACTION_RESERVE_TOKENS
+    ):
+        raise ValueError(
+            f"Model '{model}' context_window must be an integer greater than "
+            f"COMPACTION_RESERVE_TOKENS ({settings.COMPACTION_RESERVE_TOKENS})"
+        )
+    return context_window
+
+
+def get_compaction_threshold(model: str) -> int:
+    """Effective per-model trigger: total context window minus output reserve."""
+    return get_model_context_window(model) - settings.COMPACTION_RESERVE_TOKENS
 
 
 # ========================================
@@ -378,6 +475,13 @@ async def astream_with_retry(
             }
             return  # 流式完成
 
+        except ContextWindowExceededError as e:
+            # This is the one deterministic provider rejection the engine can
+            # repair structurally: compact the same agent's history and retry the
+            # failed invocation once.  Give the engine a provider-neutral type;
+            # every other non-retryable error keeps the existing loud-fail path.
+            raise LLMContextOverflowError(str(e)) from e
+
         except _RETRYABLE_LLM_ERRORS as e:
             last_error = e
             if isinstance(e, RateLimitError):
@@ -400,8 +504,9 @@ async def astream_with_retry(
 
         except Exception as e:
             # 非瞬态 = 确定性失败:重试无意义。立即响亮失败(不烧 token、不拖延诊断)。
-            # 含 BadRequest/400(图块发给文本模型即此类)、ContextWindowExceeded、
-            # ContentPolicy、Authentication、NotFound 等。
+            # 含 BadRequest/400(图块发给文本模型即此类)、ContentPolicy、
+            # Authentication、NotFound 等。ContextWindowExceeded 已在上面转成
+            # engine 可恢复信号。
             logger.error(f"LLM non-retryable error ({type(e).__name__}): {e}")
             raise
 
@@ -481,8 +586,14 @@ def get_model_info(model: str) -> Dict[str, Any]:
             "model_id": model_config["model"],
             "is_reasoning": is_reasoning,
             "supports_vision": bool(model_config.get("vision", False)),
+            "context_window": get_model_context_window(model),
         }
-    return {"model_id": model, "is_reasoning": False, "supports_vision": False}
+    return {
+        "model_id": model,
+        "is_reasoning": False,
+        "supports_vision": False,
+        "context_window": None,
+    }
 
 
 def model_supports_vision(model: str) -> bool:

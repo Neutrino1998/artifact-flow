@@ -61,10 +61,10 @@ class TestThresholdCheck:
         runner = CompactionRunner(agents, emit=None)
         state = _make_state([_ev(StreamEventType.USER_INPUT.value, data={"content": "hi"})])
 
-        # Patch threshold explicitly so the test doesn't depend on the default
-        # (the default is tuned for production and gets adjusted over time).
-        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100000):
-            await runner.maybe_trigger(state, "lead_agent", input_tokens=10000, output_tokens=10000)
+        await runner.maybe_trigger(
+            state, "lead_agent", input_tokens=10000, output_tokens=10000,
+            compaction_threshold=100000,
+        )
 
         # No compaction events appended
         types = [e.event_type for e in state["events"]]
@@ -77,8 +77,10 @@ class TestThresholdCheck:
         runner = CompactionRunner(agents, emit=None)
         state = _make_state([_ev(StreamEventType.USER_INPUT.value, data={"content": "hi"})])
 
-        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
-            await runner.maybe_trigger(state, "lead_agent", input_tokens=50, output_tokens=50)
+        await runner.maybe_trigger(
+            state, "lead_agent", input_tokens=50, output_tokens=50,
+            compaction_threshold=100,
+        )
 
         types = [e.event_type for e in state["events"]]
         assert StreamEventType.COMPACTION_SUMMARY.value not in types
@@ -97,9 +99,11 @@ class TestAppendSemantics:
             }),
         ])
 
-        with patch("models.llm.astream_with_retry", _fake_stream_ok), \
-             patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
-            await runner.maybe_trigger(state, "lead_agent", input_tokens=80, output_tokens=30)
+        with patch("models.llm.astream_with_retry", _fake_stream_ok):
+            await runner.maybe_trigger(
+                state, "lead_agent", input_tokens=80, output_tokens=30,
+                compaction_threshold=100,
+            )
 
         # Two compaction events appended AFTER the original two, in order start then summary
         types = [e.event_type for e in state["events"]]
@@ -127,7 +131,9 @@ class TestAppendSemantics:
         """
         captured_events: list = []
 
-        async def fake_run(self_, events_to_compact, agent_name, compact_agent):
+        async def fake_run(
+            self_, events_to_compact, agent_name, compact_agent, *, carry_tool_call=True
+        ):
             # Record the snapshot for inspection + return a canned summary
             captured_events.extend(events_to_compact)
             return ("UNIQUE_SUMMARY_SENTINEL", 0, {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
@@ -143,9 +149,11 @@ class TestAppendSemantics:
         ]
         state = _make_state(original_events)
 
-        with patch.object(CompactionRunner, "_run_compact_llm", fake_run), \
-             patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
-            await runner.maybe_trigger(state, "lead_agent", input_tokens=80, output_tokens=30)
+        with patch.object(CompactionRunner, "_run_compact_llm", fake_run):
+            await runner.maybe_trigger(
+                state, "lead_agent", input_tokens=80, output_tokens=30,
+                compaction_threshold=100,
+            )
 
         # Snapshot must contain original events + the compaction_start we just appended,
         # but NOT the compaction_summary (still unset at time of snapshot).
@@ -170,9 +178,11 @@ class TestAppendSemantics:
             }),
         ])
 
-        with patch("models.llm.astream_with_retry", _fake_stream_ok), \
-             patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
-            await runner.maybe_trigger(state, "search_agent", input_tokens=80, output_tokens=30)
+        with patch("models.llm.astream_with_retry", _fake_stream_ok):
+            await runner.maybe_trigger(
+                state, "search_agent", input_tokens=80, output_tokens=30,
+                compaction_threshold=100,
+            )
 
         summary_ev = state["events"][-1]
         assert summary_ev.agent_name == "search_agent"
@@ -198,10 +208,12 @@ class TestFailureLoud:
             }),
         ])
 
-        with patch("models.llm.astream_with_retry", _fake_stream_raises), \
-             patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
+        with patch("models.llm.astream_with_retry", _fake_stream_raises):
             with pytest.raises(RuntimeError, match="LLM unreachable"):
-                await runner.maybe_trigger(state, "lead_agent", input_tokens=80, output_tokens=30)
+                await runner.maybe_trigger(
+                    state, "lead_agent", input_tokens=80, output_tokens=30,
+                    compaction_threshold=100,
+                )
 
         # Start + failure-marker summary both appended (paired)
         types = [e.event_type for e in state["events"]]
@@ -251,10 +263,12 @@ class TestCancelInterrupt:
         ])
 
         with patch("models.llm.astream_with_retry", hanging_stream), \
-             patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100), \
              patch("core.compaction_runner.config.CANCEL_CHECK_INTERVAL", 0.01):
             with pytest.raises(CooperativeCancelled):
-                await runner.maybe_trigger(state, "lead_agent", input_tokens=80, output_tokens=30)
+                await runner.maybe_trigger(
+                    state, "lead_agent", input_tokens=80, output_tokens=30,
+                    compaction_threshold=100,
+                )
 
         # Paired placeholder, same shape as the LLM-failure path
         types = [e.event_type for e in state["events"]]
@@ -273,9 +287,11 @@ class TestCancelInterrupt:
         state = _make_state([
             _ev(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
         ])
-        with patch("models.llm.astream_with_retry", _fake_stream_ok), \
-             patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
-            await runner.maybe_trigger(state, "lead_agent", input_tokens=80, output_tokens=30)
+        with patch("models.llm.astream_with_retry", _fake_stream_ok):
+            await runner.maybe_trigger(
+                state, "lead_agent", input_tokens=80, output_tokens=30,
+                compaction_threshold=100,
+            )
 
         assert state["events"][-1].data["success"] is True
 
@@ -287,9 +303,11 @@ class TestMissingCompactAgent:
         runner = CompactionRunner(agents={}, emit=None)  # no compact_agent
         state = _make_state([_ev(StreamEventType.USER_INPUT.value, data={"content": "hi"})])
 
-        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
-            # Should not raise even when over threshold
-            await runner.maybe_trigger(state, "lead_agent", input_tokens=80, output_tokens=30)
+        # Should not raise even when over threshold
+        await runner.maybe_trigger(
+            state, "lead_agent", input_tokens=80, output_tokens=30,
+            compaction_threshold=100,
+        )
 
         types = [e.event_type for e in state["events"]]
         assert StreamEventType.COMPACTION_START.value not in types
@@ -323,9 +341,11 @@ class TestLeadOnlyMetricWrite:
             "execution_metrics": {"last_input_tokens": 50000},
         }
 
-        with patch("models.llm.astream_with_retry", _fake_stream_ok), \
-             patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
-            await runner.maybe_trigger(state, "search_agent", input_tokens=80, output_tokens=30)
+        with patch("models.llm.astream_with_retry", _fake_stream_ok):
+            await runner.maybe_trigger(
+                state, "search_agent", input_tokens=80, output_tokens=30,
+                compaction_threshold=100,
+            )
 
         # Compaction itself still runs — we only block the metric pollution.
         types = [e.event_type for e in state["events"]]
@@ -351,9 +371,11 @@ class TestLeadOnlyMetricWrite:
             "execution_metrics": {"last_input_tokens": 50000},
         }
 
-        with patch("models.llm.astream_with_retry", _fake_stream_ok), \
-             patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
-            await runner.maybe_trigger(state, "lead_agent", input_tokens=80, output_tokens=30)
+        with patch("models.llm.astream_with_retry", _fake_stream_ok):
+            await runner.maybe_trigger(
+                state, "lead_agent", input_tokens=80, output_tokens=30,
+                compaction_threshold=100,
+            )
 
         # _fake_stream_ok returns completion_tokens=100 → that's the summary-
         # size proxy written by the lead-only branch.
@@ -370,9 +392,11 @@ class TestSSEEmission:
             _ev(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
         ])
 
-        with patch("models.llm.astream_with_retry", _fake_stream_ok), \
-             patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
-            await runner.maybe_trigger(state, "lead_agent", input_tokens=80, output_tokens=30)
+        with patch("models.llm.astream_with_retry", _fake_stream_ok):
+            await runner.maybe_trigger(
+                state, "lead_agent", input_tokens=80, output_tokens=30,
+                compaction_threshold=100,
+            )
 
         # emit called at least twice: COMPACTION_START and COMPACTION_SUMMARY
         emitted_types = [call.args[0]["type"] for call in emit.call_args_list]
@@ -396,10 +420,10 @@ class TestCacheSaltScope:
             _ev(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
         ])
 
-        with patch("models.llm.astream_with_retry", fake_stream), \
-             patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
+        with patch("models.llm.astream_with_retry", fake_stream):
             await runner.maybe_trigger(
-                state, "lead_agent", input_tokens=80, output_tokens=30
+                state, "lead_agent", input_tokens=80, output_tokens=30,
+                compaction_threshold=100,
             )
 
         assert captured["user_id"] == "user-123"
