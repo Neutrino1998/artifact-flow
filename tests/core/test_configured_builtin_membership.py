@@ -5,6 +5,7 @@ read_skill、mount_skill、search_tools 与其它 builtin 采用同一规则：�
 defer 只是 schema 披露优化；没有 search_tools 时回退完整 schema。
 """
 
+from core.context_manager import ContextManager
 from core.effective_toolset import resolve_all, resolve_effective_toolset
 from reconcile.snapshot import AgentSnapshot, RegistrySnapshot, SkillInfo, UnitInfo
 from tools.base import ToolPermission
@@ -29,15 +30,25 @@ def _agent(name="lead_agent", builtin_tools=None, units=None):
     )
 
 
-def _unit(name, members, *, defer=False, description=""):
+def _unit(
+    name,
+    members,
+    *,
+    defer=False,
+    description="",
+    kind="toolset",
+    provider="http",
+    discovery_error=None,
+):
     return UnitInfo(
         name=name,
-        kind="toolset",
+        kind=kind,
         description=description,
         visibility="public",
         defer=defer,
-        provider="http",
+        provider=provider,
         source="seeded",
+        discovery_error=discovery_error,
         member_full_names=list(members),
     )
 
@@ -186,6 +197,40 @@ def test_deferred_skill_grant_uses_explicitly_configured_search_tools():
     assert "search_tools" in effective
     effective.activate_skill("github_skill")
     assert effective.deferred_member_names() == {"github__list"}
+
+
+def test_discovery_error_only_skill_grant_is_visible_after_activation():
+    unit = _unit(
+        "inventory",
+        [],
+        kind="mcp",
+        provider="mcp",
+        defer=True,
+        description="Inventory server",
+        discovery_error="MCP server is unavailable",
+    )
+    agent = _agent(
+        builtin_tools={"search_tools": "enabled"},
+        units={"inventory": "disabled"},
+    )
+    tools = {"search_tools": _Tool("search_tools", ToolPermission.AUTO)}
+    effective = resolve_effective_toolset(
+        agent,
+        _snapshot(units=[unit]),
+        tools,
+        {"inventory_skill": _skill("inventory_skill", ["inventory"])},
+    )
+
+    grant = effective.skill_grants["inventory_skill"]
+    assert grant.permissions == {}
+    assert grant.tool_units["inventory"].discovery_error == "MCP server is unavailable"
+
+    effective.activate_skill("inventory_skill")
+
+    assert effective.tool_units["inventory"].discovery_error == "MCP server is unavailable"
+    assert effective.deferred_units["inventory"].discovery_error == "MCP server is unavailable"
+    catalog = ContextManager._build_available_tools(effective, tools, set())
+    assert "MCP server is unavailable" in catalog
 
 
 def test_skill_can_directly_activate_disabled_search_tools_and_deferred_unit():

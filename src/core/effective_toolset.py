@@ -296,7 +296,9 @@ def _bake_skill_grants(
                             present.append(fn)
                     if present or u.discovery_error:
                         grant.tool_units[unit] = DeferredUnit.from_unit(u, present)
-        if grant.permissions:
+        # discovery_error-only unit 没有可建 member，因此 permissions 为空，但激活后
+        # 仍须把 server unavailable 显式放进工具目录，不能把这个可观察结果丢掉。
+        if grant.permissions or grant.tool_units:
             grants_by_slug[slug] = grant
     return grants_by_slug
 

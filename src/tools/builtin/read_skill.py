@@ -7,7 +7,8 @@ read_artifact 需要 ``max_result_size_chars=inf``。可见性**不照抄 owner-
 挡不住,changelog 06-23)。激活语义(决策 11/原则 8):read_skill 既返回正文,又声明式
 回填 `metadata.activated_skill` —— 引擎据此把 slug 进 `active_skills` + 在已算好的
 EffectiveToolset 上 merge 预烤 skill_grants(纯字典、本回合即生效)。工具保持哑、不持
-引擎态(对齐 ToolResult.artifact)。
+引擎态；只读取 per-call ToolExecutionContext，为 bundle 指引判断激活后的实际能力
+(对齐 ToolResult.artifact)。
 
 **mount_skill(L3,D-2)** 与 read_skill↔read_artifact 同理拆开 —— 身份空间不同
 (user-scoped slug vs session-scoped artifact id)、行为不同(zip 树解压 vs 单文件写),
@@ -25,11 +26,12 @@ import zipfile
 from typing import List, Optional
 
 from core.effective_skillset import EffectiveSkillSet
-from core.skill_guidance import render_skill_guidance
+from core.skill_guidance import can_access_skill_bundle, render_skill_guidance
 from tools.base import (
     MOUNT_SKILL_NAME,
     READ_SKILL_NAME,
     BaseTool,
+    ToolExecutionContext,
     ToolPermission,
     ToolResult,
 )
@@ -60,6 +62,8 @@ _LISTING_SENTINEL = "___MOUNT_SKILL_LISTING___"
 
 
 class ReadSkillTool(BaseTool):
+    wants_context = True
+
     def __init__(self, service: SkillService, skillset: EffectiveSkillSet):
         super().__init__(
             name=READ_SKILL_NAME,
@@ -91,10 +95,17 @@ class ReadSkillTool(BaseTool):
             "additionalProperties": False,
         }
 
-    async def execute(self, **params) -> ToolResult:
+    async def execute(
+        self, _context: Optional[ToolExecutionContext] = None, **params
+    ) -> ToolResult:
         slug = (params.get("slug") or "").strip()
         if not slug:
             return ToolResult(success=False, error="read_skill requires a 'slug'.")
+        if _context is None:
+            return ToolResult(
+                success=False,
+                error="read_skill requires engine context but none was injected (engine wiring bug).",
+            )
         # 可见性闸 = EffectiveSkillSet(含用户关掉但仍 visible 的 → 合法 opt-in)。
         # 不可见 → 404 风格,不泄露存在性(决策:cross-scope 不漏)。
         info = self._skillset.visible.get(slug)
@@ -105,7 +116,13 @@ class ReadSkillTool(BaseTool):
             return ToolResult(success=False, error=f"Skill '{slug}' has no content.")
         return ToolResult(
             success=True,
-            data=render_skill_guidance(body, has_extra_files=info.has_extra_files),
+            data=render_skill_guidance(
+                body,
+                has_extra_files=info.has_extra_files,
+                bundle_accessible=can_access_skill_bundle(
+                    _context.effective_toolset, slug
+                ),
+            ),
             metadata={"activated_skill": slug},  # 引擎据此激活(append + merge skill_grants)
         )
 

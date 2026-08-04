@@ -1977,7 +1977,9 @@ class TestSkillActivation:
                     "slug": "s",
                     "name": "My Skill",
                     "body": render_skill_guidance(
-                        "DO THE THING", has_extra_files=True
+                        "DO THE THING",
+                        has_extra_files=True,
+                        bundle_accessible=True,
                     ),
                 }
             ],
