@@ -66,8 +66,10 @@ class ReadSkillTool(BaseTool):
             description=(
                 "Load a skill's full guidance (its SKILL.md body) by slug. Call this when a "
                 "skill listed in <available_skills> fits the current task — it returns the "
-                "instructions AND activates the skill for this conversation (any tools the "
-                "skill needs become available). The returned guidance is for this conversation; "
+                "instructions AND activates the skill for this conversation. Tools become "
+                "available only when the skill explicitly grants them and this agent has them "
+                "configured as disabled; a skill cannot add tools outside the agent's tool "
+                "universe. The returned guidance is for this conversation; "
                 "if it later scrolls out of context, just read it again."
             ),
             permission=ToolPermission.AUTO,

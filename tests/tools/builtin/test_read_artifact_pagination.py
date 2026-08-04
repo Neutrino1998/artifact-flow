@@ -137,6 +137,7 @@ class TestReadArtifactPagination:
         result = await read_tool(id="nonexistent_id")
         assert not result.success
         assert "not found" in (result.error or "").lower()
+        assert "do not invent or retry unavailable tools" in (result.error or "")
 
     async def test_read_envelope_uses_artifact_slice(
         self, read_tool: ReadArtifactTool, artifact_service: ArtifactService, session_id: str
@@ -153,6 +154,8 @@ class TestReadArtifactPagination:
         """ReadArtifactTool 必须设 max_result_size_chars=inf 以避免循环落盘。"""
         import math
         assert math.isinf(read_tool.max_result_size_chars)
+        assert "instead of inventing a tool call" in read_tool.description
+        assert "via bash" not in read_tool.description
 
     async def test_read_body_not_escaped(
         self, read_tool: ReadArtifactTool, artifact_service: ArtifactService, session_id: str
@@ -260,7 +263,7 @@ class TestReadBinaryBlobArtifact:
 class TestReadArtifactVisionGate:
     """识图分支白名单(VISION_VIEWABLE_MIMES)回归:上传翻转后异型图照收 blob,
     但只有 png/jpeg 进识图;其余 image/* 必须落 blob 契约文案(不进 _read_image
-    的"试试看"——动图首帧/多页 tiff 等语义坑),文案给 mount+转 PNG 指引。"""
+    的"试试看"——动图首帧/多页 tiff 等语义坑),文案按当前是否暴露沙盒工具给处置指引。"""
 
     async def test_gif_blob_gets_contract_message_not_vision(
         self, read_tool: ReadArtifactTool, artifact_service: ArtifactService, session_id: str
@@ -278,9 +281,10 @@ class TestReadArtifactVisionGate:
         assert result.success is True              # 契约回答,非失败(防重试循环)
         assert "metadata" not in result.__dict__ or not (result.metadata or {}).get("image")
         assert "PNG/JPEG" in result.data           # 说清识图白名单
-        assert "mount" in result.data              # mount + 转 PNG 指引
+        assert "exposed sandbox tools" in result.data
+        assert "ask the caller" in result.data
 
-    async def test_unknown_binary_blob_message_has_mount_hint(
+    async def test_unknown_binary_blob_message_has_capability_aware_hint(
         self, read_tool: ReadArtifactTool, artifact_service: ArtifactService, session_id: str
     ):
         artifact_service.set_session(session_id)
@@ -294,4 +298,5 @@ class TestReadArtifactVisionGate:
         assert ok
         result = await read_tool.execute(id=info["id"])
         assert result.success is True
-        assert "mount" in result.data
+        assert "exposed sandbox tools" in result.data
+        assert "ask the caller" in result.data

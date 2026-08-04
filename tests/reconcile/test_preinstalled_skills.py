@@ -186,8 +186,12 @@ def test_document_skills_use_risk_bounded_visual_verification():
     assert "document.ast.json" not in docx_decompose
     assert "--pages 5,8" in docx_md
     assert "不要因演示文稿含图片就把所有页面交给视觉能力" in pptx_md
+    assert "persist` 为 image artifacts" in pptx_md
+    assert "不能读取调用方沙盒中的 `/workspace/...` 路径" in pptx_md
     assert "普通数据读取、公式分析和值修改默认不渲染" in xlsx_md
     assert "source-format skill decides whether to extract" in vision_md
+    assert "pass image artifact id(s) only" in vision_md
+    assert "Do not try to recover with `bash`, `mount`, `read_skill`" in vision_md
     assert "report the actual page/title cues briefly and stop" in vision_md
 
 

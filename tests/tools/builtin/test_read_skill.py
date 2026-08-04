@@ -71,6 +71,7 @@ def test_read_skill_uses_common_inline_limit():
     assert t.permission == ToolPermission.AUTO
     assert t.max_result_size_chars == config.TOOL_RESULT_INLINE_MAX_CHARS
     assert t.name == "read_skill"
+    assert "cannot add tools outside the agent's tool universe" in t.description
 
 
 async def test_visible_no_bundle_says_complete():

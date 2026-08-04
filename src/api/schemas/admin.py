@@ -71,6 +71,14 @@ class AdminPromptReconstructResponse(BaseModel):
     agent_start_event_id: str
     agent_name: Optional[str] = None
     model: Optional[str] = None
+    exposed_tool_names: Optional[List[str]] = Field(
+        None,
+        description=(
+            "Exact native function names exposed to the anchored LLM invocation. "
+            "None means the legacy event predates collection; an empty list means no "
+            "tools were exposed. Full tool schemas are not persisted."
+        ),
+    )
     has_reminder: bool = False
     messages: List[Dict[str, Any]]
 

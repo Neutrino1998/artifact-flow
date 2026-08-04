@@ -1648,6 +1648,11 @@ export interface components {
             /** Model */
             model: string | null;
             /**
+             * Exposed Tool Names
+             * @description Exact native function names exposed to the anchored LLM invocation. None means the legacy event predates collection; an empty list means no tools were exposed. Full tool schemas are not persisted.
+             */
+            exposed_tool_names: string[] | null;
+            /**
              * Has Reminder
              * @default false
              */

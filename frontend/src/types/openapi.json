@@ -4282,6 +4282,21 @@
             ],
             "title": "Model"
           },
+          "exposed_tool_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exposed Tool Names",
+            "description": "Exact native function names exposed to the anchored LLM invocation. None means the legacy event predates collection; an empty list means no tools were exposed. Full tool schemas are not persisted."
+          },
           "has_reminder": {
             "type": "boolean",
             "title": "Has Reminder",
@@ -4303,6 +4318,7 @@
           "agent_start_event_id",
           "agent_name",
           "model",
+          "exposed_tool_names",
           "has_reminder",
           "messages"
         ],

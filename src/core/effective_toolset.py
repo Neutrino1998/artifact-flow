@@ -97,6 +97,10 @@ class EffectiveToolset:
     # 本 turn 没那道能力,对应规则自然不触发。只存等级、不持工具对象/闭包。
     injectable_builtins: Dict[str, ToolPermission] = field(default_factory=dict)
     tool_units: Dict[str, DeferredUnit] = field(default_factory=dict)
+    # Agent 宇宙内显式 disabled、且本 turn 有工具对象的成员。它们不在 permissions，
+    # 但执行闸需要区分「可经 skill 激活的 disabled」与「根本不属于该 agent 的 absent」。
+    # 部门规则已在 resolver 中先收窄，因此这里不会泄露 dept-denied unit。
+    disabled_tool_names: Set[str] = field(default_factory=set)
 
     def __contains__(self, full_name: str) -> bool:
         return full_name in self.permissions
@@ -160,6 +164,14 @@ class EffectiveToolset:
             names.update(unit.member_full_names)
         return names
 
+    def activatable_tool_names(self) -> set[str]:
+        """可由任一当前可见 skill 从 disabled 池翻开的工具名。"""
+        return {
+            name
+            for grant in self.skill_grants.values()
+            for name in grant.permissions
+        }
+
 
 def unit_visible_by_department(
     unit: UnitInfo, dept_matched_units: Optional[Set[str]]
@@ -203,23 +215,35 @@ def resolve_effective_toolset(
     permissions: Dict[str, ToolPermission] = {}
     deferred_units: Dict[str, DeferredUnit] = {}
     tool_units: Dict[str, DeferredUnit] = {}
+    disabled_tool_names: Set[str] = set()
 
     # ① builtin 轴:enabled 的 builtin,等级取工具对象
     for name, member_state in agent.builtin_tools.items():
+        tool = tools.get(name)
+        if member_state == "disabled":
+            if tool is not None:
+                disabled_tool_names.add(name)
+            continue
         if member_state != "enabled":
             continue
-        tool = tools.get(name)
         if tool is not None:
             permissions[name] = tool.permission
 
     # ② external 轴:enabled 的 unit → 展开成员 full_name,逐个取等级
     for unit_name, member_state in agent.units.items():
-        if member_state != "enabled":
+        if member_state not in {"enabled", "disabled"}:
             continue
         unit = snapshot.units.get(unit_name)
         if unit is None:
             continue
         if not unit_visible_by_department(unit, dept_matched_units):
+            continue
+        if member_state == "disabled":
+            disabled_tool_names.update(
+                full_name
+                for full_name in unit.member_full_names
+                if tools.get(full_name) is not None
+            )
             continue
         present_members: List[str] = []
         for full_name in unit.member_full_names:
@@ -256,6 +280,7 @@ def resolve_effective_toolset(
         skill_grants=skill_grants,
         injectable_builtins=injectable,
         tool_units=tool_units,
+        disabled_tool_names=disabled_tool_names,
     )
     ets.apply_injection_invariants()
     return ets

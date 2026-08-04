@@ -81,6 +81,7 @@ def test_disabled_builtin_absent():
     eff = resolve_effective_toolset(agent, _snapshot(), tools)
     assert "web_search" in eff
     assert "bash" not in eff
+    assert eff.disabled_tool_names == {"bash"}
 
 
 def test_undeclared_tool_absent():
@@ -91,6 +92,7 @@ def test_undeclared_tool_absent():
     }
     eff = resolve_effective_toolset(agent, _snapshot(), tools)
     assert "web_fetch" not in eff  # 未声明 = 不在宇宙
+    assert "web_fetch" not in eff.disabled_tool_names
 
 
 def test_singleton_unit_enabled():
@@ -122,6 +124,7 @@ def test_disabled_unit_members_absent():
     tools = {"github__search_repos": _Tool("github__search_repos", ToolPermission.AUTO)}
     eff = resolve_effective_toolset(agent, snap, tools)
     assert eff.names() == []
+    assert eff.disabled_tool_names == {"github__search_repos"}
 
 
 def test_unit_missing_from_snapshot_skipped():
@@ -294,6 +297,7 @@ def test_public_unit_denied_by_department_match():
     eff = resolve_effective_toolset(agent, snap, tools, dept_matched_units={"weather"})
 
     assert "weather" not in eff
+    assert "weather" not in eff.disabled_tool_names
 
 
 def test_department_unit_requires_department_match():
@@ -306,6 +310,7 @@ def test_department_unit_requires_department_match():
     granted = resolve_effective_toolset(agent, snap, tools, dept_matched_units={"reports"})
 
     assert "reports" not in denied
+    assert "reports" not in denied.disabled_tool_names
     assert "reports" in granted
 
 
@@ -330,3 +335,4 @@ def test_skill_grant_cannot_reopen_dept_denied_unit():
     eff.activate_skill("s")
 
     assert "weather" not in eff
+    assert "weather" not in eff.disabled_tool_names

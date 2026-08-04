@@ -1506,6 +1506,7 @@ function PromptReconstructSection({
     if (!result) return;
     const blob = new Blob([JSON.stringify({
       model: result.model,
+      exposed_tool_names: result.exposed_tool_names,
       messages: result.messages,
     }, null, 2)], {
       type: 'application/json;charset=utf-8',
@@ -1516,7 +1517,7 @@ function PromptReconstructSection({
   return (
     <div className="space-y-2 border-t border-border dark:border-border-dark pt-3">
       <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-        重建此发 OpenAI-compatible messages（不包含 tools schema 或 provider chat template 后的 token 序列）
+        重建此发 OpenAI-compatible messages 和实际暴露的工具名（不包含 tools schema 或 provider chat template 后的 token 序列）
       </div>
       <div className="flex items-center gap-2 flex-wrap">
         <button
@@ -1549,6 +1550,14 @@ function PromptReconstructSection({
             ) : null}
           </div>
           <DetailRow label="Model" value={result.model ?? '-'} />
+          <DetailRow
+            label="Exposed tools"
+            value={
+              result.exposed_tool_names == null
+                ? '未采集（旧事件）'
+                : result.exposed_tool_names.join(', ') || '（无）'
+            }
+          />
           <DetailBlock label="重建 Messages" content={JSON.stringify(result.messages, null, 2)} />
         </div>
       ) : null}

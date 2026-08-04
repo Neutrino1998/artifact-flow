@@ -613,6 +613,8 @@ class ConversationManager:
             "agent_start_event_id": agent_start_event_id,
             "agent_name": agent_name,
             "model": model,
+            # None = legacy agent_start 没有采集；[] = 当次确实没有向模型暴露工具。
+            "exposed_tool_names": data.get("exposed_tool_names"),
             "has_reminder": reminder is not None,
             "messages": messages,
         }
