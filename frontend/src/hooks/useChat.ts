@@ -14,6 +14,8 @@ import { getNavGen, bumpNavGen } from '@/lib/navGen';
 import { bumpArtifactFetchGen } from '@/lib/artifactFetchGen';
 import { bumpArtifactDetailGen } from '@/lib/artifactDetailGen';
 import { refreshArtifactList } from '@/lib/refreshArtifactList';
+import { requestDefaultTaskNotificationPermission } from '@/lib/taskNotifications';
+import { useAuthStore } from '@/stores/authStore';
 
 export function useChat() {
   const current = useConversationStore((s) => s.current);
@@ -54,6 +56,13 @@ export function useChat() {
       // bubble until the backend-resolved Message metadata is refreshed.
       activateSkills?: ActivatedSkillRef[],
     ): Promise<boolean> => {
+      // Task notifications are opt-out. The first send is an explicit user
+      // gesture, so it is the earliest browser-safe point to request the
+      // origin-level permission. Fire-and-forget: permission UI must not delay
+      // submitting the task itself.
+      const userId = useAuthStore.getState().user?.id;
+      if (userId) requestDefaultTaskNotificationPermission(userId);
+
       // Capture nav-gen BEFORE the await. If the user clicks New Chat or
       // switches to another conversation while api.sendMessage() is in
       // flight, the engine still runs server-side (runner.submit is

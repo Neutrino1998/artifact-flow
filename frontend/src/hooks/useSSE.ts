@@ -12,6 +12,8 @@ import * as api from '@/lib/api';
 import { refreshArtifactList } from '@/lib/refreshArtifactList';
 import { bumpArtifactFetchGen } from '@/lib/artifactFetchGen';
 import { getNavGen } from '@/lib/navGen';
+import { notifyTaskTerminal } from '@/lib/taskNotifications';
+import { useAuthStore } from '@/stores/authStore';
 
 const ARTIFACT_TOOLS = new Set([
   'create_artifact',
@@ -496,6 +498,8 @@ export function useSSE() {
             snapshotSegments(messageId);
           }
           snapshotTerminalMessage(conversationId, messageId, data?.response as string | undefined, metrics);
+          const userId = useAuthStore.getState().user?.id;
+          if (userId && messageId) notifyTaskTerminal(userId, messageId, 'complete');
           endStream();
           refreshAfterComplete(conversationId, messageId);
           break;
@@ -512,6 +516,8 @@ export function useSSE() {
             snapshotSegments(messageId);
           }
           snapshotTerminalMessage(conversationId, messageId, data?.response as string | undefined, metrics);
+          const userId = useAuthStore.getState().user?.id;
+          if (userId && messageId) notifyTaskTerminal(userId, messageId, 'timed_out');
           endStream();
           refreshAfterComplete(conversationId, messageId);
           break;
@@ -543,6 +549,8 @@ export function useSSE() {
             snapshotSegments(errMsgId);
           }
           snapshotTerminalMessage(conversationId, errMsgId, (data?.response as string | undefined) ?? errMsg, metrics);
+          const userId = useAuthStore.getState().user?.id;
+          if (userId && errMsgId) notifyTaskTerminal(userId, errMsgId, 'error');
           endStream();
           refreshAfterComplete(conversationId, errMsgId);
           break;

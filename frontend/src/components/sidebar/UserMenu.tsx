@@ -6,8 +6,19 @@ import { useUIStore } from '@/stores/uiStore';
 import ChangePasswordDialog from '@/components/layout/ChangePasswordDialog';
 import EditDisplayNameDialog from '@/components/layout/EditDisplayNameDialog';
 import { PillBadge } from '@/components/ui/PillBadge';
+import { SwitchTrack } from '@/components/ui/SwitchTrack';
 import { MENU_ROW_HOVER, MENU_ROW_DANGER_HOVER } from '@/lib/styles';
+import {
+  enableTaskNotifications,
+  setTaskNotificationPreference,
+  TASK_NOTIFICATION_PREFERENCE_EVENT,
+  type TaskNotificationPreferenceDetail,
+  taskNotificationsEnabled,
+  taskNotificationsSupported,
+} from '@/lib/taskNotifications';
 import StorageBar from './StorageBar';
+
+type TaskNotificationCapability = NotificationPermission | 'loading' | 'unsupported';
 
 export default function UserMenu({
   collapsed,
@@ -23,6 +34,9 @@ export default function UserMenu({
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
+  const [taskNotificationsOn, setTaskNotificationsOn] = useState(false);
+  const [taskNotificationCapability, setTaskNotificationCapability] =
+    useState<TaskNotificationCapability>('loading');
   const setActiveMode = useUIStore((s) => s.setActiveMode);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -35,6 +49,45 @@ export default function UserMenu({
   const deptLeaf = user?.department_path?.length
     ? user.department_path[user.department_path.length - 1]
     : null;
+
+  useEffect(() => {
+    const userId = user?.id;
+    if (!userId) {
+      setTaskNotificationsOn(false);
+      setTaskNotificationCapability('loading');
+      return;
+    }
+
+    const sync = () => {
+      if (!taskNotificationsSupported()) {
+        setTaskNotificationsOn(false);
+        setTaskNotificationCapability('unsupported');
+        return;
+      }
+      setTaskNotificationsOn(taskNotificationsEnabled(userId));
+      setTaskNotificationCapability(window.Notification.permission);
+    };
+
+    sync();
+    const onPreferenceChange = (event: Event) => {
+      const detail = (event as CustomEvent<TaskNotificationPreferenceDetail>).detail;
+      if (!detail || detail.userId !== userId) {
+        sync();
+        return;
+      }
+      setTaskNotificationsOn(detail.enabled && detail.permission !== 'denied');
+      if (detail.permission) setTaskNotificationCapability(detail.permission);
+    };
+
+    window.addEventListener('storage', sync);
+    window.addEventListener('focus', sync);
+    window.addEventListener(TASK_NOTIFICATION_PREFERENCE_EVENT, onPreferenceChange);
+    return () => {
+      window.removeEventListener('storage', sync);
+      window.removeEventListener('focus', sync);
+      window.removeEventListener(TASK_NOTIFICATION_PREFERENCE_EVENT, onPreferenceChange);
+    };
+  }, [user?.id]);
 
   const togglePopover = () => {
     setPopoverOpen((prev) => {
@@ -114,6 +167,15 @@ export default function UserMenu({
   const handleEditProfile = () => {
     setPopoverOpen(false);
     setEditProfileOpen(true);
+  };
+
+  const handleTaskNotificationsToggle = () => {
+    if (!user) return;
+    if (taskNotificationsOn) {
+      setTaskNotificationPreference(user.id, false);
+      return;
+    }
+    void enableTaskNotifications(user.id);
   };
 
   if (!user) return null;
@@ -197,6 +259,43 @@ export default function UserMenu({
               )}
               {theme === 'light' ? '深色模式' : '浅色模式'}
             </button>
+
+            {/* Browser-level task terminal notifications (opt-out by default). */}
+            <div className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark rounded-lg">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="shrink-0">
+                <path d="M8 2v1M4 6a4 4 0 0 1 8 0v3l1.5 2H2.5L4 9V6z" strokeLinejoin="round" />
+                <path d="M6.5 13a1.5 1.5 0 0 0 3 0" />
+              </svg>
+              <div className="min-w-0 flex-1">
+                <div className="font-medium">任务完成通知</div>
+                {taskNotificationCapability === 'default' && taskNotificationsOn && (
+                  <div className="text-[11px] text-text-tertiary dark:text-text-tertiary-dark">
+                    首次发送任务时询问权限
+                  </div>
+                )}
+                {taskNotificationCapability === 'denied' && (
+                  <div className="text-[11px] text-status-warning">
+                    请在浏览器网站设置中允许
+                  </div>
+                )}
+                {taskNotificationCapability === 'unsupported' && (
+                  <div className="text-[11px] text-text-tertiary dark:text-text-tertiary-dark">
+                    当前浏览器不支持
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-label="任务完成通知"
+                aria-checked={taskNotificationsOn}
+                disabled={taskNotificationCapability === 'unsupported' || taskNotificationCapability === 'denied'}
+                onClick={handleTaskNotificationsToggle}
+                className="shrink-0 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <SwitchTrack checked={taskNotificationsOn} />
+              </button>
+            </div>
 
             {/* Edit display name (all users) */}
             <button
