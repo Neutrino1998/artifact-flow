@@ -16,6 +16,7 @@ from models.llm import (
     get_compaction_threshold,
     get_model_context_window,
     model_supports_vision,
+    validate_agent_model_config,
     validate_model_config,
 )
 
@@ -49,6 +50,24 @@ def test_agent_models_must_use_configured_aliases(monkeypatch):
 
     with pytest.raises(ValueError, match="must use configured aliases"):
         validate_model_config(["openai/direct-model"])
+
+
+def test_compact_agent_window_must_cover_every_runtime_agent(monkeypatch):
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "large": {"model": "openai/large", "context_window": 1_000_000},
+                "small": {"model": "openai/small", "context_window": 128_000},
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="compact_agent.*at least every Agent"):
+        validate_agent_model_config({
+            "lead_agent": "large",
+            "compact_agent": "small",
+        })
 
 
 def test_compaction_threshold_is_model_window_minus_global_reserve(monkeypatch):

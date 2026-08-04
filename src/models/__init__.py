@@ -10,6 +10,7 @@ from .llm import (
     get_compaction_threshold,
     get_model_context_window,
     get_model_info,
+    validate_agent_model_config,
     validate_model_config,
 )
 
@@ -20,5 +21,6 @@ __all__ = [
     "get_compaction_threshold",
     "get_model_context_window",
     "get_model_info",
+    "validate_agent_model_config",
     "validate_model_config",
 ]

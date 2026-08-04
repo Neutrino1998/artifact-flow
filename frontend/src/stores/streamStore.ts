@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ExecutionMetrics, TokenUsage } from '@/types/events';
+import type { CompactionReason, ExecutionMetrics, TokenUsage } from '@/types/events';
 import type { ActivatedSkillRef } from '@/types';
 
 export interface ToolCallInfo {
@@ -61,6 +61,8 @@ export interface CompactionBlock {
   state: 'running' | 'done' | 'error';
   /** input+output tokens of the LLM call that tripped the threshold (from COMPACTION_START) */
   triggerTokens?: { input: number; output: number };
+  /** overflow is a provider rejection before accepted-call usage exists. */
+  reason?: CompactionReason;
   /** compacted summary text (frame-prepended; from COMPACTION_SUMMARY) */
   summary?: string;
   /** compact_agent's model id — shown in header next to usage, mirroring agent segment */
@@ -94,6 +96,39 @@ export type TimelineBlock = NonAgentBlock | PendingInjectBlock;
 export type FlowItem =
   | { kind: 'agent'; segment: ExecutionSegment; index: number }
   | TimelineBlock;
+
+/** Completed flow hides invocations that never produced reasoning or tools. */
+export function isVisibleExecutionSegment(segment: ExecutionSegment): boolean {
+  return segment.toolCalls.length > 0 || Boolean(segment.reasoningContent);
+}
+
+/**
+ * Rebase insertion positions after empty Agent attempts are filtered out.
+ *
+ * A block position is the number of raw segments that preceded its event.  If
+ * one of those segments is later hidden (for example, a provider overflow before
+ * the first chunk), keeping the raw position moves the block after a later retry.
+ */
+export function rebaseTimelineBlockPositions<T extends TimelineBlock>(
+  rawSegments: ExecutionSegment[],
+  blocks: T[],
+): T[] {
+  const visiblePrefixCounts = [0];
+  for (const segment of rawSegments) {
+    visiblePrefixCounts.push(
+      visiblePrefixCounts[visiblePrefixCounts.length - 1]
+      + (isVisibleExecutionSegment(segment) ? 1 : 0)
+    );
+  }
+
+  return blocks.map((block) => {
+    const rawPosition = Math.min(
+      Math.max(Math.trunc(block.position), 0),
+      rawSegments.length,
+    );
+    return { ...block, position: visiblePrefixCounts[rawPosition] };
+  });
+}
 
 /** Interleave agent segments with non-agent blocks by insertion position. */
 export function interleaveFlowItems(
@@ -498,7 +533,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
       const state = get();
       // Only snapshot if there are intermediate segments (more than just the final one with content)
       const segsToSnapshot = state.segments
-        .filter((seg) => seg.toolCalls.length > 0 || seg.reasoningContent)
+        .filter(isVisibleExecutionSegment)
         // Execution is done — mark any remaining 'running' segments as 'complete'
         // and discard UI-only native-call drafts even on an abnormal transport exit.
         .map((seg) => ({
@@ -515,7 +550,10 @@ export const useStreamStore = create<StreamState>((set, get) => {
       }
       // Snapshot non-agent blocks. Compaction is now persistent (COMPACTION_SUMMARY
       // is a DB event), so both inject and compaction blocks are retained in cache.
-      const blocksToSnapshot = state.nonAgentBlocks;
+      const blocksToSnapshot = rebaseTimelineBlockPositions(
+        state.segments,
+        state.nonAgentBlocks,
+      );
       if (blocksToSnapshot.length > 0) {
         const nabMap = new Map(state.completedNonAgentBlocks);
         nabMap.set(messageId, blocksToSnapshot);

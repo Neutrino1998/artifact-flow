@@ -465,9 +465,10 @@ export function useSSE() {
             kind: 'compaction',
             id: `compact-${event.timestamp}`,
             state: 'running',
-            triggerTokens: d
+            triggerTokens: d?.last_input_tokens != null && d.last_output_tokens != null
               ? { input: d.last_input_tokens, output: d.last_output_tokens }
               : undefined,
+            reason: d?.reason,
             timestamp: event.timestamp,
             position: useStreamStore.getState().segments.length,
           });

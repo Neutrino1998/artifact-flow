@@ -1,5 +1,10 @@
 import { describe, test, expect, beforeEach } from 'vitest';
-import { reconstructSegments, reconstructNonAgentBlocks } from './reconstructSegments';
+import {
+  reconstructFlow,
+  reconstructSegments,
+  reconstructNonAgentBlocks,
+} from './reconstructSegments';
+import { interleaveFlowItems } from '@/stores/streamStore';
 import { makeEvent, resetEventSeq } from '@/test-utils/events';
 
 describe('reconstructSegments', () => {
@@ -209,6 +214,7 @@ describe('reconstructNonAgentBlocks', () => {
     const events = [
       makeEvent('agent_start', {}, 'lead'),
       makeEvent('queued_message', { content: 'wait, also do X' }),
+      makeEvent('llm_complete', { reasoning_content: 'continued' }, 'lead'),
     ];
     const blocks = reconstructNonAgentBlocks(events);
     expect(blocks).toHaveLength(1);
@@ -229,7 +235,12 @@ describe('reconstructNonAgentBlocks', () => {
   test('compaction_start alone → state=running, no summary', () => {
     const events = [
       makeEvent('agent_start', {}, 'lead'),
-      makeEvent('compaction_start', { last_input_tokens: 50000, last_output_tokens: 1000 }),
+      makeEvent('llm_complete', { reasoning_content: 'thinking' }, 'lead'),
+      makeEvent('compaction_start', {
+        reason: 'threshold',
+        last_input_tokens: 50000,
+        last_output_tokens: 1000,
+      }),
     ];
     const blocks = reconstructNonAgentBlocks(events);
     expect(blocks).toHaveLength(1);
@@ -240,6 +251,28 @@ describe('reconstructNonAgentBlocks', () => {
       position: 1,
     });
     expect((blocks[0] as { summary?: string }).summary).toBeUndefined();
+  });
+
+  test('overflow compaction stays before the visible retry after empty attempt filtering', () => {
+    const events = [
+      makeEvent('agent_start', {}, 'lead'), // rejected before any visible output
+      makeEvent('compaction_start', { reason: 'overflow' }, 'lead'),
+      makeEvent('compaction_summary', { content: 'summary', error: null }, 'lead'),
+      makeEvent('agent_start', {}, 'lead'),
+      makeEvent('llm_complete', { reasoning_content: 'retry thinking' }, 'lead'),
+    ];
+
+    const { segments, blocks } = reconstructFlow(events);
+    expect(segments).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({
+      kind: 'compaction',
+      reason: 'overflow',
+      position: 0,
+    });
+    expect((blocks[0] as { triggerTokens?: unknown }).triggerTokens).toBeUndefined();
+
+    const flow = interleaveFlowItems(segments, blocks);
+    expect(flow.map((item) => item.kind)).toEqual(['compaction', 'agent']);
   });
 
   test('compaction_start + compaction_summary → state=done, summary populated', () => {

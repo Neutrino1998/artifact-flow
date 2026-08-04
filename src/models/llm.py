@@ -11,7 +11,7 @@ import hmac
 import json
 import os
 from pathlib import Path
-from typing import Optional, Dict, Any, AsyncIterator, Iterable
+from typing import Optional, Dict, Any, AsyncIterator, Iterable, Mapping
 
 import httpx
 import yaml
@@ -140,6 +140,45 @@ def _load_config() -> Dict[str, Any]:
 def validate_model_config(required_models: Optional[Iterable[str]] = None) -> None:
     """Startup validation for models.yaml and every agent-referenced alias."""
     _validate_model_config(_load_config(), required_models)
+
+
+def validate_agent_model_config(agent_models: Mapping[str, str]) -> None:
+    """Validate Agent aliases plus the compactor's cross-Agent capacity.
+
+    A separate compact model is useful only when it can accept the histories it
+    may be asked to summarize.  Requiring its declared window to cover every
+    runtime Agent window makes the predictable cross-model failure unrepresentable
+    in configuration; semantic oversize tool results remain the tool author's
+    loud-fail responsibility.
+    """
+    raw_config = _load_config()
+    _validate_model_config(raw_config, agent_models.values())
+
+    compact_alias = agent_models.get("compact_agent")
+    if compact_alias is None:
+        return
+
+    models = raw_config["models"]
+    compact_window = models[compact_alias]["context_window"]
+    oversized = sorted(
+        (
+            agent_name,
+            alias,
+            models[alias]["context_window"],
+        )
+        for agent_name, alias in agent_models.items()
+        if agent_name != "compact_agent"
+        and models[alias]["context_window"] > compact_window
+    )
+    if oversized:
+        details = ", ".join(
+            f"{name}={alias} ({window})" for name, alias, window in oversized
+        )
+        raise ValueError(
+            "Invalid model configuration — compact_agent "
+            f"'{compact_alias}' context_window ({compact_window}) must be at least "
+            f"every Agent context_window; larger Agent(s): {details}"
+        )
 
 
 def get_model_context_window(model: str) -> int:

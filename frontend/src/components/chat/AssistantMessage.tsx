@@ -7,7 +7,7 @@ import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import MarkdownBlock from '@/components/markdown/MarkdownBlock';
 import { CopyIcon } from '@/components/ui/CopyIcon';
 import { getMessageEvents } from '@/lib/api';
-import { reconstructSegments, reconstructNonAgentBlocks } from '@/lib/reconstructSegments';
+import { reconstructFlow } from '@/lib/reconstructSegments';
 import AgentSegmentBlock from './AgentSegmentBlock';
 import InjectFlowBlock from './InjectFlowBlock';
 import CompactionFlowBlock from './CompactionFlowBlock';
@@ -45,8 +45,7 @@ function AssistantMessage({ content, messageId, executionMetrics }: AssistantMes
     getMessageEvents(conversationId, messageId)
       .then((res) => {
         if (cancelled || res.events.length === 0) return;
-        const segments = reconstructSegments(res.events);
-        const blocks = reconstructNonAgentBlocks(res.events);
+        const { segments, blocks } = reconstructFlow(res.events);
         const store = useStreamStore.getState();
         if (segments.length > 0) {
           const newMap = new Map(store.completedSegments);

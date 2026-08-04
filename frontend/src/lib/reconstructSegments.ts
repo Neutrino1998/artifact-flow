@@ -1,6 +1,13 @@
 import type { MessageEventItem } from '@/lib/api';
-import type { ExecutionSegment, ToolCallInfo, NonAgentBlock, CompactionBlock } from '@/stores/streamStore';
-import type { TokenUsage, LLMCompleteData } from '@/types/events';
+import {
+  isVisibleExecutionSegment,
+  rebaseTimelineBlockPositions,
+  type ExecutionSegment,
+  type ToolCallInfo,
+  type NonAgentBlock,
+  type CompactionBlock,
+} from '@/stores/streamStore';
+import type { CompactionReason, TokenUsage, LLMCompleteData } from '@/types/events';
 
 /**
  * Reconstruct ExecutionSegment[] from persisted MessageEvent records (history reload).
@@ -12,7 +19,7 @@ import type { TokenUsage, LLMCompleteData } from '@/types/events';
  * EITHER file → mirror it in the other. (The `reason` field once shipped live-only because
  * this side was missed on reload.)
  */
-export function reconstructSegments(events: MessageEventItem[]): ExecutionSegment[] {
+function reconstructRawSegments(events: MessageEventItem[]): ExecutionSegment[] {
   const segments: ExecutionSegment[] = [];
   // Latched on permission_result, consumed by the next tool_start. Mirrors
   // useSSE._pendingPermissionResult — engine emits permission_result
@@ -153,10 +160,7 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
     if (seg.status === 'running') seg.status = 'complete';
   }
 
-  // Only return segments that have meaningful content (tool calls or reasoning)
-  return segments.filter(
-    (seg) => seg.toolCalls.length > 0 || seg.reasoningContent
-  );
+  return segments;
 }
 
 /**
@@ -167,7 +171,7 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
  * the live SSE handler): each compaction_summary consumes the earliest
  * still-running compaction block of the same position bucket.
  */
-export function reconstructNonAgentBlocks(events: MessageEventItem[]): NonAgentBlock[] {
+function reconstructRawNonAgentBlocks(events: MessageEventItem[]): NonAgentBlock[] {
   const blocks: NonAgentBlock[] = [];
   let agentSegmentCount = 0;
 
@@ -185,14 +189,16 @@ export function reconstructNonAgentBlocks(events: MessageEventItem[]): NonAgentB
         position: agentSegmentCount,
       });
     } else if (event_type === 'compaction_start') {
+      const lastInput = data?.last_input_tokens as number | undefined;
+      const lastOutput = data?.last_output_tokens as number | undefined;
       blocks.push({
         kind: 'compaction',
         id: `compact-${evt.created_at}`,
         state: 'running',
-        triggerTokens: data ? {
-          input: (data.last_input_tokens as number) ?? 0,
-          output: (data.last_output_tokens as number) ?? 0,
-        } : undefined,
+        triggerTokens: lastInput != null && lastOutput != null
+          ? { input: lastInput, output: lastOutput }
+          : undefined,
+        reason: data?.reason as CompactionReason | undefined,
         timestamp: evt.created_at,
         position: agentSegmentCount,
       });
@@ -231,4 +237,31 @@ export function reconstructNonAgentBlocks(events: MessageEventItem[]): NonAgentB
   }
 
   return blocks;
+}
+
+export function reconstructSegments(events: MessageEventItem[]): ExecutionSegment[] {
+  return reconstructRawSegments(events).filter(isVisibleExecutionSegment);
+}
+
+export function reconstructNonAgentBlocks(events: MessageEventItem[]): NonAgentBlock[] {
+  const rawSegments = reconstructRawSegments(events);
+  return rebaseTimelineBlockPositions(
+    rawSegments,
+    reconstructRawNonAgentBlocks(events),
+  );
+}
+
+/** Fold persisted events once so segments and block positions share one raw timeline. */
+export function reconstructFlow(events: MessageEventItem[]): {
+  segments: ExecutionSegment[];
+  blocks: NonAgentBlock[];
+} {
+  const rawSegments = reconstructRawSegments(events);
+  return {
+    segments: rawSegments.filter(isVisibleExecutionSegment),
+    blocks: rebaseTimelineBlockPositions(
+      rawSegments,
+      reconstructRawNonAgentBlocks(events),
+    ),
+  };
 }

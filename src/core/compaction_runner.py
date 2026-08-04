@@ -131,8 +131,8 @@ class CompactionRunner:
         await self._compact(
             state,
             agent_name,
-            input_tokens=0,
-            output_tokens=0,
+            input_tokens=None,
+            output_tokens=None,
             reason="overflow",
             compaction_threshold=None,
             missing_compactor_is_error=True,
@@ -143,8 +143,8 @@ class CompactionRunner:
         state: Dict[str, Any],
         agent_name: str,
         *,
-        input_tokens: int,
-        output_tokens: int,
+        input_tokens: Optional[int],
+        output_tokens: Optional[int],
         reason: str,
         compaction_threshold: Optional[int],
         missing_compactor_is_error: bool,
@@ -161,12 +161,17 @@ class CompactionRunner:
 
         # 提到 INFO:compaction 触发条件是关键状态转移,事故诊断必需(对齐
         # "工具完成/状态转移"分级原则;尺寸字段而非大体积内容,可常驻 INFO)。
+        token_detail = (
+            "last_call_tokens=unknown"
+            if input_tokens is None or output_tokens is None
+            else (
+                f"last_call input={input_tokens} output={output_tokens} "
+                f"(sum={input_tokens + output_tokens})"
+            )
+        )
         logger.info(
             f"[compaction] triggered for {agent_name}: "
-            f"trigger={reason}, "
-            f"threshold={compaction_threshold}, "
-            f"last_call input={input_tokens} output={output_tokens} "
-            f"(sum={input_tokens + output_tokens}), "
+            f"trigger={reason}, threshold={compaction_threshold}, {token_detail}, "
             f"events_in_state={len(state['events'])}"
         )
 
@@ -174,12 +179,14 @@ class CompactionRunner:
         # 看到"压缩进行中"指示器，而不是看完最后一个 llm_complete 就等到 summary。
         # forced 标记手动触发，供前端/replay 区分「用户压缩」与「超阈值自动压缩」。
         start_data = {
-            "last_input_tokens": input_tokens,
-            "last_output_tokens": output_tokens,
             "forced": reason == "forced",
             "reason": reason,
-            "compaction_threshold": compaction_threshold,
         }
+        if compaction_threshold is not None:
+            start_data["compaction_threshold"] = compaction_threshold
+        if input_tokens is not None and output_tokens is not None:
+            start_data["last_input_tokens"] = input_tokens
+            start_data["last_output_tokens"] = output_tokens
         start_event = ExecutionEvent(
             event_type=StreamEventType.COMPACTION_START.value,
             agent_name=agent_name,

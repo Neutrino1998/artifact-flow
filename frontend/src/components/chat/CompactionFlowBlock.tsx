@@ -69,6 +69,9 @@ function Badge({ state }: { state: CompactionBlock['state'] }) {
 
 function Extra({ block }: { block: CompactionBlock }) {
   if (block.state === 'running') {
+    if (block.reason === 'overflow') {
+      return <>recovering from context overflow…</>;
+    }
     if (!block.triggerTokens) return <>compressing…</>;
     const total = block.triggerTokens.input + block.triggerTokens.output;
     return <>compressing {formatTokens(total)} tokens…</>;

@@ -537,6 +537,27 @@ async def test_agent_references_unit(db_session, cfg):
     assert units[0].source == "seeded"
 
 
+async def test_agent_model_validation_runs_before_reconcile_writes(db_session, cfg):
+    tools, agents = cfg
+    _write(tools / "weather.md", _singleton_tool_md())
+    _write(
+        agents / "lead_agent.md",
+        _agent_md(name="lead_agent", tools_block="  {}", model="qwen3.7-plus"),
+    )
+    _write(
+        agents / "compact_agent.md",
+        _agent_md(name="compact_agent", tools_block="  {}", model="gpt-4o-mini"),
+    )
+
+    with pytest.raises(ValueError, match="compact_agent.*at least every Agent"):
+        await _run(db_session, cfg)
+
+    # The model invariant is checked before tool reconciliation touches the
+    # session, so even callers that catch the error cannot accidentally flush a
+    # partial release snapshot later.
+    assert (await db_session.execute(select(ToolUnit))).scalars().all() == []
+
+
 # --------------------------------------------------------------------------
 # loud-fail 门禁
 # --------------------------------------------------------------------------

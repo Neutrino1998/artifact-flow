@@ -211,11 +211,17 @@ export interface ErrorData {
   code?: string;
 }
 
+export type CompactionReason = 'forced' | 'threshold' | 'overflow';
+
 export interface CompactionStartData {
+  /** why this compaction started; overflow has no accepted-call token usage */
+  reason: CompactionReason;
   /** input tokens of the LLM call that tripped the threshold */
-  last_input_tokens: number;
+  last_input_tokens?: number;
   /** output tokens of the same call */
-  last_output_tokens: number;
+  last_output_tokens?: number;
+  /** effective per-model threshold; absent for provider overflow recovery */
+  compaction_threshold?: number;
 }
 
 export interface ExecutionQueuedData {

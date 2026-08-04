@@ -303,6 +303,28 @@ describe('streamStore actions', () => {
       expect(blockSnap).toEqual(blocks);
     });
 
+    test('rebases compaction before retry when an empty overflow attempt is filtered', () => {
+      useStreamStore.setState({
+        segments: [
+          seg('overflow-attempt'),
+          seg('retry', { reasoningContent: 'retry thinking' }),
+        ],
+        nonAgentBlocks: [
+          { ...compaction('overflow-compact', 1), reason: 'overflow' },
+        ],
+      });
+
+      useStreamStore.getState().snapshotSegments('msg-overflow');
+
+      const segments = useStreamStore.getState().completedSegments.get('msg-overflow')!;
+      const blocks = useStreamStore.getState().completedNonAgentBlocks.get('msg-overflow')!;
+      expect(blocks[0].position).toBe(0);
+      expect(interleaveFlowItems(segments, blocks).map((item) => item.kind)).toEqual([
+        'compaction',
+        'agent',
+      ]);
+    });
+
     test('does not cache SSE-only tool-call progress', () => {
       useStreamStore.setState({
         segments: [seg('s1', {

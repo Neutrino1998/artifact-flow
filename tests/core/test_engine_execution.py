@@ -1665,6 +1665,9 @@ class TestInEngineCompaction:
         ]
         assert len(starts) == 1
         assert starts[0].data["reason"] == "overflow"
+        assert "compaction_threshold" not in starts[0].data
+        assert "last_input_tokens" not in starts[0].data
+        assert "last_output_tokens" not in starts[0].data
         summary = next(
             e for e in result["events"]
             if e.event_type == StreamEventType.COMPACTION_SUMMARY.value

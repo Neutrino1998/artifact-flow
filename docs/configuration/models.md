@@ -93,7 +93,7 @@ models:
 
 ## Context window 与压缩
 
-ArtifactFlow 不从 LiteLLM 的公共模型目录猜测上下文窗口，因为私有部署可能用更小的 serving limit。每个 alias 都必须显式配置 `context_window`，Agent 也必须引用 alias，进程会在初始化数据库和 Redis 前统一校验；缺失、非正整数、alias 不存在或窗口不大于 reserve 都会拒绝启动。
+ArtifactFlow 不从 LiteLLM 的公共模型目录猜测上下文窗口，因为私有部署可能用更小的 serving limit。每个 alias 都必须显式配置 `context_window`，Agent 也必须引用 alias；缺失、非正整数、alias 不存在或窗口不大于 reserve 都会拒绝配置发布。`compact_agent` 的窗口还必须不小于其他任何 Agent，否则它无法可靠接收待压缩历史。Release reconcile 会在接触 DB session 前执行这套校验，Backend 启动时再执行一次作为二次防线。
 
 服务级 `ARTIFACTFLOW_COMPACTION_RESERVE_TOKENS` 默认为 `20000`。每个 Agent 的自动压缩阈值为：
 

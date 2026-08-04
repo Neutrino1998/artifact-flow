@@ -24,6 +24,8 @@ from db.models import (
     ToolUnit,
     UserSkill,
 )
+from agents.loader import load_all_agents
+from models.llm import validate_agent_model_config
 from reconcile.report import ReconcileReport
 from reconcile.seeds import (
     AgentSeed,
@@ -67,6 +69,14 @@ async def reconcile_config_to_db(
     agents_dir = agents_dir or _default_config_dir("agents")
     skills_dir = skills_dir or _default_config_dir("skills")
     report = ReconcileReport()
+
+    # Model capabilities are a config-ingress invariant, not a FastAPI-only
+    # startup check.  Validate before touching the session so release reconcile
+    # cannot publish Agent rows that a running worker will fail to execute.
+    parsed_agents = load_all_agents(agents_dir) if os.path.isdir(agents_dir) else {}
+    validate_agent_model_config({
+        name: agent.model for name, agent in parsed_agents.items()
+    })
 
     tool_seeds = parse_tool_seeds(tools_dir) + parse_mcp_seeds(mcp_dir)
     check_tool_collisions(tool_seeds, label="config/tools + config/mcp")

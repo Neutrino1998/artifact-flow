@@ -84,9 +84,9 @@ async def init_globals() -> None:
     # 模型别名与 models.yaml 的必填 context_window。坏配置不能等到首个 turn 才暴露，
     # 也不应在拒绝启动前留下已打开的连接池。
     from agents.loader import load_all_agents
-    from models.llm import validate_model_config
+    from models.llm import validate_agent_model_config
     _agents = load_all_agents()
-    validate_model_config(agent.model for agent in _agents.values())
+    validate_agent_model_config({name: agent.model for name, agent in _agents.items()})
     logger.info(f"Loaded {len(_agents)} agent configs and validated model capabilities")
 
     # 1. 初始化数据库管理器
