@@ -16,12 +16,17 @@ import (
 )
 
 type fakeRunner struct {
-	commands []Command
-	failName string
+	commands    []Command
+	failName    string
+	failUpCount int
 }
 
 func (r *fakeRunner) Run(_ context.Context, command Command) error {
 	r.commands = append(r.commands, command)
+	if command.Name == "docker" && slices.Contains(command.Args, "up") && r.failUpCount > 0 {
+		r.failUpCount--
+		return fmt.Errorf("forced compose up failure")
+	}
 	if command.Name == r.failName {
 		return fmt.Errorf("forced %s failure", command.Name)
 	}
@@ -202,7 +207,11 @@ func TestSiteInitWritesIntranetModelCredentialNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := string(data)
-	for _, key := range []string{"GPUSTACK_DEEPSEEK_API_KEY=", "GPUSTACK_VISION_API_KEY="} {
+	for _, key := range []string{
+		"GPUSTACK_DEEPSEEK_API_KEY=",
+		"GPUSTACK_VISION_API_KEY=",
+		"ARTIFACTFLOW_COMPACTION_RESERVE_TOKENS=40000",
+	} {
 		if !strings.Contains(env, key) {
 			t.Fatalf("generated intranet environment is missing %s: %s", key, env)
 		}
@@ -347,7 +356,7 @@ func TestSiteMigrateV1PreservesSecretsAndDropsOldSandboxSwitch(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(legacy, "certs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	env := "ARTIFACTFLOW_JWT_SECRET=keep-me\nAF_ENABLE_SANDBOX=0\nARTIFACTFLOW_DATABASE_URL=postgres://db\n"
+	env := "ARTIFACTFLOW_JWT_SECRET=keep-me\nAF_ENABLE_SANDBOX=0\nARTIFACTFLOW_DATABASE_URL=postgres://db\nARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD=100000\nARTIFACTFLOW_RENDER_TOOL_EXAMPLES=false\n"
 	if err := os.WriteFile(filepath.Join(legacy, ".env"), []byte(env), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +378,11 @@ func TestSiteMigrateV1PreservesSecretsAndDropsOldSandboxSwitch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(got), "keep-me") || strings.Contains(string(got), "AF_ENABLE_SANDBOX") {
+	if !strings.Contains(string(got), "keep-me") ||
+		strings.Contains(string(got), "AF_ENABLE_SANDBOX") ||
+		strings.Contains(string(got), "ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD") ||
+		strings.Contains(string(got), "ARTIFACTFLOW_RENDER_TOOL_EXAMPLES") ||
+		!strings.Contains(string(got), "ARTIFACTFLOW_COMPACTION_RESERVE_TOKENS=40000") {
 		t.Fatalf("unexpected migrated env: %s", got)
 	}
 	site, err := LoadSite(c.sitePath())
@@ -691,6 +704,75 @@ func TestApplyWritesOneStateAndConfigHotfixBindsBase(t *testing.T) {
 	}
 }
 
+func TestApplyKeepMaintenanceLeavesFlagAfterHealthyStateWrite(t *testing.T) {
+	c, _ := newTestController(t)
+	bundle := makeAppBundle(t, t.TempDir(), "v1")
+	if err := c.applyWithOptions(context.Background(), bundle, applyOptions{KeepMaintenance: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	flag := filepath.Join(c.controlDir(), "maintenance", "MAINTENANCE_ON")
+	if _, err := os.Stat(flag); err != nil {
+		t.Fatalf("keep-maintenance did not preserve maintenance flag: %v", err)
+	}
+	out := c.Out.(*bytes.Buffer).String()
+	if !strings.Contains(out, "leave maintenance enabled for operator verification") {
+		t.Fatalf("apply plan did not describe retained maintenance: %s", out)
+	}
+	if !strings.Contains(out, "maintenance remains enabled (--keep-maintenance)") {
+		t.Fatalf("apply result did not report retained maintenance: %s", out)
+	}
+}
+
+func TestCLIApplyKeepMaintenanceFlagAndValidation(t *testing.T) {
+	c, _ := newTestController(t)
+	bundle := makeAppBundle(t, t.TempDir(), "v1")
+	if err := dispatch(context.Background(), c, []string{"apply", bundle, "--keep-maintenance"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(c.controlDir(), "maintenance", "MAINTENANCE_ON")); err != nil {
+		t.Fatalf("CLI keep-maintenance did not preserve flag: %v", err)
+	}
+
+	for _, args := range [][]string{
+		{"apply", bundle, "--unknown"},
+		{"apply", bundle, "--keep-maintenance", "--keep-maintenance"},
+		{"apply", bundle, "another-target"},
+		{"apply", "--keep-maintenance"},
+	} {
+		if err := dispatch(context.Background(), c, args); err == nil {
+			t.Fatalf("expected apply argument rejection for %v", args)
+		}
+	}
+}
+
+func TestApplyKeepMaintenanceSurvivesSuccessfulRecovery(t *testing.T) {
+	c, runner := newTestController(t)
+	if err := c.Apply(context.Background(), makeAppBundle(t, t.TempDir(), "v1")); err != nil {
+		t.Fatal(err)
+	}
+	runner.failUpCount = 1
+
+	err := c.applyWithOptions(
+		context.Background(),
+		makeAppBundle(t, t.TempDir(), "v2"),
+		applyOptions{KeepMaintenance: true},
+	)
+	if err == nil || !strings.Contains(err.Error(), "restored last-known-good release v1; maintenance remains enabled") {
+		t.Fatalf("expected recovery with retained maintenance, got %v", err)
+	}
+	state, stateErr := c.readState()
+	if stateErr != nil {
+		t.Fatal(stateErr)
+	}
+	if state.Current != "v1" || state.Generation != 1 {
+		t.Fatalf("failed apply changed state: %+v", state)
+	}
+	if _, statErr := os.Stat(filepath.Join(c.controlDir(), "maintenance", "MAINTENANCE_ON")); statErr != nil {
+		t.Fatalf("recovery did not preserve maintenance flag: %v", statErr)
+	}
+}
+
 func TestLocalReadinessProbeCannotOutliveSiteDeadline(t *testing.T) {
 	c := NewController(t.TempDir(), &bytes.Buffer{}, &bytes.Buffer{})
 	c.Runner = deadlineRunner{}
@@ -776,6 +858,33 @@ func TestMaintenanceMutationUsesTheSameKernelLock(t *testing.T) {
 	defer lock.Close()
 	if err := c.Maintenance(context.Background(), "on", "test"); err == nil || !strings.Contains(err.Error(), "another afctl mutation") {
 		t.Fatalf("expected maintenance lock contention, got %v", err)
+	}
+}
+
+func TestMaintenanceWritesAndRemovesOperatorNote(t *testing.T) {
+	c, _ := newTestController(t)
+	if err := c.Maintenance(context.Background(), "on", "planned database work"); err != nil {
+		t.Fatal(err)
+	}
+	maintenanceDir := filepath.Join(c.controlDir(), "maintenance")
+	note, err := os.ReadFile(filepath.Join(maintenanceDir, "note.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(note) != "planned database work\n" {
+		t.Fatalf("unexpected maintenance note %q", note)
+	}
+	if _, err := os.Stat(filepath.Join(maintenanceDir, "MAINTENANCE_ON")); err != nil {
+		t.Fatalf("maintenance flag missing: %v", err)
+	}
+
+	if err := c.Maintenance(context.Background(), "off", ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"note.txt", "MAINTENANCE_ON"} {
+		if _, err := os.Stat(filepath.Join(maintenanceDir, name)); !os.IsNotExist(err) {
+			t.Fatalf("maintenance off retained %s: %v", name, err)
+		}
 	}
 }
 

@@ -70,6 +70,10 @@
 用 [scripts/add_comment.py](../scripts/add_comment.py),不要手写——批注涉及
 comments.xml、rels、Content_Types 三处样板,脚本一次做对。
 
+回复已有批注时用 [scripts/reply_comment.py](../scripts/reply_comment.py)：先
+`--list` 取得明确的主批注 ID，再以 `--reply-to ID` 每次追加一条一级回复。
+不要按文字猜父批注、默认选择第一条，或手写 `commentsExtended.xml`。
+
 ## 事后处置
 
 - 接受/拒绝(全部或按作者):[scripts/accept_changes.py](../scripts/accept_changes.py)。

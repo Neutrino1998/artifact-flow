@@ -56,7 +56,7 @@ sudo /opt/artifactflow/bin/afctl --root /opt/artifactflow maintenance status
 sudo /opt/artifactflow/bin/afctl --root /opt/artifactflow maintenance off
 ```
 
-维护状态会让业务、API 和 SSE 返回 503 页面，但健康端点继续反映真实状态。Apply 会在自身窗口管理维护状态；不要在另一终端同时手工切换。
+维护状态会让业务、API 和 SSE 返回 503 页面，但健康端点继续反映真实状态。Apply 会在自身窗口管理维护状态；不要在另一终端同时手工切换。需要在新 release 健康后继续停机验收时，使用 `afctl apply TARGET --keep-maintenance`；它会保留维护页，验收完成后由 operator 显式执行 `afctl maintenance off`。
 
 ## 通知与现场内容
 

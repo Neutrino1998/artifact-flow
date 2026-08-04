@@ -7,7 +7,7 @@ braces: ``/datasets/{dataset_id}/documents/{document_id}``.
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable, Mapping
+from typing import Any, Mapping
 from urllib.parse import quote, urlsplit
 
 
@@ -37,30 +37,40 @@ def extract_url_path_params(endpoint: str) -> list[str]:
 
 def validate_url_path_template(
     endpoint: str,
-    parameters: Iterable[Mapping[str, Any]] | None,
+    input_schema: Mapping[str, Any],
 ) -> None:
-    """Validate endpoint ``{param}`` references against declared parameters."""
+    """Validate endpoint ``{param}`` references against an object JSON Schema."""
     refs = extract_url_path_params(endpoint)
     if not refs:
         return
 
-    param_by_name = {str(p.get("name")): p for p in parameters or []}
+    properties = input_schema.get("properties") or {}
+    required = set(input_schema.get("required") or [])
     for name in refs:
-        param = param_by_name.get(name)
-        if param is None:
+        param = properties.get(name)
+        if not isinstance(param, Mapping):
             raise UrlTemplateError(
-                f"URL path parameter '{{{name}}}' must reference a declared parameter"
+                f"URL path parameter '{{{name}}}' must reference a declared schema property"
             )
-        if param.get("type", "string") == "json":
+        declared_types = param.get("type")
+        if isinstance(declared_types, str):
+            declared_types = {declared_types}
+        elif isinstance(declared_types, list):
+            declared_types = set(declared_types)
+        else:
+            declared_types = set()
+        if not declared_types or not declared_types.issubset(
+            {"string", "integer", "number", "boolean"}
+        ):
             raise UrlTemplateError(
-                f"URL path parameter '{{{name}}}' cannot use json type"
+                f"URL path parameter '{{{name}}}' must have a scalar, non-null JSON Schema type"
             )
         default = param.get("default")
         if default == "" or isinstance(default, (dict, list)):
             raise UrlTemplateError(
                 f"URL path parameter '{{{name}}}' default must be a non-empty scalar"
             )
-        if param.get("required", True) is False and default is None:
+        if name not in required and "default" not in param:
             raise UrlTemplateError(
                 f"URL path parameter '{{{name}}}' must be required or have a default"
             )

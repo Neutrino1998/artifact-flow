@@ -493,10 +493,11 @@ export interface paths {
         };
         /**
          * Reconstruct Admin Prompt
-         * @description 重建某一发 LLM 调用实际发出的完整 prompt（admin 取证，按 agent_start 锚定）。
+         * @description 重建某一发 LLM 调用的 messages 语义输入（admin 取证，按 agent_start 锚定）。
          *
          *     锚 = 该次调用前发出的 agent_start 事件（其 event_id 由 events 端点返回）。重建走
-         *     分支正确的 path，复用引擎同一套装配逻辑，不重新生成动态内容 —— 详见
+         *     分支正确的 path，复用引擎同一套 messages 装配逻辑，并返回当次持久化的 model；
+         *     不重新生成动态内容，也不声称还原未持久化的 native tools schema —— 详见
          *     ConversationManager.reconstruct_prompt。
          */
         get: operations["reconstruct_admin_prompt_api_v1_admin_conversations__conv_id__messages__message_id__reconstruct_get"];
@@ -1450,6 +1451,22 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * ActivatedSkillRef
+         * @description Skill the user explicitly activated on one message (display snapshot).
+         */
+        ActivatedSkillRef: {
+            /**
+             * Slug
+             * @description Skill slug resolved for this turn
+             */
+            slug: string;
+            /**
+             * Name
+             * @description Skill display name frozen at activation time
+             */
+            name: string;
+        };
+        /**
          * ActiveStreamResponse
          * @description GET /api/v1/chat/{conv_id}/active-stream response
          */
@@ -1613,10 +1630,11 @@ export interface components {
         };
         /**
          * AdminPromptReconstructResponse
-         * @description GET .../messages/{message_id}/reconstruct response — 重建某发 LLM 调用的完整 prompt。
+         * @description 重建某发 LLM 调用的 OpenAI-compatible messages 语义输入。
          *
          *     has_reminder=False 表示该 agent_start 早于 reminder 持久化（只重建了 system_prompt +
-         *     历史，无动态 reminder）。messages 的 content 可能是 str 或块列表（识图块降级为占位文本）。
+         *     历史，无动态 reminder）。不包含未持久化的 native tools schema；messages 的 content
+         *     可能是 str 或块列表（识图块降级为占位文本）。
          */
         AdminPromptReconstructResponse: {
             /** Conversation Id */
@@ -1627,6 +1645,8 @@ export interface components {
             agent_start_event_id: string;
             /** Agent Name */
             agent_name: string | null;
+            /** Model */
+            model: string | null;
             /**
              * Has Reminder
              * @default false
@@ -2170,7 +2190,7 @@ export interface components {
         ClientConfigResponse: {
             /**
              * Compaction Token Threshold
-             * @description Token sum (a single LLM call's input+output) at which the engine auto-compacts. Used by the frontend as the context-usage gauge denominator so it doesn't hardcode a value that could drift from the server.
+             * @description Effective token sum at which the lead model auto-compacts, calculated as its configured context_window minus the service reserve. Used by the frontend as the context-usage gauge denominator.
              */
             compaction_token_threshold: number;
             /**
@@ -2718,8 +2738,13 @@ export interface components {
              */
             uploaded_files: components["schemas"]["UploadedFileRef"][] | null;
             /**
+             * Activated Skills
+             * @description Skills the user explicitly activated on this turn, from Message.metadata_['activated_skills']. This is a per-message display snapshot, unlike cumulative active_skills; model-initiated read_skill calls are excluded.
+             */
+            activated_skills: components["schemas"]["ActivatedSkillRef"][] | null;
+            /**
              * Active Skills
-             * @description Skill slugs active as of this turn (sticky, from Message.metadata_['active_skills']). The branch-tail message's list is the conversation's current active set; the composer reads it to mark already-active skills in the activation picker. Absent/empty when no skills are active.
+             * @description Lead-agent skill slugs active as of this turn, projected from Message.metadata_['agent_progressive_state']['lead_agent']['active_skills']. The branch-tail message drives the activation picker. Absent/empty when no skills are active.
              */
             active_skills: string[] | null;
         };
@@ -3033,8 +3058,10 @@ export interface components {
             headers: {
                 [key: string]: string;
             };
-            /** Parameters */
-            parameters: components["schemas"]["ToolParamSpec"][];
+            /** Input Schema */
+            input_schema: {
+                [key: string]: unknown;
+            };
             /** Response Extract */
             response_extract: string | null;
             artifact_output: components["schemas"]["ArtifactOutputSpec"] | null;
@@ -3043,31 +3070,6 @@ export interface components {
              * @default 60
              */
             timeout: number;
-        };
-        /** ToolParamSpec */
-        ToolParamSpec: {
-            /** Name */
-            name: string;
-            /**
-             * Type
-             * @default string
-             * @enum {string}
-             */
-            type: "string" | "integer" | "number" | "boolean" | "json";
-            /**
-             * Description
-             * @default
-             */
-            description: string;
-            /**
-             * Required
-             * @default true
-             */
-            required: boolean;
-            /** Default */
-            default: unknown | null;
-            /** Enum */
-            enum: unknown[] | null;
         };
         /** ToolUnitImportResponse */
         ToolUnitImportResponse: {

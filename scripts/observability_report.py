@@ -209,7 +209,7 @@ def _print_token_distribution(df_llm: pd.DataFrame, hours: int) -> None:
 
     与 _print_llm_summary 的区别:那张表给 sum(成本视角)+ 延迟分位;这里给
     单次调用的 avg/median/min/max(容量视角)。input_tokens 即喂进模型的全部
-    上下文,max 能看出最坏情况离模型上限 / COMPACTION_TOKEN_THRESHOLD 多近。
+    上下文,max 能看出最坏情况离该模型有效 compaction threshold 多近。
     """
     print(f"\n=== Per-call token distribution ({hours}h) ===")
     if df_llm.empty:

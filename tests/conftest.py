@@ -15,6 +15,10 @@ os.environ.setdefault("ARTIFACTFLOW_JWT_SECRET", "test-secret-do-not-use-in-prod
 os.environ.setdefault(
     "ARTIFACTFLOW_CREDENTIAL_KEY", base64.urlsafe_b64encode(b"0" * 32).decode()
 )
+# intranet models resolve their OpenAI-compatible endpoint credentials while
+# building context, before the mocked LLM adapter runs.
+os.environ.setdefault("GPUSTACK_DEEPSEEK_API_KEY", "test-gpustack-key")
+os.environ.setdefault("GPUSTACK_VISION_API_KEY", "test-gpustack-key")
 # 测试日志隔离到 tests/logs,别污染生产 data/logs(尤其故意抛异常的中间件/路由
 # 测试会写整段 traceback)。必须在任何 app import 前设置,否则 import 时已建好的
 # logger 还是指向 data/logs。

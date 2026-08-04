@@ -25,11 +25,13 @@ def _tool_with_secret_md(name="ragflow", host_ph="TOOL_SECRET_RAGFLOW_HOST",
         "method: GET\n"
         "headers:\n"
         f'  Authorization: "Bearer {{{{{key_ph}}}}}"\n'
-        "parameters:\n"
-        "  - name: q\n"
-        "    type: string\n"
-        '    description: "query"\n'
-        "    required: true\n"
+        "input_schema:\n"
+        "  type: object\n"
+        "  properties:\n"
+        "    q:\n"
+        "      type: string\n"
+        '      description: "query"\n'
+        "  required: [q]\n"
         "---\n"
         "Body.\n"
     )

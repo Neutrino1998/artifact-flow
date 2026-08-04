@@ -8,11 +8,17 @@ _resolve_model_params — 模型名解析的 loud-fail 边界回归
 
 import pytest
 import httpx
+from types import SimpleNamespace
 
 from models.llm import (
     _resolve_model_params,
     format_messages_for_debug,
+    get_compaction_threshold,
+    get_model_context_window,
+    model_replays_reasoning,
     model_supports_vision,
+    validate_agent_model_config,
+    validate_model_config,
 )
 
 
@@ -21,6 +27,87 @@ def test_known_alias_resolves():
         _resolve_model_params("deepseek-v4-flash", api_key="test-key")["model"]
         == "openai/deepseek-v4-flash"
     )
+
+
+def test_context_window_is_required_for_every_configured_model(monkeypatch):
+    monkeypatch.setattr(
+        "models.llm._config",
+        {"models": {"missing-window": {"model": "openai/private"}}},
+    )
+
+    with pytest.raises(ValueError, match="context_window.*positive integer"):
+        validate_model_config()
+
+
+def test_replay_reasoning_must_be_boolean(monkeypatch):
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "bad-replay-flag": {
+                    "model": "openai/private",
+                    "context_window": 32768,
+                    "replay_reasoning": "false",
+                }
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="replay_reasoning.*boolean"):
+        validate_model_config()
+
+
+def test_agent_models_must_use_configured_aliases(monkeypatch):
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "configured": {
+                    "model": "openai/private",
+                    "context_window": 32768,
+                }
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="must use configured aliases"):
+        validate_model_config(["openai/direct-model"])
+
+
+def test_compact_agent_window_must_cover_every_runtime_agent(monkeypatch):
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "large": {"model": "openai/large", "context_window": 1_000_000},
+                "small": {"model": "openai/small", "context_window": 128_000},
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="compact_agent.*at least every Agent"):
+        validate_agent_model_config({
+            "lead_agent": "large",
+            "compact_agent": "small",
+        })
+
+
+def test_compaction_threshold_is_model_window_minus_global_reserve(monkeypatch):
+    monkeypatch.setattr("models.llm.settings.COMPACTION_RESERVE_TOKENS", 4096)
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "private": {
+                    "model": "openai/private",
+                    "context_window": 32768,
+                }
+            }
+        },
+    )
+
+    assert get_model_context_window("private") == 32768
+    assert get_compaction_threshold("private") == 28672
 
 
 def test_default_timeout_is_split_by_http_phase(monkeypatch):
@@ -184,6 +271,45 @@ def test_vision_flag_false_for_unknown_alias():
 
 
 # ============================================================
+# Reasoning 历史回传:model_replays_reasoning
+# ============================================================
+
+def test_replay_reasoning_defaults_true_for_compatibility(monkeypatch):
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "default-replay": {
+                    "model": "openai/private",
+                    "context_window": 32768,
+                }
+            }
+        },
+    )
+
+    assert model_replays_reasoning("default-replay") is True
+
+
+def test_replay_reasoning_false_is_app_metadata_not_litellm_param(monkeypatch):
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "defaults": {},
+            "models": {
+                "no-replay": {
+                    "model": "openai/private",
+                    "context_window": 32768,
+                    "replay_reasoning": False,
+                }
+            },
+        },
+    )
+
+    assert model_replays_reasoning("no-replay") is False
+    assert "replay_reasoning" not in _resolve_model_params("no-replay")
+
+
+# ============================================================
 # format_messages_for_debug:块列表 content 不崩 + 不吐 base64（P1 回归）
 # ============================================================
 
@@ -212,13 +338,128 @@ def test_debug_formatter_still_handles_plain_string():
 # astream_with_retry:仅瞬态错误重试,确定性错误立即 loud-fail
 # ============================================================
 
-from litellm.exceptions import BadRequestError, RateLimitError
+from litellm.exceptions import (
+    BadRequestError,
+    ContextWindowExceededError,
+    RateLimitError,
+)
 
-from models.llm import astream_with_retry
+from models.llm import LLMContextOverflowError, astream_with_retry
 
 
 async def _drain(gen):
     return [chunk async for chunk in gen]
+
+
+async def _usage_only_response():
+    yield SimpleNamespace(
+        usage=SimpleNamespace(
+            prompt_tokens=1,
+            completion_tokens=1,
+            total_tokens=2,
+        ),
+        choices=[],
+    )
+
+
+async def test_model_cache_salt_is_hmaced_and_sent_via_extra_body(monkeypatch):
+    """同用户稳定、跨用户隔离；原始 user_id 不进入 provider request。"""
+    monkeypatch.setattr("models.llm.settings.JWT_SECRET", "cache-salt-test-secret")
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "private-vllm": {
+                    "model": "openai/private-vllm",
+                    "cache_salt_field": "cache_salt",
+                    "params": {"extra_body": {"other_provider_option": True}},
+                }
+            }
+        },
+    )
+    request_bodies = []
+
+    async def fake_acompletion(**kwargs):
+        request_bodies.append(kwargs)
+        return _usage_only_response()
+
+    monkeypatch.setattr("models.llm.acompletion", fake_acompletion)
+    for user_id in ("user-a", "user-a", "user-b"):
+        await _drain(astream_with_retry(
+            [{"role": "user", "content": "same prompt"}],
+            model="private-vllm",
+            user_id=user_id,
+        ))
+
+    salts = [body["extra_body"]["cache_salt"] for body in request_bodies]
+    assert salts[0] == salts[1]
+    assert salts[0] != salts[2]
+    assert len(salts[0]) == 64  # HMAC-SHA256 hex，不是原始 user_id
+    assert "user-a" not in salts[0]
+    assert all(
+        body["extra_body"]["other_provider_option"] is True
+        for body in request_bodies
+    )
+
+
+async def test_unconfigured_model_does_not_send_cache_salt(monkeypatch):
+    monkeypatch.setattr("models.llm._config", {"models": {}})
+    captured = {}
+
+    async def fake_acompletion(**kwargs):
+        captured.update(kwargs)
+        return _usage_only_response()
+
+    monkeypatch.setattr("models.llm.acompletion", fake_acompletion)
+    await _drain(astream_with_retry(
+        [{"role": "user", "content": "x"}],
+        model="openai/fake",
+        user_id="user-a",
+    ))
+
+    assert "extra_body" not in captured
+
+
+async def test_configured_cache_salt_without_user_id_loud_fails(monkeypatch):
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "private-vllm": {
+                    "model": "openai/private-vllm",
+                    "cache_salt_field": "cache_salt",
+                }
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="has no user_id"):
+        await _drain(astream_with_retry(
+            [{"role": "user", "content": "x"}],
+            model="private-vllm",
+        ))
+
+
+@pytest.mark.parametrize("field", ["", 1, "cache-salt"])
+async def test_invalid_cache_salt_field_loud_fails(monkeypatch, field):
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "private-vllm": {
+                    "model": "openai/private-vllm",
+                    "cache_salt_field": field,
+                }
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="non-empty identifier"):
+        await _drain(astream_with_retry(
+            [{"role": "user", "content": "x"}],
+            model="private-vllm",
+            user_id="user-a",
+        ))
 
 
 async def test_bad_request_fails_fast_no_retry(monkeypatch):
@@ -233,8 +474,32 @@ async def test_bad_request_fails_fast_no_retry(monkeypatch):
     with pytest.raises(BadRequestError):
         await _drain(astream_with_retry([{"role": "user", "content": "x"}],
                                         model="deepseek-v4-flash", api_key="test-key",
+                                        user_id="test-user",
                                         max_retries=3, retry_delay=0))
     assert calls["n"] == 1  # 立即抛,无重试
+
+
+async def test_context_window_error_maps_to_engine_recovery_signal(monkeypatch):
+    """Typed overflow is not retried in the adapter; the engine owns one compact+retry."""
+    calls = {"n": 0}
+
+    async def fake_acompletion(**kwargs):
+        calls["n"] += 1
+        raise ContextWindowExceededError(
+            message="maximum context length exceeded",
+            model="m",
+            llm_provider="p",
+        )
+
+    monkeypatch.setattr("models.llm.acompletion", fake_acompletion)
+    with pytest.raises(LLMContextOverflowError):
+        await _drain(astream_with_retry(
+            [{"role": "user", "content": "x"}],
+            model="openai/test-model",
+            max_retries=3,
+            retry_delay=0,
+        ))
+    assert calls["n"] == 1
 
 
 async def test_rate_limit_is_retried(monkeypatch):
@@ -249,5 +514,6 @@ async def test_rate_limit_is_retried(monkeypatch):
     with pytest.raises(RateLimitError):
         await _drain(astream_with_retry([{"role": "user", "content": "x"}],
                                         model="deepseek-v4-flash", api_key="test-key",
+                                        user_id="test-user",
                                         max_retries=3, retry_delay=0))
     assert calls["n"] == 3  # 重试满 3 次才抛

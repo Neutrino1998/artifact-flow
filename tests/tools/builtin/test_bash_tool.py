@@ -38,8 +38,9 @@ class TestBashTool:
         tool = BashTool(FakeSession())
         assert tool.name == "bash"
         assert tool.permission == ToolPermission.AUTO
-        params = tool.get_parameters()
-        assert [p.name for p in params] == ["command"]
+        schema = tool.get_input_schema()
+        assert list(schema["properties"]) == ["command"]
+        assert schema["required"] == ["command"]
 
     def test_factory(self):
         tools = create_sandbox_tools(FakeSession(), object())

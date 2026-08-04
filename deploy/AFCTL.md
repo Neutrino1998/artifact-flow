@@ -8,7 +8,7 @@ afctl site migrate-v1 --preset intranet|public --sandbox-runtime runsc|runc
 afctl site validate
 afctl doctor
 afctl plan apply BUNDLE|RELEASE_ID|current
-afctl apply BUNDLE|RELEASE_ID|current
+afctl apply BUNDLE|RELEASE_ID|current [--keep-maintenance]
 afctl plan rollback
 afctl rollback
 afctl status
@@ -55,6 +55,11 @@ release 目录不会作为可写 bind mount。欢迎提示、品牌等 frontend 
 `apply current`，所有 Backend 副本会在重建时更新系统信任库。
 
 `plan` 永远只读。所有 release-changing apply/rollback/config apply 都使用同一 kernel lock 和 reconcile executor。成功探活前不写 state；失败时尝试恢复上一个成功 release，恢复失败则明确报错并保留维护页。
+
+需要在新 release 健康后继续执行停机检查时，使用 `apply TARGET
+--keep-maintenance`。apply 仍会先启用维护页，但成功写入 `state.json` 后不自动关闭；
+若 reconcile 失败但成功恢复 last-known-good release，也继续保留维护页。检查结束后必须显式执行
+`afctl maintenance off`。该 flag 不改变 rollback 或 config apply 的默认行为。
 
 `afctl` 不安装 runsc、不格式化磁盘，也不修改 `/etc/fstab`。runsc/runc 与 scratch mount 应在 commissioning 阶段由主机镜像、配置管理或明确的主机 SOP 预置，`doctor/apply` 只检查并 loud-fail。
 

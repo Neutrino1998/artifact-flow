@@ -191,7 +191,9 @@ def test_mount_identity():
     tool = MountSkillTool(_FakeSandbox(), _FakeService(), _skillset("a"))
     assert tool.name == "mount_skill"
     assert tool.permission == ToolPermission.AUTO
-    assert [p.name for p in tool.get_parameters()] == ["slug"]
+    schema = tool.get_input_schema()
+    assert list(schema["properties"]) == ["slug"]
+    assert schema["required"] == ["slug"]
 
 
 async def test_mount_empty_slug(tmp_path):

@@ -125,10 +125,11 @@ func dispatch(ctx context.Context, c *Controller, args []string) error {
 			return fmt.Errorf("unknown plan operation %q", args[1])
 		}
 	case "apply":
-		if len(args) != 2 {
-			return fmt.Errorf("usage: afctl apply <bundle-dir|release-id|current>")
+		target, options, err := parseApplyArgs(args[1:])
+		if err != nil {
+			return err
 		}
-		return c.Apply(ctx, args[1])
+		return c.applyWithOptions(ctx, target, options)
 	case "rollback":
 		if len(args) != 1 {
 			return fmt.Errorf("usage: afctl rollback")
@@ -158,6 +159,30 @@ func dispatch(ctx context.Context, c *Controller, args []string) error {
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func parseApplyArgs(args []string) (string, applyOptions, error) {
+	target := ""
+	options := applyOptions{}
+	for _, arg := range args {
+		switch {
+		case arg == "--keep-maintenance":
+			if options.KeepMaintenance {
+				return "", applyOptions{}, fmt.Errorf("duplicate apply flag %q", arg)
+			}
+			options.KeepMaintenance = true
+		case strings.HasPrefix(arg, "-"):
+			return "", applyOptions{}, fmt.Errorf("unknown apply flag %q", arg)
+		case target != "":
+			return "", applyOptions{}, fmt.Errorf("multiple apply targets supplied")
+		default:
+			target = arg
+		}
+	}
+	if target == "" {
+		return "", applyOptions{}, fmt.Errorf("usage: afctl apply <bundle-dir|release-id|current> [--keep-maintenance]")
+	}
+	return target, options, nil
 }
 
 func dispatchConfig(ctx context.Context, c *Controller, args []string) error {
@@ -253,7 +278,7 @@ Usage:
   afctl [--root PATH] site migrate-v1 --preset intranet|public --sandbox-runtime runsc|runc
   afctl [--root PATH] doctor
   afctl [--root PATH] plan apply <bundle-dir|release-id|current>
-  afctl [--root PATH] apply <bundle-dir|release-id|current>
+  afctl [--root PATH] apply <bundle-dir|release-id|current> [--keep-maintenance]
   afctl [--root PATH] plan rollback
   afctl [--root PATH] rollback
   afctl [--root PATH] status

@@ -59,11 +59,32 @@ export interface AgentStartData {
 export interface LLMChunkData {
   content?: string;
   reasoning_content?: string;
+  /** Cumulative, display-only progress for streamed native tool calls.
+   *  Partial arguments are intentionally represented only by their length. */
+  tool_call_progress?: ToolCallProgressData[];
+}
+
+export interface ToolCallProgressData {
+  index: number;
+  call_id?: string;
+  name?: string;
+  arguments_chars: number;
+}
+
+export interface NativeToolCall {
+  id: string;
+  type: 'function';
+  function: {
+    name: string;
+    /** OpenAI-compatible wire shape keeps arguments as encoded JSON text. */
+    arguments: string;
+  };
 }
 
 export interface LLMCompleteData {
   content: string;
   reasoning_content?: string;
+  tool_calls?: NativeToolCall[];
   model?: string;
   duration_ms?: number;
   token_usage?: TokenUsage;
@@ -75,13 +96,15 @@ export interface AgentCompleteData {
 }
 
 export interface ToolStartData {
+  call_id: string;
   tool: string;
   params: Record<string, unknown>;
-  /** The model's stated intent for this call (<reason> tag); display-only. */
+  /** Optional backend-supplied display explanation; not model reasoning. */
   reason?: string;
 }
 
 export interface ToolCompleteData {
+  call_id: string;
   tool: string;
   success: boolean;
   result_data?: unknown;
@@ -140,20 +163,26 @@ export interface ArtifactUpdatedData {
 
 export interface PermissionRequestData {
   permission_level: string;
+  call_id: string;
   tool: string;
   params: Record<string, unknown>;
-  /** The model's stated intent for this call (<reason> tag); display-only. */
+  /** Optional backend-supplied display explanation; not model reasoning. */
   reason?: string;
 }
 
 export interface PermissionResultData {
   approved: boolean;
+  call_id: string;
+  tool: string;
+  reason?: string;
 }
 
 export interface TokenUsage {
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
+  /** Provider-reported prefix-cache reads; absent means the provider did not report it. */
+  cached_input_tokens?: number;
 }
 
 export interface ExecutionMetrics {
@@ -161,6 +190,8 @@ export interface ExecutionMetrics {
   completed_at?: string;
   total_duration_ms?: number;
   total_token_usage: TokenUsage;
+  /** True when the cached-input aggregate is a lower bound because some calls did not report it. */
+  cached_input_tokens_partial?: boolean;
   /** input tokens of the turn's last LLM call = context size carried into the
    *  next turn. Used by the composer's context-usage gauge (vs the compaction
    *  threshold). Optional: pre-existing records / partial turns may omit it. */
@@ -182,11 +213,17 @@ export interface ErrorData {
   code?: string;
 }
 
+export type CompactionReason = 'forced' | 'threshold' | 'overflow';
+
 export interface CompactionStartData {
+  /** why this compaction started; overflow has no accepted-call token usage */
+  reason: CompactionReason;
   /** input tokens of the LLM call that tripped the threshold */
-  last_input_tokens: number;
+  last_input_tokens?: number;
   /** output tokens of the same call */
-  last_output_tokens: number;
+  last_output_tokens?: number;
+  /** effective per-model threshold; absent for provider overflow recovery */
+  compaction_threshold?: number;
 }
 
 export interface ExecutionQueuedData {

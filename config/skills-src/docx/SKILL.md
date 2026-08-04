@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 LibreOffice、Pandoc、python-docx、lxml、Pillow、RapidFuzz。
 metadata:
-  version: "2.5.3"
+  version: "2.5.6"
 ---
 
 # Word 文档
@@ -17,6 +17,7 @@ metadata:
 
 包内工具：[apply_redline.py](scripts/apply_redline.py)、
 [accept_changes.py](scripts/accept_changes.py)、[add_comment.py](scripts/add_comment.py)、
+[reply_comment.py](scripts/reply_comment.py)、
 [check_redlines.py](scripts/check_redlines.py)、[unpack.py](scripts/unpack.py)、
 [pack.py](scripts/pack.py)、[decompose_docx.py](scripts/decompose_docx.py)、
 [内部表格目录过滤器](scripts/catalog_tables.lua)、
@@ -31,7 +32,7 @@ metadata:
 | 新建普通文档 | Markdown + Pandoc reference docx |
 | 保留既有版式做普通小改 | python-docx，修改最少对象后另存 |
 | 以修订模式做多处修改 | `apply_redline.py --plan` |
-| 接受/拒绝修订、加批注 | 对应技能脚本 |
+| 接受/拒绝修订、加主批注、逐条回复批注 | 对应技能脚本 |
 | `.doc` 老格式 | 先用 `artifactflow-office convert` 转 `.docx` |
 | 导出 PDF、视觉质检 | `artifactflow-office convert/render` |
 
@@ -187,9 +188,21 @@ python "$SKILL/scripts/accept_changes.py" 输入.docx /workspace/接受稿.docx 
 python "$SKILL/scripts/accept_changes.py" 输入.docx /workspace/拒绝张三稿.docx --reject --author 张三
 python "$SKILL/scripts/add_comment.py" 输入.docx /workspace/批注稿.docx \
   --anchor "被批注的原文" --text-file /workspace/comment.txt --author 审阅
+python "$SKILL/scripts/reply_comment.py" 输入.docx \
+  --list /workspace/comments.json
+python "$SKILL/scripts/reply_comment.py" 输入.docx /workspace/回复稿.docx \
+  --reply-to 12 --text-file /workspace/reply.txt --author 审阅
 ```
 
 `accept_changes.py` 输出中的 `skipped` 非空时必须如实报告。批注锚点须在单段落内。
+回复前必须先 `--list`，根据 `comments.json` 中的 `id`、`text` 和 `anchor` 选择父批注；
+`id` 是须原样传给 `--reply-to` 的字符串，不要转成数字；
+每次只回复一个明确的主批注 ID，多条回复以上一次输出为下一次输入，禁止默认选第一条或按文字
+模糊匹配。回复脚本只支持正文主批注的 Office 2013 `commentsExtended` 一级回复结构；目标不存在、
+目标本身是回复、线程已解决、文档兼容模式低于 15 或缺省、线程关系损坏、批注位于页眉页脚时
+受控失败，不自动重新打开线程或升级文档兼容模式，也不手写 OOXML 绕过。
+含 `commentsIds.xml` / `commentsExtensible.xml` 的现代批注文档也明确拒绝，本版不为兼容所有
+Word 代际扩展额外维护第二套标识关系。
 
 ## 转换与质检
 

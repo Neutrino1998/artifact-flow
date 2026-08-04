@@ -1,17 +1,19 @@
 'use client';
 
 import { useCallback } from 'react';
-import { useStreamStore, scheduleContentUpdate } from '@/stores/streamStore';
+import { cancelPendingFlush, scheduleContentUpdate, useStreamStore } from '@/stores/streamStore';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useArtifactStore } from '@/stores/artifactStore';
 import { useUIStore } from '@/stores/uiStore';
 import { connectSSE } from '@/lib/sse';
 import { StreamEventType } from '@/types/events';
-import type { SSEEvent, LLMCompleteData, ArtifactCreatedData, ArtifactUpdatedData } from '@/types/events';
+import type { SSEEvent, LLMCompleteData, ToolCallProgressData, ArtifactCreatedData, ArtifactUpdatedData } from '@/types/events';
 import * as api from '@/lib/api';
 import { refreshArtifactList } from '@/lib/refreshArtifactList';
 import { bumpArtifactFetchGen } from '@/lib/artifactFetchGen';
 import { getNavGen } from '@/lib/navGen';
+import { notifyTaskTerminal } from '@/lib/taskNotifications';
+import { useAuthStore } from '@/stores/authStore';
 
 const ARTIFACT_TOOLS = new Set([
   'create_artifact',
@@ -30,13 +32,6 @@ let _sharedAbortController: AbortController | null = null;
 // pairing). Cleared on stream start/end via endStream() consumer.
 let _pendingPermissionResult: { approved: boolean; reason?: string } | null = null;
 
-// Monotonic suffix making each live tool-call id unique. `Date.now()` alone
-// collides when the same tool is invoked twice within one ms (e.g. two
-// create_artifact calls in one multi-tool turn, both tool_start frames parsed
-// in the same tick) → duplicate React keys. Matching of tool_complete is by
-// (toolName, running status), not id, so a unique id is safe.
-let _toolCallSeq = 0;
-
 const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_BASE_DELAY_MS = 1000;
 const INJECT_EVENT_PREFIX =
@@ -53,7 +48,6 @@ export function useSSE() {
   // Stream store actions
   const pushSegment = useStreamStore((s) => s.pushSegment);
   const updateCurrentSegment = useStreamStore((s) => s.updateCurrentSegment);
-  const updateAgentSegment = useStreamStore((s) => s.updateAgentSegment);
   const addToolCallToSegment = useStreamStore((s) => s.addToolCallToSegment);
   const updateToolCallInSegment = useStreamStore((s) => s.updateToolCallInSegment);
   const snapshotSegments = useStreamStore((s) => s.snapshotSegments);
@@ -103,6 +97,7 @@ export function useSSE() {
           ? metrics as Record<string, unknown>
           : null,
         uploadedFiles: streamState.pendingUserFiles?.map((filename) => ({ filename })) ?? null,
+        activatedSkills: streamState.pendingUserSkills,
       });
     },
     [applyTerminalMessageSnapshot],
@@ -244,8 +239,12 @@ export function useSSE() {
         }
 
         case StreamEventType.AGENT_START: {
+          // No chunk from the completed invocation may cross this structural
+          // boundary. The scheduler is also segment-id-bound, so this cancel
+          // protects the old segment's authoritative LLM_COMPLETE snapshot.
+          cancelPendingFlush();
           // Mark previous segment as complete — a new turn implies the prior is done
-          updateCurrentSegment({ status: 'complete' });
+          updateCurrentSegment({ status: 'complete', llmStreamChannel: null });
           pushSegment(event.agent ?? 'Agent');
           // Engine started executing — clear the concurrency-queue banner if any.
           setQueuedInfo(null);
@@ -265,7 +264,23 @@ export function useSSE() {
         case StreamEventType.LLM_CHUNK: {
           const reasoning = data?.reasoning_content as string | undefined;
           if (reasoning !== undefined) {
-            updateCurrentSegment({ reasoningContent: reasoning, isThinking: true });
+            updateCurrentSegment({ reasoningContent: reasoning, llmStreamChannel: 'reasoning' });
+          }
+
+          const rawToolProgress = data?.tool_call_progress;
+          if (Array.isArray(rawToolProgress)) {
+            updateCurrentSegment({
+              toolCallProgress: (rawToolProgress as ToolCallProgressData[]).map((progress) => ({
+                index: progress.index,
+                ...(progress.call_id ? { callId: progress.call_id } : {}),
+                ...(progress.name ? { toolName: progress.name } : {}),
+                argumentsChars: progress.arguments_chars,
+                status: 'generating' as const,
+              })),
+              // Native-call output follows reasoning semantically, just like
+              // ordinary content, so the thinking indicator is no longer live.
+              llmStreamChannel: null,
+            });
           }
 
           const content = data?.content as string | undefined;
@@ -273,35 +288,33 @@ export function useSSE() {
             // Auto-fold thinking when content starts arriving
             const currentSeg = useStreamStore.getState().segments;
             const last = currentSeg[currentSeg.length - 1];
-            if (last?.isThinking) {
-              updateCurrentSegment({ isThinking: false });
-            }
-            // Use RAF-throttled update for segment content
-            scheduleContentUpdate(content);
+            if (last) updateCurrentSegment({ llmStreamChannel: 'content' });
+            // Use an id-targeted RAF update so a late frame cannot write into
+            // the next LLM invocation's segment.
+            if (last) scheduleContentUpdate(last.id, content);
           }
           break;
         }
 
         case StreamEventType.LLM_COMPLETE: {
           const d = (data ?? {}) as Partial<LLMCompleteData>;
-          const finalContent = d.content;
-
-          // Determine the definitive content (from event data or accumulated chunks)
-          const segs = useStreamStore.getState().segments;
-          const lastSeg = segs[segs.length - 1];
-          const effectiveContent = finalContent || lastSeg?.content || '';
-
-          // Preserve raw LLM output when it contains XML tool calls.
-          // This covers call_subagent (no TOOL_START event) and acts as
-          // an early save for regular tools (TOOL_START won't overwrite).
-          const llmOutputUpdate = effectiveContent.includes('<tool_call>') && !lastSeg?.llmOutput
-            ? { llmOutput: effectiveContent }
-            : {};
+          // This is the authoritative snapshot for the invocation. Drop any
+          // RAF-buffered chunk before committing it; native tool_calls remain
+          // structured in this event and execution cards come from TOOL_START.
+          cancelPendingFlush();
 
           updateCurrentSegment({
-            ...(finalContent ? { content: finalContent } : {}),
-            isThinking: false,
-            ...llmOutputUpdate,
+            ...(d.content !== undefined ? { content: d.content } : {}),
+            llmStreamChannel: null,
+            // The accepted envelope is authoritative.  Keep calls visible as
+            // queued until their serial TOOL_START replaces each draft card.
+            toolCallProgress: (d.tool_calls ?? []).map((call, index) => ({
+              index,
+              callId: call.id,
+              toolName: call.function.name,
+              argumentsChars: call.function.arguments.length,
+              status: 'queued' as const,
+            })),
             // Backfill reasoning when the provider only delivers it on the
             // final event (no llm_chunk reasoning_content stream). Without
             // this, live shows blank reasoning while replay can — same gap
@@ -315,35 +328,22 @@ export function useSSE() {
         }
 
         case StreamEventType.AGENT_COMPLETE:
-          updateCurrentSegment({ status: 'complete' });
+          updateCurrentSegment({ status: 'complete', llmStreamChannel: null });
           break;
 
         case StreamEventType.TOOL_START: {
           // TWIN: ToolCallInfo is also built in reconstructSegments.ts `tool_start`
           // (history reload) — keep this field set identical to that one.
+          const callId = data?.call_id as string | undefined;
           const toolName = data?.tool as string ?? '';
           const params = data?.params as Record<string, unknown> ?? {};
           const reason = data?.reason as string | undefined;
           const agent = event.agent ?? '';
 
-          // Lane by agent (TWIN: reconstructSegments.ts `tool_start` mirrors
-          // this): with in-place subagent recursion the caller's later tools
-          // arrive AFTER the subagent's segment — "last segment" would misfile
-          // them onto the subagent's lane and wrongly clear its content.
-          const agentLane = event.agent ?? 'Agent';
-          const segs = useStreamStore.getState().segments;
-          let laneSeg = segs[segs.length - 1];
-          for (let i = segs.length - 1; i >= 0; i--) {
-            if (segs[i].agent === agentLane) {
-              laneSeg = segs[i];
-              break;
-            }
+          if (!callId) {
+            console.error('[useSSE] tool_start missing native call_id');
+            break;
           }
-
-          // Preserve LLM output before clearing content (only on first tool_start)
-          const preserveLlmOutput = laneSeg?.content && !laneSeg.llmOutput
-            ? { llmOutput: laneSeg.content }
-            : {};
 
           // Latch a just-resolved permission_result onto this tool call (the
           // tool the user just approved/denied). Engine emits permission_result
@@ -352,7 +352,7 @@ export function useSSE() {
           _pendingPermissionResult = null;
 
           addToolCallToSegment({
-            id: `${toolName}-${Date.now()}-${_toolCallSeq++}`,
+            id: callId,
             toolName,
             params,
             agent,
@@ -360,12 +360,11 @@ export function useSSE() {
             ...(reason ? { reason } : {}),
             ...(permission ? { permission } : {}),
           });
-          // Clear streaming content when entering tool phase (laned segment)
-          updateAgentSegment(laneSeg ? laneSeg.agent : agentLane, { content: '', ...preserveLlmOutput });
           break;
         }
 
         case StreamEventType.TOOL_COMPLETE: {
+          const callId = data?.call_id as string | undefined;
           const toolName = data?.tool as string ?? '';
           const success = data?.success as boolean ?? true;
           const result = typeof data?.result_data === 'string'
@@ -375,27 +374,20 @@ export function useSSE() {
               : JSON.stringify(data?.result_data ?? data?.result ?? '');
           const durationMs = data?.duration_ms as number | undefined;
 
-          // Find the matching running tool call across all segments. The engine
-          // guarantees a paired TOOL_START precedes every TOOL_COMPLETE (see
-          // engine.py _execute_tools), so a missing match means the producer
-          // contract is broken — surface it loudly instead of silently dropping.
+          // Native call_id is the structural join key. Tool names are not
+          // identities: the same tool may appear more than once in one response.
           const segments = useStreamStore.getState().segments;
-          let runningId: string | undefined;
-          for (const seg of segments) {
-            const running = seg.toolCalls.find(
-              (tc) => tc.toolName === toolName && tc.status === 'running'
-            );
-            if (running) {
-              runningId = running.id;
-              break;
-            }
-          }
-          if (!runningId) {
+          const running = callId
+            ? segments.some((seg) => seg.toolCalls.some(
+              (tc) => tc.id === callId && tc.status === 'running'
+            ))
+            : false;
+          if (!callId || !running) {
             console.error(
-              `[useSSE] tool_complete for "${toolName}" with no matching running tool — engine pairing contract violated`
+              `[useSSE] tool_complete for "${toolName}" has no matching running call_id — engine pairing contract violated`
             );
           } else {
-            updateToolCallInSegment(runningId, {
+            updateToolCallInSegment(callId, {
               status: success ? 'success' : 'error',
               result,
               durationMs,
@@ -473,9 +465,10 @@ export function useSSE() {
             kind: 'compaction',
             id: `compact-${event.timestamp}`,
             state: 'running',
-            triggerTokens: d
+            triggerTokens: d?.last_input_tokens != null && d.last_output_tokens != null
               ? { input: d.last_input_tokens, output: d.last_output_tokens }
               : undefined,
+            reason: d?.reason,
             timestamp: event.timestamp,
             position: useStreamStore.getState().segments.length,
           });
@@ -529,6 +522,8 @@ export function useSSE() {
             snapshotSegments(messageId);
           }
           snapshotTerminalMessage(conversationId, messageId, data?.response as string | undefined, metrics);
+          const userId = useAuthStore.getState().user?.id;
+          if (userId && messageId) notifyTaskTerminal(userId, messageId, 'complete');
           endStream();
           refreshAfterComplete(conversationId, messageId);
           break;
@@ -545,6 +540,8 @@ export function useSSE() {
             snapshotSegments(messageId);
           }
           snapshotTerminalMessage(conversationId, messageId, data?.response as string | undefined, metrics);
+          const userId = useAuthStore.getState().user?.id;
+          if (userId && messageId) notifyTaskTerminal(userId, messageId, 'timed_out');
           endStream();
           refreshAfterComplete(conversationId, messageId);
           break;
@@ -576,6 +573,8 @@ export function useSSE() {
             snapshotSegments(errMsgId);
           }
           snapshotTerminalMessage(conversationId, errMsgId, (data?.response as string | undefined) ?? errMsg, metrics);
+          const userId = useAuthStore.getState().user?.id;
+          if (userId && errMsgId) notifyTaskTerminal(userId, errMsgId, 'error');
           endStream();
           refreshAfterComplete(conversationId, errMsgId);
           break;
@@ -586,7 +585,7 @@ export function useSSE() {
       }
     },
     [
-      pushSegment, updateCurrentSegment, updateAgentSegment, addToolCallToSegment,
+      pushSegment, updateCurrentSegment, addToolCallToSegment,
       updateToolCallInSegment, snapshotSegments, setPermissionRequest,
       setError, endStream, refreshAfterComplete, setArtifactPanelVisible,
       setArtifactSessionId,

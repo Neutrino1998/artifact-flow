@@ -157,7 +157,7 @@ def seed_to_create_spec(seed: ToolUnitSeed) -> Dict[str, Any]:
                 "endpoint": m.definition.get("endpoint", ""),
                 "method": m.definition.get("method", "GET"),
                 "headers": m.definition.get("headers", {}) or {},
-                "parameters": m.definition.get("parameters", []) or [],
+                "input_schema": m.definition["input_schema"],
                 "response_extract": m.definition.get("response_extract"),
                 "artifact_output": m.definition.get("artifact_output"),
                 "timeout": m.definition.get("timeout", 60),
@@ -188,8 +188,7 @@ def _member_frontmatter(member: ToolMember, *, fallback_name: str) -> Dict[str, 
         fm["response_extract"] = definition["response_extract"]
     if definition.get("artifact_output"):
         fm["artifact_output"] = definition["artifact_output"]
-    if definition.get("parameters"):
-        fm["parameters"] = definition["parameters"]
+    fm["input_schema"] = definition["input_schema"]
     return fm
 
 

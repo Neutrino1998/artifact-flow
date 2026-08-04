@@ -12,8 +12,10 @@ models:
   # 参数),没有 thinking-需要-低温 这个差异。两边对称,后续做评测才有干净的对照。
   deepseek-v4-flash:
     model: openai/deepseek-v4-flash
+    context_window: 260000
     base_url: http://172.25.16.129:85/v1
     api_key_env: GPUSTACK_DEEPSEEK_API_KEY
+    cache_salt_field: cache_salt
     params:
       temperature: 0.8
       top_p: 0.95
@@ -23,8 +25,10 @@ models:
 
   deepseek-v4-flash-no-thinking:
     model: openai/deepseek-v4-flash
+    context_window: 260000
     base_url: http://172.25.16.129:85/v1
     api_key_env: GPUSTACK_DEEPSEEK_API_KEY
+    cache_salt_field: cache_salt
     params:
       temperature: 0.8
       top_p: 0.95
@@ -34,8 +38,10 @@ models:
 
   qwen3.6-27b-vision:
     model: openai/qwen3.6-27b
+    context_window: 128000
     base_url: http://172.22.3.54/v1
     api_key_env: GPUSTACK_VISION_API_KEY
+    cache_salt_field: cache_salt
     vision: true
 
 # ========================================
@@ -45,6 +51,7 @@ models:
 # # 另一个 OpenAI 兼容内网 endpoint
 # my-other-model:
 #   model: openai/my-model-name
+#   context_window: 32768
 #   base_url: http://10.0.0.1:8080/v1
 #   api_key: dummy
 #   # 或使用环境变量承载密钥，避免把真实 token 写进 git:

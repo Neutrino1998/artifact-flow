@@ -3,6 +3,7 @@ import type {
   ConversationSummary,
   ConversationDetail,
   MessageResponse,
+  ActivatedSkillRef,
 } from '@/types';
 import { MessageNode, buildMessageTree, extractBranchPath } from '@/lib/messageTree';
 
@@ -48,6 +49,7 @@ interface ConversationState {
     response: string;
     executionMetrics?: Record<string, unknown> | null;
     uploadedFiles?: { filename: string }[] | null;
+    activatedSkills?: ActivatedSkillRef[] | null;
   }) => void;
   removeConversation: (id: string) => void;
   /** Optimistically set the cached active_message_id for a conv. Called by
@@ -129,6 +131,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     response,
     executionMetrics,
     uploadedFiles,
+    activatedSkills,
   }) => {
     const now = new Date().toISOString();
     const state = get();
@@ -144,6 +147,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         response,
         execution_metrics: executionMetrics ?? messages[idx].execution_metrics ?? null,
         uploaded_files: uploaded ?? messages[idx].uploaded_files ?? null,
+        activated_skills: activatedSkills ?? messages[idx].activated_skills ?? null,
       };
     } else {
       messages.push({
@@ -155,6 +159,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         children: [],
         execution_metrics: executionMetrics ?? null,
         uploaded_files: uploaded ?? null,
+        activated_skills: activatedSkills ?? null,
         active_skills: null,
       });
     }

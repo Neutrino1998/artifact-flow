@@ -12,7 +12,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from dotenv import load_dotenv
 
-from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
+from tools.base import BaseTool, ToolResult, ToolPermission
 from utils.logger import get_logger
 
 # 加载环境变量
@@ -52,33 +52,34 @@ class WebSearchTool(BaseTool):
         if not BOCHA_API_KEY:
             logger.warning("BOCHA_API_KEY not found in environment variables")
     
-    def get_parameters(self) -> List[ToolParameter]:
-        return [
-            ToolParameter(
-                name="query",
-                type="string",
-                description=(
+    def get_input_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
                     "Search query using natural keywords. "
                     "Does not support search operators (site:, AND, OR, quotes, minus signs)."
-                ),
-                required=True
-            ),
-            ToolParameter(
-                name="freshness",
-                type="string",
-                description="Time range filter",
-                required=False,
-                default="noLimit",
-                enum=["noLimit", "oneDay", "oneWeek", "oneMonth", "oneYear"]
-            ),
-            ToolParameter(
-                name="count",
-                type="integer",
-                description="Number of results to return (1-50, default: 10)",
-                required=False,
-                default=10
-            )
-        ]
+                    ),
+                },
+                "freshness": {
+                    "type": "string",
+                    "description": "Time range filter",
+                    "enum": ["noLimit", "oneDay", "oneWeek", "oneMonth", "oneYear"],
+                    "default": "noLimit",
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "Number of results to return (1-50, default: 10)",
+                    "minimum": 1,
+                    "maximum": 50,
+                    "default": 10,
+                },
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        }
     
     _MAX_RETRIES = 3
     _BASE_DELAY = 2.0

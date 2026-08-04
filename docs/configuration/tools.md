@@ -20,11 +20,14 @@ headers:
   Authorization: Bearer {{TOOL_SECRET_STOCK_API_KEY}}
 timeout: 60
 response_extract: data.price
-parameters:
-  - name: symbol
-    type: string
-    description: Stock ticker such as AAPL
-    required: true
+input_schema:
+  type: object
+  properties:
+    symbol:
+      type: string
+      description: Stock ticker such as AAPL
+  required: [symbol]
+  additionalProperties: false
 ---
 
 Use this tool for current stock prices.
@@ -44,10 +47,12 @@ Use this tool for current stock prices.
 | `headers` | `{}` | 固定请求头，可引用 Secret |
 | `timeout` | `60` | 单次上游请求超时，单位秒 |
 | `response_extract` | — | 可选 JMESPath，如 `data.items[*].id` |
-| `parameters` | `[]` | 模型可填写的参数 |
+| `input_schema` | 空 object schema | 业务参数的 JSON Schema Draft 2020-12 定义 |
 | `artifact_output` | — | 可选，把响应直接保存为文本或二进制 Artifact |
 
-参数类型支持 `string`、`integer`、`number`、`boolean`、`json`。每个参数可声明 `description`、`required`、`default` 和 `enum`。
+`input_schema` 的根节点必须是 `type: object`，支持完整 JSON Schema Draft 2020-12，包括嵌套 object/array、`items`、`oneOf`、`enum`、`minProperties`、`propertyNames`、数值和字符串约束等。ArtifactFlow 将其无损导出为 native function schema，并在运行时用同一份业务语义验证参数；不会注入额外控制属性。
+
+POST / PUT / PATCH 将参数以原生 JSON body 发送，嵌套对象和数组不会再转成字符串。GET 的标量按普通 query value 编码，对象、数组和 null 使用确定性的紧凑 JSON 字符串。URL path 模板只能引用 schema 中必填或带默认值的非 null 标量属性。
 
 ## Secret
 

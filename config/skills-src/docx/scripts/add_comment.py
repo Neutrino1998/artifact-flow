@@ -9,8 +9,8 @@
 命中第一处。批注范围按 run 粒度覆盖(覆盖所有与锚点重叠的 run,可能比锚点略宽,
 Word 里高亮区域以 run 为界是正常现象)。
 
-产出的是基础批注(word/comments.xml)。Word 全系可读;不生成 commentsExtended
-等扩展部件,因此不支持「回复串/已解决状态」—— 需要回复请在批注文本里引用上下文。
+产出的是基础主批注(word/comments.xml)。Word 全系可读;不生成 commentsExtended
+等扩展部件。需要回复已有批注时使用 reply_comment.py,不要把回复伪装成新批注。
 输出末行为 JSON(批注 id + 命中段落序号)。
 """
 

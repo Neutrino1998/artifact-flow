@@ -53,6 +53,7 @@ describe('conversationStore — active_message_id CAS', () => {
       response: '*Task timed out*',
       executionMetrics: { total_duration_ms: 1_800_000 },
       uploadedFiles: [{ filename: 'brief.docx' }],
+      activatedSkills: [{ slug: 'docx', name: 'Word 文档' }],
     });
 
     const state = useConversationStore.getState();
@@ -62,6 +63,9 @@ describe('conversationStore — active_message_id CAS', () => {
     expect(state.branchPath.map((m) => m.id)).toEqual(['msg-timeout']);
     expect(state.branchPath[0].response).toBe('*Task timed out*');
     expect(state.branchPath[0].uploaded_files?.[0].filename).toBe('brief.docx');
+    expect(state.branchPath[0].activated_skills).toEqual([
+      { slug: 'docx', name: 'Word 文档' },
+    ]);
   });
 
   test('terminal snapshot updates an existing message response', () => {
@@ -82,6 +86,7 @@ describe('conversationStore — active_message_id CAS', () => {
         children: [],
         execution_metrics: null,
         uploaded_files: null,
+        activated_skills: null,
         active_skills: null,
       }],
     });
@@ -119,6 +124,7 @@ describe('conversationStore — active_message_id CAS', () => {
         children: [],
         execution_metrics: null,
         uploaded_files: null,
+        activated_skills: null,
         active_skills: null,
       }],
     });

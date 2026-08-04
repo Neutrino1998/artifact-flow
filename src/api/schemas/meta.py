@@ -14,9 +14,9 @@ class ClientConfigResponse(BaseModel):
     compaction_token_threshold: int = Field(
         ...,
         description=(
-            "Token sum (a single LLM call's input+output) at which the engine "
-            "auto-compacts. Used by the frontend as the context-usage gauge denominator "
-            "so it doesn't hardcode a value that could drift from the server."
+            "Effective token sum at which the lead model auto-compacts, calculated as "
+            "its configured context_window minus the service reserve. Used by the "
+            "frontend as the context-usage gauge denominator."
         ),
     )
     lead_agent_model: str = Field(

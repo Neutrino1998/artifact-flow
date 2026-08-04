@@ -53,7 +53,10 @@ class Settings(BaseSettings):
     MCP_POOL_TIMEOUT: float = Field(default=5.0, gt=0)
 
     # Compaction / Context 配置
-    COMPACTION_TOKEN_THRESHOLD: int = 100000  # tokens, LLM 单次调用 input+output 超此值触发引擎内 compaction
+    # 每个模型的 context_window 在 config/models/models.yaml 显式声明；引擎以
+    # context_window - reserve 作为该模型自己的 compaction 阈值。reserve 是服务级
+    # 隐藏旋钮，不进入模型参数，也不暴露给 agent。
+    COMPACTION_RESERVE_TOKENS: int = Field(default=20_000, gt=0)
     # 上一轮 input+output / 阈值 ≥ 此比例时，向 agent 注入 <context_usage> 预警(临近 compaction
     # → 提示把要据此动作的状态落 artifact)。隐藏实现旋钮，模型不可见(见 CLAUDE.md 工具参数面最小化)。
     CONTEXT_USAGE_WARN_RATIO: float = 0.8
@@ -70,11 +73,6 @@ class Settings(BaseSettings):
     TOOL_PERSIST_PREVIEW_LENGTH: int = 1000  # 工具结果落盘后回填给模型的预览长度
     SEARCH_TOOLS_MAX_RESULTS: int = 15      # search_tools 单次渲染完整 doc 的工具数上限（隐藏）；
                                             # 超出只列名，防把整集 schema 灌爆下一次 call（压缩不兜底 tool-result overflow）
-    # 是否在工具目录(<available_tools> / search_tools 结果)里给每个工具渲染 XML 调用示例。
-    # 部署级开关(对齐模型能力):弱模型 → 留 True 换调用稳定性;强模型 → 可关省 token,
-    # 调用语法已由 generate_tool_grammar 的稳定前缀(含 CDATA 结构)自洽承载,无示例也能调。
-    # 粒度刻意是 deployment(非 per-tool):示例需不需要取决于这台部署用什么模型,与具体工具无关。
-    RENDER_TOOL_EXAMPLES: bool = True
     # ARTIFACT_CREATED / ARTIFACT_UPDATED(rewrite)整文事件的体积上限。超限则事件
     # 只带"已变更"信号(content 省略、content_omitted=True),前端靠 COMPLETE 后的
     # DB 对齐补全(对齐本就兜底)。update 的 span delta 不受此限(权威且体量随模型输出)。

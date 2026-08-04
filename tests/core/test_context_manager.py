@@ -15,6 +15,8 @@ from core.context_manager import ContextManager
 from core.events import StreamEventType, ExecutionEvent
 from tests.core._toolset import effective_one
 
+TEST_COMPACTION_THRESHOLD = 100_000
+
 
 # ============================================================
 # Helpers
@@ -88,6 +90,7 @@ def _build(agent, agents=None, **kwargs):
         agents = {agent.name: agent}
     elif agent.name not in agents:
         agents[agent.name] = agent
+    kwargs.setdefault("compaction_threshold", TEST_COMPACTION_THRESHOLD)
     messages, _reminder = ContextManager.build(
         agent_name=agent.name,
         agents=agents,
@@ -123,6 +126,26 @@ class TestSystemPrompt:
         system_msg = messages[0]
         assert system_msg["role"] == "system"
         assert "research assistant" in system_msg["content"]
+
+    def test_target_model_can_disable_reasoning_history_replay(self):
+        agent = _FakeAgentConfig()
+        state = _make_state(events=[
+            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+            _make_event(StreamEventType.LLM_COMPLETE.value, data={
+                "content": "answer",
+                "reasoning_content": "private reasoning",
+            }),
+            _tool_complete(),
+        ])
+
+        with patch(
+            "core.context_manager.model_replays_reasoning", return_value=False
+        ):
+            messages = _build(agent, state=state, tools={})
+
+        assistant = next(m for m in messages if m["role"] == "assistant")
+        assert assistant["content"] == "answer"
+        assert "reasoning_content" not in assistant
 
     def test_system_time_in_trailing_reminder_not_system_prompt(self):
         agent = _FakeAgentConfig()
@@ -164,16 +187,19 @@ class TestSystemPrompt:
         messages = _build(agent, state=state, tools={})  # available_skills 缺省
         assert "<available_skills>" not in messages[-1]["content"]
 
-    def test_with_tools_grammar_in_system_docs_in_reminder(self):
-        """B-3:system prompt 只放协议语法(稳定前缀),per-tool 描述挪到尾部
-        <available_tools> reminder。"""
-        from tools.base import BaseTool, ToolPermission, ToolResult, ToolParameter
+    def test_native_tools_do_not_duplicate_protocol_or_schema_in_prompt(self):
+        """Native declarations travel in the API request, not prompt text."""
+        from tools.base import BaseTool, ToolPermission, ToolResult
 
         class FakeTool(BaseTool):
             def __init__(self):
                 super().__init__(name="web_search", description="Search the web", permission=ToolPermission.AUTO)
-            def get_parameters(self):
-                return [ToolParameter(name="query", type="string", description="Search query")]
+            def get_input_schema(self):
+                return {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                }
             async def execute(self, **p):
                 return ToolResult(success=True)
 
@@ -188,15 +214,11 @@ class TestSystemPrompt:
             tools={"web_search": FakeTool()},
         )
         system_content = messages[0]["content"]
-        # 语法块在 system prompt(可缓存前缀)
-        assert "<tool_instructions>" in system_content
-        assert "<format>" in system_content
-        # per-tool 描述不在 system prompt —— 挪到尾部 reminder
+        assert "<tool_instructions>" not in system_content
         assert "web_search" not in system_content
         reminder = messages[-1]["content"]
-        assert "<available_tools>" in reminder
-        assert "web_search" in reminder
-        assert "Search the web" in reminder
+        assert "web_search" not in reminder
+        assert "Search the web" not in reminder
 
     def test_no_tools_no_grammar_no_available_tools(self):
         agent = _FakeAgentConfig(tools={})
@@ -561,19 +583,20 @@ class TestArtifactsAndAgents:
 class TestDynamicContextReminder:
     """动态上下文（时间 / task_plan / 清单）作为 ephemeral <system-reminder> 并入末条消息。"""
 
-    def test_reminder_merged_into_last_message_no_extra_message(self):
+    def test_reminder_is_an_independent_trailing_user_message(self):
         agent = _FakeAgentConfig()
         state = _make_state(events=[
             _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi there"}),
         ])
 
         messages = _build(agent, state=state, tools={})
-        # [system, user] —— reminder 并入末条 user，不新增独立消息、不劈开历史
-        assert len(messages) == 2
+        # [system, historical user, ephemeral reminder user]
+        assert len(messages) == 3
         last = messages[-1]
         assert last["role"] == "user"
-        assert "hi there" in last["content"]            # 原内容保留
-        assert "<system-reminder>" in last["content"]   # reminder 并入同一条
+        assert "hi there" not in last["content"]
+        assert messages[-2]["content"] == "hi there"
+        assert "<system-reminder>" in last["content"]
 
     def test_reminder_is_ephemeral_not_written_to_events(self):
         agent = _FakeAgentConfig()
@@ -583,10 +606,39 @@ class TestDynamicContextReminder:
         ContextManager.build(
             agent_name=agent.name, agents={agent.name: agent}, state=state, tools={},
             effective_toolset=effective_one(agent, {}),
+            compaction_threshold=TEST_COMPACTION_THRESHOLD,
         )
         # build 不得把 reminder 写回 event —— 否则过期时间/清单会冻进历史
         assert user_event.data["content"] == "hi"
         assert "<system-reminder>" not in user_event.data["content"]
+
+    def test_trailing_tool_image_is_attached_to_new_user_reminder(self):
+        history = [{
+            "role": "tool",
+            "tool_call_id": "call_image",
+            "content": "image result",
+            "_meta": {
+                "image": {
+                    "artifact_id": "shot",
+                    "version": 1,
+                    "content_type": "image/png",
+                    "data_uri": "data:image/png;base64,AAAA",
+                }
+            },
+        }]
+
+        messages = ContextManager.assemble("system", history, "<system-reminder>x</system-reminder>")
+
+        assert messages[1] == {
+            "role": "tool",
+            "tool_call_id": "call_image",
+            "content": "image result",
+        }
+        assert messages[2]["role"] == "user"
+        blocks = messages[2]["content"]
+        assert blocks[0]["type"] == "text"
+        assert "call_image" in blocks[1]["text"]
+        assert blocks[2]["image_url"]["url"] == "data:image/png;base64,AAAA"
 
     def test_system_prompt_has_no_dynamic_content(self):
         agent = _FakeAgentConfig(tools={"create_artifact": "auto"})
@@ -610,33 +662,35 @@ class TestAvailableTools:
     """B-3:<available_tools> 渲染 —— non-deferred 出完整 doc,deferred unit 只出索引行。"""
 
     def _tool(self, name, description, permission=None):
-        from tools.base import BaseTool, ToolPermission, ToolResult, ToolParameter
+        from tools.base import BaseTool, ToolPermission, ToolResult
 
         class _T(BaseTool):
             def __init__(self):
                 super().__init__(name=name, description=description,
                                  permission=permission or ToolPermission.AUTO)
-            def get_parameters(self):
-                return [ToolParameter(name="q", type="string", description="param q")]
+            def get_input_schema(self):
+                return {
+                    "type": "object",
+                    "properties": {
+                        "q": {"type": "string", "description": "param q"},
+                    },
+                }
             async def execute(self, **p):
                 return ToolResult(success=True)
         return _T()
 
-    def test_non_deferred_renders_full_doc(self):
+    def test_non_external_catalog_schema_is_not_rendered_as_prompt_text(self):
         from core.context_manager import ContextManager
         from core.effective_toolset import EffectiveToolset
         from tools.base import ToolPermission
 
         tools = {"weather": self._tool("weather", "Query the weather forecast")}
         eff = EffectiveToolset({"weather": ToolPermission.AUTO})
-        block = ContextManager._build_available_tools(eff, tools)
-        assert "<available_tools>" in block
-        assert "weather" in block
-        assert "Query the weather forecast" in block
-        # 完整 doc 含参数
-        assert "param q" in block
-        assert 'disclosure="deferred"' not in block
-        assert "<tool_boundaries>" not in block
+        block = ContextManager._build_available_tools(eff, tools, set())
+        assert block == ""
+        native = tools["weather"].to_native_tool_schema()
+        assert native["function"]["name"] == "weather"
+        assert native["function"]["parameters"]["properties"]["q"]["type"] == "string"
 
     def test_bash_renders_platform_and_data_boundaries(self):
         from core.context_manager import ContextManager
@@ -647,15 +701,15 @@ class TestAvailableTools:
         tools = {name: self._tool(name, f"{name} description") for name in names}
         eff = EffectiveToolset({name: ToolPermission.AUTO for name in names})
 
-        block = ContextManager._build_available_tools(eff, tools)
+        block = ContextManager._build_available_tools(eff, tools, set())
 
         assert "<tool_boundaries>" in block
-        assert "platform tools" in block
-        assert "never put them inside bash.command" in block
+        assert "Platform tools" in block
+        assert "never put their names inside bash.command" in block
         assert "separate copies with no automatic sync" in block
         assert "edit an existing artifact with mount -> bash -> persist" in block
         assert "create a new file with bash -> persist" in block
-        assert block.index("<tool_boundaries>") < block.index('<tool name="bash">')
+        assert '<tool name="bash">' not in block
 
     def test_bash_without_stage_tools_omits_data_boundary(self):
         from core.context_manager import ContextManager
@@ -665,10 +719,10 @@ class TestAvailableTools:
         tools = {"bash": self._tool("bash", "Run shell commands")}
         eff = EffectiveToolset({"bash": ToolPermission.AUTO})
 
-        block = ContextManager._build_available_tools(eff, tools)
+        block = ContextManager._build_available_tools(eff, tools, set())
 
         assert "<tool_boundaries>" in block
-        assert "platform tools" in block
+        assert "Platform tools" in block
         assert "separate copies with no automatic sync" not in block
 
     def test_deferred_unit_renders_index_line_only(self):
@@ -681,24 +735,25 @@ class TestAvailableTools:
             "github__create_issue": self._tool("github__create_issue", "Open issue"),
             "search_tools": self._tool("search_tools", "the searcher"),
         }
+        github_unit = DeferredUnit(
+            name="github", description="GitHub API",
+            member_full_names=["github__search_repos", "github__create_issue"],
+        )
         eff = EffectiveToolset(
             permissions={
                 "github__search_repos": ToolPermission.AUTO,
                 "github__create_issue": ToolPermission.CONFIRM,
                 "search_tools": ToolPermission.AUTO,
             },
-            deferred_units={"github": DeferredUnit(
-                name="github", description="GitHub API",
-                member_full_names=["github__search_repos", "github__create_issue"],
-            )},
+            deferred_units={"github": github_unit},
+            tool_units={"github": github_unit},
         )
-        block = ContextManager._build_available_tools(eff, tools)
+        block = ContextManager._build_available_tools(eff, tools, set())
         # deferred unit:索引行 + 成员名,但**无 param schema**
-        assert '<tool_unit name="github" disclosure="deferred">' in block
+        assert '<tool_unit name="github">' in block
         assert "GitHub API" in block
-        assert "- github__search_repos" in block
-        assert "- github__create_issue" in block
-        assert "search_tools" in block  # 指引去 search
+        assert "- github__search_repos [deferred]" in block
+        assert "- github__create_issue [deferred]" in block
         # deferred 成员的完整描述/参数不在(只索引)
         assert "Find repos" not in block
         assert "Open issue" not in block
@@ -712,22 +767,29 @@ class TestAvailableTools:
             "weather": self._tool("weather", "Weather forecast tool"),
             "gh__x": self._tool("gh__x", "deferred member"),
         }
+        weather_unit = DeferredUnit(
+            name="weather_unit", description="Weather API",
+            member_full_names=["weather"], defer=False,
+        )
+        gh_unit = DeferredUnit(
+            name="gh", description="GH", member_full_names=["gh__x"]
+        )
         eff = EffectiveToolset(
             permissions={"weather": ToolPermission.AUTO, "gh__x": ToolPermission.AUTO},
-            deferred_units={"gh": DeferredUnit(
-                name="gh", description="GH", member_full_names=["gh__x"])},
+            deferred_units={"gh": gh_unit},
+            tool_units={"weather_unit": weather_unit, "gh": gh_unit},
         )
-        block = ContextManager._build_available_tools(eff, tools)
-        # 非 deferred 出完整 doc
-        assert "Weather forecast tool" in block
-        # deferred 只索引
-        assert "- gh__x" in block
+        block = ContextManager._build_available_tools(eff, tools, set())
+        assert "Weather API" in block
+        assert "- weather [loaded]" in block
+        assert "- gh__x [deferred]" in block
+        assert "Weather forecast tool" not in block
         assert "deferred member" not in block
 
     def test_empty_toolset_renders_nothing(self):
         from core.context_manager import ContextManager
         from core.effective_toolset import EffectiveToolset
-        assert ContextManager._build_available_tools(EffectiveToolset({}), {}) == ""
+        assert ContextManager._build_available_tools(EffectiveToolset({}), {}, set()) == ""
 
     def test_deferred_flows_through_build_into_reminder(self):
         """端到端:build 把 effective_toolset 的 deferred 分组接进尾部 reminder,
@@ -741,10 +803,13 @@ class TestAvailableTools:
             "gh__x": self._tool("gh__x", "deferred member doc"),
             "search_tools": self._tool("search_tools", "searcher"),
         }
+        gh_unit = DeferredUnit(
+            name="gh", description="GH unit", member_full_names=["gh__x"]
+        )
         eff = EffectiveToolset(
             permissions={"gh__x": ToolPermission.AUTO, "search_tools": ToolPermission.AUTO},
-            deferred_units={"gh": DeferredUnit(
-                name="gh", description="GH unit", member_full_names=["gh__x"])},
+            deferred_units={"gh": gh_unit},
+            tool_units={"gh": gh_unit},
         )
         state = _make_state(events=[
             _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
@@ -752,14 +817,15 @@ class TestAvailableTools:
         messages, reminder = ContextManager.build(
             agent_name=agent.name, agents={agent.name: agent},
             state=state, tools=tools, effective_toolset=eff,
+            compaction_threshold=TEST_COMPACTION_THRESHOLD,
         )
         system_content = messages[0]["content"]
-        # system prompt:语法前缀,无 per-tool 描述
-        assert "<tool_instructions>" in system_content
+        # system prompt has no textual tool protocol or member schemas.
+        assert "<tool_instructions>" not in system_content
         assert "deferred member doc" not in system_content
-        # reminder:deferred 索引行 + search_tools 完整 doc
-        assert '<tool_unit name="gh" disclosure="deferred">' in reminder
-        assert "- gh__x" in reminder
+        # reminder has only the lightweight unit catalog.
+        assert '<tool_unit name="gh">' in reminder
+        assert "- gh__x [deferred]" in reminder
         assert "deferred member doc" not in reminder  # 成员只索引、不出描述
 
 
@@ -781,7 +847,7 @@ class TestContextUsageWarning:
 
     def test_absent_below_band(self):
         # 上一次 call input+output < 0.8×阈值 → 不出现，避免每轮 cry-wolf
-        threshold = config.COMPACTION_TOKEN_THRESHOLD
+        threshold = TEST_COMPACTION_THRESHOLD
         below = int(config.CONTEXT_USAGE_WARN_RATIO * threshold) - 1
         agent = _FakeAgentConfig()
         state = _make_state(events=[
@@ -795,7 +861,7 @@ class TestContextUsageWarning:
     def test_present_at_band_uses_input_plus_output(self):
         # input+output 达到 band → 整段出现，含水位数字 + 落 artifact 的 advice。
         # 关键：分子是 input+output（触发口径），不是 input-only。
-        threshold = config.COMPACTION_TOKEN_THRESHOLD
+        threshold = TEST_COMPACTION_THRESHOLD
         at = int(config.CONTEXT_USAGE_WARN_RATIO * threshold)
         in_tok, out_tok = at - 500, 500   # input-only(at-500) 低于 band，但 input+output=at 达标
         agent = _FakeAgentConfig()
@@ -814,7 +880,7 @@ class TestContextUsageWarning:
         # 回归(reviewer P3)：高 input + 空 content（如仅 reasoning 的回复）也要预警。
         # build_event_history 在 content 空时会丢弃该 llm_complete（连同 _meta），但
         # last_llm_usage 直接读原始事件 token_usage，不受影响。
-        threshold = config.COMPACTION_TOKEN_THRESHOLD
+        threshold = TEST_COMPACTION_THRESHOLD
         high = threshold
         agent = _FakeAgentConfig()
         state = _make_state(events=[
@@ -828,7 +894,7 @@ class TestContextUsageWarning:
 
     def test_uses_most_recent_call_not_earlier(self):
         # 多次 call 取最近一次：早期高位、最近低位（如压缩后）→ 不出现
-        threshold = config.COMPACTION_TOKEN_THRESHOLD
+        threshold = TEST_COMPACTION_THRESHOLD
         agent = _FakeAgentConfig()
         state = _make_state(events=[
             _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
@@ -846,7 +912,7 @@ class TestContextUsageWarning:
             current_agent="research_agent",
             events=[
                 # lead 高位 —— 对 sub 不可见
-                _llm_complete(config.COMPACTION_TOKEN_THRESHOLD, 1000, agent_name="lead_agent"),
+                _llm_complete(TEST_COMPACTION_THRESHOLD, 1000, agent_name="lead_agent"),
                 _make_event(StreamEventType.SUBAGENT_INSTRUCTION.value, "research_agent",
                             {"instruction": "go"}),
                 _llm_complete(2000, 200, agent_name="research_agent"),  # sub 低位
@@ -858,13 +924,14 @@ class TestContextUsageWarning:
 
     def test_warning_is_ephemeral_not_written_to_events(self):
         # 与其余动态上下文一致：预警不得写回 event
-        threshold = config.COMPACTION_TOKEN_THRESHOLD
+        threshold = TEST_COMPACTION_THRESHOLD
         user_event = _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"})
         agent = _FakeAgentConfig()
         state = _make_state(events=[user_event, _llm_complete(threshold, 0), _tool_complete()])
         ContextManager.build(
             agent_name=agent.name, agents={agent.name: agent}, state=state, tools={},
             effective_toolset=effective_one(agent, {}),
+            compaction_threshold=TEST_COMPACTION_THRESHOLD,
         )
         assert "<context_usage>" not in user_event.data["content"]
 
@@ -979,6 +1046,7 @@ class TestPromptReconstructionFidelity:
         live_messages, reminder = ContextManager.build(
             agent_name=agent.name, agents={agent.name: agent},
             state=state, tools={}, effective_toolset=effective_one(agent, {}),
+            compaction_threshold=TEST_COMPACTION_THRESHOLD,
             **build_kwargs,
         )
         system_prompt = live_messages[0]["content"]
@@ -1018,6 +1086,7 @@ class TestPromptReconstructionFidelity:
             agent_name=agent.name, agents={agent.name: agent},
             state=state, tools={}, tool_round_count=2,
             effective_toolset=effective_one(agent, {}),
+            compaction_threshold=TEST_COMPACTION_THRESHOLD,
         )
         assert "<tool_budget>" in reminder
         # 重建端拿持久化 reminder 直接拼，等价

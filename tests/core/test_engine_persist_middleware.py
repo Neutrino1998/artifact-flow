@@ -5,6 +5,7 @@ Covers _maybe_persist_tool_result inside execute_loop.
 """
 
 import asyncio
+import json
 import math
 import uuid
 from dataclasses import dataclass, field
@@ -28,7 +29,7 @@ class _FakeAgentConfig:
     name: str = "lead_agent"
     description: str = "test lead"
     tools: dict = field(default_factory=dict)
-    model: str = "openai/fake-model"
+    model: str = "deepseek-v4-flash"
     max_tool_rounds: int = 3
     role_prompt: str = "You are a test agent."
     internal: bool = False
@@ -51,8 +52,8 @@ class _FixedTool(BaseTool):
         )
         self._result = result
 
-    def get_parameters(self):
-        return []
+    def get_input_schema(self):
+        return {"type": "object", "properties": {}, "additionalProperties": False}
 
     async def execute(self, **params) -> ToolResult:
         return self._result
@@ -99,14 +100,24 @@ def _llm_text(text: str):
 
 
 def _tool_call_chunks(tool_name: str, **params):
-    xml = f"<tool_call>\n<name>{tool_name}</name>\n"
-    if params:
-        xml += "<params>\n"
-        for k, v in params.items():
-            xml += f"<{k}><![CDATA[{v}]]></{k}>\n"
-        xml += "</params>\n"
-    xml += "</tool_call>"
-    return _llm_text(xml)
+    usage = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+    return [
+        {"type": "usage", "token_usage": usage},
+        {
+            "type": "final",
+            "content": "",
+            "reasoning_content": None,
+            "tool_calls": [{
+                "id": f"call_{uuid.uuid4().hex}",
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "arguments": json.dumps(params),
+                },
+            }],
+            "token_usage": usage,
+        },
+    ]
 
 
 def _make_fake_stream_sequence(rounds: list[list[dict]]):

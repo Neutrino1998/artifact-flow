@@ -16,7 +16,7 @@ from typing import List, Optional
 
 from config import config
 from tools.artifact_envelope import ArtifactSlice, render_artifact_slice
-from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
+from tools.base import BaseTool, ToolResult, ToolPermission
 from tools.builtin.artifact_service import ArtifactService
 from utils.image import VISION_VIEWABLE_MIMES, resize_to_vision_data_uri
 from utils.logger import get_logger
@@ -44,35 +44,29 @@ class CreateArtifactTool(BaseTool):
         """设置 ArtifactService(依赖注入)"""
         self._service = service
 
-    def get_parameters(self) -> List[ToolParameter]:
-        return [
-            ToolParameter(
-                name="id",
-                type="string",
-                description="Unique identifier (e.g., 'task_plan', 'research_report')",
-                required=True
-            ),
-            ToolParameter(
-                name="content_type",
-                type="string",
-                description="MIME type of the artifact content",
-                required=False,
-                default="text/markdown",
-                enum=["text/markdown", "text/plain", "text/x-python", "text/html", "application/json", "text/javascript", "text/yaml"]
-            ),
-            ToolParameter(
-                name="title",
-                type="string",
-                description="Title of the artifact",
-                required=True
-            ),
-            ToolParameter(
-                name="content",
-                type="string",
-                description="Initial text content",
-                required=True
-            )
-        ]
+    def get_input_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Unique identifier (e.g., 'task_plan', 'research_report')",
+                },
+                "content_type": {
+                    "type": "string",
+                    "description": "MIME type of the artifact content",
+                    "default": "text/markdown",
+                    "enum": [
+                        "text/markdown", "text/plain", "text/x-python", "text/html",
+                        "application/json", "text/javascript", "text/yaml",
+                    ],
+                },
+                "title": {"type": "string", "description": "Title of the artifact"},
+                "content": {"type": "string", "description": "Initial text content"},
+            },
+            "required": ["id", "title", "content"],
+            "additionalProperties": False,
+        }
 
     async def execute(self, **params) -> ToolResult:
         if not self._service:
@@ -114,21 +108,16 @@ class RewriteArtifactTool(BaseTool):
         """设置 ArtifactService(依赖注入)"""
         self._service = service
 
-    def get_parameters(self) -> List[ToolParameter]:
-        return [
-            ToolParameter(
-                name="id",
-                type="string",
-                description="Artifact ID to rewrite",
-                required=True
-            ),
-            ToolParameter(
-                name="content",
-                type="string",
-                description="New complete content",
-                required=True
-            )
-        ]
+    def get_input_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string", "description": "Artifact ID to rewrite"},
+                "content": {"type": "string", "description": "New complete content"},
+            },
+            "required": ["id", "content"],
+            "additionalProperties": False,
+        }
 
     async def execute(self, **params) -> ToolResult:
         if not self._service:
@@ -184,39 +173,34 @@ class ReadArtifactTool(BaseTool):
         """设置 ArtifactService(依赖注入)"""
         self._service = service
 
-    def get_parameters(self) -> List[ToolParameter]:
-        return [
-            ToolParameter(
-                name="id",
-                type="string",
-                description="Artifact ID to read",
-                required=True
-            ),
-            ToolParameter(
-                name="version",
-                type="integer",
-                description="Version number (optional, defaults to latest)",
-                required=False,
-                default=None
-            ),
-            ToolParameter(
-                name="offset",
-                type="integer",
-                description="1-indexed start line (omit to read from line 1)",
-                required=False,
-                default=1,
-            ),
-            ToolParameter(
-                name="limit",
-                type="integer",
-                description=(
-                    "Maximum lines to read (omit to read until built-in size cap). "
-                    "Use the offset hint from a prior call to continue reading large artifacts."
-                ),
-                required=False,
-                default=None,
-            ),
-        ]
+    def get_input_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string", "description": "Artifact ID to read"},
+                "version": {
+                    "type": "integer",
+                    "description": "Version number (optional, defaults to latest)",
+                    "minimum": 1,
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "1-indexed start line (omit to read from line 1)",
+                    "minimum": 1,
+                    "default": 1,
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": (
+                        "Maximum lines to read (omit to read until built-in size cap). "
+                        "Use the offset hint from a prior call to continue reading large artifacts."
+                    ),
+                    "minimum": 1,
+                },
+            },
+            "required": ["id"],
+            "additionalProperties": False,
+        }
 
     async def execute(self, **params) -> ToolResult:
         if not self._service:

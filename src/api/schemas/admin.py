@@ -60,15 +60,17 @@ class AdminMessageGroup(BaseModel):
 
 
 class AdminPromptReconstructResponse(BaseModel):
-    """GET .../messages/{message_id}/reconstruct response — 重建某发 LLM 调用的完整 prompt。
+    """重建某发 LLM 调用的 OpenAI-compatible messages 语义输入。
 
     has_reminder=False 表示该 agent_start 早于 reminder 持久化（只重建了 system_prompt +
-    历史，无动态 reminder）。messages 的 content 可能是 str 或块列表（识图块降级为占位文本）。
+    历史，无动态 reminder）。不包含未持久化的 native tools schema；messages 的 content
+    可能是 str 或块列表（识图块降级为占位文本）。
     """
     conversation_id: str
     message_id: str
     agent_start_event_id: str
     agent_name: Optional[str] = None
+    model: Optional[str] = None
     has_reminder: bool = False
     messages: List[Dict[str, Any]]
 

@@ -97,10 +97,16 @@
 }
 
 @layer components {
-  /* Streaming cursor */
-  .streaming-cursor::after {
-    content: '\25AE';
-    @apply text-accent animate-pulse ml-0.5;
+  /* Best effort: only simple top-level text blocks get a cursor. Structured
+     Markdown intentionally omits it rather than guessing at its final leaf. */
+  .streaming-cursor > :where(p, h1, h2, h3, h4, h5, h6):last-child::after {
+    content: '';
+    display: inline-block;
+    width: 0.38em;
+    height: 0.9em;
+    margin-left: 0.18em;
+    vertical-align: -0.08em;
+    @apply bg-accent animate-pulse;
   }
 }
 

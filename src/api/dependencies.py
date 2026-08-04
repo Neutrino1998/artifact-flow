@@ -80,6 +80,15 @@ async def init_globals() -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Data directory ensured: {data_dir.absolute()}")
 
+    # 0.5 配置期 loud-fail：先于 DB/Redis 等外部资源初始化加载 agent，并校验其
+    # 模型别名与 models.yaml 的必填 context_window。坏配置不能等到首个 turn 才暴露，
+    # 也不应在拒绝启动前留下已打开的连接池。
+    from agents.loader import load_all_agents
+    from models.llm import validate_agent_model_config
+    _agents = load_all_agents()
+    validate_agent_model_config({name: agent.model for name, agent in _agents.items()})
+    logger.info(f"Loaded {len(_agents)} agent configs and validated model capabilities")
+
     # 1. 初始化数据库管理器
     db_urls = [u.strip() for u in config.DATABASE_URLS.split(",") if u.strip()] if config.DATABASE_URLS else []
 
@@ -181,16 +190,11 @@ async def init_globals() -> None:
         )
         logger.info("Login rate limiter: InMemory")
 
-    # 4. 加载 Agent 配置
-    from agents.loader import load_all_agents
-    _agents = load_all_agents()
-    logger.info(f"Loaded {len(_agents)} agent configs")
-
-    # 5. 加载全局工具
+    # 4. 加载全局工具
     _tools = _load_tools()
     logger.info(f"Loaded {len(_tools)} global tools")
 
-    # 6. MCP client manager(per-worker):每 turn 快照时按已保存 server 配置 lazy discovery。
+    # 5. MCP client manager(per-worker):每 turn 快照时按已保存 server 配置 lazy discovery。
     from tools.custom.mcp_client import McpClientManager
     _mcp_client_manager = McpClientManager()
 

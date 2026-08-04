@@ -1,6 +1,8 @@
-import { describe, test, expect, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
+  cancelPendingFlush,
   interleaveFlowItems,
+  scheduleContentUpdate,
   useStreamStore,
   type ExecutionSegment,
   type NonAgentBlock,
@@ -16,10 +18,10 @@ function seg(id: string, overrides: Partial<ExecutionSegment> = {}): ExecutionSe
     agent: 'lead',
     status: 'complete',
     reasoningContent: '',
-    isThinking: false,
+    llmStreamChannel: null,
     toolCalls: [],
+    toolCallProgress: [],
     content: '',
-    llmOutput: '',
     ...overrides,
   };
 }
@@ -92,6 +94,7 @@ describe('interleaveFlowItems', () => {
 
 describe('streamStore actions', () => {
   beforeEach(() => {
+    cancelPendingFlush();
     // Reset all mutable state — including the snapshot Maps — so tests are
     // order-independent. Forgetting completedSegments / completedNonAgentBlocks
     // here would let snapshot entries leak between cases and silently mask
@@ -103,6 +106,29 @@ describe('streamStore actions', () => {
       completedSegments: new Map(),
       completedNonAgentBlocks: new Map(),
     });
+  });
+
+  afterEach(() => {
+    cancelPendingFlush();
+    vi.unstubAllGlobals();
+  });
+
+  test('RAF content snapshot remains bound to its originating segment', () => {
+    let flush: FrameRequestCallback | undefined;
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      flush = callback;
+      return 1;
+    }));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    useStreamStore.setState({ segments: [seg('old')] });
+
+    scheduleContentUpdate('old', 'old invocation content');
+    useStreamStore.setState({ segments: [seg('old'), seg('new')] });
+    flush?.(0);
+
+    const segments = useStreamStore.getState().segments;
+    expect(segments[0].content).toBe('old invocation content');
+    expect(segments[1].content).toBe('');
   });
 
   describe('pending injects', () => {
@@ -220,6 +246,28 @@ describe('streamStore actions', () => {
     });
   });
 
+  describe('tool-call progress transition', () => {
+    test('TOOL_START replacement removes only the matching queued draft', () => {
+      useStreamStore.setState({
+        segments: [seg('s1', {
+          agent: 'lead',
+          toolCallProgress: [
+            { index: 0, callId: 'call-a', toolName: 'a', argumentsChars: 2, status: 'queued' },
+            { index: 1, callId: 'call-b', toolName: 'b', argumentsChars: 4, status: 'queued' },
+          ],
+        })],
+      });
+
+      useStreamStore.getState().addToolCallToSegment({
+        id: 'call-a', toolName: 'a', params: {}, agent: 'lead', status: 'running',
+      });
+
+      const segment = useStreamStore.getState().segments[0];
+      expect(segment.toolCalls.map((call) => call.id)).toEqual(['call-a']);
+      expect(segment.toolCallProgress.map((progress) => progress.callId)).toEqual(['call-b']);
+    });
+  });
+
   describe('snapshotSegments', () => {
     test('filters segments without toolCalls or reasoning, forces running→complete', () => {
       const segs: ExecutionSegment[] = [
@@ -253,6 +301,48 @@ describe('streamStore actions', () => {
 
       const blockSnap = useStreamStore.getState().completedNonAgentBlocks.get('msg-2');
       expect(blockSnap).toEqual(blocks);
+    });
+
+    test('rebases compaction before retry when an empty overflow attempt is filtered', () => {
+      useStreamStore.setState({
+        segments: [
+          seg('overflow-attempt'),
+          seg('retry', { reasoningContent: 'retry thinking' }),
+        ],
+        nonAgentBlocks: [
+          { ...compaction('overflow-compact', 1), reason: 'overflow' },
+        ],
+      });
+
+      useStreamStore.getState().snapshotSegments('msg-overflow');
+
+      const segments = useStreamStore.getState().completedSegments.get('msg-overflow')!;
+      const blocks = useStreamStore.getState().completedNonAgentBlocks.get('msg-overflow')!;
+      expect(blocks[0].position).toBe(0);
+      expect(interleaveFlowItems(segments, blocks).map((item) => item.kind)).toEqual([
+        'compaction',
+        'agent',
+      ]);
+    });
+
+    test('does not cache SSE-only tool-call progress', () => {
+      useStreamStore.setState({
+        segments: [seg('s1', {
+          reasoningContent: 'thinking',
+          toolCallProgress: [{
+            index: 0,
+            callId: 'call-draft',
+            toolName: 'draft',
+            argumentsChars: 99,
+            status: 'generating',
+          }],
+        })],
+      });
+
+      useStreamStore.getState().snapshotSegments('msg-progress');
+
+      const snap = useStreamStore.getState().completedSegments.get('msg-progress');
+      expect(snap?.[0].toolCallProgress).toEqual([]);
     });
 
     test('no segments to snapshot → completedSegments unchanged', () => {

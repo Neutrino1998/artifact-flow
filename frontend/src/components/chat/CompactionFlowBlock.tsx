@@ -5,6 +5,7 @@ import FlowBlock from './FlowBlock';
 import MarkdownBlock from '@/components/markdown/MarkdownBlock';
 import { PillBadge } from '@/components/ui/PillBadge';
 import type { CompactionBlock } from '@/stores/streamStore';
+import { formatTokens, formatTokenUsage } from '@/lib/formatTokens';
 
 interface CompactionFlowBlockProps {
   block: CompactionBlock;
@@ -66,13 +67,11 @@ function Badge({ state }: { state: CompactionBlock['state'] }) {
   );
 }
 
-function formatTokens(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
-}
-
 function Extra({ block }: { block: CompactionBlock }) {
   if (block.state === 'running') {
+    if (block.reason === 'overflow') {
+      return <>recovering from context overflow…</>;
+    }
     if (!block.triggerTokens) return <>compressing…</>;
     const total = block.triggerTokens.input + block.triggerTokens.output;
     return <>compressing {formatTokens(total)} tokens…</>;
@@ -85,9 +84,7 @@ function Extra({ block }: { block: CompactionBlock }) {
   const parts: string[] = [];
   if (block.model) parts.push(block.model);
   if (block.tokenUsage) {
-    parts.push(
-      `${formatTokens(block.tokenUsage.input_tokens)} ↑ · ${formatTokens(block.tokenUsage.output_tokens)} ↓`
-    );
+    parts.push(formatTokenUsage(block.tokenUsage));
   }
   if (block.durationMs != null) {
     parts.push(`${(block.durationMs / 1000).toFixed(1)}s`);

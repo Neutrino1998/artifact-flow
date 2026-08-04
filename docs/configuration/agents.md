@@ -26,7 +26,7 @@ Return only the translation unless the user asks for an explanation.
 |---|---|---|---|
 | `name` | 是 | — | Agent 注册名；应与文件名保持一致 |
 | `description` | 否 | `""` | 给 Lead Agent 看的委派说明 |
-| `model` | 是 | — | `models.yaml` 中的 alias，或带 provider 前缀的 LiteLLM ID |
+| `model` | 是 | — | `models.yaml` 中的 alias；不允许绕过 alias 直接填写 LiteLLM ID，因为运行时需要 alias 上必填的 `context_window` |
 | `tools` | 否 | `{}` | Builtin 名或 external Tool unit 到 `enabled` / `disabled` 的映射 |
 | `max_tool_rounds` | 否 | `3` | 本次 Agent 循环允许的最大工具轮数 |
 | `internal` | 否 | `false` | 内部 Agent 不出现在可委派 Subagent 列表中 |

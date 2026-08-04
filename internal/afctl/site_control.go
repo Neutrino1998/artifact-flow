@@ -75,10 +75,19 @@ func (c *Controller) SiteMigrateV1(preset, sandboxRuntime string) error {
 	}
 	var lines []string
 	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "AF_ENABLE_SANDBOX=") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "AF_ENABLE_SANDBOX=") {
+			continue
+		}
+		if preset == "intranet" && (strings.HasPrefix(trimmed, "ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD=") ||
+			strings.HasPrefix(trimmed, "ARTIFACTFLOW_COMPACTION_RESERVE_TOKENS=") ||
+			strings.HasPrefix(trimmed, "ARTIFACTFLOW_RENDER_TOOL_EXAMPLES=")) {
 			continue
 		}
 		lines = append(lines, line)
+	}
+	if preset == "intranet" {
+		lines = append(lines, "ARTIFACTFLOW_COMPACTION_RESERVE_TOKENS=40000")
 	}
 	if err := os.WriteFile(c.envPath(), []byte(strings.Join(lines, "\n")), 0o600); err != nil {
 		return err
@@ -196,6 +205,10 @@ func (c *Controller) writeInitialEnv(preset string) error {
 	if preset == "public" {
 		tls = "AF_DOMAIN=CHANGE_ME\nAF_ACME_EMAIL=CHANGE_ME\n"
 	}
+	var compaction string
+	if preset == "intranet" {
+		compaction = "ARTIFACTFLOW_COMPACTION_RESERVE_TOKENS=40000\n"
+	}
 	content := fmt.Sprintf(`ARTIFACTFLOW_JWT_SECRET=%s
 ARTIFACTFLOW_CREDENTIAL_KEY=%s
 ARTIFACTFLOW_REDIS_URL=redis://redis:6379
@@ -204,9 +217,9 @@ POSTGRES_DB=artifactflow
 POSTGRES_USER=artifactflow
 POSTGRES_PASSWORD=%s
 ARTIFACTFLOW_DATABASE_URL=postgresql+asyncpg://artifactflow:%s@postgres:5432/artifactflow
-%sGPUSTACK_DEEPSEEK_API_KEY=
+%s%sGPUSTACK_DEEPSEEK_API_KEY=
 GPUSTACK_VISION_API_KEY=
-`, jwt, credential, pg, pg, tls)
+`, jwt, credential, pg, pg, tls, compaction)
 	return os.WriteFile(c.envPath(), []byte(content), 0o600)
 }
 

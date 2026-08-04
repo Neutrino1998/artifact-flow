@@ -1,7 +1,9 @@
 import { create } from 'zustand';
-import type { ExecutionMetrics, TokenUsage } from '@/types/events';
+import type { CompactionReason, ExecutionMetrics, TokenUsage } from '@/types/events';
+import type { ActivatedSkillRef } from '@/types';
 
 export interface ToolCallInfo {
+  /** Provider-issued native tool-call id; joins llm_complete/start/complete. */
   id: string;
   toolName: string;
   params: Record<string, unknown>;
@@ -9,7 +11,7 @@ export interface ToolCallInfo {
   status: 'running' | 'success' | 'error';
   result?: string;
   durationMs?: number;
-  /** The model's stated intent for this call (<reason> tag); display-only.
+  /** Optional backend-supplied display explanation; not model reasoning.
    *  Distinct from `permission.reason` below, which is the decision outcome. */
   reason?: string;
   /** Set only for CONFIRM-level tools — the user's response (or timeout).
@@ -18,10 +20,19 @@ export interface ToolCallInfo {
   permission?: { approved: boolean; reason?: string };
 }
 
+/** Transient native-call output that has not reached TOOL_START yet. */
+export interface ToolCallProgressInfo {
+  index: number;
+  callId?: string;
+  toolName?: string;
+  argumentsChars: number;
+  status: 'generating' | 'queued';
+}
+
 export interface PermissionRequest {
   toolName: string;
   params: Record<string, unknown>;
-  /** The model's stated intent for this call (<reason> tag); display-only. */
+  /** Optional backend-supplied display explanation; not model reasoning. */
   reason?: string;
 }
 
@@ -50,6 +61,8 @@ export interface CompactionBlock {
   state: 'running' | 'done' | 'error';
   /** input+output tokens of the LLM call that tripped the threshold (from COMPACTION_START) */
   triggerTokens?: { input: number; output: number };
+  /** overflow is a provider rejection before accepted-call usage exists. */
+  reason?: CompactionReason;
   /** compacted summary text (frame-prepended; from COMPACTION_SUMMARY) */
   summary?: string;
   /** compact_agent's model id — shown in header next to usage, mirroring agent segment */
@@ -84,6 +97,39 @@ export type FlowItem =
   | { kind: 'agent'; segment: ExecutionSegment; index: number }
   | TimelineBlock;
 
+/** Completed flow hides invocations that never produced reasoning or tools. */
+export function isVisibleExecutionSegment(segment: ExecutionSegment): boolean {
+  return segment.toolCalls.length > 0 || Boolean(segment.reasoningContent);
+}
+
+/**
+ * Rebase insertion positions after empty Agent attempts are filtered out.
+ *
+ * A block position is the number of raw segments that preceded its event.  If
+ * one of those segments is later hidden (for example, a provider overflow before
+ * the first chunk), keeping the raw position moves the block after a later retry.
+ */
+export function rebaseTimelineBlockPositions<T extends TimelineBlock>(
+  rawSegments: ExecutionSegment[],
+  blocks: T[],
+): T[] {
+  const visiblePrefixCounts = [0];
+  for (const segment of rawSegments) {
+    visiblePrefixCounts.push(
+      visiblePrefixCounts[visiblePrefixCounts.length - 1]
+      + (isVisibleExecutionSegment(segment) ? 1 : 0)
+    );
+  }
+
+  return blocks.map((block) => {
+    const rawPosition = Math.min(
+      Math.max(Math.trunc(block.position), 0),
+      rawSegments.length,
+    );
+    return { ...block, position: visiblePrefixCounts[rawPosition] };
+  });
+}
+
 /** Interleave agent segments with non-agent blocks by insertion position. */
 export function interleaveFlowItems(
   segments: ExecutionSegment[],
@@ -111,10 +157,12 @@ export interface ExecutionSegment {
   agent: string;
   status: 'running' | 'complete';
   reasoningContent: string;
-  isThinking: boolean;
+  /** Live SSE display state for the current LLM invocation; never persisted. */
+  llmStreamChannel: 'reasoning' | 'content' | null;
   toolCalls: ToolCallInfo[];
+  /** SSE-only; never reconstructed or cached as execution history. */
+  toolCallProgress: ToolCallProgressInfo[];
   content: string;
-  llmOutput: string;             // raw LLM output preserved before content is cleared at tool_start
   tokenUsage?: TokenUsage;
   model?: string;
   llmDurationMs?: number;
@@ -138,6 +186,11 @@ interface StreamState {
   // attachments without waiting for the turn to flush. Same lifecycle as
   // pendingUserMessage (set on send, cleared on reset).
   pendingUserFiles: string[] | null;
+
+  // Skills explicitly selected for the pending user message. This is a
+  // per-turn display snapshot; it must not be confused with cumulative
+  // active_skills or model-initiated read_skill activation.
+  pendingUserSkills: ActivatedSkillRef[] | null;
 
   // Parent ID for rerun/edit branching (controls branchPath truncation)
   // undefined = normal send, null = root rerun, string = rerun from specific parent
@@ -195,14 +248,14 @@ interface StreamState {
   // Segment actions
   pushSegment: (agent: string) => void;
   updateCurrentSegment: (update: Partial<ExecutionSegment>) => void;
-  updateAgentSegment: (agent: string, update: Partial<ExecutionSegment>) => void;
-  appendCurrentSegmentContent: (content: string) => void;
+  updateSegmentContent: (segmentId: string, content: string) => void;
   addToolCallToSegment: (tc: ToolCallInfo) => void;
   updateToolCallInSegment: (id: string, update: Partial<ToolCallInfo>) => void;
 
   // Pending user message
   setPendingUserMessage: (msg: string | null) => void;
   setPendingUserFiles: (files: string[] | null) => void;
+  setPendingUserSkills: (skills: ActivatedSkillRef[] | null) => void;
   setStreamParentId: (id: string | null | undefined) => void;
 
   // Non-agent blocks / metrics
@@ -234,13 +287,13 @@ interface StreamState {
 
 // RAF-based throttle for segment content updates
 let _rafId: number | null = null;
-let _pendingContent: string | null = null;
-let _appendFn: ((content: string) => void) | null = null;
+let _pendingContent: { segmentId: string; content: string } | null = null;
+let _appendFn: ((segmentId: string, content: string) => void) | null = null;
 let _pendingInjectSeq = 0;
 
 function flushContent() {
   if (_pendingContent !== null && _appendFn) {
-    _appendFn(_pendingContent);
+    _appendFn(_pendingContent.segmentId, _pendingContent.content);
     _pendingContent = null;
   }
   _rafId = null;
@@ -255,8 +308,8 @@ export function cancelPendingFlush() {
   _pendingContent = null;
 }
 
-export function scheduleContentUpdate(content: string) {
-  _pendingContent = content;
+export function scheduleContentUpdate(segmentId: string, content: string) {
+  _pendingContent = { segmentId, content };
   if (_rafId === null && typeof requestAnimationFrame !== 'undefined') {
     _rafId = requestAnimationFrame(flushContent);
   } else if (typeof requestAnimationFrame === 'undefined') {
@@ -265,10 +318,12 @@ export function scheduleContentUpdate(content: string) {
 }
 
 export const useStreamStore = create<StreamState>((set, get) => {
-  // Capture appendCurrentSegmentContent for RAF throttle after store creation
+  // Capture the id-targeted content action for RAF throttling. Binding a
+  // snapshot to its segment makes a late frame unable to mutate a newer LLM
+  // invocation after AGENT_START has advanced the timeline.
   // We use a wrapper that calls get() to always get the latest action reference
-  _appendFn = (content: string) => {
-    get().appendCurrentSegmentContent(content);
+  _appendFn = (segmentId: string, content: string) => {
+    get().updateSegmentContent(segmentId, content);
   };
 
   return {
@@ -279,6 +334,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
     segments: [],
     pendingUserMessage: null,
     pendingUserFiles: null,
+    pendingUserSkills: null,
     streamParentId: undefined,
     completedSegments: new Map(),
     nonAgentBlocks: [],
@@ -328,6 +384,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
         segments: [],
         pendingUserMessage: null,
         pendingUserFiles: null,
+        pendingUserSkills: null,
         pendingInjects: [],
         streamParentId: undefined,
         permissionRequest: null,
@@ -349,10 +406,10 @@ export const useStreamStore = create<StreamState>((set, get) => {
             agent,
             status: 'running',
             reasoningContent: '',
-            isThinking: false,
+            llmStreamChannel: null,
             toolCalls: [],
+            toolCallProgress: [],
             content: '',
-            llmOutput: '',
           },
         ],
       })),
@@ -367,27 +424,14 @@ export const useStreamStore = create<StreamState>((set, get) => {
         };
       }),
 
-    appendCurrentSegmentContent: (content) =>
+    updateSegmentContent: (segmentId, content) =>
       set((s) => {
         const segs = s.segments;
-        if (segs.length === 0) return s;
-        const last = segs[segs.length - 1];
-        return {
-          segments: [...segs.slice(0, -1), { ...last, content }],
-        };
-      }),
-
-    updateAgentSegment: (agent, update) =>
-      set((s) => {
-        const segs = s.segments;
-        for (let i = segs.length - 1; i >= 0; i--) {
-          if (segs[i].agent === agent) {
-            const newSegs = [...segs];
-            newSegs[i] = { ...newSegs[i], ...update };
-            return { segments: newSegs };
-          }
-        }
-        return s;
+        const idx = segs.findIndex((seg) => seg.id === segmentId);
+        if (idx === -1) return s;
+        const newSegs = [...segs];
+        newSegs[idx] = { ...newSegs[idx], content };
+        return { segments: newSegs };
       }),
 
     addToolCallToSegment: (tc) =>
@@ -408,7 +452,16 @@ export const useStreamStore = create<StreamState>((set, get) => {
         }
         const target = segs[idx];
         const newSegs = [...segs];
-        newSegs[idx] = { ...target, toolCalls: [...target.toolCalls, tc] };
+        newSegs[idx] = {
+          ...target,
+          toolCalls: [...target.toolCalls, tc],
+          // LLM_COMPLETE promotes every accepted draft to queued; the native
+          // call id then lets TOOL_START atomically replace exactly one draft
+          // even when the response contains several serial tool calls.
+          toolCallProgress: (target.toolCallProgress ?? []).filter(
+            (progress) => progress.callId !== tc.id
+          ),
+        };
         return { segments: newSegs };
       }),
 
@@ -429,6 +482,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
 
     setPendingUserMessage: (msg) => set({ pendingUserMessage: msg }),
     setPendingUserFiles: (files) => set({ pendingUserFiles: files }),
+    setPendingUserSkills: (skills) => set({ pendingUserSkills: skills }),
     setStreamParentId: (id) => set({ streamParentId: id }),
 
     pushNonAgentBlock: (block) =>
@@ -479,9 +533,15 @@ export const useStreamStore = create<StreamState>((set, get) => {
       const state = get();
       // Only snapshot if there are intermediate segments (more than just the final one with content)
       const segsToSnapshot = state.segments
-        .filter((seg) => seg.toolCalls.length > 0 || seg.reasoningContent)
+        .filter(isVisibleExecutionSegment)
         // Execution is done — mark any remaining 'running' segments as 'complete'
-        .map((seg) => seg.status === 'running' ? { ...seg, status: 'complete' as const } : seg);
+        // and discard UI-only native-call drafts even on an abnormal transport exit.
+        .map((seg) => ({
+          ...seg,
+          status: seg.status === 'running' ? 'complete' as const : seg.status,
+          llmStreamChannel: null,
+          toolCallProgress: [],
+        }));
       if (segsToSnapshot.length > 0) {
         const newMap = new Map(state.completedSegments);
         // Deep copy to prevent stale references
@@ -490,7 +550,10 @@ export const useStreamStore = create<StreamState>((set, get) => {
       }
       // Snapshot non-agent blocks. Compaction is now persistent (COMPACTION_SUMMARY
       // is a DB event), so both inject and compaction blocks are retained in cache.
-      const blocksToSnapshot = state.nonAgentBlocks;
+      const blocksToSnapshot = rebaseTimelineBlockPositions(
+        state.segments,
+        state.nonAgentBlocks,
+      );
       if (blocksToSnapshot.length > 0) {
         const nabMap = new Map(state.completedNonAgentBlocks);
         nabMap.set(messageId, blocksToSnapshot);

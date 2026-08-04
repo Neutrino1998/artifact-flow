@@ -108,6 +108,13 @@ class UploadedFileRef(BaseModel):
     filename: str = Field(..., description="Original filename")
 
 
+class ActivatedSkillRef(BaseModel):
+    """Skill the user explicitly activated on one message (display snapshot)."""
+
+    slug: str = Field(..., description="Skill slug resolved for this turn")
+    name: str = Field(..., description="Skill display name frozen at activation time")
+
+
 class MessageResponse(BaseModel):
     """Message in conversation detail response"""
     id: str = Field(..., description="Message ID")
@@ -124,9 +131,13 @@ class MessageResponse(BaseModel):
         None,
         description="Files the user attached this turn, from Message.metadata_['uploaded_files']. Display-only (best-effort): absent for turns that failed before artifact flush.",
     )
+    activated_skills: Optional[List[ActivatedSkillRef]] = Field(
+        None,
+        description="Skills the user explicitly activated on this turn, from Message.metadata_['activated_skills']. This is a per-message display snapshot, unlike cumulative active_skills; model-initiated read_skill calls are excluded.",
+    )
     active_skills: Optional[List[str]] = Field(
         None,
-        description="Skill slugs active as of this turn (sticky, from Message.metadata_['active_skills']). The branch-tail message's list is the conversation's current active set; the composer reads it to mark already-active skills in the activation picker. Absent/empty when no skills are active.",
+        description="Lead-agent skill slugs active as of this turn, projected from Message.metadata_['agent_progressive_state']['lead_agent']['active_skills']. The branch-tail message drives the activation picker. Absent/empty when no skills are active.",
     )
 
 

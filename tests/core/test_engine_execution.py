@@ -8,6 +8,8 @@ Mock strategy: patch("models.llm.astream_with_retry") + real RuntimeStore.
 """
 
 import asyncio
+import itertools
+import json
 from dataclasses import dataclass, field
 from unittest.mock import patch
 
@@ -15,6 +17,7 @@ import pytest
 
 from core.engine import EngineHooks, create_initial_state, execute_loop
 from core.events import StreamEventType, ExecutionEvent
+from models.llm import LLMContextOverflowError
 from tests.core._toolset import effective_for
 from api.services.runtime_store import InMemoryRuntimeStore
 from tools.base import ArtifactSpec, BaseTool, ToolPermission, ToolResult
@@ -24,13 +27,15 @@ from tools.base import ArtifactSpec, BaseTool, ToolPermission, ToolResult
 # Helpers
 # ============================================================
 
+_CALL_IDS = itertools.count()
+
 
 @dataclass
 class _FakeAgentConfig:
     name: str = "lead_agent"
     description: str = "test lead"
     tools: dict = field(default_factory=dict)
-    model: str = "openai/fake-model"
+    model: str = "deepseek-v4-flash"
     max_tool_rounds: int = 3
     role_prompt: str = "You are a test agent."
     internal: bool = False
@@ -70,38 +75,70 @@ def _make_cancelling_stream(chunks: list[dict], store, message_id: str, cancel_b
     return fake
 
 
-def _simple_llm_chunks(text: str, input_tokens: int = 10, output_tokens: int = 5):
+def _simple_llm_chunks(
+    text: str,
+    input_tokens: int = 10,
+    output_tokens: int = 5,
+    cached_input_tokens: int | None = None,
+):
     """Build standard LLM chunks for a simple text response."""
+    usage = {
+        "prompt_tokens": input_tokens,
+        "completion_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+    }
+    if cached_input_tokens is not None:
+        usage["cached_input_tokens"] = cached_input_tokens
     return [
         {"type": "content", "content": text},
-        {"type": "usage", "token_usage": {
-            "prompt_tokens": input_tokens,
-            "completion_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens,
-        }},
-        {"type": "final", "content": text, "reasoning_content": None, "token_usage": {
-            "prompt_tokens": input_tokens,
-            "completion_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens,
-        }},
+        {"type": "usage", "token_usage": usage},
+        {"type": "final", "content": text, "reasoning_content": None, "token_usage": usage},
     ]
 
 
-def _tool_call_xml(tool_name: str, **params) -> str:
-    """Build correct tool_call XML for the parser: <name>...</name><params>...</params>."""
-    xml = f"<tool_call>\n<name>{tool_name}</name>\n"
-    if params:
-        xml += "<params>\n"
-        for k, v in params.items():
-            xml += f"<{k}><![CDATA[{v}]]></{k}>\n"
-        xml += "</params>\n"
-    xml += "</tool_call>"
-    return xml
+def _native_tool_call(tool_name: str, **params) -> list[dict]:
+    """Build one normalized native tool call."""
+    return [{
+        "id": f"call_{tool_name}_{next(_CALL_IDS)}",
+        "type": "function",
+        "function": {
+            "name": tool_name,
+            "arguments": json.dumps(params),
+        },
+    }]
 
 
-def _tool_call_chunks(xml: str, input_tokens: int = 10, output_tokens: int = 5):
-    """Build LLM chunks whose response includes a tool_call XML block."""
-    return _simple_llm_chunks(xml, input_tokens, output_tokens)
+def _tool_call_chunks(
+    tool_calls,
+    input_tokens: int = 10,
+    output_tokens: int = 5,
+    cached_input_tokens: int | None = None,
+):
+    """Build adapter chunks for an accepted native tool-call envelope."""
+    if isinstance(tool_calls, str):
+        return _simple_llm_chunks(
+            tool_calls,
+            input_tokens,
+            output_tokens,
+            cached_input_tokens,
+        )
+    usage = {
+        "prompt_tokens": input_tokens,
+        "completion_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+    }
+    if cached_input_tokens is not None:
+        usage["cached_input_tokens"] = cached_input_tokens
+    return [
+        {"type": "usage", "token_usage": usage},
+        {
+            "type": "final",
+            "content": "",
+            "reasoning_content": None,
+            "tool_calls": tool_calls,
+            "token_usage": usage,
+        },
+    ]
 
 
 class _FakeTool(BaseTool):
@@ -111,8 +148,8 @@ class _FakeTool(BaseTool):
         super().__init__(name=name, description=f"Fake {name}", permission=permission)
         self._result = result or ToolResult(success=True, data="ok")
 
-    def get_parameters(self):
-        return []
+    def get_input_schema(self):
+        return {"type": "object", "properties": {}, "additionalProperties": True}
 
     async def execute(self, **params) -> ToolResult:
         return self._result
@@ -127,8 +164,8 @@ class _FailingTool(BaseTool):
     def __init__(self, name: str):
         super().__init__(name=name, description=f"Failing {name}", permission=ToolPermission.AUTO)
 
-    def get_parameters(self):
-        return []
+    def get_input_schema(self):
+        return {"type": "object", "properties": {}, "additionalProperties": True}
 
     async def execute(self, **params) -> ToolResult:
         raise RuntimeError("tool exploded")
@@ -177,6 +214,10 @@ async def _run_engine(
     cancel_check_interval=None,
     force_compact=False,
     artifact_service=None,
+    effective_toolsets=None,
+    agent_progressive_state=None,
+    user_id=None,
+    compaction_threshold=100_000,
 ):
     """Helper to run engine with given LLM factory and return (state, emitted).
 
@@ -190,6 +231,7 @@ async def _run_engine(
         message_id=message_id,
         path_events=path_events or [],
         force_compact=force_compact,
+        agent_progressive_state=agent_progressive_state,
     )
 
     if store is None:
@@ -204,6 +246,7 @@ async def _run_engine(
         agents = {"lead_agent": _FakeAgentConfig()}
 
     with patch("models.llm.astream_with_retry", llm_factory), \
+         patch("models.llm.get_compaction_threshold", return_value=compaction_threshold), \
          patch("core.engine.config") as mock_config:
         # Copy real config values then override permission_timeout for fast tests
         from config import config as real_config
@@ -217,10 +260,13 @@ async def _run_engine(
             state=state,
             agents=agents,
             tools=tools or {},
-            effective_toolsets=effective_for(agents, tools or {}),
+            effective_toolsets=(
+                effective_toolsets or effective_for(agents, tools or {})
+            ),
             hooks=_hooks_from_store(store),
             artifact_service=artifact_service,
             emit=capture_emit,
+            user_id=user_id,
         )
 
     return result, emitted, store
@@ -236,6 +282,18 @@ def _events_of_type(emitted, event_type):
 
 
 class TestLeadCompletion:
+
+    async def test_authenticated_user_id_reaches_llm_adapter(self):
+        captured = {}
+
+        async def fake(messages, **kwargs):
+            captured.update(kwargs)
+            for chunk in _simple_llm_chunks("Done!"):
+                yield chunk
+
+        await _run_engine(fake, user_id="user-123")
+
+        assert captured["user_id"] == "user-123"
 
     async def test_plain_text_completes(self):
         result, emitted, store = await _run_engine(
@@ -255,6 +313,23 @@ class TestLeadCompletion:
         assert len(completes) == 1
         assert starts[0]["agent"] == "lead_agent"
         assert completes[0]["agent"] == "lead_agent"
+        assert starts[0]["data"]["model"] == "deepseek-v4-flash"
+        assert starts[0]["data"]["replay_reasoning"] is True
+        assert "tools" not in starts[0]["data"]
+
+    async def test_agent_start_does_not_persist_native_tool_schemas(self):
+        agent = _FakeAgentConfig(tools={"my_tool": "auto"})
+        tool = _FakeTool("my_tool")
+
+        _, emitted, _ = await _run_engine(
+            _make_fake_stream(_simple_llm_chunks("ok")),
+            agents={"lead_agent": agent},
+            tools={"my_tool": tool},
+        )
+
+        start = _events_of_type(emitted, "agent_start")[0]
+        assert start["data"]["model"] == agent.model
+        assert "tools" not in start["data"]
 
 
 # ============================================================
@@ -271,7 +346,7 @@ class TestSubagentRouting:
             tools={"call_subagent": "auto"},
         )
 
-        call_subagent_xml = _tool_call_xml(
+        call_subagent_xml = _native_tool_call(
             "call_subagent",
             agent_name="search_agent",
             instruction="find stuff",
@@ -280,7 +355,8 @@ class TestSubagentRouting:
         class CallSubagentTool(BaseTool):
             def __init__(self):
                 super().__init__(name="call_subagent", description="Dispatch", permission=ToolPermission.AUTO)
-            def get_parameters(self): return []
+            def get_input_schema(self):
+                return {"type": "object", "properties": {}, "additionalProperties": True}
             async def execute(self, **p): return ToolResult(success=True, data="ok")
             async def __call__(self, **p): return await self.execute(**p)
 
@@ -320,7 +396,7 @@ class TestSubagentRouting:
         lead = _FakeAgentConfig(tools={"call_subagent": "auto"})
         sub = _FakeAgentConfig(name="sub_agent", tools={})
         long_response = "S" * (config.TOOL_RESULT_INLINE_MAX_CHARS + 1)
-        xml = _tool_call_xml(
+        xml = _native_tool_call(
             "call_subagent", agent_name="sub_agent", instruction="return the result"
         )
         artifact_service = _RecordingArtifactService()
@@ -362,11 +438,12 @@ class TestSubagentRouting:
         class CallSubagentTool(BaseTool):
             def __init__(self):
                 super().__init__(name="call_subagent", description="Dispatch", permission=ToolPermission.AUTO)
-            def get_parameters(self): return []
+            def get_input_schema(self):
+                return {"type": "object", "properties": {}, "additionalProperties": True}
             async def execute(self, **p): return ToolResult(success=True, data="ok")
             async def __call__(self, **p): return await self.execute(**p)
 
-        xml = _tool_call_xml("call_subagent", agent_name="sub_agent", instruction="do stuff")
+        xml = _native_tool_call("call_subagent", agent_name="sub_agent", instruction="do stuff")
 
         rounds = [
             _tool_call_chunks(xml),
@@ -399,7 +476,7 @@ class TestToolExecution:
         agent = _FakeAgentConfig(tools={"my_tool": "auto"})
         tool = _FakeTool("my_tool", ToolResult(success=True, data="result_data"))
 
-        xml = _tool_call_xml("my_tool", query="test")
+        xml = _native_tool_call("my_tool", query="test")
         rounds = [
             _tool_call_chunks(xml),
             _simple_llm_chunks("Done with tool"),
@@ -418,7 +495,8 @@ class TestToolExecution:
         assert completes[0]["data"]["success"] is True
 
     async def test_search_tools_routed_renders_docs(self):
-        # B-3:引擎特殊路由 search_tools,渲染当前可调集里匹配工具的完整 doc。
+        # Deferred 工具先经 search_tools 披露完整 native schema。
+        from core.effective_toolset import DeferredUnit, EffectiveToolset
         from tools.builtin.search_tools import SearchToolsTool
 
         agent = _FakeAgentConfig(tools={"search_tools": "auto", "weather": "auto"})
@@ -426,16 +504,30 @@ class TestToolExecution:
             "search_tools": SearchToolsTool(),
             "weather": _FakeTool("weather", ToolResult(success=True, data="x")),
         }
-        xml = _tool_call_xml("search_tools", query="select:weather")
+        calls = _native_tool_call("search_tools", query="select:weather")
         rounds = [
-            _tool_call_chunks(xml),
+            _tool_call_chunks(calls),
             _simple_llm_chunks("got the schema"),
         ]
+        deferred = DeferredUnit(
+            name="weather_unit",
+            description="Weather tools",
+            member_full_names=["weather"],
+        )
+        effective = EffectiveToolset(
+            permissions={
+                "search_tools": ToolPermission.AUTO,
+                "weather": ToolPermission.AUTO,
+            },
+            deferred_units={"weather_unit": deferred},
+            tool_units={"weather_unit": deferred},
+        )
 
         result, emitted, store = await _run_engine(
             _make_fake_stream_sequence(rounds),
             agents={"lead_agent": agent},
             tools=tools,
+            effective_toolsets={"lead_agent": effective},
         )
 
         starts = [e for e in emitted if e["type"] == "tool_start" and e["data"]["tool"] == "search_tools"]
@@ -443,9 +535,12 @@ class TestToolExecution:
         assert len(starts) == 1
         assert len(completes) == 1
         assert completes[0]["data"]["success"] is True
-        # 渲染了 weather 的完整 doc(SearchToolsTool.execute 不该被走到 —— 那会回错误)
+        # Result carries the full native declaration and advances sticky disclosure.
         assert "weather" in completes[0]["data"]["result_data"]
         assert "Fake weather" in completes[0]["data"]["result_data"]
+        assert result["agent_progressive_state"]["lead_agent"]["disclosed_tools"] == [
+            "weather"
+        ]
 
     async def test_wants_context_param_collision_is_tool_failure_not_turn_error(self):
         # 模型误吐 `_context` 参数 → 与引擎注入键撞车 → 绑定 TypeError。协程构造在 try 内,
@@ -454,7 +549,7 @@ class TestToolExecution:
 
         agent = _FakeAgentConfig(tools={"search_tools": "auto"})
         tools = {"search_tools": SearchToolsTool()}
-        xml = _tool_call_xml("search_tools", _context="oops")
+        xml = _native_tool_call("search_tools", _context="oops")
         rounds = [
             _tool_call_chunks(xml),
             _simple_llm_chunks("recovered"),
@@ -478,7 +573,7 @@ class TestToolExecution:
 
         agent = _FakeAgentConfig(tools={})  # 空可调集
         tools = {"search_tools": SearchToolsTool()}
-        xml = _tool_call_xml("search_tools", query="select:weather")
+        xml = _native_tool_call("search_tools", query="select:weather")
         rounds = [
             _tool_call_chunks(xml),
             _simple_llm_chunks("ok"),
@@ -493,31 +588,12 @@ class TestToolExecution:
         completes = [e for e in emitted if e["type"] == "tool_complete" and e["data"]["tool"] == "search_tools"]
         assert len(completes) == 1
         assert completes[0]["data"]["success"] is False
-        assert "not available" in completes[0]["data"]["error"]
-
-    async def test_tool_not_found(self):
-        agent = _FakeAgentConfig(tools={"my_tool": "auto"})
-        xml = _tool_call_xml("my_tool")
-        rounds = [
-            _tool_call_chunks(xml),
-            _simple_llm_chunks("ok"),
-        ]
-
-        result, emitted, store = await _run_engine(
-            _make_fake_stream_sequence(rounds),
-            agents={"lead_agent": agent},
-            tools={},  # no tools registered
-        )
-
-        completes = [e for e in emitted if e["type"] == "tool_complete" and e["data"]["tool"] == "my_tool"]
-        assert len(completes) == 1
-        assert completes[0]["data"]["success"] is False
-        assert "not found" in completes[0]["data"]["error"]
+        assert "not exposed" in completes[0]["data"]["error"]
 
     async def test_tool_not_in_whitelist(self):
         agent = _FakeAgentConfig(tools={})  # empty whitelist
         tool = _FakeTool("my_tool")
-        xml = _tool_call_xml("my_tool")
+        xml = _native_tool_call("my_tool")
         rounds = [
             _tool_call_chunks(xml),
             _simple_llm_chunks("ok"),
@@ -532,12 +608,12 @@ class TestToolExecution:
         completes = [e for e in emitted if e["type"] == "tool_complete" and e["data"]["tool"] == "my_tool"]
         assert len(completes) == 1
         assert completes[0]["data"]["success"] is False
-        assert "not available" in completes[0]["data"]["error"]
+        assert "not exposed" in completes[0]["data"]["error"]
 
     async def test_tool_raises_exception(self):
         agent = _FakeAgentConfig(tools={"bad_tool": "auto"})
         tool = _FailingTool("bad_tool")
-        xml = _tool_call_xml("bad_tool")
+        xml = _native_tool_call("bad_tool")
         rounds = [
             _tool_call_chunks(xml),
             _simple_llm_chunks("recovered"),
@@ -554,19 +630,16 @@ class TestToolExecution:
         assert completes[0]["data"]["success"] is False
         assert "exploded" in completes[0]["data"]["error"]
 
-    async def test_tool_call_parse_error(self):
-        """Malformed tool_call XML → engine emits paired TOOL_START + TOOL_COMPLETE.
-
-        Pairing contract: every TOOL_COMPLETE must have a preceding TOOL_START
-        for the same tool. The parser-error branch used to violate this by
-        emitting only TOOL_COMPLETE, which forced live SSE / replay consumers
-        to write orphan-tolerance code. We now require the pair so both
-        consumer paths can rely on the invariant.
-        """
+    async def test_invalid_native_arguments_are_a_bound_tool_failure(self):
+        """Invalid JSON is still an accepted call and receives one bound result."""
         agent = _FakeAgentConfig(tools={"my_tool": "auto"})
-        xml = '<tool_call>some random garbage</tool_call>'
+        calls = [{
+            "id": "call_invalid_json",
+            "type": "function",
+            "function": {"name": "my_tool", "arguments": "{broken"},
+        }]
         rounds = [
-            _tool_call_chunks(xml),
+            _tool_call_chunks(calls),
             _simple_llm_chunks("ok"),
         ]
 
@@ -578,18 +651,15 @@ class TestToolExecution:
 
         assert result["completed"] is True
 
-        # Parser turns malformed input into ToolCall(name="__malformed__", error=...)
-        starts = [e for e in emitted if e["type"] == "tool_start" and e["data"]["tool"] == "__malformed__"]
-        completes = [e for e in emitted if e["type"] == "tool_complete" and e["data"]["tool"] == "__malformed__"]
-        assert len(starts) == 1, "parser-error path must emit TOOL_START to keep the pairing contract"
+        starts = [e for e in emitted if e["type"] == "tool_start"]
+        completes = [e for e in emitted if e["type"] == "tool_complete"]
+        assert len(starts) == 1
         assert len(completes) == 1
+        assert starts[0]["data"]["call_id"] == "call_invalid_json"
+        assert completes[0]["data"]["call_id"] == "call_invalid_json"
         assert completes[0]["data"]["success"] is False
-        assert "could not be parsed" in completes[0]["data"]["error"]
-
-        # START must precede COMPLETE in the emit stream
-        start_idx = next(i for i, e in enumerate(emitted) if e["type"] == "tool_start" and e["data"]["tool"] == "__malformed__")
-        complete_idx = next(i for i, e in enumerate(emitted) if e["type"] == "tool_complete" and e["data"]["tool"] == "__malformed__")
-        assert start_idx < complete_idx
+        assert "Invalid native tool arguments" in completes[0]["data"]["error"]
+        assert emitted.index(starts[0]) < emitted.index(completes[0])
 
 
 # ============================================================
@@ -603,7 +673,7 @@ class TestPermissionInterrupt:
         agent = _FakeAgentConfig(tools={"sensitive_tool": "confirm"})
         tool = _FakeTool("sensitive_tool", permission=ToolPermission.CONFIRM)
 
-        xml = _tool_call_xml("sensitive_tool", query="test")
+        xml = _native_tool_call("sensitive_tool", query="test")
 
         store = InMemoryRuntimeStore()
         state = create_initial_state(task="test", session_id="s1", message_id="msg-1", path_events=[])
@@ -649,7 +719,7 @@ class TestPermissionInterrupt:
         agent = _FakeAgentConfig(tools={"sensitive_tool": "confirm"})
         tool = _FakeTool("sensitive_tool", permission=ToolPermission.CONFIRM)
 
-        xml = _tool_call_xml("sensitive_tool", query="test")
+        xml = _native_tool_call("sensitive_tool", query="test")
         store = InMemoryRuntimeStore()
         state = create_initial_state(task="test", session_id="s1", message_id="msg-1", path_events=[])
         emitted = []
@@ -693,7 +763,7 @@ class TestPermissionInterrupt:
         agent = _FakeAgentConfig(tools={"sensitive_tool": "confirm"})
         tool = _FakeTool("sensitive_tool", permission=ToolPermission.CONFIRM)
 
-        xml = _tool_call_xml("sensitive_tool", query="test")
+        xml = _native_tool_call("sensitive_tool", query="test")
         store = InMemoryRuntimeStore()
         state = create_initial_state(task="test", session_id="s1", message_id="msg-1", path_events=[])
         emitted = []
@@ -736,7 +806,7 @@ class TestPermissionInterrupt:
         agent = _FakeAgentConfig(tools={"sensitive_tool": "confirm"})
         tool = _FakeTool("sensitive_tool", permission=ToolPermission.CONFIRM)
 
-        xml = _tool_call_xml("sensitive_tool", query="test")
+        xml = _native_tool_call("sensitive_tool", query="test")
 
         # Use very short timeout
         rounds = [
@@ -775,68 +845,6 @@ class TestPermissionInterrupt:
         # START 必须在 COMPLETE 之前
         assert emitted.index(tool_starts[0]) < emitted.index(tool_completes[0])
 
-    async def test_denied_tool_complete_includes_parser_warnings(self):
-        """显式 deny 的 TOOL_COMPLETE 必须带上本次 tool_call 的 parser_warnings，
-        否则被 repair 过的 confirm 工具调用一旦被拒绝，下一轮模型就再也看不到
-        修复提示 —— 与提交目标 "thread parser_warnings through every TOOL_COMPLETE"
-        不一致（reviewer P2）。"""
-        agent = _FakeAgentConfig(tools={"sensitive_tool": "confirm"})
-        tool = _FakeTool("sensitive_tool", permission=ToolPermission.CONFIRM)
-
-        # 用 <name=foo</name> 等号语法触发 _repair_tag_equals_syntax warning
-        xml_with_repair = """<tool_call>
-<name=sensitive_tool</name>
-<params>
-<query><![CDATA[test]]></query>
-</params>
-</tool_call>"""
-
-        store = InMemoryRuntimeStore()
-        state = create_initial_state(task="test", session_id="s1", message_id="msg-1", path_events=[])
-        emitted = []
-
-        async def _resolve_deny():
-            for _ in range(100):
-                if await store.get_interrupt_data("msg-1") is not None:
-                    await store.resolve_interrupt("msg-1", {"approved": False})
-                    return
-                await asyncio.sleep(0.01)
-
-        async def capture_emit(event_dict):
-            emitted.append(event_dict)
-            if event_dict["type"] == "permission_request":
-                asyncio.create_task(_resolve_deny())
-
-        rounds = [
-            _tool_call_chunks(xml_with_repair),
-            _simple_llm_chunks("done"),
-        ]
-
-        with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
-             patch("core.engine.config.PERMISSION_TIMEOUT", 5):
-            await execute_loop(
-                state=state,
-                agents={"lead_agent": agent},
-                tools={"sensitive_tool": tool},
-                effective_toolsets=effective_for({"lead_agent": agent}, {"sensitive_tool": tool}),
-                hooks=_hooks_from_store(store),
-                emit=capture_emit,
-            )
-
-        tool_completes = [
-            e for e in emitted
-            if e["type"] == "tool_complete" and e["data"].get("tool") == "sensitive_tool"
-        ]
-        assert len(tool_completes) == 1
-        deny_event = tool_completes[0]
-        assert deny_event["data"]["success"] is False
-        warnings = deny_event["data"].get("parser_warnings")
-        assert warnings, f"deny TOOL_COMPLETE missing parser_warnings, got: {deny_event['data']}"
-        assert any("=" in w and "name" in w.lower() for w in warnings), (
-            f"warnings should describe the '=' syntax repair, got: {warnings}"
-        )
-
-
 # ============================================================
 # TestCancellation
 # ============================================================
@@ -863,10 +871,9 @@ class TestCancellation:
         """Cancel during tool execution → break out of tool loop."""
         agent = _FakeAgentConfig(tools={"t1": "auto", "t2": "auto"})
 
-        xml = (
-            _tool_call_xml("t1", param="val1")
-            + "\n"
-            + _tool_call_xml("t2", param="val2")
+        calls = (
+            _native_tool_call("t1", param="val1")
+            + _native_tool_call("t2", param="val2")
         )
 
         store = InMemoryRuntimeStore()
@@ -880,7 +887,7 @@ class TestCancellation:
                 store._cancellations["msg-1"] = asyncio.Event()
                 store._cancellations["msg-1"].set()
 
-        with patch("models.llm.astream_with_retry", _make_fake_stream(_tool_call_chunks(xml))):
+        with patch("models.llm.astream_with_retry", _make_fake_stream(_tool_call_chunks(calls))):
             result = await execute_loop(
                 state=state,
                 agents={"lead_agent": agent},
@@ -921,8 +928,8 @@ class TestCancellation:
             def __init__(self):
                 super().__init__(name="hang", description="hangs", permission=ToolPermission.AUTO)
 
-            def get_parameters(self):
-                return []
+            def get_input_schema(self):
+                return {"type": "object", "properties": {}, "additionalProperties": True}
 
             async def execute(self, **p):
                 # Set the cancel flag once we're in flight, then hang far past
@@ -940,7 +947,7 @@ class TestCancellation:
 
         lead = _FakeAgentConfig(tools={"hang": "auto"})
         result, emitted, _store = await _run_engine(
-            _make_fake_stream(_tool_call_chunks(_tool_call_xml("hang"))),
+            _make_fake_stream(_tool_call_chunks(_native_tool_call("hang"))),
             agents={"lead_agent": lead},
             tools={"hang": _HangingTool()},
             message_id=message_id,
@@ -985,31 +992,6 @@ class TestCancellation:
         llm_completes = _events_of_type(emitted, StreamEventType.LLM_COMPLETE.value)
         assert len(llm_completes) == 1
         assert llm_completes[0]["data"]["content"] == "Hello, this is a partial "
-
-    async def test_cancel_mid_stream_tool_call_xml_not_packed(self):
-        """Cancel mid tool-call XML → state['response'] stays empty (no broken
-        XML snapshot), but llm_complete still carries the full partial content."""
-        store = InMemoryRuntimeStore()
-        xml = _tool_call_xml("some_tool", arg="value")
-        chunks = [
-            {"type": "content", "content": xml[:18]},
-            {"type": "content", "content": xml[18:]},
-        ]
-        result, emitted, _ = await _run_engine(
-            _make_cancelling_stream(chunks, store, "msg-1", cancel_before_idx=1),
-            store=store,
-            message_id="msg-1",
-            cancel_check_interval=0,
-        )
-
-        assert result["cancelled"] is True
-        assert result["completed"] is True
-        # tool-call XML must NOT be packed into the display snapshot
-        assert not result.get("response")
-        # but the event stream still has the full partial content for history
-        llm_completes = _events_of_type(emitted, StreamEventType.LLM_COMPLETE.value)
-        assert len(llm_completes) == 1
-        assert "<tool_call>" in llm_completes[0]["data"]["content"]
 
     async def test_cancel_mid_stream_reasoning_phase(self):
         """Cancel during the reasoning phase (no content chunks yet) → no
@@ -1067,8 +1049,8 @@ class TestCancelProbeFailure:
             def __init__(self):
                 super().__init__(name="slow", description="slow", permission=ToolPermission.AUTO)
 
-            def get_parameters(self):
-                return []
+            def get_input_schema(self):
+                return {"type": "object", "properties": {}, "additionalProperties": True}
 
             async def execute(self, **p):
                 in_tool["armed"] = True  # 让下一拍探针在我们在飞时爆
@@ -1080,7 +1062,7 @@ class TestCancelProbeFailure:
 
         lead = _FakeAgentConfig(tools={"slow": "auto"})
         rounds = [
-            _tool_call_chunks(_tool_call_xml("slow")),
+            _tool_call_chunks(_native_tool_call("slow")),
             _simple_llm_chunks("Done"),
         ]
         state = create_initial_state(task="t", session_id="s1", message_id="msg-1", path_events=[])
@@ -1178,7 +1160,7 @@ class TestRoundLimits:
         agent = _FakeAgentConfig(tools={"my_tool": "auto"}, max_tool_rounds=1)
         tool = _FakeTool("my_tool")
 
-        xml = _tool_call_xml("my_tool", query="test")
+        xml = _native_tool_call("my_tool", query="test")
 
         captured_messages = []
         call_idx = {"n": 0}
@@ -1270,11 +1252,16 @@ class TestMetrics:
         """Multi-round token usage should be aggregated."""
         agent = _FakeAgentConfig(tools={"my_tool": "auto"})
         tool = _FakeTool("my_tool")
-        xml = _tool_call_xml("my_tool", query="test")
+        xml = _native_tool_call("my_tool", query="test")
 
         rounds = [
             _tool_call_chunks(xml, input_tokens=100, output_tokens=50),
-            _simple_llm_chunks("Done", input_tokens=200, output_tokens=30),
+            _simple_llm_chunks(
+                "Done",
+                input_tokens=200,
+                output_tokens=30,
+                cached_input_tokens=120,
+            ),
         ]
 
         result, _, store = await _run_engine(
@@ -1287,12 +1274,45 @@ class TestMetrics:
         assert total["input_tokens"] == 300
         assert total["output_tokens"] == 80
         assert total["total_tokens"] == 380
+        assert total["cached_input_tokens"] == 120
+        assert result["execution_metrics"]["cached_input_tokens_partial"] is True
+
+    async def test_cached_token_aggregation_is_exact_when_all_calls_report(self):
+        """An explicit zero is a report, so full coverage stays exact."""
+        agent = _FakeAgentConfig(tools={"my_tool": "auto"})
+        tool = _FakeTool("my_tool")
+        xml = _native_tool_call("my_tool", query="test")
+
+        rounds = [
+            _tool_call_chunks(
+                xml,
+                input_tokens=100,
+                output_tokens=50,
+                cached_input_tokens=0,
+            ),
+            _simple_llm_chunks(
+                "Done",
+                input_tokens=200,
+                output_tokens=30,
+                cached_input_tokens=120,
+            ),
+        ]
+
+        result, _, store = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": agent},
+            tools={"my_tool": tool},
+        )
+
+        metrics = result["execution_metrics"]
+        assert metrics["total_token_usage"]["cached_input_tokens"] == 120
+        assert metrics["cached_input_tokens_partial"] is False
 
     async def test_per_turn_token_metrics(self):
         """first_input_tokens, last_output_tokens, last_input_tokens should be tracked for lead_agent."""
         agent = _FakeAgentConfig(tools={"my_tool": "auto"})
         tool = _FakeTool("my_tool")
-        xml = _tool_call_xml("my_tool", query="test")
+        xml = _native_tool_call("my_tool", query="test")
 
         rounds = [
             _tool_call_chunks(xml, input_tokens=100, output_tokens=50),
@@ -1387,11 +1407,11 @@ class TestInEngineCompaction:
             ],
         ]
 
-        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
-            result, emitted, _ = await _run_engine(
-                _make_fake_stream_sequence(rounds),
-                agents={"lead_agent": lead, "compact_agent": compact},
-            )
+        result, emitted, _ = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": lead, "compact_agent": compact},
+            compaction_threshold=100,
+        )
 
         # Both events should end up in persisted state
         event_types = [e.event_type for e in result["events"]]
@@ -1409,7 +1429,7 @@ class TestInEngineCompaction:
         # Content = memory-aid frame + raw summary from compact_agent
         assert summary_ev.data["content"].startswith("[Prior conversation has been compacted")
         assert "compacted prior turn" in summary_ev.data["content"]
-        assert summary_ev.data["model"] == "openai/fake-model"
+        assert summary_ev.data["model"] == "deepseek-v4-flash"
         assert summary_ev.data["error"] is None
 
     async def test_under_threshold_no_compaction(self):
@@ -1419,11 +1439,11 @@ class TestInEngineCompaction:
 
         rounds = [_simple_llm_chunks("Done", input_tokens=10, output_tokens=5)]
 
-        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 1000):
-            result, emitted, _ = await _run_engine(
-                _make_fake_stream_sequence(rounds),
-                agents={"lead_agent": lead, "compact_agent": compact},
-            )
+        result, emitted, _ = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": lead, "compact_agent": compact},
+            compaction_threshold=1000,
+        )
 
         event_types = [e.event_type for e in result["events"]]
         assert "compaction_start" not in event_types
@@ -1462,13 +1482,13 @@ class TestInEngineCompaction:
         lead = _FakeAgentConfig(tools={})
         compact = _FakeAgentConfig(name="compact_agent", role_prompt="Compactor.", tools={})
 
-        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100), \
-             patch("core.compaction_runner.config.CANCEL_CHECK_INTERVAL", 0.01):
+        with patch("core.compaction_runner.config.CANCEL_CHECK_INTERVAL", 0.01):
             result, emitted, _ = await _run_engine(
                 fake_llm,
                 agents={"lead_agent": lead, "compact_agent": compact},
                 message_id=message_id,
                 store=store,
+                compaction_threshold=100,
             )
 
         assert result["completed"] is True
@@ -1490,11 +1510,11 @@ class TestInEngineCompaction:
 
         rounds = [_simple_llm_chunks("Done", input_tokens=80, output_tokens=30)]
 
-        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
-            result, emitted, _ = await _run_engine(
-                _make_fake_stream_sequence(rounds),
-                agents={"lead_agent": lead},
-            )
+        result, emitted, _ = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": lead},
+            compaction_threshold=100,
+        )
 
         # Engine should complete normally
         assert result["completed"] is True
@@ -1527,12 +1547,12 @@ class TestInEngineCompaction:
         ]
 
         # Threshold deliberately way above usage — only the force flag can fire compaction.
-        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100_000):
-            result, _, _ = await _run_engine(
-                _make_fake_stream_sequence(rounds),
-                agents={"lead_agent": lead, "compact_agent": compact},
-                force_compact=True,
-            )
+        result, _, _ = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": lead, "compact_agent": compact},
+            force_compact=True,
+            compaction_threshold=100_000,
+        )
 
         event_types = [e.event_type for e in result["events"]]
         assert "compaction_start" in event_types
@@ -1556,7 +1576,7 @@ class TestInEngineCompaction:
         rounds = [
             # R1: lead calls a tool. Forced compaction fires after this call
             # (using R1's input_tokens as the measurement); R1 itself is folded.
-            _tool_call_chunks(_tool_call_xml("echo", text="hi"), input_tokens=10, output_tokens=5),
+            _tool_call_chunks(_native_tool_call("echo", text="hi"), input_tokens=10, output_tokens=5),
             # R2: compact_agent produces the summary.
             [
                 {"type": "content", "content": "<summary>compacted prior + R1</summary>"},
@@ -1572,13 +1592,13 @@ class TestInEngineCompaction:
             _simple_llm_chunks("Final after tool", input_tokens=15, output_tokens=8),
         ]
 
-        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100_000):
-            result, _, _ = await _run_engine(
-                _make_fake_stream_sequence(rounds),
-                agents={"lead_agent": lead, "compact_agent": compact},
-                tools={"echo": echo_tool},
-                force_compact=True,
-            )
+        result, _, _ = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": lead, "compact_agent": compact},
+            tools={"echo": echo_tool},
+            force_compact=True,
+            compaction_threshold=100_000,
+        )
 
         event_types = [e.event_type for e in result["events"]]
         summary_idx = event_types.index("compaction_summary")
@@ -1634,12 +1654,12 @@ class TestInEngineCompaction:
             ],
         ]
 
-        with patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100_000):
-            result, _, _ = await _run_engine(
-                _make_fake_stream_sequence(rounds),
-                agents={"lead_agent": lead, "compact_agent": compact},
-                force_compact=True,
-            )
+        result, _, _ = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": lead, "compact_agent": compact},
+            force_compact=True,
+            compaction_threshold=100_000,
+        )
 
         # Pre-condition: compaction actually ran.
         event_types = [e.event_type for e in result["events"]]
@@ -1655,9 +1675,82 @@ class TestInEngineCompaction:
             "and the gauge will show stale pre-compaction tokens."
         )
 
+    async def test_context_overflow_compacts_and_retries_once(self):
+        """A typed provider overflow gets one compaction and one successful retry."""
+        lead = _FakeAgentConfig(tools={})
+        compact = _FakeAgentConfig(
+            name="compact_agent", role_prompt="Compactor.", tools={}
+        )
+        calls = {"n": 0}
+
+        async def fake_llm(messages, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise LLMContextOverflowError("too many tokens")
+            chunks = (
+                _simple_llm_chunks("overflow summary", 50, 20)
+                if calls["n"] == 2
+                else _simple_llm_chunks("Recovered", 30, 5)
+            )
+            for chunk in chunks:
+                yield chunk
+
+        result, _, _ = await _run_engine(
+            fake_llm,
+            agents={"lead_agent": lead, "compact_agent": compact},
+        )
+
+        assert calls["n"] == 3  # failed lead + compact + retried lead
+        assert result["completed"] is True
+        assert result["response"] == "Recovered"
+        assert not result.get("error")
+        starts = [
+            e for e in result["events"]
+            if e.event_type == StreamEventType.COMPACTION_START.value
+        ]
+        assert len(starts) == 1
+        assert starts[0].data["reason"] == "overflow"
+        assert "compaction_threshold" not in starts[0].data
+        assert "last_input_tokens" not in starts[0].data
+        assert "last_output_tokens" not in starts[0].data
+        summary = next(
+            e for e in result["events"]
+            if e.event_type == StreamEventType.COMPACTION_SUMMARY.value
+        )
+        assert summary.data["carry_tool_call"] is False
+
+    async def test_second_context_overflow_fails_without_compaction_loop(self):
+        """If the immediate retry also overflows, terminate instead of compacting forever."""
+        lead = _FakeAgentConfig(tools={})
+        compact = _FakeAgentConfig(
+            name="compact_agent", role_prompt="Compactor.", tools={}
+        )
+        calls = {"n": 0}
+
+        async def fake_llm(messages, **kwargs):
+            calls["n"] += 1
+            if calls["n"] in (1, 3):
+                raise LLMContextOverflowError("still too many tokens")
+            for chunk in _simple_llm_chunks("overflow summary", 50, 20):
+                yield chunk
+
+        result, _, _ = await _run_engine(
+            fake_llm,
+            agents={"lead_agent": lead, "compact_agent": compact},
+        )
+
+        assert calls["n"] == 3
+        assert result["completed"] is True
+        assert result["error"] is True
+        assert "after one compact-and-retry attempt" in result["response"]
+        assert sum(
+            e.event_type == StreamEventType.COMPACTION_START.value
+            for e in result["events"]
+        ) == 1
+
 
 # ============================================================
-# TestSkillActivation (C-2: read_skill → active_skills + skill_grants merge)
+# TestSkillActivation (C-2: per-agent skill state + skill_grants merge)
 # ============================================================
 
 
@@ -1669,8 +1762,8 @@ class _ActivatingTool(BaseTool):
                          permission=ToolPermission.AUTO)
         self._slug = slug
 
-    def get_parameters(self):
-        return []
+    def get_input_schema(self):
+        return {"type": "object", "properties": {}, "additionalProperties": True}
 
     async def execute(self, **params) -> ToolResult:
         return ToolResult(success=True, data="GUIDANCE",
@@ -1698,8 +1791,8 @@ class TestSkillActivation:
 
         # 三轮:① 调 read_skill ② 调 granted_tool(激活后才可调)③ 收尾
         rounds = [
-            _tool_call_chunks(_tool_call_xml("read_skill", slug="s")),
-            _tool_call_chunks(_tool_call_xml("granted_tool")),
+            _tool_call_chunks(_native_tool_call("read_skill", slug="s")),
+            _tool_call_chunks(_native_tool_call("granted_tool")),
             _simple_llm_chunks("Done"),
         ]
         state = create_initial_state(task="hi", session_id="sess", message_id="msg-act")
@@ -1722,7 +1815,7 @@ class TestSkillActivation:
             )
 
         # 激活持久进 state(回合末由 controller 写 metadata)
-        assert result["active_skills"] == ["s"]
+        assert result["agent_progressive_state"]["lead_agent"]["active_skills"] == ["s"]
         # granted_tool 被激活后翻进可调集
         assert "granted_tool" in eff
         # 两个工具都真执行成功(granted_tool 没被白名单闸拒)
@@ -1738,7 +1831,8 @@ class TestSkillActivation:
             def __init__(self):
                 super().__init__(name="read_skill", description="x",
                                  permission=ToolPermission.AUTO)
-            def get_parameters(self): return []
+            def get_input_schema(self):
+                return {"type": "object", "properties": {}, "additionalProperties": True}
             async def execute(self, **p):
                 return ToolResult(success=False, error="nope",
                                   metadata={"activated_skill": "s"})
@@ -1749,7 +1843,7 @@ class TestSkillActivation:
             skill_grants={"s": SkillGrant(permissions={"granted_tool": ToolPermission.AUTO})},
         )
         state = create_initial_state(task="hi", session_id="sess", message_id="msg-f")
-        rounds = [_tool_call_chunks(_tool_call_xml("read_skill", slug="s")),
+        rounds = [_tool_call_chunks(_native_tool_call("read_skill", slug="s")),
                   _simple_llm_chunks("Done")]
         store = InMemoryRuntimeStore()
 
@@ -1767,19 +1861,30 @@ class TestSkillActivation:
             )
 
         # 失败调用不激活(only on success)
-        assert result["active_skills"] == []
+        assert result["agent_progressive_state"].get("lead_agent", {}).get(
+            "active_skills", []
+        ) == []
         assert "granted_tool" not in eff
 
     async def test_button_activation_injects_body_into_user_input(self):
         """C-3:用户按钮激活 → controller 传 activated_skill_bodies → engine 注入 USER_INPUT
         正文(仅 LLM 可见,同 force_compact/上传路径),让模型即刻看到 skill 指令。"""
         from core.effective_toolset import EffectiveToolset
+        from core.skill_guidance import render_skill_guidance
 
         state = create_initial_state(
             task="use it", session_id="sess", message_id="msg-b",
-            active_skills=["s"],
+            agent_progressive_state={
+                "lead_agent": {"active_skills": ["s"], "disclosed_tools": []}
+            },
             activated_skill_bodies=[
-                {"slug": "s", "name": "My Skill", "body": "DO THE THING"}
+                {
+                    "slug": "s",
+                    "name": "My Skill",
+                    "body": render_skill_guidance(
+                        "DO THE THING", has_extra_files=True
+                    ),
+                }
             ],
         )
         rounds = [_simple_llm_chunks("Done")]
@@ -1806,6 +1911,7 @@ class TestSkillActivation:
         assert "use it" in content              # 原始输入保留
         assert "My Skill" in content            # skill 名注入
         assert "DO THE THING" in content        # skill 正文注入
+        assert "mount_skill" in content          # 与 read_skill 同一条件化提醒
 
     async def test_activation_only_turn_body_becomes_content(self):
         """纯激活轮(无文本):skill 正文即 USER_INPUT 正文,让 lead 总有可回应输入。"""
@@ -1813,7 +1919,9 @@ class TestSkillActivation:
 
         state = create_initial_state(
             task="", session_id="sess", message_id="msg-b2",
-            active_skills=["s"],
+            agent_progressive_state={
+                "lead_agent": {"active_skills": ["s"], "disclosed_tools": []}
+            },
             activated_skill_bodies=[{"slug": "s", "name": "S", "body": "BODY-ONLY"}],
         )
         rounds = [_simple_llm_chunks("Done")]
@@ -1860,12 +1968,12 @@ class TestMixedSerialDelegation:
         sub_a = _FakeAgentConfig(name="sub_a", tools={})
         sub_b = _FakeAgentConfig(name="sub_b", tools={})
 
-        response_r1 = "\n".join([
-            _tool_call_xml("tool_a"),
-            _tool_call_xml("call_subagent", agent_name="sub_a", instruction="task A"),
-            _tool_call_xml("call_subagent", agent_name="sub_b", instruction="task B"),
-            _tool_call_xml("tool_b"),
-        ])
+        response_r1 = (
+            _native_tool_call("tool_a")
+            + _native_tool_call("call_subagent", agent_name="sub_a", instruction="task A")
+            + _native_tool_call("call_subagent", agent_name="sub_b", instruction="task B")
+            + _native_tool_call("tool_b")
+        )
         rounds = [
             _tool_call_chunks(response_r1),       # lead round 1: 4 calls
             _simple_llm_chunks("result from A"),  # sub_a
@@ -1929,10 +2037,10 @@ class TestMixedSerialDelegation:
         sub_a = _FakeAgentConfig(name="sub_a", tools={})
         store = InMemoryRuntimeStore()
 
-        r1 = "\n".join([
-            _tool_call_xml("call_subagent", agent_name="sub_a", instruction="task A"),
-            _tool_call_xml("tool_b"),
-        ])
+        r1 = (
+            _native_tool_call("call_subagent", agent_name="sub_a", instruction="task A")
+            + _native_tool_call("tool_b")
+        )
         call_count = {"n": 0}
 
         async def fake(messages, **kwargs):
@@ -1976,10 +2084,10 @@ class TestMixedSerialDelegation:
         lead = _FakeAgentConfig(tools={"call_subagent": "auto", "tool_b": "auto"})
         sub_a = _FakeAgentConfig(name="sub_a", tools={})
 
-        r1 = "\n".join([
-            _tool_call_xml("call_subagent", agent_name="sub_a", instruction="task A"),
-            _tool_call_xml("tool_b"),
-        ])
+        r1 = (
+            _native_tool_call("call_subagent", agent_name="sub_a", instruction="task A")
+            + _native_tool_call("tool_b")
+        )
         call_count = {"n": 0}
 
         async def fake(messages, **kwargs):
@@ -2006,40 +2114,3 @@ class TestMixedSerialDelegation:
         assert "llm boom" in result["error_detail"]["error"]
         start_names = [e["data"]["tool"] for e in _events_of_type(emitted, "tool_start")]
         assert start_names == ["call_subagent"]  # tool_b 从未启动
-
-    async def test_call_subagent_parser_warnings_in_tool_complete(self):
-        """repair 过的 call_subagent 调用,其 TOOL_COMPLETE 原地带 parser_warnings
-        (旧实现经 state 暂存槽 deferred 回填,新实现随结果直接写入)。"""
-        lead = _FakeAgentConfig(tools={"call_subagent": "auto"})
-        sub_a = _FakeAgentConfig(name="sub_a", tools={})
-
-        # <name=...</name> 等号语法触发 _repair_tag_equals_syntax warning
-        xml_with_repair = """<tool_call>
-<name=call_subagent</name>
-<params>
-<agent_name><![CDATA[sub_a]]></agent_name>
-<instruction><![CDATA[do it]]></instruction>
-</params>
-</tool_call>"""
-        rounds = [
-            _tool_call_chunks(xml_with_repair),
-            _simple_llm_chunks("sub done"),
-            _simple_llm_chunks("lead done"),
-        ]
-
-        result, emitted, _ = await _run_engine(
-            _make_fake_stream_sequence(rounds),
-            agents={"lead_agent": lead, "sub_a": sub_a},
-            tools={"call_subagent": self._real_call_subagent(["sub_a"])},
-        )
-
-        assert result["completed"] is True
-        sub_completes = [
-            e for e in _events_of_type(emitted, "tool_complete")
-            if e["data"].get("tool") == "call_subagent"
-        ]
-        assert len(sub_completes) == 1
-        assert sub_completes[0]["data"]["success"] is True
-        assert sub_completes[0]["data"].get("parser_warnings"), (
-            "call_subagent TOOL_COMPLETE 应带上本次调用的 parser_warnings"
-        )

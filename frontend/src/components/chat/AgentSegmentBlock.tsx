@@ -3,39 +3,15 @@
 import { memo, useState } from 'react';
 import type { ExecutionSegment } from '@/stores/streamStore';
 import { PROSE_CLASSES, MENU_ROW_HOVER } from '@/lib/styles';
+import { formatTokenUsage } from '@/lib/formatTokens';
 import MarkdownBlock from '@/components/markdown/MarkdownBlock';
 import { PillBadge } from '@/components/ui/PillBadge';
 import ThinkingBlock from './ThinkingBlock';
-import AgentOutputBlock from './AgentOutputBlock';
 import ToolCallCard from './ToolCallCard';
 
-/**
- * Strip complete and partial XML tool_call blocks from streaming content.
- * Complete: <tool_call>...</tool_call>
- * Partial (trailing): <tool_call>... (no closing tag yet)
- */
-function stripToolCallXml(text: string): string {
-  // Remove complete blocks
-  let cleaned = text.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '');
-  // Remove trailing partial block (opening tag without closing)
-  cleaned = cleaned.replace(/<tool_call>[\s\S]*$/g, '');
-  return cleaned.trimEnd();
-}
-
-/**
- * Extract only <tool_call> XML blocks (complete and partial) from text.
- * Inverse of stripToolCallXml — returns only the XML parts.
- */
-function extractToolCallXml(text: string): string {
-  const parts: string[] = [];
-  for (const m of text.matchAll(/<tool_call>[\s\S]*?<\/tool_call>/g)) {
-    parts.push(m[0]);
-  }
-  // Trailing partial block (opening without closing)
-  const afterComplete = text.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '');
-  const partial = afterComplete.match(/<tool_call>[\s\S]*$/);
-  if (partial) parts.push(partial[0]);
-  return parts.join('\n');
+function formatArgumentChars(count: number): string {
+  if (count < 1000) return `${count}`;
+  return `${(count / 1000).toFixed(1)}k`;
 }
 
 interface AgentSegmentBlockProps {
@@ -49,38 +25,13 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
   const [expanded, setExpanded] = useState(defaultExpanded);
 
   const isExpanded = isActive || expanded;
-  const hasBody = !!(segment.reasoningContent || segment.llmOutput || segment.toolCalls.length > 0 || segment.content);
-
-  // --- Compute display values upfront ---
-  // Whether this segment involves tool calls (past or in-progress)
-  const hasTool = !!segment.llmOutput || segment.content.includes('<tool_call');
-
-  // Source for pre-tool text and XML: prefer llmOutput (stable), fall back to streaming content
-  const toolSource = segment.llmOutput || segment.content;
-
-  // Pre-tool text: text before <tool_call>, rendered as markdown in a stable position.
-  // When no tool calls, this is empty and mainContent handles everything.
-  const preToolText = hasTool ? stripToolCallXml(toolSource) : '';
-
-  // XML tool call blocks only (for AgentOutputBlock)
-  const toolCallXml = hasTool ? extractToolCallXml(toolSource) : '';
-
-  // Whether XML is currently being streamed (live indicator in AgentOutputBlock)
-  const isStreamingXml = isActive && !segment.isThinking && !segment.llmOutput
-    && segment.content.includes('<tool_call');
-
-  // Main content: post-tool text from a new LLM round, or normal content when no tools involved.
-  // - No tool calls: show content as-is
-  // - Tool calls present but content still has XML (between LLM_COMPLETE and TOOL_START): empty (pre-tool text already shown above)
-  // - Tool calls present, content cleared or has new text: show the new text
-  let mainContent = '';
-  if (hasTool) {
-    if (segment.llmOutput && segment.content && !segment.content.includes('<tool_call')) {
-      mainContent = segment.content;
-    }
-  } else {
-    mainContent = segment.content;
-  }
+  const showContentCursor = isActive && segment.llmStreamChannel === 'content';
+  const hasBody = !!(
+    segment.reasoningContent
+    || segment.toolCalls.length > 0
+    || segment.toolCallProgress.length > 0
+    || segment.content
+  );
 
   return (
     <div className="bg-chat dark:bg-chat-dark border border-border dark:border-border-dark rounded-card overflow-hidden">
@@ -125,10 +76,13 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
 
         {/* Compact metadata — only shown when segment is done */}
         {segment.status === 'complete' && (segment.model || segment.tokenUsage || segment.llmDurationMs) && (
-          <span className="ml-auto text-xs text-text-tertiary dark:text-text-tertiary-dark font-mono">
+          <span
+            className="ml-auto text-xs text-text-tertiary dark:text-text-tertiary-dark font-mono"
+            title={segment.tokenUsage?.cached_input_tokens != null ? '↻ cached input tokens' : undefined}
+          >
             {[
               segment.model,
-              segment.tokenUsage && `${(segment.tokenUsage.input_tokens / 1000).toFixed(1)}k ↑ · ${(segment.tokenUsage.output_tokens / 1000).toFixed(1)}k ↓`,
+              segment.tokenUsage && formatTokenUsage(segment.tokenUsage),
               segment.llmDurationMs != null && `${(segment.llmDurationMs / 1000).toFixed(1)}s`,
             ].filter(Boolean).join(' · ')}
           </span>
@@ -141,7 +95,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
         <div className="px-3 pb-3 space-y-3">
           {/* Thinking block */}
           {segment.reasoningContent && (() => {
-            const isThinkingLive = isActive && !segment.content && !segment.llmOutput && segment.toolCalls.length === 0;
+            const isThinkingLive = isActive && segment.llmStreamChannel === 'reasoning';
             return (
               <ThinkingBlock
                 content={segment.reasoningContent}
@@ -151,16 +105,12 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
             );
           })()}
 
-          {/* Pre-tool text — stable position; text before <tool_call> rendered as markdown.
-              Appears in the same DOM slot whether sourced from streaming content or llmOutput,
-              so new elements (AgentOutput, ToolCards) appear BELOW without layout shift. */}
-          {preToolText && (
-            <MarkdownBlock>{preToolText}</MarkdownBlock>
-          )}
-
-          {/* Agent Output — only XML tool_call blocks */}
-          {toolCallXml && (
-            <AgentOutputBlock content={toolCallXml} defaultExpanded={isStreamingXml} isLive={isStreamingXml} />
+          {/* One segment is one native LLM invocation. Ordinary content may
+              coexist with structured calls and is rendered exactly once. */}
+          {segment.content && (
+            <MarkdownBlock className={`${PROSE_CLASSES} ${showContentCursor ? 'streaming-cursor' : ''}`}>
+              {segment.content}
+            </MarkdownBlock>
           )}
 
           {/* Tool calls */}
@@ -168,12 +118,24 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
             <ToolCallCard key={tc.id} toolCall={tc} />
           ))}
 
-          {/* Main content — normal streaming text or post-tool text from new LLM round */}
-          {mainContent && (
-            <MarkdownBlock className={`${PROSE_CLASSES} ${isActive ? 'streaming-cursor' : ''}`}>
-              {mainContent}
-            </MarkdownBlock>
-          )}
+          {/* Native tool-call arguments may take a long time to stream.  Show a
+              bounded liveness row; never render the incomplete JSON itself. */}
+          {segment.toolCallProgress.map((progress) => (
+            <div
+              key={progress.callId ?? progress.index}
+              className="flex items-center gap-2 pl-1 text-xs text-text-secondary dark:text-text-secondary-dark"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse flex-shrink-0" />
+              <span>{progress.status === 'generating' ? 'Preparing' : 'Waiting to run'}</span>
+              <code className="font-mono text-text-primary dark:text-text-primary-dark">
+                {progress.toolName || 'tool call'}
+              </code>
+              <span className="text-text-tertiary dark:text-text-tertiary-dark font-mono">
+                · {formatArgumentChars(progress.argumentsChars)} chars
+              </span>
+            </div>
+          ))}
+
         </div>
       )}
     </div>

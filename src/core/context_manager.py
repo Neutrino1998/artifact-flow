@@ -2,12 +2,12 @@
 ContextManager — 为每次 LLM 调用构建完整的 messages 列表
 
 职责：
-1. 拼接 system prompt —— 仅放全 session 稳定的内容（role_prompt + agents + tools），
+1. 拼接 system prompt —— 仅放全 session 稳定的内容（role_prompt + agents），
    作为 prompt cache 的可缓存前缀。
 2. 通过 EventHistory 从 state["events"] 构建历史 messages（含 compaction_summary boundary）。
 3. 把每轮刷新的动态上下文（system_time + task_plan + artifact 清单）包裹成 ephemeral
-   <system-reminder>，并入最后一条 user 消息正文 —— 现拼即用即丢、不入 event，位于消息
-   尾部，避免它坐在缓存前缀里把后续历史的 prompt cache 全部打掉。
+   <system-reminder>，追加为独立的尾部 user 消息 —— 现拼即用即丢、不入 event，避免
+   修改已有历史消息，也避免动态内容进入缓存前缀。
 
 Token 预算的上下文控制由引擎内 compaction 负责（见 compaction_runner.py），
 ContextManager 本身不再做任何截断。
@@ -21,7 +21,7 @@ from config import config
 from core.effective_toolset import EffectiveToolset
 from core.event_history import build_event_history, last_llm_usage
 from utils.image import VISION_VIEWABLE_MIMES
-from models.llm import model_supports_vision
+from models.llm import model_replays_reasoning, model_supports_vision
 from tools.artifact_envelope import make_preview_slice, render_artifact_slice
 from utils.logger import get_logger
 
@@ -45,6 +45,7 @@ class ContextManager:
         agents: Dict[str, Any],  # {name: AgentSnapshot}
         tools: Dict[str, Any],   # {name: BaseTool}
         effective_toolset: EffectiveToolset,  # 当前 agent 解析后的可调集 + 等级(决策 11)
+        compaction_threshold: int,
         artifacts_inventory: Optional[List[Dict]] = None,
         model: Optional[str] = None,
         sandbox_status: Optional[Dict] = None,
@@ -61,6 +62,8 @@ class ContextManager:
             agent_name: 当前 agent 名称
             agents: 所有 agent 配置 {name: AgentConfig}
             tools: 所有可用工具 {name: BaseTool}
+            compaction_threshold: 当前 agent 模型的有效阈值
+                (models.yaml context_window - 服务级 reserve)
             artifacts_inventory: 预加载的 artifacts 清单（含完整内容）
             tool_round_count: 本 agent 已用的工具轮数（命中 max_tool_rounds 时 reminder
                 里出现 <tool_budget> 收尾提示，见 _build_dynamic_context）
@@ -70,12 +73,11 @@ class ContextManager:
             消息的 ephemeral <system-reminder> 原文，单独返回供引擎落进 agent_start 事件
             （admin 重建 prompt 时拿它当持久化原值，无需重新生成 → 不漂移）。
         """
-        from tools.xml_formatter import generate_tool_grammar
-
         agent_config = agents[agent_name]
 
         # ========== System Prompt（全 session 稳定 → 可缓存前缀）==========
-        # 只放真正不随轮次变化的内容：角色提示词、可用 agent、工具说明。系统时间 /
+        # 只放真正不随轮次变化的内容：角色提示词、可用 agent。工具 schema 由引擎
+        # 作为 native `tools` 独立传递。系统时间 /
         # task_plan / artifact 清单等每轮刷新的动态上下文一律移到消息尾部的
         # <system-reminder>（见下），避免它们坐在前缀里把后续历史的 prompt cache 全打掉。
         system_parts = []
@@ -88,12 +90,6 @@ class ContextManager:
         if "call_subagent" in effective_toolset:
             system_parts.append(cls._build_available_agents(agents, agent_config.name))
 
-        # 3. 工具调用协议语法(稳定可缓存前缀,保 APC)。per-tool 描述不在 system
-        # prompt —— 挪到尾部 <available_tools> 动态 reminder(B-3 渐进式披露):catalog
-        # 变化只失效末尾、语法前缀恒稳。仅在 agent 有可调工具时放语法块。
-        if effective_toolset.names():
-            system_parts.append(generate_tool_grammar())
-
         system_prompt = "\n\n".join(s for s in system_parts if s)
 
         # ========== Messages ==========
@@ -102,10 +98,11 @@ class ContextManager:
         all_messages = build_event_history(
             state.get("events", []), agent_name, state.get("vision_blocks"),
             vision_capable=model_supports_vision(agent_config.model),
+            replay_reasoning=model_replays_reasoning(agent_config.model),
         )
 
         # 动态上下文（系统时间 / task_plan / artifact 清单）作为 ephemeral
-        # <system-reminder> 并入最后一条消息正文：每次 build 现拼、即用即丢、绝不入
+        # <system-reminder> 追加为独立尾消息：每次 build 现拼、即用即丢、绝不入
         # event（否则会把过期时间/清单冻进历史）。放尾部而非 system prompt，使
         # [system + 历史] 成为稳定可缓存前缀，只有这一条尾消息因动态内容失效。
         # build 时刻末条必为 user 角色（USER_INPUT / tool_complete / subagent_instruction
@@ -122,9 +119,17 @@ class ContextManager:
         # 「content 空则丢 _meta」影响(高 input+空 content 也能预警)。
         last_usage = last_llm_usage(state.get("events", []), agent_name)
         reminder = cls._build_dynamic_context(
-            agent_config, effective_toolset, tools, artifacts_inventory, last_usage,
-            sandbox_status, tool_round_count=tool_round_count,
+            agent_config, effective_toolset, tools, artifacts_inventory,
+            compaction_threshold=compaction_threshold,
+            last_usage=last_usage,
+            sandbox_status=sandbox_status,
+            tool_round_count=tool_round_count,
             available_skills=available_skills,
+            disclosed_tools=set(
+                state.get("agent_progressive_state", {})
+                .get(agent_name, {})
+                .get("disclosed_tools", [])
+            ),
         )
         return cls.assemble(system_prompt, all_messages, reminder), reminder
 
@@ -135,31 +140,57 @@ class ContextManager:
         history_messages: List[Dict[str, Any]],
         reminder: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """把 reminder 并入末条历史消息 + 前置 system message，得到最终 messages。
+        """追加 reminder 尾消息并前置 system message，得到最终 messages。
 
         这是 live 路径（build）与 admin 重建路径（ConversationManager.reconstruct_prompt）
-        **共享的拼接叶子** —— 易漂的「reminder 合进 [-1]」逻辑只此一处，两条路径必然一致。
+        **共享的拼接叶子** —— reminder 的独立尾消息逻辑只此一处，两条路径必然一致。
         build 永远传非空 reminder；重建路径对早于 reminder-持久化的旧事件传 reminder=None
         （那时只前置 system + 历史，不拼 reminder）。发给 LLM 前剥离 _meta 也在此完成
         （两条路径共享），故调用方传原始 build_event_history 输出即可。
 
-        末条历史必为 user 角色（USER_INPUT / tool_complete / subagent_instruction /
-        queued_message / compaction_summary），故直接并入末条。history_messages 为空 =
-        上游不变量被破坏（见 build 注释），让它在 [-1] 上响亮失败。
+        既有历史绝不原地修改；工具结果后的图片也只附着到新建的 user 尾消息。
         """
+        images = cls._trailing_tool_images(history_messages)
         all_messages = cls._strip_meta(history_messages)
         if reminder is not None:
-            last = all_messages[-1]
-            last_content = last["content"]
-            if isinstance(last_content, list):
-                # 末条是图块列表(本轮刚 read 图的 tool_result):reminder 作为附加 text block
-                # 追加,不能字符串拼接(会把整个 list stringify、毁掉图块结构)。
-                new_content = last_content + [{"type": "text", "text": reminder}]
+            if images:
+                content: List[Dict[str, Any]] = [
+                    {"type": "text", "text": reminder}
+                ]
+                for image in images:
+                    content.append({
+                        "type": "text",
+                        "text": (
+                            "Image result from tool_call_id="
+                            f"{image.get('tool_call_id')}, artifact_id="
+                            f"{image.get('artifact_id')}, version={image.get('version')}, "
+                            f"content_type={image.get('content_type')}"
+                        ),
+                    })
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {"url": image["data_uri"]},
+                    })
+                all_messages.append({"role": "user", "content": content})
             else:
-                new_content = f'{last_content}\n\n{reminder}'
-            all_messages[-1] = {**last, "content": new_content}
+                all_messages.append({"role": "user", "content": reminder})
 
         return [{"role": "system", "content": system_prompt}] + all_messages
+
+    @staticmethod
+    def _trailing_tool_images(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        images: List[Dict[str, Any]] = []
+        for message in reversed(messages):
+            if message.get("role") != "tool":
+                break
+            image = (message.get("_meta") or {}).get("image")
+            if image:
+                images.append({
+                    **image,
+                    "tool_call_id": message.get("tool_call_id"),
+                })
+        images.reverse()
+        return images
 
     @classmethod
     def _build_dynamic_context(
@@ -168,10 +199,12 @@ class ContextManager:
         effective_toolset: EffectiveToolset,
         tools: Dict[str, Any],
         artifacts_inventory: Optional[List[Dict]],
+        compaction_threshold: int,
         last_usage: Optional[int] = None,
         sandbox_status: Optional[Dict] = None,
         tool_round_count: int = 0,
         available_skills: Optional[List[Dict]] = None,
+        disclosed_tools: Optional[set[str]] = None,
     ) -> str:
         """组装每轮刷新的动态上下文，包裹为 ephemeral <system-reminder>。
 
@@ -197,7 +230,9 @@ class ContextManager:
         #   一轮真实展示的工具集**;若放 system prompt(从当前快照重建)skill 状态变了就
         #   漂移成当前集。deferred 索引行也因此每轮重渲、无视压缩(跨压缩存活 by-construction)。
         # non-deferred 出完整 doc、deferred unit 只出索引行(完整 schema 由 search_tools 补)。
-        available_tools = cls._build_available_tools(effective_toolset, tools)
+        available_tools = cls._build_available_tools(
+            effective_toolset, tools, disclosed_tools or set()
+        )
         if available_tools:
             parts.append(available_tools)
 
@@ -247,7 +282,7 @@ class ContextManager:
         # Context 水位预警（仅临近 compaction 时整段出现）—— last_usage 是上一轮 call 的
         # input+output（compaction 触发值），≥ WARN_RATIO×阈值才注入；水位以下完全不出现，
         # 避免每轮 cry-wolf。band 内每轮都出、不设次数上限（数字每轮刷新）。
-        context_usage = cls._build_context_usage(last_usage)
+        context_usage = cls._build_context_usage(last_usage, compaction_threshold)
         if context_usage:
             parts.append(context_usage)
 
@@ -281,43 +316,20 @@ class ContextManager:
         cls,
         effective_toolset: EffectiveToolset,
         tools: Dict[str, Any],
+        disclosed_tools: set[str],
     ) -> str:
-        """渲染 <available_tools> 目录（B-3 渐进式披露）。
-
-        non-deferred 的可调工具 → 完整 doc（render_tool_docs）；deferred unit → 只出
-        索引行（unit 描述 + 成员 full_name 列表，无 param schema），完整 schema 由
-        search_tools 按需补。无可调工具时返回 ""（调用方据此不追加本段）。
-
-        defer 分组取自 effective_toolset.deferred_units（resolver 一处算好）—— 本方法
-        只做渲染、不碰 snapshot，维持单一解析点。
-        """
-        from tools.xml_formatter import render_tool_docs
-
+        """Render the lightweight external unit catalog; schemas travel natively."""
         names = effective_toolset.names()
         if not names:
             return ""
 
-        deferred_member_names = effective_toolset.deferred_member_names()
-        # 完整 doc:可调且工具对象存在、且不属于任何 deferred unit
-        full_doc_tools = [
-            tools[name] for name in names
-            if name in tools and name not in deferred_member_names
-        ]
-        deferred_units = effective_toolset.deferred_units
-
-        if not full_doc_tools and not deferred_units:
-            # 宣称有工具(names 非空)但都不在 tools 字典 → 无可渲染内容,不输出空壳。
-            # 真生产侧到不了(resolver 只在工具对象存在时才进 permissions);触发者是
-            # 松构造的 EffectiveToolset(测试桥的 orphan permission:声明了工具名但传空
-            # tools)。留作渲染地板,防 <available_tools></available_tools> 空标签。
-            return ""
-
-        lines = ['<available_tools>']
+        units = effective_toolset.tool_units
+        lines: List[str] = []
         if "bash" in names:
             lines.extend([
                 '<tool_boundaries>',
-                "Names in this catalog are platform tools. Invoke them with "
-                "<tool_call>; never put them inside bash.command. Bash can run only "
+                "Platform tools are native function calls; never put their names "
+                "inside bash.command. Bash can run only "
                 "executables and scripts available in the sandbox.",
             ])
             artifact_tool_names = {
@@ -335,43 +347,42 @@ class ContextManager:
                     "mount -> bash -> persist; create a new file with bash -> persist."
                 )
             lines.append('</tool_boundaries>')
-        if full_doc_tools:
-            lines.append(render_tool_docs(full_doc_tools))
-        # deferred unit 索引行（按 unit 名稳定排序，避免提示词抖动）。unit.name/description
-        # 是 operator 可控输入(seeded config / B-4 UI),含 < " & 会破坏模型可见块结构 /
-        # 结构注入 → 转义(同本文件 _build_sandbox_status 对文件名的处理)。
-        for unit_name in sorted(deferred_units):
-            unit = deferred_units[unit_name]
+        if not units:
+            return "\n".join(lines)
+
+        deferred_names = effective_toolset.deferred_member_names()
+        lines.append('<available_tool_units>')
+        for unit_name in sorted(units):
+            unit = units[unit_name]
             safe_name = xml_escape(unit.name, {'"': "&quot;"})
-            lines.append(f'<tool_unit name="{safe_name}" disclosure="deferred">')
+            lines.append(f'<tool_unit name="{safe_name}">')
             if unit.description:
                 lines.append(xml_escape(unit.description.rstrip()))
             if unit.discovery_error:
                 lines.append(xml_escape(f"This tool server is currently unavailable: {unit.discovery_error}"))
-            if unit.member_full_names:
-                lines.append(
-                    "Tools below are available but listed by name only. Call `search_tools` "
-                    "(select:<full_name> or a keyword) to load full parameters before calling:"
-                )
-                for full_name in unit.member_full_names:
-                    lines.append(f"- {full_name}")
+            for full_name in unit.member_full_names:
+                loaded = full_name not in deferred_names or full_name in disclosed_tools
+                lines.append(f"- {full_name} [{'loaded' if loaded else 'deferred'}]")
             lines.append('</tool_unit>')
-        lines.append('</available_tools>')
+        lines.append('</available_tool_units>')
         return "\n".join(lines)
 
     @classmethod
-    def _build_context_usage(cls, last_usage: Optional[int]) -> Optional[str]:
+    def _build_context_usage(
+        cls, last_usage: Optional[int], compaction_threshold: int
+    ) -> Optional[str]:
         """临近 compaction 的水位预警段；水位以下返回 None（整段不出现）。
 
         分子 last_usage = 上一轮 call 的 input+output（compaction 触发值，见
-        compaction_runner.maybe_trigger）；分母 = COMPACTION_TOKEN_THRESHOLD（与前端
-        gauge、与真正绊倒 compaction 的判定同源）。≥ WARN_RATIO 才注入。
+        compaction_runner.maybe_trigger）；分母 = 当前模型的 compaction_threshold
+        （context_window - reserve，与前端 gauge、真正触发 compaction 的判定同源）。
+        ≥ WARN_RATIO 才注入。
 
         advice 措辞刻意指向「要据此**动作**的状态」（plans / 收集的数据 / 中间结果）
         而非「瞄一眼的上下文」：artifact 活在 compaction 边界之外（每轮在 inventory 里），
         summary 则可能丢细节 —— 对齐「act vs glance」分界。
         """
-        threshold = config.COMPACTION_TOKEN_THRESHOLD
+        threshold = compaction_threshold
         if not last_usage or threshold <= 0:
             return None
         if last_usage < config.CONTEXT_USAGE_WARN_RATIO * threshold:

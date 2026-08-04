@@ -3,14 +3,18 @@
 提供所有工具的基础接口和通用功能
 """
 
-import json
 import math
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 from dataclasses import dataclass, field
 from enum import Enum
 
 from config import config
+from tools.input_schema import (
+    build_native_function_schema,
+    normalize_business_input_schema,
+    validate_business_arguments,
+)
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -77,17 +81,7 @@ class ToolExecutionContext:
     agent_name: str
     effective_toolset: Any        # core.effective_toolset.EffectiveToolset(鸭子类型,避免 tools→core)
     tools: Dict[str, "BaseTool"]  # 本 turn 合并后的全量工具对象(name -> BaseTool)
-
-
-@dataclass
-class ToolParameter:
-    """工具参数定义"""
-    name: str
-    type: str  # "string", "integer", "boolean", "number", "json"
-    description: str
-    required: bool = True
-    default: Any = None
-    enum: Optional[List[Any]] = None
+    disclosed_tools: Set[str] = field(default_factory=set)
 
 
 class BaseTool(ABC):
@@ -96,7 +90,7 @@ class BaseTool(ABC):
 
     子类需要实现:
     - execute(): 执行工具的核心逻辑
-    - get_parameters(): 返回工具参数定义
+    - get_input_schema(): 返回业务参数 JSON Schema
     """
 
     # opt-in:True → 引擎在正常执行路径里给 execute 多注入一个 `_context`
@@ -147,125 +141,27 @@ class BaseTool(ABC):
         pass
     
     @abstractmethod
-    def get_parameters(self) -> List[ToolParameter]:
+    def get_input_schema(self) -> Dict[str, Any]:
         """
-        获取工具参数定义
+        获取业务输入 JSON Schema。
         
         Returns:
-            参数列表
+            根节点 ``type=object`` 的 JSON Schema。
         """
         pass
-    
-    def validate_params(self, params: Dict[str, Any]) -> Optional[str]:
-        """
-        验证参数（可选实现）
-        
-        Args:
-            params: 待验证的参数
-            
-        Returns:
-            错误信息，None表示验证通过
-        """
-        param_defs = {p.name: p for p in self.get_parameters()}
-        
-        # 检查必需参数
-        missing = [p.name for p in param_defs.values() if p.required and p.name not in params]
-        if missing:
-            expected = [p.name for p in param_defs.values() if p.required]
-            received = list(params.keys()) or ["(none)"]
-            return f"Missing required parameter(s): {', '.join(missing)}. Required: {expected}. Received: {received}"
 
-        # 检查未知参数
-        unknown = [name for name in params if name not in param_defs]
-        if unknown:
-            return f"Unknown parameter(s): {', '.join(unknown)}. Valid: {list(param_defs.keys())}"
+    def business_input_schema(self) -> Dict[str, Any]:
+        """Return a validated copy so callers cannot mutate the tool definition."""
+        return normalize_business_input_schema(
+            self.get_input_schema(), source=f"tool {self.name!r}"
+        )
 
-        # 检查 enum 约束
-        for name, value in params.items():
-            param_def = param_defs.get(name)
-            if param_def and param_def.enum and (
-                isinstance(value, str) or param_def.type.lower() == "json"
-            ):
-                if value not in param_def.enum:
-                    return f"Invalid value for '{name}': '{value}'. Must be one of: {param_def.enum}"
-
-        # 检查类型（coerce 后仍为 str 说明转换失败）
-        for name, value in params.items():
-            param_def = param_defs.get(name)
-            if param_def is None:
-                continue
-            target = param_def.type.lower()
-            if target == "integer" and not isinstance(value, int):
-                return f"Invalid value for '{name}': '{value}' is not a valid integer"
-            if target == "number" and not isinstance(value, (int, float)):
-                return f"Invalid value for '{name}': '{value}' is not a valid number"
-            if target == "boolean" and not isinstance(value, bool):
-                return f"Invalid value for '{name}': '{value}' is not a valid boolean (use true/false/yes/no/1/0)"
-            if target == "json" and not isinstance(value, (dict, list)):
-                return f"Invalid value for '{name}': must be a valid JSON object or array"
-
-        return None
-    
-    def _coerce_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        根据 ToolParameter.type 做确定性类型转换
-
-        XML parser 返回的值统一为 str，此方法将其转为目标类型。
-
-        Args:
-            params: 原始参数（值为 str）
-
-        Returns:
-            类型转换后的参数
-        """
-        param_defs = {p.name: p for p in self.get_parameters()}
-        result = dict(params)
-
-        for name, value in result.items():
-            param_def = param_defs.get(name)
-            if param_def is None or not isinstance(value, str):
-                continue
-
-            target_type = param_def.type.lower()
-            try:
-                # String params are semantic payload and stay unchanged after XML decoding.
-                # Only typed scalar parsing may ignore surrounding XML formatting whitespace.
-                scalar_value = value.strip()
-                if target_type == "integer":
-                    result[name] = int(scalar_value)
-                elif target_type == "boolean":
-                    lower = scalar_value.lower()
-                    if lower in ("true", "1", "yes"):
-                        result[name] = True
-                    elif lower in ("false", "0", "no"):
-                        result[name] = False
-                    # 其他值保持原始字符串，由 validate_params 报错
-                elif target_type == "number":
-                    result[name] = float(scalar_value)
-                elif target_type == "json":
-                    result[name] = json.loads(scalar_value)
-                # "string" stays as-is
-            except (json.JSONDecodeError, ValueError, TypeError) as e:
-                # 转换失败保持原值，由 validate_params 报错
-                logger.warning(f"Type coercion failed for param '{name}': {value!r} -> {target_type}: {e}")
-
-        return result
-
-    def _apply_defaults(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        应用参数默认值
-
-        Args:
-            params: 原始参数
-
-        Returns:
-            填充默认值后的参数
-        """
-        result = dict(params)
-        for param_def in self.get_parameters():
-            if param_def.name not in result and param_def.default is not None:
-                result[param_def.name] = param_def.default
-        return result
+    def to_native_tool_schema(self) -> Dict[str, Any]:
+        return build_native_function_schema(
+            name=self.name,
+            description=self.description,
+            business_schema=self.get_input_schema(),
+        )
 
     async def __call__(self, _context: Optional["ToolExecutionContext"] = None, **params) -> ToolResult:
         """
@@ -273,22 +169,16 @@ class BaseTool(ABC):
 
         Args:
             _context: 引擎注入的运行期上下文(仅 wants_context=True 工具用);带下划线
-                与模型 XML 参数区隔 —— 它不是工具参数,不参与 validate/coerce。
+                它不是模型可见的业务参数，不参与 JSON Schema 校验。
             **params: 工具参数
 
         Returns:
             ToolResult: 执行结果
         """
-        # 类型转换（str → target type）
-        params = self._coerce_params(params)
-
-        # 应用默认值
-        params = self._apply_defaults(params)
-
-        # 验证参数
-        error = self.validate_params(params)
-        if error:
-            return ToolResult(success=False, error=error)
+        try:
+            params = validate_business_arguments(self.business_input_schema(), params)
+        except ValueError as exc:
+            return ToolResult(success=False, error=str(exc))
 
         # 执行工具
         try:
@@ -301,46 +191,6 @@ class BaseTool(ABC):
                 error=f"Tool execution failed: {str(e)}"
             )
     
-    def to_xml_example(self) -> str:
-        """
-        生成XML调用示例（使用CDATA包装所有值）
-
-        Returns:
-            XML格式的调用示例
-        """
-        params = self.get_parameters()
-        param_lines = []
-
-        for param in params:
-            param_type = param.type.lower()
-
-            if param.default is not None:
-                if isinstance(param.default, (dict, list)):
-                    value = json.dumps(param.default, ensure_ascii=False)
-                else:
-                    value = str(param.default)
-            elif param_type == "string":
-                value = f"your_{param.name}_here"
-            elif param_type == "integer":
-                value = "123"
-            elif param_type == "boolean":
-                value = "true"
-            elif param_type == "json":
-                value = '{"key":"value"}'
-            else:
-                value = "..."
-
-            param_lines.append(f"    <{param.name}><![CDATA[{value}]]></{param.name}>")
-
-        return f"""<tool_call>
-  <reason><![CDATA[why you are calling {self.name}]]></reason>
-  <name>{self.name}</name>
-  <params>
-{chr(10).join(param_lines)}
-  </params>
-</tool_call>"""
-
-
 # skill 工具的注册名(单一来源,同 SEARCH_TOOLS_NAME 姿态)—— 工具定义(read_skill.py
 # 两处 name=)/ RESERVED 集 / resolver 注入不变量(effective_toolset)共用,改名只此一处
 # (否则 tools.get(字面量) 返回 None → 注入静默跳过,无错无日志,F-0 reviewer #1)。

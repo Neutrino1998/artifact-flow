@@ -10,7 +10,10 @@ permission: auto
 endpoint: "https://catfact.ninja/fact"
 method: GET
 response_extract: "fact"
-parameters: []
+input_schema:
+  type: object
+  properties: {}
+  additionalProperties: false
 ---
 
 Fetch a random cat fact from the catfact.ninja API. Use when the user asks for a

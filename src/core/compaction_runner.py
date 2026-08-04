@@ -40,6 +40,22 @@ _SUMMARY_FRAME = (
 )
 
 
+def _normalize_token_usage(token_usage: Dict[str, Any]) -> Dict[str, int]:
+    """Map adapter usage into the event/metrics token shape.
+
+    ``cached_input_tokens`` stays optional so old providers and estimated usage
+    remain distinguishable from an explicit zero cache hit.
+    """
+    normalized = {
+        "input_tokens": token_usage.get("prompt_tokens", 0),
+        "output_tokens": token_usage.get("completion_tokens", 0),
+        "total_tokens": token_usage.get("total_tokens", 0),
+    }
+    if "cached_input_tokens" in token_usage:
+        normalized["cached_input_tokens"] = token_usage["cached_input_tokens"]
+    return normalized
+
+
 class CompactionRunner:
     """
     引擎内 compaction 执行器。
@@ -52,9 +68,11 @@ class CompactionRunner:
         agents: Dict[str, Any],
         emit: Optional[EmitFn] = None,
         check_cancelled: Optional[Callable[[], Awaitable[bool]]] = None,
+        user_id: Optional[str] = None,
     ):
         self._agents = agents
         self._emit = emit
+        self._user_id = user_id
         # 零参 async 谓词（engine 预绑定 message_id）。提供时 compaction LLM 调用
         # 变为可被协作式 cancel 打断（抛 CooperativeCancelled）—— 否则该调用是
         # 长达 COMPACTION_TIMEOUT 的 cancel 盲窗。None = 不轮询（独立测试场景）。
@@ -66,6 +84,7 @@ class CompactionRunner:
         agent_name: str,
         input_tokens: int,
         output_tokens: int,
+        compaction_threshold: int,
     ) -> None:
         """
         LLM 调用完成后的 compaction 检查入口。
@@ -80,22 +99,79 @@ class CompactionRunner:
         if forced:
             state["force_compact"] = False
 
-        if not forced and input_tokens + output_tokens <= config.COMPACTION_TOKEN_THRESHOLD:
+        if not forced and input_tokens + output_tokens <= compaction_threshold:
             return
+
+        await self._compact(
+            state,
+            agent_name,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            reason="forced" if forced else "threshold",
+            compaction_threshold=compaction_threshold,
+            missing_compactor_is_error=False,
+        )
+
+    async def compact_for_overflow(
+        self,
+        state: Dict[str, Any],
+        agent_name: str,
+    ) -> None:
+        """Compact after an explicit provider context-window rejection.
+
+        Unlike the proactive threshold path, a missing compact_agent is fatal: the
+        failed provider call cannot make progress without a new history boundary.
+        The caller owns the exactly-once retry guard.
+        """
+        if agent_name == "lead_agent":
+            # Overflow recovery fulfills a pending manual compaction request too;
+            # leaving the flag set would compact a second time after the retry.
+            state["force_compact"] = False
+
+        await self._compact(
+            state,
+            agent_name,
+            input_tokens=None,
+            output_tokens=None,
+            reason="overflow",
+            compaction_threshold=None,
+            missing_compactor_is_error=True,
+        )
+
+    async def _compact(
+        self,
+        state: Dict[str, Any],
+        agent_name: str,
+        *,
+        input_tokens: Optional[int],
+        output_tokens: Optional[int],
+        reason: str,
+        compaction_threshold: Optional[int],
+        missing_compactor_is_error: bool,
+    ) -> None:
+        """Run one compaction and append its paired start/summary events."""
 
         compact_agent = self._agents.get("compact_agent")
         if not compact_agent:
-            logger.warning("compact_agent not configured, skipping compaction")
+            message = "compact_agent not configured"
+            if missing_compactor_is_error:
+                raise RuntimeError(f"{message}; cannot recover from context overflow")
+            logger.warning(f"{message}, skipping compaction")
             return
 
         # 提到 INFO:compaction 触发条件是关键状态转移,事故诊断必需(对齐
         # "工具完成/状态转移"分级原则;尺寸字段而非大体积内容,可常驻 INFO)。
+        token_detail = (
+            "last_call_tokens=unknown"
+            if input_tokens is None or output_tokens is None
+            else (
+                f"last_call input={input_tokens} output={output_tokens} "
+                f"(sum={input_tokens + output_tokens})"
+            )
+        )
         logger.info(
             f"[compaction] triggered for {agent_name}: "
-            f"trigger={'forced' if forced else 'threshold'}, "
-            f"threshold={config.COMPACTION_TOKEN_THRESHOLD}, "
-            f"last_call input={input_tokens} output={output_tokens} "
-            f"(sum={input_tokens + output_tokens}), "
+            f"trigger={reason}, threshold={compaction_threshold}, {token_detail}, "
             f"events_in_state={len(state['events'])}"
         )
 
@@ -103,10 +179,14 @@ class CompactionRunner:
         # 看到"压缩进行中"指示器，而不是看完最后一个 llm_complete 就等到 summary。
         # forced 标记手动触发，供前端/replay 区分「用户压缩」与「超阈值自动压缩」。
         start_data = {
-            "last_input_tokens": input_tokens,
-            "last_output_tokens": output_tokens,
-            "forced": forced,
+            "forced": reason == "forced",
+            "reason": reason,
         }
+        if compaction_threshold is not None:
+            start_data["compaction_threshold"] = compaction_threshold
+        if input_tokens is not None and output_tokens is not None:
+            start_data["last_input_tokens"] = input_tokens
+            start_data["last_output_tokens"] = output_tokens
         start_event = ExecutionEvent(
             event_type=StreamEventType.COMPACTION_START.value,
             agent_name=agent_name,
@@ -121,10 +201,19 @@ class CompactionRunner:
         # compaction_start 也在快照里 —— 它会被 EventHistory 的过滤器自然忽略（不是 history-building
         # 关心的事件类型），所以不影响压缩输入。
         events_to_compact = list(state["events"])
+        # Proactive/manual compaction runs immediately after an accepted assistant
+        # tool-call envelope, before its tools execute; that envelope must bridge the
+        # new boundary so later results still have a request half. Overflow recovery
+        # happens before a provider call and may already include completed tool pairs,
+        # so carrying only the old request half would create an orphan after summary.
+        carry_tool_call = reason != "overflow"
 
         try:
             content, duration_ms, usage = await self._run_compact_llm(
-                events_to_compact, agent_name, compact_agent
+                events_to_compact,
+                agent_name,
+                compact_agent,
+                carry_tool_call=carry_tool_call,
             )
         except asyncio.CancelledError:
             raise
@@ -149,6 +238,7 @@ class CompactionRunner:
                 "duration_ms": 0,
                 "model": compact_agent.model,
                 "error": str(e),
+                "carry_tool_call": carry_tool_call,
             }
             state["events"].append(ExecutionEvent(
                 event_type=StreamEventType.COMPACTION_SUMMARY.value,
@@ -177,6 +267,7 @@ class CompactionRunner:
                 "duration_ms": duration_ms,
                 "model": compact_agent.model,
                 "error": None,
+                "carry_tool_call": carry_tool_call,
             },
             is_historical=False,
         )
@@ -217,15 +308,35 @@ class CompactionRunner:
         events_to_compact: List[ExecutionEvent],
         agent_name: str,
         compact_agent: Any,
+        *,
+        carry_tool_call: bool = True,
     ) -> Tuple[str, int, Dict[str, int]]:
         """
         调用 compact_agent LLM，返回 (summary_content, duration_ms, token_usage)。
         """
         from core.event_history import build_event_history
-        from models.llm import astream_with_retry, format_messages_for_debug
+        from models.llm import (
+            astream_with_retry,
+            format_messages_for_debug,
+            model_replays_reasoning,
+        )
 
         # 按 agent_name 过滤 + boundary 扫描，得到用于压缩的历史 messages
-        history = build_event_history(events_to_compact, agent_name)
+        compact_input = list(events_to_compact)
+        if carry_tool_call:
+            for index in range(len(compact_input) - 1, -1, -1):
+                event = compact_input[index]
+                if event.agent_name != agent_name:
+                    continue
+                if event.event_type == StreamEventType.LLM_COMPLETE.value:
+                    if (event.data or {}).get("tool_calls"):
+                        del compact_input[index]
+                    break
+        history = build_event_history(
+            compact_input,
+            agent_name,
+            replay_reasoning=model_replays_reasoning(compact_agent.model),
+        )
         clean_history = [
             {k: v for k, v in m.items() if k != "_meta"} for m in history
         ]
@@ -263,27 +374,22 @@ class CompactionRunner:
 
         async def _stream():
             nonlocal response, usage
-            async for chunk in astream_with_retry(messages, model=compact_agent.model):
+            llm_kwargs = {"user_id": self._user_id} if self._user_id else {}
+            async for chunk in astream_with_retry(
+                messages, model=compact_agent.model, **llm_kwargs
+            ):
                 ct = chunk.get("type")
                 if ct == "content":
                     response += chunk["content"]
                 elif ct == "usage":
                     tu = chunk.get("token_usage") or {}
-                    usage = {
-                        "input_tokens": tu.get("prompt_tokens", 0),
-                        "output_tokens": tu.get("completion_tokens", 0),
-                        "total_tokens": tu.get("total_tokens", 0),
-                    }
+                    usage = _normalize_token_usage(tu)
                 elif ct == "final":
                     if not response and chunk.get("content"):
                         response = chunk["content"]
                     tu = chunk.get("token_usage")
                     if tu and not usage["total_tokens"]:
-                        usage = {
-                            "input_tokens": tu.get("prompt_tokens", 0),
-                            "output_tokens": tu.get("completion_tokens", 0),
-                            "total_tokens": tu.get("total_tokens", 0),
-                        }
+                        usage = _normalize_token_usage(tu)
 
         async def _guarded_stream():
             async with asyncio.timeout(config.COMPACTION_TIMEOUT):

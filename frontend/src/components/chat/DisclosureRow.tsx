@@ -6,7 +6,7 @@ import { MENU_ROW_HOVER } from '@/lib/styles';
 interface DisclosureRowProps {
   /**
    * 'card' (default): bordered + rounded outer + `border-t` body divider — the
-   *   original visual of ThinkingBlock / AgentOutputBlock / ToolCallCard.
+   *   shared visual of ThinkingBlock / ToolCallCard.
    * 'inline': borderless, no body divider, no horizontal header padding. Used
    *   inside a parent card where the disclosure row is a list-style entry, not
    *   its own card. Callers control body padding/indent via `bodyClassName`.

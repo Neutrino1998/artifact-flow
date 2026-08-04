@@ -828,14 +828,14 @@ class ToolMember(Base):
     member_name: Mapped[str] = mapped_column(String(64), primary_key=True)
 
     # 注册/可调全名:resolver/registry/always_allow 的 key。全局唯一。
-    full_name: Mapped[str] = mapped_column(String(130), nullable=False)
+    full_name: Mapped[str] = mapped_column(String(64), nullable=False)
 
     # 等级:auto | confirm —— 决策 11 的唯一来源
     permission: Mapped[str] = mapped_column(
         String(16), nullable=False, default="confirm"
     )
 
-    # provider 相关定义:http → endpoint/method/headers/params/response_extract/
+    # provider 相关定义:http → endpoint/method/headers/input_schema/response_extract/
     # timeout/secret 引用;mcp → 运行期由 tools/list 填(F)。JSON 不锁 schema,
     # 按 unit.provider 分派解释。
     definition: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
@@ -852,6 +852,10 @@ class ToolMember(Base):
     __table_args__ = (
         # full_name 全局唯一:跨 unit 同 member 名不撞、resolver 按 full_name 寻址
         UniqueConstraint("full_name", name="uq_tool_members_full_name"),
+        CheckConstraint(
+            "length(full_name) <= 64",
+            name="ck_tool_members_full_name_length",
+        ),
     )
 
     def __repr__(self) -> str:

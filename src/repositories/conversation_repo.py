@@ -417,7 +417,11 @@ class ConversationRepository(BaseRepository[Conversation]):
             更新后的消息
         """
         message = await self.get_message_or_raise(message_id)
-        existing = message.metadata_ or {}
+        # JSON columns are not MutableDict-tracked. Copy before merging so assigning
+        # the result is always a new value that SQLAlchemy marks dirty. This matters
+        # now that messages can be created with non-empty display metadata (for
+        # example activated_skills) before terminal metrics/progressive state land.
+        existing = dict(message.metadata_ or {})
         existing.update(metadata)
         message.metadata_ = existing
 

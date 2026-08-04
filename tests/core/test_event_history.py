@@ -150,6 +150,41 @@ class TestCompactionSummaryBoundary:
         assert "lead-a" in contents
         assert "sub-summary" not in contents
 
+    def test_overflow_summary_does_not_carry_completed_tool_request_half(self):
+        """Overflow compacts before a provider call, after prior tool pairs may
+        already be complete. Carrying only the pre-boundary assistant request would
+        leave an orphan tool call because its result was compacted into the summary.
+        """
+        events = [
+            _ev(StreamEventType.USER_INPUT.value, data={"content": "old task"}),
+            _ev(StreamEventType.LLM_COMPLETE.value, data={
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_done",
+                    "type": "function",
+                    "function": {"name": "search", "arguments": "{}"},
+                }],
+            }),
+            _ev(StreamEventType.TOOL_COMPLETE.value, data={
+                "call_id": "call_done",
+                "tool": "search",
+                "success": True,
+                "result_data": "done",
+            }),
+            _ev(StreamEventType.COMPACTION_SUMMARY.value, data={
+                "success": True,
+                "content": "summary including completed search",
+                "carry_tool_call": False,
+            }),
+        ]
+
+        msgs = build_event_history(events, "lead_agent")
+
+        assert msgs == [{
+            "role": "user",
+            "content": "summary including completed search",
+        }]
+
 
 class TestFreshStartBoundary:
 
@@ -220,6 +255,81 @@ class TestFreshStartBoundary:
 
 class TestMessageConversion:
 
+    def test_reasoning_replay_can_be_disabled_without_dropping_answer_or_tools(self):
+        calls = [{
+            "id": "call_one",
+            "type": "function",
+            "function": {"name": "search", "arguments": "{}"},
+        }]
+        events = [
+            _ev(StreamEventType.LLM_COMPLETE.value, data={
+                "content": "I will search.",
+                "reasoning_content": "private reasoning",
+                "tool_calls": calls,
+            }),
+        ]
+
+        messages = build_event_history(
+            events, "lead_agent", replay_reasoning=False
+        )
+
+        assert messages == [{
+            "role": "assistant",
+            "content": "I will search.",
+            "tool_calls": calls,
+        }]
+
+    def test_reasoning_only_message_is_omitted_when_replay_is_disabled(self):
+        events = [
+            _ev(StreamEventType.USER_INPUT.value, data={"content": "question"}),
+            _ev(StreamEventType.LLM_COMPLETE.value, data={
+                "content": "",
+                "reasoning_content": "reasoning without a visible answer",
+            }),
+        ]
+
+        messages = build_event_history(
+            events, "lead_agent", replay_reasoning=False
+        )
+
+        assert messages == [{"role": "user", "content": "question"}]
+
+    def test_native_assistant_calls_and_results_keep_structural_ids(self):
+        calls = [
+            {
+                "id": "call_one",
+                "type": "function",
+                "function": {"name": "search", "arguments": '{"q":"one"}'},
+            },
+            {
+                "id": "call_two",
+                "type": "function",
+                "function": {"name": "search", "arguments": '{"q":"two"}'},
+            },
+        ]
+        events = [
+            _ev(StreamEventType.LLM_COMPLETE.value, "lead_agent", {
+                "content": "I will search twice.",
+                "tool_calls": calls,
+            }),
+            _ev(StreamEventType.TOOL_COMPLETE.value, "lead_agent", {
+                "call_id": "call_one", "tool": "search",
+                "success": True, "result_data": "one",
+            }),
+            _ev(StreamEventType.TOOL_COMPLETE.value, "lead_agent", {
+                "call_id": "call_two", "tool": "search",
+                "success": True, "result_data": "two",
+            }),
+        ]
+
+        messages = build_event_history(events, "lead_agent")
+
+        assert messages[0]["role"] == "assistant"
+        assert messages[0]["tool_calls"] == calls
+        assert [message["tool_call_id"] for message in messages[1:]] == [
+            "call_one", "call_two",
+        ]
+
     def test_llm_complete_carries_meta(self):
         events = [
             _ev(StreamEventType.LLM_COMPLETE.value, "lead_agent", {
@@ -246,15 +356,17 @@ class TestMessageConversion:
         assert msgs[0]["role"] == "user"
         assert msgs[1]["role"] == "assistant"
 
-    def test_tool_complete_renders_as_user_with_xml(self):
+    def test_tool_complete_renders_as_bound_native_tool_message(self):
         events = [
             _ev(StreamEventType.TOOL_COMPLETE.value, "lead_agent", {
+                "call_id": "call_search",
                 "tool": "web_search", "success": True, "result_data": "found",
             }),
         ]
         msgs = build_event_history(events, "lead_agent")
         assert len(msgs) == 1
-        assert msgs[0]["role"] == "user"
+        assert msgs[0]["role"] == "tool"
+        assert msgs[0]["tool_call_id"] == "call_search"
         assert "<tool_result" in msgs[0]["content"]
 
     def test_empty_events_returns_empty(self):
@@ -279,6 +391,7 @@ class TestVisionImageBlock:
     """识图 tool_complete 携图片引用 + vision_blocks 缓存 → 块列表 vs 占位文本门控。"""
 
     _IMG_EVENT = dict(
+        call_id="call_image",
         tool="read_artifact", success=True, result_data="[image artifact 'shot' v1, image/png]",
         metadata={"image": {"artifact_id": "shot", "version": 1, "content_type": "image/png"}},
     )
@@ -287,15 +400,16 @@ class TestVisionImageBlock:
     def _events(self):
         return [_ev(StreamEventType.TOOL_COMPLETE.value, "lead_agent", dict(self._IMG_EVENT))]
 
-    def test_hit_and_vision_capable_expands_to_block_list(self):
+    def test_hit_and_vision_capable_attaches_ephemeral_image_metadata(self):
         msgs = build_event_history(
             self._events(), "lead_agent",
             vision_blocks={("shot", 1): self._DATA_URI}, vision_capable=True,
         )
         assert len(msgs) == 1
-        content = msgs[0]["content"]
-        assert isinstance(content, list)
-        assert any(b["type"] == "image_url" and b["image_url"]["url"] == self._DATA_URI for b in content)
+        assert msgs[0]["role"] == "tool"
+        assert msgs[0]["tool_call_id"] == "call_image"
+        assert isinstance(msgs[0]["content"], str)
+        assert msgs[0]["_meta"]["image"]["data_uri"] == self._DATA_URI
 
     def test_hit_but_not_vision_capable_falls_back_to_placeholder(self):
         """文本模型(vision_capable=False)即便缓存命中也只得占位文本 —— 不注入 image_url 块。

@@ -13,7 +13,7 @@ import pytest
 from config import config
 from tools.custom.mcp_client import McpClientManager, McpToolCallResult
 from tools.custom.mcp_client import _McpSessionContext
-from tools.custom.mcp_tool import McpTool, McpToolConfig, parameters_from_json_schema
+from tools.custom.mcp_tool import McpTool, McpToolConfig
 
 
 def _provider_config():
@@ -57,20 +57,7 @@ def _tool(manager):
     )
 
 
-def test_parameters_from_json_schema_maps_object_params_to_json_string():
-    params = parameters_from_json_schema(_schema())
-
-    assert [(p.name, p.type, p.required) for p in params] == [
-        ("sku", "string", True),
-        ("limit", "integer", False),
-        ("filters", "json", False),
-    ]
-    assert params[0].enum == ["A-1", "B-2"]
-    assert params[1].default == 5
-    assert "JSON string" in params[2].description
-
-
-async def test_mcp_tool_calls_manager_with_schema_coerced_arguments():
+async def test_mcp_tool_preserves_typed_arguments_and_applies_defaults():
     seen = {}
 
     async def fake_call(url, headers, timeout, tool_name, arguments):
@@ -100,7 +87,7 @@ async def test_mcp_tool_calls_manager_with_schema_coerced_arguments():
         client_manager=manager,
     )
 
-    result = await tool(sku="A-1", filters='{"warehouse":"east"}')
+    result = await tool(sku="A-1", filters={"warehouse": "east"})
 
     assert result.success is True
     assert result.data == "stock: 12"
@@ -113,7 +100,7 @@ async def test_mcp_tool_calls_manager_with_schema_coerced_arguments():
     }
 
 
-async def test_mcp_tool_rejects_invalid_json_object_param_before_call():
+async def test_mcp_tool_rejects_wrong_typed_object_param_before_call():
     called = False
 
     async def fake_call(url, headers, timeout, tool_name, arguments):
@@ -135,7 +122,7 @@ async def test_mcp_tool_rejects_invalid_json_object_param_before_call():
         client_manager=manager,
     )
 
-    result = await tool(sku="A-1", filters="{not-json")
+    result = await tool(sku="A-1", filters="not-an-object")
 
     assert result.success is False
     assert "filters" in result.error

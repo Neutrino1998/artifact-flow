@@ -1,28 +1,13 @@
 """
 工具系统模块
-提供工具基类、XML解析/格式化和具体工具实现
+提供工具基类、native tool schema 和具体工具实现
 """
 
 # 基础类和枚举
 from .base import (
     ToolPermission,
     ToolResult,
-    ToolParameter,
     BaseTool,
-)
-
-# XML工具调用解析
-from .xml_parser import (
-    ToolCall,
-    XMLToolCallParser,
-    parse_tool_calls,
-)
-
-# XML格式化（工具说明 + 结果序列化）
-from .xml_formatter import (
-    generate_tool_grammar,
-    render_tool_docs,
-    format_result,
 )
 
 # Artifact envelope 公共渲染器
@@ -39,18 +24,7 @@ __all__ = [
     # 基础类
     "ToolPermission",
     "ToolResult",
-    "ToolParameter",
     "BaseTool",
-
-    # XML解析
-    "ToolCall",
-    "XMLToolCallParser",
-    "parse_tool_calls",
-
-    # XML格式化
-    "generate_tool_grammar",
-    "render_tool_docs",
-    "format_result",
 
     # Artifact envelope
     "ArtifactSlice",

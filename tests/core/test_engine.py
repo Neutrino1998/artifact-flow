@@ -26,7 +26,7 @@ class _FakeAgentConfig:
     description: str = "test"
     capabilities: list = field(default_factory=list)
     tools: dict = field(default_factory=dict)
-    model: str = "openai/fake-model"
+    model: str = "deepseek-v4-flash"
     max_tool_rounds: int = 3
     role_prompt: str = ""
 
@@ -330,3 +330,30 @@ class TestLlmChunkAccumulation:
             if e.event_type == StreamEventType.LLM_CHUNK.value
         ]
         assert len(state_chunks) == 0
+
+    async def test_tool_call_progress_is_forwarded_as_sse_only_snapshot(self):
+        progress = [{
+            "index": 0,
+            "call_id": "call_1",
+            "name": "update_artifact",
+            "arguments_chars": 12000,
+        }]
+        chunks = [
+            {"type": "tool_call_progress", "tool_call_progress": progress},
+            {"type": "content", "content": "done"},
+            {"type": "usage", "token_usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+            {"type": "final", "content": "done", "reasoning_content": None, "tool_calls": [], "token_usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+        ]
+
+        result, emitted = await _run_with_fake_llm(chunks)
+
+        progress_events = [
+            event for event in emitted
+            if event["type"] == StreamEventType.LLM_CHUNK.value
+            and "tool_call_progress" in (event.get("data") or {})
+        ]
+        assert [event["data"]["tool_call_progress"] for event in progress_events] == [progress]
+        assert not [
+            event for event in result["events"]
+            if event.event_type == StreamEventType.LLM_CHUNK.value
+        ]

@@ -140,7 +140,8 @@ class ConversationManager:
         conv_id: str,
         message_id: str,
         user_input: str,
-        parent_id: Optional[str] = None
+        parent_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict:
         """
         添加消息到对话（支持持久化）
@@ -150,6 +151,7 @@ class ConversationManager:
             message_id: 消息ID
             user_input: 消息内容
             parent_id: 父消息ID（分支时使用）
+            metadata: 与用户输入同时确定的 display-only 快照
 
         Returns:
             消息对象字典
@@ -164,7 +166,8 @@ class ConversationManager:
                     conversation_id=conv_id,
                     message_id=message_id,
                     user_input=user_input,
-                    parent_id=parent_id
+                    parent_id=parent_id,
+                    metadata=metadata,
                 )
             except DuplicateError:
                 # 幂等(with_retry 契约):本方法被 _with_db_retry 包裹,瞬断会从头重跑;
@@ -185,7 +188,7 @@ class ConversationManager:
             "user_input": user_input,
             "timestamp": now,
             "response": None,
-            "metadata": {}
+            "metadata": metadata or {},
         }
 
     async def update_response_async(
@@ -544,12 +547,14 @@ class ConversationManager:
         message_id: str,
         agent_start_event_id: str,
     ) -> Optional[Dict[str, Any]]:
-        """Admin 取证：重建某一发 LLM 调用实际发出的完整 prompt（messages 列表）。
+        """Admin 取证：重建某一发 LLM 调用的 messages 语义输入。
 
-        忠实性策略 = 持久化后纯重放，不重新生成动态内容：
+        messages 忠实性策略 = 持久化后纯重放，不重新生成动态内容：
           - 静态 system_prompt + 动态 reminder 取自锚 agent_start 事件的持久化原值；
+          - model 同样取自锚事件，避免当前配置覆盖历史调用；
           - 历史 messages 用 build_event_history 在「锚之前的 path 事件」上确定性重放；
           - 两者经 ContextManager.assemble（与 live build 同一拼接叶子）合成。
+        完整 native tools schema 不持久化，因此这里不声称还原完整 provider 请求。
         分支安全：按 message_id 走 load_event_history_async（分支正确的 path），锚事件
         必须落在该 path 上，否则（选错分支 / 不存在）返回 None → 404。
 
@@ -582,9 +587,16 @@ class ConversationManager:
         data = anchor.data or {}
         system_prompt = data.get("system_prompt") or ""
         reminder = data.get("reminder")  # 旧事件无此字段 → None
+        model = data.get("model")
         agent_name = anchor.agent_name
 
-        history = build_event_history(events[:anchor_idx], agent_name)
+        history = build_event_history(
+            events[:anchor_idx],
+            agent_name,
+            # Old agent_start events predate the field and were generated while
+            # reasoning replay was unconditional.
+            replay_reasoning=data.get("replay_reasoning", True),
+        )
         if not history:
             # 锚前无本 agent 历史 = 数据异常（正常下至少有 user_input / subagent_instruction）。
             # 取证场景、admin 会上报，记一笔便于排查。
@@ -600,6 +612,7 @@ class ConversationManager:
             "message_id": message_id,
             "agent_start_event_id": agent_start_event_id,
             "agent_name": agent_name,
+            "model": model,
             "has_reminder": reminder is not None,
             "messages": messages,
         }

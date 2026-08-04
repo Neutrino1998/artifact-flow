@@ -1,0 +1,587 @@
+"""DOCX 批注回复必须显式绑定各自父批注。"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+import zipfile
+from pathlib import Path
+from unittest import mock
+
+try:
+    from lxml import etree
+except ModuleNotFoundError:  # sandbox-only dependency; standard backend CI skips.
+    etree = None
+
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPT = ROOT / "config" / "skills-src" / "docx" / "scripts" / "reply_comment.py"
+
+
+def _load_script():
+    spec = importlib.util.spec_from_file_location("docx_reply_comment", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+reply_comment = _load_script() if etree is not None else None
+
+NS_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+NS_W14 = "http://schemas.microsoft.com/office/word/2010/wordml"
+NS_W15 = "http://schemas.microsoft.com/office/word/2012/wordml"
+NS_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
+NS_CT = "http://schemas.openxmlformats.org/package/2006/content-types"
+NS_DOC_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+W = f"{{{NS_W}}}"
+W14 = f"{{{NS_W14}}}"
+W15 = f"{{{NS_W15}}}"
+R = f"{{{NS_REL}}}"
+C = f"{{{NS_CT}}}"
+DOC_REL = f"{{{NS_DOC_REL}}}"
+
+
+def _xml_bytes(root):
+    return etree.tostring(
+        root, xml_declaration=True, encoding="UTF-8", standalone=True
+    )
+
+
+def _write_fixture(path: Path, compatibility_mode: int | None = 15) -> None:
+    document = etree.Element(W + "document", nsmap={"w": NS_W})
+    body = etree.SubElement(document, W + "body")
+    for comment_id, text in (("0", "Alpha"), ("1", "Beta")):
+        paragraph = etree.SubElement(body, W + "p")
+        start = etree.SubElement(paragraph, W + "commentRangeStart")
+        start.set(W + "id", comment_id)
+        run = etree.SubElement(paragraph, W + "r")
+        etree.SubElement(run, W + "t").text = text
+        end = etree.SubElement(paragraph, W + "commentRangeEnd")
+        end.set(W + "id", comment_id)
+        ref_run = etree.SubElement(paragraph, W + "r")
+        ref = etree.SubElement(ref_run, W + "commentReference")
+        ref.set(W + "id", comment_id)
+
+    comments = etree.Element(W + "comments", nsmap={"w": NS_W})
+    for comment_id, text in (("0", "Check alpha"), ("1", "Check beta")):
+        comment = etree.SubElement(comments, W + "comment")
+        comment.set(W + "id", comment_id)
+        comment.set(W + "author", "Reviewer")
+        comment.set(W + "initials", "RV")
+        paragraph = etree.SubElement(comment, W + "p")
+        run = etree.SubElement(paragraph, W + "r")
+        etree.SubElement(run, W + "t").text = text
+
+    settings = etree.Element(W + "settings", nsmap={"w": NS_W})
+    compatibility = etree.SubElement(settings, W + "compat")
+    if compatibility_mode is not None:
+        compatibility_setting = etree.SubElement(
+            compatibility, W + "compatSetting"
+        )
+        compatibility_setting.set(W + "name", "compatibilityMode")
+        compatibility_setting.set(
+            W + "uri", "http://schemas.microsoft.com/office/word"
+        )
+        compatibility_setting.set(W + "val", str(compatibility_mode))
+
+    rels = etree.Element(R + "Relationships", nsmap={None: NS_REL})
+    rel = etree.SubElement(rels, R + "Relationship")
+    rel.set("Id", "rId1")
+    rel.set(
+        "Type",
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments",
+    )
+    rel.set("Target", "comments.xml")
+    settings_rel = etree.SubElement(rels, R + "Relationship")
+    settings_rel.set("Id", "rId2")
+    settings_rel.set(
+        "Type",
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings",
+    )
+    settings_rel.set("Target", "settings.xml")
+
+    content_types = etree.Element(C + "Types", nsmap={None: NS_CT})
+    for part_name, content_type in (
+        (
+            "/word/document.xml",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
+        ),
+        (
+            "/word/comments.xml",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml",
+        ),
+        (
+            "/word/settings.xml",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml",
+        ),
+    ):
+        override = etree.SubElement(content_types, C + "Override")
+        override.set("PartName", part_name)
+        override.set("ContentType", content_type)
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as package:
+        package.writestr("word/document.xml", _xml_bytes(document))
+        package.writestr("word/comments.xml", _xml_bytes(comments))
+        package.writestr("word/settings.xml", _xml_bytes(settings))
+        package.writestr("word/_rels/document.xml.rels", _xml_bytes(rels))
+        package.writestr("[Content_Types].xml", _xml_bytes(content_types))
+
+
+def _read_part(path: Path, part: str):
+    with zipfile.ZipFile(path) as package:
+        return etree.fromstring(package.read(part))
+
+
+def _read_members(path: Path) -> dict[str, bytes]:
+    with zipfile.ZipFile(path) as package:
+        return {
+            info.filename: package.read(info.filename)
+            for info in package.infolist()
+        }
+
+
+def _write_members(path: Path, members: dict[str, bytes]) -> None:
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as package:
+        for name, blob in members.items():
+            package.writestr(name, blob)
+
+
+def _rename_comment_id(path: Path, old: str, new: str) -> None:
+    members = _read_members(path)
+    for part in ("word/document.xml", "word/comments.xml"):
+        root = etree.fromstring(members[part])
+        for element in root.iter():
+            if element.get(W + "id") == old:
+                element.set(W + "id", new)
+        members[part] = _xml_bytes(root)
+    _write_members(path, members)
+
+
+def _move_comment_markers_to_header(path: Path, comment_id: str) -> None:
+    members = _read_members(path)
+    document = etree.fromstring(members["word/document.xml"])
+    header = etree.Element(W + "hdr", nsmap={"w": NS_W})
+    header_paragraph = etree.SubElement(header, W + "p")
+
+    for paragraph in document.iter(W + "p"):
+        for child in list(paragraph):
+            if child.tag in {W + "commentRangeStart", W + "commentRangeEnd"}:
+                marker = child
+            else:
+                marker = next(child.iter(W + "commentReference"), None)
+            if marker is not None and marker.get(W + "id") == comment_id:
+                paragraph.remove(child)
+                header_paragraph.append(child)
+
+    body = next(document.iter(W + "body"))
+    section = etree.SubElement(body, W + "sectPr")
+    header_reference = etree.SubElement(section, W + "headerReference")
+    header_reference.set(W + "type", "default")
+    header_reference.set(DOC_REL + "id", "rId3")
+
+    rels = etree.fromstring(members["word/_rels/document.xml.rels"])
+    rel = etree.SubElement(rels, R + "Relationship")
+    rel.set("Id", "rId3")
+    rel.set(
+        "Type",
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header",
+    )
+    rel.set("Target", "header1.xml")
+
+    content_types = etree.fromstring(members["[Content_Types].xml"])
+    override = etree.SubElement(content_types, C + "Override")
+    override.set("PartName", "/word/header1.xml")
+    override.set(
+        "ContentType",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml",
+    )
+
+    members["word/document.xml"] = _xml_bytes(document)
+    members["word/header1.xml"] = _xml_bytes(header)
+    members["word/_rels/document.xml.rels"] = _xml_bytes(rels)
+    members["[Content_Types].xml"] = _xml_bytes(content_types)
+    _write_members(path, members)
+
+
+def _set_comment_resolved(path: Path, comment_id: str) -> None:
+    members = _read_members(path)
+    comments = etree.fromstring(members["word/comments.xml"])
+    target = next(
+        comment
+        for comment in comments.iter(W + "comment")
+        if comment.get(W + "id") == comment_id
+    )
+    paragraphs = list(target.iter(W + "p"))
+    para_id = paragraphs[-1].get(W14 + "paraId")
+
+    extended = etree.fromstring(members["word/commentsExtended.xml"])
+    item = next(
+        comment_ex
+        for comment_ex in extended.iter(W15 + "commentEx")
+        if comment_ex.get(W15 + "paraId") == para_id
+    )
+    item.set(W15 + "done", "1")
+    members["word/commentsExtended.xml"] = _xml_bytes(extended)
+    _write_members(path, members)
+
+
+def _comment_para_ids(comments_root):
+    result = {}
+    for comment in comments_root.iter(W + "comment"):
+        paragraphs = list(comment.iter(W + "p"))
+        result[comment.get(W + "id")] = paragraphs[-1].get(W14 + "paraId")
+    return result
+
+
+@unittest.skipIf(etree is None, "requires the sandbox lxml dependency")
+class DocxCommentReplyTests(unittest.TestCase):
+    def setUp(self):
+        self._temp_dir = tempfile.TemporaryDirectory()
+        self.tmp_path = Path(self._temp_dir.name)
+
+    def tearDown(self):
+        self._temp_dir.cleanup()
+
+    def test_each_reply_is_bound_to_its_explicit_parent(self):
+        source = self.tmp_path / "source.docx"
+        first = self.tmp_path / "first.docx"
+        second = self.tmp_path / "second.docx"
+        _write_fixture(source)
+
+        result_a = reply_comment.reply_to_comment(
+            source,
+            first,
+            reply_to="0",
+            text="Reply alpha",
+            author="Assistant",
+            initials="AI",
+        )
+        result_b = reply_comment.reply_to_comment(
+            first,
+            second,
+            reply_to="1",
+            text="Reply beta",
+            author="Assistant",
+            initials="AI",
+        )
+
+        self.assertEqual(
+            result_a, {"parent_comment_id": "0", "reply_comment_id": "2"}
+        )
+        self.assertEqual(
+            result_b, {"parent_comment_id": "1", "reply_comment_id": "3"}
+        )
+
+        comments = _read_part(second, "word/comments.xml")
+        para_ids = _comment_para_ids(comments)
+        self.assertEqual(set(para_ids), {"0", "1", "2", "3"})
+        self.assertEqual(len(set(para_ids.values())), 4)
+
+        extended = _read_part(second, "word/commentsExtended.xml")
+        by_para_id = {
+            item.get(W15 + "paraId"): item
+            for item in extended.iter(W15 + "commentEx")
+        }
+        self.assertEqual(
+            by_para_id[para_ids["2"]].get(W15 + "paraIdParent"), para_ids["0"]
+        )
+        self.assertEqual(
+            by_para_id[para_ids["3"]].get(W15 + "paraIdParent"), para_ids["1"]
+        )
+        self.assertIsNone(by_para_id[para_ids["0"]].get(W15 + "paraIdParent"))
+        self.assertIsNone(by_para_id[para_ids["1"]].get(W15 + "paraIdParent"))
+
+        document = _read_part(second, "word/document.xml")
+        anchored_ids = {
+            marker.get(W + "id")
+            for marker in document.iter(W + "commentRangeStart")
+        }
+        self.assertEqual(anchored_ids, {"0", "1"})
+
+        rels = _read_part(second, "word/_rels/document.xml.rels")
+        extended_rels = [
+            rel
+            for rel in rels.iter(R + "Relationship")
+            if rel.get("Type") == reply_comment.COMMENTS_EXTENDED_REL_TYPE
+        ]
+        self.assertEqual(len(extended_rels), 1)
+        self.assertEqual(extended_rels[0].get("Target"), "commentsExtended.xml")
+
+        content_types = _read_part(second, "[Content_Types].xml")
+        overrides = {
+            item.get("PartName"): item.get("ContentType")
+            for item in content_types.iter(C + "Override")
+        }
+        self.assertEqual(
+            overrides["/word/commentsExtended.xml"],
+            reply_comment.COMMENTS_EXTENDED_CONTENT_TYPE,
+        )
+
+        listed = {
+            str(item["id"]): item for item in reply_comment.list_comments(second)
+        }
+        self.assertEqual(listed["0"]["anchor"], "Alpha")
+        self.assertEqual(listed["1"]["anchor"], "Beta")
+        self.assertEqual(listed["2"]["parent_id"], "0")
+        self.assertEqual(listed["3"]["parent_id"], "1")
+        self.assertIs(listed["0"]["replyable"], True)
+        self.assertIs(listed["2"]["replyable"], False)
+
+    def test_replying_to_a_reply_fails_without_output(self):
+        source = self.tmp_path / "source.docx"
+        first = self.tmp_path / "first.docx"
+        invalid = self.tmp_path / "invalid.docx"
+        _write_fixture(source)
+        reply_comment.reply_to_comment(
+            source,
+            first,
+            reply_to="0",
+            text="First reply",
+            author="Assistant",
+            initials="AI",
+        )
+
+        with self.assertRaisesRegex(
+            reply_comment.CommentReplyError, "不能回复已有回复"
+        ):
+            reply_comment.reply_to_comment(
+                first,
+                invalid,
+                reply_to="2",
+                text="Nested reply",
+                author="Assistant",
+                initials="AI",
+            )
+
+        self.assertFalse(invalid.exists())
+
+    def test_list_mode_writes_comment_ids_and_anchors(self):
+        source = self.tmp_path / "source.docx"
+        output = self.tmp_path / "comments.json"
+        _write_fixture(source)
+
+        completed = subprocess.run(
+            [sys.executable, str(SCRIPT), str(source), "--list", str(output)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(
+            json.loads(completed.stdout), {"comments": 2, "path": str(output)}
+        )
+        listed = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(
+            [(item["id"], item["anchor"]) for item in listed],
+            [("0", "Alpha"), ("1", "Beta")],
+        )
+
+    def test_generated_para_ids_stay_inside_word_range(self):
+        used = set()
+        with mock.patch.object(
+            reply_comment.secrets,
+            "randbelow",
+            side_effect=[0, 0x7FFFFFFE],
+        ) as randbelow:
+            self.assertEqual(reply_comment._new_para_id(used), "00000001")
+            self.assertEqual(reply_comment._new_para_id(used), "7FFFFFFF")
+
+        self.assertEqual(
+            randbelow.call_args_list,
+            [mock.call(0x7FFFFFFF), mock.call(0x7FFFFFFF)],
+        )
+        self.assertEqual(used, {"00000001", "7FFFFFFF"})
+
+    def test_existing_para_id_outside_word_range_is_rejected(self):
+        comments = etree.Element(W + "comments", nsmap={"w": NS_W, "w14": NS_W14})
+        comment = etree.SubElement(comments, W + "comment")
+        comment.set(W + "id", "0")
+        paragraph = etree.SubElement(comment, W + "p")
+        paragraph.set(W14 + "paraId", "80000000")
+
+        with self.assertRaisesRegex(
+            reply_comment.CommentReplyError, "paraId 不在合法范围内"
+        ):
+            reply_comment._paragraph_ids(reply_comment._comments_by_id(comments))
+
+    def test_list_mode_cannot_overwrite_source_docx(self):
+        source = self.tmp_path / "source.docx"
+        _write_fixture(source)
+        original = source.read_bytes()
+
+        completed = subprocess.run(
+            [sys.executable, str(SCRIPT), str(source), "--list", str(source)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("必须与输入文件不同", completed.stderr)
+        self.assertEqual(source.read_bytes(), original)
+        self.assertTrue(zipfile.is_zipfile(source))
+
+    def test_header_comment_is_listed_as_unreplyable_and_rejected(self):
+        source = self.tmp_path / "source.docx"
+        invalid = self.tmp_path / "invalid.docx"
+        _write_fixture(source)
+        _move_comment_markers_to_header(source, "0")
+
+        listed = {item["id"]: item for item in reply_comment.list_comments(source)}
+        self.assertIs(listed["0"]["replyable"], False)
+        self.assertIs(listed["1"]["replyable"], True)
+
+        with self.assertRaisesRegex(
+            reply_comment.CommentReplyError, "不在受支持的正文中"
+        ):
+            reply_comment.reply_to_comment(
+                source,
+                invalid,
+                reply_to="0",
+                text="Reply",
+                author="Assistant",
+                initials="AI",
+            )
+
+        self.assertFalse(invalid.exists())
+
+    def test_listed_comment_id_preserves_lexical_form_for_reply(self):
+        source = self.tmp_path / "source.docx"
+        output = self.tmp_path / "output.docx"
+        _write_fixture(source)
+        _rename_comment_id(source, "0", "000")
+
+        listed = reply_comment.list_comments(source)
+        self.assertEqual(listed[0]["id"], "000")
+        result = reply_comment.reply_to_comment(
+            source,
+            output,
+            reply_to=listed[0]["id"],
+            text="Reply alpha",
+            author="Assistant",
+            initials="AI",
+        )
+
+        self.assertEqual(
+            result, {"parent_comment_id": "000", "reply_comment_id": "2"}
+        )
+        self.assertTrue(output.exists())
+
+    def test_unsupported_compatibility_modes_are_unreplyable(self):
+        for label, mode, expected_mode in (
+            ("word-2010", 14, 14),
+            ("default", None, 12),
+        ):
+            with self.subTest(label=label):
+                source = self.tmp_path / f"{label}.docx"
+                invalid = self.tmp_path / f"{label}-invalid.docx"
+                _write_fixture(source, compatibility_mode=mode)
+
+                listed = {
+                    item["id"]: item for item in reply_comment.list_comments(source)
+                }
+                self.assertIs(listed["0"]["replyable"], False)
+
+                with self.assertRaisesRegex(
+                    reply_comment.CommentReplyError,
+                    f"兼容模式 {expected_mode} 不支持批注回复",
+                ):
+                    reply_comment.reply_to_comment(
+                        source,
+                        invalid,
+                        reply_to="0",
+                        text="Reply",
+                        author="Assistant",
+                        initials="AI",
+                    )
+
+                self.assertFalse(invalid.exists())
+
+    def test_resolved_thread_is_unreplyable_and_not_reopened(self):
+        source = self.tmp_path / "source.docx"
+        threaded = self.tmp_path / "threaded.docx"
+        invalid = self.tmp_path / "invalid.docx"
+        _write_fixture(source)
+        reply_comment.reply_to_comment(
+            source,
+            threaded,
+            reply_to="0",
+            text="First reply",
+            author="Assistant",
+            initials="AI",
+        )
+        _set_comment_resolved(threaded, "0")
+
+        listed = {
+            item["id"]: item for item in reply_comment.list_comments(threaded)
+        }
+        self.assertIs(listed["0"]["resolved"], True)
+        self.assertIs(listed["0"]["replyable"], False)
+
+        with self.assertRaisesRegex(
+            reply_comment.CommentReplyError, "批注 ID 0 已解决"
+        ):
+            reply_comment.reply_to_comment(
+                threaded,
+                invalid,
+                reply_to="0",
+                text="Late reply",
+                author="Assistant",
+                initials="AI",
+            )
+
+        self.assertFalse(invalid.exists())
+        extended = _read_part(threaded, "word/commentsExtended.xml")
+        self.assertIn(
+            "1",
+            [item.get(W15 + "done") for item in extended.iter(W15 + "commentEx")],
+        )
+
+    def test_empty_reply_fails_without_output(self):
+        source = self.tmp_path / "source.docx"
+        invalid = self.tmp_path / "invalid.docx"
+        _write_fixture(source)
+
+        with self.assertRaisesRegex(
+            reply_comment.CommentReplyError, "回复内容不能为空"
+        ):
+            reply_comment.reply_to_comment(
+                source,
+                invalid,
+                reply_to="0",
+                text="  \n",
+                author="Assistant",
+                initials="AI",
+            )
+
+        self.assertFalse(invalid.exists())
+
+    def test_modern_comment_parts_fail_loud_without_output(self):
+        source = self.tmp_path / "source.docx"
+        invalid = self.tmp_path / "invalid.docx"
+        _write_fixture(source)
+        with zipfile.ZipFile(source, "a", zipfile.ZIP_DEFLATED) as package:
+            package.writestr("word/commentsIds.xml", b"<unsupported/>")
+
+        with self.assertRaisesRegex(
+            reply_comment.CommentReplyError, "尚未支持的现代批注部件"
+        ):
+            reply_comment.reply_to_comment(
+                source,
+                invalid,
+                reply_to="0",
+                text="Reply",
+                author="Assistant",
+                initials="AI",
+            )
+
+        self.assertFalse(invalid.exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

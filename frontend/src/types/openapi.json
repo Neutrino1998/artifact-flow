@@ -1210,7 +1210,7 @@
           "admin"
         ],
         "summary": "Reconstruct Admin Prompt",
-        "description": "\u91cd\u5efa\u67d0\u4e00\u53d1 LLM \u8c03\u7528\u5b9e\u9645\u53d1\u51fa\u7684\u5b8c\u6574 prompt\uff08admin \u53d6\u8bc1\uff0c\u6309 agent_start \u951a\u5b9a\uff09\u3002\n\n\u951a = \u8be5\u6b21\u8c03\u7528\u524d\u53d1\u51fa\u7684 agent_start \u4e8b\u4ef6\uff08\u5176 event_id \u7531 events \u7aef\u70b9\u8fd4\u56de\uff09\u3002\u91cd\u5efa\u8d70\n\u5206\u652f\u6b63\u786e\u7684 path\uff0c\u590d\u7528\u5f15\u64ce\u540c\u4e00\u5957\u88c5\u914d\u903b\u8f91\uff0c\u4e0d\u91cd\u65b0\u751f\u6210\u52a8\u6001\u5185\u5bb9 \u2014\u2014 \u8be6\u89c1\nConversationManager.reconstruct_prompt\u3002",
+        "description": "\u91cd\u5efa\u67d0\u4e00\u53d1 LLM \u8c03\u7528\u7684 messages \u8bed\u4e49\u8f93\u5165\uff08admin \u53d6\u8bc1\uff0c\u6309 agent_start \u951a\u5b9a\uff09\u3002\n\n\u951a = \u8be5\u6b21\u8c03\u7528\u524d\u53d1\u51fa\u7684 agent_start \u4e8b\u4ef6\uff08\u5176 event_id \u7531 events \u7aef\u70b9\u8fd4\u56de\uff09\u3002\u91cd\u5efa\u8d70\n\u5206\u652f\u6b63\u786e\u7684 path\uff0c\u590d\u7528\u5f15\u64ce\u540c\u4e00\u5957 messages \u88c5\u914d\u903b\u8f91\uff0c\u5e76\u8fd4\u56de\u5f53\u6b21\u6301\u4e45\u5316\u7684 model\uff1b\n\u4e0d\u91cd\u65b0\u751f\u6210\u52a8\u6001\u5185\u5bb9\uff0c\u4e5f\u4e0d\u58f0\u79f0\u8fd8\u539f\u672a\u6301\u4e45\u5316\u7684 native tools schema \u2014\u2014 \u8be6\u89c1\nConversationManager.reconstruct_prompt\u3002",
         "operationId": "reconstruct_admin_prompt_api_v1_admin_conversations__conv_id__messages__message_id__reconstruct_get",
         "security": [
           {
@@ -3817,6 +3817,27 @@
   },
   "components": {
     "schemas": {
+      "ActivatedSkillRef": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug",
+            "description": "Skill slug resolved for this turn"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Skill display name frozen at activation time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slug",
+          "name"
+        ],
+        "title": "ActivatedSkillRef",
+        "description": "Skill the user explicitly activated on one message (display snapshot)."
+      },
       "ActiveStreamResponse": {
         "properties": {
           "active": {
@@ -4250,6 +4271,17 @@
             ],
             "title": "Agent Name"
           },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
           "has_reminder": {
             "type": "boolean",
             "title": "Has Reminder",
@@ -4270,11 +4302,12 @@
           "message_id",
           "agent_start_event_id",
           "agent_name",
+          "model",
           "has_reminder",
           "messages"
         ],
         "title": "AdminPromptReconstructResponse",
-        "description": "GET .../messages/{message_id}/reconstruct response \u2014 \u91cd\u5efa\u67d0\u53d1 LLM \u8c03\u7528\u7684\u5b8c\u6574 prompt\u3002\n\nhas_reminder=False \u8868\u793a\u8be5 agent_start \u65e9\u4e8e reminder \u6301\u4e45\u5316\uff08\u53ea\u91cd\u5efa\u4e86 system_prompt +\n\u5386\u53f2\uff0c\u65e0\u52a8\u6001 reminder\uff09\u3002messages \u7684 content \u53ef\u80fd\u662f str \u6216\u5757\u5217\u8868\uff08\u8bc6\u56fe\u5757\u964d\u7ea7\u4e3a\u5360\u4f4d\u6587\u672c\uff09\u3002"
+        "description": "\u91cd\u5efa\u67d0\u53d1 LLM \u8c03\u7528\u7684 OpenAI-compatible messages \u8bed\u4e49\u8f93\u5165\u3002\n\nhas_reminder=False \u8868\u793a\u8be5 agent_start \u65e9\u4e8e reminder \u6301\u4e45\u5316\uff08\u53ea\u91cd\u5efa\u4e86 system_prompt +\n\u5386\u53f2\uff0c\u65e0\u52a8\u6001 reminder\uff09\u3002\u4e0d\u5305\u542b\u672a\u6301\u4e45\u5316\u7684 native tools schema\uff1bmessages \u7684 content\n\u53ef\u80fd\u662f str \u6216\u5757\u5217\u8868\uff08\u8bc6\u56fe\u5757\u964d\u7ea7\u4e3a\u5360\u4f4d\u6587\u672c\uff09\u3002"
       },
       "AdminSkillItem": {
         "properties": {
@@ -5170,7 +5203,7 @@
           "compaction_token_threshold": {
             "type": "integer",
             "title": "Compaction Token Threshold",
-            "description": "Token sum (a single LLM call's input+output) at which the engine auto-compacts. Used by the frontend as the context-usage gauge denominator so it doesn't hardcode a value that could drift from the server."
+            "description": "Effective token sum at which the lead model auto-compacts, calculated as its configured context_window minus the service reserve. Used by the frontend as the context-usage gauge denominator."
           },
           "lead_agent_model": {
             "type": "string",
@@ -6160,6 +6193,21 @@
             "title": "Uploaded Files",
             "description": "Files the user attached this turn, from Message.metadata_['uploaded_files']. Display-only (best-effort): absent for turns that failed before artifact flush."
           },
+          "activated_skills": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ActivatedSkillRef"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activated Skills",
+            "description": "Skills the user explicitly activated on this turn, from Message.metadata_['activated_skills']. This is a per-message display snapshot, unlike cumulative active_skills; model-initiated read_skill calls are excluded."
+          },
           "active_skills": {
             "anyOf": [
               {
@@ -6173,7 +6221,7 @@
               }
             ],
             "title": "Active Skills",
-            "description": "Skill slugs active as of this turn (sticky, from Message.metadata_['active_skills']). The branch-tail message's list is the conversation's current active set; the composer reads it to mark already-active skills in the activation picker. Absent/empty when no skills are active."
+            "description": "Lead-agent skill slugs active as of this turn, projected from Message.metadata_['agent_progressive_state']['lead_agent']['active_skills']. The branch-tail message drives the activation picker. Absent/empty when no skills are active."
           }
         },
         "type": "object",
@@ -6186,6 +6234,7 @@
           "children",
           "execution_metrics",
           "uploaded_files",
+          "activated_skills",
           "active_skills"
         ],
         "title": "MessageResponse",
@@ -6702,12 +6751,10 @@
             "type": "object",
             "title": "Headers"
           },
-          "parameters": {
-            "items": {
-              "$ref": "#/components/schemas/ToolParamSpec"
-            },
-            "type": "array",
-            "title": "Parameters"
+          "input_schema": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Input Schema"
           },
           "response_extract": {
             "anyOf": [
@@ -6738,6 +6785,7 @@
             "default": 60
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "member_name",
@@ -6746,74 +6794,12 @@
           "endpoint",
           "method",
           "headers",
-          "parameters",
+          "input_schema",
           "response_extract",
           "artifact_output",
           "timeout"
         ],
         "title": "ToolMemberSpec"
-      },
-      "ToolParamSpec": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "maxLength": 64,
-            "title": "Name"
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "string",
-              "integer",
-              "number",
-              "boolean",
-              "json"
-            ],
-            "title": "Type",
-            "default": "string"
-          },
-          "description": {
-            "type": "string",
-            "title": "Description",
-            "default": ""
-          },
-          "required": {
-            "type": "boolean",
-            "title": "Required",
-            "default": true
-          },
-          "default": {
-            "anyOf": [
-              {},
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default"
-          },
-          "enum": {
-            "anyOf": [
-              {
-                "items": {},
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enum"
-          }
-        },
-        "type": "object",
-        "required": [
-          "name",
-          "type",
-          "description",
-          "required",
-          "default",
-          "enum"
-        ],
-        "title": "ToolParamSpec"
       },
       "ToolUnitImportResponse": {
         "properties": {

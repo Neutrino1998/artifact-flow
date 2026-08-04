@@ -121,7 +121,9 @@ class TestMountTool:
         tool = MountArtifactTool(session, service)
         assert tool.name == "mount"
         assert tool.permission == ToolPermission.AUTO
-        assert [p.name for p in tool.get_parameters()] == ["artifact_id"]
+        schema = tool.get_input_schema()
+        assert list(schema["properties"]) == ["artifact_id"]
+        assert schema["required"] == ["artifact_id"]
 
     async def test_mount_text_artifact_writes_utf8(self, session, service):
         service.add_text("notes.md", "# 标题\nbody")
@@ -223,9 +225,10 @@ class TestPersistTool:
         tool = PersistFileTool(session, service)
         assert tool.name == "persist"
         assert tool.permission == ToolPermission.AUTO
-        assert [p.name for p in tool.get_parameters()] == ["path", "artifact_id"]
+        schema = tool.get_input_schema()
+        assert list(schema["properties"]) == ["path", "artifact_id"]
         # artifact_id 可选:缺省 = 产新件(旧调用形态不破)
-        assert [p.required for p in tool.get_parameters()] == [True, False]
+        assert schema["required"] == ["path"]
 
     async def test_persist_text_file(self, session, service):
         await session.ensure_container()

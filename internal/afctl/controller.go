@@ -19,6 +19,10 @@ type Controller struct {
 	Err    io.Writer
 }
 
+type applyOptions struct {
+	KeepMaintenance bool
+}
+
 func NewController(root string, out, errOut io.Writer) *Controller {
 	return &Controller{Root: root, Runner: OSRunner{Out: out, Err: errOut}, Out: out, Err: errOut}
 }
@@ -119,6 +123,10 @@ func (c *Controller) readRelease(id string) (ReleaseMetadata, error) {
 }
 
 func (c *Controller) PlanApply(input string) (Plan, error) {
+	return c.planApply(input, applyOptions{})
+}
+
+func (c *Controller) planApply(input string, options applyOptions) (Plan, error) {
 	site, err := c.SiteValidate()
 	if err != nil {
 		return Plan{}, err
@@ -208,7 +216,11 @@ func (c *Controller) PlanApply(input string) (Plan, error) {
 		}
 		plan.Target, plan.AppVersion, plan.ReleaseKind = manifest.ReleaseID, meta.AppVersion, manifest.Kind
 	}
-	plan.Actions = append(plan.Actions, "enable maintenance", "compose reconcile via "+site.Executor, "wait for load-balancer readiness", "atomically write state.json", "disable maintenance")
+	finalMaintenanceAction := "disable maintenance"
+	if options.KeepMaintenance {
+		finalMaintenanceAction = "leave maintenance enabled for operator verification"
+	}
+	plan.Actions = append(plan.Actions, "enable maintenance", "compose reconcile via "+site.Executor, "wait for load-balancer readiness", "atomically write state.json", finalMaintenanceAction)
 	return plan, nil
 }
 
@@ -245,12 +257,16 @@ func (c *Controller) PlanRollback() (Plan, error) {
 }
 
 func (c *Controller) Apply(ctx context.Context, input string) error {
+	return c.applyWithOptions(ctx, input, applyOptions{})
+}
+
+func (c *Controller) applyWithOptions(ctx context.Context, input string, options applyOptions) error {
 	lock, err := acquireMutationLock(c.lockPath())
 	if err != nil {
 		return err
 	}
 	defer lock.Close()
-	return c.applyLocked(ctx, input)
+	return c.applyLocked(ctx, input, options)
 }
 
 func (c *Controller) Rollback(ctx context.Context) error {
@@ -266,11 +282,11 @@ func (c *Controller) Rollback(ctx context.Context) error {
 	if state.Previous == "" {
 		return fmt.Errorf("no previous release recorded")
 	}
-	return c.applyLocked(ctx, state.Previous)
+	return c.applyLocked(ctx, state.Previous, applyOptions{})
 }
 
-func (c *Controller) applyLocked(ctx context.Context, input string) error {
-	plan, err := c.PlanApply(input)
+func (c *Controller) applyLocked(ctx context.Context, input string, options applyOptions) error {
+	plan, err := c.planApply(input, options)
 	if err != nil {
 		return err
 	}
@@ -324,10 +340,13 @@ func (c *Controller) applyLocked(ctx context.Context, input string) error {
 			}
 		}
 		if recovered {
-			if maintenanceErr := c.disableMaintenanceAfterApply(ctx, site); maintenanceErr != nil {
-				return fmt.Errorf("apply failed and restored last-known-good release %s, but maintenance could not be disabled: %v (original apply error: %w)", state.Current, maintenanceErr, err)
+			if !options.KeepMaintenance {
+				if maintenanceErr := c.disableMaintenanceAfterApply(ctx, site); maintenanceErr != nil {
+					return fmt.Errorf("apply failed and restored last-known-good release %s, but maintenance could not be disabled: %v (original apply error: %w)", state.Current, maintenanceErr, err)
+				}
+				return fmt.Errorf("apply failed; restored last-known-good release %s: %w", state.Current, err)
 			}
-			return fmt.Errorf("apply failed; restored last-known-good release %s: %w", state.Current, err)
+			return fmt.Errorf("apply failed; restored last-known-good release %s; maintenance remains enabled: %w", state.Current, err)
 		}
 		return fmt.Errorf("apply failed; maintenance remains enabled: %w", err)
 	}
@@ -338,8 +357,12 @@ func (c *Controller) applyLocked(ctx context.Context, input string) error {
 	if err := c.writeState(target, previous, state); err != nil {
 		return fmt.Errorf("release is healthy but state write failed; maintenance remains enabled: %w", err)
 	}
-	if err := c.disableMaintenanceAfterApply(ctx, site); err != nil {
-		return fmt.Errorf("release is healthy and recorded but maintenance could not be disabled: %w", err)
+	if !options.KeepMaintenance {
+		if err := c.disableMaintenanceAfterApply(ctx, site); err != nil {
+			return fmt.Errorf("release is healthy and recorded but maintenance could not be disabled: %w", err)
+		}
+	} else {
+		_, _ = fmt.Fprintln(c.Out, "maintenance remains enabled (--keep-maintenance)")
 	}
 	_, _ = fmt.Fprintf(c.Out, "applied release %s (app=%s)\n", target, meta.AppVersion)
 	return nil

@@ -103,6 +103,21 @@ def test_maintenance_assets_and_target_local_state_are_separate_mounts() -> None
     assert "${AF_RUNTIME_DEPLOY_DIR:-.}/site:/app/public/site:ro" in base
 
 
+def test_maintenance_note_route_rewrites_exact_path_to_state_file() -> None:
+    caddy = (ROOT / "deploy/caddy/common.caddy").read_text(encoding="utf-8")
+    assert "handle_path /__maintenance/note.txt" not in caddy
+    match = re.search(
+        r"handle /__maintenance/note\.txt \{(?P<body>.*?)\n\s*\}",
+        caddy,
+        re.DOTALL,
+    )
+    assert match is not None
+    body = match.group("body")
+    assert "root * /etc/caddy/maintenance-state" in body
+    assert "rewrite * /note.txt" in body
+    assert "file_server" in body
+
+
 def test_outbound_ca_trust_is_target_local_and_rebuilt_at_startup() -> None:
     base = (ROOT / "deploy/compose.base.yml").read_text(encoding="utf-8")
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")

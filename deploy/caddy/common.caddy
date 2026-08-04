@@ -120,10 +120,12 @@
 	# `route` evaluates handles top-to-bottom, first match wins and terminates.
 	route {
 		# 1. Maintenance page's own assets — ALWAYS reachable, even mid-window,
-		#    or the page's own <img>/note.txt would 503 too. handle_path strips
-		#    the /__maintenance prefix before hitting the file root.
-		handle_path /__maintenance/note.txt {
+		#    or the page's own <img>/note.txt would 503 too. The note lives in a
+		#    separate target-local root, so rewrite its public exact path explicitly;
+		#    handle_path on an exact matcher would strip the entire URI to `/`.
+		handle /__maintenance/note.txt {
 			root * /etc/caddy/maintenance-state
+			rewrite * /note.txt
 			header Cache-Control "no-store"
 			file_server
 		}

@@ -3,31 +3,20 @@
 import { INPUT_ON_PANEL, LABEL_CLASS } from '@/lib/styles';
 import { SELECT_CHEVRON } from '@/components/ui/SelectChevron';
 import Checkbox from '@/components/forms/Checkbox';
+import InputSchemaEditor from '@/components/forms/InputSchemaEditor';
 import type { CreateToolUnitRequest, ToolUnitResponse } from '@/types';
 
 // ---------------------------------------------------------------------------
 // Draft 模型
 //
 // 编辑器持「draft」而非直接持请求体：headers 用有序数组（字典在 UI 里没法稳定
-// 编辑空键/重复键），parameters 的 default/enum 用原始文本（按 type 在提交期 coerce）。
-// draftToRequest 做唯一的一次 校验 + coerce + 收口成请求体;unitResponseToDraft 反向。
-// 后端 _build_definition 不按 type 强转 default(原样存)——所以 coerce 必须在这里做,
-// 否则整数默认值会以字符串落库。
+// 编辑空键/重复键），input_schema 用格式化 JSON 文本；draftToRequest 解析并做
+// 根结构检查，后端继续负责完整 Draft 2020-12 校验。
 // ---------------------------------------------------------------------------
 
 export type UnitKind = 'tool' | 'toolset' | 'mcp';
-export type ParamType = 'string' | 'integer' | 'number' | 'boolean' | 'json';
 export type ArtifactOutputMode = 'text' | 'binary';
 export type PermissionLevel = 'auto' | 'confirm';
-
-export interface ParamDraft {
-  name: string;
-  type: ParamType;
-  description: string;
-  required: boolean;
-  default: string; // 原始文本;'' → null,按 type coerce
-  enum: string; // 换行分隔的原始文本;'' → null
-}
 
 export interface MemberDraft {
   member_name: string;
@@ -36,7 +25,7 @@ export interface MemberDraft {
   endpoint: string;
   method: string;
   headers: Array<{ key: string; value: string }>;
-  parameters: ParamDraft[];
+  input_schema: string;
   response_extract: string; // '' → null
   artifact_output: {
     enabled: boolean;
@@ -66,14 +55,6 @@ export interface UnitDraft {
   provider_config: McpProviderConfigDraft;
 }
 
-const PARAM_TYPES: ParamType[] = ['string', 'integer', 'number', 'boolean', 'json'];
-const PARAM_TYPE_LABELS: Record<ParamType, string> = {
-  string: 'string',
-  integer: 'integer',
-  number: 'number',
-  boolean: 'boolean',
-  json: 'json（数组/对象）',
-};
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 const ARTIFACT_OUTPUT_MODES: ArtifactOutputMode[] = ['text', 'binary'];
 const TEXT_CONTENT_TYPES = [
@@ -135,7 +116,11 @@ function emptyMember(): MemberDraft {
     endpoint: '',
     method: 'GET',
     headers: [],
-    parameters: [],
+    input_schema: JSON.stringify({
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    }, null, 2),
     response_extract: '',
     artifact_output: {
       enabled: false,
@@ -195,7 +180,9 @@ export function unitResponseToDraft(u: ToolUnitResponse): UnitDraft {
     members: u.members.map((m) => {
       const def = (m.definition ?? {}) as Record<string, unknown>;
       const headersObj = (def.headers ?? {}) as Record<string, unknown>;
-      const params = Array.isArray(def.parameters) ? (def.parameters as Array<Record<string, unknown>>) : [];
+      const inputSchema = def.input_schema && typeof def.input_schema === 'object'
+        ? def.input_schema
+        : { type: 'object', properties: {}, additionalProperties: false };
       const artifactOutput = (def.artifact_output ?? {}) as Record<string, unknown>;
       return {
         member_name: m.member_name,
@@ -204,16 +191,7 @@ export function unitResponseToDraft(u: ToolUnitResponse): UnitDraft {
         endpoint: typeof def.endpoint === 'string' ? def.endpoint : '',
         method: typeof def.method === 'string' ? def.method : 'GET',
         headers: Object.entries(headersObj).map(([key, value]) => ({ key, value: scalarToText(value) })),
-        parameters: params.map((p) => ({
-          name: typeof p.name === 'string' ? p.name : '',
-          type: (PARAM_TYPES.includes(p.type as ParamType) ? (p.type as ParamType) : 'string'),
-          description: typeof p.description === 'string' ? p.description : '',
-          required: p.required !== false,
-          default: scalarToText(p.default),
-          enum: Array.isArray(p.enum)
-            ? (p.enum as unknown[]).map((v) => scalarToText(v, { prettyObjects: false })).join('\n')
-            : '',
-        })),
+        input_schema: JSON.stringify(inputSchema, null, 2),
         response_extract: typeof def.response_extract === 'string' ? def.response_extract : '',
         artifact_output: {
           enabled: artifactOutput.enabled === true,
@@ -228,62 +206,6 @@ export function unitResponseToDraft(u: ToolUnitResponse): UnitDraft {
       };
     }),
   };
-}
-
-// 仅在本编辑器自己的提交期 coerce/校验。后端存 default 时不按 type 强转(原样存),故"绕过本
-// UI 用 REST 直建的、type 与 default 不符的脏 unit"在这里重存会抛错——但 dynamic unit 的唯一
-// 创建者就是本 UI(建时即 coerce),该脏态按构造不可达,不额外兜底(reviewer #4)。
-function coerceScalar(type: ParamType, raw: string): unknown {
-  const t = raw.trim();
-  if (t === '') return null;
-  if (type === 'integer') {
-    if (!/^-?\d+$/.test(t)) throw new Error(`整数参数的值「${t}」不是合法整数`);
-    return parseInt(t, 10);
-  }
-  if (type === 'number') {
-    const n = Number(t);
-    // 拒非有限(NaN/Infinity):否则 Infinity 过了"合法数字"校验,却被 JSON.stringify 静默
-    // 吞成 null → 默认值无声丢失。loud-fail 优于静默(reviewer #5)。
-    if (!Number.isFinite(n)) throw new Error(`数值参数的值「${t}」不是合法有限数字`);
-    return n;
-  }
-  if (type === 'boolean') {
-    if (t === 'true') return true;
-    if (t === 'false') return false;
-    throw new Error(`布尔参数的值「${t}」必须是 true 或 false`);
-  }
-  if (type === 'json') {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(t);
-    } catch {
-      throw new Error(`JSON 参数的值必须是合法 JSON 数组或对象`);
-    }
-    if (parsed === null || typeof parsed !== 'object') {
-      throw new Error(`JSON 参数的值必须是数组或对象`);
-    }
-    return parsed;
-  }
-  return raw;
-}
-
-function coerceScalarForField(type: ParamType, raw: string, fieldLabel: string): unknown {
-  try {
-    return coerceScalar(type, raw);
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    throw new Error(`${fieldLabel}：${message}`);
-  }
-}
-
-function parseEnum(type: ParamType, raw: string, fieldLabel: string): unknown[] | null {
-  // 只按换行分隔(与 unitResponseToDraft 的 \n join 对齐)→ 往返无损,枚举值本身可含逗号(reviewer #3)
-  const parts = raw
-    .split('\n')
-    .map((s, idx) => ({ value: s.trim(), lineNumber: idx + 1 }))
-    .filter((s) => s.value.length > 0);
-  if (parts.length === 0) return null;
-  return parts.map((p) => coerceScalarForField(type, p.value, `${fieldLabel}枚举第 ${p.lineNumber} 行无效`));
 }
 
 /** draft → 请求体;校验失败抛 Error(中文),由调用方 catch 显示。后端仍是权威校验。 */
@@ -342,19 +264,28 @@ export function draftToRequest(d: UnitDraft): CreateToolUnitRequest {
       headers[k] = h.value;
     }
 
-    const parameters = m.parameters.map((p) => {
-      const pname = p.name.trim();
-      if (!pname) throw new Error(`成员「${memberName}」有参数缺少名称`);
-      const fieldLabel = `成员「${memberName}」参数「${pname}」`;
-      return {
-        name: pname,
-        type: p.type,
-        description: p.description,
-        required: p.required,
-        default: coerceScalarForField(p.type, p.default, `${fieldLabel}默认值无效`),
-        enum: parseEnum(p.type, p.enum, fieldLabel),
-      };
-    });
+    let inputSchema: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(m.input_schema);
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('必须是 JSON 对象');
+      }
+      inputSchema = parsed as Record<string, unknown>;
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      throw new Error(`成员「${memberName}」的 input_schema 无效：${detail}`);
+    }
+    if (inputSchema.type !== 'object') {
+      throw new Error(`成员「${memberName}」的 input_schema 根 type 必须是 object`);
+    }
+    let properties = inputSchema.properties;
+    if (properties === undefined) {
+      properties = {};
+      inputSchema.properties = properties;
+    }
+    if (properties === null || typeof properties !== 'object' || Array.isArray(properties)) {
+      throw new Error(`成员「${memberName}」的 input_schema.properties 必须是对象`);
+    }
 
     return {
       member_name: memberName,
@@ -363,7 +294,7 @@ export function draftToRequest(d: UnitDraft): CreateToolUnitRequest {
       endpoint: m.endpoint.trim(),
       method: m.method,
       headers,
-      parameters,
+      input_schema: inputSchema,
       response_extract: m.response_extract.trim() || null,
       artifact_output: m.artifact_output.enabled
         ? {
@@ -797,10 +728,12 @@ function MemberCard({
         onChange={(headers) => onChange({ headers })}
       />
 
-      <ParamEditor
-        params={member.parameters}
+      <InputSchemaEditor
+        value={member.input_schema}
+        endpoint={member.endpoint}
+        method={member.method}
         readOnly={readOnly}
-        onChange={(parameters) => onChange({ parameters })}
+        onChange={(input_schema) => onChange({ input_schema })}
       />
 
       <div>
@@ -1036,133 +969,6 @@ function HeaderEditor({
                   </svg>
                 </button>
               )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 参数列表编辑器
-// ---------------------------------------------------------------------------
-
-function ParamEditor({
-  params,
-  readOnly,
-  onChange,
-}: {
-  params: ParamDraft[];
-  readOnly: boolean;
-  onChange: (next: ParamDraft[]) => void;
-}) {
-  const update = (idx: number, p: Partial<ParamDraft>) =>
-    onChange(params.map((x, i) => (i === idx ? { ...x, ...p } : x)));
-  const add = () =>
-    onChange([...params, { name: '', type: 'string', description: '', required: true, default: '', enum: '' }]);
-  const remove = (idx: number) => onChange(params.filter((_, i) => i !== idx));
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-1">
-        <label className={`${LABEL_CLASS} mb-0`}>参数</label>
-        {!readOnly && (
-          <button type="button" onClick={add} className="text-xs text-accent hover:underline">
-            + 添加参数
-          </button>
-        )}
-      </div>
-      {params.length === 0 ? (
-        <p className="text-xs text-text-tertiary dark:text-text-tertiary-dark">无</p>
-      ) : (
-        <div className="space-y-3">
-          {params.map((p, idx) => (
-            <div key={idx} className="rounded-lg border border-border/60 dark:border-border-dark/60 p-3 space-y-2">
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={p.name}
-                  onChange={(e) => update(idx, { name: e.target.value })}
-                  disabled={readOnly}
-                  placeholder="参数名"
-                  className={`${INPUT_ON_PANEL} font-mono flex-1`}
-                />
-                <div className="relative w-44 flex-shrink-0">
-                  <select
-                    value={p.type}
-                    onChange={(e) => update(idx, { type: e.target.value as ParamType })}
-                    disabled={readOnly}
-                    className={`${INPUT_ON_PANEL} appearance-none pr-9`}
-                  >
-                    {PARAM_TYPES.map((t) => (
-                      <option key={t} value={t}>{PARAM_TYPE_LABELS[t]}</option>
-                    ))}
-                  </select>
-                  {SELECT_CHEVRON}
-                </div>
-                {!readOnly && (
-                  <button
-                    type="button"
-                    onClick={() => remove(idx)}
-                    className="flex-shrink-0 p-1.5 text-text-tertiary dark:text-text-tertiary-dark hover:text-status-error transition-colors"
-                    aria-label="移除参数"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                      <path d="M3 3l8 8M11 3l-8 8" />
-                    </svg>
-                  </button>
-                )}
-              </div>
-              <input
-                type="text"
-                value={p.description}
-                onChange={(e) => update(idx, { description: e.target.value })}
-                disabled={readOnly}
-                placeholder="参数说明"
-                className={INPUT_ON_PANEL}
-              />
-              {p.type === 'json' ? (
-                <textarea
-                  value={p.default}
-                  onChange={(e) => update(idx, { default: e.target.value })}
-                  disabled={readOnly}
-                  rows={3}
-                  placeholder='默认 JSON，如 ["id"] 或 {"k":"v"}（可选）'
-                  className={`${INPUT_ON_PANEL} font-mono resize-y`}
-                />
-              ) : (
-                <input
-                  type="text"
-                  value={p.default}
-                  onChange={(e) => update(idx, { default: e.target.value })}
-                  disabled={readOnly}
-                  placeholder="默认值（可选）"
-                  className={`${INPUT_ON_PANEL} font-mono`}
-                />
-              )}
-              <textarea
-                value={p.enum}
-                onChange={(e) => update(idx, { enum: e.target.value })}
-                disabled={readOnly}
-                rows={2}
-                placeholder={p.type === 'json' ? '高级：每行一个 JSON 对象或数组（可选）' : '枚举值，每行一个（可选）'}
-                className={`${INPUT_ON_PANEL} font-mono resize-y`}
-              />
-              {p.type === 'json' && (
-                <p className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                  JSON 枚举会原样展示给模型；复杂结构建议改用 mode / preset 这类字符串参数。
-                </p>
-              )}
-              <label className="flex items-center gap-2 select-none cursor-pointer">
-                <Checkbox
-                  checked={p.required}
-                  onChange={(c) => update(idx, { required: c })}
-                  disabled={readOnly}
-                  ariaLabel="必填参数"
-                />
-                <span className="text-xs text-text-secondary dark:text-text-secondary-dark">必填</span>
-              </label>
             </div>
           ))}
         </div>

@@ -25,11 +25,11 @@ import zipfile
 from typing import List, Optional
 
 from core.effective_skillset import EffectiveSkillSet
+from core.skill_guidance import render_skill_guidance
 from tools.base import (
     MOUNT_SKILL_NAME,
     READ_SKILL_NAME,
     BaseTool,
-    ToolParameter,
     ToolPermission,
     ToolResult,
 )
@@ -45,19 +45,6 @@ from utils.logger import get_logger
 from utils.skill_zip import SkillZipError, locate_skill_md, strip_prefix
 
 logger = get_logger("ArtifactFlow")
-
-# 有附属文件:read_skill 只返回 SKILL.md,其余文件要 mount 进沙盒才读得到。
-_MOUNT_HINT_EXTRA_FILES = (
-    "\n\n---\n"
-    "Above is this skill's guidance (SKILL.md). It bundles more files "
-    "(references/, scripts/, assets/) that are NOT shown here — call mount_skill "
-    "to unpack them into the sandbox, then read or run them with bash."
-)
-# 无附属文件:SKILL.md 就是完整技能,别去 mount。
-_MOUNT_HINT_NO_EXTRA_FILES = (
-    "\n\n---\n"
-    "Above is this skill's complete guidance (SKILL.md); it has no bundled files."
-)
 
 # 容器内暂存/解压位(固定名 —— 引擎单 turn 内工具串行,无并发覆写;下划线/点前缀
 # 不与工作区顶层产物撞眼)。宿主侧写进 session.tmp_dir(= 容器 /tmp 的 bind 源)。
@@ -88,15 +75,19 @@ class ReadSkillTool(BaseTool):
         self._service = service
         self._skillset = skillset
 
-    def get_parameters(self) -> List[ToolParameter]:
-        return [
-            ToolParameter(
-                name="slug",
-                type="string",
-                description="Skill slug to load (as shown in <available_skills>).",
-                required=True,
-            )
-        ]
+    def get_input_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "slug": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Skill slug to load (as shown in <available_skills>).",
+                }
+            },
+            "required": ["slug"],
+            "additionalProperties": False,
+        }
 
     async def execute(self, **params) -> ToolResult:
         slug = (params.get("slug") or "").strip()
@@ -110,11 +101,9 @@ class ReadSkillTool(BaseTool):
         body = await self._service.get_skill_md(info.id)
         if body is None:
             return ToolResult(success=False, error=f"Skill '{slug}' has no content.")
-        # 提示按 has_extra_files 条件化:有附属文件才指向 mount_skill。
-        hint = _MOUNT_HINT_EXTRA_FILES if info.has_extra_files else _MOUNT_HINT_NO_EXTRA_FILES
         return ToolResult(
             success=True,
-            data=body + hint,
+            data=render_skill_guidance(body, has_extra_files=info.has_extra_files),
             metadata={"activated_skill": slug},  # 引擎据此激活(append + merge skill_grants)
         )
 
@@ -150,15 +139,19 @@ class MountSkillTool(BaseTool):
         self._service = service
         self._skillset = skillset
 
-    def get_parameters(self) -> List[ToolParameter]:
-        return [
-            ToolParameter(
-                name="slug",
-                type="string",
-                description="Skill slug to mount (as shown in <available_skills>).",
-                required=True,
-            )
-        ]
+    def get_input_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "slug": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Skill slug to mount (as shown in <available_skills>).",
+                }
+            },
+            "required": ["slug"],
+            "additionalProperties": False,
+        }
 
     async def execute(self, **params) -> ToolResult:
         slug = (params.get("slug") or "").strip()

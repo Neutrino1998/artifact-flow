@@ -8,7 +8,7 @@ import json
 import httpx
 import jmespath
 from jmespath.exceptions import JMESPathError
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from dataclasses import dataclass, field
 
 from tools.artifact_output import (
@@ -16,7 +16,7 @@ from tools.artifact_output import (
     content_type_from_headers,
     filename_from_headers,
 )
-from tools.base import BaseTool, ToolResult, ToolParameter, ToolPermission
+from tools.base import BaseTool, ToolResult, ToolPermission
 from tools.custom.secrets import (
     resolve_secrets,
     substitute_templates,
@@ -38,7 +38,13 @@ class HttpToolConfig:
     endpoint: str = ""
     method: str = "GET"
     headers: Dict[str, str] = field(default_factory=dict)
-    parameters: List[ToolParameter] = field(default_factory=list)
+    input_schema: Dict[str, Any] = field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        }
+    )
     response_extract: Optional[str] = None   # JMESPath 提取表达式(无 $. 前缀,如 data.price)
     artifact_output: Optional[Dict[str, Any]] = None
     timeout: int = 60                        # 请求超时（秒）。per-MD 可调;长任务 endpoint 放心设大 ——
@@ -69,7 +75,7 @@ class HttpTool(BaseTool):
         self._response_extract = config.response_extract
         self._artifact_output = config.artifact_output
         self._timeout = config.timeout
-        self._param_defs = config.parameters
+        self._input_schema = config.input_schema
         # 运行期凭证(B-4;B-5 退回 lazy):snapshot 重建时灌入 unit 名 + resolver。两者齐备
         # → execute 期按 unit 从 tool_credentials(加密落库)开短 session 解密填 {{NAME}}
         # (只解被调工具、用完即弃);否则回落 env(legacy loader / 直接构造的工具,无 unit
@@ -77,8 +83,8 @@ class HttpTool(BaseTool):
         self._unit_name = unit_name
         self._credential_resolver = credential_resolver
 
-    def get_parameters(self) -> List[ToolParameter]:
-        return self._param_defs
+    def get_input_schema(self) -> dict:
+        return self._input_schema
 
     async def execute(self, **params) -> ToolResult:
         """
@@ -148,7 +154,7 @@ class HttpTool(BaseTool):
                     response = await client.request(
                         self._method,
                         endpoint,
-                        params=request_params,
+                        params=_encode_query_params(request_params),
                         headers=headers,
                     )
 
@@ -250,6 +256,25 @@ class HttpTool(BaseTool):
                 success=False,
                 error=f"Tool execution failed: {str(e)}",
             )
+
+def _encode_query_params(params: Dict[str, Any]) -> Dict[str, str]:
+    """Encode native JSON values deterministically for a URL query string."""
+    encoded: Dict[str, str] = {}
+    for name, value in params.items():
+        if isinstance(value, str):
+            encoded[name] = value
+        elif isinstance(value, (dict, list)) or value is None:
+            encoded[name] = json.dumps(
+                value,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        elif isinstance(value, bool):
+            encoded[name] = "true" if value else "false"
+        else:
+            encoded[name] = str(value)
+    return encoded
 
 
 def validate_response_extract(expr: Optional[str]) -> None:

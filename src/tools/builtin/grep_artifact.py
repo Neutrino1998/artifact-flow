@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, List, Optional, Tuple
 import re2
 
 from config import config
-from tools.base import BaseTool, ToolParameter, ToolPermission, ToolResult
+from tools.base import BaseTool, ToolPermission, ToolResult
 
 if TYPE_CHECKING:
     from tools.builtin.artifact_service import ArtifactService
@@ -244,57 +244,49 @@ class GrepArtifactTool(BaseTool):
         """依赖注入入口（跟其他 artifact 工具一致）。"""
         self._service = service
 
-    def get_parameters(self) -> List[ToolParameter]:
-        return [
-            ToolParameter(
-                name="pattern",
-                type="string",
-                description=(
+    def get_input_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": (
                     "Search pattern. RE2 regex by default (ripgrep-style; no backreferences "
                     "or look-around; \\z for end-of-input) — use fixed_strings=true to disable "
                     "regex semantics and match literally."
-                ),
-                required=True,
-            ),
-            ToolParameter(
-                name="id",
-                type="string",
-                description=(
+                    ),
+                },
+                "id": {
+                    "type": "string",
+                    "description": (
                     "Artifact ID to search. Omit to grep every artifact in the current session "
                     "(heading-style output)."
-                ),
-                required=False,
-                default=None,
-            ),
-            ToolParameter(
-                name="fixed_strings",
-                type="boolean",
-                description="Treat pattern as a literal string (ripgrep -F).",
-                required=False,
-                default=False,
-            ),
-            ToolParameter(
-                name="ignore_case",
-                type="boolean",
-                description="Case-insensitive match (ripgrep -i).",
-                required=False,
-                default=False,
-            ),
-            ToolParameter(
-                name="context",
-                type="integer",
-                description="Symmetric context lines around each match (ripgrep -C).",
-                required=False,
-                default=0,
-            ),
-            ToolParameter(
-                name="max_count",
-                type="integer",
-                description="Maximum matches per artifact (ripgrep -m). Default 20.",
-                required=False,
-                default=20,
-            ),
-        ]
+                    ),
+                },
+                "fixed_strings": {
+                    "type": "boolean",
+                    "description": "Treat pattern as a literal string (ripgrep -F).",
+                    "default": False,
+                },
+                "ignore_case": {
+                    "type": "boolean",
+                    "description": "Case-insensitive match (ripgrep -i).",
+                    "default": False,
+                },
+                "context": {
+                    "type": "integer",
+                    "description": "Symmetric context lines around each match (ripgrep -C).",
+                    "default": 0,
+                },
+                "max_count": {
+                    "type": "integer",
+                    "description": "Maximum matches per artifact (ripgrep -m). Default 20.",
+                    "default": 20,
+                },
+            },
+            "required": ["pattern"],
+            "additionalProperties": False,
+        }
 
     async def execute(self, **params) -> ToolResult:
         if not self._service:

@@ -35,7 +35,11 @@ from tools.custom.seed_bundle import (
 from tools.custom.mcp_client import McpListResult
 from tools.custom.secrets import assert_secret_refs_allowed, extract_placeholders, SecretResolutionError
 from tools.custom.url_template import validate_url_path_template
-from tools.param_specs import normalize_parameter_specs
+from tools.input_schema import (
+    InputSchemaError,
+    normalize_business_input_schema,
+    validate_native_tool_name,
+)
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -155,7 +159,7 @@ class ToolRegistryManager:
             "member_name": m.member_name,
             "full_name": m.full_name,
             "permission": m.permission,
-            # definition 含 endpoint/headers(里头是 {{NAME}} 占位符,非明文 secret)+ params
+            # definition 含 endpoint/headers(里头是 {{NAME}} 占位符,非明文 secret)+ schema
             "definition": d,
         }
 
@@ -453,16 +457,25 @@ class ToolRegistryManager:
 
     def _build_definition(self, rm: dict) -> dict:
         try:
-            params = normalize_parameter_specs(rm.get("parameters", []) or [])
-        except ValueError as e:
+            input_schema = normalize_business_input_schema(
+                rm.get("input_schema") or {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
+                source=f"tool member '{rm.get('member_name') or '<unnamed>'}' input_schema",
+            )
+        except InputSchemaError as e:
             raise InvalidUnitError(str(e)) from e
 
-        for p in params:
+        for name, property_schema in input_schema["properties"].items():
             # {{...}} 只在 endpoint/headers 受支持(运行期替换);参数 default 不是 secret
             # 注入点 —— 出现占位符 = 配错(会原样外发,且不被 substitute),build 期拒(sweep)
-            if extract_placeholders(p.get("default")):
+            if isinstance(property_schema, dict) and extract_placeholders(
+                property_schema.get("default")
+            ):
                 raise InvalidUnitError(
-                    f"parameter '{p['name']}' default must not contain a {{{{...}}}} placeholder "
+                    f"property '{name}' default must not contain a {{{{...}}}} placeholder "
                     f"(secret placeholders are only supported in endpoint/headers)"
                 )
         endpoint = rm.get("endpoint", "") or ""
@@ -476,7 +489,7 @@ class ToolRegistryManager:
         except SecretResolutionError as e:
             raise InvalidUnitError(str(e)) from e
         try:
-            validate_url_path_template(endpoint, params)
+            validate_url_path_template(endpoint, input_schema)
         except ValueError as e:
             raise InvalidUnitError(str(e)) from e
         # response_extract(JMESPath)语法在保存期 loud-fail(→400),与 seeds 同口径
@@ -496,7 +509,7 @@ class ToolRegistryManager:
             "endpoint": endpoint,
             "method": (rm.get("method", "GET") or "GET").upper(),
             "headers": headers,
-            "parameters": params,
+            "input_schema": input_schema,
             "response_extract": rm.get("response_extract"),
             "artifact_output": artifact_output,
             "timeout": int(rm.get("timeout", 60) or 60),
@@ -530,6 +543,10 @@ class ToolRegistryManager:
 
         existing_full = await self._registry.existing_full_names(exclude_unit=exclude_unit)
         for m in members:
+            try:
+                validate_native_tool_name(m.full_name)
+            except InputSchemaError as e:
+                raise InvalidUnitError(str(e)) from e
             if is_builtin_name(m.full_name):
                 raise NameCollisionError(
                     f"tool full_name '{m.full_name}' collides with a builtin/reserved name"

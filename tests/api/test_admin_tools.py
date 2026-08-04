@@ -50,7 +50,12 @@ def _singleton_body(name="weather", **kw):
             "permission": "auto",
             "endpoint": "https://api.example.com/weather",
             "method": "GET",
-            "parameters": [{"name": "city", "type": "string", "required": True}],
+            "input_schema": {
+                "type": "object",
+                "properties": {"city": {"type": "string"}},
+                "required": ["city"],
+                "additionalProperties": False,
+            },
         }],
     }
     body.update(kw)
@@ -228,9 +233,12 @@ class TestUnitCrud:
     async def test_create_rejects_placeholder_in_param_default(self, admin_client: AsyncClient):
         # 参数 default 不是 secret 注入点 → 含 {{...}} 即 400(sweep minor)
         body = _singleton_body()
-        body["members"][0]["parameters"] = [
-            {"name": "q", "type": "string", "default": "{{TOOL_SECRET_K}}"}
-        ]
+        body["members"][0]["input_schema"] = {
+            "type": "object",
+            "properties": {
+                "q": {"type": "string", "default": "{{TOOL_SECRET_K}}"},
+            },
+        }
         resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
         assert resp.status_code == 400
         assert "default" in resp.json()["detail"]
@@ -252,50 +260,51 @@ class TestUnitCrud:
     async def test_create_accepts_json_parameter_default(self, admin_client: AsyncClient):
         body = _singleton_body(name="ragflow_retrieval")
         body["members"][0]["method"] = "POST"
-        body["members"][0]["parameters"] = [
-            {"name": "question", "type": "string", "required": True},
-            {
-                "name": "dataset_ids",
-                "type": "json",
-                "required": True,
-                "default": ["c750d2f6752411f191e693d1a844b0ba"],
-                "enum": [
-                    ["c750d2f6752411f191e693d1a844b0ba"],
-                    {"dataset_ids": ["c750d2f6752411f191e693d1a844b0ba"]},
-                ],
+        default_ids = ["c750d2f6752411f191e693d1a844b0ba"]
+        body["members"][0]["input_schema"] = {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string"},
+                "dataset_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "default": default_ids,
+                    "enum": [default_ids],
+                },
             },
-        ]
+            "required": ["question", "dataset_ids"],
+        }
         resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
         assert resp.status_code == 201, resp.text
-        params = resp.json()["members"][0]["definition"]["parameters"]
-        assert params[1]["type"] == "json"
-        assert params[1]["default"] == ["c750d2f6752411f191e693d1a844b0ba"]
-        assert params[1]["enum"] == [
-            ["c750d2f6752411f191e693d1a844b0ba"],
-            {"dataset_ids": ["c750d2f6752411f191e693d1a844b0ba"]},
-        ]
+        schema = resp.json()["members"][0]["definition"]["input_schema"]
+        dataset_ids = schema["properties"]["dataset_ids"]
+        assert dataset_ids["type"] == "array"
+        assert dataset_ids["default"] == default_ids
+        assert dataset_ids["enum"] == [default_ids]
 
     async def test_create_rejects_json_parameter_scalar_default(self, admin_client: AsyncClient):
         body = _singleton_body()
-        body["members"][0]["parameters"] = [
-            {"name": "payload", "type": "json", "default": "not-an-object"},
-        ]
+        body["members"][0]["input_schema"] = {
+            "type": "object",
+            "properties": {
+                "payload": {"type": "object", "default": "not-an-object"},
+            },
+        }
         resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
         assert resp.status_code == 400
         assert "payload" in resp.json()["detail"]
         assert "default" in resp.json()["detail"]
-        assert "JSON object or array" in resp.json()["detail"]
+        assert "does not satisfy" in resp.json()["detail"]
 
-    async def test_create_rejects_json_parameter_scalar_enum_item(self, admin_client: AsyncClient):
+    async def test_create_rejects_invalid_json_schema_type(self, admin_client: AsyncClient):
         body = _singleton_body()
-        body["members"][0]["parameters"] = [
-            {"name": "payload", "type": "json", "enum": ["not-an-object"]},
-        ]
+        body["members"][0]["input_schema"] = {
+            "type": "object",
+            "properties": {"payload": {"type": "not-a-json-schema-type"}},
+        }
         resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
         assert resp.status_code == 400
-        assert "payload" in resp.json()["detail"]
-        assert "enum[0]" in resp.json()["detail"]
-        assert "JSON object or array" in resp.json()["detail"]
+        assert "invalid JSON Schema" in resp.json()["detail"]
 
     async def test_create_accepts_text_artifact_output(self, admin_client: AsyncClient):
         body = _singleton_body()
@@ -335,10 +344,14 @@ class TestUnitCrud:
         body["members"][0]["endpoint"] = (
             "https://ragflow.example.com/api/v1/datasets/{dataset_id}/documents/{document_id}"
         )
-        body["members"][0]["parameters"] = [
-            {"name": "dataset_id", "type": "string", "required": True},
-            {"name": "document_id", "type": "string", "required": True},
-        ]
+        body["members"][0]["input_schema"] = {
+            "type": "object",
+            "properties": {
+                "dataset_id": {"type": "string"},
+                "document_id": {"type": "string"},
+            },
+            "required": ["dataset_id", "document_id"],
+        }
         body["members"][0]["artifact_output"] = {"enabled": True, "mode": "binary"}
 
         resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
@@ -354,21 +367,27 @@ class TestUnitCrud:
         body["members"][0]["endpoint"] = (
             "https://api.example.com/datasets/{dataset_id}/documents/{document_id}"
         )
-        body["members"][0]["parameters"] = [
-            {"name": "dataset_id", "type": "string", "required": True},
-        ]
+        body["members"][0]["input_schema"] = {
+            "type": "object",
+            "properties": {"dataset_id": {"type": "string"}},
+            "required": ["dataset_id"],
+        }
         resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
         assert resp.status_code == 400
         assert "document_id" in resp.json()["detail"]
-        assert "declared parameter" in resp.json()["detail"]
+        assert "declared schema property" in resp.json()["detail"]
 
     async def test_create_rejects_url_path_parameter_in_host(self, admin_client: AsyncClient):
         body = _singleton_body()
         body["members"][0]["endpoint"] = "https://{host}/api/v1/documents/{document_id}"
-        body["members"][0]["parameters"] = [
-            {"name": "host", "type": "string", "required": True},
-            {"name": "document_id", "type": "string", "required": True},
-        ]
+        body["members"][0]["input_schema"] = {
+            "type": "object",
+            "properties": {
+                "host": {"type": "string"},
+                "document_id": {"type": "string"},
+            },
+            "required": ["host", "document_id"],
+        }
         resp = await admin_client.post("/api/v1/admin/tools/units", json=body)
         assert resp.status_code == 400
         assert "only allowed in the path" in resp.json()["detail"]
@@ -542,10 +561,14 @@ endpoint: https://api.example.com/weather
         self, admin_client: AsyncClient
     ):
         body = _singleton_body(name="weather_seed")
-        body["members"][0]["parameters"] = [
-            {"name": "city", "type": "string", "required": True},
-            {"name": "payload", "type": "json", "default": {"k": "v"}},
-        ]
+        body["members"][0]["input_schema"] = {
+            "type": "object",
+            "properties": {
+                "city": {"type": "string"},
+                "payload": {"type": "object", "default": {"k": "v"}},
+            },
+            "required": ["city"],
+        }
         body["members"][0]["artifact_output"] = {
             "enabled": True,
             "mode": "text",
@@ -566,7 +589,7 @@ endpoint: https://api.example.com/weather
         assert unit["name"] == "weather_seed"
         assert unit["source"] == "dynamic"
         definition = unit["members"][0]["definition"]
-        assert definition["parameters"][1]["default"] == {"k": "v"}
+        assert definition["input_schema"]["properties"]["payload"]["default"] == {"k": "v"}
         assert definition["artifact_output"]["filename"] == "weather.txt"
 
     async def test_import_single_mcp_markdown_seed(self, admin_client: AsyncClient):

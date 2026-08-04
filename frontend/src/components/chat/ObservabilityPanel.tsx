@@ -12,7 +12,7 @@ import * as api from '@/lib/api';
 import { isCsvMime } from '@/lib/artifactPreview';
 import { parseUtcIso } from '@/lib/time';
 import { formatDuration } from '@/lib/formatDuration';
-import { formatTokens } from '@/lib/formatTokens';
+import { formatCachedTokens, formatTokens } from '@/lib/formatTokens';
 import { triggerBlobDownload } from '@/lib/download';
 import ArtifactPreviewContent from '@/components/artifact/ArtifactPreviewContent';
 import PanelSearchBar from './PanelSearchBar';
@@ -24,6 +24,7 @@ import type {
   AdminConversationEventsResponse,
 } from '@/lib/api';
 import type { ArtifactSummary, ArtifactDetail, VersionDetail } from '@/types';
+import type { NativeToolCall } from '@/types/events';
 import { useUIStore } from '@/stores/uiStore';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 import { connectSSE } from '@/lib/sse';
@@ -56,6 +57,28 @@ function compactText(value: unknown, max = 96): string {
   if (typeof value !== 'string') return '';
   const oneLine = value.replace(/\s+/g, ' ').trim();
   return oneLine.length > max ? `${oneLine.slice(0, max)}...` : oneLine;
+}
+
+function nativeToolCalls(data: Record<string, unknown> | null): NativeToolCall[] {
+  return Array.isArray(data?.tool_calls) ? data.tool_calls as NativeToolCall[] : [];
+}
+
+function formatNativeToolCalls(calls: NativeToolCall[]): string {
+  const diagnostic = calls.map((call) => {
+    let parsedArguments: unknown;
+    try {
+      parsedArguments = JSON.parse(call.function.arguments);
+    } catch {
+      parsedArguments = undefined;
+    }
+    return {
+      id: call.id,
+      type: call.type,
+      function: call.function,
+      ...(parsedArguments !== undefined ? { parsed_arguments: parsedArguments } : {}),
+    };
+  });
+  return JSON.stringify(diagnostic, null, 2);
 }
 
 function isToolFailure(event: AdminEventItem): boolean {
@@ -94,7 +117,13 @@ function eventSummary(event: AdminEventItem): string {
       const tokens = d.token_usage as Record<string, number> | undefined;
       const model = (d.model as string) || '';
       const dur = d.duration_ms as number | undefined;
-      return `${model} | ${tokens?.input_tokens ?? 0}/${tokens?.output_tokens ?? 0} tokens | ${dur ?? 0}ms`;
+      const cached = tokens?.cached_input_tokens;
+      const cacheSummary = cached != null ? ` | ${cached} ↻ cached` : '';
+      const calls = nativeToolCalls(d);
+      const callSummary = calls.length > 0
+        ? ` | ${calls.length} call${calls.length === 1 ? '' : 's'}: ${calls.map((call) => call.function.name).join(', ')}`
+        : '';
+      return `${model} | ${tokens?.input_tokens ?? 0}/${tokens?.output_tokens ?? 0} tokens${cacheSummary} | ${dur ?? 0}ms${callSummary}`;
     }
     case 'tool_start':
       return `${d.tool as string}`;
@@ -104,8 +133,10 @@ function eventSummary(event: AdminEventItem): string {
       const err = compactText(d.error, 90);
       return `${d.tool as string} ${ok ? 'OK' : 'FAIL'} ${dur ?? 0}ms${!ok && err ? ` | ${err}` : ''}`;
     }
-    case 'agent_start':
-      return d.agent as string;
+    case 'agent_start': {
+      const model = d.model as string | undefined;
+      return `${d.agent as string}${model ? ` | ${model}` : ''}`;
+    }
     case 'agent_complete':
       return `${d.agent as string} done`;
     case 'error':
@@ -125,6 +156,13 @@ function eventSummary(event: AdminEventItem): string {
   }
 }
 
+export function formatLlmTokenUsage(tokens: Record<string, number>): string {
+  const cached = tokens.cached_input_tokens != null
+    ? ` | cached: ${tokens.cached_input_tokens} ↻`
+    : '';
+  return `in: ${tokens.input_tokens ?? 0}${cached} | out: ${tokens.output_tokens ?? 0}`;
+}
+
 function formatTime(iso: string): string {
   try {
     const d = parseUtcIso(iso);
@@ -137,6 +175,8 @@ function formatTime(iso: string): string {
 // ── Stats helpers ──
 interface AggregatedStats {
   inputTokens: number;
+  cachedInputTokens: number;
+  cacheReportedCalls: number;
   outputTokens: number;
   llmCalls: number;
   toolCalls: number;
@@ -150,9 +190,11 @@ interface AggregatedStats {
   totalDurationMs: number;
 }
 
-function aggregateStats(messages: AdminMessageGroup[]): AggregatedStats {
+export function aggregateStats(messages: AdminMessageGroup[]): AggregatedStats {
   const stats: AggregatedStats = {
     inputTokens: 0,
+    cachedInputTokens: 0,
+    cacheReportedCalls: 0,
     outputTokens: 0,
     llmCalls: 0,
     toolCalls: 0,
@@ -182,6 +224,10 @@ function aggregateStats(messages: AdminMessageGroup[]): AggregatedStats {
         if (tokens) {
           stats.inputTokens += tokens.input_tokens ?? 0;
           stats.outputTokens += tokens.output_tokens ?? 0;
+          if (tokens.cached_input_tokens != null) {
+            stats.cachedInputTokens += tokens.cached_input_tokens;
+            stats.cacheReportedCalls++;
+          }
         }
       } else if (ev.event_type === 'tool_complete') {
         stats.toolCalls++;
@@ -559,6 +605,12 @@ export default function ObservabilityPanel() {
                 <StatCard label="Messages" value={String(eventsData.messages.length)} />
                 <StatCard label="Events" value={String(eventsData.messages.reduce((n, m) => n + m.events.length, 0))} />
                 <StatCard label="Tokens In" value={formatNumber(stats.inputTokens)} />
+                {stats.cacheReportedCalls > 0 ? (
+                  <StatCard
+                    label="Cached In ↻"
+                    value={`${stats.cacheReportedCalls < stats.llmCalls ? '≥' : ''}${formatNumber(stats.cachedInputTokens)}`}
+                  />
+                ) : null}
                 <StatCard label="Tokens Out" value={formatNumber(stats.outputTokens)} />
                 <StatCard label="LLM Calls" value={String(stats.llmCalls)} />
                 <StatCard
@@ -628,7 +680,7 @@ export default function ObservabilityPanel() {
   );
 }
 
-function serializeEventToText(event: AdminEventItem): string {
+export function serializeEventToText(event: AdminEventItem): string {
   const lines: string[] = [];
   const d = event.data;
   lines.push(`ID: ${event.id}`);
@@ -641,13 +693,17 @@ function serializeEventToText(event: AdminEventItem): string {
     lines.push(`耗时: ${d.duration_ms as number}ms`);
     if (d.token_usage != null) {
       const t = d.token_usage as Record<string, number>;
-      lines.push(`Tokens: in: ${t.input_tokens} | out: ${t.output_tokens}`);
+      lines.push(`Tokens: ${formatLlmTokenUsage(t)}`);
     }
     if (d.reasoning_content != null) lines.push(`\n--- Reasoning ---\n${d.reasoning_content as string}`);
     if (d.content != null) lines.push(`\n--- Response ---\n${d.content as string}`);
+    const calls = nativeToolCalls(d);
+    if (calls.length > 0) lines.push(`\n--- Tool Calls ---\n${formatNativeToolCalls(calls)}`);
   }
   if (d != null && (event.event_type === 'tool_start' || event.event_type === 'tool_complete')) {
+    if (d.call_id != null) lines.push(`Call ID: ${d.call_id as string}`);
     lines.push(`工具: ${(d.tool as string) || '-'}`);
+    if (d.reason != null) lines.push(`调用说明: ${d.reason as string}`);
     if (d.duration_ms != null) lines.push(`耗时: ${d.duration_ms}ms`);
     if (d.success != null) lines.push(`状态: ${d.success ? 'OK' : 'FAIL'}`);
     if (d.params != null) lines.push(`\n--- Params ---\n${JSON.stringify(d.params, null, 2)}`);
@@ -660,6 +716,9 @@ function serializeEventToText(event: AdminEventItem): string {
   }
   if (d != null && event.event_type === 'agent_start' && d.reminder != null) {
     lines.push(`\n--- Reminder ---\n${d.reminder as string}`);
+  }
+  if (d != null && event.event_type === 'agent_start') {
+    if (d.model != null) lines.push(`模型: ${d.model as string}`);
   }
   if (d != null && event.event_type === 'error') {
     lines.push(`\n--- Error ---\n${(d.error as string) || JSON.stringify(d, null, 2)}`);
@@ -924,10 +983,18 @@ function MessageGroupView({
   const visibleEvents = issuesOnly ? group.events.filter(isIssueEvent) : group.events;
   const executionMetrics = group.execution_metrics as {
     total_duration_ms?: number | null;
-    total_token_usage?: { total_tokens?: number | null } | null;
+    cached_input_tokens_partial?: boolean;
+    total_token_usage?: {
+      total_tokens?: number | null;
+      cached_input_tokens?: number | null;
+    } | null;
   } | null;
   const totalDurationMs = executionMetrics?.total_duration_ms;
   const totalTokens = executionMetrics?.total_token_usage?.total_tokens;
+  const cachedInputTokens = executionMetrics?.total_token_usage?.cached_input_tokens;
+  // Old persisted aggregates have no coverage bit, so treat them conservatively.
+  const cachedInputTokensPartial = cachedInputTokens != null
+    && executionMetrics?.cached_input_tokens_partial !== false;
 
   return (
     <div className="mb-3">
@@ -970,7 +1037,18 @@ function MessageGroupView({
         {issues.compactionFails > 0 ? <PillBadge tone="warning">compaction fail</PillBadge> : null}
         <span className="ml-auto flex-shrink-0 text-xs text-text-tertiary dark:text-text-tertiary-dark">
           {totalTokens != null && totalTokens > 0 ? (
-            <span className="font-mono">{formatTokens(totalTokens)} tokens · </span>
+            <span
+              className="font-mono"
+              title={cachedInputTokens != null
+                ? cachedInputTokensPartial
+                  ? '↻ cached input tokens (partial reporting; actual total may be higher)'
+                  : '↻ cached input tokens'
+                : undefined}
+            >
+              {formatTokens(totalTokens)} tokens
+              {cachedInputTokens != null ? ` (${formatCachedTokens(cachedInputTokens, cachedInputTokensPartial)})` : ''}
+              {' · '}
+            </span>
           ) : null}
           {issuesOnly ? `${visibleEvents.length}/${group.events.length} events` : `${group.events.length} events`}
           {totalDurationMs != null && totalDurationMs > 0 ? (
@@ -1071,7 +1149,7 @@ function EventDetail({
           {d.token_usage != null ? (
             <DetailRow
               label="Tokens"
-              value={`in: ${(d.token_usage as Record<string, number>).input_tokens} | out: ${(d.token_usage as Record<string, number>).output_tokens}`}
+              value={formatLlmTokenUsage(d.token_usage as Record<string, number>)}
             />
           ) : null}
           {d.reasoning_content != null ? (
@@ -1080,12 +1158,17 @@ function EventDetail({
           {d.content != null ? (
             <DetailBlock label="Response" content={d.content as string} />
           ) : null}
+          {nativeToolCalls(d).length > 0 ? (
+            <DetailBlock label="Tool Calls" content={formatNativeToolCalls(nativeToolCalls(d))} />
+          ) : null}
         </div>
       ) : null}
 
       {d != null && (event.event_type === 'tool_start' || event.event_type === 'tool_complete') ? (
         <div className="space-y-2">
+          {d.call_id != null ? <DetailRow label="Call ID" value={d.call_id as string} /> : null}
           <DetailRow label="工具" value={(d.tool as string) || '-'} />
+          {d.reason != null ? <DetailBlock label="调用说明" content={d.reason as string} /> : null}
           {d.duration_ms != null ? <DetailRow label="耗时" value={`${d.duration_ms}ms`} /> : null}
           {d.success != null ? <DetailRow label="状态" value={d.success ? 'OK' : 'FAIL'} /> : null}
           {d.params != null ? (
@@ -1105,6 +1188,7 @@ function EventDetail({
 
       {event.event_type === 'agent_start' ? (
         <>
+          {d?.model != null ? <DetailRow label="Model" value={d.model as string} /> : null}
           {d?.system_prompt != null ? (
             <DetailBlock label="System Prompt" content={d.system_prompt as string} />
           ) : null}
@@ -1389,9 +1473,9 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
   );
 }
 
-// ── Prompt Reconstruction (admin forensics) ──
-// 重建某发 agent_start 后 LLM 调用实际发出的完整 prompt：后端走分支正确的 path，
-// 用持久化的 system_prompt + reminder + 重放历史合成，不重新生成动态内容。
+// ── Model Messages Reconstruction (admin forensics) ──
+// 重建某发 agent_start 后 LLM 调用的 OpenAI-compatible messages：messages 走
+// 分支正确的历史重放，model 使用当次持久化值，不重新生成动态内容。
 function PromptReconstructSection({
   convId,
   messageId,
@@ -1420,16 +1504,19 @@ function PromptReconstructSection({
 
   const handleDownload = useCallback(() => {
     if (!result) return;
-    const blob = new Blob([JSON.stringify(result.messages, null, 2)], {
+    const blob = new Blob([JSON.stringify({
+      model: result.model,
+      messages: result.messages,
+    }, null, 2)], {
       type: 'application/json;charset=utf-8',
     });
-    triggerBlobDownload(`prompt-${messageId ?? 'msg'}-${eventId ?? 'evt'}.json`, blob);
+    triggerBlobDownload(`model-messages-${messageId ?? 'msg'}-${eventId ?? 'evt'}.json`, blob);
   }, [result, messageId, eventId]);
 
   return (
     <div className="space-y-2 border-t border-border dark:border-border-dark pt-3">
       <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-        重建此发实际发给模型的完整 prompt（持久化重放，不重新生成；忠实性为版本内）
+        重建此发 OpenAI-compatible messages（不包含 tools schema 或 provider chat template 后的 token 序列）
       </div>
       <div className="flex items-center gap-2 flex-wrap">
         <button
@@ -1437,7 +1524,7 @@ function PromptReconstructSection({
           disabled={!canReconstruct || loading}
           className="px-2 py-1 rounded-md text-xs bg-accent/10 text-accent hover:bg-accent/20 disabled:opacity-50 transition-colors"
         >
-          {loading ? '重建中…' : '重建 Prompt'}
+          {loading ? '重建中…' : '重建 Messages'}
         </button>
         {result ? (
           <button onClick={handleDownload} className="text-xs text-accent">
@@ -1461,6 +1548,7 @@ function PromptReconstructSection({
               </span>
             ) : null}
           </div>
+          <DetailRow label="Model" value={result.model ?? '-'} />
           <DetailBlock label="重建 Messages" content={JSON.stringify(result.messages, null, 2)} />
         </div>
       ) : null}

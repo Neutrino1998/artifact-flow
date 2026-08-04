@@ -16,6 +16,7 @@ export default function MessageList() {
   const streamParentId = useStreamStore((s) => s.streamParentId);
   const pendingUserMessage = useStreamStore((s) => s.pendingUserMessage);
   const pendingUserFiles = useStreamStore((s) => s.pendingUserFiles);
+  const pendingUserSkills = useStreamStore((s) => s.pendingUserSkills);
 
   // Only show streaming UI if the active stream belongs to this conversation
   const isStreamingHere = isStreaming && streamConversationId === currentId;
@@ -48,6 +49,7 @@ export default function MessageList() {
                 siblingIndex={node.siblingIndex}
                 siblingCount={node.siblingCount}
                 attachments={node.uploaded_files}
+                activatedSkills={node.activated_skills}
               />
 
               {/* Assistant response */}
@@ -55,7 +57,7 @@ export default function MessageList() {
                 <AssistantMessage
                   content={node.response}
                   messageId={node.id}
-                  executionMetrics={node.execution_metrics as { total_duration_ms?: number | null; total_token_usage?: { total_tokens?: number | null } | null } | null | undefined}
+                  executionMetrics={node.execution_metrics as { total_duration_ms?: number | null; cached_input_tokens_partial?: boolean; total_token_usage?: { total_tokens?: number | null; cached_input_tokens?: number | null } | null } | null | undefined}
                 />
               )}
             </div>
@@ -75,6 +77,7 @@ export default function MessageList() {
             parentId={streamParentId ?? null}
             pending
             attachments={pendingUserFiles?.map((filename) => ({ filename }))}
+            activatedSkills={pendingUserSkills}
           />
         )}
 

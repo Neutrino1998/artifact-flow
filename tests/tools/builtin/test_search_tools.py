@@ -5,22 +5,31 @@
 """
 
 from core.effective_toolset import DeferredUnit, EffectiveToolset
-from tools.base import ToolParameter, ToolPermission
+from tools.base import ToolPermission
 from tools.builtin.search_tools import search_tools_result
 
 
 class _Tool:
-    """最小工具桩:render_tool_docs 读 name/description/get_parameters/to_xml_example。"""
+    """Minimal tool stub with a native function declaration."""
     def __init__(self, name, description, permission=ToolPermission.AUTO):
         self.name = name
         self.description = description
         self.permission = permission
 
-    def get_parameters(self):
-        return [ToolParameter(name="q", type="string", description="a param")]
-
-    def to_xml_example(self):
-        return f"<tool_call><name>{self.name}</name></tool_call>"
+    def to_native_tool_schema(self):
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "q": {"type": "string", "description": "a param"},
+                    },
+                },
+            },
+        }
 
 
 def _tools(*specs):
@@ -28,7 +37,17 @@ def _tools(*specs):
 
 
 def _eff(*names):
-    return EffectiveToolset({n: ToolPermission.AUTO for n in names})
+    deferred_names = [name for name in names if name != "search_tools"]
+    deferred = DeferredUnit(
+        name="test_unit",
+        description="Test tools",
+        member_full_names=deferred_names,
+    )
+    return EffectiveToolset(
+        {n: ToolPermission.AUTO for n in names},
+        deferred_units={"test_unit": deferred} if deferred_names else {},
+        tool_units={"test_unit": deferred} if deferred_names else {},
+    )
 
 
 def test_select_exact_names():

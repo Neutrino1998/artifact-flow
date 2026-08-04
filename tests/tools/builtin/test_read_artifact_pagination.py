@@ -100,16 +100,16 @@ class TestReadArtifactPagination:
         # shown_lines 省略（None）
         assert 'shown_lines' not in result.data
 
-    async def test_read_offset_zero_clamped(
+    async def test_read_offset_zero_rejected_by_native_schema(
         self, read_tool: ReadArtifactTool, artifact_service: ArtifactService, session_id: str
     ):
-        """offset=0 应 clamp 到 1。"""
+        """The disclosed minimum is authoritative; invalid input fails before execute."""
         content = "line_1\nline_2\n"
         aid = await _create_artifact(artifact_service, session_id, content)
 
         result = await read_tool(id=aid, offset=0)
-        assert result.success
-        assert 'shown_lines="1-2"' in result.data
+        assert result.success is False
+        assert "minimum" in result.error
 
     async def test_read_truncated_by_char_cap(
         self, read_tool: ReadArtifactTool, artifact_service: ArtifactService, session_id: str,

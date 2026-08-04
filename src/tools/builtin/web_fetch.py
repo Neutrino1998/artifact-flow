@@ -12,7 +12,7 @@ import aiohttp
 from typing import Dict, Any, Optional, Tuple
 from urllib.parse import urlparse, unquote
 
-from tools.base import ArtifactSpec, BaseTool, ToolResult, ToolParameter, ToolPermission
+from tools.base import ArtifactSpec, BaseTool, ToolResult, ToolPermission
 from config import config
 from utils.logger import get_logger
 from utils.time import utc_now
@@ -111,15 +111,19 @@ class WebFetchTool(BaseTool):
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
         ]
 
-    def get_parameters(self) -> list[ToolParameter]:
-        return [
-            ToolParameter(
-                name="url",
-                type="string",
-                description="URL to fetch (supports HTML and PDF)",
-                required=True
-            ),
-        ]
+    def get_input_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "URL to fetch (supports HTML and PDF)",
+                }
+            },
+            "required": ["url"],
+            "additionalProperties": False,
+        }
 
     async def execute(self, **params) -> ToolResult:
         """
