@@ -123,7 +123,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
               key={progress.callId ?? progress.index}
               className="flex items-center gap-2 pl-1 text-xs text-text-secondary dark:text-text-secondary-dark"
             >
-              <span className="w-2 h-2 rounded-full bg-accent animate-pulse flex-shrink-0" />
+              <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse flex-shrink-0" />
               <span>{progress.status === 'generating' ? 'Preparing' : 'Waiting to run'}</span>
               <code className="font-mono text-text-primary dark:text-text-primary-dark">
                 {progress.toolName || 'tool call'}
