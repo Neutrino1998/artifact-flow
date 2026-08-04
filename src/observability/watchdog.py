@@ -24,6 +24,7 @@ loop_lag 分布。
 from __future__ import annotations
 
 import asyncio
+import sys
 import threading
 import time
 import traceback
@@ -109,8 +110,8 @@ class LoopLagWatchdog:
     def last_wedge(self) -> Optional[dict]:
         """供 Phase C 心跳读取最近一次 wedge/超阈事件摘要;从未抓到过返回 None。
 
-        栈明细仍只落 loop-lag.jsonl(取证用),这里只带面板变黄要用的轻摘要
-        {ts, lag_ms, wedged}。
+        栈明细仍只落 loop-lag.jsonl(取证用),这里只带实例卡片快速定位要用的
+        轻摘要 {ts, lag_ms, wedged, location?, message_id?}。
         """
         return dict(self._last_wedge) if self._last_wedge else None
 
@@ -175,33 +176,62 @@ class LoopLagWatchdog:
 
     def _record_wedge(self, lag_ms: float, *, wedged: bool) -> None:
         """采集 asyncio.all_tasks() 各 task 栈截断,写一行 loop-lag.jsonl。"""
+        recorded_at = utc_now().isoformat()
         try:
             tasks_info = self._collect_task_stacks()
         except Exception:
             tasks_info = []
 
-        # 只有**硬 wedge**(回调彻底不来)才留 last_wedge 摘要 —— 心跳的「黄色」里
-        # 「watchdog 抓到过 wedge」这一档是永久标记(进程生命周期不清),必须只对真
-        # wedge 生效。软告警(lag≥warn 但回调仍来)是 routine 抖动(GC/冷 import),
-        # 若也写 last_wedge,一次 550ms 抖动就把实例永久钉黄 + 假报「抓到 wedge」到
-        # 重启为止——毁掉面板信号。软告警的可见性由 loop_lag.max_1m_ms(60s 窗口自愈)
-        # 承载;jsonl 两者都记(取证不受影响)。
+        # asyncio Task.get_stack() 在协程正执行同步 Python 代码时常只暴露 task
+        # 的外层 await 边界。hard wedge 额外从 sys._current_frames() 取线程栈,
+        # 才能看到 LiteLLM 等库内部真正占住 event-loop 线程的函数。soft lag 不取,
+        # 避免 routine 抖动记录无谓膨胀。C 扩展持 GIL 时本 Python 线程也跑不到,
+        # 仍由 faulthandler deadman 的 C 线程兜底。
+        threads_info: list[dict] = []
+        if wedged:
+            try:
+                threads_info = self._collect_thread_stacks()
+            except Exception:
+                threads_info = []
+
+        loop_thread = next(
+            (thread for thread in threads_info if thread.get("event_loop")), None
+        )
+        location = None
+        if loop_thread and loop_thread.get("stack"):
+            location = loop_thread["stack"][-1]
+        message_id = next(
+            (
+                str(task.get("name"))[len("exec-") :]
+                for task in tasks_info
+                if str(task.get("name") or "").startswith("exec-msg-")
+            ),
+            None,
+        )
+
+        # 只有**硬 wedge**(回调彻底不来)才留 last_wedge 摘要。摘要在进程生命周期内
+        # 保留供卡片展示历史事件，但判黄只看近期窗口；软告警(lag≥warn 但回调仍来)
+        # 是 routine 抖动(GC/冷 import)，可见性由 loop_lag.max_1m_ms(60s 窗口自愈)
+        # 承载。jsonl 两者都记，取证不受影响。
         if wedged:
             self._last_wedge = {
-                "ts": utc_now().isoformat(),
+                "ts": recorded_at,
                 "lag_ms": round(lag_ms, 1),
                 "wedged": True,
+                "location": location,
+                "message_id": message_id,
             }
 
         try:
             self._sink.write({
-                "ts": utc_now().isoformat(),
+                "ts": recorded_at,
                 # 目录已按实例分,但记录内也带:文件被拷走聚合后目录信息即丢
                 "instance_id": INSTANCE_ID,
                 "lag_ms": round(lag_ms, 1),
                 "wedged": wedged,
                 "warn_ms": self._warn_ms,
                 "tasks": tasks_info,
+                "threads": threads_info,
             })
         except Exception:
             pass
@@ -242,6 +272,36 @@ class LoopLagWatchdog:
                     "name": task.get_name(),
                     "done": task.done(),
                     "stack": stack_lines,
+                })
+            except Exception:
+                continue
+        return out
+
+    def _collect_thread_stacks(self) -> list[dict]:
+        """Capture bounded Python stacks for every live interpreter thread.
+
+        ``BaseEventLoop._thread_id`` is the loop's own runtime identity while it
+        is running.  We use it only as diagnostic metadata; absence simply means
+        no thread is labelled as the event-loop thread.
+        """
+        frames = sys._current_frames()
+        names = {
+            thread.ident: thread.name
+            for thread in threading.enumerate()
+            if thread.ident is not None
+        }
+        loop_thread_id = getattr(self._loop, "_thread_id", None)
+        out: list[dict] = []
+        for thread_id, frame in frames.items():
+            try:
+                extracted = traceback.extract_stack(frame, limit=self._STACK_FRAMES)
+                out.append({
+                    "name": names.get(thread_id, f"thread-{thread_id}"),
+                    "event_loop": thread_id == loop_thread_id,
+                    "stack": [
+                        f"{item.filename}:{item.lineno} in {item.name}"
+                        for item in extracted
+                    ],
                 })
             except Exception:
                 continue

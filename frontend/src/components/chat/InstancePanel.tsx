@@ -7,6 +7,7 @@ import { parseUtcIso } from '@/lib/time';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 import { useUIStore } from '@/stores/uiStore';
 import { PillBadge } from '@/components/ui/PillBadge';
+import InstanceEventDrawer, { type InstanceEventFilter } from './InstanceEventDrawer';
 
 // 实例监控面板轮询周期。心跳 sample 周期是 30s,面板 10s 轮询让状态色(尤其
 // 陈旧→红)在心跳停更后一个 sample 周期内可见,又不过度打后端。
@@ -83,10 +84,10 @@ function reasonText(inst: InstanceHeartbeat, reason: StatusReason, nowMs: number
     return loop.max_1m_ms != null ? `${reason.label} · ${Math.round(loop.max_1m_ms)}ms` : reason.label;
   }
   if (reason.code === 'recent_error') return `${reason.label} · ${ago(inst.last_error_ts, nowMs)}`;
-  if (reason.code === 'wedge_seen') {
+  if (reason.code === 'wedge_recent' || reason.code === 'wedge_seen') {
     const wedge = inst.last_wedge ?? null;
     return wedge?.lag_ms != null
-      ? `${reason.label} · ${ago(wedge.ts, nowMs)} · ${Math.round(wedge.lag_ms)}ms`
+      ? `${reason.label} · ${ago(wedge.ts, nowMs)} · ≥${Math.round(wedge.lag_ms)}ms`
       : reason.label;
   }
   if (reason.code === 'autoheal_recent') {
@@ -98,7 +99,24 @@ function reasonText(inst: InstanceHeartbeat, reason: StatusReason, nowMs: number
   return reason.label;
 }
 
-function InstanceCard({ inst, nowMs, isSelf }: { inst: InstanceHeartbeat; nowMs: number; isSelf: boolean }) {
+function filterForReason(code: string): InstanceEventFilter {
+  if (code === 'recent_error') return 'error';
+  if (code === 'loop_lag_warn' || code === 'wedge_recent' || code === 'wedge_seen') return 'wedge';
+  if (code === 'autoheal_recent') return 'autoheal';
+  return 'all';
+}
+
+function InstanceCard({
+  inst,
+  nowMs,
+  isSelf,
+  onOpenEvents,
+}: {
+  inst: InstanceHeartbeat;
+  nowMs: number;
+  isSelf: boolean;
+  onOpenEvents: (instance: InstanceHeartbeat, filter: InstanceEventFilter) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const meta = STATUS_META[inst.status] ?? STATUS_META.red;
 
@@ -106,6 +124,14 @@ function InstanceCard({ inst, nowMs, isSelf }: { inst: InstanceHeartbeat; nowMs:
   const proc = inst.process ?? {};
   const errCount = inst.error_count ?? 0;
   const reasons = inst.status_reasons ?? [];
+  // wedge_seen is accepted for rolling-upgrade compatibility with an older backend.
+  const wedgeIsCurrentReason = reasons.some(
+    (reason) => reason.code === 'wedge_recent' || reason.code === 'wedge_seen',
+  );
+  const autohealIsCurrentReason = reasons.some((reason) => reason.code === 'autoheal_recent');
+  const showHistoricalWedge = Boolean(inst.last_wedge && !wedgeIsCurrentReason);
+  const showHistoricalAutoheal = Boolean(inst.last_autoheal?.ts && !autohealIsCurrentReason);
+  const hasBadges = reasons.length > 0 || showHistoricalWedge || showHistoricalAutoheal;
 
   return (
     <div className="rounded-xl border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-3.5 shadow-float">
@@ -139,27 +165,75 @@ function InstanceCard({ inst, nowMs, isSelf }: { inst: InstanceHeartbeat; nowMs:
           <Metric label="RSS" value={proc.rss_mb != null ? `${proc.rss_mb}M` : '—'} />
         </div>
         <div className="col-span-3 min-w-0">
-          <Metric
-            label="loop p50/max"
-            value={`${loop.p50_ms ?? '—'}/${loop.max_1m_ms ?? '—'}`}
-          />
+          <button
+            type="button"
+            onClick={() => onOpenEvents(inst, 'wedge')}
+            className="w-full text-left rounded-md hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+            title="查看 loop lag / wedge 历史"
+          >
+            <Metric
+              label="loop p50/max"
+              value={`${loop.p50_ms ?? '—'}/${loop.max_1m_ms ?? '—'}`}
+            />
+          </button>
         </div>
         <div className="col-span-2 min-w-0">
           <Metric label="在途" value={String(inst.in_flight ?? 0)} />
         </div>
         <div className="col-span-2 min-w-0">
-          <Metric label="ERROR" value={String(errCount)} />
+          <button
+            type="button"
+            onClick={() => onOpenEvents(inst, 'error')}
+            className="w-full text-left rounded-md hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+            title="查看 ERROR 日志"
+          >
+            <Metric label="ERROR" value={String(errCount)} />
+          </button>
         </div>
       </div>
 
       {/* Anomaly badges — backend owns the status decision; UI only renders reasons. */}
-      {reasons.length > 0 && (
+      {hasBadges && (
         <div className="mt-3 flex flex-wrap gap-2">
           {reasons.map((reason) => (
-            <PillBadge key={reason.code} tone={reasonTone(reason.code)} size="regular">
-              {reasonText(inst, reason, nowMs)}
-            </PillBadge>
+            <button
+              type="button"
+              key={reason.code}
+              onClick={() => onOpenEvents(inst, filterForReason(reason.code))}
+              className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              title="查看事件详情"
+            >
+              <PillBadge tone={reasonTone(reason.code)} size="regular">
+                {reasonText(inst, reason, nowMs)}
+              </PillBadge>
+            </button>
           ))}
+          {showHistoricalWedge && inst.last_wedge && (
+            <button
+              type="button"
+              onClick={() => onOpenEvents(inst, 'wedge')}
+              className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              title="查看历史 wedge"
+            >
+              <PillBadge tone="neutral" size="regular">
+                历史 wedge · {ago(inst.last_wedge.ts, nowMs)}
+                {inst.last_wedge.lag_ms != null ? ` · ≥${Math.round(inst.last_wedge.lag_ms)}ms` : ''}
+              </PillBadge>
+            </button>
+          )}
+          {showHistoricalAutoheal && inst.last_autoheal && (
+            <button
+              type="button"
+              onClick={() => onOpenEvents(inst, 'autoheal')}
+              className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              title="查看历史 autoheal"
+            >
+              <PillBadge tone="neutral" size="regular">
+                历史 autoheal · {ago(inst.last_autoheal.ts, nowMs)}
+                {inst.last_autoheal.count != null ? ` ×${inst.last_autoheal.count}` : ''}
+              </PillBadge>
+            </button>
+          )}
         </div>
       )}
 
@@ -191,9 +265,15 @@ export default function InstancePanel() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [drawer, setDrawer] = useState<{
+    instance: InstanceHeartbeat;
+    filter: InstanceEventFilter;
+  } | null>(null);
   const claim = useLatestOnly();
   // 刷新按钮已上移到侧栏(与会话监控一致);bump 这个 tick 触发一次 reload。
   const refreshTick = useUIStore((s) => s.instancesRefreshTick);
+  const setActiveMode = useUIStore((s) => s.setActiveMode);
+  const setObservabilitySelectedConvId = useUIStore((s) => s.setObservabilitySelectedConvId);
 
   const load = useCallback(async () => {
     const isLatest = claim();
@@ -219,6 +299,16 @@ export default function InstancePanel() {
 
   const instances = data?.instances ?? [];
   const selfId = data?.instance_id;
+  const drawerInstance = drawer
+    ? instances.find((instance) => instance.instance_id === drawer.instance.instance_id) ?? drawer.instance
+    : null;
+
+  const openConversation = useCallback((conversationId: string) => {
+    // setActiveMode resets per-mode child state by construction, so select only
+    // after entering observability mode.
+    setActiveMode('observability');
+    setObservabilitySelectedConvId(conversationId);
+  }, [setActiveMode, setObservabilitySelectedConvId]);
 
   return (
     <div className="flex-1 flex flex-col bg-chat dark:bg-chat-dark overflow-hidden">
@@ -237,10 +327,24 @@ export default function InstancePanel() {
         )}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {instances.map((inst) => (
-            <InstanceCard key={inst.instance_id} inst={inst} nowMs={nowMs} isSelf={inst.instance_id === selfId} />
+            <InstanceCard
+              key={inst.instance_id}
+              inst={inst}
+              nowMs={nowMs}
+              isSelf={inst.instance_id === selfId}
+              onOpenEvents={(instance, filter) => setDrawer({ instance, filter })}
+            />
           ))}
         </div>
       </div>
+      {drawer && drawerInstance && (
+        <InstanceEventDrawer
+          instance={drawerInstance}
+          initialFilter={drawer.filter}
+          onClose={() => setDrawer(null)}
+          onOpenConversation={openConversation}
+        />
+      )}
     </div>
   );
 }

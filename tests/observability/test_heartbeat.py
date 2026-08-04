@@ -174,7 +174,9 @@ def test_compute_status_matrix():
     assert _status(loop_lag_ms={"max_1m_ms": 900}) == "yellow"
     assert _status(last_error_ts=(now - timedelta(seconds=60)).isoformat()) == "yellow"
     assert _status(last_error_ts=(now - timedelta(seconds=999)).isoformat()) == "green"
-    assert _status(last_wedge={"ts": "x", "lag_ms": 5000}) == "yellow"
+    assert _status(last_wedge={"ts": (now - timedelta(seconds=60)).isoformat(), "lag_ms": 5000}) == "yellow"
+    # wedge 摘要保留到进程重启供历史详情查看,但超过近期窗口后不再把健康实例钉黄。
+    assert _status(last_wedge={"ts": (now - timedelta(seconds=999)).isoformat(), "lag_ms": 5000}) == "green"
     assert _status(last_autoheal={"ts": (now - timedelta(seconds=30)).isoformat()}) == "yellow"
 
 
@@ -187,6 +189,6 @@ def test_compute_status_reasons_match_status_inputs():
     assert _reason_codes(
         loop_lag_ms={"max_1m_ms": 900},
         last_error_ts=(now - timedelta(seconds=60)).isoformat(),
-        last_wedge={"ts": "x", "lag_ms": 5000},
+        last_wedge={"ts": (now - timedelta(seconds=60)).isoformat(), "lag_ms": 5000},
         last_autoheal={"ts": (now - timedelta(seconds=30)).isoformat()},
-    ) == ["loop_lag_warn", "recent_error", "wedge_seen", "autoheal_recent"]
+    ) == ["loop_lag_warn", "recent_error", "wedge_recent", "autoheal_recent"]
