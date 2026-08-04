@@ -526,6 +526,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#激活与-sandbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        激活与 Sandbox
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#frontmatter" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -861,6 +872,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#激活与-sandbox" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        激活与 Sandbox
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#frontmatter" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -952,7 +974,10 @@
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>├── references/style-guide.md
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>└── templates/report.docx
 </code></pre></div>
-<p>ZIP 中必须能唯一定位一份 <code>SKILL.md</code>。Reconcile 会校验路径、成员数量、声明解压大小和正文，然后原样保存 bundle；需要处理附件时，Agent 使用 <code>mount_skill</code> 把它显式挂入 Sandbox。</p>
+<p>ZIP 中必须能唯一定位一份 <code>SKILL.md</code>。Reconcile 会校验路径、成员数量、声明解压大小和正文，然后原样保存 bundle；需要使用 bundle 中的附属文件时，Agent 使用 <code>mount_skill</code> 把它显式挂入 Sandbox。</p>
+<h2 id="激活与-sandbox">激活与 Sandbox</h2>
+<p>用户在输入框选择 Skill，以及模型自行调用 <code>read_skill</code>，是同一个激活语义的两个入口：两者都会向当前 Agent 提供完整 <code>SKILL.md</code> 指导、打开该 Skill 声明的可用能力，并根据是否含附属文件给出相同的条件化提示。</p>
+<p>激活本身不会启动 Sandbox，也不会自动挂载文件。只有 bundle 含附属文件且当前任务确实需要它们时，Agent 才调用 <code>mount_skill</code>，将目录解到 <code>/workspace/.skills/&lt;slug&gt;/</code>；Sandbox 按 turn 销毁，后续 turn 如需再次访问，应重新挂载。只有用户明确选择的 Skill 会作为 chip 显示在该条用户消息上；模型自行 <code>read_skill</code> 不会被记成用户选择。</p>
 <h2 id="frontmatter">Frontmatter</h2>
 <table>
 <thead>

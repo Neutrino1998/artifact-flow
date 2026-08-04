@@ -1034,10 +1034,18 @@
 </code></pre></div>
 <p><code>server.crt</code> 应包含 leaf 与 intermediate 完整链。</p>
 <p>ACME 则确认 <code>.env</code> 中 <code>AF_DOMAIN</code>、<code>AF_ACME_EMAIL</code> 已替换，并且公网 DNS、80/443 已生效。</p>
+<p>如果 Backend 需要连接由企业私有 CA 签发、或使用自签 leaf 的 HTTPS Tool/MCP，
+另外放置出站信任锚（不要放私钥）：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>sudo<span class="w"> </span>install<span class="w"> </span>-d<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span>/opt/artifactflow/control/trust/ca-certificates
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>sudo<span class="w"> </span>install<span class="w"> </span>-m<span class="w"> </span><span class="m">0644</span><span class="w"> </span>company-root.crt<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span>/opt/artifactflow/control/trust/ca-certificates/company-root.crt
+</code></pre></div>
+<p>一文件只放一张 PEM X.509 证书。优先安装企业根 CA，而不是会频繁续期的服务
+leaf。完整规则见<a href="../../configuration/runtime/#出站-https-信任">出站 HTTPS 信任</a>。</p>
 <h2 id="5-doctor-与-plan">5. Doctor 与 Plan</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>sudo<span class="w"> </span>./1.4.0/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>site<span class="w"> </span>validate
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>sudo<span class="w"> </span>./1.4.0/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>doctor
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>sudo<span class="w"> </span>./1.4.0/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>plan<span class="w"> </span>apply<span class="w"> </span>./1.4.0
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>sudo<span class="w"> </span>./1.4.0/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>site<span class="w"> </span>validate
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>sudo<span class="w"> </span>./1.4.0/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>doctor
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>sudo<span class="w"> </span>./1.4.0/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>plan<span class="w"> </span>apply<span class="w"> </span>./1.4.0
 </code></pre></div>
 <ul>
 <li><code>site validate</code> 检查严格 TOML、环境变量和 capability 组合；</li>
@@ -1046,7 +1054,7 @@
 </ul>
 <p>任何一步失败都先修复主机或配置，不要绕过检查直接运行 Compose。</p>
 <h2 id="6-apply">6. Apply</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>sudo<span class="w"> </span>./1.4.0/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>apply<span class="w"> </span>./1.4.0
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sudo<span class="w"> </span>./1.4.0/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>apply<span class="w"> </span>./1.4.0
 </code></pre></div>
 <p>Apply 会：</p>
 <ol>
@@ -1063,21 +1071,21 @@
 <p>健康检查成功前不会写 current state。失败时会尽力恢复上一个成功 Release；首次部署没有上一个 Release，错误会保留维护状态供 Operator 处理。</p>
 <h2 id="7-安装稳定-afctl-入口">7. 安装稳定 afctl 入口</h2>
 <p>只有 Apply 成功后才安装本次 bundle 自带的控制器：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sudo<span class="w"> </span>install<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span>./1.4.0/afctl<span class="w"> </span>/opt/artifactflow/bin/afctl
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>sudo<span class="w"> </span>install<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span>./1.4.0/afctl<span class="w"> </span>/opt/artifactflow/bin/afctl
 </code></pre></div>
 <p>Apply 不会自动覆盖正在使用的 <code>afctl</code>。升级时仍应优先使用新 bundle 自带的控制器执行该 bundle，成功后再更新稳定入口。</p>
 <h2 id="8-创建管理员">8. 创建管理员</h2>
 <p>先列出 Backend 容器：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>docker<span class="w"> </span>ps<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span>--filter<span class="w"> </span><span class="nv">label</span><span class="o">=</span>com.docker.compose.project<span class="o">=</span>artifactflow<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span>--filter<span class="w"> </span><span class="nv">label</span><span class="o">=</span>com.docker.compose.service<span class="o">=</span>backend
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>docker<span class="w"> </span>ps<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span>--filter<span class="w"> </span><span class="nv">label</span><span class="o">=</span>com.docker.compose.project<span class="o">=</span>artifactflow<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span>--filter<span class="w"> </span><span class="nv">label</span><span class="o">=</span>com.docker.compose.service<span class="o">=</span>backend
 </code></pre></div>
 <p>选择任一健康 Backend 的 container ID：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-it<span class="w"> </span>&lt;backend-container-id&gt;<span class="w"> </span>python<span class="w"> </span>scripts/create_admin.py<span class="w"> </span>admin
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-it<span class="w"> </span>&lt;backend-container-id&gt;<span class="w"> </span>python<span class="w"> </span>scripts/create_admin.py<span class="w"> </span>admin
 </code></pre></div>
 <p>交互输入符合密码策略的管理员密码。不要把密码放在 shell history 中。</p>
 <h2 id="9-验收">9. 验收</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>sudo<span class="w"> </span>/opt/artifactflow/bin/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>status
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>sudo<span class="w"> </span>/opt/artifactflow/bin/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>status
 </code></pre></div>
 <p>然后验证：</p>
 <ul>

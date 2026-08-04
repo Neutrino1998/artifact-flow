@@ -554,6 +554,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#出站-https-信任" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        出站 HTTPS 信任
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#站点内容" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -839,6 +850,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#出站-https-信任" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        出站 HTTPS 信任
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#站点内容" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -885,10 +907,12 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>/opt/artifactflow/control/
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── site.toml
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── .env
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── certs/
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── site/
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>├── maintenance/
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>└── autoheal/
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── certs/                       # Caddy 入站证书/私钥
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── trust/
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│   └── ca-certificates/         # Backend 出站 HTTPS 信任锚
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>├── site/
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>├── maintenance/
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>└── autoheal/
 </code></pre></div>
 <h2 id="sitetoml"><code>site.toml</code></h2>
 <p><code>site.toml</code> 只声明部署能力，不存 Secret：</p>
@@ -1045,6 +1069,28 @@
 </tbody>
 </table>
 <p><code>src/config.py</code> 还有算法护栏和内部实现常量。它们即使能被环境变量覆盖，也不等于常规部署契约；没有具体容量或故障证据时不要照单调大。</p>
+<h2 id="出站-https-信任">出站 HTTPS 信任</h2>
+<p>HTTP Tool、MCP 以及其他 Backend HTTPS 客户端默认验证服务端证书。内网服务由
+企业私有 CA 签发，或确实使用自签 leaf 时，把信任证书放在：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>/opt/artifactflow/control/trust/ca-certificates/&lt;name&gt;.crt
+</code></pre></div>
+<p>目录可为空，此时 Backend 只使用镜像默认公共 CA。证书采用 Debian
+<code>update-ca-certificates</code> 接受的 PEM <code>.crt</code> 格式，不要放私钥。优先放稳定的企业根
+CA：服务 leaf 续期后只要仍由该根签发，就不必更新 ArtifactFlow。只有没有上级 CA
+的自签 leaf 才直接放 leaf，它到期或轮换时需要同步替换。</p>
+<p>示例：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>sudo<span class="w"> </span>install<span class="w"> </span>-d<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span>/opt/artifactflow/control/trust/ca-certificates
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sudo<span class="w"> </span>install<span class="w"> </span>-m<span class="w"> </span><span class="m">0644</span><span class="w"> </span>company-root.crt<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>/opt/artifactflow/control/trust/ca-certificates/company-root.crt
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>sudo<span class="w"> </span>/opt/artifactflow/bin/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>site<span class="w"> </span>validate
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>sudo<span class="w"> </span>/opt/artifactflow/bin/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>apply<span class="w"> </span>current
+</code></pre></div>
+<p>Apply 会重建所有 Backend 副本，在 Python 启动前把这些证书合入容器系统 CA
+bundle；TLS 有效期与主机名验证保持开启。不要设置 <code>verify=false</code>，也不要手工修改
+容器中的 <code>certifi/cacert.pem</code>，这些修改会在容器重建时丢失。移除一个信任锚也要
+再次执行 <code>apply current</code>，Ansible executor 会用源目录精确替换远端目录，避免旧 CA
+残留。容器启动只检查 <code>.crt</code> 是否恰好包含一张可解析的 PEM X.509 证书；损坏文件
+会阻断 Apply，但不会在这里检查证书有效期、SAN、证书链或远端服务可达性。</p>
 <h2 id="站点内容">站点内容</h2>
 <p><code>control/site/</code> 可保存：</p>
 <ul>
@@ -1058,12 +1104,12 @@
 后的通知配置从空状态开始，旧通知自然失效。遗留文件仅作为历史备份保留，后续
 新通知统一通过通知管理页发布并使用新的 ID。</p>
 <h2 id="修改后的应用方式">修改后的应用方式</h2>
-<p>修改 <code>.env</code>、证书或 <code>control/site/</code> 后先校验：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sudo<span class="w"> </span>/opt/artifactflow/bin/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>site<span class="w"> </span>validate
+<p>修改 <code>.env</code>、入站证书、出站信任锚或 <code>control/site/</code> 后先校验：</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>sudo<span class="w"> </span>/opt/artifactflow/bin/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>site<span class="w"> </span>validate
 </code></pre></div>
 <p>站点内容由文件直接读取；<code>.env</code> 和证书需要重新 reconcile 当前 Release：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>sudo<span class="w"> </span>/opt/artifactflow/bin/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>plan<span class="w"> </span>apply<span class="w"> </span>current
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sudo<span class="w"> </span>/opt/artifactflow/bin/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>apply<span class="w"> </span>current
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>sudo<span class="w"> </span>/opt/artifactflow/bin/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>plan<span class="w"> </span>apply<span class="w"> </span>current
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>sudo<span class="w"> </span>/opt/artifactflow/bin/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>apply<span class="w"> </span>current
 </code></pre></div>
 <p>不要用 <code>docker restart</code> 代替：容器重启不会重新读取已经展开的环境配置，也不会走 Release 校验和 readiness gate。</p>
 

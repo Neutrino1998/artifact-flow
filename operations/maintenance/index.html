@@ -1016,7 +1016,7 @@
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
 <a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>sudo<span class="w"> </span>/opt/artifactflow/bin/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>maintenance<span class="w"> </span>off
 </code></pre></div>
-<p>维护状态会让业务、API 和 SSE 返回 503 页面，但健康端点继续反映真实状态。Apply 会在自身窗口管理维护状态；不要在另一终端同时手工切换。</p>
+<p>维护状态会让业务、API 和 SSE 返回 503 页面，但健康端点继续反映真实状态。Apply 会在自身窗口管理维护状态；不要在另一终端同时手工切换。需要在新 release 健康后继续停机验收时，使用 <code>afctl apply TARGET --keep-maintenance</code>；它会保留维护页，验收完成后由 operator 显式执行 <code>afctl maintenance off</code>。</p>
 <h2 id="通知与现场内容">通知与现场内容</h2>
 <p>管理员可在 UI 编辑通知，也可修改：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>/opt/artifactflow/control/site/welcome_tips.json

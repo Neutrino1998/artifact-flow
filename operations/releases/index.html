@@ -988,6 +988,10 @@
 <p>已加载对应 content-addressed infra 镜像的站点，日常应用更新可使用：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>./scripts/release.sh<span class="w"> </span><span class="m">1</span>.4.1<span class="w"> </span>--app-only<span class="w"> </span>--platform<span class="w"> </span>linux/amd64
 </code></pre></div>
+<p>app-only bundle 不声明也不读取 Caddy、PostgreSQL 或 Redis 镜像；目标机物化
+Release 时从当前已成功 Release 继承这三项精确引用。没有 current Release 的新
+站点会拒绝 app-only，首包必须使用 <code>--with-infra</code>。若要升级任一基础设施镜像，
+同样必须改用 <code>--with-infra</code>，使新镜像随 Release 一起进入离线包。</p>
 <p>输出包括：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>dist/releases/1.4.1/
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>├── afctl
@@ -1025,7 +1029,7 @@
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>└── state.json
 </code></pre></div>
 <p><code>state.json</code> 是 current/previous 的唯一权威。没有需要同步的 <code>current</code> symlink 或第二状态文件。Release 目录是完整 effective snapshot，不应作为可写 bind mount，也不应手工修改。</p>
-<p>现场 <code>.env</code>、证书、欢迎/品牌静态内容和维护状态始终在 <code>control/</code>，不会随 Release 切换；在线通知保存在数据库中。</p>
+<p>现场 <code>.env</code>、入站证书、出站 CA 信任锚、欢迎/品牌静态内容和维护状态始终在 <code>control/</code>，不会随 Release 切换；在线通知保存在数据库中。</p>
 <h2 id="回滚">回滚</h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>sudo<span class="w"> </span>/opt/artifactflow/bin/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>plan<span class="w"> </span>rollback
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>sudo<span class="w"> </span>/opt/artifactflow/bin/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>rollback
@@ -1051,7 +1055,9 @@
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>sudo<span class="w"> </span>/opt/artifactflow/bin/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>plan<span class="w"> </span>apply<span class="w"> </span>current
 <a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>sudo<span class="w"> </span>/opt/artifactflow/bin/afctl<span class="w"> </span>--root<span class="w"> </span>/opt/artifactflow<span class="w"> </span>apply<span class="w"> </span>current
 </code></pre></div>
-<p>静态证书轮换同样是在 <code>control/certs/</code> 原子替换证书和私钥后执行 <code>apply current</code>。</p>
+<p>静态证书轮换同样是在 <code>control/certs/</code> 原子替换证书和私钥后执行 <code>apply current</code>。
+内网 HTTPS Tool/MCP 的信任锚放在 <code>control/trust/ca-certificates/*.crt</code>；增加、
+替换或删除后同样执行 <code>apply current</code>，使所有 Backend 副本重建系统 CA bundle。</p>
 <p><code>POSTGRES_*</code> 只参与空 volume 的首次初始化。已有数据库改密码时，必须先在 PostgreSQL 内修改账号密码，再同步 <code>.env</code> 中的 <code>POSTGRES_PASSWORD</code> 和应用 URL。</p>
 <h2 id="从-fleet-v1-迁移">从 Fleet v1 迁移</h2>
 <p>旧安装若还有 <code>/opt/artifactflow/deploy/.env</code>：</p>

@@ -941,14 +941,17 @@
 <a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>  Authorization: Bearer {{TOOL_SECRET_STOCK_API_KEY}}
 <a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>timeout: 60
 <a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>response_extract: data.price
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>parameters:
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">  </span><span class="k">-</span><span class="w"> </span>name: symbol
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>    type: string
-<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    description: Stock ticker such as AAPL
-<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="gu">    required: true</span>
-<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="gu">---</span>
-<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>
-<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>Use this tool for current stock prices.
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>input_schema:
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>  type: object
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>  properties:
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    symbol:
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>      type: string
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>      description: Stock ticker such as AAPL
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>  required: [symbol]
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="gu">  additionalProperties: false</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="gu">---</span>
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>Use this tool for current stock prices.
 </code></pre></div>
 <p>主要字段：</p>
 <table>
@@ -978,7 +981,7 @@
 <tr>
 <td><code>defer</code></td>
 <td><code>false</code></td>
-<td>为 <code>true</code> 时仅注入索引，模型通过 <code>search_tools</code> 按需展开</td>
+<td>为 <code>true</code> 且 Agent 配置了 <code>search_tools</code> 时仅注入索引；否则回退为完整 schema</td>
 </tr>
 <tr>
 <td><code>permission</code></td>
@@ -1011,9 +1014,9 @@
 <td>可选 JMESPath，如 <code>data.items[*].id</code></td>
 </tr>
 <tr>
-<td><code>parameters</code></td>
-<td><code>[]</code></td>
-<td>模型可填写的参数</td>
+<td><code>input_schema</code></td>
+<td>空 object schema</td>
+<td>业务参数的 JSON Schema Draft 2020-12 定义</td>
 </tr>
 <tr>
 <td><code>artifact_output</code></td>
@@ -1022,7 +1025,8 @@
 </tr>
 </tbody>
 </table>
-<p>参数类型支持 <code>string</code>、<code>integer</code>、<code>number</code>、<code>boolean</code>、<code>json</code>。每个参数可声明 <code>description</code>、<code>required</code>、<code>default</code> 和 <code>enum</code>。</p>
+<p><code>input_schema</code> 的根节点必须是 <code>type: object</code>，支持完整 JSON Schema Draft 2020-12，包括嵌套 object/array、<code>items</code>、<code>oneOf</code>、<code>enum</code>、<code>minProperties</code>、<code>propertyNames</code>、数值和字符串约束等。ArtifactFlow 将其无损导出为 native function schema，并在运行时用同一份业务语义验证参数；不会注入额外控制属性。</p>
+<p>POST / PUT / PATCH 将参数以原生 JSON body 发送，嵌套对象和数组不会再转成字符串。GET 的标量按普通 query value 编码，对象、数组和 null 使用确定性的紧凑 JSON 字符串。URL path 模板只能引用 schema 中必填或带默认值的非 null 标量属性。</p>
 <h2 id="secret">Secret</h2>
 <p>HTTP Tool 和 MCP 只能引用 <code>TOOL_SECRET_</code> 前缀的占位符：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">headers</span><span class="p">:</span>

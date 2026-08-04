@@ -946,7 +946,7 @@
 <td><code>model</code></td>
 <td>是</td>
 <td>—</td>
-<td><code>models.yaml</code> 中的 alias，或带 provider 前缀的 LiteLLM ID</td>
+<td><code>models.yaml</code> 中的 alias；不允许绕过 alias 直接填写 LiteLLM ID，因为运行时需要 alias 上必填的 <code>context_window</code></td>
 </tr>
 <tr>
 <td><code>tools</code></td>
@@ -988,8 +988,14 @@
 <li>Artifact：<code>create_artifact</code>、<code>update_artifact</code>、<code>rewrite_artifact</code>、<code>read_artifact</code>、<code>grep_artifact</code></li>
 <li>协作与网络：<code>call_subagent</code>、<code>web_search</code>、<code>web_fetch</code></li>
 <li>Sandbox：<code>bash</code>、<code>mount</code>、<code>persist</code></li>
+<li>Skill：<code>read_skill</code>、<code>mount_skill</code></li>
+<li>渐进式工具发现：<code>search_tools</code></li>
 </ul>
-<p><code>search_tools</code>、<code>read_skill</code>、<code>mount_skill</code> 会根据 deferred Tool 和 Skill 状态按规则注入，通常不需要手工配置。</p>
+<p>Builtin 不会根据其它工具或运行时状态自动加入 Agent。配置决定 Agent 的工具宇宙，
+本轮是否成功创建工具对象只会进一步收窄它：例如没有可见 Skill 时，即使配置了
+<code>read_skill</code>，本轮也不会暴露。<code>mount_skill</code> 通常与 <code>bash</code> 一起配置；需要按需展开
+deferred Tool 的 Agent 应显式配置 <code>search_tools</code>。未配置 <code>search_tools</code> 时，deferred
+unit 会回退为完整 schema，不影响调用能力。</p>
 <h2 id="description-与-prompt">Description 与 Prompt</h2>
 <p><code>description</code> 应告诉 Lead“什么时候值得委派”，不要复制完整 role prompt。建议写清：</p>
 <ul>

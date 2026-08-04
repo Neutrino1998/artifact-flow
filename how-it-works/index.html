@@ -1036,7 +1036,7 @@
 <p>生产环境修改 Release 内文件没有意义：Release 是不可变快照。应用配置改动应使用 <a href="../operations/releases/#配置热修"><code>afctl config</code></a>，现场 Secret 和证书则修改 <code>control/</code> 后执行 <code>apply current</code>。</p>
 <h2 id="artifact-与历史">Artifact 与历史</h2>
 <p>Artifact 是任务的持久化工作成果，不等同于聊天回复。Agent 在一轮内可以多次创建或编辑 Artifact；执行结束时统一写回数据库，因此同一轮的多次编辑可能只产生一个持久版本。</p>
-<p>聊天历史由执行事件重建，而不是把消息表的展示文本直接重新喂给模型。这使工具调用、Subagent 结果、权限决定和压缩摘要都能进入后续上下文。上下文过长时，系统为对应 Agent 生成压缩摘要，并从该摘要继续。</p>
+<p>聊天历史由执行事件重建，而不是把消息表的展示文本直接重新喂给模型。这使工具调用、Subagent 结果、权限决定和压缩摘要都能进入后续上下文。每个模型 alias 显式声明 <code>context_window</code>，对应 Agent 在 <code>context_window - 服务级 reserve</code> 处自动生成压缩摘要并从摘要继续；模型若提前明确拒绝为 context overflow，引擎会压缩并只重试一次。</p>
 <h2 id="实时权限与取消">实时、权限与取消</h2>
 <ul>
 <li>模型片段、工具状态和 Artifact 变更通过 SSE 实时发送。</li>
@@ -1059,7 +1059,7 @@
 <li><code>release.sh</code> 在构建机生成应用、配置、部署文件、Sandbox 镜像和严格 manifest；</li>
 <li><code>afctl</code> 在目标站点校验、物化并应用 Release；</li>
 <li><code>.artifactflow/state.json</code> 是当前版和上一版的唯一状态；</li>
-<li><code>control/</code> 保存不会随升级覆盖的现场配置；</li>
+<li><code>control/</code> 保存不会随升级覆盖的现场配置，包括入站 TLS 材料与 Backend 出站 HTTPS 信任锚；</li>
 <li>单机是当前正式支持路径，Ansible 多机 executor 仍是实验性能力。</li>
 </ul>
 <p>接下来可以阅读<a href="../configuration/">配置总览</a>或从<a href="../operations/host-preparation/">主机准备</a>开始部署。</p>
