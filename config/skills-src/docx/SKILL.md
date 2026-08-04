@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 compatibility: 需要沙盒(bash/mount/persist)。镜像已烤 LibreOffice、Pandoc、python-docx、lxml、Pillow、RapidFuzz。
 metadata:
-  version: "2.5.4"
+  version: "2.5.5"
 ---
 
 # Word 文档
@@ -196,6 +196,7 @@ python "$SKILL/scripts/reply_comment.py" 输入.docx /workspace/回复稿.docx \
 
 `accept_changes.py` 输出中的 `skipped` 非空时必须如实报告。批注锚点须在单段落内。
 回复前必须先 `--list`，根据 `comments.json` 中的 `id`、`text` 和 `anchor` 选择父批注；
+`id` 是须原样传给 `--reply-to` 的字符串，不要转成数字；
 每次只回复一个明确的主批注 ID，多条回复以上一次输出为下一次输入，禁止默认选第一条或按文字
 模糊匹配。回复脚本只支持正文主批注的 Office 2013 `commentsExtended` 一级回复结构；目标不存在、
 目标本身是回复、线程关系损坏或批注位于页眉页脚时受控失败，不手写 OOXML 绕过。

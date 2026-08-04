@@ -142,6 +142,10 @@ def _paragraph_ids(
             raise CommentReplyError(
                 f"批注 ID {comment_id} 的 w14:paraId 不是 8 位十六进制值"
             )
+        if not 0 < int(normalized, 16) < 0x80000000:
+            raise CommentReplyError(
+                f"批注 ID {comment_id} 的 w14:paraId 不在合法范围内"
+            )
         if normalized in para_to_comment:
             raise CommentReplyError(
                 f"批注 ID {comment_id} 与 {para_to_comment[normalized]} 共用 paraId"
@@ -287,8 +291,8 @@ def _ensure_root_namespaces(root: etree._Element) -> etree._Element:
 
 def _new_para_id(used: set[str]) -> str:
     while True:
-        candidate = f"{secrets.randbits(32):08X}"
-        if candidate != "00000000" and candidate not in used:
+        candidate = f"{secrets.randbelow(0x7FFFFFFF) + 1:08X}"
+        if candidate not in used:
             used.add(candidate)
             return candidate
 
@@ -326,6 +330,19 @@ def _anchor_text_by_comment(document_root: etree._Element) -> dict[str, str]:
             if comment_id in active:
                 active.remove(comment_id)
     return {comment_id: "".join(parts) for comment_id, parts in chunks.items()}
+
+
+def _supported_body_comment_ids(document_root: etree._Element) -> set[str]:
+    """Return comments referenced from the supported main-document body."""
+    supported: set[str] = set()
+    for reference in document_root.iter(W + "commentReference"):
+        comment_id = reference.get(W + "id")
+        if comment_id is None:
+            continue
+        ancestors = {ancestor.tag for ancestor in reference.iterancestors()}
+        if W + "body" in ancestors and W + "txbxContent" not in ancestors:
+            supported.add(comment_id)
+    return supported
 
 
 def _thread_info(
@@ -378,29 +395,26 @@ def list_comments(path: Path) -> list[dict[str, object]]:
     )
     parents, resolved = _thread_info(comments, extended_root)
     anchors = _anchor_text_by_comment(document_root)
+    supported_ids = _supported_body_comment_ids(document_root)
     result = []
     for comment_id, comment in comments.items():
         paragraph = _last_paragraph(comment)
         parent_id = parents[comment_id]
         result.append(
             {
-                "id": (
-                    int(comment_id)
-                    if comment_id.lstrip("-").isdigit()
-                    else comment_id
-                ),
-                "parent_id": (
-                    int(parent_id)
-                    if parent_id is not None and parent_id.lstrip("-").isdigit()
-                    else parent_id
-                ),
+                "id": comment_id,
+                "parent_id": parent_id,
                 "author": comment.get(W + "author", ""),
                 "initials": comment.get(W + "initials", ""),
                 "date": comment.get(W + "date"),
                 "text": _comment_text(comment),
                 "anchor": anchors.get(comment_id, ""),
                 "resolved": resolved[comment_id],
-                "replyable": parent_id is None and paragraph is not None,
+                "replyable": (
+                    parent_id is None
+                    and paragraph is not None
+                    and comment_id in supported_ids
+                ),
             }
         )
     return result
@@ -447,15 +461,18 @@ def reply_to_comment(
     _, used_para_ids = _paragraph_ids(comments)
     extended = _extended_by_para_id(extended_root)
     parent_para_id = parent_paragraph.get(W14 + "paraId")
+    parent_item = None
     if parent_para_id is not None:
         parent_para_id = parent_para_id.upper()
         parent_item = extended.get(parent_para_id)
         if parent_item is not None and parent_item.get(W15 + "paraIdParent") is not None:
             raise CommentReplyError("仅支持回复主批注，不能回复已有回复")
-    else:
+    document_root = _parse_xml(members[DOCUMENT_PART], DOCUMENT_PART)
+    if reply_to not in _supported_body_comment_ids(document_root):
+        raise CommentReplyError(f"父批注 ID {reply_to} 不在受支持的正文中")
+    if parent_para_id is None:
         parent_para_id = _new_para_id(used_para_ids)
         parent_paragraph.set(W14 + "paraId", parent_para_id)
-        parent_item = None
     if parent_item is None:
         parent_item = etree.SubElement(extended_root, W15 + "commentEx")
         parent_item.set(W15 + "paraId", parent_para_id)
@@ -490,10 +507,8 @@ def reply_to_comment(
     members[CONTENT_TYPES_PART] = _serialize(content_types_root)
     _write_package(destination, members)
     return {
-        "parent_comment_id": (
-            int(reply_to) if reply_to.lstrip("-").isdigit() else reply_to
-        ),
-        "reply_comment_id": int(reply_comment_id),
+        "parent_comment_id": reply_to,
+        "reply_comment_id": reply_comment_id,
     }
 
 
@@ -531,6 +546,8 @@ def main() -> None:
         if args.list_out is not None:
             if args.out is not None or args.text is not None or args.text_file is not None:
                 parser.error("列出模式不能提供输出 DOCX 或回复文本")
+            if args.src.resolve() == args.list_out.resolve():
+                raise CommentReplyError("列表输出文件必须与输入文件不同")
             comments = list_comments(args.src)
             args.list_out.write_text(
                 json.dumps(comments, ensure_ascii=False, indent=2) + "\n",
