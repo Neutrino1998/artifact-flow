@@ -7,13 +7,16 @@ import type {
   InstanceDiagnosticEvent,
   InstanceDiagnosticEventType,
   InstanceEventMetricSnapshot,
+} from '@/types';
+import type {
+  InstanceEventKind,
   InstanceHeartbeat,
 } from '@/lib/api';
 import { parseUtcIso } from '@/lib/time';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { PillBadge } from '@/components/ui/PillBadge';
 
-export type InstanceEventFilter = 'all' | 'error' | 'wedge' | 'autoheal';
+export type InstanceEventFilter = InstanceEventKind;
 
 interface Props {
   instance: InstanceHeartbeat;
@@ -25,28 +28,25 @@ interface Props {
 const FILTERS: { id: InstanceEventFilter; label: string }[] = [
   { id: 'all', label: '全部' },
   { id: 'error', label: 'ERROR' },
-  { id: 'wedge', label: 'Loop / Wedge' },
-  { id: 'autoheal', label: 'Autoheal' },
+  { id: 'wedge', label: 'Wedge' },
+  { id: 'loop_lag', label: 'Loop lag' },
 ];
 
 const TYPE_LABEL: Record<InstanceDiagnosticEventType, string> = {
   error: 'ERROR',
   wedge: 'Watchdog wedge',
   loop_lag: 'Loop lag',
-  autoheal: 'Autoheal',
 };
 
 const SOURCE_LABEL: Record<InstanceDiagnosticEvent['source'], string> = {
   runtime_log: '错误日志',
   loop_lag: 'Watchdog',
-  autoheal_marker: '宿主标记',
 };
 
 const SOURCE_KEY_LABEL: Record<string, string> = {
   error_log: '错误日志',
   loop_lag: 'Watchdog 日志',
   metrics: '运行指标',
-  autoheal: 'Autoheal 标记',
 };
 
 const STATUS_LABEL: Record<InstanceHeartbeat['status'], string> = {
@@ -63,7 +63,6 @@ function formatTime(ts: string | null | undefined): string {
 
 function eventMatches(event: InstanceDiagnosticEvent, filter: InstanceEventFilter): boolean {
   if (filter === 'all') return true;
-  if (filter === 'wedge') return event.type === 'wedge' || event.type === 'loop_lag';
   return event.type === filter;
 }
 
@@ -242,7 +241,7 @@ export default function InstanceEventDrawer({
   useEffect(() => {
     let active = true;
     setLoading(true);
-    api.getAdminInstanceEvents(instance.instance_id, 50).then((response) => {
+    api.getAdminInstanceEvents(instance.instance_id, filter, 50).then((response) => {
       if (!active) return;
       setData(response);
       setError(null);
@@ -253,7 +252,7 @@ export default function InstanceEventDrawer({
       if (active) setLoading(false);
     });
     return () => { active = false; };
-  }, [instance.instance_id, reloadToken]);
+  }, [filter, instance.instance_id, reloadToken]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -269,9 +268,8 @@ export default function InstanceEventDrawer({
   );
   const relevantSourceKeys = useMemo(() => {
     if (filter === 'error') return new Set(['error_log']);
-    if (filter === 'wedge') return new Set(['loop_lag']);
-    if (filter === 'autoheal') return new Set(['autoheal']);
-    return new Set(['error_log', 'loop_lag', 'autoheal']);
+    if (filter === 'wedge' || filter === 'loop_lag') return new Set(['loop_lag']);
+    return new Set(['error_log', 'loop_lag']);
   }, [filter]);
   const unavailable = useMemo(
     () => Object.entries(data?.sources ?? {})
@@ -285,7 +283,7 @@ export default function InstanceEventDrawer({
   );
   const truncationSourceKeys = useMemo(() => {
     const keys = new Set(relevantSourceKeys);
-    if (filter === 'all' || filter === 'wedge') keys.add('metrics');
+    if (filter === 'all' || filter === 'wedge' || filter === 'loop_lag') keys.add('metrics');
     return keys;
   }, [filter, relevantSourceKeys]);
   const truncated = useMemo(

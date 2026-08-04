@@ -21,6 +21,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from config import config
+from api.schemas.admin import AdminInstanceEventsResponse
 from api.dependencies import (
     get_runtime_store,
     get_execution_runner,
@@ -28,7 +29,7 @@ from api.dependencies import (
     require_admin,
 )
 from observability.heartbeat import HeartbeatWriter
-from observability.instance_events import read_instance_events
+from observability.instance_events import InstanceEventKind, read_instance_events
 from utils.instance import INSTANCE_ID
 from utils.logger import get_logger
 from utils.time import utc_now
@@ -254,9 +255,13 @@ async def list_instances(
     }
 
 
-@router.get("/instances/{instance_id}/events")
+@router.get(
+    "/instances/{instance_id}/events",
+    response_model=AdminInstanceEventsResponse,
+)
 async def get_instance_events(
     instance_id: str,
+    kind: InstanceEventKind = Query(default="all"),
     limit: int = Query(default=30, ge=1, le=config.OBS_ADMIN_EVENT_LIMIT_MAX),
     _admin: TokenPayload = Depends(require_admin),
 ):
@@ -267,10 +272,11 @@ async def get_instance_events(
     files.  File IO and parsing run off the event loop.  On a multi-host fleet,
     ``sources.*.available=false`` explicitly reports that this responder cannot
     see the selected host's local volume instead of pretending there were no
-    incidents.
+    incidents.  ``kind`` is applied before ``limit`` so an exact historical
+    wedge lookup cannot be displaced by newer ERROR or soft-lag records.
     """
     try:
-        return await asyncio.to_thread(read_instance_events, instance_id, limit)
+        return await asyncio.to_thread(read_instance_events, instance_id, limit, kind)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid instance ID")
     except Exception as exc:

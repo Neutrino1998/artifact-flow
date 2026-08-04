@@ -68,6 +68,10 @@ class LoopLagWatchdog:
         self._sink = sink
         self._warn_ms = warn_ms
         self._interval = interval_sec
+        # Watchdog is constructed from FastAPI lifespan on the running loop
+        # thread.  Freeze that public thread identity here instead of depending
+        # on CPython asyncio's private ``loop._thread_id`` (absent on uvloop).
+        self._event_loop_thread_id = threading.get_ident()
 
         # 滚动窗口(只在 watchdog 线程内读写,无锁)
         self._samples: deque[float] = deque(maxlen=self._MAX_WINDOW_SAMPLES)
@@ -280,9 +284,8 @@ class LoopLagWatchdog:
     def _collect_thread_stacks(self) -> list[dict]:
         """Capture bounded Python stacks for every live interpreter thread.
 
-        ``BaseEventLoop._thread_id`` is the loop's own runtime identity while it
-        is running.  We use it only as diagnostic metadata; absence simply means
-        no thread is labelled as the event-loop thread.
+        The loop thread identity is frozen when the watchdog is constructed on
+        FastAPI's running event loop, so this works across asyncio and uvloop.
         """
         frames = sys._current_frames()
         names = {
@@ -290,14 +293,13 @@ class LoopLagWatchdog:
             for thread in threading.enumerate()
             if thread.ident is not None
         }
-        loop_thread_id = getattr(self._loop, "_thread_id", None)
         out: list[dict] = []
         for thread_id, frame in frames.items():
             try:
                 extracted = traceback.extract_stack(frame, limit=self._STACK_FRAMES)
                 out.append({
                     "name": names.get(thread_id, f"thread-{thread_id}"),
-                    "event_loop": thread_id == loop_thread_id,
+                    "event_loop": thread_id == self._event_loop_thread_id,
                     "stack": [
                         f"{item.filename}:{item.lineno} in {item.name}"
                         for item in extracted

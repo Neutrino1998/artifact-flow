@@ -135,12 +135,15 @@ def test_collect_task_stacks_format(tmp_path):
     asyncio.run(runner())
 
 
-def test_collect_thread_stacks_marks_event_loop_thread(tmp_path):
-    """hard wedge 取证要能标出 event-loop 线程并给出有界 Python 栈。"""
+def test_collect_thread_stacks_marks_event_loop_thread_without_private_loop_id(tmp_path):
+    """uvloop 无 ``_thread_id`` 时，hard wedge 仍应标出 event-loop 线程。"""
+
+    class LoopWithoutThreadId:
+        pass
 
     async def runner():
         sink = JsonlSink(tmp_path / "loop-lag.jsonl", max_mb=1, backups=1, mirror_stdout=False)
-        loop = asyncio.get_running_loop()
+        loop = LoopWithoutThreadId()
         wd = LoopLagWatchdog(loop, sink, warn_ms=500, interval_sec=1.0)
         try:
             threads = wd._collect_thread_stacks()

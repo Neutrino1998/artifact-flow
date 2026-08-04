@@ -2012,6 +2012,82 @@
         ]
       }
     },
+    "/api/v1/admin/instances/{instance_id}/events": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Get Instance Events",
+        "description": "Return a bounded, admin-only diagnostic timeline for one instance.\n\nERROR entries come from the same dedicated ERROR log that feeds the card's\ncounter; loop events and nearby metrics come from their existing JSONL\nfiles.  File IO and parsing run off the event loop.  On a multi-host fleet,\n``sources.*.available=false`` explicitly reports that this responder cannot\nsee the selected host's local volume instead of pretending there were no\nincidents.  ``kind`` is applied before ``limit`` so an exact historical\nwedge lookup cannot be displaced by newer ERROR or soft-lag records.",
+        "operationId": "get_instance_events_api_v1_admin_instances__instance_id__events_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "instance_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance Id"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "all",
+                "error",
+                "wedge",
+                "loop_lag"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 30,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminInstanceEventsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/tools/units": {
       "get": {
         "tags": [
@@ -4160,6 +4236,36 @@
         "title": "AdminEventItem",
         "description": "Single event in admin event timeline"
       },
+      "AdminInstanceEventsResponse": {
+        "properties": {
+          "instance_id": {
+            "type": "string",
+            "title": "Instance Id"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/InstanceDiagnosticEvent"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "sources": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/InstanceEventSourceStatus"
+            },
+            "type": "object",
+            "title": "Sources"
+          }
+        },
+        "type": "object",
+        "required": [
+          "instance_id",
+          "events",
+          "sources"
+        ],
+        "title": "AdminInstanceEventsResponse",
+        "description": "GET /api/v1/admin/instances/{instance_id}/events response."
+      },
       "AdminMessageGroup": {
         "properties": {
           "message_id": {
@@ -6032,6 +6138,511 @@
         ],
         "title": "InjectResponse",
         "description": "POST /api/v1/chat/{conv_id}/inject response"
+      },
+      "InstanceDbPoolMetrics": {
+        "properties": {
+          "in_use": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "In Use"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "overflow": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overflow"
+          }
+        },
+        "type": "object",
+        "title": "InstanceDbPoolMetrics",
+        "required": [
+          "in_use",
+          "size",
+          "overflow"
+        ]
+      },
+      "InstanceDiagnosticEvent": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "error",
+              "wedge",
+              "loop_lag"
+            ],
+            "title": "Type"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "runtime_log",
+              "loop_lag"
+            ],
+            "title": "Source"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "warning",
+              "error"
+            ],
+            "title": "Severity"
+          },
+          "ts": {
+            "type": "string",
+            "title": "Ts"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "lag_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lag Ms"
+          },
+          "lower_bound": {
+            "type": "boolean",
+            "title": "Lower Bound",
+            "default": false
+          },
+          "warn_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warn Ms"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Id"
+          },
+          "instance_id": {
+            "type": "string",
+            "title": "Instance Id"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/InstanceEventStackOwner"
+            },
+            "type": "array",
+            "title": "Tasks"
+          },
+          "threads": {
+            "items": {
+              "$ref": "#/components/schemas/InstanceEventStackOwner"
+            },
+            "type": "array",
+            "title": "Threads"
+          },
+          "metrics_before": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InstanceEventMetricSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metrics_after": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InstanceEventMetricSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "source",
+          "severity",
+          "ts",
+          "summary",
+          "level",
+          "detail",
+          "location",
+          "lag_ms",
+          "lower_bound",
+          "warn_ms",
+          "request_id",
+          "conversation_id",
+          "message_id",
+          "instance_id",
+          "tasks",
+          "threads",
+          "metrics_before",
+          "metrics_after"
+        ],
+        "title": "InstanceDiagnosticEvent",
+        "description": "One normalized ERROR, hard wedge, or soft loop-lag record."
+      },
+      "InstanceEventMetricSnapshot": {
+        "properties": {
+          "ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ts"
+          },
+          "loop_lag_ms": {
+            "$ref": "#/components/schemas/InstanceLoopLagMetrics"
+          },
+          "in_flight": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "In Flight"
+          },
+          "tasks_long_running": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tasks Long Running"
+          },
+          "process": {
+            "$ref": "#/components/schemas/InstanceProcessMetrics"
+          },
+          "db_pool": {
+            "$ref": "#/components/schemas/InstanceDbPoolMetrics"
+          },
+          "redis": {
+            "$ref": "#/components/schemas/InstanceRedisMetrics"
+          }
+        },
+        "type": "object",
+        "title": "InstanceEventMetricSnapshot",
+        "description": "Runtime sample immediately before or after a loop incident.",
+        "required": [
+          "ts",
+          "loop_lag_ms",
+          "in_flight",
+          "tasks_long_running",
+          "process",
+          "db_pool",
+          "redis"
+        ]
+      },
+      "InstanceEventSourceStatus": {
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "title": "Configured",
+            "default": true
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "configured",
+          "available",
+          "truncated"
+        ],
+        "title": "InstanceEventSourceStatus",
+        "description": "Readability state for one local diagnostic-file source."
+      },
+      "InstanceEventStackOwner": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "stack": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Stack"
+          },
+          "done": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Done"
+          },
+          "event_loop": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Loop"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "stack",
+          "done",
+          "event_loop"
+        ],
+        "title": "InstanceEventStackOwner",
+        "description": "One bounded task or thread stack captured by the watchdog."
+      },
+      "InstanceLoopLagMetrics": {
+        "properties": {
+          "p50_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P50 Ms"
+          },
+          "p99_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P99 Ms"
+          },
+          "max_1m_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max 1M Ms"
+          },
+          "samples": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Samples"
+          }
+        },
+        "type": "object",
+        "title": "InstanceLoopLagMetrics",
+        "required": [
+          "p50_ms",
+          "p99_ms",
+          "max_1m_ms",
+          "samples"
+        ]
+      },
+      "InstanceProcessMetrics": {
+        "properties": {
+          "rss_mb": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rss Mb"
+          },
+          "cpu_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Pct"
+          },
+          "open_fds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open Fds"
+          }
+        },
+        "type": "object",
+        "title": "InstanceProcessMetrics",
+        "required": [
+          "rss_mb",
+          "cpu_pct",
+          "open_fds"
+        ]
+      },
+      "InstanceRedisMetrics": {
+        "properties": {
+          "used_mb": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Used Mb"
+          },
+          "maxmemory_mb": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maxmemory Mb"
+          }
+        },
+        "type": "object",
+        "title": "InstanceRedisMetrics",
+        "required": [
+          "used_mb",
+          "maxmemory_mb"
+        ]
       },
       "LoginRequest": {
         "properties": {

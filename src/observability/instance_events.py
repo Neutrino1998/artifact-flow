@@ -6,7 +6,6 @@ The instance status signals already have durable homes:
   records are duplicated into ``artifactflow_error.log``.
 * loop-lag / hard-wedge records live in ``loop-lag.jsonl``.
 * runtime samples live in ``metrics.jsonl``.
-* host autoheal records optionally live in its mounted marker JSONL.
 
 This module reads those same files on demand.  It deliberately does not merge
 ``MessageEvent`` rows: doing so would give one execution failure two sources of
@@ -26,7 +25,7 @@ import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from config import config
 
@@ -38,6 +37,9 @@ _LOG_HEADER_RE = re.compile(
     r" - \[(?P<context>[^]]*)] (?P<location>.+?) - (?P<summary>.*)$"
 )
 _EXEC_TASK_RE = re.compile(r"^exec-(msg-[A-Za-z0-9._-]+)$")
+
+InstanceEventKind = Literal["all", "error", "wedge", "loop_lag"]
+_EVENT_KINDS = {"all", "error", "wedge", "loop_lag"}
 
 
 def is_safe_instance_id(instance_id: str) -> bool:
@@ -364,31 +366,6 @@ def _attach_nearest_metrics(
         event["metrics_after"] = _metric_summary(after)
 
 
-def _parse_autoheal_events(text: str, instance_id: str) -> list[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
-    for record in _parse_jsonl(text):
-        if record.get("instance_id") != instance_id:
-            continue
-        ts = record.get("ts")
-        if not isinstance(ts, str):
-            continue
-        reason = str(record.get("reason") or "unhealthy")
-        events.append({
-            "id": f"autoheal-{len(events)}-{ts}",
-            "type": "autoheal",
-            "source": "autoheal_marker",
-            "severity": "error",
-            "ts": ts,
-            "summary": f"Autoheal 重启实例：{reason}",
-            "reason": reason,
-            "request_id": None,
-            "conversation_id": None,
-            "message_id": None,
-            "instance_id": instance_id,
-        })
-    return events
-
-
 def _event_sort_key(event: dict[str, Any]) -> datetime:
     try:
         return datetime.fromisoformat(str(event.get("ts") or ""))
@@ -396,10 +373,16 @@ def _event_sort_key(event: dict[str, Any]) -> datetime:
         return datetime.min
 
 
-def read_instance_events(instance_id: str, limit: int) -> dict[str, Any]:
+def read_instance_events(
+    instance_id: str,
+    limit: int,
+    kind: InstanceEventKind = "all",
+) -> dict[str, Any]:
     """Read and normalize one instance's most recent diagnostic events."""
     if not is_safe_instance_id(instance_id):
         raise ValueError("invalid instance_id")
+    if kind not in _EVENT_KINDS:
+        raise ValueError("invalid event kind")
     limit = max(1, min(int(limit), int(config.OBS_ADMIN_EVENT_LIMIT_MAX)))
 
     error_text, error_available, error_truncated = _read_rotated_tail(
@@ -412,19 +395,15 @@ def read_instance_events(instance_id: str, limit: int) -> dict[str, Any]:
         _instance_scoped_path(config.OBS_METRICS_LOG_PATH, instance_id)
     )
 
-    autoheal_text = ""
-    autoheal_available = False
-    autoheal_truncated = False
-    if config.OBS_AUTOHEAL_MARKER_PATH:
-        autoheal_text, autoheal_available, autoheal_truncated = _read_rotated_tail(
-            Path(config.OBS_AUTOHEAL_MARKER_PATH)
-        )
-
     events = _parse_error_log(error_text, instance_id)
     loop_events = _parse_loop_events(loop_text, instance_id)
     _attach_nearest_metrics(loop_events, _parse_jsonl(metrics_text))
     events.extend(loop_events)
-    events.extend(_parse_autoheal_events(autoheal_text, instance_id))
+    if kind != "all":
+        # Apply the selected type before the result limit.  Otherwise a burst of
+        # newer ERROR or soft-lag records can make a retained hard wedge appear
+        # to be absent when the user opens its exact filter.
+        events = [event for event in events if event.get("type") == kind]
     events.sort(key=_event_sort_key, reverse=True)
 
     return {
@@ -434,10 +413,5 @@ def read_instance_events(instance_id: str, limit: int) -> dict[str, Any]:
             "error_log": {"configured": True, "available": error_available, "truncated": error_truncated},
             "loop_lag": {"configured": True, "available": loop_available, "truncated": loop_truncated},
             "metrics": {"configured": True, "available": metrics_available, "truncated": metrics_truncated},
-            "autoheal": {
-                "configured": bool(config.OBS_AUTOHEAL_MARKER_PATH),
-                "available": autoheal_available,
-                "truncated": autoheal_truncated,
-            },
         },
     }

@@ -101,8 +101,8 @@ function reasonText(inst: InstanceHeartbeat, reason: StatusReason, nowMs: number
 
 function filterForReason(code: string): InstanceEventFilter {
   if (code === 'recent_error') return 'error';
-  if (code === 'loop_lag_warn' || code === 'wedge_recent' || code === 'wedge_seen') return 'wedge';
-  if (code === 'autoheal_recent') return 'autoheal';
+  if (code === 'loop_lag_warn') return 'loop_lag';
+  if (code === 'wedge_recent' || code === 'wedge_seen') return 'wedge';
   return 'all';
 }
 
@@ -167,9 +167,9 @@ function InstanceCard({
         <div className="col-span-3 min-w-0">
           <button
             type="button"
-            onClick={() => onOpenEvents(inst, 'wedge')}
+            onClick={() => onOpenEvents(inst, 'loop_lag')}
             className="w-full text-left rounded-md hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-            title="查看 loop lag / wedge 历史"
+            title="查看 loop lag 历史"
           >
             <Metric
               label="loop p50/max"
@@ -224,9 +224,9 @@ function InstanceCard({
           {showHistoricalAutoheal && inst.last_autoheal && (
             <button
               type="button"
-              onClick={() => onOpenEvents(inst, 'autoheal')}
+              onClick={() => onOpenEvents(inst, 'all')}
               className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-              title="查看历史 autoheal"
+              title="查看实例概览（Autoheal 仅展示心跳摘要）"
             >
               <PillBadge tone="neutral" size="regular">
                 历史 autoheal · {ago(inst.last_autoheal.ts, nowMs)}

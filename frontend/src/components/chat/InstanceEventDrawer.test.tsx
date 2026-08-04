@@ -89,7 +89,7 @@ describe('InstanceEventDrawer', () => {
       await Promise.resolve();
     });
 
-    expect(apiMocks.getAdminInstanceEvents).toHaveBeenCalledWith('backend-1', 50);
+    expect(apiMocks.getAdminInstanceEvents).toHaveBeenCalledWith('backend-1', 'error', 50);
     expect(container.textContent).toContain('LLM call failed');
     expect(container.textContent).not.toContain('Event loop did not respond');
 
@@ -100,9 +100,14 @@ describe('InstanceEventDrawer', () => {
     expect(onOpenConversation).toHaveBeenCalledWith('conv-1');
 
     const wedgeFilter = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent?.trim() === 'Loop / Wedge',
+      (button) => button.textContent?.trim() === 'Wedge',
     );
-    await act(async () => wedgeFilter?.click());
+    await act(async () => {
+      wedgeFilter?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(apiMocks.getAdminInstanceEvents).toHaveBeenLastCalledWith('backend-1', 'wedge', 50);
     expect(container.textContent).toContain('Event loop did not respond');
     expect(container.textContent).toContain('≥5000ms');
     expect(container.textContent).not.toContain('LLM call failed');

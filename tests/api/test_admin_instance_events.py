@@ -33,10 +33,16 @@ async def test_instance_events_endpoint_is_admin_only_and_validates_id(
     assert forbidden.status_code == 403
 
     response = await admin_client.get(
-        f"/api/v1/admin/instances/{instance_id}/events?limit=10"
+        f"/api/v1/admin/instances/{instance_id}/events?kind=error&limit=10"
     )
     assert response.status_code == 200
     assert response.json()["events"][0]["summary"] == "boom"
+    assert response.json()["events"][0]["type"] == "error"
+
+    invalid_kind = await admin_client.get(
+        f"/api/v1/admin/instances/{instance_id}/events?kind=autoheal"
+    )
+    assert invalid_kind.status_code == 422
 
     invalid = await admin_client.get("/api/v1/admin/instances/bad$id/events")
     assert invalid.status_code == 400

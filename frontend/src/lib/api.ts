@@ -54,6 +54,7 @@ import type {
   AdminSkillItem,
   SiteNotificationsResponse,
   UpdateSiteNotificationsRequest,
+  AdminInstanceEventsResponse,
 } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
 import { API_URL } from './apiBase';
@@ -706,57 +707,14 @@ export function getAdminInstances() {
   return request<AdminInstancesResponse>('/api/v1/admin/instances');
 }
 
-export interface InstanceEventStackOwner {
-  name: string;
-  done?: boolean;
-  event_loop?: boolean;
-  stack: string[];
-}
+export type InstanceEventKind = 'all' | 'error' | 'wedge' | 'loop_lag';
 
-export interface InstanceEventMetricSnapshot {
-  ts?: string | null;
-  loop_lag_ms?: { p50_ms?: number; p99_ms?: number; max_1m_ms?: number; samples?: number };
-  in_flight?: number | null;
-  tasks_long_running?: number | null;
-  process?: { rss_mb?: number; cpu_pct?: number; open_fds?: number };
-  db_pool?: { in_use?: number; size?: number; overflow?: number };
-  redis?: { used_mb?: number; maxmemory_mb?: number };
-}
-
-export type InstanceDiagnosticEventType = 'error' | 'wedge' | 'loop_lag' | 'autoheal';
-
-export interface InstanceDiagnosticEvent {
-  id: string;
-  type: InstanceDiagnosticEventType;
-  source: 'runtime_log' | 'loop_lag' | 'autoheal_marker';
-  severity: 'warning' | 'error';
-  ts: string;
-  summary: string;
-  level?: string;
-  detail?: string | null;
-  location?: string | null;
-  lag_ms?: number | null;
-  lower_bound?: boolean;
-  warn_ms?: number | null;
-  reason?: string;
-  request_id?: string | null;
-  conversation_id?: string | null;
-  message_id?: string | null;
-  instance_id: string;
-  tasks?: InstanceEventStackOwner[];
-  threads?: InstanceEventStackOwner[];
-  metrics_before?: InstanceEventMetricSnapshot | null;
-  metrics_after?: InstanceEventMetricSnapshot | null;
-}
-
-export interface AdminInstanceEventsResponse {
-  instance_id: string;
-  events: InstanceDiagnosticEvent[];
-  sources: Record<string, { configured?: boolean; available: boolean; truncated: boolean }>;
-}
-
-export function getAdminInstanceEvents(instanceId: string, limit = 30) {
-  const params = new URLSearchParams({ limit: String(limit) });
+export function getAdminInstanceEvents(
+  instanceId: string,
+  kind: InstanceEventKind = 'all',
+  limit = 30,
+) {
+  const params = new URLSearchParams({ kind, limit: String(limit) });
   return request<AdminInstanceEventsResponse>(
     `/api/v1/admin/instances/${encodeURIComponent(instanceId)}/events?${params}`
   );
