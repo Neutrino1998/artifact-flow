@@ -209,6 +209,7 @@ async def execute_loop(
     emit: Optional[EmitFn] = None,
     sandbox_session: Optional[Any] = None,
     available_skills: Optional[List[Dict[str, Any]]] = None,
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Pi-style 扁平 while loop 执行引擎
@@ -228,6 +229,8 @@ async def execute_loop(
         sandbox_session: SandboxSession 实例（duck-typed:status_snapshot），仅用于
             动态上下文的 <sandbox_status> 快照——生命周期/拆除归 controller_factory
             + runner cleanup，引擎不管理它
+        user_id: 当前认证用户 ID，仅传给 LLM adapter 派生 provider cache salt；
+            不写入 prompt / event
     Returns:
         最终执行状态
     """
@@ -256,7 +259,7 @@ async def execute_loop(
             return False
 
     compaction_runner = CompactionRunner(
-        agents=agents, emit=emit, check_cancelled=_is_cancelled
+        agents=agents, emit=emit, check_cancelled=_is_cancelled, user_id=user_id
     )
 
     # NOTE: the USER_INPUT event (+ uploaded-file attribution + force_compact
@@ -494,7 +497,10 @@ async def execute_loop(
         tool_calls: list[dict] = []
 
         cancelled_mid_stream = False
-        llm_stream = astream_with_retry(messages, model=model, tools=native_tools)
+        llm_kwargs = {"user_id": user_id} if user_id else {}
+        llm_stream = astream_with_retry(
+            messages, model=model, tools=native_tools, **llm_kwargs
+        )
         try:
             last_cancel_check = time.monotonic()
             async for chunk in llm_stream:

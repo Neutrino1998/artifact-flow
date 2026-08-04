@@ -210,6 +210,7 @@ async def create_controller(
         db_manager=db_manager,
         sandbox_session=sandbox_session,
         effective_skillset=effective_skillset,
+        user_id=user_id,
     )
 
 

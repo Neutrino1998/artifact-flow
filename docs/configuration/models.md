@@ -27,6 +27,7 @@ model: my-model
 | `api_key` | 否 | 显式密钥；通常应改用环境变量 |
 | `api_key_env` | 否 | 承载该模型密钥的环境变量名；避免把真实密钥写入 YAML |
 | `vision` | 否 | 是否允许 `read_artifact` 向模型发送图片块，默认 `false` |
+| `cache_salt_field` | 否 | 按认证用户隔离 prefix cache 时注入的请求字段名；vLLM 使用 `cache_salt`，不配置则不发送 |
 | `params` | 否 | 透传给 LiteLLM 的模型参数 |
 | `defaults` | 否 | 所有 alias 共用的参数；model 级 `params` 覆盖同名默认值 |
 
@@ -42,6 +43,7 @@ models:
     model: Qwen3-32B
     base_url: http://model-gateway.internal:8000/v1
     api_key_env: INTERNAL_QWEN_API_KEY
+    cache_salt_field: cache_salt
     params:
       temperature: 0.6
       timeout: 900
@@ -49,6 +51,12 @@ models:
 
 当 `base_url` 存在且 `model` 没有已知 provider 前缀时，运行时按 OpenAI-compatible 模型处理。
 `api_key_env` 指向的变量缺失时会直接报错，不会把变量名当作密钥发送。
+
+`cache_salt_field` 是模型 alias 级开关。配置后，每次普通 Agent、子 Agent 和
+compaction 请求都会在 provider request body 中携带该字段。字段值不是原始用户 ID，
+而是使用服务端 `ARTIFACTFLOW_JWT_SECRET` 派生的 HMAC-SHA256；同一用户跨请求稳定，
+不同用户不同，日志也只记录启用的字段名。配置了该字段但调用链缺少认证用户时会
+直接失败，避免静默退化为未隔离缓存。轮换 JWT secret 会使旧 prefix cache 自然失效。
 
 Ollama：
 

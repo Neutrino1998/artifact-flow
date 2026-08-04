@@ -6,6 +6,8 @@
 """
 
 import asyncio
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -176,6 +178,66 @@ def _resolve_model_params(
     return params
 
 
+def _apply_user_cache_salt(
+    params: dict,
+    model: str,
+    user_id: Optional[str],
+) -> Optional[str]:
+    """按模型配置向 provider request body 注入不透明的用户缓存 salt。
+
+    ``cache_salt_field`` 是 alias 级能力声明，而不是静态 ``params``：字段值必须
+    随当前认证用户变化。启用后缺 user_id 直接 loud-fail，不能悄悄退化成未隔离
+    请求。salt 使用 JWT secret 做带域分离的 HMAC-SHA256；推理服务只看到不可逆、
+    跨副本稳定的 opaque 值，不会收到原始 user_id。JWT secret 轮换只会让旧 prefix
+    cache 自然失效，不影响业务数据。
+
+    返回实际注入的字段名；未配置则返回 None。
+    """
+    models = _load_config().get("models", {})
+    model_config = models.get(model)
+    if not model_config or "cache_salt_field" not in model_config:
+        return None
+
+    field = model_config["cache_salt_field"]
+    if (
+        not isinstance(field, str)
+        or not field
+        or not field.isidentifier()
+    ):
+        raise ValueError(
+            f"Model '{model}' cache_salt_field must be a non-empty identifier"
+        )
+    if not user_id:
+        raise ValueError(
+            f"Model '{model}' enables cache_salt_field but this LLM call has no user_id"
+        )
+    if not settings.JWT_SECRET:
+        # 正常服务启动已由 validate_config 保证；这里保留局部 loud-fail，避免脚本/
+        # 测试绕过 lifespan 时生成一个所有部署相同的弱 salt。
+        raise ValueError(
+            f"Model '{model}' enables cache_salt_field but ARTIFACTFLOW_JWT_SECRET is unset"
+        )
+
+    digest = hmac.new(
+        settings.JWT_SECRET.encode("utf-8"),
+        b"artifactflow:llm-cache-salt:v1\x00" + user_id.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    existing_extra_body = params.get("extra_body")
+    if existing_extra_body is None:
+        extra_body: dict = {}
+    elif isinstance(existing_extra_body, dict):
+        extra_body = dict(existing_extra_body)
+    else:
+        raise ValueError(
+            f"Model '{model}' params.extra_body must be an object when cache_salt_field is enabled"
+        )
+    extra_body[field] = digest
+    params["extra_body"] = extra_body
+    return field
+
+
 def get_litellm_model_id(model_alias: str) -> str:
     """Resolve a model alias to its litellm model ID."""
     params = _resolve_model_params(model_alias)
@@ -194,6 +256,7 @@ async def astream_with_retry(
     base_url: Optional[str] = None,
     api_key: Optional[str] = None,
     tools: Optional[list[dict]] = None,
+    user_id: Optional[str] = None,
 ) -> AsyncIterator[dict]:
     """
     带重试的异步流式 LLM 调用
@@ -207,6 +270,8 @@ async def astream_with_retry(
         retry_delay: 初始重试延迟（秒）
         base_url: 自部署接口地址
         api_key: API 密钥
+        user_id: 当前认证用户 ID。模型配置 ``cache_salt_field`` 时用于派生并注入
+                 opaque cache salt；未配置时不进入 provider 请求。
 
     Yields:
         dict: chunk 字典
@@ -216,9 +281,14 @@ async def astream_with_retry(
             - {"type": "final", "content": "...", "reasoning_content": "..."} - 完整响应
     """
     params = _resolve_model_params(model, base_url, api_key)
+    cache_salt_field = _apply_user_cache_salt(params, model, user_id)
     if tools:
         params["tools"] = tools
-    logger.info(f"LLM call: {params['model']}")
+    cache_note = (
+        f" (user cache salt field: {cache_salt_field})"
+        if cache_salt_field else ""
+    )
+    logger.info(f"LLM call: {params['model']}{cache_note}")
 
     last_error = None
 

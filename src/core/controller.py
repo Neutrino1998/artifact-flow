@@ -86,6 +86,7 @@ class ExecutionController:
         sandbox_session: Optional[Any] = None,  # duck-typed: status_snapshot(动态上下文快照用,
                                                 # 生命周期归 controller_factory + runner cleanup)
         effective_skillset: Optional[Any] = None,  # EffectiveSkillSet(C-2;None = 无 skill)
+        user_id: Optional[str] = None,  # 当前认证用户；仅供 LLM cache salt 派生
     ):
         self.agents = agents
         self.tools = tools
@@ -98,6 +99,7 @@ class ExecutionController:
         self._on_engine_exit = on_engine_exit
         self._db_manager = db_manager
         self.sandbox_session = sandbox_session
+        self.user_id = user_id
         logger.info("ExecutionController initialized")
 
     async def _with_db_retry(self, fn):
@@ -419,6 +421,7 @@ class ExecutionController:
                         emit=emit_to_queue,
                         sandbox_session=self.sandbox_session,
                         available_skills=available_skills,
+                        user_id=self.user_id,
                     )
             except TimeoutError:
                 # 引擎执行超时。模仿协作式 cancel:置 flag 正常返回,让 post-processing

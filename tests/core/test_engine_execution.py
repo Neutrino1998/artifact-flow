@@ -199,6 +199,7 @@ async def _run_engine(
     artifact_service=None,
     effective_toolsets=None,
     agent_progressive_state=None,
+    user_id=None,
 ):
     """Helper to run engine with given LLM factory and return (state, emitted).
 
@@ -246,6 +247,7 @@ async def _run_engine(
             hooks=_hooks_from_store(store),
             artifact_service=artifact_service,
             emit=capture_emit,
+            user_id=user_id,
         )
 
     return result, emitted, store
@@ -261,6 +263,18 @@ def _events_of_type(emitted, event_type):
 
 
 class TestLeadCompletion:
+
+    async def test_authenticated_user_id_reaches_llm_adapter(self):
+        captured = {}
+
+        async def fake(messages, **kwargs):
+            captured.update(kwargs)
+            for chunk in _simple_llm_chunks("Done!"):
+                yield chunk
+
+        await _run_engine(fake, user_id="user-123")
+
+        assert captured["user_id"] == "user-123"
 
     async def test_plain_text_completes(self):
         result, emitted, store = await _run_engine(

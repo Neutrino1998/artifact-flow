@@ -378,3 +378,28 @@ class TestSSEEmission:
         emitted_types = [call.args[0]["type"] for call in emit.call_args_list]
         assert StreamEventType.COMPACTION_START.value in emitted_types
         assert StreamEventType.COMPACTION_SUMMARY.value in emitted_types
+
+
+class TestCacheSaltScope:
+
+    async def test_authenticated_user_id_reaches_compaction_llm_adapter(self):
+        captured = {}
+
+        async def fake_stream(messages, **kwargs):
+            captured.update(kwargs)
+            async for chunk in _fake_stream_ok(messages, model=kwargs.get("model")):
+                yield chunk
+
+        agents = {"compact_agent": _FakeAgent()}
+        runner = CompactionRunner(agents, emit=None, user_id="user-123")
+        state = _make_state([
+            _ev(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
+        ])
+
+        with patch("models.llm.astream_with_retry", fake_stream), \
+             patch("core.compaction_runner.config.COMPACTION_TOKEN_THRESHOLD", 100):
+            await runner.maybe_trigger(
+                state, "lead_agent", input_tokens=80, output_tokens=30
+            )
+
+        assert captured["user_id"] == "user-123"

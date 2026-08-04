@@ -543,6 +543,7 @@ class TestChatStreamE2E:
 
         async def fake_llm(messages, **kwargs):
             observed_llm_messages["messages"] = messages
+            observed_llm_messages["user_id"] = kwargs.get("user_id")
             async for chunk in _make_fake_llm_stream("Hello from agent")(messages, **kwargs):
                 yield chunk
 
@@ -615,6 +616,7 @@ class TestChatStreamE2E:
                 )
                 assert "DOCX GUIDANCE" in model_context
                 assert "mount_skill" in model_context
+                assert observed_llm_messages["user_id"]
 
                 detail = (await client.get(f"/api/v1/chat/{conv_id}")).json()
                 persisted = next(

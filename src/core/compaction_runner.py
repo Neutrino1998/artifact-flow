@@ -52,9 +52,11 @@ class CompactionRunner:
         agents: Dict[str, Any],
         emit: Optional[EmitFn] = None,
         check_cancelled: Optional[Callable[[], Awaitable[bool]]] = None,
+        user_id: Optional[str] = None,
     ):
         self._agents = agents
         self._emit = emit
+        self._user_id = user_id
         # 零参 async 谓词（engine 预绑定 message_id）。提供时 compaction LLM 调用
         # 变为可被协作式 cancel 打断（抛 CooperativeCancelled）—— 否则该调用是
         # 长达 COMPACTION_TIMEOUT 的 cancel 盲窗。None = 不轮询（独立测试场景）。
@@ -272,7 +274,10 @@ class CompactionRunner:
 
         async def _stream():
             nonlocal response, usage
-            async for chunk in astream_with_retry(messages, model=compact_agent.model):
+            llm_kwargs = {"user_id": self._user_id} if self._user_id else {}
+            async for chunk in astream_with_retry(
+                messages, model=compact_agent.model, **llm_kwargs
+            ):
                 ct = chunk.get("type")
                 if ct == "content":
                     response += chunk["content"]

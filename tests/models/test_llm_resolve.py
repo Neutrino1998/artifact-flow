@@ -8,6 +8,7 @@ _resolve_model_params — 模型名解析的 loud-fail 边界回归
 
 import pytest
 import httpx
+from types import SimpleNamespace
 
 from models.llm import (
     _resolve_model_params,
@@ -215,6 +216,117 @@ from models.llm import astream_with_retry
 
 async def _drain(gen):
     return [chunk async for chunk in gen]
+
+
+async def _usage_only_response():
+    yield SimpleNamespace(
+        usage=SimpleNamespace(
+            prompt_tokens=1,
+            completion_tokens=1,
+            total_tokens=2,
+        ),
+        choices=[],
+    )
+
+
+async def test_model_cache_salt_is_hmaced_and_sent_via_extra_body(monkeypatch):
+    """同用户稳定、跨用户隔离；原始 user_id 不进入 provider request。"""
+    monkeypatch.setattr("models.llm.settings.JWT_SECRET", "cache-salt-test-secret")
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "private-vllm": {
+                    "model": "openai/private-vllm",
+                    "cache_salt_field": "cache_salt",
+                    "params": {"extra_body": {"other_provider_option": True}},
+                }
+            }
+        },
+    )
+    request_bodies = []
+
+    async def fake_acompletion(**kwargs):
+        request_bodies.append(kwargs)
+        return _usage_only_response()
+
+    monkeypatch.setattr("models.llm.acompletion", fake_acompletion)
+    for user_id in ("user-a", "user-a", "user-b"):
+        await _drain(astream_with_retry(
+            [{"role": "user", "content": "same prompt"}],
+            model="private-vllm",
+            user_id=user_id,
+        ))
+
+    salts = [body["extra_body"]["cache_salt"] for body in request_bodies]
+    assert salts[0] == salts[1]
+    assert salts[0] != salts[2]
+    assert len(salts[0]) == 64  # HMAC-SHA256 hex，不是原始 user_id
+    assert "user-a" not in salts[0]
+    assert all(
+        body["extra_body"]["other_provider_option"] is True
+        for body in request_bodies
+    )
+
+
+async def test_unconfigured_model_does_not_send_cache_salt(monkeypatch):
+    monkeypatch.setattr("models.llm._config", {"models": {}})
+    captured = {}
+
+    async def fake_acompletion(**kwargs):
+        captured.update(kwargs)
+        return _usage_only_response()
+
+    monkeypatch.setattr("models.llm.acompletion", fake_acompletion)
+    await _drain(astream_with_retry(
+        [{"role": "user", "content": "x"}],
+        model="openai/fake",
+        user_id="user-a",
+    ))
+
+    assert "extra_body" not in captured
+
+
+async def test_configured_cache_salt_without_user_id_loud_fails(monkeypatch):
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "private-vllm": {
+                    "model": "openai/private-vllm",
+                    "cache_salt_field": "cache_salt",
+                }
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="has no user_id"):
+        await _drain(astream_with_retry(
+            [{"role": "user", "content": "x"}],
+            model="private-vllm",
+        ))
+
+
+@pytest.mark.parametrize("field", ["", 1, "cache-salt"])
+async def test_invalid_cache_salt_field_loud_fails(monkeypatch, field):
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "private-vllm": {
+                    "model": "openai/private-vllm",
+                    "cache_salt_field": field,
+                }
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="non-empty identifier"):
+        await _drain(astream_with_retry(
+            [{"role": "user", "content": "x"}],
+            model="private-vllm",
+            user_id="user-a",
+        ))
 
 
 async def test_bad_request_fails_fast_no_retry(monkeypatch):
