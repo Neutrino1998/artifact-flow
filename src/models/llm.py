@@ -143,13 +143,12 @@ def validate_model_config(required_models: Optional[Iterable[str]] = None) -> No
 
 
 def validate_agent_model_config(agent_models: Mapping[str, str]) -> None:
-    """Validate Agent aliases plus the compactor's cross-Agent capacity.
+    """Validate Agent aliases and reject an obviously undersized compactor.
 
-    A separate compact model is useful only when it can accept the histories it
-    may be asked to summarize.  Requiring its declared window to cover every
-    runtime Agent window makes the predictable cross-model failure unrepresentable
-    in configuration; semantic oversize tool results remain the tool author's
-    loud-fail responsibility.
+    Requiring its declared window to cover every runtime Agent window is a
+    baseline capacity guard, not a promise that compaction always fits.  The
+    reserve provides best-effort headroom; a call may still cross the trigger or
+    incur different tokenizer/prompt overhead.  Such failures remain loud.
     """
     raw_config = _load_config()
     _validate_model_config(raw_config, agent_models.values())

@@ -95,13 +95,15 @@ models:
 
 ## Context window 与压缩
 
-ArtifactFlow 不从 LiteLLM 的公共模型目录猜测上下文窗口，因为私有部署可能用更小的 serving limit。每个 alias 都必须显式配置 `context_window`，Agent 也必须引用 alias；缺失、非正整数、alias 不存在或窗口不大于 reserve 都会拒绝配置发布。`compact_agent` 的窗口还必须不小于其他任何 Agent，否则它无法可靠接收待压缩历史。Release reconcile 会在接触 DB session 前执行这套校验，Backend 启动时再执行一次作为二次防线。
+ArtifactFlow 不从 LiteLLM 的公共模型目录猜测上下文窗口，因为私有部署可能用更小的 serving limit。每个 alias 都必须显式配置 `context_window`，Agent 也必须引用 alias；缺失、非正整数、alias 不存在或窗口不大于 reserve 都会拒绝配置发布。`compact_agent` 的窗口还必须不小于其他任何 Agent，以排除明显容量不足的配置。Release reconcile 会在接触 DB session 前执行这套校验，Backend 启动时再执行一次作为二次防线。
 
 服务级 `ARTIFACTFLOW_COMPACTION_RESERVE_TOKENS` 默认为 `20000`。每个 Agent 的自动压缩阈值为：
 
 ```text
 context_window - ARTIFACTFLOW_COMPACTION_RESERVE_TOKENS
 ```
+
+Reserve 为 Agent 后续输出和 compactor 的额外提示、总结输出提供 best-effort headroom，并不保证接近物理窗口上限的压缩一定成功：单次调用可能跨过触发线，不同模型的 tokenizer 和提示开销也可能不同。若 compaction 仍然 overflow，本轮会响亮失败，不会写入假的历史边界、循环压缩或静默丢弃历史。
 
 模型明确返回 context-window overflow 时，引擎会为当前 Agent 立即压缩并重试该次调用一次；重试仍溢出则以错误结束，不会循环压缩。前端的上下文水位上限使用数据库中实际生效的 `lead_agent` 模型对应阈值，Subagent 各自按自己的模型阈值运行。
 
