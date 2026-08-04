@@ -30,7 +30,7 @@ describe('reconstructSegments', () => {
     expect(segs).toHaveLength(1);
     expect(segs[0].agent).toBe('lead');
     expect(segs[0].reasoningContent).toBe('thinking...');
-    expect(segs[0].isThinking).toBe(false);
+    expect(segs[0].llmStreamChannel).toBeNull();
     expect(segs[0].status).toBe('complete');
   });
 

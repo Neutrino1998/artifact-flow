@@ -122,7 +122,8 @@ export interface ExecutionSegment {
   agent: string;
   status: 'running' | 'complete';
   reasoningContent: string;
-  isThinking: boolean;
+  /** Live SSE display state for the current LLM invocation; never persisted. */
+  llmStreamChannel: 'reasoning' | 'content' | null;
   toolCalls: ToolCallInfo[];
   /** SSE-only; never reconstructed or cached as execution history. */
   toolCallProgress: ToolCallProgressInfo[];
@@ -370,7 +371,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
             agent,
             status: 'running',
             reasoningContent: '',
-            isThinking: false,
+            llmStreamChannel: null,
             toolCalls: [],
             toolCallProgress: [],
             content: '',
@@ -503,6 +504,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
         .map((seg) => ({
           ...seg,
           status: seg.status === 'running' ? 'complete' as const : seg.status,
+          llmStreamChannel: null,
           toolCallProgress: [],
         }));
       if (segsToSnapshot.length > 0) {

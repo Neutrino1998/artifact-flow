@@ -33,7 +33,7 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
           agent: agent_name ?? 'Agent',
           status: 'running',
           reasoningContent: '',
-          isThinking: false,
+          llmStreamChannel: null,
           toolCalls: [],
           toolCallProgress: [],
           content: '',
@@ -49,7 +49,6 @@ export function reconstructSegments(events: MessageEventItem[]): ExecutionSegmen
         seg.content = content;
         if (d.reasoning_content) {
           seg.reasoningContent = d.reasoning_content;
-          seg.isThinking = false; // historical — already complete
         }
         if (d.token_usage) seg.tokenUsage = d.token_usage;
         if (d.model) seg.model = d.model;

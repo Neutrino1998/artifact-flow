@@ -18,7 +18,7 @@ function seg(id: string, overrides: Partial<ExecutionSegment> = {}): ExecutionSe
     agent: 'lead',
     status: 'complete',
     reasoningContent: '',
-    isThinking: false,
+    llmStreamChannel: null,
     toolCalls: [],
     toolCallProgress: [],
     content: '',

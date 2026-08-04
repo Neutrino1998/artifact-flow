@@ -28,7 +28,7 @@ describe('AgentSegmentBlock', () => {
       agent: 'lead_agent',
       status: 'running',
       reasoningContent: '',
-      isThinking: false,
+      llmStreamChannel: null,
       content,
       toolCallProgress: [],
       toolCalls: [{
@@ -61,7 +61,7 @@ describe('AgentSegmentBlock', () => {
       agent: 'lead_agent',
       status: 'running',
       reasoningContent: '',
-      isThinking: false,
+      llmStreamChannel: null,
       content: '继续更新报告的其他关键部分：',
       toolCalls: [],
       toolCallProgress: [{
@@ -96,7 +96,7 @@ describe('AgentSegmentBlock', () => {
       agent: 'lead_agent',
       status: 'running',
       reasoningContent: '',
-      isThinking: false,
+      llmStreamChannel: 'content',
       content: 'Still writing',
       toolCalls: [],
       toolCallProgress: [],
@@ -117,13 +117,66 @@ describe('AgentSegmentBlock', () => {
     expect(cursorHost?.lastElementChild?.tagName).toBe('P');
   });
 
+  test('stops the cursor when the LLM completes but the agent remains active', async () => {
+    const segment: ExecutionSegment = {
+      id: 'lead-compacting',
+      agent: 'lead_agent',
+      status: 'running',
+      reasoningContent: '',
+      llmStreamChannel: null,
+      content: 'Finished response',
+      toolCalls: [],
+      toolCallProgress: [],
+    };
+
+    await act(async () => {
+      root.render(
+        <AgentSegmentBlock
+          segment={segment}
+          isActive
+          defaultExpanded
+        />,
+      );
+    });
+
+    expect(container.querySelector('.streaming-cursor')).toBeNull();
+  });
+
+  test.each([
+    ['list', '- first\n- second', '.streaming-cursor > ul:last-child > li:last-child'],
+    ['quote', '> final quote', '.streaming-cursor > blockquote:last-child > p:last-child'],
+  ])('exposes the final %s text leaf for best-effort cursor placement', async (_kind, content, selector) => {
+    const segment: ExecutionSegment = {
+      id: `lead-${_kind}`,
+      agent: 'lead_agent',
+      status: 'running',
+      reasoningContent: '',
+      llmStreamChannel: 'content',
+      content,
+      toolCalls: [],
+      toolCallProgress: [],
+    };
+
+    await act(async () => {
+      root.render(
+        <AgentSegmentBlock
+          segment={segment}
+          isActive
+          defaultExpanded
+        />,
+      );
+    });
+
+    expect(container.querySelector(selector)).not.toBeNull();
+  });
+
   test('shows cached input as a parenthesized subset of input tokens', async () => {
     const segment: ExecutionSegment = {
       id: 'lead-cached',
       agent: 'lead_agent',
       status: 'complete',
       reasoningContent: 'done',
-      isThinking: false,
+      llmStreamChannel: null,
       content: '',
       toolCalls: [],
       toolCallProgress: [],

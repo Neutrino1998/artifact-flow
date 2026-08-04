@@ -97,10 +97,12 @@
 }
 
 @layer components {
-  /* Attach the cursor inside ReactMarkdown's final block (normally <p>) so it
-     stays on the last text line.  An em-sized CSS caret avoids font-dependent
-     glyph metrics from the old \25AE character. */
-  .streaming-cursor > :last-child::after {
+  /* Best-effort attachment to ReactMarkdown's common final text leaves. Code,
+     tables, and custom blocks intentionally omit the cursor instead of placing
+     it on a misleading new line below the block. */
+  .streaming-cursor > :where(p, h1, h2, h3, h4, h5, h6):last-child::after,
+  .streaming-cursor > :is(ul, ol):last-child > li:last-child::after,
+  .streaming-cursor > blockquote:last-child > :last-child::after {
     content: '';
     display: inline-block;
     width: 0.38em;

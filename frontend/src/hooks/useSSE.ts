@@ -244,7 +244,7 @@ export function useSSE() {
           // protects the old segment's authoritative LLM_COMPLETE snapshot.
           cancelPendingFlush();
           // Mark previous segment as complete — a new turn implies the prior is done
-          updateCurrentSegment({ status: 'complete' });
+          updateCurrentSegment({ status: 'complete', llmStreamChannel: null });
           pushSegment(event.agent ?? 'Agent');
           // Engine started executing — clear the concurrency-queue banner if any.
           setQueuedInfo(null);
@@ -264,7 +264,7 @@ export function useSSE() {
         case StreamEventType.LLM_CHUNK: {
           const reasoning = data?.reasoning_content as string | undefined;
           if (reasoning !== undefined) {
-            updateCurrentSegment({ reasoningContent: reasoning, isThinking: true });
+            updateCurrentSegment({ reasoningContent: reasoning, llmStreamChannel: 'reasoning' });
           }
 
           const rawToolProgress = data?.tool_call_progress;
@@ -279,7 +279,7 @@ export function useSSE() {
               })),
               // Native-call output follows reasoning semantically, just like
               // ordinary content, so the thinking indicator is no longer live.
-              isThinking: false,
+              llmStreamChannel: null,
             });
           }
 
@@ -288,9 +288,7 @@ export function useSSE() {
             // Auto-fold thinking when content starts arriving
             const currentSeg = useStreamStore.getState().segments;
             const last = currentSeg[currentSeg.length - 1];
-            if (last?.isThinking) {
-              updateCurrentSegment({ isThinking: false });
-            }
+            if (last) updateCurrentSegment({ llmStreamChannel: 'content' });
             // Use an id-targeted RAF update so a late frame cannot write into
             // the next LLM invocation's segment.
             if (last) scheduleContentUpdate(last.id, content);
@@ -307,7 +305,7 @@ export function useSSE() {
 
           updateCurrentSegment({
             ...(d.content !== undefined ? { content: d.content } : {}),
-            isThinking: false,
+            llmStreamChannel: null,
             // The accepted envelope is authoritative.  Keep calls visible as
             // queued until their serial TOOL_START replaces each draft card.
             toolCallProgress: (d.tool_calls ?? []).map((call, index) => ({
@@ -330,7 +328,7 @@ export function useSSE() {
         }
 
         case StreamEventType.AGENT_COMPLETE:
-          updateCurrentSegment({ status: 'complete' });
+          updateCurrentSegment({ status: 'complete', llmStreamChannel: null });
           break;
 
         case StreamEventType.TOOL_START: {

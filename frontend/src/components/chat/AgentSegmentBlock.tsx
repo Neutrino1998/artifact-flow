@@ -25,8 +25,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
   const [expanded, setExpanded] = useState(defaultExpanded);
 
   const isExpanded = isActive || expanded;
-  const isToolPhase = segment.toolCalls.length > 0 || segment.toolCallProgress.length > 0;
-  const showContentCursor = isActive && !isToolPhase;
+  const showContentCursor = isActive && segment.llmStreamChannel === 'content';
   const hasBody = !!(
     segment.reasoningContent
     || segment.toolCalls.length > 0
@@ -96,9 +95,7 @@ function AgentSegmentBlock({ segment, isActive, defaultExpanded, stepNumber }: A
         <div className="px-3 pb-3 space-y-3">
           {/* Thinking block */}
           {segment.reasoningContent && (() => {
-            const isThinkingLive = isActive
-              && !segment.content
-              && !isToolPhase;
+            const isThinkingLive = isActive && segment.llmStreamChannel === 'reasoning';
             return (
               <ThinkingBlock
                 content={segment.reasoningContent}
