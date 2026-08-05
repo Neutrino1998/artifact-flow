@@ -328,15 +328,22 @@ func (c *Controller) applyLocked(ctx context.Context, input string, options appl
 			return fmt.Errorf("sandbox runtime smoke failed: %w", err)
 		}
 	}
+	services, err := c.reconcileServices(state.Current, target, meta, input == "current")
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(c.Out, "reconcile services: %s\n", strings.Join(services, ", "))
 	if err := c.setMaintenance(true); err != nil {
 		return err
 	}
-	if err := c.reconcile(ctx, site, target, meta); err != nil {
+	if err := c.reconcile(ctx, site, target, meta, services); err != nil {
 		recovered := false
 		if state.Current != "" && state.Current != target {
 			_, _ = fmt.Fprintf(c.Err, "apply failed; attempting last-known-good release %s\n", state.Current)
 			if previous, previousErr := c.readRelease(state.Current); previousErr == nil {
-				recovered = c.reconcile(ctx, site, state.Current, previous) == nil
+				if recoveryServices, serviceErr := c.reconcileServices(target, state.Current, previous, false); serviceErr == nil {
+					recovered = c.reconcile(ctx, site, state.Current, previous, recoveryServices) == nil
+				}
 			}
 		}
 		if recovered {
@@ -571,7 +578,50 @@ func (c *Controller) composeCommand(site Site, release string, meta ReleaseMetad
 	return Command{Name: "docker", Args: composeArgs, Dir: filepath.Join(releaseRoot, "deploy"), Env: env}
 }
 
-func (c *Controller) reconcile(ctx context.Context, site Site, release string, meta ReleaseMetadata) error {
+func (c *Controller) reconcileServices(currentRelease, targetRelease string, target ReleaseMetadata, refreshSite bool) ([]string, error) {
+	services := []string{"release", "backend"}
+	if currentRelease == "" {
+		return append(services, "frontend", "caddy"), nil
+	}
+
+	current, err := c.readRelease(currentRelease)
+	if err != nil {
+		return nil, err
+	}
+	if current.AppVersion != target.AppVersion {
+		services = append(services, "frontend")
+	}
+
+	restartCaddy := refreshSite
+	if !restartCaddy {
+		currentCaddy, _, _, err := infraImageRefs(current.Images)
+		if err != nil {
+			return nil, err
+		}
+		targetCaddy, _, _, err := infraImageRefs(target.Images)
+		if err != nil {
+			return nil, err
+		}
+		restartCaddy = currentCaddy != targetCaddy
+	}
+	if !restartCaddy {
+		currentDeploy, err := treeDigest(filepath.Join(c.releaseDir(currentRelease), "deploy"))
+		if err != nil {
+			return nil, err
+		}
+		targetDeploy, err := treeDigest(filepath.Join(c.releaseDir(targetRelease), "deploy"))
+		if err != nil {
+			return nil, err
+		}
+		restartCaddy = currentDeploy != targetDeploy
+	}
+	if restartCaddy {
+		services = append(services, "caddy")
+	}
+	return services, nil
+}
+
+func (c *Controller) reconcile(ctx context.Context, site Site, release string, meta ReleaseMetadata, services []string) error {
 	// Existing v2 sites predate outbound CA support. Create the optional stable
 	// bind source only in the mutating Apply path; site validation and plan stay
 	// read-only. Ansible consumes the same controller-side directory via /work.
@@ -588,7 +638,8 @@ func (c *Controller) reconcile(ctx context.Context, site Site, release string, m
 		}
 		args = append(args, "--profile", "infra")
 	}
-	args = append(args, "up", "-d", "--remove-orphans", "--force-recreate", "--scale", "backend="+strconv.Itoa(site.BackendReplicas), "release", "backend", "frontend", "caddy")
+	args = append(args, "up", "-d", "--remove-orphans", "--force-recreate", "--scale", "backend="+strconv.Itoa(site.BackendReplicas))
+	args = append(args, services...)
 	if err := c.Runner.Run(ctx, c.composeCommand(site, release, meta, args...)); err != nil {
 		return err
 	}

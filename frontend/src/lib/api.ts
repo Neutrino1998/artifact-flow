@@ -58,6 +58,7 @@ import type {
 } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
 import { API_URL } from './apiBase';
+import { fetchWithMaintenanceRedirect } from './maintenance';
 
 const BASE_URL = API_URL;
 const CONVERSATION_DETAIL_TTL_MS = 20_000;
@@ -149,7 +150,7 @@ function formatApiError(status: number, body: string, requestId?: string): strin
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const res = await fetchWithMaintenanceRedirect(`${BASE_URL}${path}`, {
     headers: {
       'Content-Type': 'application/json',
       ...authHeaders(),
@@ -188,7 +189,7 @@ export function getNotifications(): Promise<SiteNotificationsResponse> {
 // Auth
 export function login(body: LoginRequest) {
   // Login does not need auth headers
-  return fetch(`${BASE_URL}/api/v1/auth/login`, {
+  return fetchWithMaintenanceRedirect(`${BASE_URL}/api/v1/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -262,7 +263,7 @@ export async function importSkill(
     ? '/api/v1/admin/skills/import'
     : '/api/v1/skills/import';
 
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const res = await fetchWithMaintenanceRedirect(`${BASE_URL}${path}`, {
     method: 'POST',
     headers: authHeaders(),
     body: formData,
@@ -289,7 +290,7 @@ export async function downloadSkillBundle(
   const path = opts?.admin
     ? `/api/v1/admin/skills/${encodeURIComponent(skillId)}/export`
     : `/api/v1/skills/${encodeURIComponent(skillId)}/export`;
-  const res = await fetch(
+  const res = await fetchWithMaintenanceRedirect(
     `${BASE_URL}${path}`,
     { headers: authHeaders() },
   );
@@ -524,7 +525,7 @@ export function getVersion(
 }
 
 async function fetchRawBlob(path: string): Promise<Blob> {
-  const res = await fetch(`${BASE_URL}${path}`, { headers: authHeaders() });
+  const res = await fetchWithMaintenanceRedirect(`${BASE_URL}${path}`, { headers: authHeaders() });
 
   if (res.status === 401) {
     useAuthStore.getState().logout();
@@ -827,7 +828,7 @@ export async function bulkImportUsers(file: File): Promise<BulkImportResponse> {
   const formData = new FormData();
   formData.append('file', file);
 
-  const res = await fetch(`${BASE_URL}/api/v1/admin/users/bulk-import`, {
+  const res = await fetchWithMaintenanceRedirect(`${BASE_URL}/api/v1/admin/users/bulk-import`, {
     method: 'POST',
     headers: authHeaders(),
     body: formData,
@@ -997,7 +998,7 @@ export function deleteToolUnit(name: string) {
 export async function importToolUnitSeed(file: File): Promise<ToolUnitImportResponse> {
   const formData = new FormData();
   formData.append('file', file);
-  const res = await fetch(`${BASE_URL}/api/v1/admin/tools/units/import`, {
+  const res = await fetchWithMaintenanceRedirect(`${BASE_URL}/api/v1/admin/tools/units/import`, {
     method: 'POST',
     headers: authHeaders(),
     body: formData,
@@ -1018,7 +1019,7 @@ export async function importToolUnitSeed(file: File): Promise<ToolUnitImportResp
 
 /** 导出工具 unit 的 seed bundle；真实凭证不会出现在 bundle 中。 */
 export async function downloadToolUnitSeedBundle(name: string): Promise<Blob> {
-  const res = await fetch(
+  const res = await fetchWithMaintenanceRedirect(
     `${BASE_URL}/api/v1/admin/tools/units/${encodeURIComponent(name)}/export`,
     { headers: authHeaders() },
   );

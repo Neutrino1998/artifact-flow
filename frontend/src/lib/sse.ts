@@ -1,6 +1,7 @@
 import type { SSEEvent } from '@/types/events';
 import { useAuthStore } from '@/stores/authStore';
 import { API_URL } from './apiBase';
+import { MaintenanceNavigation, fetchWithMaintenanceRedirect } from './maintenance';
 
 const BASE_URL = API_URL;
 
@@ -35,7 +36,7 @@ export function connectSSE(
     headers['Last-Event-ID'] = lastEventId;
   }
 
-  fetch(url, { headers, signal })
+  fetchWithMaintenanceRedirect(url, { headers, signal })
     .then(async (res) => {
       if (res.status === 401) {
         useAuthStore.getState().logout();
@@ -97,6 +98,7 @@ export function connectSSE(
       handlers.onClose?.();
     })
     .catch((err) => {
+      if (err instanceof MaintenanceNavigation) return;
       if ((err as Error).name === 'AbortError') {
         handlers.onClose?.();
         return;
