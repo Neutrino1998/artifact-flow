@@ -23,7 +23,7 @@ tools:
   update_artifact: enabled
 # vision 依赖:model 必须是 models.yaml 里 vision:true 的条目(read_artifact 只向
 # vision 模型注入图块;文本模型只会得到占位文本)。
-model: qwen3.6-27b-vision
+model: 视觉模型
 max_tool_rounds: 20
 ---
 

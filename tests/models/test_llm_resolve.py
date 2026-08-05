@@ -24,7 +24,7 @@ from models.llm import (
 
 def test_known_alias_resolves():
     assert (
-        _resolve_model_params("deepseek-v4-flash", api_key="test-key")["model"]
+        _resolve_model_params("文本模型", api_key="test-key")["model"]
         == "openai/deepseek-v4-flash"
     )
 
@@ -118,7 +118,7 @@ def test_default_timeout_is_split_by_http_phase(monkeypatch):
     monkeypatch.setattr("models.llm.settings.LLM_POOL_TIMEOUT", 2.0)
 
     timeout = _resolve_model_params(
-        "deepseek-v4-flash", api_key="test-key"
+        "文本模型", api_key="test-key"
     )["timeout"]
 
     assert isinstance(timeout, httpx.Timeout)
@@ -258,11 +258,11 @@ def test_bare_model_with_base_url_no_double_prefix():
 # ============================================================
 
 def test_vision_flag_true_for_multimodal_alias():
-    assert model_supports_vision("qwen3.6-27b-vision") is True
+    assert model_supports_vision("视觉模型") is True
 
 
 def test_vision_flag_false_for_text_alias():
-    assert model_supports_vision("deepseek-v4-flash") is False
+    assert model_supports_vision("文本模型") is False
 
 
 def test_vision_flag_false_for_unknown_alias():
@@ -473,7 +473,7 @@ async def test_bad_request_fails_fast_no_retry(monkeypatch):
     monkeypatch.setattr("models.llm.acompletion", fake_acompletion)
     with pytest.raises(BadRequestError):
         await _drain(astream_with_retry([{"role": "user", "content": "x"}],
-                                        model="deepseek-v4-flash", api_key="test-key",
+                                        model="文本模型", api_key="test-key",
                                         user_id="test-user",
                                         max_retries=3, retry_delay=0))
     assert calls["n"] == 1  # 立即抛,无重试
@@ -513,7 +513,7 @@ async def test_rate_limit_is_retried(monkeypatch):
     monkeypatch.setattr("models.llm.acompletion", fake_acompletion)
     with pytest.raises(RateLimitError):
         await _drain(astream_with_retry([{"role": "user", "content": "x"}],
-                                        model="deepseek-v4-flash", api_key="test-key",
+                                        model="文本模型", api_key="test-key",
                                         user_id="test-user",
                                         max_retries=3, retry_delay=0))
     assert calls["n"] == 3  # 重试满 3 次才抛

@@ -10,7 +10,7 @@ models:
   # 之前两条用 0.6/0.7 是从 Qwen3.6 preset 不假思索抄来的 —— Qwen 那套 RL 训练评测
   # 用低温,DeepSeek V3.x 官方推荐对称 1.0(thinking 和 non-thinking 共享同一组采样
   # 参数),没有 thinking-需要-低温 这个差异。两边对称,后续做评测才有干净的对照。
-  deepseek-v4-flash:
+  文本模型:
     model: openai/deepseek-v4-flash
     context_window: 260000
     base_url: http://172.25.16.129:85/v1
@@ -36,7 +36,7 @@ models:
         chat_template_kwargs:
           thinking: false
 
-  qwen3.6-27b-vision:
+  视觉模型:
     model: openai/qwen3.6-27b
     context_window: 128000
     base_url: http://172.22.3.54/v1

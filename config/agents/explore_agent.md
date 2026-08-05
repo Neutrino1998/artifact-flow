@@ -25,7 +25,7 @@ tools:
   bash: enabled
   mount: enabled
   persist: enabled
-model: deepseek-v4-flash
+model: 文本模型
 max_tool_rounds: 50
 ---
 

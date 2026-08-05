@@ -26,7 +26,7 @@ class _FakeAgentConfig:
     description: str = "test"
     capabilities: list = field(default_factory=list)
     tools: dict = field(default_factory=dict)
-    model: str = "deepseek-v4-flash"
+    model: str = "文本模型"
     max_tool_rounds: int = 3
     role_prompt: str = ""
 

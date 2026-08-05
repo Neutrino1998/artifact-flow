@@ -22,7 +22,7 @@ async def materialized_lead_agent(db_session: AsyncSession):
         Agent(
             name="lead_agent",
             description="test lead",
-            model="deepseek-v4-flash",
+            model="文本模型",
             max_tool_rounds=3,
             internal=False,
             role_prompt="test",
@@ -66,7 +66,7 @@ async def test_meta_returns_full_shape(client: AsyncClient):
     # lead_agent_model — composer model badge
     assert "lead_agent_model" in data
     assert isinstance(data["lead_agent_model"], str)
-    assert data["lead_agent_model"] == "deepseek-v4-flash"
+    assert data["lead_agent_model"] == "文本模型"
 
     # max_upload_size — composer's per-file size pre-gate (mirrors MAX_UPLOAD_SIZE)
     assert "max_upload_size" in data

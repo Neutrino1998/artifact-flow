@@ -65,7 +65,7 @@ def _mcp_server_md(name="inventory", desc="Inventory MCP"):
 
 
 def _agent_md(name="lead_agent", tools_block="  web_search: enabled\n  read_artifact: enabled",
-              model="deepseek-v4-flash"):
+              model="文本模型"):
     return (
         "---\n"
         f"name: {name}\n"
@@ -512,7 +512,7 @@ async def test_agent_builtin_split(db_session, cfg):
     await _run(db_session, cfg)
 
     agent = (await db_session.execute(select(Agent).where(Agent.name == "lead_agent"))).scalar_one()
-    assert agent.model == "deepseek-v4-flash"
+    assert agent.model == "文本模型"
     assert agent.max_tool_rounds == 50
     assert agent.builtin_tools == {"web_search": "enabled", "read_artifact": "enabled"}
 
@@ -542,11 +542,11 @@ async def test_agent_model_validation_runs_before_reconcile_writes(db_session, c
     _write(tools / "weather.md", _singleton_tool_md())
     _write(
         agents / "lead_agent.md",
-        _agent_md(name="lead_agent", tools_block="  {}", model="deepseek-v4-flash"),
+        _agent_md(name="lead_agent", tools_block="  {}", model="文本模型"),
     )
     _write(
         agents / "compact_agent.md",
-        _agent_md(name="compact_agent", tools_block="  {}", model="qwen3.6-27b-vision"),
+        _agent_md(name="compact_agent", tools_block="  {}", model="视觉模型"),
     )
 
     with pytest.raises(ValueError, match="compact_agent.*at least every Agent"):
@@ -725,7 +725,7 @@ async def test_snapshot_reconstructs_http_tool(db_session, cfg):
 
     # agent 快照:builtin + units 分开
     agent = snap.agents["lead_agent"]
-    assert agent.model == "deepseek-v4-flash"
+    assert agent.model == "文本模型"
     assert agent.builtin_tools == {"web_search": "enabled"}
     assert agent.units == {"weather": "enabled"}
 

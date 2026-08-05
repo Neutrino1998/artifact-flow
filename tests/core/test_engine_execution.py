@@ -35,7 +35,7 @@ class _FakeAgentConfig:
     name: str = "lead_agent"
     description: str = "test lead"
     tools: dict = field(default_factory=dict)
-    model: str = "deepseek-v4-flash"
+    model: str = "文本模型"
     max_tool_rounds: int = 3
     role_prompt: str = "You are a test agent."
     internal: bool = False
@@ -313,7 +313,7 @@ class TestLeadCompletion:
         assert len(completes) == 1
         assert starts[0]["agent"] == "lead_agent"
         assert completes[0]["agent"] == "lead_agent"
-        assert starts[0]["data"]["model"] == "deepseek-v4-flash"
+        assert starts[0]["data"]["model"] == "文本模型"
         assert starts[0]["data"]["exposed_tool_names"] == []
         assert starts[0]["data"]["replay_reasoning"] is True
         assert "tools" not in starts[0]["data"]
@@ -1524,7 +1524,7 @@ class TestInEngineCompaction:
         # Content = memory-aid frame + raw summary from compact_agent
         assert summary_ev.data["content"].startswith("[Prior conversation has been compacted")
         assert "compacted prior turn" in summary_ev.data["content"]
-        assert summary_ev.data["model"] == "deepseek-v4-flash"
+        assert summary_ev.data["model"] == "文本模型"
         assert summary_ev.data["error"] is None
 
     async def test_under_threshold_no_compaction(self):
