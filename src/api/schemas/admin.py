@@ -168,6 +168,7 @@ class InstanceDiagnosticEvent(BaseModel):
     request_id: Optional[str] = None
     conversation_id: Optional[str] = None
     message_id: Optional[str] = None
+    active_message_ids: List[str] = Field(default_factory=list)
     instance_id: str
     tasks: List[InstanceEventStackOwner] = Field(default_factory=list)
     threads: List[InstanceEventStackOwner] = Field(default_factory=list)

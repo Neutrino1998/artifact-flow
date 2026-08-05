@@ -7,10 +7,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 )
+
+const frontendReadinessScript = `const timeout=Number(process.argv[1])*1000;const req=require('http').get('http://localhost:3000/',res=>process.exit(res.statusCode<500?0:1));req.setTimeout(timeout,()=>{req.destroy();process.exit(1)});req.on('error',()=>process.exit(1));`
 
 type Controller struct {
 	Root   string
@@ -220,7 +223,7 @@ func (c *Controller) planApply(input string, options applyOptions) (Plan, error)
 	if options.KeepMaintenance {
 		finalMaintenanceAction = "leave maintenance enabled for operator verification"
 	}
-	plan.Actions = append(plan.Actions, "enable maintenance", "compose reconcile via "+site.Executor, "wait for load-balancer readiness", "atomically write state.json", finalMaintenanceAction)
+	plan.Actions = append(plan.Actions, "enable maintenance", "compose reconcile via "+site.Executor, "wait for release readiness", "atomically write state.json", finalMaintenanceAction)
 	return plan, nil
 }
 
@@ -253,7 +256,7 @@ func (c *Controller) PlanRollback() (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	return Plan{Operation: "rollback", Current: state.Current, Target: state.Previous, AppVersion: meta.AppVersion, ReleaseKind: meta.Kind, Actions: []string{"enable maintenance", "compose reconcile the previous immutable release", "wait for load-balancer readiness", "atomically swap current and previous in state.json", "disable maintenance"}}, nil
+	return Plan{Operation: "rollback", Current: state.Current, Target: state.Previous, AppVersion: meta.AppVersion, ReleaseKind: meta.Kind, Actions: []string{"enable maintenance", "compose reconcile the previous immutable release", "wait for release readiness", "atomically swap current and previous in state.json", "disable maintenance"}}, nil
 }
 
 func (c *Controller) Apply(ctx context.Context, input string) error {
@@ -328,15 +331,22 @@ func (c *Controller) applyLocked(ctx context.Context, input string, options appl
 			return fmt.Errorf("sandbox runtime smoke failed: %w", err)
 		}
 	}
+	services, err := c.reconcileServices(state.Current, target, meta, input == "current")
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(c.Out, "reconcile services: %s\n", strings.Join(services, ", "))
 	if err := c.setMaintenance(true); err != nil {
 		return err
 	}
-	if err := c.reconcile(ctx, site, target, meta); err != nil {
+	if err := c.reconcile(ctx, site, target, meta, services); err != nil {
 		recovered := false
 		if state.Current != "" && state.Current != target {
 			_, _ = fmt.Fprintf(c.Err, "apply failed; attempting last-known-good release %s\n", state.Current)
 			if previous, previousErr := c.readRelease(state.Current); previousErr == nil {
-				recovered = c.reconcile(ctx, site, state.Current, previous) == nil
+				if recoveryServices, serviceErr := c.reconcileServices(target, state.Current, previous, false); serviceErr == nil {
+					recovered = c.reconcile(ctx, site, state.Current, previous, recoveryServices) == nil
+				}
 			}
 		}
 		if recovered {
@@ -571,7 +581,50 @@ func (c *Controller) composeCommand(site Site, release string, meta ReleaseMetad
 	return Command{Name: "docker", Args: composeArgs, Dir: filepath.Join(releaseRoot, "deploy"), Env: env}
 }
 
-func (c *Controller) reconcile(ctx context.Context, site Site, release string, meta ReleaseMetadata) error {
+func (c *Controller) reconcileServices(currentRelease, targetRelease string, target ReleaseMetadata, refreshSite bool) ([]string, error) {
+	services := []string{"release", "backend"}
+	if currentRelease == "" {
+		return append(services, "frontend", "caddy"), nil
+	}
+
+	current, err := c.readRelease(currentRelease)
+	if err != nil {
+		return nil, err
+	}
+	if current.AppVersion != target.AppVersion {
+		services = append(services, "frontend")
+	}
+
+	restartCaddy := refreshSite
+	if !restartCaddy {
+		currentCaddy, _, _, err := infraImageRefs(current.Images)
+		if err != nil {
+			return nil, err
+		}
+		targetCaddy, _, _, err := infraImageRefs(target.Images)
+		if err != nil {
+			return nil, err
+		}
+		restartCaddy = currentCaddy != targetCaddy
+	}
+	if !restartCaddy {
+		currentDeploy, err := treeDigest(filepath.Join(c.releaseDir(currentRelease), "deploy"))
+		if err != nil {
+			return nil, err
+		}
+		targetDeploy, err := treeDigest(filepath.Join(c.releaseDir(targetRelease), "deploy"))
+		if err != nil {
+			return nil, err
+		}
+		restartCaddy = currentDeploy != targetDeploy
+	}
+	if restartCaddy {
+		services = append(services, "caddy")
+	}
+	return services, nil
+}
+
+func (c *Controller) reconcile(ctx context.Context, site Site, release string, meta ReleaseMetadata, services []string) error {
 	// Existing v2 sites predate outbound CA support. Create the optional stable
 	// bind source only in the mutating Apply path; site validation and plan stay
 	// read-only. Ansible consumes the same controller-side directory via /work.
@@ -588,31 +641,52 @@ func (c *Controller) reconcile(ctx context.Context, site Site, release string, m
 		}
 		args = append(args, "--profile", "infra")
 	}
-	args = append(args, "up", "-d", "--remove-orphans", "--force-recreate", "--scale", "backend="+strconv.Itoa(site.BackendReplicas), "release", "backend", "frontend", "caddy")
+	args = append(args, "up", "-d", "--remove-orphans", "--force-recreate", "--scale", "backend="+strconv.Itoa(site.BackendReplicas))
+	args = append(args, services...)
 	if err := c.Runner.Run(ctx, c.composeCommand(site, release, meta, args...)); err != nil {
 		return err
 	}
 	deadline := time.Now().Add(time.Duration(site.ReadyTimeoutSeconds) * time.Second)
 	last := error(context.DeadlineExceeded)
-	for {
+	probe := func(command func(timeoutSeconds int) Command) error {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
-			break
+			return context.DeadlineExceeded
 		}
 		probeSeconds := int((remaining + time.Second - 1) / time.Second)
 		if probeSeconds > 8 {
 			probeSeconds = 8
 		}
 		probeCtx, cancel := context.WithTimeout(ctx, remaining)
-		_, last = c.Runner.Output(probeCtx, c.composeCommand(site, release, meta, "exec", "-T", "caddy", "wget", "-q", "--spider", "-T", strconv.Itoa(probeSeconds), "http://localhost:2021/health/ready"))
-		cancel()
+		defer cancel()
+		_, err := c.Runner.Output(probeCtx, command(probeSeconds))
+		return err
+	}
+	waitForFrontend := slices.Contains(services, "frontend")
+	for {
+		if time.Until(deadline) <= 0 {
+			break
+		}
+		last = probe(func(probeSeconds int) Command {
+			return c.composeCommand(site, release, meta, "exec", "-T", "caddy", "wget", "-q", "--spider", "-T", strconv.Itoa(probeSeconds), "http://localhost:2021/health/ready")
+		})
+		if last != nil {
+			last = fmt.Errorf("backend readiness through Caddy: %w", last)
+		} else if waitForFrontend {
+			last = probe(func(probeSeconds int) Command {
+				return c.composeCommand(site, release, meta, "exec", "-T", "frontend", "node", "-e", frontendReadinessScript, strconv.Itoa(probeSeconds))
+			})
+			if last != nil {
+				last = fmt.Errorf("frontend readiness: %w", last)
+			}
+		}
 		if last == nil {
 			return nil
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		remaining = time.Until(deadline)
+		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			break
 		}
@@ -625,5 +699,5 @@ func (c *Controller) reconcile(ctx context.Context, site Site, release string, m
 		case <-timer.C:
 		}
 	}
-	return fmt.Errorf("load balancer readiness timed out after %ds: %w", site.ReadyTimeoutSeconds, last)
+	return fmt.Errorf("release readiness timed out after %ds: %w", site.ReadyTimeoutSeconds, last)
 }

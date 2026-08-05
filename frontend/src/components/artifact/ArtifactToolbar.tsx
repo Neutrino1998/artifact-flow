@@ -6,26 +6,14 @@ import { useStreamStore } from '@/stores/streamStore';
 import { useArtifacts } from '@/hooks/useArtifacts';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { fetchArtifactRawObjectUrl } from '@/lib/api';
-import { triggerBlobDownload, triggerObjectUrlDownload } from '@/lib/download';
+import {
+  getTextArtifactDownloadFilename,
+  triggerBlobDownload,
+  triggerObjectUrlDownload,
+} from '@/lib/download';
 import { BUTTON_GHOST_ICON, BUTTON_PRIMARY, SELECT_COMPACT } from '@/lib/styles';
 import { SELECT_CHEVRON_COMPACT } from '@/components/ui/SelectChevron';
 import ArtifactTabs from './ArtifactTabs';
-
-function getFileExtension(contentType: string): string {
-  const map: Record<string, string> = {
-    'text/markdown': '.md',
-    'text/plain': '.txt',
-    'text/html': '.html',
-    'text/css': '.css',
-    'text/csv': '.csv',
-    'application/json': '.json',
-    'application/javascript': '.js',
-    'text/javascript': '.js',
-    'text/x-python': '.py',
-    'text/x-typescript': '.ts',
-  };
-  return map[contentType] ?? '.txt';
-}
 
 export default function ArtifactToolbar() {
   const current = useArtifactStore((s) => s.current);
@@ -56,8 +44,7 @@ export default function ArtifactToolbar() {
       return;
     }
     const content = selectedVersion?.content ?? current.content;
-    const ext = getFileExtension(current.content_type);
-    const filename = current.title.replace(/[/\\?%*:|"<>]/g, '-') + ext;
+    const filename = getTextArtifactDownloadFilename(current.title, current.content_type);
     triggerBlobDownload(filename, new Blob([content], { type: 'text/plain;charset=utf-8' }));
   }, [current, selectedVersion]);
 

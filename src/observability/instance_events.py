@@ -264,12 +264,16 @@ def _bounded_threads(value: Any) -> list[dict[str, Any]]:
     return out
 
 
-def _infer_message_id(tasks: list[dict[str, Any]]) -> Optional[str]:
-    for task in tasks:
-        match = _EXEC_TASK_RE.match(str(task.get("name") or ""))
-        if match:
-            return match.group(1)
-    return None
+def _bounded_active_message_ids(value: Any) -> list[str]:
+    """Return a bounded, deterministic list from a new-format loop record."""
+    if not isinstance(value, list):
+        return []
+    valid = {
+        item
+        for item in value
+        if isinstance(item, str) and _EXEC_TASK_RE.fullmatch(f"exec-{item}")
+    }
+    return sorted(valid)[: config.OBS_ADMIN_EVENT_MAX_TASKS]
 
 
 def _parse_loop_events(text: str, instance_id: str) -> list[dict[str, Any]]:
@@ -281,6 +285,9 @@ def _parse_loop_events(text: str, instance_id: str) -> list[dict[str, Any]]:
             continue
         tasks = _bounded_tasks(record.get("tasks"))
         threads = _bounded_threads(record.get("threads"))
+        active_message_ids = _bounded_active_message_ids(
+            record.get("active_message_ids")
+        )
         wedged = bool(record.get("wedged", False))
         lag_ms = record.get("lag_ms")
         loop_thread = next((thread for thread in threads if thread["event_loop"]), None)
@@ -305,7 +312,10 @@ def _parse_loop_events(text: str, instance_id: str) -> list[dict[str, Any]]:
             "location": suspected_location,
             "request_id": None,
             "conversation_id": None,
-            "message_id": _infer_message_id(tasks),
+            # A lag pauses the entire event loop.  Concurrent execution tasks
+            # are context, not proof that an arbitrary first task caused it.
+            "message_id": None,
+            "active_message_ids": active_message_ids,
             "instance_id": instance_id,
             "tasks": tasks,
             "threads": threads,

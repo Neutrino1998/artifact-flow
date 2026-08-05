@@ -16,9 +16,10 @@ import (
 )
 
 type fakeRunner struct {
-	commands    []Command
-	failName    string
-	failUpCount int
+	commands                    []Command
+	failName                    string
+	failUpCount                 int
+	unhealthyFrontendAppVersion string
 }
 
 func (r *fakeRunner) Run(_ context.Context, command Command) error {
@@ -35,6 +36,11 @@ func (r *fakeRunner) Run(_ context.Context, command Command) error {
 
 func (r *fakeRunner) Output(_ context.Context, command Command) (string, error) {
 	r.commands = append(r.commands, command)
+	if r.unhealthyFrontendAppVersion != "" &&
+		slices.Contains(command.Env, "AF_VERSION="+r.unhealthyFrontendAppVersion) &&
+		strings.Contains(strings.Join(command.Args, "\x00"), "http://localhost:3000/") {
+		return "", fmt.Errorf("forced unhealthy frontend")
+	}
 	if command.Name == r.failName {
 		return "", fmt.Errorf("forced %s failure", command.Name)
 	}
@@ -125,6 +131,10 @@ func makeAppOnlyBundle(t *testing.T, parent, id string) string {
 }
 
 func makeAppBundleWithInfra(t *testing.T, parent, id string, withInfra bool) string {
+	return makeAppBundleWithDeploy(t, parent, id, withInfra, "services: {}\n")
+}
+
+func makeAppBundleWithDeploy(t *testing.T, parent, id string, withInfra bool, composeBase string) string {
 	t.Helper()
 	bundle := filepath.Join(parent, "bundle-"+id)
 	if err := os.MkdirAll(bundle, 0o755); err != nil {
@@ -133,7 +143,7 @@ func makeAppBundleWithInfra(t *testing.T, parent, id string, withInfra bool) str
 	makeTarGz(t, filepath.Join(bundle, "app.tar.gz"), map[string]string{"images.txt": "app"})
 	makeTarGz(t, filepath.Join(bundle, "config.tar.gz"), map[string]string{"config/models/models.yaml": "endpoint: http://old\n"})
 	makeTarGz(t, filepath.Join(bundle, "deploy.tar.gz"), map[string]string{
-		"deploy/compose.base.yml":     "services: {}\n",
+		"deploy/compose.base.yml":     composeBase,
 		"deploy/compose.sandbox.yml":  "services: {}\n",
 		"deploy/compose.tls-acme.yml": "services: {}\n",
 	})
@@ -168,6 +178,18 @@ func newTestController(t *testing.T) (*Controller, *fakeRunner) {
 	c := NewController(root, &bytes.Buffer{}, &bytes.Buffer{})
 	c.Runner = runner
 	return c, runner
+}
+
+func forceRecreateCommand(t *testing.T, commands []Command) Command {
+	t.Helper()
+	for i := len(commands) - 1; i >= 0; i-- {
+		command := commands[i]
+		if command.Name == "docker" && slices.Contains(command.Args, "up") && slices.Contains(command.Args, "--force-recreate") {
+			return command
+		}
+	}
+	t.Fatal("no force-recreate compose command recorded")
+	return Command{}
 }
 
 func TestLoadSiteRejectsUnknownAndDuplicateFields(t *testing.T) {
@@ -593,6 +615,13 @@ func TestAppOnlyRequiresCurrentReleaseAndInheritsItsInfra(t *testing.T) {
 	if err := c.Apply(context.Background(), appOnly); err != nil {
 		t.Fatal(err)
 	}
+	appOnlyReconcile := forceRecreateCommand(t, runner.commands)
+	if !slices.Contains(appOnlyReconcile.Args, "frontend") {
+		t.Fatalf("app release did not recreate frontend: %v", appOnlyReconcile.Args)
+	}
+	if slices.Contains(appOnlyReconcile.Args, "caddy") {
+		t.Fatalf("app-only release with unchanged deploy/infra recreated Caddy: %v", appOnlyReconcile.Args)
+	}
 	v2, err := c.readRelease("v2")
 	if err != nil {
 		t.Fatal(err)
@@ -608,6 +637,47 @@ func TestAppOnlyRequiresCurrentReleaseAndInheritsItsInfra(t *testing.T) {
 		if command.Name == "docker" && len(command.Args) >= 3 && command.Args[0] == "load" && strings.Contains(command.Args[2], "infra") {
 			t.Fatalf("app-only apply loaded an infra archive: %v", command.Args)
 		}
+	}
+}
+
+func TestAppApplyRecreatesCaddyOnlyWhenDeployChanges(t *testing.T) {
+	c, runner := newTestController(t)
+	if err := c.Apply(context.Background(), makeAppBundle(t, t.TempDir(), "v1")); err != nil {
+		t.Fatal(err)
+	}
+
+	changedDeploy := makeAppBundleWithDeploy(
+		t,
+		t.TempDir(),
+		"v2",
+		false,
+		"services:\n  caddy:\n    image: changed\n",
+	)
+	runner.commands = nil
+	if err := c.Apply(context.Background(), changedDeploy); err != nil {
+		t.Fatal(err)
+	}
+	reconcile := forceRecreateCommand(t, runner.commands)
+	if !slices.Contains(reconcile.Args, "caddy") {
+		t.Fatalf("deploy-changing app release did not recreate Caddy: %v", reconcile.Args)
+	}
+}
+
+func TestApplyCurrentRefreshesCaddyWithoutRecreatingFrontend(t *testing.T) {
+	c, runner := newTestController(t)
+	if err := c.Apply(context.Background(), makeAppBundle(t, t.TempDir(), "v1")); err != nil {
+		t.Fatal(err)
+	}
+	runner.commands = nil
+	if err := c.Apply(context.Background(), "current"); err != nil {
+		t.Fatal(err)
+	}
+	reconcile := forceRecreateCommand(t, runner.commands)
+	if !slices.Contains(reconcile.Args, "caddy") {
+		t.Fatalf("apply current did not refresh Caddy site state: %v", reconcile.Args)
+	}
+	if slices.Contains(reconcile.Args, "frontend") {
+		t.Fatalf("apply current recreated unchanged frontend: %v", reconcile.Args)
 	}
 }
 
@@ -681,8 +751,25 @@ func TestApplyWritesOneStateAndConfigHotfixBindsBase(t *testing.T) {
 	if err := os.WriteFile(model, []byte("endpoint: http://new\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	runner.commands = nil
 	if err := c.ConfigApply(context.Background(), workspace, "hotfix-model-v2"); err != nil {
 		t.Fatal(err)
+	}
+	hotfixReconcile := forceRecreateCommand(t, runner.commands)
+	for _, service := range []string{"release", "backend"} {
+		if !slices.Contains(hotfixReconcile.Args, service) {
+			t.Fatalf("config apply omitted %s: %v", service, hotfixReconcile.Args)
+		}
+	}
+	for _, service := range []string{"frontend", "caddy"} {
+		if slices.Contains(hotfixReconcile.Args, service) {
+			t.Fatalf("config apply recreated unchanged %s: %v", service, hotfixReconcile.Args)
+		}
+	}
+	for _, command := range runner.commands {
+		if strings.Contains(strings.Join(command.Args, "\x00"), "http://localhost:3000/") {
+			t.Fatalf("config apply probed unchanged frontend: %v", command.Args)
+		}
 	}
 	state, err = c.readState()
 	if err != nil {
@@ -776,6 +863,29 @@ func TestApplyKeepMaintenanceSurvivesSuccessfulRecovery(t *testing.T) {
 	}
 }
 
+func TestAppApplyRejectsUnhealthyFrontendAndRestoresPreviousRelease(t *testing.T) {
+	c, runner := newTestController(t)
+	if err := c.Apply(context.Background(), makeAppBundle(t, t.TempDir(), "v1")); err != nil {
+		t.Fatal(err)
+	}
+	runner.unhealthyFrontendAppVersion = "v2"
+
+	err := c.Apply(context.Background(), makeAppBundle(t, t.TempDir(), "v2"))
+	if err == nil || !strings.Contains(err.Error(), "frontend readiness") || !strings.Contains(err.Error(), "restored last-known-good release v1") {
+		t.Fatalf("expected unhealthy frontend to trigger recovery, got %v", err)
+	}
+	state, stateErr := c.readState()
+	if stateErr != nil {
+		t.Fatal(stateErr)
+	}
+	if state.Current != "v1" || state.Generation != 1 {
+		t.Fatalf("unhealthy frontend changed active state: %+v", state)
+	}
+	if _, statErr := os.Stat(filepath.Join(c.controlDir(), "maintenance", "MAINTENANCE_ON")); !os.IsNotExist(statErr) {
+		t.Fatalf("successful recovery did not disable maintenance: %v", statErr)
+	}
+}
+
 func TestLocalReadinessProbeCannotOutliveSiteDeadline(t *testing.T) {
 	c := NewController(t.TempDir(), &bytes.Buffer{}, &bytes.Buffer{})
 	c.Runner = deadlineRunner{}
@@ -784,7 +894,7 @@ func TestLocalReadinessProbeCannotOutliveSiteDeadline(t *testing.T) {
 		Executor:            "local",
 		Infra:               "external",
 		ReadyTimeoutSeconds: 1,
-	}, "v1", ReleaseMetadata{})
+	}, "v1", ReleaseMetadata{}, []string{"release", "backend", "frontend", "caddy"})
 	if err == nil || !strings.Contains(err.Error(), "timed out after 1s") {
 		t.Fatalf("expected readiness timeout, got %v", err)
 	}

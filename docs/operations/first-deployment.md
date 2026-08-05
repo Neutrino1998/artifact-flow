@@ -113,7 +113,7 @@ Apply 会：
 4. 启动 bundled infra（如启用）；
 5. 执行数据库 migration 和 config reconcile；
 6. Reconcile Backend、Frontend 和 Caddy；
-7. 通过 Caddy 等待 `/health/ready`；
+7. 通过 Caddy 等待 Backend `/health/ready`，并等待本次重建的 Frontend 可服务；
 8. 原子更新 `.artifactflow/state.json`；
 9. 关闭维护页。
 

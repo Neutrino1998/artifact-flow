@@ -22,6 +22,7 @@ export default function BinaryFilePreview({
   description,
   pendingMessage,
   downloadLabel = '下载原件',
+  showDownload = true,
   fetchRawObjectUrl = fetchArtifactRawObjectUrl,
   pendingFlush: pendingFlushProp,
 }: {
@@ -32,6 +33,7 @@ export default function BinaryFilePreview({
   description?: string;
   pendingMessage?: string;
   downloadLabel?: string;
+  showDownload?: boolean;
   fetchRawObjectUrl?: ArtifactRawObjectUrlFetcher;
   pendingFlush?: boolean;
 }) {
@@ -76,14 +78,14 @@ export default function BinaryFilePreview({
           <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
             {pendingMessage ?? '本回合完成后可下载原件'}
           </div>
-        ) : (
+        ) : showDownload ? (
           <button
             onClick={handleDownload}
             className={`${BUTTON_PRIMARY} px-3 py-1.5 text-xs rounded-lg`}
           >
             {downloadLabel}
           </button>
-        )}
+        ) : null}
         {error && (
           <div className="text-xs text-status-error">{error}</div>
         )}

@@ -180,11 +180,14 @@ function EventCard({
         </div>
       )}
 
-      {(event.request_id || event.conversation_id || event.message_id) && (
+      {(event.request_id || event.conversation_id || event.message_id || (event.active_message_ids?.length ?? 0) > 0) && (
         <div className="mt-2 space-y-0.5 font-mono text-[10px] text-text-tertiary dark:text-text-tertiary-dark">
           {event.request_id && <div>request: {event.request_id}</div>}
           {event.conversation_id && <div>conversation: {event.conversation_id}</div>}
           {event.message_id && <div>message: {event.message_id}</div>}
+          {(event.active_message_ids?.length ?? 0) > 0 && (
+            <div>active messages: {event.active_message_ids.join(', ')}</div>
+          )}
         </div>
       )}
 

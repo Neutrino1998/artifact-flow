@@ -24,6 +24,7 @@ export default function ArtifactPreviewContent({
   fetchRawObjectUrl,
   pendingFlush,
   useLocalPreview,
+  showUnsupportedBinaryDownload,
 }: {
   sessionId: string;
   artifactId: string;
@@ -36,6 +37,7 @@ export default function ArtifactPreviewContent({
   fetchRawObjectUrl?: ArtifactRawObjectUrlFetcher;
   pendingFlush?: boolean;
   useLocalPreview?: boolean;
+  showUnsupportedBinaryDownload?: boolean;
 }) {
   const isImage = isSafeInlineImageMime(contentType);
   const isBinary = !!hasBlob && !isImage;
@@ -120,6 +122,7 @@ export default function ArtifactPreviewContent({
         originalFilename={originalFilename}
         contentType={contentType}
         description={`${contentType} · 二进制文件暂不能预览，可下载原件查看`}
+        showDownload={showUnsupportedBinaryDownload}
         fetchRawObjectUrl={fetchRawObjectUrl}
         pendingFlush={pendingFlush}
       />
