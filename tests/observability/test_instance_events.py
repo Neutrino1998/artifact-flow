@@ -51,6 +51,7 @@ def test_reads_error_wedge_and_metrics(monkeypatch, tmp_path):
         "lag_ms": 5000.0,
         "wedged": True,
         "warn_ms": 500,
+        "active_message_ids": ["msg-2", "msg-1", "msg-2"],
         "tasks": [{
             "name": "exec-msg-1",
             "done": False,
@@ -79,7 +80,8 @@ def test_reads_error_wedge_and_metrics(monkeypatch, tmp_path):
     wedge = by_type["wedge"]
     assert wedge["lower_bound"] is True
     assert wedge["location"].endswith("_calculate_usage_per_chunk")
-    assert wedge["message_id"] == "msg-1"
+    assert wedge["message_id"] is None
+    assert wedge["active_message_ids"] == ["msg-1", "msg-2"]
     assert wedge["metrics_before"]["process"]["cpu_pct"] == 7.0
     assert wedge["metrics_after"]["process"]["cpu_pct"] == 22.4
 

@@ -10,6 +10,7 @@ LoopLagWatchdog 单元测试
 """
 
 import asyncio
+import json
 import threading
 import time
 
@@ -98,12 +99,47 @@ def test_writes_loop_lag_jsonl_on_threshold(tmp_path, monkeypatch):
     content = path.read_text(encoding="utf-8")
     assert content.strip(), f"expected loop-lag entries written, got empty file"
     # 每一行都应是合法 JSON,且含 lag_ms / wedged 字段
-    import json as _json
-
     for line in content.strip().splitlines():
-        obj = _json.loads(line)
+        obj = json.loads(line)
         assert "lag_ms" in obj
         assert "wedged" in obj
+
+
+def test_soft_lag_captures_threads_at_threshold_and_all_active_messages(
+    tmp_path, monkeypatch
+):
+    """A recovered soft lag retains the stack sampled while the loop was blocked."""
+
+    class DelayedLoop:
+        def is_closed(self):
+            return False
+
+        def call_soon_threadsafe(self, callback):
+            threading.Timer(0.03, callback).start()
+
+    path = tmp_path / "loop-lag.jsonl"
+    sink = JsonlSink(path, max_mb=1, backups=1, mirror_stdout=False)
+    wd = LoopLagWatchdog(DelayedLoop(), sink, warn_ms=10, interval_sec=1.0)
+    monkeypatch.setattr(wd, "_collect_thread_stacks", lambda: [{
+        "name": "MainThread",
+        "event_loop": True,
+        "stack": ["blocked.py:42 in sync_work"],
+    }])
+    monkeypatch.setattr(wd, "_collect_task_stacks", lambda: [
+        {"name": "exec-msg-b", "done": False, "stack": []},
+        {"name": "background", "done": False, "stack": []},
+        {"name": "exec-msg-a", "done": False, "stack": []},
+    ])
+
+    try:
+        wd._measure_once()
+    finally:
+        sink.close()
+
+    record = json.loads(path.read_text(encoding="utf-8").strip())
+    assert record["wedged"] is False
+    assert record["threads"][0]["stack"] == ["blocked.py:42 in sync_work"]
+    assert record["active_message_ids"] == ["msg-a", "msg-b"]
 
 
 def test_collect_task_stacks_format(tmp_path):

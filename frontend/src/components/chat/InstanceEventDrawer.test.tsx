@@ -57,6 +57,7 @@ describe('InstanceEventDrawer', () => {
           lag_ms: 5000,
           lower_bound: true,
           instance_id: 'backend-1',
+          active_message_ids: ['msg-active-1', 'msg-active-2'],
           tasks: [],
           threads: [],
         },
@@ -110,6 +111,7 @@ describe('InstanceEventDrawer', () => {
     expect(apiMocks.getAdminInstanceEvents).toHaveBeenLastCalledWith('backend-1', 'wedge', 50);
     expect(container.textContent).toContain('Event loop did not respond');
     expect(container.textContent).toContain('≥5000ms');
+    expect(container.textContent).toContain('active messages: msg-active-1, msg-active-2');
     expect(container.textContent).not.toContain('LLM call failed');
 
     const close = container.querySelector<HTMLButtonElement>('[aria-label="关闭实例事件详情"]');

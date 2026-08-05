@@ -6340,6 +6340,13 @@
             ],
             "title": "Message Id"
           },
+          "active_message_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Active Message Ids"
+          },
           "instance_id": {
             "type": "string",
             "title": "Instance Id"
@@ -6396,6 +6403,7 @@
           "request_id",
           "conversation_id",
           "message_id",
+          "active_message_ids",
           "instance_id",
           "tasks",
           "threads",

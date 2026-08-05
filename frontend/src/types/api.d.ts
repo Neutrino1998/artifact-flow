@@ -2739,6 +2739,8 @@ export interface components {
             conversation_id: string | null;
             /** Message Id */
             message_id: string | null;
+            /** Active Message Ids */
+            active_message_ids: string[];
             /** Instance Id */
             instance_id: string;
             /** Tasks */

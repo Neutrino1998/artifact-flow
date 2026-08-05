@@ -689,7 +689,7 @@ export interface InstanceHeartbeat {
     lag_ms?: number;
     wedged?: boolean;
     location?: string | null;
-    message_id?: string | null;
+    active_message_ids?: string[];
   } | null;
   last_autoheal?: { ts?: string; reason?: string; count?: number } | null;
   status: 'green' | 'yellow' | 'red';
