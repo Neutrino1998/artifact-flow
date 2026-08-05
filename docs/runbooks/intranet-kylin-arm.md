@@ -284,8 +284,8 @@ Production `control/.env` has already been cleaned of the obsolete
 `ARTIFACTFLOW_RENDER_TOOL_EXAMPLES` settings. Do not reintroduce them. Native
 function calls replaced the old XML tool examples, and the service now derives
 the compaction trigger from each model's context window. The default reserve is
-20K, so DeepSeek's 260K window triggers at 240K and Qwen 27B's 128K window at
-108K. Any intentional future reserve override remains target-local in
+20K, so the 150K text-model window triggers at 130K and Qwen 27B's 128K window
+at 108K. Any intentional future reserve override remains target-local in
 `control/.env`, so afctl apply and rollback preserve it.
 
 Validate the complete target state before applying the release:

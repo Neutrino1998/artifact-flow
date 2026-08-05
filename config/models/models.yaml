@@ -12,7 +12,7 @@ models:
   # 参数),没有 thinking-需要-低温 这个差异。两边对称,后续做评测才有干净的对照。
   文本模型:
     model: openai/deepseek-v4-flash
-    context_window: 260000
+    context_window: 150000
     base_url: http://172.25.16.129:85/v1
     api_key_env: GPUSTACK_DEEPSEEK_API_KEY
     cache_salt_field: cache_salt
