@@ -6,14 +6,18 @@ import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { CopyIcon } from '@/components/ui/CopyIcon';
 import { PillBadge } from '@/components/ui/PillBadge';
 import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
-import { SELECT_COMPACT, MENU_ROW_HOVER } from '@/lib/styles';
+import { BUTTON_SECONDARY, SELECT_COMPACT, MENU_ROW_HOVER } from '@/lib/styles';
 import { SELECT_CHEVRON_COMPACT } from '@/components/ui/SelectChevron';
 import * as api from '@/lib/api';
 import { isCsvMime } from '@/lib/artifactPreview';
 import { parseUtcIso } from '@/lib/time';
 import { formatDuration } from '@/lib/formatDuration';
 import { formatCachedTokens, formatTokens } from '@/lib/formatTokens';
-import { triggerBlobDownload } from '@/lib/download';
+import {
+  getTextArtifactDownloadFilename,
+  triggerBlobDownload,
+  triggerObjectUrlDownload,
+} from '@/lib/download';
 import ArtifactPreviewContent from '@/components/artifact/ArtifactPreviewContent';
 import PanelSearchBar from './PanelSearchBar';
 import Pagination from './Pagination';
@@ -1239,6 +1243,7 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
   const [viewingVersion, setViewingVersion] = useState<number | null>(null);
   const [versionContent, setVersionContent] = useState<VersionDetail | null>(null);
   const [versionLoading, setVersionLoading] = useState(false);
+  const [downloadLoading, setDownloadLoading] = useState(false);
 
   // Load artifact list when conv changes
   useEffect(() => {
@@ -1337,15 +1342,37 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
     : versionContentMatches
       ? versionContent!.content
       : '';
-  const viewingHistoricalBlob =
-    detail != null && detail.has_blob && versionContentReady && !isViewingCurrent;
   const showingRichPreview =
-    detail != null && versionContentReady && shouldUseAdminArtifactPreview(detail) && !viewingHistoricalBlob;
+    detail != null && versionContentReady && shouldUseAdminArtifactPreview(detail);
   const contentClassName = showingRichPreview
     ? detail?.content_type === 'text/markdown'
       ? 'flex-1 min-h-0 overflow-y-auto'
       : 'flex-1 min-h-0 overflow-hidden'
     : 'flex-1 min-h-0 overflow-y-auto px-4 py-3';
+
+  const handleArtifactDownload = useCallback(async () => {
+    if (detail == null || !versionContentReady) return;
+
+    setDownloadLoading(true);
+    try {
+      if (detail.has_blob) {
+        const url = await api.fetchAdminArtifactRawObjectUrl(convId, detail.id);
+        triggerObjectUrlDownload(detail.original_filename ?? detail.title, url);
+        return;
+      }
+
+      const filename = getTextArtifactDownloadFilename(detail.title, detail.content_type);
+      triggerBlobDownload(
+        filename,
+        new Blob([displayedContent], { type: `${detail.content_type};charset=utf-8` })
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '下载失败，请稍后重试';
+      window.alert(message);
+    } finally {
+      setDownloadLoading(false);
+    }
+  }, [convId, detail, displayedContent, versionContentReady]);
 
   return (
     <div className="flex-1 flex min-h-0">
@@ -1431,17 +1458,34 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
                     {versionLoading ? <span>加载…</span> : null}
                   </>
                 ) : null}
+                <button
+                  type="button"
+                  onClick={handleArtifactDownload}
+                  disabled={downloadLoading || !versionContentReady}
+                  className={`${BUTTON_SECONDARY} inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px]`}
+                  aria-label="下载 artifact"
+                  title="下载当前查看的版本"
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 14 14"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    aria-hidden="true"
+                  >
+                    <path d="M7 2v7.5M4 7l3 3 3-3M2.5 11.5h9" />
+                  </svg>
+                  {downloadLoading ? '下载中…' : '下载'}
+                </button>
               </div>
             </div>
 
             {/* Content */}
             <div className={contentClassName}>
               {versionContentReady ? (
-                viewingHistoricalBlob ? (
-                  <div className="flex h-full items-center justify-center text-center text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                    历史版本的二进制原件暂不能预览；请切回当前版本查看或下载原件。
-                  </div>
-                ) : showingRichPreview && detail != null ? (
+                showingRichPreview && detail != null ? (
                   <ArtifactPreviewContent
                     sessionId={convId}
                     artifactId={detail.id}
@@ -1454,6 +1498,7 @@ function ArtifactsTab({ convId, refreshTick }: { convId: string; refreshTick: nu
                     fetchRawObjectUrl={api.fetchAdminArtifactRawObjectUrl}
                     pendingFlush={false}
                     useLocalPreview={false}
+                    showUnsupportedBinaryDownload={false}
                   />
                 ) : (
                   <pre className="text-xs text-text-primary dark:text-text-primary-dark whitespace-pre-wrap break-words font-mono">

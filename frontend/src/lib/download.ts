@@ -1,3 +1,21 @@
+const TEXT_ARTIFACT_EXTENSIONS: Record<string, string> = {
+  'text/markdown': '.md',
+  'text/plain': '.txt',
+  'text/html': '.html',
+  'text/css': '.css',
+  'text/csv': '.csv',
+  'application/json': '.json',
+  'application/javascript': '.js',
+  'text/javascript': '.js',
+  'text/x-python': '.py',
+  'text/x-typescript': '.ts',
+};
+
+export function getTextArtifactDownloadFilename(title: string, contentType: string): string {
+  const safeTitle = title.replace(/[/\\?%*:|"<>]/g, '-');
+  return safeTitle + (TEXT_ARTIFACT_EXTENSIONS[contentType] ?? '.txt');
+}
+
 /**
  * 触发浏览器把 Blob 存成文件 —— objectURL + 隐形 <a download> 点击的唯一实现
  * （此前散落 5 处 verbatim 拷贝）。
