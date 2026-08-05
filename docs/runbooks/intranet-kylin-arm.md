@@ -286,8 +286,8 @@ Production `control/.env` has already been cleaned of the obsolete
 function calls replaced the old XML tool examples, and the service now derives
 the compaction trigger from each model's context window. The application default
 reserve remains 20K; this intranet site intentionally overrides it to 10K in
-`control/.env`. The 110K text-model window therefore triggers at 100K, and Qwen
-27B's 128K window at 118K. afctl apply and rollback preserve this target-local
+`control/.env`. Both the text and vision model windows are 110K, so each
+triggers compaction at 100K. afctl apply and rollback preserve this target-local
 override.
 
 Validate the complete target state before applying the release:

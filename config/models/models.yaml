@@ -38,7 +38,7 @@ models:
 
   视觉模型:
     model: openai/qwen3.6-27b
-    context_window: 128000
+    context_window: 110000
     base_url: http://172.22.3.54/v1
     api_key_env: GPUSTACK_VISION_API_KEY
     cache_salt_field: cache_salt
