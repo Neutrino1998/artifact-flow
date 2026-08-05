@@ -72,7 +72,7 @@ sudo install -m 0755 /media/1.4.1/afctl /opt/artifactflow/bin/afctl
 
 Apply、rollback 和 config apply 共用一个 kernel advisory lock。不要并发执行多条 mutation 命令。
 
-单机 Apply 只强制重建输入发生变化的服务：Release gate 和 Backend 每次重建；应用版本变化时重建 Frontend；Caddy 镜像或 `deploy/` 内容变化时才重建 Caddy。这样通常能让 Caddy 在 Backend 切换期间持续提供维护页。`apply current` 会主动刷新 Caddy，以应用现场 `.env`、证书等站点状态变更。
+单机 Apply 只强制重建输入发生变化的服务：Release gate 和 Backend 每次重建；应用版本变化时重建 Frontend；Caddy 镜像或 `deploy/` 内容变化时才重建 Caddy。这样通常能让 Caddy 在 Backend 切换期间持续提供维护页。Apply 会同时等待经 Caddy 的 Backend readiness，以及本次重建的 Frontend readiness，成功后才记录 Release。`apply current` 会主动刷新 Caddy，以应用现场 `.env`、证书等站点状态变更。
 
 ## 状态与不可变性
 

@@ -7,10 +7,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 )
+
+const frontendReadinessScript = `const timeout=Number(process.argv[1])*1000;const req=require('http').get('http://localhost:3000/',res=>process.exit(res.statusCode<500?0:1));req.setTimeout(timeout,()=>{req.destroy();process.exit(1)});req.on('error',()=>process.exit(1));`
 
 type Controller struct {
 	Root   string
@@ -220,7 +223,7 @@ func (c *Controller) planApply(input string, options applyOptions) (Plan, error)
 	if options.KeepMaintenance {
 		finalMaintenanceAction = "leave maintenance enabled for operator verification"
 	}
-	plan.Actions = append(plan.Actions, "enable maintenance", "compose reconcile via "+site.Executor, "wait for load-balancer readiness", "atomically write state.json", finalMaintenanceAction)
+	plan.Actions = append(plan.Actions, "enable maintenance", "compose reconcile via "+site.Executor, "wait for release readiness", "atomically write state.json", finalMaintenanceAction)
 	return plan, nil
 }
 
@@ -253,7 +256,7 @@ func (c *Controller) PlanRollback() (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	return Plan{Operation: "rollback", Current: state.Current, Target: state.Previous, AppVersion: meta.AppVersion, ReleaseKind: meta.Kind, Actions: []string{"enable maintenance", "compose reconcile the previous immutable release", "wait for load-balancer readiness", "atomically swap current and previous in state.json", "disable maintenance"}}, nil
+	return Plan{Operation: "rollback", Current: state.Current, Target: state.Previous, AppVersion: meta.AppVersion, ReleaseKind: meta.Kind, Actions: []string{"enable maintenance", "compose reconcile the previous immutable release", "wait for release readiness", "atomically swap current and previous in state.json", "disable maintenance"}}, nil
 }
 
 func (c *Controller) Apply(ctx context.Context, input string) error {
@@ -645,25 +648,45 @@ func (c *Controller) reconcile(ctx context.Context, site Site, release string, m
 	}
 	deadline := time.Now().Add(time.Duration(site.ReadyTimeoutSeconds) * time.Second)
 	last := error(context.DeadlineExceeded)
-	for {
+	probe := func(command func(timeoutSeconds int) Command) error {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
-			break
+			return context.DeadlineExceeded
 		}
 		probeSeconds := int((remaining + time.Second - 1) / time.Second)
 		if probeSeconds > 8 {
 			probeSeconds = 8
 		}
 		probeCtx, cancel := context.WithTimeout(ctx, remaining)
-		_, last = c.Runner.Output(probeCtx, c.composeCommand(site, release, meta, "exec", "-T", "caddy", "wget", "-q", "--spider", "-T", strconv.Itoa(probeSeconds), "http://localhost:2021/health/ready"))
-		cancel()
+		defer cancel()
+		_, err := c.Runner.Output(probeCtx, command(probeSeconds))
+		return err
+	}
+	waitForFrontend := slices.Contains(services, "frontend")
+	for {
+		if time.Until(deadline) <= 0 {
+			break
+		}
+		last = probe(func(probeSeconds int) Command {
+			return c.composeCommand(site, release, meta, "exec", "-T", "caddy", "wget", "-q", "--spider", "-T", strconv.Itoa(probeSeconds), "http://localhost:2021/health/ready")
+		})
+		if last != nil {
+			last = fmt.Errorf("backend readiness through Caddy: %w", last)
+		} else if waitForFrontend {
+			last = probe(func(probeSeconds int) Command {
+				return c.composeCommand(site, release, meta, "exec", "-T", "frontend", "node", "-e", frontendReadinessScript, strconv.Itoa(probeSeconds))
+			})
+			if last != nil {
+				last = fmt.Errorf("frontend readiness: %w", last)
+			}
+		}
 		if last == nil {
 			return nil
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		remaining = time.Until(deadline)
+		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			break
 		}
@@ -676,5 +699,5 @@ func (c *Controller) reconcile(ctx context.Context, site Site, release string, m
 		case <-timer.C:
 		}
 	}
-	return fmt.Errorf("load balancer readiness timed out after %ds: %w", site.ReadyTimeoutSeconds, last)
+	return fmt.Errorf("release readiness timed out after %ds: %w", site.ReadyTimeoutSeconds, last)
 }

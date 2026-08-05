@@ -16,9 +16,10 @@ import (
 )
 
 type fakeRunner struct {
-	commands    []Command
-	failName    string
-	failUpCount int
+	commands                    []Command
+	failName                    string
+	failUpCount                 int
+	unhealthyFrontendAppVersion string
 }
 
 func (r *fakeRunner) Run(_ context.Context, command Command) error {
@@ -35,6 +36,11 @@ func (r *fakeRunner) Run(_ context.Context, command Command) error {
 
 func (r *fakeRunner) Output(_ context.Context, command Command) (string, error) {
 	r.commands = append(r.commands, command)
+	if r.unhealthyFrontendAppVersion != "" &&
+		slices.Contains(command.Env, "AF_VERSION="+r.unhealthyFrontendAppVersion) &&
+		strings.Contains(strings.Join(command.Args, "\x00"), "http://localhost:3000/") {
+		return "", fmt.Errorf("forced unhealthy frontend")
+	}
 	if command.Name == r.failName {
 		return "", fmt.Errorf("forced %s failure", command.Name)
 	}
@@ -728,6 +734,11 @@ func TestApplyWritesOneStateAndConfigHotfixBindsBase(t *testing.T) {
 			t.Fatalf("config apply recreated unchanged %s: %v", service, hotfixReconcile.Args)
 		}
 	}
+	for _, command := range runner.commands {
+		if strings.Contains(strings.Join(command.Args, "\x00"), "http://localhost:3000/") {
+			t.Fatalf("config apply probed unchanged frontend: %v", command.Args)
+		}
+	}
 	state, err = c.readState()
 	if err != nil {
 		t.Fatal(err)
@@ -817,6 +828,29 @@ func TestApplyKeepMaintenanceSurvivesSuccessfulRecovery(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(c.controlDir(), "maintenance", "MAINTENANCE_ON")); statErr != nil {
 		t.Fatalf("recovery did not preserve maintenance flag: %v", statErr)
+	}
+}
+
+func TestAppApplyRejectsUnhealthyFrontendAndRestoresPreviousRelease(t *testing.T) {
+	c, runner := newTestController(t)
+	if err := c.Apply(context.Background(), makeAppBundle(t, t.TempDir(), "v1")); err != nil {
+		t.Fatal(err)
+	}
+	runner.unhealthyFrontendAppVersion = "v2"
+
+	err := c.Apply(context.Background(), makeAppBundle(t, t.TempDir(), "v2"))
+	if err == nil || !strings.Contains(err.Error(), "frontend readiness") || !strings.Contains(err.Error(), "restored last-known-good release v1") {
+		t.Fatalf("expected unhealthy frontend to trigger recovery, got %v", err)
+	}
+	state, stateErr := c.readState()
+	if stateErr != nil {
+		t.Fatal(stateErr)
+	}
+	if state.Current != "v1" || state.Generation != 1 {
+		t.Fatalf("unhealthy frontend changed active state: %+v", state)
+	}
+	if _, statErr := os.Stat(filepath.Join(c.controlDir(), "maintenance", "MAINTENANCE_ON")); !os.IsNotExist(statErr) {
+		t.Fatalf("successful recovery did not disable maintenance: %v", statErr)
 	}
 }
 
