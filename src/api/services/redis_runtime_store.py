@@ -111,17 +111,25 @@ redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
 return len + 1
 """
 
-# resolve-interrupt: 检查 status=pending → 设 resume_data + status=resolved → PUBLISH
+# resolve-interrupt: 原子检查 status=pending + expected call_id → resolved → PUBLISH。
+# ARGV[1] 为空仅供 cancel/shutdown 这类内部终止路径解决当前 interrupt；
+# 用户 /resume 必须传非空 expected call_id。
 _LUA_RESOLVE_INTERRUPT = """
 local status = redis.call('HGET', KEYS[1], 'status')
 if not status then
     return 'not_found'
 end
+if ARGV[1] ~= '' then
+    local interrupt_data = cjson.decode(redis.call('HGET', KEYS[1], 'data') or '{}')
+    if interrupt_data['call_id'] ~= ARGV[1] then
+        return 'call_mismatch'
+    end
+end
 if status ~= 'pending' then
     return 'already_resolved'
 end
-redis.call('HSET', KEYS[1], 'status', 'resolved', 'resume_data', ARGV[1])
-redis.call('PUBLISH', ARGV[2], 'resolved')
+redis.call('HSET', KEYS[1], 'status', 'resolved', 'resume_data', ARGV[2])
+redis.call('PUBLISH', ARGV[3], 'resolved')
 return 'resolved'
 """
 
@@ -313,14 +321,25 @@ class RedisRuntimeStore:
             await pubsub.aclose()
 
     async def resolve_interrupt(
-        self, message_id: str, resume_data: Dict[str, Any]
-    ) -> Literal["resolved", "not_found", "already_resolved"]:
+        self, message_id: str, call_id: str, resume_data: Dict[str, Any]
+    ) -> Literal["resolved", "not_found", "call_mismatch", "already_resolved"]:
+        return await self._resolve_interrupt(
+            message_id, resume_data, expected_call_id=call_id
+        )
+
+    async def _resolve_interrupt(
+        self,
+        message_id: str,
+        resume_data: Dict[str, Any],
+        expected_call_id: Optional[str],
+    ) -> Literal["resolved", "not_found", "call_mismatch", "already_resolved"]:
         interrupt_key = self._interrupt_key(message_id)
         channel_name = self._interrupt_channel(message_id)
         resume_json = json.dumps(resume_data)
 
         result = await self._script_resolve_interrupt(
-            keys=[interrupt_key], args=[resume_json, channel_name]
+            keys=[interrupt_key],
+            args=[expected_call_id or "", resume_json, channel_name],
         )
         status = result if isinstance(result, str) else result.decode()
         logger.info(f"Interrupt resolve for {message_id}: {status}")
@@ -343,7 +362,7 @@ class RedisRuntimeStore:
         channel_name = self._interrupt_channel(message_id)
         cancel_data = json.dumps({"approved": False, "reason": "cancelled"})
         await self._script_resolve_interrupt(
-            keys=[interrupt_key], args=[cancel_data, channel_name]
+            keys=[interrupt_key], args=["", cancel_data, channel_name]
         )
         logger.info(f"Cancellation requested for {message_id}")
 
@@ -475,8 +494,10 @@ class RedisRuntimeStore:
         """关闭时清理：resolve 本 Worker 已知的 pending interrupt"""
         for message_id in list(self._local_subscriptions):
             try:
-                await self.resolve_interrupt(
-                    message_id, {"approved": False, "reason": "shutdown"}
+                await self._resolve_interrupt(
+                    message_id,
+                    {"approved": False, "reason": "shutdown"},
+                    expected_call_id=None,
                 )
             except Exception:
                 logger.warning(f"Failed to resolve interrupt {message_id} during shutdown")

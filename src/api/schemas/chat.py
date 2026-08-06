@@ -61,6 +61,7 @@ class CancelResponse(BaseModel):
 class ResumeRequest(BaseModel):
     """POST /api/v1/chat/{conv_id}/resume request body"""
     message_id: str = Field(..., description="Message ID to resume")
+    call_id: str = Field(..., min_length=1, description="Native tool-call ID to resume")
     approved: bool = Field(..., description="Whether the permission was approved")
     always_allow: bool = Field(False, description="Always allow this tool for the rest of this execution")
 

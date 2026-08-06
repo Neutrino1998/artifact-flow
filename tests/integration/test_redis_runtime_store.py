@@ -230,12 +230,16 @@ class TestInterrupt:
     async def test_resolve_before_timeout(self, store):
         async def resolver():
             await asyncio.sleep(0.2)
-            result = await store.resolve_interrupt("test_msg_int1", {"approved": True})
+            result = await store.resolve_interrupt(
+                "test_msg_int1", "call-dangerous", {"approved": True}
+            )
             assert result == "resolved"
 
         task = asyncio.create_task(resolver())
         resume_data = await store.wait_for_interrupt(
-            "test_msg_int1", {"tool": "dangerous"}, timeout=5.0
+            "test_msg_int1",
+            {"call_id": "call-dangerous", "tool": "dangerous"},
+            timeout=5.0,
         )
         await task
         assert resume_data == {"approved": True}
@@ -247,33 +251,77 @@ class TestInterrupt:
         assert resume_data is None
 
     async def test_resolve_not_found(self, store):
-        result = await store.resolve_interrupt("test_msg_nonexistent", {"approved": True})
+        result = await store.resolve_interrupt(
+            "test_msg_nonexistent", "call-missing", {"approved": True}
+        )
         assert result == "not_found"
 
     async def test_resolve_already_resolved(self, store):
         async def resolver():
             await asyncio.sleep(0.1)
-            await store.resolve_interrupt("test_msg_int3", {"approved": True})
+            await store.resolve_interrupt(
+                "test_msg_int3", "call-t", {"approved": True}
+            )
 
         task = asyncio.create_task(resolver())
-        await store.wait_for_interrupt("test_msg_int3", {"tool": "t"}, timeout=5.0)
+        await store.wait_for_interrupt(
+            "test_msg_int3", {"call_id": "call-t", "tool": "t"}, timeout=5.0
+        )
         await task
 
-        result = await store.resolve_interrupt("test_msg_int3", {"approved": False})
+        result = await store.resolve_interrupt(
+            "test_msg_int3", "call-t", {"approved": False}
+        )
         assert result == "already_resolved"
 
     async def test_get_interrupt_data(self, store):
         async def resolver():
             await asyncio.sleep(0.1)
             data = await store.get_interrupt_data("test_msg_int4")
-            assert data == {"tool": "read_file"}
-            await store.resolve_interrupt("test_msg_int4", {"approved": True})
+            assert data == {"call_id": "call-read", "tool": "read_file"}
+            await store.resolve_interrupt(
+                "test_msg_int4", "call-read", {"approved": True}
+            )
 
         task = asyncio.create_task(resolver())
         await store.wait_for_interrupt(
-            "test_msg_int4", {"tool": "read_file"}, timeout=5.0
+            "test_msg_int4", {"call_id": "call-read", "tool": "read_file"}, timeout=5.0
         )
         await task
+
+    async def test_stale_call_cannot_resolve_replacement_interrupt(self, store):
+        first = await store.wait_for_interrupt(
+            "test_msg_int_race",
+            {"call_id": "call-a", "tool": "tool_a"},
+            timeout=0.05,
+        )
+        assert first is None
+
+        second_task = asyncio.create_task(store.wait_for_interrupt(
+            "test_msg_int_race",
+            {"call_id": "call-b", "tool": "tool_b"},
+            timeout=5.0,
+        ))
+        for _ in range(100):
+            data = await store.get_interrupt_data("test_msg_int_race")
+            if data and data.get("call_id") == "call-b":
+                break
+            await asyncio.sleep(0.01)
+        else:
+            pytest.fail("replacement interrupt B was not created")
+
+        stale = await store.resolve_interrupt(
+            "test_msg_int_race",
+            "call-a",
+            {"approved": True, "always_allow": True},
+        )
+        assert stale == "call_mismatch"
+        assert not second_task.done()
+
+        assert await store.resolve_interrupt(
+            "test_msg_int_race", "call-b", {"approved": False}
+        ) == "resolved"
+        assert await second_task == {"approved": False}
 
 
 class TestCancel:

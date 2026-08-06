@@ -831,6 +831,58 @@ class TestToolExecution:
 
 class TestPermissionInterrupt:
 
+    async def test_late_approval_for_timed_out_call_cannot_approve_next_call(self):
+        agent = _FakeAgentConfig(tools={"tool_a": "confirm", "tool_b": "confirm"})
+        tools = {
+            "tool_a": _FakeTool("tool_a", permission=ToolPermission.CONFIRM),
+            "tool_b": _FakeTool("tool_b", permission=ToolPermission.CONFIRM),
+        }
+        calls = [
+            *_native_tool_call("tool_a"),
+            *_native_tool_call("tool_b"),
+        ]
+        call_a, call_b = calls[0]["id"], calls[1]["id"]
+        store = InMemoryRuntimeStore()
+
+        async def submit_stale_a_when_b_is_pending():
+            for _ in range(200):
+                data = await store.get_interrupt_data("msg-1")
+                if data and data.get("call_id") == call_b:
+                    stale = await store.resolve_interrupt(
+                        "msg-1",
+                        call_a,
+                        {"approved": True, "always_allow": True},
+                    )
+                    assert stale == "call_mismatch"
+                    assert await store.resolve_interrupt(
+                        "msg-1", call_b, {"approved": False}
+                    ) == "resolved"
+                    return
+                await asyncio.sleep(0.005)
+            pytest.fail("second permission request was not created")
+
+        coordinator = asyncio.create_task(submit_stale_a_when_b_is_pending())
+        result, emitted, _ = await _run_engine(
+            _make_fake_stream_sequence([
+                _tool_call_chunks(calls),
+                _simple_llm_chunks("continued without either tool"),
+            ]),
+            agents={"lead_agent": agent},
+            tools=tools,
+            store=store,
+            permission_timeout=0.05,
+        )
+        await coordinator
+
+        decisions = {
+            event["data"]["call_id"]: event["data"]
+            for event in _events_of_type(emitted, "permission_result")
+        }
+        assert decisions[call_a]["approved"] is False
+        assert decisions[call_a]["reason"] == "timeout"
+        assert decisions[call_b]["approved"] is False
+        assert result["always_allowed_tools"] == []
+
     async def test_confirm_tool_emits_permission_request(self):
         agent = _FakeAgentConfig(tools={"sensitive_tool": "confirm"})
         tool = _FakeTool("sensitive_tool", permission=ToolPermission.CONFIRM)
@@ -845,7 +897,9 @@ class TestPermissionInterrupt:
             """Wait until interrupt exists, then resolve."""
             for _ in range(100):
                 if await store.get_interrupt_data("msg-1") is not None:
-                    await store.resolve_interrupt("msg-1", {"approved": True})
+                    await store.resolve_interrupt(
+                        "msg-1", xml[0]["id"], {"approved": True}
+                    )
                     return
                 await asyncio.sleep(0.01)
 
@@ -889,7 +943,9 @@ class TestPermissionInterrupt:
         async def _resolve_deny():
             for _ in range(100):
                 if await store.get_interrupt_data("msg-1") is not None:
-                    await store.resolve_interrupt("msg-1", {"approved": False})
+                    await store.resolve_interrupt(
+                        "msg-1", xml[0]["id"], {"approved": False}
+                    )
                     return
                 await asyncio.sleep(0.01)
 
@@ -933,7 +989,11 @@ class TestPermissionInterrupt:
         async def _resolve_allow():
             for _ in range(100):
                 if await store.get_interrupt_data("msg-1") is not None:
-                    await store.resolve_interrupt("msg-1", {"approved": True, "always_allow": True})
+                    await store.resolve_interrupt(
+                        "msg-1",
+                        xml[0]["id"],
+                        {"approved": True, "always_allow": True},
+                    )
                     return
                 await asyncio.sleep(0.01)
 

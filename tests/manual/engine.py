@@ -438,7 +438,9 @@ async def demo_permission():
                     if not interrupt.event.is_set():
                         print("\n[AUTO-APPROVE] 自动批准权限请求...")
                         await store.resolve_interrupt(
-                            msg_id, {"approved": True}
+                            msg_id,
+                            interrupt.interrupt_data["call_id"],
+                            {"approved": True},
                         )
                         permission_resolved.set()
                         return

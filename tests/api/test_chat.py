@@ -305,6 +305,7 @@ class TestResumeInterrupt:
         # which would block; directly populate internal state)
         from api.services.runtime_store import _InterruptState
         runner.store._interrupts[message_id] = _InterruptState(interrupt_data={
+            "call_id": "call-web-search",
             "tool": "web_search",
             "params": {"query": "test"},
         })
@@ -312,6 +313,7 @@ class TestResumeInterrupt:
         # First resume — should succeed (resolve the interrupt)
         resp = await client.post(f"/api/v1/chat/{conv_id}/resume", json={
             "message_id": message_id,
+            "call_id": "call-web-search",
             "approved": True,
             "always_allow": False,
         })
@@ -320,6 +322,7 @@ class TestResumeInterrupt:
         # Second resume — same interrupt already resolved → 409
         resp = await client.post(f"/api/v1/chat/{conv_id}/resume", json={
             "message_id": message_id,
+            "call_id": "call-web-search",
             "approved": True,
             "always_allow": False,
         })
@@ -336,10 +339,43 @@ class TestResumeInterrupt:
 
         resp = await client.post(f"/api/v1/chat/{conv_id}/resume", json={
             "message_id": message_id,
+            "call_id": "call-missing",
             "approved": True,
             "always_allow": False,
         })
         assert resp.status_code == 404
+
+    async def test_resume_stale_call_id_returns_409_without_resolving_current(
+        self,
+        client: AsyncClient,
+        app,
+        seed_conversation: Tuple[str, List[str]],
+    ):
+        conv_id, msg_ids = seed_conversation
+        message_id = msg_ids[0]
+
+        from api.dependencies import get_execution_runner
+        from api.services.runtime_store import _InterruptState
+
+        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        current = _InterruptState(interrupt_data={
+            "call_id": "call-b",
+            "tool": "sensitive_b",
+            "params": {},
+        })
+        runner.store._interrupts[message_id] = current
+
+        resp = await client.post(f"/api/v1/chat/{conv_id}/resume", json={
+            "message_id": message_id,
+            "call_id": "call-a",
+            "approved": True,
+            "always_allow": True,
+        })
+
+        assert resp.status_code == 409
+        assert "different tool call" in resp.json()["detail"]
+        assert current.event.is_set() is False
+        assert current.resume_data is None
 
 
 class TestChatInputCap:

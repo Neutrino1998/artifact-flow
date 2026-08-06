@@ -685,9 +685,20 @@ async def resume_execution(
         "always_allow": request.always_allow,
     }
 
-    result = await runner.store.resolve_interrupt(message_id, resume_data)
+    result = await runner.store.resolve_interrupt(
+        message_id, request.call_id, resume_data
+    )
     if result == "not_found":
         raise HTTPException(status_code=404, detail="No pending interrupt found for this message")
+    if result == "call_mismatch":
+        logger.warning(
+            "Resume rejected (409): stale permission call_id "
+            f"(conv={conv_id}, message={message_id}, call={request.call_id})"
+        )
+        raise HTTPException(
+            status_code=409,
+            detail="Permission request is stale; a different tool call is awaiting approval",
+        )
     if result == "already_resolved":
         raise HTTPException(status_code=409, detail="Interrupt already resolved for this message")
 

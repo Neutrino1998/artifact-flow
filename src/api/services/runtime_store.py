@@ -69,7 +69,9 @@ class RuntimeStore(Protocol):
     # ── Interrupts ──
 
     async def wait_for_interrupt(self, message_id: str, data: Dict[str, Any], timeout: float) -> Optional[Dict[str, Any]]: ...
-    async def resolve_interrupt(self, message_id: str, resume_data: Dict[str, Any]) -> Literal["resolved", "not_found", "already_resolved"]: ...
+    async def resolve_interrupt(
+        self, message_id: str, call_id: str, resume_data: Dict[str, Any]
+    ) -> Literal["resolved", "not_found", "call_mismatch", "already_resolved"]: ...
     async def get_interrupt_data(self, message_id: str) -> Optional[Dict[str, Any]]: ...
 
     # ── Cancellation ──
@@ -205,12 +207,22 @@ class InMemoryRuntimeStore:
         return interrupt.resume_data
 
     async def resolve_interrupt(
-        self, message_id: str, resume_data: Dict[str, Any]
-    ) -> Literal["resolved", "not_found", "already_resolved"]:
+        self, message_id: str, call_id: str, resume_data: Dict[str, Any]
+    ) -> Literal["resolved", "not_found", "call_mismatch", "already_resolved"]:
         interrupt = self._interrupts.get(message_id)
         if not interrupt:
             logger.warning(f"No interrupt found for {message_id}")
             return "not_found"
+
+        # No await between lookup, identity check, and event.set(): one asyncio
+        # task cannot replace this message's interrupt halfway through resolve.
+        # message_id identifies the turn; call_id identifies the exact pending
+        # authorization within that turn.
+        if interrupt.interrupt_data.get("call_id") != call_id:
+            logger.warning(
+                f"Stale interrupt resolve rejected for {message_id} (call_id={call_id})"
+            )
+            return "call_mismatch"
 
         if interrupt.event.is_set():
             logger.warning(f"Interrupt for {message_id} already resolved")

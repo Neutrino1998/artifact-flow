@@ -3024,6 +3024,11 @@ export interface components {
              */
             message_id: string;
             /**
+             * Call Id
+             * @description Native tool-call ID to resume
+             */
+            call_id: string;
+            /**
              * Approved
              * @description Whether the permission was approved
              */

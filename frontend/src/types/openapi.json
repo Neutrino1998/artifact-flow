@@ -7034,6 +7034,12 @@
             "title": "Message Id",
             "description": "Message ID to resume"
           },
+          "call_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Call Id",
+            "description": "Native tool-call ID to resume"
+          },
           "approved": {
             "type": "boolean",
             "title": "Approved",
@@ -7049,6 +7055,7 @@
         "type": "object",
         "required": [
           "message_id",
+          "call_id",
           "approved"
         ],
         "title": "ResumeRequest",
