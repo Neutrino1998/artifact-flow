@@ -388,6 +388,38 @@ describe('artifactStore.finishLiveTurn', () => {
 describe('artifactStore authoritative DB collection reconciliation', () => {
   beforeEach(() => useArtifactStore.getState().reset());
 
+  test('mid-stream DB list preserves live-only files and overlays stale versions', () => {
+    const store = useArtifactStore.getState();
+    store.reconcileArtifactsFromDb([summary('existing')]);
+    store.applyArtifactUpdated({
+      id: 'existing',
+      current_version: 2,
+      content_type: 'text/markdown',
+      content: 'updated live',
+    });
+    store.applyArtifactCreated({
+      id: 'live-only',
+      title: 'Live only',
+      content_type: 'text/plain',
+      source: 'agent',
+      current_version: 1,
+      content: 'not flushed',
+    });
+
+    useArtifactStore.getState().mergeArtifactsFromDbDuringLive([summary('existing')]);
+
+    const state = useArtifactStore.getState();
+    expect(state.artifacts.map((artifact) => artifact.id)).toEqual(['existing', 'live-only']);
+    expect(state.artifacts[0].current_version).toBe(2);
+    expect(state.artifacts[1]).toMatchObject({
+      id: 'live-only',
+      title: 'Live only',
+      content_type: 'text/plain',
+      current_version: 1,
+    });
+    expect(state.openArtifactIds).toEqual(['existing', 'live-only']);
+  });
+
   test('failed new artifact is removed from current, list and open tabs', () => {
     const store = useArtifactStore.getState();
     store.applyArtifactCreated({
@@ -418,7 +450,7 @@ describe('artifactStore authoritative DB collection reconciliation', () => {
     const bVersions = [versionSummary(1)];
     const bSelected = versionDetail(1);
     const store = useArtifactStore.getState();
-    store.setArtifacts([summary('A'), summary('ghost'), summary('B')]);
+    store.reconcileArtifactsFromDb([summary('A'), summary('ghost'), summary('B')]);
     store.setCurrent(a);
     store.setCurrent(ghost);
     store.setCurrent(b);
@@ -450,6 +482,35 @@ describe('artifactStore authoritative DB collection reconciliation', () => {
     expect(state.artifacts).toEqual([]);
     expect(state.openArtifactIds).toEqual([]);
     expect(state.current).toBeNull();
+  });
+
+  test('one detail 404 cannot prune a different open tab absent from the visible list', () => {
+    const store = useArtifactStore.getState();
+    store.applyArtifactCreated({
+      id: 'good', title: 'Good', content_type: 'text/markdown',
+      source: 'agent', current_version: 1, content: 'persisted later',
+    });
+    store.applyArtifactCreated({
+      id: 'ghost', title: 'Ghost', content_type: 'text/markdown',
+      source: 'agent', current_version: 1, content: 'never persisted',
+    });
+    store.selectFromLive('ghost');
+    store.finishLiveTurn();
+
+    // Reproduce the pre-fix ordering: a stale list response had hidden both
+    // summaries before the ghost detail returned 404. The 404 proves only that
+    // ghost is missing; it says nothing about good.
+    useArtifactStore.setState({ artifacts: [] });
+    useArtifactStore.getState().removeArtifactMissingFromDb('ghost');
+
+    let state = useArtifactStore.getState();
+    expect(state.openArtifactIds).toEqual(['good']);
+    expect(state.current).toBeNull();
+
+    useArtifactStore.getState().reconcileArtifactsFromDb([summary('good')]);
+    state = useArtifactStore.getState();
+    expect(state.artifacts.map((artifact) => artifact.id)).toEqual(['good']);
+    expect(state.openArtifactIds).toEqual(['good']);
   });
 });
 

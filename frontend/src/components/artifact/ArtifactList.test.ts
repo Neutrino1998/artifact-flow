@@ -77,7 +77,7 @@ describe('ArtifactList source tree', () => {
   beforeEach(() => {
     selectArtifact.mockReset();
     useArtifactStore.getState().reset();
-    useArtifactStore.getState().setArtifacts([
+    useArtifactStore.getState().reconcileArtifactsFromDb([
       {
         ...artifact('report', 'agent'),
         title: 'Quarterly report',

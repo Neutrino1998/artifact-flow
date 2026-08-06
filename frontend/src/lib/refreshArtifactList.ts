@@ -34,7 +34,7 @@ let _generation = 0;
 
 export async function refreshArtifactList(
   sessionId: string,
-  setArtifacts: (artifacts: ArtifactSummary[]) => void,
+  commitArtifacts: (artifacts: ArtifactSummary[]) => void,
   setSessionId: (sessionId: string | null) => void,
   getCurrentSessionId: () => string | null,
   canCommit: () => boolean = () => true,
@@ -56,7 +56,7 @@ export async function refreshArtifactList(
     //     a new turn in the same conversation must not accept the old turn's
     //     list snapshot over its live event-reduced state.
     if (!canCommit()) return;
-    setArtifacts(data.artifacts);
+    commitArtifacts(data.artifacts);
   } catch {
     // Silent: callers decide whether/how to surface errors. This refresh is
     // a best-effort secondary update — the next refresh will retry.

@@ -114,8 +114,8 @@ interface ArtifactState {
 
   // Actions
   setSessionId: (sessionId: string | null) => void;
-  /** Replace only the visible list; safe for best-effort DB reads during a turn. */
-  setArtifacts: (artifacts: ArtifactSummary[]) => void;
+  /** Merge a lagging DB list into the live projection without pruning live files/tabs. */
+  mergeArtifactsFromDbDuringLive: (artifacts: ArtifactSummary[]) => void;
   /** Commit an authoritative terminal DB collection, pruning missing tabs. */
   reconcileArtifactsFromDb: (artifacts: ArtifactSummary[]) => void;
   /** Commit an authoritative detail 404 when the collection request is absent/late. */
@@ -184,6 +184,49 @@ function reconcileDbArtifactCollection(
   };
 }
 
+/**
+ * Merge a pure-DB list into the visible in-turn projection. The DB list is a
+ * complete persisted collection, but it intentionally cannot see this turn's
+ * unflushed artifacts. Preserve every live entry and let its event-reduced
+ * version/content metadata win over a stale row for the same ID.
+ *
+ * This transition deliberately does not touch tabs/current: absence from a
+ * mid-stream DB response says nothing about an optimistic artifact.
+ */
+function mergeDbArtifactsWithLive(
+  state: ArtifactState,
+  dbArtifacts: ArtifactSummary[],
+): ArtifactSummary[] {
+  const merged = dbArtifacts.map((artifact) => {
+    const live = state.liveContent[artifact.id];
+    if (!live) return artifact;
+    return {
+      ...artifact,
+      content_type: live.contentType,
+      current_version: live.version,
+      has_blob: live.hasBlob,
+    };
+  });
+  const mergedIds = new Set(merged.map((artifact) => artifact.id));
+
+  for (const [id, live] of Object.entries(state.liveContent)) {
+    if (mergedIds.has(id)) continue;
+    merged.push({
+      id,
+      content_type: live.contentType,
+      title: live.title,
+      current_version: live.version,
+      source: live.source,
+      original_filename: live.originalFilename,
+      has_blob: live.hasBlob,
+      created_at: '',
+      updated_at: '',
+    });
+  }
+
+  return merged;
+}
+
 export const useArtifactStore = create<ArtifactState>((set, get) => ({
   sessionId: null,
 
@@ -209,16 +252,35 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
   uploadError: null,
 
   setSessionId: (sessionId) => set({ sessionId }),
-  setArtifacts: (artifacts) => set({ artifacts }),
+  mergeArtifactsFromDbDuringLive: (artifacts) =>
+    set((state) => ({ artifacts: mergeDbArtifactsWithLive(state, artifacts) })),
   reconcileArtifactsFromDb: (artifacts) =>
     set((state) => reconcileDbArtifactCollection(state, artifacts)),
   removeArtifactMissingFromDb: (artifactId) =>
-    set((state) =>
-      reconcileDbArtifactCollection(
-        state,
-        state.artifacts.filter((artifact) => artifact.id !== artifactId),
-      )
-    ),
+    set((state) => {
+      const artifacts = state.artifacts.filter((artifact) => artifact.id !== artifactId);
+      const openArtifactIds = state.openArtifactIds.filter((id) => id !== artifactId);
+      const liveContent = { ...state.liveContent };
+      delete liveContent[artifactId];
+      const pendingUpdates = state.pendingUpdates.filter((id) => id !== artifactId);
+
+      if (state.current?.id !== artifactId) {
+        return { artifacts, openArtifactIds, liveContent, pendingUpdates };
+      }
+      return {
+        artifacts,
+        openArtifactIds,
+        liveContent,
+        pendingUpdates,
+        current: null,
+        currentLoading: false,
+        autoSelected: false,
+        versions: [],
+        selectedVersion: null,
+        diffBaseContent: null,
+        viewMode: 'preview',
+      };
+    }),
   setArtifactsLoading: (loading) => set({ artifactsLoading: loading }),
   setCurrent: (artifact) =>
     set((s) => ({

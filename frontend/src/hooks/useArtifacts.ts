@@ -25,7 +25,9 @@ function resolveSessionId(): string | null {
 
 export function useArtifacts() {
   const sessionId = useConversationStore((s) => s.current?.session_id);
-  const setArtifacts = useArtifactStore((s) => s.setArtifacts);
+  const mergeArtifactsFromDbDuringLive = useArtifactStore(
+    (s) => s.mergeArtifactsFromDbDuringLive,
+  );
   const reconcileArtifactsFromDb = useArtifactStore((s) => s.reconcileArtifactsFromDb);
   const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
   const setArtifactsLoading = useArtifactStore((s) => s.setArtifactsLoading);
@@ -51,7 +53,7 @@ export function useArtifacts() {
           if (stream.isStreaming && stream.conversationId === sessionId) {
             // During a turn DB intentionally lags: refresh the best-effort list
             // without pruning live-only files or their tabs.
-            setArtifacts(artifacts);
+            mergeArtifactsFromDbDuringLive(artifacts);
           } else {
             // Outside a live turn every successful DB list is authoritative.
             // This also handles a manual refresh superseding the terminal list
@@ -65,7 +67,7 @@ export function useArtifacts() {
     } finally {
       setArtifactsLoading(false);
     }
-  }, [sessionId, setArtifacts, reconcileArtifactsFromDb, setArtifactSessionId, setArtifactsLoading]);
+  }, [sessionId, mergeArtifactsFromDbDuringLive, reconcileArtifactsFromDb, setArtifactSessionId, setArtifactsLoading]);
 
   // selectArtifact resolves sessionId at call time via getState()
   const selectArtifact = useCallback(

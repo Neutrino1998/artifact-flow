@@ -43,7 +43,7 @@ describe('ArtifactFileTabs', () => {
   beforeEach(() => {
     selectArtifact.mockReset();
     useArtifactStore.getState().reset();
-    useArtifactStore.getState().setArtifacts([summary('A'), summary('B')]);
+    useArtifactStore.getState().reconcileArtifactsFromDb([summary('A'), summary('B')]);
     useArtifactStore.getState().setCurrent(detail('A'));
     useArtifactStore.getState().setCurrent(detail('B'));
     useArtifactStore.getState().setCurrent(detail('A'));
