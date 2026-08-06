@@ -1,12 +1,12 @@
 /**
  * Monotonic counter for the artifact-detail-view selection scope.
  *
- * Both `useArtifacts.selectArtifact` and `useArtifacts.selectVersion` bump
- * this on entry. Late responses (fast user clicking A→B in the artifact
- * list, or v5→v3 in the version dropdown) compare their captured value
- * against `getArtifactDetailGen()` after the await — mismatch drops the
- * response so the slow A/v5 cannot overwrite the latest B/v3 selection
- * (or poison the diff base of an unrelated artifact).
+ * `useArtifacts.selectArtifact`, `useArtifacts.selectVersion`, and terminal
+ * DB reconciliation bump this on entry. Late responses (fast user clicking
+ * A→B in the artifact list, or v5→v3 in the version dropdown) compare their
+ * captured value against `getArtifactDetailGen()` after the await — mismatch
+ * drops the response so the slow A/v5 cannot overwrite the latest B/v3
+ * selection (or poison the diff base of an unrelated artifact).
  *
  * Also bumped by `useChat.switchConversation` and `useChat.startNewChat`
  * so an in-flight manual artifact-detail fetch from the previous

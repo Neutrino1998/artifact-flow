@@ -7,7 +7,7 @@ import { useUIStore } from '@/stores/uiStore';
 import * as api from '@/lib/api';
 import { refreshArtifactList } from '@/lib/refreshArtifactList';
 import { bumpArtifactDetailGen, getArtifactDetailGen } from '@/lib/artifactDetailGen';
-import type { VersionSummary } from '@/types';
+import { findPrevVersion } from '@/lib/artifactVersions';
 
 /**
  * Resolve session ID at call time.
@@ -20,16 +20,6 @@ function resolveSessionId(): string | null {
     useArtifactStore.getState().sessionId ??
     null
   );
-}
-
-/**
- * Find the previous version number from a sorted versions list.
- * Version numbers can be sparse (e.g. 1, 3, 5) due to write-back folding.
- */
-function findPrevVersion(versions: VersionSummary[], currentVersion: number): number | null {
-  const sorted = versions.map((v) => v.version).sort((a, b) => a - b);
-  const idx = sorted.indexOf(currentVersion);
-  return idx > 0 ? sorted[idx - 1] : null;
 }
 
 export function useArtifacts() {

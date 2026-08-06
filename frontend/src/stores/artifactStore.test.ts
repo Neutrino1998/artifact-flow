@@ -166,23 +166,39 @@ describe('artifactStore.refreshCurrent', () => {
     useArtifactStore.getState().setSelectedVersion(versionDetail(1));
     expect(useArtifactStore.getState().autoSelected).toBe(false);
 
-    useArtifactStore.getState().refreshCurrent(v2);
+    useArtifactStore.getState().refreshCurrent(v2, 'version 1');
 
     expect(useArtifactStore.getState().current?.current_version).toBe(2);
     expect(useArtifactStore.getState().versions).toEqual(v2.versions);
     expect(useArtifactStore.getState().selectedVersion).toBeNull();
+    expect(useArtifactStore.getState().diffBaseContent).toBe('version 1');
     expect(useArtifactStore.getState().autoSelected).toBe(false);  // preserved
   });
 
-  test('same-id refresh: does not reset viewMode', () => {
+  test('resolved DB diff base preserves diff viewMode', () => {
     const v1 = { ...detail('text/markdown'), current_version: 1 } as ArtifactDetail;
     const v2 = { ...detail('text/markdown'), current_version: 2 } as ArtifactDetail;
     useArtifactStore.getState().setCurrent(v1);
     useArtifactStore.getState().setViewMode('diff');  // user-chosen mode
 
-    useArtifactStore.getState().refreshCurrent(v2);
+    useArtifactStore.getState().refreshCurrent(v2, 'persisted v1');
 
     expect(useArtifactStore.getState().viewMode).toBe('diff');  // preserved
+    expect(useArtifactStore.getState().diffBaseContent).toBe('persisted v1');
+  });
+
+  test('failed DB diff-base request exits diff instead of showing a stale comparison', () => {
+    const v1 = { ...detail('text/markdown'), current_version: 1 } as ArtifactDetail;
+    const v2 = { ...detail('text/markdown'), current_version: 2 } as ArtifactDetail;
+    useArtifactStore.getState().setCurrent(v1);
+    useArtifactStore.getState().setDiffBaseContent('older stale base');
+    useArtifactStore.getState().setViewMode('diff');
+
+    useArtifactStore.getState().refreshCurrent(v2, undefined);
+
+    expect(useArtifactStore.getState().current?.current_version).toBe(2);
+    expect(useArtifactStore.getState().diffBaseContent).toBeNull();
+    expect(useArtifactStore.getState().viewMode).toBe('preview');
   });
 
   test('late refresh after a tab switch does not pollute the new current artifact', () => {
@@ -195,11 +211,14 @@ describe('artifactStore.refreshCurrent', () => {
     useArtifactStore.getState().setVersions(bVersions);
     useArtifactStore.getState().setSelectedVersion(bSelected);
 
-    useArtifactStore.getState().refreshCurrent({
-      ...a,
-      current_version: 2,
-      versions: [versionSummary(1), versionSummary(2)],
-    });
+    useArtifactStore.getState().refreshCurrent(
+      {
+        ...a,
+        current_version: 2,
+        versions: [versionSummary(1), versionSummary(2)],
+      },
+      'A base',
+    );
 
     expect(useArtifactStore.getState().current?.id).toBe('B');
     expect(useArtifactStore.getState().versions).toEqual(bVersions);
@@ -213,11 +232,14 @@ describe('artifactStore.refreshCurrent', () => {
     useArtifactStore.getState().setSelectedVersion(versionDetail(1));
     useArtifactStore.getState().closeArtifactTab('A');
 
-    useArtifactStore.getState().refreshCurrent({
-      ...a,
-      current_version: 2,
-      versions: [versionSummary(1), versionSummary(2)],
-    });
+    useArtifactStore.getState().refreshCurrent(
+      {
+        ...a,
+        current_version: 2,
+        versions: [versionSummary(1), versionSummary(2)],
+      },
+      'A base',
+    );
 
     const state = useArtifactStore.getState();
     expect(state.current).toBeNull();
@@ -229,9 +251,35 @@ describe('artifactStore.refreshCurrent', () => {
   test('refresh when current is null: no-op', () => {
     const a = { ...detail('text/markdown'), id: 'A' } as ArtifactDetail;
 
-    useArtifactStore.getState().refreshCurrent(a);
+    useArtifactStore.getState().refreshCurrent(a, 'A base');
 
     expect(useArtifactStore.getState().current).toBe(null);
+  });
+
+  test('same-id delayed DB response cannot downgrade newer live content', () => {
+    const liveV3 = {
+      ...detail('text/markdown'),
+      content: 'live v3',
+      current_version: 3,
+      versions: [],
+    } as ArtifactDetail;
+    const staleV2 = {
+      ...detail('text/markdown'),
+      content: 'stale DB v2',
+      current_version: 2,
+      versions: [versionSummary(1), versionSummary(2)],
+    } as ArtifactDetail;
+    useArtifactStore.getState().setCurrent(liveV3);
+    useArtifactStore.getState().setVersions([]);
+    useArtifactStore.getState().setDiffBaseContent('live base');
+
+    useArtifactStore.getState().refreshCurrent(staleV2, 'stale DB base');
+
+    const state = useArtifactStore.getState();
+    expect(state.current?.content).toBe('live v3');
+    expect(state.current?.current_version).toBe(3);
+    expect(state.versions).toEqual([]);
+    expect(state.diffBaseContent).toBe('live base');
   });
 });
 

@@ -11,7 +11,10 @@ import type { SSEEvent, LLMCompleteData, ToolCallProgressData, ArtifactCreatedDa
 import * as api from '@/lib/api';
 import { refreshArtifactList } from '@/lib/refreshArtifactList';
 import { bumpArtifactFetchGen } from '@/lib/artifactFetchGen';
+import { bumpArtifactDetailGen, getArtifactDetailGen } from '@/lib/artifactDetailGen';
+import { findPrevVersion } from '@/lib/artifactVersions';
 import { getNavGen } from '@/lib/navGen';
+import { isTerminalRefreshOwner } from '@/lib/terminalRefreshOwnership';
 import { notifyTaskTerminal } from '@/lib/taskNotifications';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -76,6 +79,7 @@ export function useSSE() {
   const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
   const setArtifacts = useArtifactStore((s) => s.setArtifacts);
   const setArtifactCurrent = useArtifactStore((s) => s.setCurrent);
+  const setArtifactCurrentLoading = useArtifactStore((s) => s.setCurrentLoading);
   const refreshArtifactCurrent = useArtifactStore((s) => s.refreshCurrent);
   const clearPendingUpdates = useArtifactStore((s) => s.clearPendingUpdates);
   const applyArtifactCreated = useArtifactStore((s) => s.applyArtifactCreated);
@@ -118,6 +122,25 @@ export function useSSE() {
       //     populate — would briefly revive abandoned conv before the new
       //     setCurrent overwrites)
       const myNavGen = getNavGen();
+      // A delayed duplicate terminal from an older turn must not even claim
+      // the artifact-detail generation or clear a newer turn's spinner.
+      if (!isTerminalRefreshOwner(myNavGen, terminalMessageId)) {
+        if (terminalMessageId) {
+          clearConversationActiveIfMatch(conversationId, terminalMessageId);
+        }
+        return;
+      }
+      // A terminal DB reconciliation supersedes any detail request that began
+      // while the turn was live. A later user selection bumps the same counter
+      // again and therefore wins over this background refresh.
+      const myArtifactDetailGen = bumpArtifactDetailGen();
+      // The invalidated request's finally block intentionally cannot clear a
+      // newer request's spinner, so close its old loading state at this claim.
+      setArtifactCurrentLoading(false);
+      const ownsTerminalRefresh = () =>
+        isTerminalRefreshOwner(myNavGen, terminalMessageId);
+      const ownsArtifactRefresh = () =>
+        ownsTerminalRefresh() && myArtifactDetailGen === getArtifactDetailGen();
       // Stream just ended — invalidate every in-flight auto-open fetch
       // unconditionally. Cases this catches that the per-revert bump did
       // not: the FIRST auto-open from this stream hasn't resolved yet, so
@@ -163,7 +186,7 @@ export function useSSE() {
         // Everything below mutates state that belongs to "the conversation
         // the user is on". A nav-gen change means they aren't on this conv
         // anymore — drop the whole detail/artifact write path.
-        if (myNavGen !== getNavGen()) return;
+        if (!ownsTerminalRefresh()) return;
 
         setCurrent(detail);
         clearPendingUpdates();
@@ -184,6 +207,7 @@ export function useSSE() {
             setArtifacts,
             setArtifactSessionId,
             () => useArtifactStore.getState().sessionId,
+            ownsTerminalRefresh,
           );
         }
         const { current: curArtifact, autoSelected } = useArtifactStore.getState();
@@ -196,23 +220,54 @@ export function useSSE() {
             // already invalidated any in-flight auto-opens.)
             setArtifactCurrent(null);
           } else {
-            // User actively picked this artifact — refresh content but keep
-            // them on it.
-            api.getArtifact(conversationId, curArtifact.id).then((artDetail) => {
-              // Re-check at resolution: another nav could have fired during
-              // this nested await.
-              if (myNavGen !== getNavGen()) return;
-              // The shared transition also verifies that this artifact is
-              // still current, atomically rejecting a close or tab switch.
-              refreshArtifactCurrent(artDetail);
-            }).catch(() => {});
+            // User actively picked this artifact. The live stream is best
+            // effort; after terminal, DB detail + persisted previous version
+            // become the atomic source of truth for content, versions and Diff.
+            void (async () => {
+              try {
+                const artDetail = await api.getArtifact(conversationId, curArtifact.id);
+                if (!ownsArtifactRefresh()) return;
+
+                const prevVersion = findPrevVersion(
+                  artDetail.versions,
+                  artDetail.current_version,
+                );
+                let diffBaseContent: string | undefined;
+                if (prevVersion === null) {
+                  // First persisted version: Diff is correctly empty → current.
+                  diffBaseContent = '';
+                } else {
+                  try {
+                    const base = await api.getVersion(
+                      conversationId,
+                      artDetail.id,
+                      prevVersion,
+                    );
+                    if (!ownsArtifactRefresh()) return;
+                    diffBaseContent = base.content;
+                  } catch {
+                    if (!ownsArtifactRefresh()) return;
+                    // Detail/versions still reconcile. The store exits Diff so
+                    // a failed base request cannot leave a misleading result.
+                    diffBaseContent = undefined;
+                  }
+                }
+
+                if (!ownsArtifactRefresh()) return;
+                // The shared transition additionally rejects close, tab switch
+                // and lower-version responses in one atomic store update.
+                refreshArtifactCurrent(artDetail, diffBaseContent);
+              } catch {
+                // Best-effort terminal refresh; the next panel refresh retries.
+              }
+            })();
           }
         }
       } catch (err) {
         console.error('Failed to refresh after complete:', err);
       }
     },
-    [setCurrent, setConversations, clearConversationActiveIfMatch, clearPendingUpdates, clearLiveContent, setArtifactCurrent, refreshArtifactCurrent, setArtifacts, setArtifactSessionId]
+    [setCurrent, setConversations, clearConversationActiveIfMatch, clearPendingUpdates, clearLiveContent, setArtifactCurrent, setArtifactCurrentLoading, refreshArtifactCurrent, setArtifacts, setArtifactSessionId]
   );
 
   const handleEvent = useCallback(

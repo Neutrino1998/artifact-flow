@@ -119,7 +119,10 @@ interface ArtifactState {
   setCurrent: (artifact: ArtifactDetail | null) => void;
   setCurrentAuto: (artifact: ArtifactDetail) => void;
   closeArtifactTab: (artifactId: string) => void;
-  refreshCurrent: (artifact: ArtifactDetail) => void;
+  refreshCurrent: (
+    artifact: ArtifactDetail,
+    diffBaseContent: string | undefined,
+  ) => void;
   setCurrentLoading: (loading: boolean) => void;
   setVersions: (versions: VersionSummary[]) => void;
   setSelectedVersion: (version: VersionDetail | null) => void;
@@ -210,21 +213,32 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
         viewMode: 'preview',
       };
     }),
-  // Passive same-artifact refresh: atomically update the detail and its
-  // version-scoped state only while this artifact is still current. Closing
-  // or switching the tab makes a late response a complete no-op, so passive
-  // producers cannot reopen a tab or mix one artifact's versions into
-  // another. Preserve user-owned UI state (`autoSelected`, `viewMode`).
-  refreshCurrent: (artifact) =>
-    set((s) =>
-      s.current?.id === artifact.id
-        ? {
-            current: artifact,
-            versions: artifact.versions,
-            selectedVersion: null,
-          }
-        : s
-    ),
+  // Passive DB reconciliation: atomically update the detail, versions and
+  // diff base only while this artifact is still current. A lower version is
+  // also stale by construction. The caller separately owns the turn/request
+  // generation (needed for mutable single-version blobs).
+  refreshCurrent: (artifact, diffBaseContent) =>
+    set((s) => {
+      if (
+        s.current?.id !== artifact.id ||
+        artifact.current_version < s.current.current_version
+      ) {
+        return s;
+      }
+
+      const next: Partial<ArtifactState> = {
+        current: artifact,
+        versions: artifact.versions,
+        selectedVersion: null,
+        diffBaseContent: diffBaseContent ?? null,
+      };
+      // `undefined` means the DB baseline request failed. Do not keep a Diff
+      // view whose old side is no longer trustworthy after reconciliation.
+      if (diffBaseContent === undefined && s.viewMode === 'diff') {
+        next.viewMode = defaultViewMode(artifact.content_type, artifact.has_blob);
+      }
+      return next;
+    }),
   setCurrentLoading: (loading) => set({ currentLoading: loading }),
   setVersions: (versions) => set({ versions }),
   setSelectedVersion: (version) => set({ selectedVersion: version }),
