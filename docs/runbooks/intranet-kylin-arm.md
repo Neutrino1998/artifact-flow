@@ -277,7 +277,7 @@ ARTIFACTFLOW_MAX_CONCURRENT_TASKS=16
 ARTIFACTFLOW_REDIS_MAX_CONNECTIONS=32
 ARTIFACTFLOW_DATABASE_POOL_SIZE=5
 ARTIFACTFLOW_DATABASE_MAX_OVERFLOW=10
-ARTIFACTFLOW_COMPACTION_RESERVE_TOKENS=10000
+ARTIFACTFLOW_COMPACTION_RESERVE_TOKENS=20000
 ```
 
 Production `control/.env` has already been cleaned of the obsolete
@@ -285,10 +285,10 @@ Production `control/.env` has already been cleaned of the obsolete
 `ARTIFACTFLOW_RENDER_TOOL_EXAMPLES` settings. Do not reintroduce them. Native
 function calls replaced the old XML tool examples, and the service now derives
 the compaction trigger from each model's context window. The application default
-reserve remains 20K; this intranet site intentionally overrides it to 10K in
-`control/.env`. Both the text and vision model windows are 110K, so each
-triggers compaction at 100K. afctl apply and rollback preserve this target-local
-override.
+reserve remains 20K, and this intranet site explicitly sets the same value in
+`control/.env`. The text model window is 220K and triggers compaction at 200K;
+the vision model window is 128K and triggers compaction at 108K. afctl apply and
+rollback preserve this target-local setting.
 
 Validate the complete target state before applying the release:
 
