@@ -26,11 +26,14 @@ const ARTIFACT_TOOLS = new Set([
 // operate on the same controller, preventing orphaned SSE connections.
 let _sharedAbortController: AbortController | null = null;
 
-// Most recent permission_result, latched until the next tool_start consumes
-// it. Engine guarantees serial execution, so the immediately-following
-// tool_start is the one this result belongs to (matches reconstructSegments
-// pairing). Cleared on stream start/end via endStream() consumer.
-let _pendingPermissionResult: { approved: boolean; reason?: string } | null = null;
+// Permission decisions arrive before their TOOL_START. Keep them by the same
+// native call_id used for every other tool lifecycle join instead of relying on
+// event adjacency. The map survives a reconnect within one stream and is reset
+// when a new logical stream starts.
+const _pendingPermissionResults = new Map<
+  string,
+  { approved: boolean; reason?: string }
+>();
 
 const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_BASE_DELAY_MS = 1000;
@@ -345,11 +348,8 @@ export function useSSE() {
             break;
           }
 
-          // Latch a just-resolved permission_result onto this tool call (the
-          // tool the user just approved/denied). Engine emits permission_result
-          // immediately before this tool_start.
-          const permission = _pendingPermissionResult ?? undefined;
-          _pendingPermissionResult = null;
+          const permission = _pendingPermissionResults.get(callId);
+          _pendingPermissionResults.delete(callId);
 
           addToolCallToSegment({
             id: callId,
@@ -427,19 +427,34 @@ export function useSSE() {
           break;
         }
 
-        case StreamEventType.PERMISSION_REQUEST:
+        case StreamEventType.PERMISSION_REQUEST: {
+          const callId = data?.call_id as string | undefined;
+          if (!callId) {
+            console.error('[useSSE] permission_request missing native call_id');
+            break;
+          }
           setPermissionRequest({
+            callId,
             toolName: data?.tool as string ?? '',
             params: data?.params as Record<string, unknown> ?? {},
             reason: data?.reason as string | undefined,
           });
           break;
+        }
 
         case StreamEventType.PERMISSION_RESULT: {
           setPermissionRequest(null);
+          const callId = data?.call_id as string | undefined;
+          if (!callId) {
+            console.error('[useSSE] permission_result missing native call_id');
+            break;
+          }
           const approved = (data?.approved as boolean) ?? false;
           const reason = data?.reason as string | undefined;
-          _pendingPermissionResult = reason ? { approved, reason } : { approved };
+          _pendingPermissionResults.set(
+            callId,
+            reason ? { approved, reason } : { approved },
+          );
           break;
         }
 
@@ -680,9 +695,8 @@ export function useSSE() {
       if (_sharedAbortController) {
         _sharedAbortController.abort();
       }
-      // Clear any leaked permission latch from a prior stream — the next
-      // tool_start in this stream is unrelated to a previous turn's modal.
-      _pendingPermissionResult = null;
+      // A provider call_id is unique within one turn, not across streams.
+      _pendingPermissionResults.clear();
 
       // Enter streaming state. Centralizing this here (rather than relying on
       // every caller to call startStream first) ensures the reconnect path

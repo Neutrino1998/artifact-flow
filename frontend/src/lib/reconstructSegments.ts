@@ -21,10 +21,12 @@ import type { CompactionReason, TokenUsage, LLMCompleteData } from '@/types/even
  */
 function reconstructRawSegments(events: MessageEventItem[]): ExecutionSegment[] {
   const segments: ExecutionSegment[] = [];
-  // Latched on permission_result, consumed by the next tool_start. Mirrors
-  // useSSE._pendingPermissionResult — engine emits permission_result
-  // immediately before the relevant tool_start, so serial pairing is correct.
-  let pendingPermission: { approved: boolean; reason?: string } | null = null;
+  // TWIN of useSSE: permission results join their tool card by native call_id,
+  // exactly like TOOL_COMPLETE, rather than relying on event adjacency.
+  const pendingPermissions = new Map<
+    string,
+    { approved: boolean; reason?: string }
+  >();
 
   function current(): ExecutionSegment | undefined {
     return segments[segments.length - 1];
@@ -84,8 +86,8 @@ function reconstructRawSegments(events: MessageEventItem[]): ExecutionSegment[] 
           console.error('[reconstructSegments] tool_start missing native call_id');
           break;
         }
-        const permission = pendingPermission ?? undefined;
-        pendingPermission = null;
+        const permission = pendingPermissions.get(callId);
+        pendingPermissions.delete(callId);
         // TWIN: keep this field set identical to useSSE.ts TOOL_START. `reason`
         // is an optional backend-supplied display explanation and must survive
         // reload; it is not the model's reasoning channel.
@@ -103,9 +105,17 @@ function reconstructRawSegments(events: MessageEventItem[]): ExecutionSegment[] 
       }
 
       case 'permission_result': {
+        const callId = data?.call_id as string | undefined;
+        if (!callId) {
+          console.error('[reconstructSegments] permission_result missing native call_id');
+          break;
+        }
         const approved = (data?.approved as boolean) ?? false;
         const reason = data?.reason as string | undefined;
-        pendingPermission = reason ? { approved, reason } : { approved };
+        pendingPermissions.set(
+          callId,
+          reason ? { approved, reason } : { approved },
+        );
         break;
       }
 

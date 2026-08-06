@@ -15,8 +15,7 @@ export interface ToolCallInfo {
    *  Distinct from `permission.reason` below, which is the decision outcome. */
   reason?: string;
   /** Set only for CONFIRM-level tools — the user's response (or timeout).
-   *  Engine emits permission_request → permission_result immediately before
-   *  the tool's own tool_start, so live + replay both pair by time. */
+   *  Live + replay join permission_result to TOOL_START by native call id. */
   permission?: { approved: boolean; reason?: string };
 }
 
@@ -30,6 +29,8 @@ export interface ToolCallProgressInfo {
 }
 
 export interface PermissionRequest {
+  /** Provider-issued native tool-call id for this interrupted call. */
+  callId: string;
   toolName: string;
   params: Record<string, unknown>;
   /** Optional backend-supplied display explanation; not model reasoning. */
