@@ -14,6 +14,7 @@ import {
 import { BUTTON_GHOST_ICON, BUTTON_PRIMARY, SELECT_COMPACT } from '@/lib/styles';
 import { SELECT_CHEVRON_COMPACT } from '@/components/ui/SelectChevron';
 import ArtifactTabs from './ArtifactTabs';
+import { ArtifactBrowserIcon } from './ArtifactFileIcon';
 
 export default function ArtifactToolbar() {
   const current = useArtifactStore((s) => s.current);
@@ -68,14 +69,12 @@ export default function ArtifactToolbar() {
 
   return (
     <>
-      {/* Title row */}
-      <div className="px-4 py-2 border-b border-border dark:border-border-dark min-w-0">
-        <h3 className="font-semibold text-text-primary dark:text-text-primary-dark truncate">
+      <div className="min-w-0 border-b border-border px-4 py-2 dark:border-border-dark">
+        <h3 className="break-words text-sm font-semibold leading-5 text-text-primary dark:text-text-primary-dark">
           {current.title}
         </h3>
       </div>
 
-      {/* Tabs + actions row */}
       <div className="flex items-center justify-between gap-3 px-4 py-2 border-b border-border dark:border-border-dark">
         <ArtifactTabs />
 
@@ -153,16 +152,14 @@ export default function ArtifactToolbar() {
             </button>
           )}
 
-          {/* Back to list */}
+          {/* Full-width source-grouped file tree replaces the old flat list. */}
           <button
             onClick={() => setCurrent(null)}
             className={`${BUTTON_PRIMARY} ml-2 w-11 h-11 sm:w-7 sm:h-7 flex items-center justify-center rounded-full`}
-            aria-label="Back to artifact list"
-            title="返回列表"
+            aria-label="查看文件系统"
+            title="查看文件"
           >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M2 3.5h10M2 7h10M2 10.5h10" />
-            </svg>
+            <ArtifactBrowserIcon />
           </button>
         </div>
       </div>

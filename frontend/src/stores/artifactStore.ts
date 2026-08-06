@@ -68,6 +68,12 @@ interface ArtifactState {
   current: ArtifactDetail | null;
   currentLoading: boolean;
 
+  // File tabs. IDs are enough: display metadata comes from `artifacts` (or
+  // `current` for a just-opened detail). Detail/version state remains scoped to
+  // the single active artifact, so tabs don't duplicate the existing fetch and
+  // live-update machinery.
+  openArtifactIds: string[];
+
   // True iff `current` was placed there by the SSE auto-open path (i.e. the
   // agent updated an artifact mid-stream). Cleared the moment the user makes
   // any explicit pick or the panel is reset to list view. Two consumers:
@@ -112,6 +118,7 @@ interface ArtifactState {
   setArtifactsLoading: (loading: boolean) => void;
   setCurrent: (artifact: ArtifactDetail | null) => void;
   setCurrentAuto: (artifact: ArtifactDetail) => void;
+  closeArtifactTab: (artifactId: string) => void;
   refreshCurrent: (artifact: ArtifactDetail) => void;
   setCurrentLoading: (loading: boolean) => void;
   setVersions: (versions: VersionSummary[]) => void;
@@ -150,6 +157,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
 
   current: null,
   currentLoading: false,
+  openArtifactIds: [],
   autoSelected: false,
 
   versions: [],
@@ -169,16 +177,38 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
   setArtifacts: (artifacts) => set({ artifacts }),
   setArtifactsLoading: (loading) => set({ artifactsLoading: loading }),
   setCurrent: (artifact) =>
-    set({
+    set((s) => ({
       current: artifact,
       autoSelected: false,
       viewMode: artifact ? defaultViewMode(artifact.content_type, artifact.has_blob) : 'preview',
-    }),
+      openArtifactIds:
+        artifact && !s.openArtifactIds.includes(artifact.id)
+          ? [...s.openArtifactIds, artifact.id]
+          : s.openArtifactIds,
+    })),
   setCurrentAuto: (artifact) =>
-    set({
+    set((s) => ({
       current: artifact,
       autoSelected: true,
       viewMode: defaultViewMode(artifact.content_type, artifact.has_blob),
+      openArtifactIds: s.openArtifactIds.includes(artifact.id)
+        ? s.openArtifactIds
+        : [...s.openArtifactIds, artifact.id],
+    })),
+  closeArtifactTab: (artifactId) =>
+    set((s) => {
+      const openArtifactIds = s.openArtifactIds.filter((id) => id !== artifactId);
+      if (s.current?.id !== artifactId) return { openArtifactIds };
+      return {
+        openArtifactIds,
+        current: null,
+        currentLoading: false,
+        autoSelected: false,
+        versions: [],
+        selectedVersion: null,
+        diffBaseContent: null,
+        viewMode: 'preview',
+      };
     }),
   // Same-artifact content refresh: write the new ArtifactDetail through
   // WITHOUT touching `autoSelected` or `viewMode`. Used when a stream
@@ -250,6 +280,9 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
       if (!s.current || s.autoSelected) {
         next.current = liveToDetail(d.id, live, s.sessionId);
         next.autoSelected = true;
+        next.openArtifactIds = s.openArtifactIds.includes(d.id)
+          ? s.openArtifactIds
+          : [...s.openArtifactIds, d.id];
         next.viewMode = defaultViewMode(d.content_type, d.has_blob);
         next.versions = [];
         next.selectedVersion = null;
@@ -308,6 +341,9 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
       } else if (!s.current || s.autoSelected) {
         next.current = liveToDetail(d.id, live, s.sessionId);
         next.autoSelected = true;
+        next.openArtifactIds = s.openArtifactIds.includes(d.id)
+          ? s.openArtifactIds
+          : [...s.openArtifactIds, d.id];
         next.viewMode = defaultViewMode(live.contentType, live.hasBlob);
         next.versions = [];
         next.selectedVersion = null;
@@ -318,14 +354,17 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
   selectFromLive: (id) => {
     const live = get().liveContent[id];
     if (!live || live.omitted) return false;
-    set({
+    set((s) => ({
       current: liveToDetail(id, live, get().sessionId),
       autoSelected: false, // user-picked: keep them here at COMPLETE
+      openArtifactIds: s.openArtifactIds.includes(id)
+        ? s.openArtifactIds
+        : [...s.openArtifactIds, id],
       viewMode: defaultViewMode(live.contentType, live.hasBlob),
       versions: [],
       selectedVersion: null,
       diffBaseContent: null,
-    });
+    }));
     return true;
   },
 
@@ -349,6 +388,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
       sessionId: null,
       artifacts: [],
       current: null,
+      openArtifactIds: [],
       autoSelected: false,
       currentLoading: false,
       versions: [],

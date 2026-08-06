@@ -78,6 +78,58 @@ describe('artifactStore.autoSelected provenance flag', () => {
   });
 });
 
+describe('artifactStore file tabs', () => {
+  beforeEach(() => useArtifactStore.getState().reset());
+
+  test('opening details appends IDs once and preserves their order', () => {
+    const first = { ...detail('text/markdown'), id: 'A' } as ArtifactDetail;
+    const second = { ...detail('text/plain'), id: 'B' } as ArtifactDetail;
+
+    useArtifactStore.getState().setCurrent(first);
+    useArtifactStore.getState().setCurrent(second);
+    useArtifactStore.getState().setCurrent(first);
+
+    expect(useArtifactStore.getState().openArtifactIds).toEqual(['A', 'B']);
+  });
+
+  test('returning to the file tree keeps open tabs', () => {
+    useArtifactStore.getState().setCurrent(detail('text/markdown'));
+    useArtifactStore.getState().setCurrent(null);
+
+    expect(useArtifactStore.getState().current).toBeNull();
+    expect(useArtifactStore.getState().openArtifactIds).toEqual(['art-1']);
+  });
+
+  test('closing the active tab clears its detail and view-scoped state', () => {
+    useArtifactStore.getState().setCurrent(detail('text/markdown'));
+    useArtifactStore.getState().setViewMode('diff');
+    useArtifactStore.getState().closeArtifactTab('art-1');
+
+    const state = useArtifactStore.getState();
+    expect(state.openArtifactIds).toEqual([]);
+    expect(state.current).toBeNull();
+    expect(state.viewMode).toBe('preview');
+  });
+
+  test('closing an inactive tab leaves the active detail alone', () => {
+    const first = { ...detail('text/markdown'), id: 'A' } as ArtifactDetail;
+    const second = { ...detail('text/plain'), id: 'B' } as ArtifactDetail;
+    useArtifactStore.getState().setCurrent(first);
+    useArtifactStore.getState().setCurrent(second);
+
+    useArtifactStore.getState().closeArtifactTab('A');
+
+    expect(useArtifactStore.getState().openArtifactIds).toEqual(['B']);
+    expect(useArtifactStore.getState().current?.id).toBe('B');
+  });
+
+  test('reset clears tabs with the conversation-scoped artifact state', () => {
+    useArtifactStore.getState().setCurrent(detail('text/markdown'));
+    useArtifactStore.getState().reset();
+    expect(useArtifactStore.getState().openArtifactIds).toEqual([]);
+  });
+});
+
 describe('artifactStore.refreshCurrent', () => {
   beforeEach(() => useArtifactStore.getState().reset());
 
