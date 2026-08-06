@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 import { useArtifactStore } from '@/stores/artifactStore';
 import { useConversationStore } from '@/stores/conversationStore';
+import { useStreamStore } from '@/stores/streamStore';
 import { useUIStore } from '@/stores/uiStore';
 import * as api from '@/lib/api';
 import { refreshArtifactList } from '@/lib/refreshArtifactList';
@@ -25,6 +26,7 @@ function resolveSessionId(): string | null {
 export function useArtifacts() {
   const sessionId = useConversationStore((s) => s.current?.session_id);
   const setArtifacts = useArtifactStore((s) => s.setArtifacts);
+  const reconcileArtifactsFromDb = useArtifactStore((s) => s.reconcileArtifactsFromDb);
   const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
   const setArtifactsLoading = useArtifactStore((s) => s.setArtifactsLoading);
   const setCurrent = useArtifactStore((s) => s.setCurrent);
@@ -44,14 +46,26 @@ export function useArtifacts() {
       // refreshArtifactList stamps the artifact-store sessionId atomically.
       await refreshArtifactList(
         sessionId,
-        setArtifacts,
+        (artifacts) => {
+          const stream = useStreamStore.getState();
+          if (stream.isStreaming && stream.conversationId === sessionId) {
+            // During a turn DB intentionally lags: refresh the best-effort list
+            // without pruning live-only files or their tabs.
+            setArtifacts(artifacts);
+          } else {
+            // Outside a live turn every successful DB list is authoritative.
+            // This also handles a manual refresh superseding the terminal list
+            // request in refreshArtifactList's latest-wins generation.
+            reconcileArtifactsFromDb(artifacts);
+          }
+        },
         setArtifactSessionId,
         () => useArtifactStore.getState().sessionId,
       );
     } finally {
       setArtifactsLoading(false);
     }
-  }, [sessionId, setArtifacts, setArtifactSessionId, setArtifactsLoading]);
+  }, [sessionId, setArtifacts, reconcileArtifactsFromDb, setArtifactSessionId, setArtifactsLoading]);
 
   // selectArtifact resolves sessionId at call time via getState()
   const selectArtifact = useCallback(

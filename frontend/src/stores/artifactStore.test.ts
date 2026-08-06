@@ -1,6 +1,11 @@
 import { describe, test, expect, beforeEach } from 'vitest';
 import { useArtifactStore } from './artifactStore';
-import type { ArtifactDetail, VersionDetail, VersionSummary } from '@/types';
+import type {
+  ArtifactDetail,
+  ArtifactSummary,
+  VersionDetail,
+  VersionSummary,
+} from '@/types';
 
 function detail(content_type: string): ArtifactDetail {
   return {
@@ -29,6 +34,20 @@ function versionSummary(version: number): VersionSummary {
 
 function versionDetail(version: number): VersionDetail {
   return { ...versionSummary(version), content: `version ${version}` };
+}
+
+function summary(id: string): ArtifactSummary {
+  return {
+    id,
+    content_type: 'text/markdown',
+    title: id,
+    current_version: 1,
+    source: 'agent',
+    original_filename: null,
+    has_blob: false,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+  };
 }
 
 describe('artifactStore.setCurrent → defaultViewMode', () => {
@@ -363,6 +382,74 @@ describe('artifactStore.finishLiveTurn', () => {
     const state = useArtifactStore.getState();
     expect(state.pendingUpdates).toEqual(['new-doc']);
     expect(Object.keys(state.liveContent)).toEqual(['new-doc']);
+  });
+});
+
+describe('artifactStore authoritative DB collection reconciliation', () => {
+  beforeEach(() => useArtifactStore.getState().reset());
+
+  test('failed new artifact is removed from current, list and open tabs', () => {
+    const store = useArtifactStore.getState();
+    store.applyArtifactCreated({
+      id: 'ghost', title: 'Ghost', content_type: 'text/markdown',
+      source: 'agent', current_version: 1, content: 'never persisted',
+    });
+    store.selectFromLive('ghost');
+    store.setVersions([versionSummary(1)]);
+    store.setSelectedVersion(versionDetail(1));
+    store.setDiffBaseContent('stale base');
+    store.finishLiveTurn();
+
+    useArtifactStore.getState().reconcileArtifactsFromDb([]);
+
+    const state = useArtifactStore.getState();
+    expect(state.artifacts).toEqual([]);
+    expect(state.openArtifactIds).toEqual([]);
+    expect(state.current).toBeNull();
+    expect(state.versions).toEqual([]);
+    expect(state.selectedVersion).toBeNull();
+    expect(state.diffBaseContent).toBeNull();
+  });
+
+  test('only missing tabs are pruned while a persisted current file is preserved', () => {
+    const a = { ...detail('text/markdown'), id: 'A' } as ArtifactDetail;
+    const ghost = { ...detail('text/markdown'), id: 'ghost' } as ArtifactDetail;
+    const b = { ...detail('text/markdown'), id: 'B' } as ArtifactDetail;
+    const bVersions = [versionSummary(1)];
+    const bSelected = versionDetail(1);
+    const store = useArtifactStore.getState();
+    store.setArtifacts([summary('A'), summary('ghost'), summary('B')]);
+    store.setCurrent(a);
+    store.setCurrent(ghost);
+    store.setCurrent(b);
+    store.setVersions(bVersions);
+    store.setSelectedVersion(bSelected);
+
+    store.reconcileArtifactsFromDb([summary('A'), summary('B')]);
+
+    const state = useArtifactStore.getState();
+    expect(state.artifacts.map((artifact) => artifact.id)).toEqual(['A', 'B']);
+    expect(state.openArtifactIds).toEqual(['A', 'B']);
+    expect(state.current?.id).toBe('B');
+    expect(state.versions).toEqual(bVersions);
+    expect(state.selectedVersion).toEqual(bSelected);
+  });
+
+  test('authoritative detail 404 removes a missing file when list reconciliation is unavailable', () => {
+    const store = useArtifactStore.getState();
+    store.applyArtifactCreated({
+      id: 'ghost', title: 'Ghost', content_type: 'text/markdown',
+      source: 'agent', current_version: 1, content: 'never persisted',
+    });
+    store.selectFromLive('ghost');
+    store.finishLiveTurn();
+
+    useArtifactStore.getState().removeArtifactMissingFromDb('ghost');
+
+    const state = useArtifactStore.getState();
+    expect(state.artifacts).toEqual([]);
+    expect(state.openArtifactIds).toEqual([]);
+    expect(state.current).toBeNull();
   });
 });
 

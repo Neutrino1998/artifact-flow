@@ -12,8 +12,8 @@ import * as api from '@/lib/api';
 import { refreshArtifactList } from '@/lib/refreshArtifactList';
 import { bumpArtifactFetchGen } from '@/lib/artifactFetchGen';
 import { bumpArtifactDetailGen, getArtifactDetailGen } from '@/lib/artifactDetailGen';
-import { findPrevVersion } from '@/lib/artifactVersions';
 import { getNavGen } from '@/lib/navGen';
+import { reconcileTerminalArtifact } from '@/lib/reconcileTerminalArtifact';
 import { isTerminalRefreshOwner } from '@/lib/terminalRefreshOwnership';
 import { notifyTaskTerminal } from '@/lib/taskNotifications';
 import { useAuthStore } from '@/stores/authStore';
@@ -77,7 +77,8 @@ export function useSSE() {
 
   // Artifact store
   const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
-  const setArtifacts = useArtifactStore((s) => s.setArtifacts);
+  const reconcileArtifactsFromDb = useArtifactStore((s) => s.reconcileArtifactsFromDb);
+  const removeArtifactMissingFromDb = useArtifactStore((s) => s.removeArtifactMissingFromDb);
   const refreshArtifactCurrent = useArtifactStore((s) => s.refreshCurrent);
   const finishArtifactLiveTurn = useArtifactStore((s) => s.finishLiveTurn);
   const applyArtifactCreated = useArtifactStore((s) => s.applyArtifactCreated);
@@ -149,6 +150,43 @@ export function useSSE() {
       // its live events now build on a clean state and the old reads are dropped
       // by ownsTerminalRefresh below.
       finishArtifactLiveTurn();
+      // Artifact reconciliation is independent of conversation/sidebar reads:
+      // a failure in those secondary refreshes must not leave an unpersisted
+      // live artifact copyable or downloadable after terminal.
+      const artifactSession = useArtifactStore.getState().sessionId;
+      if (artifactSession === conversationId) {
+        refreshArtifactList(
+          conversationId,
+          reconcileArtifactsFromDb,
+          setArtifactSessionId,
+          () => useArtifactStore.getState().sessionId,
+          ownsTerminalRefresh,
+        );
+
+        const { current: curArtifact } = useArtifactStore.getState();
+        if (curArtifact && ownsArtifactRefresh()) {
+          // User actively picked this artifact. The live stream is best
+          // effort; this tri-state DB reconciliation commits present/missing
+          // results and preserves state when availability is unknown.
+          void reconcileTerminalArtifact({
+            sessionId: conversationId,
+            artifactId: curArtifact.id,
+            isOwner: ownsTerminalRefresh,
+            commitPresent: (artifact, diffBaseContent) => {
+              if (ownsArtifactRefresh()) {
+                refreshArtifactCurrent(artifact, diffBaseContent);
+              }
+            },
+            // Missing is collection truth, so a later user detail selection
+            // must not invalidate it; only terminal ownership may do so.
+            commitMissing: (artifactId) => {
+              if (ownsTerminalRefresh()) {
+                removeArtifactMissingFromDb(artifactId);
+              }
+            },
+          });
+        }
+      }
       // Compare-and-clear the sidebar dot for *this* terminal's message_id
       // only. If the user already kicked off a new turn on the same conv,
       // its sendMessage() has set active_message_id to the new id, and this
@@ -189,71 +227,11 @@ export function useSSE() {
         if (!ownsTerminalRefresh()) return;
 
         setCurrent(detail);
-
-        // Artifact refresh is further gated by artifactStore.sessionId so
-        // that conversations without artifact tools don't trigger a useless
-        // GET. Nav-gen guard above already ensured we're still on this conv.
-        const artifactSession = useArtifactStore.getState().sessionId;
-        const ownsArtifactSession = artifactSession === conversationId;
-
-        if (ownsArtifactSession) {
-          refreshArtifactList(
-            conversationId,
-            setArtifacts,
-            setArtifactSessionId,
-            () => useArtifactStore.getState().sessionId,
-            ownsTerminalRefresh,
-          );
-        }
-        const { current: curArtifact } = useArtifactStore.getState();
-        if (curArtifact && ownsArtifactSession && ownsArtifactRefresh()) {
-          // User actively picked this artifact. The live stream is best
-          // effort; after terminal, DB detail + persisted previous version
-          // become the atomic source of truth for content, versions and Diff.
-          void (async () => {
-            try {
-              const artDetail = await api.getArtifact(conversationId, curArtifact.id);
-              if (!ownsArtifactRefresh()) return;
-
-              const prevVersion = findPrevVersion(
-                artDetail.versions,
-                artDetail.current_version,
-              );
-              let diffBaseContent: string | undefined;
-              if (prevVersion === null) {
-                // First persisted version: Diff is correctly empty → current.
-                diffBaseContent = '';
-              } else {
-                try {
-                  const base = await api.getVersion(
-                    conversationId,
-                    artDetail.id,
-                    prevVersion,
-                  );
-                  if (!ownsArtifactRefresh()) return;
-                  diffBaseContent = base.content;
-                } catch {
-                  if (!ownsArtifactRefresh()) return;
-                  // Detail/versions still reconcile. The store exits Diff so
-                  // a failed base request cannot leave a misleading result.
-                  diffBaseContent = undefined;
-                }
-              }
-
-              if (!ownsArtifactRefresh()) return;
-              // The shared transition additionally rejects a close or tab
-              // switch in one atomic store update.
-              refreshArtifactCurrent(artDetail, diffBaseContent);
-            } catch {
-              // Best-effort terminal refresh; the next panel refresh retries.
-            }
-          })();
-        }
       } catch (err) {
         console.error('Failed to refresh after complete:', err);
       }
     },
-    [setCurrent, setConversations, clearConversationActiveIfMatch, finishArtifactLiveTurn, refreshArtifactCurrent, setArtifacts, setArtifactSessionId]
+    [setCurrent, setConversations, clearConversationActiveIfMatch, finishArtifactLiveTurn, refreshArtifactCurrent, reconcileArtifactsFromDb, removeArtifactMissingFromDb, setArtifactSessionId]
   );
 
   const handleEvent = useCallback(

@@ -114,7 +114,12 @@ interface ArtifactState {
 
   // Actions
   setSessionId: (sessionId: string | null) => void;
+  /** Replace only the visible list; safe for best-effort DB reads during a turn. */
   setArtifacts: (artifacts: ArtifactSummary[]) => void;
+  /** Commit an authoritative terminal DB collection, pruning missing tabs. */
+  reconcileArtifactsFromDb: (artifacts: ArtifactSummary[]) => void;
+  /** Commit an authoritative detail 404 when the collection request is absent/late. */
+  removeArtifactMissingFromDb: (artifactId: string) => void;
   setArtifactsLoading: (loading: boolean) => void;
   setCurrent: (artifact: ArtifactDetail | null) => void;
   setCurrentAuto: (artifact: ArtifactDetail) => void;
@@ -152,6 +157,33 @@ function defaultViewMode(contentType?: string, hasBlob?: boolean): ArtifactViewM
   return 'source';
 }
 
+/**
+ * Reconcile every collection-shaped artifact state field from an authoritative
+ * terminal DB list. Live events never use this transition: during a turn the
+ * DB intentionally lags and must not prune optimistic files or tabs.
+ */
+function reconcileDbArtifactCollection(
+  state: ArtifactState,
+  artifacts: ArtifactSummary[],
+): Partial<ArtifactState> {
+  const persistedIds = new Set(artifacts.map((artifact) => artifact.id));
+  const openArtifactIds = state.openArtifactIds.filter((id) => persistedIds.has(id));
+  if (!state.current || persistedIds.has(state.current.id)) {
+    return { artifacts, openArtifactIds };
+  }
+  return {
+    artifacts,
+    openArtifactIds,
+    current: null,
+    currentLoading: false,
+    autoSelected: false,
+    versions: [],
+    selectedVersion: null,
+    diffBaseContent: null,
+    viewMode: 'preview',
+  };
+}
+
 export const useArtifactStore = create<ArtifactState>((set, get) => ({
   sessionId: null,
 
@@ -178,6 +210,15 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
 
   setSessionId: (sessionId) => set({ sessionId }),
   setArtifacts: (artifacts) => set({ artifacts }),
+  reconcileArtifactsFromDb: (artifacts) =>
+    set((state) => reconcileDbArtifactCollection(state, artifacts)),
+  removeArtifactMissingFromDb: (artifactId) =>
+    set((state) =>
+      reconcileDbArtifactCollection(
+        state,
+        state.artifacts.filter((artifact) => artifact.id !== artifactId),
+      )
+    ),
   setArtifactsLoading: (loading) => set({ artifactsLoading: loading }),
   setCurrent: (artifact) =>
     set((s) => ({
