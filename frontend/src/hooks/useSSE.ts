@@ -76,8 +76,7 @@ export function useSSE() {
   const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
   const setArtifacts = useArtifactStore((s) => s.setArtifacts);
   const setArtifactCurrent = useArtifactStore((s) => s.setCurrent);
-  const setArtifactVersions = useArtifactStore((s) => s.setVersions);
-  const setSelectedVersion = useArtifactStore((s) => s.setSelectedVersion);
+  const refreshArtifactCurrent = useArtifactStore((s) => s.refreshCurrent);
   const clearPendingUpdates = useArtifactStore((s) => s.clearPendingUpdates);
   const applyArtifactCreated = useArtifactStore((s) => s.applyArtifactCreated);
   const applyArtifactUpdated = useArtifactStore((s) => s.applyArtifactUpdated);
@@ -203,9 +202,9 @@ export function useSSE() {
               // Re-check at resolution: another nav could have fired during
               // this nested await.
               if (myNavGen !== getNavGen()) return;
-              setArtifactCurrent(artDetail);
-              setArtifactVersions(artDetail.versions);
-              setSelectedVersion(null);
+              // The shared transition also verifies that this artifact is
+              // still current, atomically rejecting a close or tab switch.
+              refreshArtifactCurrent(artDetail);
             }).catch(() => {});
           }
         }
@@ -213,7 +212,7 @@ export function useSSE() {
         console.error('Failed to refresh after complete:', err);
       }
     },
-    [setCurrent, setConversations, clearConversationActiveIfMatch, clearPendingUpdates, clearLiveContent, setArtifactCurrent, setArtifacts, setArtifactSessionId, setArtifactVersions, setSelectedVersion]
+    [setCurrent, setConversations, clearConversationActiveIfMatch, clearPendingUpdates, clearLiveContent, setArtifactCurrent, refreshArtifactCurrent, setArtifacts, setArtifactSessionId]
   );
 
   const handleEvent = useCallback(

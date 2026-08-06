@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach } from 'vitest';
 import { useArtifactStore } from './artifactStore';
-import type { ArtifactDetail } from '@/types';
+import type { ArtifactDetail, VersionDetail, VersionSummary } from '@/types';
 
 function detail(content_type: string): ArtifactDetail {
   return {
@@ -11,7 +11,24 @@ function detail(content_type: string): ArtifactDetail {
     content: 'body',
     current_version: 1,
     source: null,
-  } as ArtifactDetail;
+    original_filename: null,
+    has_blob: false,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    versions: [],
+  };
+}
+
+function versionSummary(version: number): VersionSummary {
+  return {
+    version,
+    update_type: version === 1 ? 'create' : 'update',
+    created_at: `2026-01-0${version}T00:00:00Z`,
+  };
+}
+
+function versionDetail(version: number): VersionDetail {
+  return { ...versionSummary(version), content: `version ${version}` };
 }
 
 describe('artifactStore.setCurrent → defaultViewMode', () => {
@@ -133,15 +150,27 @@ describe('artifactStore file tabs', () => {
 describe('artifactStore.refreshCurrent', () => {
   beforeEach(() => useArtifactStore.getState().reset());
 
-  test('same-id refresh: updates current without touching autoSelected', () => {
-    const v1 = { ...detail('text/markdown'), current_version: 1 } as ArtifactDetail;
-    const v2 = { ...detail('text/markdown'), current_version: 2 } as ArtifactDetail;
+  test('same-id refresh atomically updates detail and versions without touching autoSelected', () => {
+    const v1 = {
+      ...detail('text/markdown'),
+      current_version: 1,
+      versions: [versionSummary(1)],
+    } as ArtifactDetail;
+    const v2 = {
+      ...detail('text/markdown'),
+      current_version: 2,
+      versions: [versionSummary(1), versionSummary(2)],
+    } as ArtifactDetail;
     useArtifactStore.getState().setCurrent(v1);  // user pick → autoSelected=false
+    useArtifactStore.getState().setVersions(v1.versions);
+    useArtifactStore.getState().setSelectedVersion(versionDetail(1));
     expect(useArtifactStore.getState().autoSelected).toBe(false);
 
     useArtifactStore.getState().refreshCurrent(v2);
 
     expect(useArtifactStore.getState().current?.current_version).toBe(2);
+    expect(useArtifactStore.getState().versions).toEqual(v2.versions);
+    expect(useArtifactStore.getState().selectedVersion).toBeNull();
     expect(useArtifactStore.getState().autoSelected).toBe(false);  // preserved
   });
 
@@ -156,14 +185,45 @@ describe('artifactStore.refreshCurrent', () => {
     expect(useArtifactStore.getState().viewMode).toBe('diff');  // preserved
   });
 
-  test('cross-id refresh: no-op (guard against accidental misuse)', () => {
+  test('late refresh after a tab switch does not pollute the new current artifact', () => {
     const a = { ...detail('text/markdown'), id: 'A', current_version: 1 } as ArtifactDetail;
     const b = { ...detail('text/markdown'), id: 'B', current_version: 1 } as ArtifactDetail;
+    const bVersions = [versionSummary(1)];
+    const bSelected = versionDetail(1);
     useArtifactStore.getState().setCurrent(a);
+    useArtifactStore.getState().setCurrent(b);
+    useArtifactStore.getState().setVersions(bVersions);
+    useArtifactStore.getState().setSelectedVersion(bSelected);
 
-    useArtifactStore.getState().refreshCurrent(b);
+    useArtifactStore.getState().refreshCurrent({
+      ...a,
+      current_version: 2,
+      versions: [versionSummary(1), versionSummary(2)],
+    });
 
-    expect(useArtifactStore.getState().current?.id).toBe('A');  // unchanged
+    expect(useArtifactStore.getState().current?.id).toBe('B');
+    expect(useArtifactStore.getState().versions).toEqual(bVersions);
+    expect(useArtifactStore.getState().selectedVersion).toEqual(bSelected);
+  });
+
+  test('late refresh after closing the active tab does not reopen it', () => {
+    const a = { ...detail('text/markdown'), id: 'A', current_version: 1 } as ArtifactDetail;
+    useArtifactStore.getState().setCurrent(a);
+    useArtifactStore.getState().setVersions([versionSummary(1)]);
+    useArtifactStore.getState().setSelectedVersion(versionDetail(1));
+    useArtifactStore.getState().closeArtifactTab('A');
+
+    useArtifactStore.getState().refreshCurrent({
+      ...a,
+      current_version: 2,
+      versions: [versionSummary(1), versionSummary(2)],
+    });
+
+    const state = useArtifactStore.getState();
+    expect(state.current).toBeNull();
+    expect(state.openArtifactIds).toEqual([]);
+    expect(state.versions).toEqual([]);
+    expect(state.selectedVersion).toBeNull();
   });
 
   test('refresh when current is null: no-op', () => {

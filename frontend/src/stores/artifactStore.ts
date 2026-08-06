@@ -210,15 +210,20 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
         viewMode: 'preview',
       };
     }),
-  // Same-artifact content refresh: write the new ArtifactDetail through
-  // WITHOUT touching `autoSelected` or `viewMode`. Used when a stream
-  // updates the artifact the user currently has open — we must not flip
-  // ownership back to "auto-selected" (which would yank the user to the
-  // list at stream end) and must not reset their chosen view mode (diff,
-  // source, etc). Guarded against accidental cross-id misuse.
+  // Passive same-artifact refresh: atomically update the detail and its
+  // version-scoped state only while this artifact is still current. Closing
+  // or switching the tab makes a late response a complete no-op, so passive
+  // producers cannot reopen a tab or mix one artifact's versions into
+  // another. Preserve user-owned UI state (`autoSelected`, `viewMode`).
   refreshCurrent: (artifact) =>
     set((s) =>
-      s.current && s.current.id === artifact.id ? { current: artifact } : s
+      s.current?.id === artifact.id
+        ? {
+            current: artifact,
+            versions: artifact.versions,
+            selectedVersion: null,
+          }
+        : s
     ),
   setCurrentLoading: (loading) => set({ currentLoading: loading }),
   setVersions: (versions) => set({ versions }),
