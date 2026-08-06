@@ -632,7 +632,6 @@ class TestDynamicContextReminder:
             "_meta": {
                 "image": {
                     "artifact_id": "shot",
-                    "version": 1,
                     "content_type": "image/png",
                     "data_uri": "data:image/png;base64,AAAA",
                 }
@@ -651,6 +650,62 @@ class TestDynamicContextReminder:
         assert blocks[0]["type"] == "text"
         assert "call_image" in blocks[1]["text"]
         assert blocks[2]["image_url"]["url"] == "data:image/png;base64,AAAA"
+
+    def test_prior_tool_image_carrier_survives_later_tool_round(self):
+        """read → another tool → next LLM still receives the original image block."""
+        history = [
+            {"role": "assistant", "content": None, "tool_calls": [{
+                "id": "call_image", "type": "function",
+                "function": {"name": "read_artifact", "arguments": '{"id":"shot"}'},
+            }]},
+            {
+                "role": "tool", "tool_call_id": "call_image", "content": "image result",
+                "_meta": {"image": {
+                    "artifact_id": "shot", "content_type": "image/png",
+                    "data_uri": "data:image/png;base64,AAAA",
+                }},
+            },
+            {"role": "assistant", "content": None, "tool_calls": [{
+                "id": "call_create", "type": "function",
+                "function": {"name": "create_artifact", "arguments": "{}"},
+            }]},
+            {"role": "tool", "tool_call_id": "call_create", "content": "created"},
+        ]
+
+        messages = ContextManager.assemble("system", history, "reminder")
+
+        assert [message["role"] for message in messages] == [
+            "system", "assistant", "tool", "user", "assistant", "tool", "user",
+        ]
+        first_carrier = messages[3]["content"]
+        assert first_carrier[1]["image_url"]["url"] == "data:image/png;base64,AAAA"
+        assert messages[-1] == {"role": "user", "content": "reminder"}
+
+    def test_multi_tool_group_closes_all_results_before_one_image_carrier(self):
+        history = [
+            {"role": "tool", "tool_call_id": "call_a", "content": "image A",
+             "_meta": {"image": {
+                 "artifact_id": "a", "content_type": "image/png",
+                 "data_uri": "data:image/png;base64,AAAA",
+             }}},
+            {"role": "tool", "tool_call_id": "call_text", "content": "plain result"},
+            {"role": "tool", "tool_call_id": "call_b", "content": "image B",
+             "_meta": {"image": {
+                 "artifact_id": "b", "content_type": "image/jpeg",
+                 "data_uri": "data:image/jpeg;base64,BBBB",
+             }}},
+        ]
+
+        messages = ContextManager.assemble("system", history, "reminder")
+
+        assert [message["role"] for message in messages] == [
+            "system", "tool", "tool", "tool", "user",
+        ]
+        blocks = messages[-1]["content"]
+        assert blocks[0] == {"type": "text", "text": "reminder"}
+        assert [block["image_url"]["url"] for block in blocks if block["type"] == "image_url"] == [
+            "data:image/png;base64,AAAA", "data:image/jpeg;base64,BBBB",
+        ]
 
     def test_system_prompt_has_no_dynamic_content(self):
         agent = _FakeAgentConfig(tools={"create_artifact": "auto"})
@@ -1062,7 +1117,8 @@ class TestPromptReconstructionFidelity:
             **build_kwargs,
         )
         system_prompt = live_messages[0]["content"]
-        # 重建路径：与引擎同一份 build_event_history（默认 vision_capable，无 vision_blocks）
+        # 重建路径：与引擎同一份 build_event_history
+        # （默认 vision_capable，无 vision_blocks_by_call）
         history = build_event_history(state["events"], agent.name)
         rebuilt = ContextManager.assemble(system_prompt, history, reminder)
         assert rebuilt == live_messages

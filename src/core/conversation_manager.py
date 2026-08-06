@@ -579,7 +579,7 @@ class ConversationManager:
 
         「100%」是**版本内**的 100%：历史重放仍跑当前版本的 build_event_history，且
         reminder 仅对本次变更上线后产生的事件存在（旧事件 reminder=None，只重建
-        system_prompt + 历史，has_reminder=False 标注）。识图块因 vision_blocks 是
+        system_prompt + 历史，has_reminder=False 标注）。识图块因 vision_blocks_by_call 是
         per-turn 内存缓存、已不可得，统一降级为占位文本（与跨轮 reload 同口径）。
 
         Returns:

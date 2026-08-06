@@ -1165,17 +1165,18 @@ async def execute_loop(
             # 超长)落盘失败 → loud-fail 替换为 error 结果，不放行原文（见 callee docstring）
             tool_result = await _maybe_persist_tool_result(tool_name, tool, tool_result)
 
-            # 识图:把图块 data-URI 从将入事件的 metadata 里摘出 → 存进本 turn 的
-            # state["vision_blocks"](仅内存、不持久化、跨轮自然失效);事件只留引用
-            # (artifact_id/version/content_type)。context build 据 state 还原:本轮命中
-            # → 注入图块;下一轮 state 已空 → 占位文本(模型再 read_artifact 即可重看)。
+            # 识图:把图块 data-URI 从将入事件的 metadata 里摘出 → 按 provider-issued
+            # native call_id 存进本 turn 的 state["vision_blocks_by_call"](仅内存、不
+            # 持久化、跨轮自然失效);事件只留引用(artifact_id/content_type)。call_id
+            # 是同 turn accepted calls 的唯一结构键,也能区分同一可变单版 blob 覆盖前后
+            # 的两次 read；artifact current_version 对 blob 字节不递增，不能作快照身份。
+            # context build 据 state 还原:本轮命中 → 注入图块;下一轮 state 已空 →
+            # 占位文本(模型再 read_artifact 即可重看)。
             # 字节绝不进事件表(撑爆 + 与「blob 有专属持久家」冲突)。
             tc_metadata = tool_result.metadata or None
             _img = tc_metadata.get("image") if tc_metadata else None
             if isinstance(_img, dict) and "data_uri" in _img:
-                state.setdefault("vision_blocks", {})[
-                    (_img.get("artifact_id"), _img.get("version"))
-                ] = _img["data_uri"]
+                state.setdefault("vision_blocks_by_call", {})[call_id] = dict(_img)
                 tc_metadata = {
                     **tc_metadata,
                     "image": {k: v for k, v in _img.items() if k != "data_uri"},

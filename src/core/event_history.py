@@ -22,7 +22,7 @@ LEAD_AGENT = "lead_agent"
 def build_event_history(
     events: List[ExecutionEvent],
     agent_name: str,
-    vision_blocks: Dict[Any, str] | None = None,
+    vision_blocks_by_call: Dict[str, Dict[str, Any]] | None = None,
     vision_capable: bool = True,
     replay_reasoning: bool = True,
 ) -> List[Dict[str, Any]]:
@@ -32,10 +32,12 @@ def build_event_history(
     Args:
         events: 完整事件流（历史 + 当前轮，含 is_historical 混合）
         agent_name: 目标 agent 名（过滤非本 agent 的事件）
-        vision_blocks: 本 turn 的图块缓存 ``{(artifact_id, version): data_uri}``（由引擎
-            在 read_artifact 读图后填进 state，纯内存、不持久化）。识图事件只存**引用**,
-            在此对照缓存还原:命中(本轮读过)→ content 扩成图块列表;未命中(跨轮、
-            state 已空)→ 文本占位。**纯内存查表,无 DB IO**——保持本函数纯净。
+        vision_blocks_by_call: 本 turn 的图块缓存
+            ``{call_id: {artifact_id, content_type, data_uri}}``（由引擎在
+            read_artifact 读图后填进 state，纯内存、不持久化）。识图事件只存**引用**,
+            在此按 native call_id 对照缓存还原:命中(本轮这次 call 读过)→ 暂存图片
+            metadata 供 ContextManager 构造 carrier;未命中(跨轮、state 已空)→ 文本
+            占位。**纯内存查表,无 DB IO**——保持本函数纯净。
         vision_capable: 目标 agent 的模型是否支持识图(models.yaml `vision: true`)。
             False 时即便命中缓存也**不**注入图块,降级为占位文本——文本模型收到
             image_url 块会被 provider 端拒。默认 True 便于直接调用/测试(生产由
@@ -45,7 +47,8 @@ def build_event_history(
 
     Returns:
         LLM 消息列表 [{"role": "user"/"assistant", "content": ..., "_meta"?: {...}}]
-        识图命中时 content 是块列表 [{type:text}, {type:image_url}],否则为 str。
+        识图命中时 tool message 的 ``_meta.image`` 暂存 data_uri，最终 image_url
+        user carrier 由 ContextManager 构造；未命中时 content 带文本占位。
     """
     filtered = [e for e in events if e.agent_name == agent_name]
     if not filtered:
@@ -54,7 +57,7 @@ def build_event_history(
     boundary_idx = _find_boundary(filtered, is_subagent=agent_name != LEAD_AGENT)
     carry_event = _tool_call_carry_before_boundary(filtered, boundary_idx)
     return _events_to_messages(
-        filtered[boundary_idx:], vision_blocks or {}, vision_capable,
+        filtered[boundary_idx:], vision_blocks_by_call or {}, vision_capable,
         replay_reasoning=replay_reasoning, carry_event=carry_event,
     )
 
@@ -101,7 +104,7 @@ def _find_boundary(events: List[ExecutionEvent], is_subagent: bool) -> int:
 
 def _events_to_messages(
     events: List[ExecutionEvent],
-    vision_blocks: Dict[Any, str],
+    vision_blocks_by_call: Dict[str, Dict[str, Any]],
     vision_capable: bool = True,
     replay_reasoning: bool = True,
     carry_event: ExecutionEvent | None = None,
@@ -153,22 +156,35 @@ def _events_to_messages(
             }
             result_text = render_tool_result(tool_name, result_data)
 
-            # 识图:tool_complete 携图片引用(metadata.image,仅 id/version/content_type)。
-            # 对照本 turn 的 vision_blocks 缓存还原——命中(本轮读过)→ content 扩成
-            # [文本块, 图块];未命中(跨轮、state 已空)→ 文本附「再 read 即可重看」占位。
+            # 识图:tool_complete 携图片引用(metadata.image,仅 id/content_type)。
+            # 对照本 turn 的 vision_blocks_by_call 缓存还原——命中(本轮这次 call
+            # 读过)→ _meta 暂存图块;未命中(跨轮、state 已空)→ 文本附「再 read
+            # 即可重看」占位。必须拒绝 historical event 命中:call_id 的唯一性范围是
+            # 当前 turn，provider 在后续 turn 复用同一字符串不应把新图灌回旧事件。
             img = (data.get("metadata") or {}).get("image")
             if isinstance(img, dict) and img.get("content_type"):
-                key = (img.get("artifact_id"), img.get("version"))
-                data_uri = vision_blocks.get(key)
+                call_id = data.get("call_id")
+                cached_img = (
+                    vision_blocks_by_call.get(call_id)
+                    if not ev.is_historical and isinstance(call_id, str)
+                    else None
+                )
+                data_uri = (
+                    cached_img.get("data_uri")
+                    if isinstance(cached_img, dict)
+                    and cached_img.get("artifact_id") == img.get("artifact_id")
+                    and cached_img.get("content_type") == img.get("content_type")
+                    else None
+                )
                 # vision_capable 门控:仅当 (a) 本轮缓存命中 且 (b) 目标模型支持识图,
                 # 才扩成图块列表;否则一律降级占位文本——文本模型收 image_url 块会被
                 # provider 端拒(见 model_supports_vision)。
                 if data_uri and vision_capable:
                     messages.append({
                         "role": "tool",
-                        "tool_call_id": data.get("call_id"),
+                        "tool_call_id": call_id,
                         "content": result_text,
-                        "_meta": {"image": {**img, "data_uri": data_uri}},
+                        "_meta": {"image": {**cached_img, "data_uri": data_uri}},
                     })
                     continue
                 # 占位文案分两种,语义不同,绝不可混用:

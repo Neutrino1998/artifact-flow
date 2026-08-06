@@ -284,6 +284,34 @@ class TestReadArtifactVisionGate:
         assert "exposed sandbox tools" in result.data
         assert "ask the caller" in result.data
 
+    async def test_png_image_metadata_uses_call_identity_not_blob_version(
+        self, read_tool: ReadArtifactTool, artifact_service: ArtifactService, session_id: str
+    ):
+        import io
+        from PIL import Image
+
+        buf = io.BytesIO()
+        Image.new("RGB", (2, 2), "white").save(buf, format="PNG")
+        artifact_service.set_session(session_id)
+        ok, _, info = await artifact_service.create_from_upload(
+            session_id=session_id,
+            filename="shot.png",
+            content="",
+            content_type="image/png",
+            blob=buf.getvalue(),
+        )
+        assert ok
+
+        result = await read_tool.execute(id=info["id"])
+
+        assert result.success is True
+        assert result.data == f"[image artifact '{info['id']}', image/png]"
+        image = result.metadata["image"]
+        assert image["artifact_id"] == info["id"]
+        assert image["content_type"] == "image/png"
+        assert image["data_uri"].startswith("data:image/png;base64,")
+        assert "version" not in image
+
     async def test_unknown_binary_blob_message_has_capability_aware_hint(
         self, read_tool: ReadArtifactTool, artifact_service: ArtifactService, session_id: str
     ):

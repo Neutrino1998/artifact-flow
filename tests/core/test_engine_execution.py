@@ -496,6 +496,73 @@ class TestToolExecution:
         assert len(completes) == 1
         assert completes[0]["data"]["success"] is True
 
+    async def test_image_result_uses_call_id_cache_and_event_keeps_reference_only(self):
+        agent = _FakeAgentConfig(tools={"read_artifact": "auto"})
+        data_uri = "data:image/png;base64,aW1hZ2U="
+        tool = _FakeTool(
+            "read_artifact",
+            ToolResult(
+                success=True,
+                data="[image artifact 'shot', image/png]",
+                metadata={
+                    "image": {
+                        "artifact_id": "shot",
+                        "content_type": "image/png",
+                        "data_uri": data_uri,
+                    }
+                },
+            ),
+        )
+        calls = _native_tool_call("read_artifact", artifact_id="shot")
+        call_id = calls[0]["id"]
+        seen_messages = []
+        rounds = [
+            _tool_call_chunks(calls),
+            _simple_llm_chunks("I saw the image"),
+        ]
+        round_index = {"value": 0}
+
+        async def fake(messages, **kwargs):
+            seen_messages.append(messages)
+            index = round_index["value"]
+            round_index["value"] += 1
+            for chunk in rounds[index]:
+                yield chunk
+
+        result, emitted, _ = await _run_engine(
+            fake,
+            agents={"lead_agent": agent},
+            tools={"read_artifact": tool},
+        )
+
+        assert result["vision_blocks_by_call"] == {
+            call_id: {
+                "artifact_id": "shot",
+                "content_type": "image/png",
+                "data_uri": data_uri,
+            }
+        }
+        complete = next(
+            event for event in emitted
+            if event["type"] == "tool_complete"
+            and event["data"]["call_id"] == call_id
+        )
+        assert complete["data"]["metadata"]["image"] == {
+            "artifact_id": "shot",
+            "content_type": "image/png",
+        }
+        assert "data_uri" not in complete["data"]["metadata"]["image"]
+        assert "version" not in complete["data"]["metadata"]["image"]
+
+        image_urls = [
+            block["image_url"]["url"]
+            for message in seen_messages[1]
+            if isinstance(message.get("content"), list)
+            for block in message["content"]
+            if block.get("type") == "image_url"
+        ]
+        assert image_urls == [data_uri]
+
     async def test_search_tools_routed_renders_docs(self):
         # Deferred 工具先经 search_tools 披露完整 native schema。
         from core.effective_toolset import DeferredUnit, EffectiveToolset
