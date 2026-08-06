@@ -104,7 +104,7 @@ interface ArtifactState {
   // just sent. Display-only and wholly separate from the composer draft (which is
   // cleared on send): it lets ImagePreview show an uploaded image instantly for
   // the live-this-turn window, before the blob is flushed and /raw works. Shares
-  // liveContent's exact lifecycle — cleared at COMPLETE (clearLiveContent) and on
+  // liveContent's exact lifecycle — cleared at COMPLETE (finishLiveTurn) and on
   // nav (reset) — so a later turn's same-named upload can't shadow it.
   localPreviews: Record<string, File>;
 
@@ -129,14 +129,14 @@ interface ArtifactState {
   setDiffBaseContent: (content: string | null) => void;
   setViewMode: (mode: ArtifactViewMode) => void;
   addPendingUpdate: (identifier: string) => void;
-  clearPendingUpdates: () => void;
+  /** Synchronously close the live-turn window before terminal DB awaits. */
+  finishLiveTurn: () => void;
   applyArtifactCreated: (data: ArtifactCreatedData) => void;
   applyArtifactUpdated: (data: ArtifactUpdatedData) => void;
   /** Open an artifact from live (in-turn) content if we have it. Returns true
    *  when handled (caller should skip the REST fetch — REST is pure-DB and would
    *  show stale content for an artifact edited this turn). User-picked → not auto. */
   selectFromLive: (id: string) => boolean;
-  clearLiveContent: () => void;
   /** Stash the just-sent images (filtered from a send's files) as send-local
    *  previews. Non-images are ignored (nothing reads them). */
   setLocalPreviews: (files: File[]) => void;
@@ -214,15 +214,13 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
       };
     }),
   // Passive DB reconciliation: atomically update the detail, versions and
-  // diff base only while this artifact is still current. A lower version is
-  // also stale by construction. The caller separately owns the turn/request
-  // generation (needed for mutable single-version blobs).
+  // diff base only while this artifact is still current. The terminal DB
+  // snapshot is authoritative even when it rolls optimistic live content back
+  // to a lower version after a flush failure. The caller owns the turn/request
+  // generation, which excludes genuinely stale responses.
   refreshCurrent: (artifact, diffBaseContent) =>
     set((s) => {
-      if (
-        s.current?.id !== artifact.id ||
-        artifact.current_version < s.current.current_version
-      ) {
+      if (s.current?.id !== artifact.id) {
         return s;
       }
 
@@ -250,7 +248,29 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
         ? s.pendingUpdates
         : [...s.pendingUpdates, identifier],
     })),
-  clearPendingUpdates: () => set({ pendingUpdates: [] }),
+  // Terminal ownership is checked by useSSE immediately before this action.
+  // Keep every live-turn-only field in one synchronous transition so a new
+  // turn can only append onto a clean substrate, even if DB reconciliation is
+  // still awaiting network responses.
+  finishLiveTurn: () =>
+    set((s) => {
+      const finished: Partial<ArtifactState> = {
+        currentLoading: false,
+        pendingUpdates: [],
+        liveContent: {},
+        localPreviews: {},
+      };
+      if (!s.autoSelected) return finished;
+      return {
+        ...finished,
+        current: null,
+        autoSelected: false,
+        versions: [],
+        selectedVersion: null,
+        diffBaseContent: null,
+        viewMode: 'preview',
+      };
+    }),
 
   // ARTIFACT_CREATED: a new artifact appeared this turn. REST list no longer
   // surfaces unflushed artifacts (overlay removed), so we upsert it into the
@@ -386,10 +406,6 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
     }));
     return true;
   },
-
-  // Cleared together with liveContent at COMPLETE: the live-this-turn window is
-  // over, so the local previews are no longer needed (settled artifacts read /raw).
-  clearLiveContent: () => set({ liveContent: {}, localPreviews: {} }),
 
   setLocalPreviews: (files) =>
     set((s) => {

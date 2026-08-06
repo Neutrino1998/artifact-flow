@@ -78,13 +78,10 @@ export function useSSE() {
   // Artifact store
   const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
   const setArtifacts = useArtifactStore((s) => s.setArtifacts);
-  const setArtifactCurrent = useArtifactStore((s) => s.setCurrent);
-  const setArtifactCurrentLoading = useArtifactStore((s) => s.setCurrentLoading);
   const refreshArtifactCurrent = useArtifactStore((s) => s.refreshCurrent);
-  const clearPendingUpdates = useArtifactStore((s) => s.clearPendingUpdates);
+  const finishArtifactLiveTurn = useArtifactStore((s) => s.finishLiveTurn);
   const applyArtifactCreated = useArtifactStore((s) => s.applyArtifactCreated);
   const applyArtifactUpdated = useArtifactStore((s) => s.applyArtifactUpdated);
-  const clearLiveContent = useArtifactStore((s) => s.clearLiveContent);
 
   // UI store
   const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
@@ -134,9 +131,6 @@ export function useSSE() {
       // while the turn was live. A later user selection bumps the same counter
       // again and therefore wins over this background refresh.
       const myArtifactDetailGen = bumpArtifactDetailGen();
-      // The invalidated request's finally block intentionally cannot clear a
-      // newer request's spinner, so close its old loading state at this claim.
-      setArtifactCurrentLoading(false);
       const ownsTerminalRefresh = () =>
         isTerminalRefreshOwner(myNavGen, terminalMessageId);
       const ownsArtifactRefresh = () =>
@@ -149,6 +143,12 @@ export function useSSE() {
       // resurrect the panel after stream end. Costs nothing if there are
       // no fetches outstanding.
       bumpArtifactFetchGen();
+      // End the optimistic live window synchronously, before any await. This
+      // clears pending markers/content/previews and returns an agent-auto-opened
+      // artifact to the list. If a new turn starts while DB reads are pending,
+      // its live events now build on a clean state and the old reads are dropped
+      // by ownsTerminalRefresh below.
+      finishArtifactLiveTurn();
       // Compare-and-clear the sidebar dot for *this* terminal's message_id
       // only. If the user already kicked off a new turn on the same conv,
       // its sendMessage() has set active_message_id to the new id, and this
@@ -189,11 +189,6 @@ export function useSSE() {
         if (!ownsTerminalRefresh()) return;
 
         setCurrent(detail);
-        clearPendingUpdates();
-        // Turn ended → live event reduce is over. Drop in-turn live content so
-        // the panel reads the DB-aligned snapshot re-pulled below (the single
-        // alignment point; decision 4). Stale live could otherwise shadow it.
-        clearLiveContent();
 
         // Artifact refresh is further gated by artifactStore.sessionId so
         // that conversations without artifact tools don't trigger a useless
@@ -210,64 +205,55 @@ export function useSSE() {
             ownsTerminalRefresh,
           );
         }
-        const { current: curArtifact, autoSelected } = useArtifactStore.getState();
-        if (curArtifact && ownsArtifactSession) {
-          if (autoSelected) {
-            // Stream finished and the panel is on an artifact the agent
-            // auto-opened — revert to list so the user sees the overview.
-            // The list refresh above already loaded the latest artifacts.
-            // (The unconditional bump at the top of this function has
-            // already invalidated any in-flight auto-opens.)
-            setArtifactCurrent(null);
-          } else {
-            // User actively picked this artifact. The live stream is best
-            // effort; after terminal, DB detail + persisted previous version
-            // become the atomic source of truth for content, versions and Diff.
-            void (async () => {
-              try {
-                const artDetail = await api.getArtifact(conversationId, curArtifact.id);
-                if (!ownsArtifactRefresh()) return;
+        const { current: curArtifact } = useArtifactStore.getState();
+        if (curArtifact && ownsArtifactSession && ownsArtifactRefresh()) {
+          // User actively picked this artifact. The live stream is best
+          // effort; after terminal, DB detail + persisted previous version
+          // become the atomic source of truth for content, versions and Diff.
+          void (async () => {
+            try {
+              const artDetail = await api.getArtifact(conversationId, curArtifact.id);
+              if (!ownsArtifactRefresh()) return;
 
-                const prevVersion = findPrevVersion(
-                  artDetail.versions,
-                  artDetail.current_version,
-                );
-                let diffBaseContent: string | undefined;
-                if (prevVersion === null) {
-                  // First persisted version: Diff is correctly empty → current.
-                  diffBaseContent = '';
-                } else {
-                  try {
-                    const base = await api.getVersion(
-                      conversationId,
-                      artDetail.id,
-                      prevVersion,
-                    );
-                    if (!ownsArtifactRefresh()) return;
-                    diffBaseContent = base.content;
-                  } catch {
-                    if (!ownsArtifactRefresh()) return;
-                    // Detail/versions still reconcile. The store exits Diff so
-                    // a failed base request cannot leave a misleading result.
-                    diffBaseContent = undefined;
-                  }
+              const prevVersion = findPrevVersion(
+                artDetail.versions,
+                artDetail.current_version,
+              );
+              let diffBaseContent: string | undefined;
+              if (prevVersion === null) {
+                // First persisted version: Diff is correctly empty → current.
+                diffBaseContent = '';
+              } else {
+                try {
+                  const base = await api.getVersion(
+                    conversationId,
+                    artDetail.id,
+                    prevVersion,
+                  );
+                  if (!ownsArtifactRefresh()) return;
+                  diffBaseContent = base.content;
+                } catch {
+                  if (!ownsArtifactRefresh()) return;
+                  // Detail/versions still reconcile. The store exits Diff so
+                  // a failed base request cannot leave a misleading result.
+                  diffBaseContent = undefined;
                 }
-
-                if (!ownsArtifactRefresh()) return;
-                // The shared transition additionally rejects close, tab switch
-                // and lower-version responses in one atomic store update.
-                refreshArtifactCurrent(artDetail, diffBaseContent);
-              } catch {
-                // Best-effort terminal refresh; the next panel refresh retries.
               }
-            })();
-          }
+
+              if (!ownsArtifactRefresh()) return;
+              // The shared transition additionally rejects a close or tab
+              // switch in one atomic store update.
+              refreshArtifactCurrent(artDetail, diffBaseContent);
+            } catch {
+              // Best-effort terminal refresh; the next panel refresh retries.
+            }
+          })();
         }
       } catch (err) {
         console.error('Failed to refresh after complete:', err);
       }
     },
-    [setCurrent, setConversations, clearConversationActiveIfMatch, clearPendingUpdates, clearLiveContent, setArtifactCurrent, setArtifactCurrentLoading, refreshArtifactCurrent, setArtifacts, setArtifactSessionId]
+    [setCurrent, setConversations, clearConversationActiveIfMatch, finishArtifactLiveTurn, refreshArtifactCurrent, setArtifacts, setArtifactSessionId]
   );
 
   const handleEvent = useCallback(

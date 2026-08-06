@@ -256,7 +256,7 @@ describe('artifactStore.refreshCurrent', () => {
     expect(useArtifactStore.getState().current).toBe(null);
   });
 
-  test('same-id delayed DB response cannot downgrade newer live content', () => {
+  test('flush-error reconciliation rolls optimistic live content back to authoritative DB', () => {
     const liveV3 = {
       ...detail('text/markdown'),
       content: 'live v3',
@@ -265,7 +265,7 @@ describe('artifactStore.refreshCurrent', () => {
     } as ArtifactDetail;
     const staleV2 = {
       ...detail('text/markdown'),
-      content: 'stale DB v2',
+      content: 'persisted DB v2',
       current_version: 2,
       versions: [versionSummary(1), versionSummary(2)],
     } as ArtifactDetail;
@@ -273,13 +273,13 @@ describe('artifactStore.refreshCurrent', () => {
     useArtifactStore.getState().setVersions([]);
     useArtifactStore.getState().setDiffBaseContent('live base');
 
-    useArtifactStore.getState().refreshCurrent(staleV2, 'stale DB base');
+    useArtifactStore.getState().refreshCurrent(staleV2, 'persisted v1');
 
     const state = useArtifactStore.getState();
-    expect(state.current?.content).toBe('live v3');
-    expect(state.current?.current_version).toBe(3);
-    expect(state.versions).toEqual([]);
-    expect(state.diffBaseContent).toBe('live base');
+    expect(state.current?.content).toBe('persisted DB v2');
+    expect(state.current?.current_version).toBe(2);
+    expect(state.versions).toEqual(staleV2.versions);
+    expect(state.diffBaseContent).toBe('persisted v1');
   });
 });
 
@@ -306,11 +306,63 @@ describe('artifactStore.addPendingUpdate', () => {
     expect(useArtifactStore.getState().pendingUpdates).toEqual(['a', 'b', 'c']);
   });
 
-  test('clearPendingUpdates resets to empty', () => {
-    useArtifactStore.getState().addPendingUpdate('a');
-    useArtifactStore.getState().addPendingUpdate('b');
-    useArtifactStore.getState().clearPendingUpdates();
-    expect(useArtifactStore.getState().pendingUpdates).toEqual([]);
+});
+
+describe('artifactStore.finishLiveTurn', () => {
+  beforeEach(() => useArtifactStore.getState().reset());
+
+  test('clears live-only state while preserving a user-selected current file', () => {
+    const store = useArtifactStore.getState();
+    store.applyArtifactCreated({
+      id: 'doc', title: 'Doc', content_type: 'text/markdown',
+      source: 'agent', current_version: 2, content: 'live content',
+    });
+    store.selectFromLive('doc');
+    store.setCurrentLoading(true);
+    store.setLocalPreviews([
+      new File(['image'], 'old-preview.png', { type: 'image/png' }),
+    ]);
+
+    useArtifactStore.getState().finishLiveTurn();
+
+    const state = useArtifactStore.getState();
+    expect(state.current?.id).toBe('doc');
+    expect(state.autoSelected).toBe(false);
+    expect(state.currentLoading).toBe(false);
+    expect(state.pendingUpdates).toEqual([]);
+    expect(state.liveContent).toEqual({});
+    expect(state.localPreviews).toEqual({});
+  });
+
+  test('returns an agent-auto-opened file to the list', () => {
+    useArtifactStore.getState().applyArtifactCreated({
+      id: 'doc', title: 'Doc', content_type: 'text/markdown',
+      source: 'agent', current_version: 1, content: 'live content',
+    });
+
+    useArtifactStore.getState().finishLiveTurn();
+
+    const state = useArtifactStore.getState();
+    expect(state.current).toBeNull();
+    expect(state.autoSelected).toBe(false);
+    expect(state.openArtifactIds).toEqual(['doc']);
+  });
+
+  test('a new turn appends markers and live content onto a clean state', () => {
+    useArtifactStore.getState().applyArtifactCreated({
+      id: 'old-doc', title: 'Old', content_type: 'text/markdown',
+      source: 'agent', current_version: 1, content: 'old turn',
+    });
+    useArtifactStore.getState().finishLiveTurn();
+
+    useArtifactStore.getState().applyArtifactCreated({
+      id: 'new-doc', title: 'New', content_type: 'text/markdown',
+      source: 'agent', current_version: 1, content: 'new turn',
+    });
+
+    const state = useArtifactStore.getState();
+    expect(state.pendingUpdates).toEqual(['new-doc']);
+    expect(Object.keys(state.liveContent)).toEqual(['new-doc']);
   });
 });
 
@@ -439,13 +491,4 @@ describe('artifactStore live reduce (ARTIFACT_* events)', () => {
     expect(useArtifactStore.getState().selectFromLive('missing')).toBe(false);
   });
 
-  test('clearLiveContent empties the map', () => {
-    const s = useArtifactStore.getState();
-    s.applyArtifactCreated({
-      id: 'doc', title: 'Doc', content_type: 'text/markdown',
-      source: 'agent', current_version: 1, content: 'x',
-    });
-    useArtifactStore.getState().clearLiveContent();
-    expect(useArtifactStore.getState().liveContent).toEqual({});
-  });
 });
