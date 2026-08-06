@@ -76,6 +76,11 @@ export function useArtifacts() {
       if (useArtifactStore.getState().selectFromLive(artifactId)) {
         return;
       }
+      // Only an already-open tab can be closed while this fetch is pending.
+      // Remember that precondition so a late response cannot undo the user's
+      // explicit close. Newly selected files are not tabs until their detail
+      // arrives, so they remain eligible to open normally.
+      const wasOpen = useArtifactStore.getState().openArtifactIds.includes(artifactId);
       // Bump-before-await: claim "the detail view will belong to this
       // selection". Late responses (fast A→B clicks, or any selection
       // followed by a conversation switch) check this after the await
@@ -88,6 +93,9 @@ export function useArtifacts() {
       try {
         const detail = await api.getArtifact(sid, artifactId);
         if (myGen !== getArtifactDetailGen()) return;
+        if (wasOpen && !useArtifactStore.getState().openArtifactIds.includes(artifactId)) {
+          return;
+        }
         setCurrent(detail);
         setVersions(detail.versions);
         // current.content is already the latest — no need to fetch version detail.
