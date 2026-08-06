@@ -112,6 +112,8 @@ Non-obvious design choices you won't infer from reading one file.
 
 - **Frontend locks are UX; backend locks are correctness — discriminator: who gets hurt if the gate is bypassed.** Bypass corrupts shared/durable state or hurts another actor (writes/execution) → enforce server-side (lease `409` / ownership `404`); the frontend control is just a mirror. Bypass only gives the caller a stale/odd result for themselves (reads) → frontend-only gate, backend stays permissive, client reconciles.
 
+- **State reconciliation cannot exceed evidence scope.** A complete authoritative snapshot may replace and prune a collection; a partial or stale snapshot may only merge; an entity-level not-found may remove only that entity. Freshness/ownership tokens (request generations, message IDs) establish whether a response may still commit, not whether it has broader authority. Encode these as distinct state transitions instead of a generic setter or reconciler.
+
 - **ORM instances are short-lived persistence snapshots, not runtime state containers.** Async-session attribute access on an expired instance triggers implicit IO → `MissingGreenlet`. Rules:
   - Timestamps: `server_default=func.now()` for creation, `onupdate=func.now()` for updates — never assign `datetime.now()` in repo code.
   - Prefer ORM attribute mutation when the row is already dirty (lets `onupdate` fire). Use bulk `UPDATE` only when the row needs a DB-side value (e.g. `func.now()`) with no other change — never assign a SQL expression to an instance attribute.
