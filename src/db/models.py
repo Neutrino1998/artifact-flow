@@ -389,6 +389,17 @@ class Message(Base):
         back_populates="messages"
     )
 
+    # 一条助手回复至多一份当前反馈；反馈是可修改的用户标注，不属于 append-only
+    # MessageEvent。message_id 同时作为 PK + FK，让重复反馈与孤儿反馈都不可表示。
+    feedback: Mapped[Optional["MessageFeedback"]] = relationship(
+        "MessageFeedback",
+        back_populates="message",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
+        lazy="raise",
+    )
+
     __table_args__ = (
         UniqueConstraint("conversation_id", "id", name="uq_messages_conversation_id_id"),
         ForeignKeyConstraint(
@@ -403,6 +414,38 @@ class Message(Base):
     def __repr__(self) -> str:
         input_preview = self.user_input[:50] + "..." if len(self.user_input) > 50 else self.user_input
         return f"<Message(id={self.id}, user_input={input_preview})>"
+
+
+class MessageFeedback(Base):
+    """用户对一条助手回复的当前评价。删除消息时由 FK CASCADE 自动清理。"""
+
+    __tablename__ = "message_feedback"
+
+    message_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("messages.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    rating: Mapped[str] = mapped_column(String(16), nullable=False)
+    tags: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
+    detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    message: Mapped["Message"] = relationship("Message", back_populates="feedback")
+
+    __table_args__ = (
+        CheckConstraint(
+            "rating IN ('positive', 'negative')",
+            name="ck_message_feedback_rating",
+        ),
+        Index("ix_message_feedback_updated", "updated_at"),
+        Index("ix_message_feedback_rating_updated", "rating", "updated_at"),
+    )
 
 
 class MessageEvent(Base):

@@ -1,22 +1,27 @@
 'use client';
 
-import { memo, useEffect } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { useStreamStore, interleaveFlowItems } from '@/stores/streamStore';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import MarkdownBlock from '@/components/markdown/MarkdownBlock';
 import { CopyIcon } from '@/components/ui/CopyIcon';
-import { getMessageEvents } from '@/lib/api';
+import { FeedbackRatingIcon } from '@/components/ui/FeedbackRatingIcon';
+import * as api from '@/lib/api';
+import type { MessageFeedbackResponse } from '@/types';
+import type { FeedbackRating, FeedbackTag } from '@/lib/messageFeedback';
 import { reconstructFlow } from '@/lib/reconstructSegments';
 import AgentSegmentBlock from './AgentSegmentBlock';
 import InjectFlowBlock from './InjectFlowBlock';
 import CompactionFlowBlock from './CompactionFlowBlock';
 import ErrorFlowBlock from './ErrorFlowBlock';
 import ProcessingFlow from './ProcessingFlow';
+import MessageFeedbackDialog from './MessageFeedbackDialog';
 
 interface AssistantMessageProps {
   content: string;
   messageId?: string;
+  feedback?: MessageFeedbackResponse | null;
   /** Persisted turn metrics from the message row; shape matches ExecutionMetrics in events.ts. */
   executionMetrics?: {
     total_duration_ms?: number | null;
@@ -28,8 +33,11 @@ interface AssistantMessageProps {
   } | null;
 }
 
-function AssistantMessage({ content, messageId, executionMetrics }: AssistantMessageProps) {
+function AssistantMessage({ content, messageId, feedback = null, executionMetrics }: AssistantMessageProps) {
   const { copied, copy } = useCopyFeedback();
+  const [dialogRating, setDialogRating] = useState<FeedbackRating | null>(null);
+  const [feedbackSaving, setFeedbackSaving] = useState(false);
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const completedSegs = useStreamStore(
     (s) => messageId ? s.completedSegments.get(messageId) : undefined
   );
@@ -37,13 +45,14 @@ function AssistantMessage({ content, messageId, executionMetrics }: AssistantMes
     (s) => messageId ? s.completedNonAgentBlocks.get(messageId) : undefined
   );
   const conversationId = useConversationStore((s) => s.current?.id);
+  const updateMessageFeedback = useConversationStore((s) => s.updateMessageFeedback);
 
   // Lazy-load historical segments from persisted events when session cache is empty
   useEffect(() => {
     if (!messageId || !conversationId || completedSegs !== undefined) return;
 
     let cancelled = false;
-    getMessageEvents(conversationId, messageId)
+    api.getMessageEvents(conversationId, messageId)
       .then((res) => {
         if (cancelled || res.events.length === 0) return;
         const { segments, blocks } = reconstructFlow(res.events);
@@ -67,6 +76,45 @@ function AssistantMessage({ content, messageId, executionMetrics }: AssistantMes
   }, [messageId, conversationId, completedSegs]);
 
   const handleCopy = () => copy(content);
+
+  const openFeedback = (rating: FeedbackRating) => {
+    setFeedbackError(null);
+    setDialogRating(rating);
+  };
+
+  const submitFeedback = async (tags: FeedbackTag[], detail: string) => {
+    if (!conversationId || !messageId || !dialogRating) return;
+    setFeedbackSaving(true);
+    setFeedbackError(null);
+    try {
+      const saved = await api.putMessageFeedback(conversationId, messageId, {
+        rating: dialogRating,
+        tags,
+        detail: detail.trim() || null,
+      });
+      updateMessageFeedback(messageId, saved);
+      setDialogRating(null);
+    } catch (error) {
+      setFeedbackError(error instanceof Error ? error.message : '提交反馈失败');
+    } finally {
+      setFeedbackSaving(false);
+    }
+  };
+
+  const removeFeedback = async () => {
+    if (!conversationId || !messageId) return;
+    setFeedbackSaving(true);
+    setFeedbackError(null);
+    try {
+      await api.deleteMessageFeedback(conversationId, messageId);
+      updateMessageFeedback(messageId, null);
+      setDialogRating(null);
+    } catch (error) {
+      setFeedbackError(error instanceof Error ? error.message : '撤销反馈失败');
+    } finally {
+      setFeedbackSaving(false);
+    }
+  };
 
   const hasSegs = completedSegs && completedSegs.length > 0;
   const hasBlocks = completedBlocks && completedBlocks.length > 0;
@@ -128,7 +176,48 @@ function AssistantMessage({ content, messageId, executionMetrics }: AssistantMes
         >
           <CopyIcon copied={copied} />
         </button>
+        <button
+          type="button"
+          onClick={() => openFeedback('positive')}
+          aria-label="赞"
+          aria-pressed={feedback?.rating === 'positive'}
+          title="赞"
+          className={`p-1 rounded transition-colors ${
+            feedback?.rating === 'positive'
+              ? 'bg-accent/10 text-accent'
+              : 'text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark'
+          }`}
+        >
+          <FeedbackRatingIcon rating="positive" />
+        </button>
+        <button
+          type="button"
+          onClick={() => openFeedback('negative')}
+          aria-label="踩"
+          aria-pressed={feedback?.rating === 'negative'}
+          title="踩"
+          className={`p-1 rounded transition-colors ${
+            feedback?.rating === 'negative'
+              ? 'bg-status-warning/10 text-status-warning'
+              : 'text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark hover:bg-surface dark:hover:bg-bg-dark'
+          }`}
+        >
+          <FeedbackRatingIcon rating="negative" />
+        </button>
       </div>
+
+      {dialogRating ? (
+        <MessageFeedbackDialog
+          key={dialogRating}
+          rating={dialogRating}
+          current={feedback?.rating === dialogRating ? feedback : null}
+          saving={feedbackSaving}
+          error={feedbackError}
+          onSubmit={submitFeedback}
+          onDelete={removeFeedback}
+          onClose={() => setDialogRating(null)}
+        />
+      ) : null}
     </div>
   );
 }

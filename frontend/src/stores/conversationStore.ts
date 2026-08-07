@@ -3,6 +3,7 @@ import type {
   ConversationSummary,
   ConversationDetail,
   MessageResponse,
+  MessageFeedbackResponse,
   ActivatedSkillRef,
 } from '@/types';
 import { MessageNode, buildMessageTree, extractBranchPath } from '@/lib/messageTree';
@@ -41,6 +42,7 @@ interface ConversationState {
   setCurrentLoading: (loading: boolean) => void;
   setActiveBranch: (messageId: string | null) => void;
   updateMessages: (messages: MessageResponse[]) => void;
+  updateMessageFeedback: (messageId: string, feedback: MessageFeedbackResponse | null) => void;
   applyTerminalMessageSnapshot: (snapshot: {
     conversationId: string;
     messageId: string;
@@ -121,6 +123,20 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       nodeMap,
       branchPath,
     }));
+  },
+
+  updateMessageFeedback: (messageId, feedback) => {
+    const state = get();
+    if (!state.current) return;
+    const messages = state.current.messages.map((message) =>
+      message.id === messageId ? { ...message, feedback } : message
+    );
+    const nodeMap = buildMessageTree(messages);
+    set({
+      current: { ...state.current, messages },
+      nodeMap,
+      branchPath: extractBranchPath(nodeMap, state.activeBranch),
+    });
   },
 
   applyTerminalMessageSnapshot: ({

@@ -120,7 +120,7 @@ export default function Sidebar({
 
   const activeMode = useUIStore((s) => s.activeMode);
   const setActiveMode = useUIStore((s) => s.setActiveMode);
-  const setObservabilityBrowseVisible = useUIStore((s) => s.setObservabilityBrowseVisible);
+  const setObservabilityBrowser = useUIStore((s) => s.setObservabilityBrowser);
   const triggerObservabilityRefresh = useUIStore((s) => s.triggerObservabilityRefresh);
   const triggerInstancesRefresh = useUIStore((s) => s.triggerInstancesRefresh);
   const notificationConfigDirty = useUIStore((s) => s.notificationConfigDirty);
@@ -189,7 +189,12 @@ export default function Sidebar({
   };
 
   const handleSearchAdmin = () => {
-    setObservabilityBrowseVisible(true);
+    setObservabilityBrowser('conversations');
+    onNavigate();
+  };
+
+  const handleBrowseFeedback = () => {
+    setObservabilityBrowser('feedback');
     onNavigate();
   };
 
@@ -272,6 +277,13 @@ export default function Sidebar({
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <circle cx="7" cy="7" r="5" />
                 <path d="M11 11l3.5 3.5" />
+              </svg>
+            </IconButton>
+
+            <IconButton onClick={handleBrowseFeedback} label="反馈记录">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2 2.5h12v8H7l-3.5 3v-3H2z" />
+                <path d="M5 6.5h6" />
               </svg>
             </IconButton>
 
@@ -438,6 +450,16 @@ export default function Sidebar({
                 <path d="M11 11l3.5 3.5" />
               </svg>
               搜索对话
+            </button>
+            <button
+              onClick={handleBrowseFeedback}
+              className={navRowClass}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2 2.5h12v8H7l-3.5 3v-3H2z" />
+                <path d="M5 6.5h6" />
+              </svg>
+              反馈记录
             </button>
             <button
               onClick={handleRefresh}

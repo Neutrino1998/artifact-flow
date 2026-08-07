@@ -448,6 +448,7 @@ class ConversationRepository(BaseRepository[Conversation]):
         """
         query = (
             select(Message)
+            .options(selectinload(Message.feedback))
             .where(Message.conversation_id == conversation_id)
             .order_by(Message.created_at)
         )

@@ -55,7 +55,8 @@ describe('uiStore activeMode mutual exclusion', () => {
       selectionMode: true,
       userManagementSelection: ['u-1', 'u-2'],
       observabilitySelectedConvId: 'conv-1',
-      observabilityBrowseVisible: true,
+      observabilityBrowser: 'feedback',
+      observabilityFocusMessageId: 'msg-1',
     });
     useUIStore.getState().setActiveMode('toolUnit');
 
@@ -66,20 +67,21 @@ describe('uiStore activeMode mutual exclusion', () => {
     expect(s.userManagementSelection).toEqual([]);
     expect(s.toolUnitRightView).toEqual({ type: 'empty' });
     expect(s.observabilitySelectedConvId).toBeNull();
-    expect(s.observabilityBrowseVisible).toBe(false);
+    expect(s.observabilityBrowser).toBe('none');
+    expect(s.observabilityFocusMessageId).toBeNull();
   });
 
   test('leaving a mode (→ none) clears its sub-state too', () => {
     useUIStore.setState({
       activeMode: 'observability',
       observabilitySelectedConvId: 'conv-1',
-      observabilityBrowseVisible: true,
+      observabilityBrowser: 'conversations',
     });
     useUIStore.getState().setActiveMode('none');
 
     const s = useUIStore.getState();
     expect(s.observabilitySelectedConvId).toBeNull();
-    expect(s.observabilityBrowseVisible).toBe(false);
+    expect(s.observabilityBrowser).toBe('none');
   });
 
   test('re-entering the current mode is a no-op (does not wipe sub-state)', () => {
@@ -183,13 +185,27 @@ describe('uiStore composer focus request', () => {
 describe('uiStore observability sub-state', () => {
   beforeEach(() => reset());
 
-  test('setObservabilitySelectedConvId clears observabilityBrowseVisible', () => {
-    useUIStore.setState({ observabilityBrowseVisible: true });
+  test('setObservabilitySelectedConvId closes the browser and clears message focus', () => {
+    useUIStore.setState({
+      observabilityBrowser: 'feedback',
+      observabilityFocusMessageId: 'msg-old',
+    });
     useUIStore.getState().setObservabilitySelectedConvId('conv-42');
 
     const s = useUIStore.getState();
     expect(s.observabilitySelectedConvId).toBe('conv-42');
-    expect(s.observabilityBrowseVisible).toBe(false);
+    expect(s.observabilityBrowser).toBe('none');
+    expect(s.observabilityFocusMessageId).toBeNull();
+  });
+
+  test('openObservabilityMessage selects and focuses one feedback message', () => {
+    useUIStore.setState({ observabilityBrowser: 'feedback' });
+    useUIStore.getState().openObservabilityMessage('conv-7', 'msg-9');
+
+    const s = useUIStore.getState();
+    expect(s.observabilitySelectedConvId).toBe('conv-7');
+    expect(s.observabilityFocusMessageId).toBe('msg-9');
+    expect(s.observabilityBrowser).toBe('none');
   });
 
   test('triggerObservabilityRefresh increments tick', () => {

@@ -325,6 +325,8 @@ class Settings(BaseSettings):
     # 输入限制
     MAX_MESSAGE_CHARS: int = 20000   # 单条用户输入 / inject 内容字符上限（超即 422）；
                                      # 超大粘贴在前端转为暂存附件而非 inline 消息
+    # 单条回复反馈的可选文字说明上限
+    MESSAGE_FEEDBACK_MAX_DETAIL_CHARS: int = Field(default=2000, ge=1)
     MAX_INJECT_QUEUE_SIZE: int = 5   # 单轮执行待处理 inject 队列深度上限（满即 429 背压；
                                      # 最坏单次 drain = MAX_MESSAGE_CHARS × 此值，详见输入挡板设计）
     MAX_CHAT_ATTACHMENTS: int = 30   # 单条 /chat 消息附件数量上限（超即 422）；上传后逐个

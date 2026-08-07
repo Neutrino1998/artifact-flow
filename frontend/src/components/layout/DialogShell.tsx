@@ -11,8 +11,8 @@ interface DialogShellProps {
   children?: ReactNode;
   /** Footer slot — typically a <DialogFooter> with action buttons. */
   footer?: ReactNode;
-  /** Width tier. `sm` ≈ 384px, `md` ≈ 448px (matches existing usage). */
-  size?: 'sm' | 'md';
+  /** Width tier. `lg` is used by content-heavy forms such as message feedback. */
+  size?: 'sm' | 'md' | 'lg';
   /** Called when the user requests close (backdrop click / ESC). */
   onClose: () => void;
   /** Backdrop click closes the dialog when true (default true). */
@@ -51,7 +51,7 @@ export default function DialogShell({
     return () => window.removeEventListener('keydown', handler);
   }, [closeOnEscape, onClose]);
 
-  const sizeClass = size === 'md' ? 'max-w-md' : 'max-w-sm';
+  const sizeClass = size === 'lg' ? 'max-w-3xl' : size === 'md' ? 'max-w-md' : 'max-w-sm';
 
   return (
     <div

@@ -8,7 +8,7 @@ from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 from pydantic import BaseModel, Field
 
-from api.schemas.chat import UploadedFileRef
+from api.schemas.chat import MessageFeedbackResponse, UploadedFileRef
 
 
 class AdminConversationSummary(BaseModel):
@@ -27,6 +27,24 @@ class AdminConversationSummary(BaseModel):
 class AdminConversationListResponse(BaseModel):
     """GET /api/v1/admin/conversations response"""
     conversations: List[AdminConversationSummary]
+    total: int
+    has_more: bool
+
+
+class AdminFeedbackItem(BaseModel):
+    """One message-level feedback record in the admin read-only browser."""
+
+    conversation_id: str
+    conversation_title: Optional[str] = None
+    user_id: Optional[str] = None
+    user_display_name: Optional[str] = None
+    message_id: str
+    user_input: str
+    feedback: MessageFeedbackResponse
+
+
+class AdminFeedbackListResponse(BaseModel):
+    feedback: List[AdminFeedbackItem]
     total: int
     has_more: bool
 
@@ -50,6 +68,7 @@ class AdminMessageGroup(BaseModel):
     created_at: datetime
     events: List[AdminEventItem]
     execution_metrics: Optional[Dict[str, Any]] = None
+    feedback: Optional[MessageFeedbackResponse] = None
     uploaded_files: Optional[List[UploadedFileRef]] = Field(
         None,
         description=(

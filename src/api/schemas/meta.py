@@ -47,3 +47,8 @@ class ClientConfigResponse(BaseModel):
             "Shared/admin-imported skills do not count."
         ),
     )
+    message_feedback_max_detail_chars: int = Field(
+        ...,
+        ge=1,
+        description="Maximum optional detail length for one message feedback record.",
+    )

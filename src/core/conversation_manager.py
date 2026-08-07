@@ -11,8 +11,9 @@ from typing import Dict, List, Optional, Any
 
 from repositories.conversation_repo import ConversationRepository
 from repositories.message_event_repo import MessageEventRepository
+from repositories.message_feedback_repo import MessageFeedbackRepository
 from repositories.base import NotFoundError, DuplicateError
-from db.models import Conversation, Message, MessageEvent
+from db.models import Conversation, Message, MessageEvent, MessageFeedback
 from utils.logger import get_logger
 from utils.time import utc_now
 
@@ -467,6 +468,41 @@ class ConversationManager:
         repo = self._ensure_repository()
         return await repo.get_message(message_id)
 
+    async def set_message_feedback(
+        self,
+        *,
+        conversation_id: str,
+        message_id: str,
+        user_id: str,
+        rating: str,
+        tags: list[str],
+        detail: Optional[str],
+    ) -> Optional[MessageFeedback]:
+        """Create or replace feedback after checking conversation ownership."""
+        repo = self._ensure_repository()
+        conversation = await repo.get_conversation(conversation_id)
+        if not conversation or conversation.user_id != user_id:
+            return None
+        message = await repo.get_message(message_id)
+        if not message or message.conversation_id != conversation_id:
+            return None
+        return await MessageFeedbackRepository(repo.session).upsert(
+            message_id, rating=rating, tags=tags, detail=detail
+        )
+
+    async def delete_message_feedback(
+        self, *, conversation_id: str, message_id: str, user_id: str
+    ) -> Optional[bool]:
+        """Delete feedback idempotently; None means conversation/message is hidden."""
+        repo = self._ensure_repository()
+        conversation = await repo.get_conversation(conversation_id)
+        if not conversation or conversation.user_id != user_id:
+            return None
+        message = await repo.get_message(message_id)
+        if not message or message.conversation_id != conversation_id:
+            return None
+        return await MessageFeedbackRepository(repo.session).delete(message_id)
+
     # ========================================
     # Event / Admin 查询（封装 MessageEventRepository 访问）
     # ========================================
@@ -527,6 +563,41 @@ class ConversationManager:
                 user_names[uid] = display_name or username
 
         return conversations, total, user_names
+
+    async def list_admin_feedback(
+        self,
+        *,
+        rating: Optional[str],
+        query: Optional[str],
+        limit: int,
+        offset: int,
+    ) -> tuple[
+        list[tuple[MessageFeedback, Message, Conversation]],
+        int,
+        Dict[str, str],
+    ]:
+        """Admin read-only feedback records plus owner display-name projection."""
+        from sqlalchemy import select
+        from db.models import User
+
+        repo = self._ensure_repository()
+        feedback_repo = MessageFeedbackRepository(repo.session)
+        rows = await feedback_repo.list_admin(
+            rating=rating, query=query, limit=limit, offset=offset
+        )
+        total = await feedback_repo.count_admin(rating=rating, query=query)
+
+        user_names: Dict[str, str] = {}
+        user_ids = {conv.user_id for _, _, conv in rows if conv.user_id}
+        if user_ids:
+            result = await repo.session.execute(
+                select(User.id, User.display_name, User.username).where(
+                    User.id.in_(user_ids)
+                )
+            )
+            for uid, display_name, username in result.all():
+                user_names[uid] = display_name or username
+        return rows, total, user_names
 
     async def get_admin_conversation_events(
         self,
