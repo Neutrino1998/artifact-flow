@@ -378,7 +378,10 @@ function ConvMetaBlock({ data, fallbackConvId }: {
 export default function ObservabilityPanel() {
   const selectedConvId = useUIStore((s) => s.observabilitySelectedConvId);
   const browser = useUIStore((s) => s.observabilityBrowser);
-  const focusMessageId = useUIStore((s) => s.observabilityFocusMessageId);
+  const highlightedMessageId = useUIStore((s) => s.observabilityHighlightedMessageId);
+  const focusRequestId = useUIStore((s) => s.observabilityFocusRequestId);
+  const focusConsumedId = useUIStore((s) => s.observabilityFocusConsumedId);
+  const consumeFocusRequest = useUIStore((s) => s.consumeObservabilityFocusRequest);
   const setObservabilityBrowser = useUIStore((s) => s.setObservabilityBrowser);
   const openObservabilityMessage = useUIStore((s) => s.openObservabilityMessage);
   const setObservabilitySelectedConvId = useUIStore((s) => s.setObservabilitySelectedConvId);
@@ -393,7 +396,6 @@ export default function ObservabilityPanel() {
   const refreshTick = useUIStore((s) => s.observabilityRefreshTick);
   const [viewMode, setViewMode] = useState<'events' | 'artifacts'>('events');
   const [issuesOnly, setIssuesOnly] = useState(false);
-  const handledFocusKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     setViewMode('events');
@@ -430,15 +432,10 @@ export default function ObservabilityPanel() {
   }, [selectedConvId, refreshTick]);
 
   useEffect(() => {
-    if (browser !== 'none') handledFocusKeyRef.current = null;
-  }, [browser]);
-
-  useEffect(() => {
     if (browser !== 'none') return;
-    if (!eventsData || !focusMessageId) return;
-    if (!eventsData.messages.some((message) => message.message_id === focusMessageId)) return;
-    const focusKey = `${selectedConvId ?? ''}:${focusMessageId}`;
-    if (handledFocusKeyRef.current === focusKey) return;
+    if (focusRequestId <= focusConsumedId) return;
+    if (!eventsData || !highlightedMessageId) return;
+    if (!eventsData.messages.some((message) => message.message_id === highlightedMessageId)) return;
 
     // Selecting feedback from the already-open conversation does not change
     // selectedConvId, so the conversation-reset effect above will not run.
@@ -450,17 +447,26 @@ export default function ObservabilityPanel() {
       return;
     }
 
-    const target = document.getElementById(messageAnchorId(focusMessageId));
+    const target = document.getElementById(messageAnchorId(highlightedMessageId));
     if (!target) return;
-    handledFocusKeyRef.current = focusKey;
     setCollapsedMessages((prev) => {
-      if (!prev.has(focusMessageId)) return prev;
+      if (!prev.has(highlightedMessageId)) return prev;
       const next = new Set(prev);
-      next.delete(focusMessageId);
+      next.delete(highlightedMessageId);
       return next;
     });
     target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, [browser, eventsData, focusMessageId, issuesOnly, selectedConvId, viewMode]);
+    consumeFocusRequest(focusRequestId);
+  }, [
+    browser,
+    consumeFocusRequest,
+    eventsData,
+    focusConsumedId,
+    focusRequestId,
+    highlightedMessageId,
+    issuesOnly,
+    viewMode,
+  ]);
 
   const activeMessageId = eventsData?.active_message_id ?? null;
   const activeMessageHasPersistedTerminal = useMemo(() => {
@@ -701,7 +707,7 @@ export default function ObservabilityPanel() {
                   <MessageGroupView
                     key={msg.message_id}
                     group={msg}
-                    focused={msg.message_id === focusMessageId}
+                    focused={msg.message_id === highlightedMessageId}
                     collapsed={collapsedMessages.has(msg.message_id)}
                     onToggle={() => toggleMessageCollapse(msg.message_id)}
                     offActiveBranch={isAdminMessageOffActiveBranch(

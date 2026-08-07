@@ -83,7 +83,13 @@ interface UIState {
   userManagementSelection: string[];
   observabilitySelectedConvId: string | null;
   observabilityBrowser: ObservabilityBrowser;
-  observabilityFocusMessageId: string | null;
+  // Highlight is persistent display state; request/consumed ids are the
+  // independent one-shot navigation signal. Keeping them separate prevents a
+  // browser close from replaying an old scroll while still allowing the same
+  // message to be explicitly selected again.
+  observabilityHighlightedMessageId: string | null;
+  observabilityFocusRequestId: number;
+  observabilityFocusConsumedId: number;
   observabilityRefreshTick: number;
   // 实例监控刷新版本号 —— 侧栏「刷新」按钮 bump,InstancePanel 订阅触发 reload
   // (与 observabilityRefreshTick 同构:刷新动作上移到侧栏,面板不再自带按钮)。
@@ -113,6 +119,7 @@ interface UIState {
   setObservabilitySelectedConvId: (id: string | null) => void;
   setObservabilityBrowser: (browser: ObservabilityBrowser) => void;
   openObservabilityMessage: (conversationId: string, messageId: string) => void;
+  consumeObservabilityFocusRequest: (id: number) => void;
   triggerObservabilityRefresh: () => void;
   triggerInstancesRefresh: () => void;
   notificationConfigDirty: boolean;
@@ -143,6 +150,7 @@ type UIData = Omit<UIState,
   | 'setToolUnitRightView' | 'bumpToolUnitListVersion' | 'enterSelectionMode' | 'exitSelectionMode'
   | 'toggleUserSelection' | 'setUserManagementSelection' | 'clearUserSelection'
   | 'setObservabilitySelectedConvId' | 'setObservabilityBrowser' | 'openObservabilityMessage'
+  | 'consumeObservabilityFocusRequest'
   | 'triggerObservabilityRefresh'
   | 'triggerInstancesRefresh' | 'setNotificationConfigStatus'
   | 'requestNotificationConfigCreate' | 'requestNotificationConfigRefresh' | 'requestNotificationConfigSave'
@@ -163,7 +171,9 @@ export const INITIAL_UI_STATE: UIData = {
   userManagementSelection: [],
   observabilitySelectedConvId: null,
   observabilityBrowser: 'none',
-  observabilityFocusMessageId: null,
+  observabilityHighlightedMessageId: null,
+  observabilityFocusRequestId: 0,
+  observabilityFocusConsumedId: 0,
   observabilityRefreshTick: 0,
   instancesRefreshTick: 0,
   notificationConfigDirty: false,
@@ -207,7 +217,9 @@ export const useUIStore = create<UIState>((set) => ({
       toolUnitRightView: { type: 'empty' },
       observabilitySelectedConvId: null,
       observabilityBrowser: 'none',
-      observabilityFocusMessageId: null,
+      observabilityHighlightedMessageId: null,
+      observabilityFocusRequestId: 0,
+      observabilityFocusConsumedId: 0,
       // 进入任一接管右面板的模式(用户管理/工具管理/会话监控/实例监控)→ 收起已展开的
       // 文件面板:全屏接管的(observability/instances)本就不该露出,master-detail 的
       // (userManagement/toolUnit)则避免退出时残留的 artifactPanelVisible 让文件面板弹回。
@@ -242,19 +254,28 @@ export const useUIStore = create<UIState>((set) => ({
   }),
   setUserManagementSelection: (ids) => set({ userManagementSelection: ids }),
   clearUserSelection: () => set({ userManagementSelection: [] }),
-  setObservabilitySelectedConvId: (id) => set({
+  setObservabilitySelectedConvId: (id) => set((s) => ({
     observabilitySelectedConvId: id,
     observabilityBrowser: 'none',
-    observabilityFocusMessageId: null,
-  }),
+    observabilityHighlightedMessageId: null,
+    // Selecting a conversation without a message cancels any navigation that
+    // has not reached the DOM yet.
+    observabilityFocusConsumedId: s.observabilityFocusRequestId,
+  })),
   setObservabilityBrowser: (browser) => set({
     observabilityBrowser: browser,
   }),
-  openObservabilityMessage: (conversationId, messageId) => set({
+  openObservabilityMessage: (conversationId, messageId) => set((s) => ({
     observabilitySelectedConvId: conversationId,
     observabilityBrowser: 'none',
-    observabilityFocusMessageId: messageId,
-  }),
+    observabilityHighlightedMessageId: messageId,
+    observabilityFocusRequestId: s.observabilityFocusRequestId + 1,
+  })),
+  consumeObservabilityFocusRequest: (id) => set((s) => (
+    id > s.observabilityFocusConsumedId
+      ? { observabilityFocusConsumedId: id }
+      : {}
+  )),
   triggerObservabilityRefresh: () => set((s) => ({
     observabilityRefreshTick: s.observabilityRefreshTick + 1,
   })),

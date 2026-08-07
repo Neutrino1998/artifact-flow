@@ -56,7 +56,9 @@ describe('uiStore activeMode mutual exclusion', () => {
       userManagementSelection: ['u-1', 'u-2'],
       observabilitySelectedConvId: 'conv-1',
       observabilityBrowser: 'feedback',
-      observabilityFocusMessageId: 'msg-1',
+      observabilityHighlightedMessageId: 'msg-1',
+      observabilityFocusRequestId: 3,
+      observabilityFocusConsumedId: 2,
     });
     useUIStore.getState().setActiveMode('toolUnit');
 
@@ -68,7 +70,9 @@ describe('uiStore activeMode mutual exclusion', () => {
     expect(s.toolUnitRightView).toEqual({ type: 'empty' });
     expect(s.observabilitySelectedConvId).toBeNull();
     expect(s.observabilityBrowser).toBe('none');
-    expect(s.observabilityFocusMessageId).toBeNull();
+    expect(s.observabilityHighlightedMessageId).toBeNull();
+    expect(s.observabilityFocusRequestId).toBe(0);
+    expect(s.observabilityFocusConsumedId).toBe(0);
   });
 
   test('leaving a mode (→ none) clears its sub-state too', () => {
@@ -188,24 +192,37 @@ describe('uiStore observability sub-state', () => {
   test('setObservabilitySelectedConvId closes the browser and clears message focus', () => {
     useUIStore.setState({
       observabilityBrowser: 'feedback',
-      observabilityFocusMessageId: 'msg-old',
+      observabilityHighlightedMessageId: 'msg-old',
+      observabilityFocusRequestId: 4,
+      observabilityFocusConsumedId: 3,
     });
     useUIStore.getState().setObservabilitySelectedConvId('conv-42');
 
     const s = useUIStore.getState();
     expect(s.observabilitySelectedConvId).toBe('conv-42');
     expect(s.observabilityBrowser).toBe('none');
-    expect(s.observabilityFocusMessageId).toBeNull();
+    expect(s.observabilityHighlightedMessageId).toBeNull();
+    expect(s.observabilityFocusConsumedId).toBe(4);
   });
 
-  test('openObservabilityMessage selects and focuses one feedback message', () => {
+  test('openObservabilityMessage highlights a message and creates a one-shot request', () => {
     useUIStore.setState({ observabilityBrowser: 'feedback' });
     useUIStore.getState().openObservabilityMessage('conv-7', 'msg-9');
 
-    const s = useUIStore.getState();
+    let s = useUIStore.getState();
     expect(s.observabilitySelectedConvId).toBe('conv-7');
-    expect(s.observabilityFocusMessageId).toBe('msg-9');
+    expect(s.observabilityHighlightedMessageId).toBe('msg-9');
+    expect(s.observabilityFocusRequestId).toBe(1);
+    expect(s.observabilityFocusConsumedId).toBe(0);
     expect(s.observabilityBrowser).toBe('none');
+
+    s.consumeObservabilityFocusRequest(1);
+    s = useUIStore.getState();
+    expect(s.observabilityFocusConsumedId).toBe(1);
+    expect(s.observabilityHighlightedMessageId).toBe('msg-9');
+
+    s.openObservabilityMessage('conv-7', 'msg-9');
+    expect(useUIStore.getState().observabilityFocusRequestId).toBe(2);
   });
 
   test('triggerObservabilityRefresh increments tick', () => {

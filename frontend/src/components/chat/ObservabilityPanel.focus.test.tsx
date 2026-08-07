@@ -8,11 +8,15 @@ import ObservabilityPanel from './ObservabilityPanel';
 const apiMocks = vi.hoisted(() => ({
   getAdminConversationEvents: vi.fn(),
   listAdminConversationArtifacts: vi.fn(),
+  listAdminFeedback: vi.fn(),
+  listAdminConversations: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => ({
   getAdminConversationEvents: apiMocks.getAdminConversationEvents,
   listAdminConversationArtifacts: apiMocks.listAdminConversationArtifacts,
+  listAdminFeedback: apiMocks.listAdminFeedback,
+  listAdminConversations: apiMocks.listAdminConversations,
 }));
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
@@ -82,6 +86,10 @@ describe('ObservabilityPanel feedback focus', () => {
     apiMocks.getAdminConversationEvents.mockResolvedValue(eventsResponse);
     apiMocks.listAdminConversationArtifacts.mockReset();
     apiMocks.listAdminConversationArtifacts.mockResolvedValue({ artifacts: [] });
+    apiMocks.listAdminFeedback.mockReset();
+    apiMocks.listAdminFeedback.mockResolvedValue({ feedback: [], total: 0, has_more: false });
+    apiMocks.listAdminConversations.mockReset();
+    apiMocks.listAdminConversations.mockResolvedValue({ conversations: [], total: 0, has_more: false });
     scrollIntoView = vi.fn();
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
@@ -110,6 +118,15 @@ describe('ObservabilityPanel feedback focus', () => {
     });
   }
 
+  async function openAndCloseBrowser(browser: 'feedback' | 'conversations') {
+    await act(async () => {
+      useUIStore.getState().setObservabilityBrowser(browser);
+    });
+    await act(async () => {
+      useUIStore.getState().setObservabilityBrowser('none');
+    });
+  }
+
   it('returns from Artifacts before locating feedback in the current conversation', async () => {
     await renderPanel();
     await act(async () => buttonWithText(container, 'Artifacts')?.click());
@@ -132,5 +149,48 @@ describe('ObservabilityPanel feedback focus', () => {
     expect(buttonWithText(container, '只看异常')).toBeDefined();
     expect(document.getElementById('admin-message-msg-target')).not.toBeNull();
     expect(scrollIntoView).toHaveBeenCalledOnce();
+  });
+
+  it.each(['feedback', 'conversations'] as const)(
+    'does not replay consumed focus after opening and closing the %s browser',
+    async (browser) => {
+      await renderPanel();
+      await focusTargetMessage();
+      expect(useUIStore.getState().observabilityFocusConsumedId).toBe(1);
+      scrollIntoView.mockClear();
+
+      await act(async () => buttonWithText(container, 'Artifacts')?.click());
+      await openAndCloseBrowser(browser);
+
+      expect(buttonWithText(container, 'Artifacts')?.getAttribute('aria-selected')).toBe('true');
+      expect(scrollIntoView).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps issues-only when a browser closes without a new focus request', async () => {
+    await renderPanel();
+    await focusTargetMessage();
+    scrollIntoView.mockClear();
+    await act(async () => buttonWithText(container, '只看异常')?.click());
+    expect(document.getElementById('admin-message-msg-target')).toBeNull();
+
+    await openAndCloseBrowser('feedback');
+
+    expect(buttonWithText(container, '显示全部')).toBeDefined();
+    expect(document.getElementById('admin-message-msg-target')).toBeNull();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('locates the same highlighted message again when explicitly reselected', async () => {
+    await renderPanel();
+    await focusTargetMessage();
+    expect(scrollIntoView).toHaveBeenCalledOnce();
+
+    await focusTargetMessage();
+
+    expect(scrollIntoView).toHaveBeenCalledTimes(2);
+    const state = useUIStore.getState();
+    expect(state.observabilityFocusRequestId).toBe(2);
+    expect(state.observabilityFocusConsumedId).toBe(2);
   });
 });
