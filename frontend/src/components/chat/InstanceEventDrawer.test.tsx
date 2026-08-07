@@ -212,7 +212,7 @@ describe('InstanceEventDrawer', () => {
       await Promise.resolve();
     });
 
-    const warning = '较早运行指标未纳入本次扫描，该事件的指标快照可能不完整。';
+    const warning = '未找到事件前运行指标，指标快照可能不完整。';
     expect(container.textContent?.split(warning)).toHaveLength(2);
   });
 });

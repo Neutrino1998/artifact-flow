@@ -257,7 +257,7 @@ function EventCard({
       )}
       {metricsMayBeIncomplete && (
         <div className="mt-2 text-[11px] text-text-tertiary dark:text-text-tertiary-dark">
-          较早运行指标未纳入本次扫描，该事件的指标快照可能不完整。
+          未找到事件前运行指标，指标快照可能不完整。
         </div>
       )}
 
