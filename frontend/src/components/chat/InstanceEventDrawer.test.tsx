@@ -164,4 +164,55 @@ describe('InstanceEventDrawer', () => {
     expect(container.textContent).toContain('Watchdog 日志超过单次扫描上限');
     expect(container.textContent).not.toContain('运行指标超过单次扫描上限');
   });
+
+  test('flags only events whose earlier metric snapshot may be outside the scan', async () => {
+    apiMocks.getAdminInstanceEvents.mockResolvedValue({
+      instance_id: 'backend-1',
+      sources: {
+        error_log: { available: true, truncated: false },
+        loop_lag: { available: true, truncated: false },
+        metrics: { available: true, truncated: true },
+      },
+      events: [
+        {
+          id: 'wedge-old',
+          type: 'wedge',
+          source: 'loop_lag',
+          severity: 'error',
+          ts: '2026-07-01T07:08:22',
+          summary: 'Historical wedge',
+          instance_id: 'backend-1',
+        },
+        {
+          id: 'lag-recent',
+          type: 'loop_lag',
+          source: 'loop_lag',
+          severity: 'warning',
+          ts: '2026-07-30T07:08:22',
+          summary: 'Recent lag without a later sample',
+          instance_id: 'backend-1',
+          metrics_before: {
+            ts: '2026-07-30T07:08:00',
+            process: { cpu_pct: 1.2 },
+          },
+        },
+      ],
+    });
+
+    await act(async () => {
+      root.render(
+        <InstanceEventDrawer
+          instance={instance}
+          initialFilter="all"
+          onClose={vi.fn()}
+          onOpenConversation={vi.fn()}
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const warning = '较早运行指标未纳入本次扫描，该事件的指标快照可能不完整。';
+    expect(container.textContent?.split(warning)).toHaveLength(2);
+  });
 });

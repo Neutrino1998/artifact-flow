@@ -193,12 +193,19 @@ function StackGroups({ event }: { event: InstanceDiagnosticEvent }) {
 
 function EventCard({
   event,
+  metricsScanTruncated,
   onOpenConversation,
 }: {
   event: InstanceDiagnosticEvent;
+  metricsScanTruncated: boolean;
   onOpenConversation: (conversationId: string) => void;
 }) {
   const isWedge = event.type === 'wedge';
+  const metricsMayBeIncomplete = (
+    metricsScanTruncated
+    && (event.type === 'wedge' || event.type === 'loop_lag')
+    && !event.metrics_before
+  );
   return (
     <article className="rounded-xl border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-3 shadow-float">
       <div className="flex items-start gap-2">
@@ -246,6 +253,11 @@ function EventCard({
             <div className="text-text-tertiary dark:text-text-tertiary-dark">事件后 · {formatTime(event.metrics_after?.ts)}</div>
             <div className="mt-1 text-text-secondary dark:text-text-secondary-dark">{metricText(event.metrics_after)}</div>
           </div>
+        </div>
+      )}
+      {metricsMayBeIncomplete && (
+        <div className="mt-2 text-[11px] text-text-tertiary dark:text-text-tertiary-dark">
+          较早运行指标未纳入本次扫描，该事件的指标快照可能不完整。
         </div>
       )}
 
@@ -420,7 +432,12 @@ export default function InstanceEventDrawer({
           )}
           <div className="space-y-3">
             {visibleEvents.map((event) => (
-              <EventCard key={event.id} event={event} onOpenConversation={onOpenConversation} />
+              <EventCard
+                key={event.id}
+                event={event}
+                metricsScanTruncated={Boolean(data?.sources.metrics?.truncated)}
+                onOpenConversation={onOpenConversation}
+              />
             ))}
           </div>
         </div>
