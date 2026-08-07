@@ -72,10 +72,16 @@ export default function ArtifactFileTabs() {
             ref={active ? activeTabRef : undefined}
             className={`group relative flex h-10 min-w-[7rem] max-w-[10.5rem] shrink-0 items-center rounded-lg border sm:h-8 ${
               active
-                ? 'border-accent bg-surface text-text-primary shadow-sm dark:bg-surface-dark dark:text-text-primary-dark'
+                ? 'border-transparent bg-surface text-text-primary shadow-sm dark:bg-surface-dark dark:text-text-primary-dark'
                 : 'border-transparent text-text-secondary hover:bg-surface/60 dark:text-text-secondary-dark dark:hover:bg-surface-dark/60'
             }`}
           >
+            {active && (
+              <span
+                aria-hidden="true"
+                className="absolute bottom-1.5 left-0 top-1.5 w-0.5 rounded-r-full bg-accent"
+              />
+            )}
             <button
               type="button"
               role="tab"

@@ -64,8 +64,10 @@ describe('ArtifactFileTabs', () => {
     const activeTab = container.querySelector<HTMLButtonElement>(
       'button[role="tab"][aria-selected="true"]',
     )?.parentElement;
-    expect(activeTab?.className).toContain('border-accent');
-    expect(activeTab?.querySelector('span.bg-accent')).toBeNull();
+    expect(activeTab?.className).not.toContain('border-accent');
+    const activeMarker = activeTab?.querySelector('span.bg-accent');
+    expect(activeMarker?.className).toContain('left-0');
+    expect(activeMarker?.getAttribute('aria-hidden')).toBe('true');
 
     const tab = container.querySelector<HTMLButtonElement>(
       'button[role="tab"][title="Document B"]',
