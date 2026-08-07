@@ -18,6 +18,12 @@ const instance: InstanceHeartbeat = {
   instance_id: 'backend-1',
   status: 'green',
   error_count: 2,
+  started_at: '2026-07-30T06:00:00',
+  process: { cpu_pct: 12.5, open_fds: 42 },
+  db_pool: { in_use: 2, size: 10, overflow: 1 },
+  redis: { used_mb: 128 },
+  tasks_long_running: 3,
+  data_dir_mb: 256,
   last_error_ts: '2026-07-30T07:07:00',
   last_wedge: { ts: '2026-07-30T07:08:22', lag_ms: 5000, wedged: true },
 };
@@ -91,6 +97,11 @@ describe('InstanceEventDrawer', () => {
     });
 
     expect(apiMocks.getAdminInstanceEvents).toHaveBeenCalledWith('backend-1', 'error', 50);
+    expect(container.textContent).toContain('CPU');
+    expect(container.textContent).toContain('12.5%');
+    expect(container.textContent).toContain('2/10 +1');
+    expect(container.textContent).toContain('长跑任务');
+    expect(container.textContent).toContain('256M');
     expect(container.textContent).toContain('LLM call failed');
     expect(container.textContent).not.toContain('Event loop did not respond');
 

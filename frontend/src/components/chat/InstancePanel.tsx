@@ -110,7 +110,6 @@ export function InstanceCard({
   isSelf: boolean;
   onOpenEvents: (instance: InstanceHeartbeat) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const meta = STATUS_META[inst.status] ?? STATUS_META.red;
 
   const loop = inst.loop_lag_ms ?? {};
@@ -139,7 +138,7 @@ export function InstanceCard({
             onOpenEvents(inst);
           }
         }}
-        className="cursor-pointer rounded-lg outline-none transition-colors hover:bg-bg/60 dark:hover:bg-bg-dark/60 focus-visible:ring-2 focus-visible:ring-accent"
+        className="-m-1.5 cursor-pointer rounded-lg p-1.5 outline-none transition-colors hover:bg-bg/60 dark:hover:bg-bg-dark/60 focus-visible:ring-2 focus-visible:ring-accent"
       >
         {/* Header: status dot + id + version + self marker */}
         <div className="flex items-center gap-2">
@@ -211,26 +210,6 @@ export function InstanceCard({
           </div>
         )}
       </div>
-
-      {/* Expandable detail */}
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className="mt-2.5 text-xs text-text-tertiary dark:text-text-tertiary-dark hover:text-accent transition-colors"
-      >
-        {expanded ? '收起详情' : '展开详情'}
-      </button>
-      {expanded && (
-        <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-text-secondary dark:text-text-secondary-dark">
-          <span>CPU: {proc.cpu_pct != null ? `${proc.cpu_pct}%` : '—'}</span>
-          <span>FDs: {proc.open_fds ?? '—'}</span>
-          <span>DB pool: {inst.db_pool ? `${inst.db_pool.in_use ?? 0}/${inst.db_pool.size ?? 0}${inst.db_pool.overflow ? ` +${inst.db_pool.overflow}` : ''}` : '—'}</span>
-          <span>Redis: {inst.redis?.used_mb != null ? `${inst.redis.used_mb}M` : '—'}</span>
-          <span>长跑任务：{inst.tasks_long_running ?? 0}</span>
-          <span>data/: {inst.data_dir_mb != null ? `${inst.data_dir_mb}M` : '—'}</span>
-          <span>最近 ERROR：{ago(inst.last_error_ts, nowMs)}</span>
-          <span>started_at: {inst.started_at ?? '—'}</span>
-        </div>
-      )}
     </div>
   );
 }

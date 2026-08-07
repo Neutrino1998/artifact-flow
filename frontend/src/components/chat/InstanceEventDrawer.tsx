@@ -88,6 +88,7 @@ export function serializeInstanceEvents(instanceId: string, events: InstanceDiag
 function HeartbeatSummary({ instance }: { instance: InstanceHeartbeat }) {
   const wedge = instance.last_wedge;
   const heal = instance.last_autoheal;
+  const proc = instance.process ?? {};
   return (
     <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-border dark:border-border-dark bg-bg/60 dark:bg-bg-dark/60 p-3 text-xs">
       <div>
@@ -116,6 +117,47 @@ function HeartbeatSummary({ instance }: { instance: InstanceHeartbeat }) {
           </div>
         </div>
       )}
+      <div className="col-span-2 mt-1 border-t border-border dark:border-border-dark pt-2 font-medium text-text-secondary dark:text-text-secondary-dark">
+        运行详情
+      </div>
+      <div>
+        <div className="text-text-tertiary dark:text-text-tertiary-dark">CPU</div>
+        <div className="mt-0.5 text-text-primary dark:text-text-primary-dark">{proc.cpu_pct != null ? `${proc.cpu_pct}%` : '—'}</div>
+      </div>
+      <div>
+        <div className="text-text-tertiary dark:text-text-tertiary-dark">FDs</div>
+        <div className="mt-0.5 text-text-primary dark:text-text-primary-dark">{proc.open_fds ?? '—'}</div>
+      </div>
+      <div>
+        <div className="text-text-tertiary dark:text-text-tertiary-dark">DB pool</div>
+        <div className="mt-0.5 text-text-primary dark:text-text-primary-dark">
+          {instance.db_pool
+            ? `${instance.db_pool.in_use ?? 0}/${instance.db_pool.size ?? 0}${instance.db_pool.overflow ? ` +${instance.db_pool.overflow}` : ''}`
+            : '—'}
+        </div>
+      </div>
+      <div>
+        <div className="text-text-tertiary dark:text-text-tertiary-dark">Redis</div>
+        <div className="mt-0.5 text-text-primary dark:text-text-primary-dark">
+          {instance.redis?.used_mb != null ? `${instance.redis.used_mb}M` : '—'}
+        </div>
+      </div>
+      <div>
+        <div className="text-text-tertiary dark:text-text-tertiary-dark">长跑任务</div>
+        <div className="mt-0.5 text-text-primary dark:text-text-primary-dark">{instance.tasks_long_running ?? 0}</div>
+      </div>
+      <div>
+        <div className="text-text-tertiary dark:text-text-tertiary-dark">data/</div>
+        <div className="mt-0.5 text-text-primary dark:text-text-primary-dark">
+          {instance.data_dir_mb != null ? `${instance.data_dir_mb}M` : '—'}
+        </div>
+      </div>
+      <div className="col-span-2">
+        <div className="text-text-tertiary dark:text-text-tertiary-dark">启动时间</div>
+        <div className="mt-0.5 break-words text-text-primary dark:text-text-primary-dark">
+          {formatTime(instance.started_at)}
+        </div>
+      </div>
     </div>
   );
 }
