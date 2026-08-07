@@ -62,6 +62,7 @@ describe('conversationStore — active_message_id CAS', () => {
     expect(state.current?.active_branch).toBe('msg-timeout');
     expect(state.branchPath.map((m) => m.id)).toEqual(['msg-timeout']);
     expect(state.branchPath[0].response).toBe('*Task timed out*');
+    expect(state.branchPath[0].created_at).toBeNull();
     expect(state.branchPath[0].uploaded_files?.[0].filename).toBe('brief.docx');
     expect(state.branchPath[0].activated_skills).toEqual([
       { slug: 'docx', name: 'Word 文档' },

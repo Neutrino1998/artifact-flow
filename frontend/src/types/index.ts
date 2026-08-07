@@ -119,8 +119,10 @@ export type ResumeRequest = S['ResumeRequest'];
 export type ResumeResponse = S['ResumeResponse'];
 export type MessageFeedbackRequest = S['MessageFeedbackRequest'];
 export type MessageFeedbackResponse = S['MessageFeedbackResponse'];
-export type MessageResponse = Omit<S['MessageResponse'], 'feedback'> & {
+export type MessageResponse = Omit<S['MessageResponse'], 'feedback' | 'created_at'> & {
   feedback?: MessageFeedbackResponse | null;
+  /** Null only for a terminal snapshot awaiting authoritative REST reconciliation. */
+  created_at: string | null;
 };
 export type ActivatedSkillRef = S['ActivatedSkillRef'];
 export type ConversationSummary = S['ConversationSummary'];

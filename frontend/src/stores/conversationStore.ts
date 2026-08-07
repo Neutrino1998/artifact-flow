@@ -171,7 +171,10 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         parent_id: parentId,
         user_input: userInput,
         response,
-        created_at: now,
+        // The terminal event has no authoritative Message.created_at. Keep the
+        // timestamp absent until the REST detail refresh replaces this optimistic
+        // node; using `now` here would mislabel completion time as send time.
+        created_at: null,
         children: [],
         execution_metrics: executionMetrics ?? null,
         uploaded_files: uploaded ?? null,

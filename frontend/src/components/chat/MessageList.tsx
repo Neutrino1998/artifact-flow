@@ -40,8 +40,9 @@ export default function MessageList() {
                   below (search `pending`) renders the SAME UserMessage component, so
                   layout can't drift. The field SOURCES differ, though — any field
                   visible while pending must also be mirrored through useChat.ts +
-                  streamStore. The timestamp is intentionally persisted-only because
-                  the entire hover action bar is hidden while pending. */}
+                  streamStore. The timestamp is intentionally authoritative-only:
+                  pending hides the action bar, and a terminal optimistic node keeps
+                  created_at null until the REST detail refresh replaces it. */}
               <UserMessage
                 content={node.user_input}
                 messageId={node.id}
