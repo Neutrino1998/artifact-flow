@@ -2,7 +2,7 @@
 # 在该模型 params 里显式声明;未声明的参数交给 provider/模型默认决定(OpenAI/DeepSeek
 # 默认 1.0、vLLM 用 max_model_len 兜 max_tokens 等)。详见 src/models/llm.py 注释。
 
-# 模型配置（内网部署：GPUStack OpenAI-compatible API @ 172.25.16.129:85/v1）
+# 模型配置（内网部署：GPUStack OpenAI-compatible API @ https://172.25.16.129:86/v1）
 # 后端推理服务需回填 reasoning_content；thinking 通过
 # extra_body.chat_template_kwargs.thinking 切换（V3.1 系默认关）。
 models:
@@ -13,7 +13,7 @@ models:
   文本模型:
     model: openai/deepseek-v4-flash
     context_window: 220000
-    base_url: http://172.25.16.129:85/v1
+    base_url: https://172.25.16.129:86/v1
     api_key_env: GPUSTACK_DEEPSEEK_API_KEY
     cache_salt_field: cache_salt
     params:
@@ -26,7 +26,7 @@ models:
   deepseek-v4-flash-no-thinking:
     model: openai/deepseek-v4-flash
     context_window: 260000
-    base_url: http://172.25.16.129:85/v1
+    base_url: https://172.25.16.129:86/v1
     api_key_env: GPUSTACK_DEEPSEEK_API_KEY
     cache_salt_field: cache_salt
     params:
