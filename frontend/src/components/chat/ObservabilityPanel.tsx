@@ -174,15 +174,6 @@ export function formatLlmTokenUsage(tokens: Record<string, number>): string {
   return `in: ${tokens.input_tokens ?? 0}${cached} | out: ${tokens.output_tokens ?? 0}`;
 }
 
-function formatTime(iso: string): string {
-  try {
-    const d = parseUtcIso(iso);
-    return d.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  } catch {
-    return '';
-  }
-}
-
 // ── Stats helpers ──
 interface AggregatedStats {
   inputTokens: number;
@@ -1400,8 +1391,8 @@ function MessageGroupView({
                         : 'hover:bg-surface dark:hover:bg-bg-dark'
                 }`}
               >
-                <span className="flex-shrink-0 text-text-tertiary dark:text-text-tertiary-dark w-[52px]">
-                  {formatTime(event.created_at)}
+                <span className="flex-shrink-0 whitespace-nowrap tabular-nums text-text-tertiary dark:text-text-tertiary-dark">
+                  {formatDateTime(event.created_at)}
                 </span>
                 {event.agent_name != null ? (
                   <PillBadge tone="accent">{event.agent_name.replace('_agent', '')}</PillBadge>

@@ -127,6 +127,15 @@ describe('ObservabilityPanel feedback focus', () => {
     });
   }
 
+  it('shows both the local date and time for each event', async () => {
+    await renderPanel();
+
+    const eventButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('error'),
+    );
+    expect(eventButton?.textContent).toMatch(/\d{4}.*\d{1,2}:\d{2}:\d{2}/);
+  });
+
   it('returns from Artifacts before locating feedback in the current conversation', async () => {
     await renderPanel();
     await act(async () => buttonWithText(container, 'Artifacts')?.click());
