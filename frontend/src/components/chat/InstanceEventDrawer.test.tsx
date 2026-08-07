@@ -129,4 +129,32 @@ describe('InstanceEventDrawer', () => {
     await act(async () => close?.click());
     expect(onClose).toHaveBeenCalledOnce();
   });
+
+  test('ignores metrics truncation while retaining Watchdog truncation warnings', async () => {
+    apiMocks.getAdminInstanceEvents.mockResolvedValue({
+      instance_id: 'backend-1',
+      sources: {
+        error_log: { available: true, truncated: false },
+        loop_lag: { available: true, truncated: true },
+        metrics: { available: true, truncated: true },
+      },
+      events: [],
+    });
+
+    await act(async () => {
+      root.render(
+        <InstanceEventDrawer
+          instance={instance}
+          initialFilter="wedge"
+          onClose={vi.fn()}
+          onOpenConversation={vi.fn()}
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('Watchdog 日志超过单次扫描上限');
+    expect(container.textContent).not.toContain('运行指标超过单次扫描上限');
+  });
 });

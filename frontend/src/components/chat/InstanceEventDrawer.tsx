@@ -46,7 +46,6 @@ const SOURCE_LABEL: Record<InstanceDiagnosticEvent['source'], string> = {
 const SOURCE_KEY_LABEL: Record<string, string> = {
   error_log: '错误日志',
   loop_lag: 'Watchdog 日志',
-  metrics: '运行指标',
 };
 
 const STATUS_LABEL: Record<InstanceHeartbeat['status'], string> = {
@@ -326,16 +325,11 @@ export default function InstanceEventDrawer({
       .map(([source]) => SOURCE_KEY_LABEL[source] ?? source),
     [data, relevantSourceKeys],
   );
-  const truncationSourceKeys = useMemo(() => {
-    const keys = new Set(relevantSourceKeys);
-    if (filter === 'all' || filter === 'wedge' || filter === 'loop_lag') keys.add('metrics');
-    return keys;
-  }, [filter, relevantSourceKeys]);
   const truncated = useMemo(
     () => Object.entries(data?.sources ?? {})
-      .filter(([source, state]) => truncationSourceKeys.has(source) && state.truncated)
+      .filter(([source, state]) => relevantSourceKeys.has(source) && state.truncated)
       .map(([source]) => SOURCE_KEY_LABEL[source] ?? source),
-    [data, truncationSourceKeys],
+    [data, relevantSourceKeys],
   );
 
   const handleCopy = useCallback(() => {
