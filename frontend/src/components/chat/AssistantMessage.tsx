@@ -10,6 +10,7 @@ import { FeedbackRatingIcon } from '@/components/ui/FeedbackRatingIcon';
 import * as api from '@/lib/api';
 import type { MessageFeedbackResponse } from '@/types';
 import type { FeedbackRating, FeedbackTag } from '@/lib/messageFeedback';
+import { formatMessageDateTime } from '@/lib/time';
 import { reconstructFlow } from '@/lib/reconstructSegments';
 import AgentSegmentBlock from './AgentSegmentBlock';
 import InjectFlowBlock from './InjectFlowBlock';
@@ -24,6 +25,7 @@ interface AssistantMessageProps {
   feedback?: MessageFeedbackResponse | null;
   /** Persisted turn metrics from the message row; shape matches ExecutionMetrics in events.ts. */
   executionMetrics?: {
+    completed_at?: string | null;
     total_duration_ms?: number | null;
     cached_input_tokens_partial?: boolean;
     total_token_usage?: {
@@ -122,6 +124,9 @@ function AssistantMessage({ content, messageId, feedback = null, executionMetric
     ? interleaveFlowItems(completedSegs ?? [], completedBlocks ?? [])
     : null;
   const hasError = !!completedBlocks?.some((b) => b.kind === 'error');
+  const formattedCompletedAt = executionMetrics?.completed_at
+    ? formatMessageDateTime(executionMetrics.completed_at)
+    : null;
 
   return (
     <div className="group relative">
@@ -204,6 +209,18 @@ function AssistantMessage({ content, messageId, feedback = null, executionMetric
         >
           <FeedbackRatingIcon rating="negative" />
         </button>
+        {formattedCompletedAt && (
+          <>
+            <div className="w-px h-3 bg-border dark:bg-border-dark mx-0.5" />
+            <time
+              dateTime={executionMetrics?.completed_at ?? undefined}
+              title={`回答完成时间：${formattedCompletedAt}`}
+              className="ml-1 whitespace-nowrap text-xs leading-none tabular-nums text-text-tertiary dark:text-text-tertiary-dark"
+            >
+              {formattedCompletedAt}
+            </time>
+          </>
+        )}
       </div>
 
       {dialogRating ? (

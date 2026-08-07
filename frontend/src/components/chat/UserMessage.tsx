@@ -7,6 +7,7 @@ import { useStreamStore } from '@/stores/streamStore';
 import { BUTTON_PRIMARY } from '@/lib/styles';
 import { CopyIcon } from '@/components/ui/CopyIcon';
 import type { ActivatedSkillRef } from '@/types';
+import { formatMessageDateTime } from '@/lib/time';
 import BranchNavigator from './BranchNavigator';
 
 interface UserMessageProps {
@@ -36,9 +37,11 @@ interface UserMessageProps {
   attachments?: { filename: string }[] | null;
   /** Skills explicitly selected by the user for this turn (not cumulative/model-read). */
   activatedSkills?: ActivatedSkillRef[] | null;
+  /** Persisted message creation time. */
+  timestamp?: string | null;
 }
 
-function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCount = 1, pending = false, attachments = null, activatedSkills = null }: UserMessageProps) {
+function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCount = 1, pending = false, attachments = null, activatedSkills = null, timestamp = null }: UserMessageProps) {
   const { copied, copy } = useCopyFeedback();
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(content);
@@ -49,6 +52,7 @@ function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCo
   const hasAttachments = Boolean(attachments?.length);
   const hasActivatedSkills = Boolean(activatedSkills?.length);
   const hasContextChips = hasAttachments || hasActivatedSkills;
+  const formattedTimestamp = timestamp ? formatMessageDateTime(timestamp) : null;
 
   useEffect(() => {
     if (editing && textareaRef.current) {
@@ -175,10 +179,22 @@ function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCo
             {content}
           </div>
         )}
-        {/* Action buttons and branch navigator on hover. Skipped entirely when
-            pending — turn is in flight, none of these actions are valid yet. */}
+        {/* Action buttons, branch navigator, and timestamp on hover. Skipped
+            entirely while pending because none of these are valid yet. */}
         {!pending && (
         <div className="absolute -bottom-7 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          {formattedTimestamp && (
+            <>
+              <time
+                dateTime={timestamp ?? undefined}
+                title={`发送时间：${formattedTimestamp}`}
+                className="mr-1 whitespace-nowrap text-xs leading-none tabular-nums text-text-tertiary dark:text-text-tertiary-dark"
+              >
+                {formattedTimestamp}
+              </time>
+              <div className="w-px h-3 bg-border dark:bg-border-dark mx-0.5" />
+            </>
+          )}
           <button
             onClick={handleEdit}
             disabled={isStreaming}
