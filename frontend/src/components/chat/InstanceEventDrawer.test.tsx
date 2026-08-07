@@ -105,6 +105,13 @@ describe('InstanceEventDrawer', () => {
     expect(container.textContent).toContain('LLM call failed');
     expect(container.textContent).not.toContain('Event loop did not respond');
 
+    const runtimeDetails = Array.from(container.querySelectorAll('details')).find(
+      (details) => details.querySelector('summary')?.textContent?.trim() === '运行详情',
+    );
+    expect(runtimeDetails?.open).toBe(false);
+    await act(async () => runtimeDetails?.querySelector('summary')?.click());
+    expect(runtimeDetails?.open).toBe(true);
+
     const openConversation = Array.from(container.querySelectorAll('button')).find(
       (button) => button.textContent?.includes('在会话监控中打开'),
     );
