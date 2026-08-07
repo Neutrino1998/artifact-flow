@@ -42,6 +42,10 @@ describe('MessageFeedbackDialog', () => {
       (button) => button.textContent?.includes('解决了我的问题'),
     );
     const textarea = document.body.querySelector('textarea');
+    expect(textarea?.className).toContain('placeholder:text-text-tertiary');
+    expect(textarea?.className).toContain('dark:placeholder:text-text-tertiary-dark');
+    expect(textarea?.parentElement?.className).toContain('space-y-1');
+    expect(textarea?.parentElement?.className).toContain('pb-3');
     await act(async () => {
       tag?.click();
       if (textarea) {

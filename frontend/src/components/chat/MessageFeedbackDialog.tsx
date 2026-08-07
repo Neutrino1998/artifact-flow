@@ -2,7 +2,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { MessageFeedbackResponse } from '@/types';
-import { BUTTON_DANGER, BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
+import {
+  BUTTON_DANGER,
+  BUTTON_PRIMARY,
+  BUTTON_SECONDARY,
+  INPUT_ON_SURFACE,
+} from '@/lib/styles';
 import {
   FEEDBACK_TAG_LABELS,
   feedbackTagsFor,
@@ -114,19 +119,21 @@ export default function MessageFeedbackDialog({
           })}
         </div>
 
-        <textarea
-          value={detail}
-          onChange={(event) => setDetail(event.target.value)}
-          maxLength={maxDetailChars ?? undefined}
-          disabled={saving}
-          placeholder="填写详情（选填）"
-          className="min-h-40 w-full resize-y rounded-xl border border-border dark:border-border-dark bg-bg dark:bg-bg-dark px-4 py-3 text-sm text-text-primary dark:text-text-primary-dark outline-none focus:border-accent disabled:opacity-50"
-        />
-        <div className="flex items-center justify-between gap-4 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-          <span>反馈仅保存在当前私有部署中，供管理员排查和改进服务。</span>
-          <span className="shrink-0">
-            {detail.length}{maxDetailChars != null ? `/${maxDetailChars}` : ''}
-          </span>
+        <div className="space-y-1 pb-3">
+          <textarea
+            value={detail}
+            onChange={(event) => setDetail(event.target.value)}
+            maxLength={maxDetailChars ?? undefined}
+            disabled={saving}
+            placeholder="填写详情（选填）"
+            className={`${INPUT_ON_SURFACE} min-h-40 resize-y text-sm`}
+          />
+          <div className="flex items-center justify-between gap-4 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+            <span>反馈仅保存在当前私有部署中，供管理员排查和改进服务。</span>
+            <span className="shrink-0">
+              {detail.length}{maxDetailChars != null ? `/${maxDetailChars}` : ''}
+            </span>
+          </div>
         </div>
         {error ? <div className="text-sm text-status-error">{error}</div> : null}
       </div>
