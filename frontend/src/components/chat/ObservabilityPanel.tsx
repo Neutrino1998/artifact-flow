@@ -439,6 +439,19 @@ export default function ObservabilityPanel() {
     if (!eventsData.messages.some((message) => message.message_id === focusMessageId)) return;
     const focusKey = `${selectedConvId ?? ''}:${focusMessageId}`;
     if (handledFocusKeyRef.current === focusKey) return;
+
+    // Selecting feedback from the already-open conversation does not change
+    // selectedConvId, so the conversation-reset effect above will not run.
+    // Restore a view in which every message is renderable, then let this effect
+    // run again after React commits that DOM before consuming the focus request.
+    if (viewMode !== 'events' || issuesOnly) {
+      setViewMode('events');
+      setIssuesOnly(false);
+      return;
+    }
+
+    const target = document.getElementById(messageAnchorId(focusMessageId));
+    if (!target) return;
     handledFocusKeyRef.current = focusKey;
     setCollapsedMessages((prev) => {
       if (!prev.has(focusMessageId)) return prev;
@@ -446,14 +459,8 @@ export default function ObservabilityPanel() {
       next.delete(focusMessageId);
       return next;
     });
-    const timer = window.setTimeout(() => {
-      document.getElementById(messageAnchorId(focusMessageId))?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center',
-      });
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [browser, eventsData, focusMessageId, selectedConvId]);
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [browser, eventsData, focusMessageId, issuesOnly, selectedConvId, viewMode]);
 
   const activeMessageId = eventsData?.active_message_id ?? null;
   const activeMessageHasPersistedTerminal = useMemo(() => {
