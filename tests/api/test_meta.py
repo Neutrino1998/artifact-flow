@@ -60,7 +60,7 @@ async def test_meta_returns_full_shape(client: AsyncClient):
     assert "compaction_token_threshold" in data
     assert isinstance(data["compaction_token_threshold"], int)
     assert data["compaction_token_threshold"] == (
-        260_000 - config.COMPACTION_RESERVE_TOKENS
+        220_000 - config.COMPACTION_RESERVE_TOKENS
     )
 
     # lead_agent_model — composer model badge

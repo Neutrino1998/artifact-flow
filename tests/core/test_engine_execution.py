@@ -497,7 +497,10 @@ class TestToolExecution:
         assert completes[0]["data"]["success"] is True
 
     async def test_image_result_uses_call_id_cache_and_event_keeps_reference_only(self):
-        agent = _FakeAgentConfig(tools={"read_artifact": "auto"})
+        agent = _FakeAgentConfig(
+            tools={"read_artifact": "auto"},
+            model="视觉模型",
+        )
         data_uri = "data:image/png;base64,aW1hZ2U="
         tool = _FakeTool(
             "read_artifact",
