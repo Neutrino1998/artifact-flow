@@ -6,13 +6,21 @@ what must be checked again, and how routine v2 upgrades are performed.
 
 ## Target
 
-- Deployment target: two Kylin V10 SP3 ARM / Kunpeng hosts, 16c / 32G. One
-  known hostname is `ai-agent-app`.
-- Role: sandbox-enabled ArtifactFlow app hosts in a two-host target topology.
-  Check each host's live status before a coordinated change; one successful
-  host upgrade does not prove the other host is current.
-- Each host's production install root is `/root/workspace/artifactflow`.
-  Release transfer media stays outside it under
+- The host pool contains two Kylin V10 SP3 ARM / Kunpeng machines, 16c / 32G,
+  but they do not currently form a two-host application deployment:
+  - `172.25.148.94` is the only active production application host. Its install
+    root is `/root/workspace/artifactflow`.
+  - `172.25.148.113` is an unprovisioned standby. It does not currently have an
+    ArtifactFlow site or a v2 current Release and is outside routine app-only
+    upgrades.
+- Routine production upgrades target `172.25.148.94` only. Commissioning
+  `172.25.148.113` is a separate new-site operation and requires a
+  `--with-infra` first bundle.
+- Earlier hardware and Sandbox verification used the hostname `ai-agent-app`,
+  but this runbook does not have evidence that maps that historical hostname to
+  either current IP. Re-verify the mapping before using the hostname for
+  operations.
+- Release transfer media stays outside the active install root under
   `/root/workspace/releases/<version>`.
 - The old CentOS 7 host `bsyshealthyapc` is retired for this deployment. Do not
   apply its Docker, NTP, or network conclusions to these Kylin hosts unless
@@ -20,44 +28,54 @@ what must be checked again, and how routine v2 upgrades are performed.
 
 ## Current Operational Status
 
-- Production has completed the Fleet v1 to afctl v2 migration. The existing
-  site has a v2 `current` Release and routine upgrades use ARM64 app-only
-  bundles unless infrastructure images are intentionally being upgraded.
-- Release `2026.08.05-intranet.1` was successfully applied on 2026-08-05 as a
-  `linux/arm64` app-only update.
-- `/root/workspace/artifactflow/.artifactflow/state.json` is the current /
+- Production on `172.25.148.94` has completed the Fleet v1 to afctl v2
+  migration. The site has a v2 `current` Release and routine upgrades use
+  ARM64 app-only bundles unless infrastructure images are intentionally being
+  upgraded.
+- Release `2026.08.08-intranet.1` was successfully applied to
+  `172.25.148.94` on 2026-08-08 as a `linux/arm64` app-only update.
+- On `172.25.148.94`,
+  `/root/workspace/artifactflow/.artifactflow/state.json` is the current /
   previous Release authority. Use `afctl status` for the live operator view;
   this runbook's release history is an audit note, not a second state source.
+- `172.25.148.113` remains a standby with no ArtifactFlow installation. Do not
+  treat the active host's Release state as evidence that the standby is ready
+  or current.
 - `ARTIFACTFLOW_COMPACTION_TOKEN_THRESHOLD` and
   `ARTIFACTFLOW_RENDER_TOOL_EXAMPLES` have been removed from the production
   `control/.env`. Do not reintroduce either obsolete setting.
-- Do not run `site init` or `site migrate-v1` on the existing production site.
-  Those commands are retained below only for a genuinely new or independently
-  discovered legacy host.
+- Do not run `site init` or `site migrate-v1` on the existing production site
+  at `172.25.148.94`. `site init` is retained below for a genuinely new site,
+  including `172.25.148.113` if that standby is commissioned later;
+  `site migrate-v1` is only for an independently discovered legacy host.
 
 ## Hard Facts
 
 - Kylin V10 SP3 ARM defaults to a 64K page-size kernel. gVisor on arm64 rejects
   that host shape with `host page size mismatch - running on non-4K host`.
-- `ai-agent-app` was verified as UEFI + LVM root + an in-image GRUB kernel
-  (`BOOT_IMAGE=` appears in `/proc/cmdline`), so it can switch kernel in place.
-  A cloud image whose kernel is injected externally must be handled by changing
-  the image, not by installing guest RPMs.
+- The host then identified as `ai-agent-app` was verified as UEFI + LVM root +
+  an in-image GRUB kernel (`BOOT_IMAGE=` appears in `/proc/cmdline`), so it can
+  switch kernel in place. The hostname-to-IP mapping must be re-verified before
+  applying that evidence to a current host. A cloud image whose kernel is
+  injected externally must be handled by changing the image, not by installing
+  guest RPMs.
 - The 4K swap path is: install the vendor 4K kernel RPMs beside the old kernel,
   let `grubby` select the 4K entry, reboot, then confirm `PAGE_SIZE=4096`.
   The old 64K kernel remains available for rollback.
 - gVisor uses the userspace `systrap` platform here; it does not need `/dev/kvm`.
 - The arm smoke path verified `89.11(64K) -> 89.38.4k`, then `run-all.sh` passed.
 
-Production commissioning and subsequent v2 deployments verified this durable
-target shape:
+Production commissioning and subsequent v2 deployments established this
+required shape for the active site. The two Backend replicas are colocated on
+`172.25.148.94`; this evidence does not cover the unprovisioned standby at
+`172.25.148.113`:
 
 - `aarch64` with `PAGE_SIZE=4096`
 - Docker Compose v2 and `runsc` registered in Docker
 - Docker data-root `/data/docker`
 - Sandbox runtime `runsc` with scratch mounted as ext4 at
   `/data/artifactflow/sandbox-scratch`
-- two healthy Backend replicas
+- two healthy Backend replicas on the same active host
 - fixed volumes `artifactflow_data`, `artifactflow_postgres_data`, and
   `artifactflow_redis_data` (no legacy `deploy_*` volume migration required)
 
@@ -70,9 +88,11 @@ important constraint was `/var` at about 8G while Docker's data-root lived
 there, with essentially no free VG space to reshuffle. That is enough for a
 short smoke test, not for Postgres, images, and sandbox scratch.
 
-Each production host needs a data disk mounted at `/data`. The 2026-07
+The active production host needs a data disk mounted at `/data`. The 2026-07
 deployment used a 500G disk because the stock 100G `vda` was split across many
-small filesystems and `/var` was only about 8G.
+small filesystems and `/var` was only about 8G. Before commissioning
+`172.25.148.113`, provision and re-verify equivalent storage there; do not
+infer readiness from `172.25.148.94`.
 Use it for:
 
 - Docker data-root (`/data/docker`), before loading images
@@ -112,6 +132,9 @@ Release:
 app-only 构建不读取 Caddy、PostgreSQL 或 Redis 的上游标签；目标机物化新
 Release 时从 current Release 继承已经加载的精确镜像引用。没有 current Release
 的新站点会拒绝 app-only，首包必须使用 `--with-infra`。
+
+This means routine app-only bundles apply to `172.25.148.94` only.
+`172.25.148.113` has no current Release and cannot be bootstrapped from one.
 
 For a genuinely new site, or when intentionally upgrading Caddy, PostgreSQL,
 or Redis images, build with infrastructure:
@@ -158,11 +181,19 @@ install root:
 ```
 
 The pre-release backup directory should be mode `0700` because it can contain
-the target-local environment and database dump. Retain at least:
+target-local state and, exceptionally, a database dump. Routine app-only
+upgrades must not create an ad hoc `pg_dump` by default: the dump is large and
+expensive to produce repeatedly. Confirm the operator-managed backup or
+snapshot is recent and recoverable, then record its identifier and time. Take
+an extra dump only for a database or infrastructure major upgrade, a
+destructive or non-backward-compatible migration, a change whose recovery plan
+explicitly requires one, or when no suitable recent backup exists. Retain at
+least:
 
 ```text
 state.before.json
-postgres.sql.gz
+database-backup.txt     # existing backup/snapshot identifier and time
+postgres.sql.gz         # exceptional high-risk change only
 containers.before.txt
 volumes.before.json
 plan.log
@@ -237,8 +268,8 @@ Keep transferred release bundles separate from target-local control state:
 /root/workspace/artifactflow/.artifactflow   # immutable releases and state.json
 ```
 
-The existing production site already has a v2 current Release. Confirm that
-state before an upgrade with the stable controller:
+The existing production site on `172.25.148.94` already has a v2 current
+Release. Confirm that state before an upgrade with the stable controller:
 
 ```bash
 sudo /root/workspace/artifactflow/bin/afctl \
@@ -249,7 +280,7 @@ sudo /root/workspace/artifactflow/bin/afctl \
 `afctl` validates this mount but deliberately does not create a loop device,
 format storage, edit `/etc/fstab`, or install runsc.
 
-Keep production `control/site.toml` aligned with the host:
+Keep the `172.25.148.94` production `control/site.toml` aligned with the host:
 
 ```toml
 executor = "local"
@@ -333,7 +364,8 @@ for trusted development targets.
 ## New Site and Historical Fleet v1 Migration
 
 This section is not part of routine production upgrades. Use it only for a
-genuinely new host or an independently discovered legacy installation.
+genuinely new host, including `172.25.148.113` if it is commissioned later, or
+an independently discovered legacy installation.
 
 A new site has no current Release, so its first bundle must be built with
 `--with-infra`. Provision the dedicated scratch filesystem and other host
@@ -363,11 +395,14 @@ remain authoritative for the live current / previous edge.
 
 | Date | Release | Bundle | Result | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-08-08 | `2026.08.08-intranet.1` | `linux/arm64`, app-only | Success | Applied only to active host `172.25.148.94`; `172.25.148.113` remained an unprovisioned standby. Source `intranet@80cfae11`; transport SHA256 `f520c095e3e2c8093971aa7bcdd3d1d30b8fb39c62cfa9142565b3feae1a7746`. State generation and detailed post-Apply smoke evidence were not captured in this edit. |
 | 2026-08-05 | `2026.08.05-intranet.1` | `linux/arm64`, app-only | Success | Existing v2 site upgraded normally; obsolete environment variables had already been removed. Exact host scope and state generation were not captured in this record. |
 
 ## Previously Verified
 
-The 2026-06-12 ARM smoke on `ai-agent-app` verified:
+The 2026-06-12 ARM smoke on the host then identified as `ai-agent-app`
+verified the following. Because its current IP mapping was not recorded, do
+not transfer this evidence to `172.25.148.113` without re-running the checks:
 
 - `run-all.sh ALL PASSED`, including the git and dubious-ownership probes
 - sandbox image anchor `sha256:fac22b8384e2a6b84915794bd46a79e01b9d9a90df6bf5ab7536b37ee453d08e`
@@ -396,18 +431,23 @@ appears; do not assume the retired CentOS host's conflict applies unchanged.
 
 ## Routine Upgrade Checklist
 
-- [ ] Confirm the intended host set and record `afctl status` from each host in
-      scope; do not infer two-host convergence from one successful Apply.
+- [ ] Confirm `172.25.148.94` is still the active production target and record
+      its `afctl status`. Keep `172.25.148.113` outside routine app-only Apply
+      while it remains unprovisioned.
 - [ ] Verify the transport checksum and manifest platform `linux/arm64`.
-- [ ] Create the pre-upgrade database / state backup and retain the plan/apply
-      logs under `backups/pre-<version>/`.
+- [ ] Confirm a recent recoverable database backup or snapshot, record its
+      identifier, and copy the small current state file. Do not run `pg_dump`
+      for a routine app-only upgrade; reserve it for the high-risk cases listed
+      above. Retain the record plus plan/apply logs under
+      `backups/pre-<version>/`.
 - [ ] Run `site validate`, `doctor`, and `plan apply` with the new bundle's
       `afctl`; stop on any failure.
 - [ ] Apply the Release, install its `afctl` as the stable controller, and run
       `afctl status` again.
 - [ ] Verify the expected Backend replicas are healthy, then exercise login, a
       minimal real-model conversation, and a Sandbox / Artifact write-back.
-- [ ] Record Release ID, date, `state.json` generation, per-host result, and any
-      rollback or follow-up action in the acceptance history.
+- [ ] Record Release ID, date, `state.json` generation, result on
+      `172.25.148.94`, and any rollback or follow-up action in the acceptance
+      history.
 - [ ] If kernel, Docker, storage, runsc, or host networking changed, rerun the
       full commissioning preflight instead of relying on the routine checklist.
