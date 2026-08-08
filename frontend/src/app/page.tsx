@@ -29,7 +29,8 @@ export default function Home() {
   //                              so opening admin management while the artifact drawer
   //                              was open does not bury the master list under an empty
   //                              detail panel — admin work isn't a mobile use case)
-  //   full-screen takeover → false (SSE artifact events must not reopen the right panel)
+  //   conversation-independent takeover (including skills) → false
+  //                             (SSE artifact events must not reopen the right panel)
   //   neither → undefined (defer to user-controlled artifactPanelVisible)
   const forceArtifactVisible = artifactVisibilityOverride(activeMode, isAdmin, isMd);
 

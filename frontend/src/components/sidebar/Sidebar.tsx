@@ -242,6 +242,7 @@ export default function Sidebar({
   // but without the conversation search/refresh actions.
   const inInstances = activeMode === 'instances' && isAdmin;
   const inNotificationConfig = activeMode === 'notificationConfig' && isAdmin;
+  const inSkills = activeMode === 'skills';
 
   // 「全接管」admin 模式:实例监控/工具管理/用户管理/部门授权。这些把中间/右面板整个接管,
   // 与对话无关 → 侧栏隐藏对话列表 + 文件面板/搜索对话/新建对话/技能管理,只留退出
@@ -366,13 +367,15 @@ export default function Sidebar({
           </>
         ) : (
           <>
-            {/* Artifacts */}
-            <IconButton onClick={handleToggleArtifactPanel} label="文件面板">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <rect x="2" y="2" width="12" height="12" rx="1.5" />
-                <path d="M5 6h6M5 8.5h4" />
-              </svg>
-            </IconButton>
+            {/* Artifacts — skill management owns the full content width. */}
+            {!inSkills && (
+              <IconButton onClick={handleToggleArtifactPanel} label="文件面板">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <rect x="2" y="2" width="12" height="12" rx="1.5" />
+                  <path d="M5 6h6M5 8.5h4" />
+                </svg>
+              </IconButton>
+            )}
 
             {/* Search conversations */}
             <IconButton onClick={handleSearchChat} label="搜索对话">
@@ -567,16 +570,18 @@ export default function Sidebar({
           </>
         ) : (
           <>
-            <button
-              onClick={handleToggleArtifactPanel}
-              className={navRowClass}
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <rect x="2" y="2" width="12" height="12" rx="1.5" />
-                <path d="M5 6h6M5 8.5h4" />
-              </svg>
-              文件面板
-            </button>
+            {!inSkills && (
+              <button
+                onClick={handleToggleArtifactPanel}
+                className={navRowClass}
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <rect x="2" y="2" width="12" height="12" rx="1.5" />
+                  <path d="M5 6h6M5 8.5h4" />
+                </svg>
+                文件面板
+              </button>
+            )}
             <button
               onClick={handleSearchChat}
               className={navRowClass}

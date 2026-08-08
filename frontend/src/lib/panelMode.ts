@@ -5,6 +5,10 @@ export function artifactVisibilityOverride(
   isAdmin: boolean,
   isMd: boolean,
 ): boolean | undefined {
+  // Skill management is a conversation-independent workspace for every user.
+  // Keep the artifact panel out even if a live turn tries to auto-open it.
+  if (activeMode === 'skills') return false;
+
   if (!isAdmin) return undefined;
 
   if (

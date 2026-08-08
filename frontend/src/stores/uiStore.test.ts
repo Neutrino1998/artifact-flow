@@ -30,9 +30,9 @@ describe('uiStore activeMode mutual exclusion', () => {
   });
 
   test('entering any right-panel-takeover mode collapses the artifact panel', () => {
-    // observability/instances/departmentAccess 全屏接管、userManagement/toolUnit master-detail —
+    // skills/observability/instances/departmentAccess 全屏接管、userManagement/toolUnit master-detail —
     // 进入任一都应收起已展开的文件面板(退出后也不弹回)。
-    for (const mode of ['observability', 'instances', 'departmentAccess', 'userManagement', 'toolUnit'] as const) {
+    for (const mode of ['skills', 'observability', 'instances', 'departmentAccess', 'userManagement', 'toolUnit'] as const) {
       useUIStore.setState({ artifactPanelVisible: true });
       useUIStore.getState().setActiveMode(mode);
       expect(useUIStore.getState().artifactPanelVisible).toBe(false);
@@ -143,6 +143,12 @@ describe('uiStore rightPanelIntentEpoch', () => {
   test('entering department access bumps epoch (full-screen takeover)', () => {
     const before = useUIStore.getState().rightPanelIntentEpoch;
     useUIStore.getState().setActiveMode('departmentAccess');
+    expect(useUIStore.getState().rightPanelIntentEpoch).toBe(before + 1);
+  });
+
+  test('entering skill management bumps epoch (full-screen takeover)', () => {
+    const before = useUIStore.getState().rightPanelIntentEpoch;
+    useUIStore.getState().setActiveMode('skills');
     expect(useUIStore.getState().rightPanelIntentEpoch).toBe(before + 1);
   });
 

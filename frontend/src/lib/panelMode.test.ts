@@ -8,6 +8,11 @@ describe('artifactVisibilityOverride', () => {
     expect(artifactVisibilityOverride('instances', true, true)).toBe(false);
   });
 
+  test('skill management force-hides the right panel for every user', () => {
+    expect(artifactVisibilityOverride('skills', true, true)).toBe(false);
+    expect(artifactVisibilityOverride('skills', false, true)).toBe(false);
+  });
+
   test('master-detail admin modes force-show only on desktop', () => {
     expect(artifactVisibilityOverride('userManagement', true, true)).toBe(true);
     expect(artifactVisibilityOverride('toolUnit', true, true)).toBe(true);
@@ -18,7 +23,6 @@ describe('artifactVisibilityOverride', () => {
   test('ordinary modes and non-admin users defer to artifactPanelVisible', () => {
     expect(artifactVisibilityOverride('none', true, true)).toBeUndefined();
     expect(artifactVisibilityOverride('conversationBrowser', true, true)).toBeUndefined();
-    expect(artifactVisibilityOverride('skills', true, true)).toBeUndefined();
     expect(artifactVisibilityOverride('departmentAccess', false, true)).toBeUndefined();
   });
 });

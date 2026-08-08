@@ -27,7 +27,7 @@ export type ObservabilityBrowser = 'none' | 'conversations' | 'feedback';
 // setter 手动 spread `其他: false` 来维持(那是旧设计的反复漏点,如选对话不退工具管理)。
 //   - none               : 普通聊天(右面板由 artifactPanelVisible 这个独立轴控制)
 //   - conversationBrowser : 中间面板接管(不动右面板)
-//   - skills             : 中间面板接管(不动右面板;用户侧技能管理,全用户,非 admin)
+//   - skills             : 全屏接管(用户侧技能管理,全用户)
 //   - userManagement      : master-detail(中列表 + 右详情)
 //   - toolUnit            : master-detail(中列表 + 右详情)
 //   - departmentAccess    : 全屏接管(部门授权工作台)
@@ -46,6 +46,7 @@ export type ActiveMode =
 // 哪些 mode 接管/影响**右面板**(master-detail 重定向 or 全屏隐藏)。
 // conversationBrowser 只接管中间面板 → 进出它不算右面板意图变更,不 bump epoch。
 const RIGHT_PANEL_MODES: ReadonlySet<ActiveMode> = new Set([
+  'skills',
   'userManagement',
   'toolUnit',
   'departmentAccess',
@@ -220,8 +221,8 @@ export const useUIStore = create<UIState>((set) => ({
       observabilityHighlightedMessageId: null,
       observabilityFocusRequestId: 0,
       observabilityFocusConsumedId: 0,
-      // 进入任一接管右面板的模式(用户管理/工具管理/会话监控/实例监控)→ 收起已展开的
-      // 文件面板:全屏接管的(observability/instances)本就不该露出,master-detail 的
+      // 进入任一接管右面板的模式(技能管理/用户管理/工具管理/会话监控/实例监控)→ 收起已展开的
+      // 文件面板:全屏接管的(skills/observability/instances)本就不该露出,master-detail 的
       // (userManagement/toolUnit)则避免退出时残留的 artifactPanelVisible 让文件面板弹回。
       ...(RIGHT_PANEL_MODES.has(mode) && { artifactPanelVisible: false }),
       // 仅当进/出影响右面板的模式时才 bump(conversationBrowser 只动中间面板,不算)
