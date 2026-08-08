@@ -106,6 +106,11 @@ interface UIState {
   setSidebarCollapsed: (collapsed: boolean) => void;
   toggleArtifactPanel: () => void;
   setArtifactPanelVisible: (visible: boolean) => void;
+  // Background sources (SSE, upload completion, conversation hydration) may
+  // request an auto-open, but must not leave latent visibility behind while a
+  // management mode owns the right panel. Unlike explicit user actions this
+  // does not bump rightPanelIntentEpoch.
+  autoOpenArtifactPanel: () => void;
   // 进入某个顶层模式(排他);回普通聊天用 setActiveMode('none')。
   setActiveMode: (mode: ActiveMode) => void;
   setUserManagementRightView: (view: UserMgmtRightView) => void;
@@ -146,7 +151,7 @@ interface UIState {
 // 初始**数据**态(不含 actions)。单独导出 → 测试可 setState(INITIAL_UI_STATE) 整体复位,
 // 不再手抄字段清单(漏抄会让状态泄漏到下个用例 —— reviewer #7)。新增字段只改这一处。
 type UIData = Omit<UIState,
-  | 'toggleSidebar' | 'setSidebarCollapsed' | 'toggleArtifactPanel' | 'setArtifactPanelVisible'
+  | 'toggleSidebar' | 'setSidebarCollapsed' | 'toggleArtifactPanel' | 'setArtifactPanelVisible' | 'autoOpenArtifactPanel'
   | 'setActiveMode' | 'setUserManagementRightView' | 'bumpUserMgmtListVersion'
   | 'setToolUnitRightView' | 'bumpToolUnitListVersion' | 'enterSelectionMode' | 'exitSelectionMode'
   | 'toggleUserSelection' | 'setUserManagementSelection' | 'clearUserSelection'
@@ -205,6 +210,11 @@ export const useUIStore = create<UIState>((set) => ({
       artifactPanelVisible: visible,
       rightPanelIntentEpoch: s.rightPanelIntentEpoch + 1,
     })),
+  autoOpenArtifactPanel: () =>
+    set((s) => {
+      if (RIGHT_PANEL_MODES.has(s.activeMode) || s.artifactPanelVisible) return {};
+      return { artifactPanelVisible: true };
+    }),
   setActiveMode: (mode) => set((s) => {
     if (s.activeMode === mode) return {}; // 重复进同一 mode = no-op,不清子状态/不 bump
     const affectsRight = RIGHT_PANEL_MODES.has(s.activeMode) || RIGHT_PANEL_MODES.has(mode);

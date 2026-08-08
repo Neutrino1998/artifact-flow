@@ -85,7 +85,7 @@ export function useSSE() {
   const applyArtifactUpdated = useArtifactStore((s) => s.applyArtifactUpdated);
 
   // UI store
-  const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
+  const autoOpenArtifactPanel = useUIStore((s) => s.autoOpenArtifactPanel);
 
   const snapshotTerminalMessage = useCallback(
     (conversationId: string, messageId: string | null, response: string | undefined, metrics: unknown) => {
@@ -422,7 +422,7 @@ export function useSSE() {
           // the content. (Tool-persisted outputs emit ARTIFACT_CREATED too.)
           if (success && ARTIFACT_TOOLS.has(toolName)) {
             setArtifactSessionId(conversationId);
-            setArtifactPanelVisible(true);
+            autoOpenArtifactPanel();
           }
           break;
         }
@@ -433,14 +433,14 @@ export function useSSE() {
           // the user actively picked another artifact), and stores live content.
           // DB re-pull on COMPLETE realigns.
           setArtifactSessionId(conversationId);
-          setArtifactPanelVisible(true);
+          autoOpenArtifactPanel();
           applyArtifactCreated(data as unknown as ArtifactCreatedData);
           break;
         }
 
         case StreamEventType.ARTIFACT_UPDATED: {
           setArtifactSessionId(conversationId);
-          setArtifactPanelVisible(true);
+          autoOpenArtifactPanel();
           applyArtifactUpdated(data as unknown as ArtifactUpdatedData);
           break;
         }
@@ -620,7 +620,7 @@ export function useSSE() {
     [
       pushSegment, updateCurrentSegment, addToolCallToSegment,
       updateToolCallInSegment, snapshotSegments, setPermissionRequest,
-      setError, endStream, refreshAfterComplete, setArtifactPanelVisible,
+      setError, endStream, refreshAfterComplete, autoOpenArtifactPanel,
       setArtifactSessionId,
       applyArtifactCreated, applyArtifactUpdated,
       pushNonAgentBlock, updateNonAgentBlock, confirmPendingInject, setExecutionMetrics, setCancelled,

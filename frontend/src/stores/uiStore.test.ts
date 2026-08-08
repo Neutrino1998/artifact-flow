@@ -115,6 +115,30 @@ describe('uiStore rightPanelIntentEpoch', () => {
     expect(useUIStore.getState().rightPanelIntentEpoch).toBe(before + 1);
   });
 
+  test('automatic open works in chat without becoming user intent', () => {
+    const before = useUIStore.getState().rightPanelIntentEpoch;
+    useUIStore.getState().autoOpenArtifactPanel();
+    expect(useUIStore.getState().artifactPanelVisible).toBe(true);
+    expect(useUIStore.getState().rightPanelIntentEpoch).toBe(before);
+  });
+
+  test.each([
+    'skills',
+    'userManagement',
+    'toolUnit',
+    'departmentAccess',
+    'observability',
+    'instances',
+    'notificationConfig',
+  ] as const)('automatic open during %s stays closed after exit', (mode) => {
+    useUIStore.getState().setActiveMode(mode);
+    useUIStore.getState().autoOpenArtifactPanel();
+    expect(useUIStore.getState().artifactPanelVisible).toBe(false);
+
+    useUIStore.getState().setActiveMode('none');
+    expect(useUIStore.getState().artifactPanelVisible).toBe(false);
+  });
+
   test('entering user management bumps epoch (right panel re-targets to detail)', () => {
     const before = useUIStore.getState().rightPanelIntentEpoch;
     useUIStore.getState().setActiveMode('userManagement');

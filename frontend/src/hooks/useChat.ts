@@ -35,7 +35,7 @@ export function useChat() {
     (s) => s.mergeArtifactsFromDbDuringLive,
   );
   const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
-  const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
+  const autoOpenArtifactPanel = useUIStore((s) => s.autoOpenArtifactPanel);
   const { connect, disconnect, reconnectIfActive } = useSSE();
 
   const isNewConversation = !current;
@@ -184,7 +184,7 @@ export function useChat() {
         // turn start) fills the list, and COMPLETE's refresh realigns with DB.
         if (files && files.length > 0) {
           setArtifactSessionId(res.conversation_id);
-          setArtifactPanelVisible(true);
+          autoOpenArtifactPanel();
           // Stash the sent images as send-local previews so ImagePreview can show
           // them instantly until COMPLETE flushes the blob — the composer draft
           // was cleared on send, so this display-only cache is their only source.
@@ -200,7 +200,7 @@ export function useChat() {
         return false;
       }
     },
-    [current?.id, lastMessageId, setPendingUserMessage, setPendingUserFiles, setPendingUserSkills, setStreamParentId, connect, setSendError, setConversations, setConversationActiveMessage, setArtifactSessionId, setArtifactPanelVisible]
+    [current?.id, lastMessageId, setPendingUserMessage, setPendingUserFiles, setPendingUserSkills, setStreamParentId, connect, setSendError, setConversations, setConversationActiveMessage, setArtifactSessionId, autoOpenArtifactPanel]
   );
 
   // Switch to an existing conversation: tear down the previous conversation's
@@ -278,7 +278,7 @@ export function useChat() {
           if (useUIStore.getState().rightPanelIntentEpoch !== epochBefore) return;
           if (useUIStore.getState().artifactPanelVisible) return;
           if (useArtifactStore.getState().artifacts.length === 0) return;
-          setArtifactPanelVisible(true);
+          autoOpenArtifactPanel();
         });
       } catch (err) {
         if (myGen !== getNavGen()) return;
@@ -289,7 +289,7 @@ export function useChat() {
         }
       }
     },
-    [current?.id, disconnect, resetStream, resetArtifacts, setCurrentLoading, setCurrent, setConversations, reconnectIfActive, mergeArtifactsFromDbDuringLive, setArtifactSessionId, setArtifactPanelVisible]
+    [current?.id, disconnect, resetStream, resetArtifacts, setCurrentLoading, setCurrent, setConversations, reconnectIfActive, mergeArtifactsFromDbDuringLive, setArtifactSessionId, autoOpenArtifactPanel]
   );
 
   // Drop into the new-conversation flow: same teardown as switchConversation
