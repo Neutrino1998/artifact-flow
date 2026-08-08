@@ -10,6 +10,24 @@ import { PillBadge } from '@/components/ui/PillBadge';
 import MarkdownPreview from '@/components/artifact/MarkdownPreview';
 import type { SkillDetailResponse } from '@/types';
 
+function buildPreviewContent(detail: SkillDetailResponse): string {
+  const sections: string[] = [];
+
+  if (detail.description || detail.has_extra_files) {
+    sections.push('### Description');
+    if (detail.description) sections.push(detail.description);
+    if (detail.has_extra_files) {
+      sections.push(
+        '`此技能包含附属文件；当前仅预览 SKILL.md 正文，完整技能包可从列表导出。`',
+      );
+    }
+    sections.push('---');
+  }
+
+  sections.push(detail.skill_md);
+  return sections.join('\n\n');
+}
+
 export default function SkillPreviewPanel() {
   const view = useUIStore((s) => s.skillRightView);
   const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
@@ -60,26 +78,35 @@ export default function SkillPreviewPanel() {
   return (
     <div className="flex h-full min-h-0 flex-col bg-chat dark:bg-chat-dark">
       <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3 dark:border-border-dark">
-        <div className="min-w-0">
-          <h2 className="break-words text-sm font-semibold text-text-primary dark:text-text-primary-dark">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <h2 className="mr-0.5 break-words text-sm font-semibold text-text-primary dark:text-text-primary-dark">
             {detail?.name ?? '技能说明'}
           </h2>
           {detail && (
-            <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              <span className="font-mono text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                {detail.slug}
-              </span>
-              <PillBadge tone={detail.source === 'dynamic' ? 'accent' : 'neutral'}>
+            <>
+              <PillBadge
+                tone={detail.source === 'dynamic' ? 'accent' : 'neutral'}
+                title={detail.source === 'dynamic' ? '通过界面导入的技能' : '随系统提供的内置技能'}
+              >
                 {detail.source === 'dynamic' ? '导入' : '内置'}
               </PillBadge>
-              <PillBadge tone={detail.visibility === 'department' ? 'warning' : 'neutral'}>
+              <PillBadge
+                tone={detail.visibility === 'department' ? 'warning' : 'neutral'}
+                title={
+                  detail.visibility === 'private'
+                    ? '仅自己可见'
+                    : detail.visibility === 'department'
+                      ? '部门可见：默认不可用，需要部门授权'
+                      : '公开可见：默认全员可用，可被部门排除'
+                }
+              >
                 {detail.visibility === 'private'
                   ? '私有'
                   : detail.visibility === 'department'
                     ? '部门'
                     : '公开'}
               </PillBadge>
-            </div>
+            </>
           )}
         </div>
 
@@ -118,18 +145,6 @@ export default function SkillPreviewPanel() {
         </div>
       </div>
 
-      {detail?.description && (
-        <p className="border-b border-border px-4 py-2 text-xs text-text-secondary dark:border-border-dark dark:text-text-secondary-dark">
-          {detail.description}
-        </p>
-      )}
-
-      {detail?.has_extra_files && (
-        <p className="border-b border-border bg-panel-accent px-4 py-2 text-xs text-text-secondary dark:border-border-dark dark:bg-panel-dark dark:text-text-secondary-dark">
-          此技能还包含附属文件；这里仅预览 SKILL.md 正文，可从技能列表导出完整技能包。
-        </p>
-      )}
-
       <div className="min-h-0 flex-1 overflow-auto">
         {loading ? (
           <div className="flex h-full items-center justify-center text-sm text-text-tertiary dark:text-text-tertiary-dark">
@@ -138,7 +153,7 @@ export default function SkillPreviewPanel() {
         ) : error ? (
           <div className="p-5 text-sm text-status-error">{error}</div>
         ) : detail ? (
-          <MarkdownPreview content={detail.skill_md} />
+          <MarkdownPreview content={buildPreviewContent(detail)} />
         ) : null}
       </div>
     </div>

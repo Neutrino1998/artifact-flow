@@ -59,10 +59,17 @@ describe('SkillPreviewPanel', () => {
     });
 
     expect(apiMock.getSkillDetail).toHaveBeenCalledWith('shared-1', { admin: true });
-    expect(container.querySelector('h2')?.textContent).toBe('Department guide');
-    expect(container.querySelector('[data-testid="skill-markdown"]')?.textContent)
-      .toContain('Follow this.');
-    expect(container.textContent).toContain('附属文件');
+    const heading = container.querySelector('h2');
+    expect(heading?.textContent).toBe('Department guide');
+    expect(heading?.parentElement?.textContent).toContain('导入');
+    expect(heading?.parentElement?.textContent).toContain('部门');
+    expect(container.textContent).not.toContain('department-guide');
+    const preview = container.querySelector('[data-testid="skill-markdown"]')?.textContent;
+    expect(preview).toContain('### Description');
+    expect(preview).toContain('Department-only guidance');
+    expect(preview).toContain('`此技能包含附属文件');
+    expect(preview).toContain('---');
+    expect(preview).toContain('# Department guide\n\nFollow this.');
   });
 
   it('closes the shared right-panel visibility without changing the selection', async () => {
