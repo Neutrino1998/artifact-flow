@@ -68,11 +68,12 @@ export type AgentSummaryResponse = S['AgentSummaryResponse'];
 export type AgentListResponse = S['AgentListResponse'];
 
 // ============================================================
-// Skill Types — 列举/toggle (C-3) + 导入/导出/删除 (E-2)
+// Skill Types — 列举/正文预览/toggle (C-3) + 导入/导出/删除 (E-2)
 // ============================================================
 
 export type SkillItem = S['SkillItem'];
 export type SkillListResponse = S['SkillListResponse'];
+export type SkillDetailResponse = S['SkillDetailResponse'];
 export type SkillFindingItem = S['FindingItem'];
 export type SkillImportResponse = S['SkillImportResponse'];
 export type AdminSkillItem = S['AdminSkillItem'];

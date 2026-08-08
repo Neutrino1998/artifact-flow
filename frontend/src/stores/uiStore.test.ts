@@ -68,6 +68,7 @@ describe('uiStore activeMode mutual exclusion', () => {
     expect(s.selectionMode).toBe(false);
     expect(s.userManagementSelection).toEqual([]);
     expect(s.toolUnitRightView).toEqual({ type: 'empty' });
+    expect(s.skillRightView).toEqual({ type: 'empty' });
     expect(s.observabilitySelectedConvId).toBeNull();
     expect(s.observabilityBrowser).toBe('none');
     expect(s.observabilityHighlightedMessageId).toBeNull();
@@ -86,6 +87,19 @@ describe('uiStore activeMode mutual exclusion', () => {
     const s = useUIStore.getState();
     expect(s.observabilitySelectedConvId).toBeNull();
     expect(s.observabilityBrowser).toBe('none');
+  });
+
+  test('leaving skill preview closes the right panel and clears selection', () => {
+    useUIStore.setState({
+      activeMode: 'skills',
+      artifactPanelVisible: true,
+      skillRightView: { type: 'detail', skillId: 'skill-1', admin: true },
+    });
+
+    useUIStore.getState().setActiveMode('none');
+
+    expect(useUIStore.getState().artifactPanelVisible).toBe(false);
+    expect(useUIStore.getState().skillRightView).toEqual({ type: 'empty' });
   });
 
   test('re-entering the current mode is a no-op (does not wipe sub-state)', () => {
@@ -274,5 +288,18 @@ describe('uiStore rightView payloads', () => {
   test('setToolUnitRightView updates view payload', () => {
     useUIStore.getState().setToolUnitRightView({ type: 'edit-unit', unitName: 'weather_api' });
     expect(useUIStore.getState().toolUnitRightView).toEqual({ type: 'edit-unit', unitName: 'weather_api' });
+  });
+
+  test('setSkillRightView updates view payload', () => {
+    useUIStore.getState().setSkillRightView({
+      type: 'detail',
+      skillId: 'skill-1',
+      admin: true,
+    });
+    expect(useUIStore.getState().skillRightView).toEqual({
+      type: 'detail',
+      skillId: 'skill-1',
+      admin: true,
+    });
   });
 });

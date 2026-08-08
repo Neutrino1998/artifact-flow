@@ -2934,61 +2934,14 @@
         ]
       }
     },
-    "/api/v1/admin/skills/import": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "summary": "Admin Import Skill",
-        "description": "\u5bfc\u5165\u5171\u4eab skill(owner=null),\u53ef\u6307\u5b9a visibility/default_enabled \u521d\u59cb\u503c\u3002",
-        "operationId": "admin_import_skill_api_v1_admin_skills_import_post",
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_admin_import_skill_api_v1_admin_skills_import_post"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SkillImportResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/v1/admin/skills/{skill_id}/export": {
+    "/api/v1/admin/skills/{skill_id}": {
       "get": {
         "tags": [
           "admin"
         ],
-        "summary": "Admin Export Skill",
-        "description": "\u5bfc\u51fa shared catalog skill,\u4e0d\u6309\u5f53\u524d admin \u7684\u90e8\u95e8\u53ef\u89c1\u6027\u8fc7\u6ee4\u3002",
-        "operationId": "admin_export_skill_api_v1_admin_skills__skill_id__export_get",
+        "summary": "Admin Get Skill Detail",
+        "description": "\u8bfb\u53d6\u5171\u4eab skill \u6b63\u6587\uff0c\u4e0d\u6309\u5f53\u524d\u7ba1\u7406\u5458\u81ea\u5df1\u7684\u90e8\u95e8\u53ef\u89c1\u6027\u8fc7\u6ee4\u3002",
+        "operationId": "admin_get_skill_detail_api_v1_admin_skills__skill_id__get",
         "security": [
           {
             "HTTPBearer": []
@@ -3010,7 +2963,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SkillDetailResponse"
+                }
               }
             }
           },
@@ -3025,9 +2980,7 @@
             }
           }
         }
-      }
-    },
-    "/api/v1/admin/skills/{skill_id}": {
+      },
       "patch": {
         "tags": [
           "admin"
@@ -3110,6 +3063,99 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/skills/import": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Import Skill",
+        "description": "\u5bfc\u5165\u5171\u4eab skill(owner=null),\u53ef\u6307\u5b9a visibility/default_enabled \u521d\u59cb\u503c\u3002",
+        "operationId": "admin_import_skill_api_v1_admin_skills_import_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_admin_import_skill_api_v1_admin_skills_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillImportResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/skills/{skill_id}/export": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Export Skill",
+        "description": "\u5bfc\u51fa shared catalog skill,\u4e0d\u6309\u5f53\u524d admin \u7684\u90e8\u95e8\u53ef\u89c1\u6027\u8fc7\u6ee4\u3002",
+        "operationId": "admin_export_skill_api_v1_admin_skills__skill_id__export_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Skill Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -3890,6 +3936,93 @@
         ]
       }
     },
+    "/api/v1/skills/{skill_id}": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Get Skill Detail",
+        "description": "\u6309\u9700\u8bfb\u53d6\u5f53\u524d\u7528\u6237\u53ef\u89c1 skill \u7684 SKILL.md \u6b63\u6587\uff1b\u4e0d\u53ef\u89c1\u4ecd\u8fd4\u56de 404\u3002",
+        "operationId": "get_skill_detail_api_v1_skills__skill_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Skill Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Delete Skill",
+        "description": "\u5220\u9664\u81ea\u5df1\u5bfc\u5165\u7684 dynamic skill\u3002\u4e0d\u53ef\u89c1 \u2192 404;seeded \u2192 400;\u975e\u672c\u4eba\u5171\u4eab \u2192 403\u3002",
+        "operationId": "delete_skill_api_v1_skills__skill_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Skill Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/skills/import": {
       "post": {
         "tags": [
@@ -3969,47 +4102,6 @@
                 "schema": {}
               }
             }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/skills/{skill_id}": {
-      "delete": {
-        "tags": [
-          "skills"
-        ],
-        "summary": "Delete Skill",
-        "description": "\u5220\u9664\u81ea\u5df1\u5bfc\u5165\u7684 dynamic skill\u3002\u4e0d\u53ef\u89c1 \u2192 404;seeded \u2192 400;\u975e\u672c\u4eba\u5171\u4eab \u2192 403\u3002",
-        "operationId": "delete_skill_api_v1_skills__skill_id__delete",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "skill_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Skill Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -7635,6 +7727,72 @@
           "revision"
         ],
         "title": "SiteNotificationsResponse"
+      },
+      "SkillDetailResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Stable skill id"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug",
+            "description": "User-context skill slug"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Display name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "One-line description"
+          },
+          "skill_md": {
+            "type": "string",
+            "title": "Skill Md",
+            "description": "SKILL.md guidance body with YAML frontmatter removed"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "seeded",
+              "dynamic"
+            ],
+            "title": "Source",
+            "description": "Config-owned or UI-imported source"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "public",
+              "department"
+            ],
+            "title": "Visibility",
+            "description": "Effective catalog visibility"
+          },
+          "has_extra_files": {
+            "type": "boolean",
+            "title": "Has Extra Files",
+            "description": "Whether the downloadable bundle contains files beyond SKILL.md"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "description",
+          "skill_md",
+          "source",
+          "visibility",
+          "has_extra_files"
+        ],
+        "title": "SkillDetailResponse",
+        "description": "On-demand SKILL.md preview for one management-list item."
       },
       "SkillImportResponse": {
         "properties": {

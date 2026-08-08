@@ -6,6 +6,7 @@ import ChatPanel from '@/components/chat/ChatPanel';
 import ArtifactPanel from '@/components/artifact/ArtifactPanel';
 import UserManagementDetailPanel from '@/components/chat/UserManagementDetailPanel';
 import ToolUnitDetailPanel from '@/components/chat/ToolUnitDetailPanel';
+import SkillPreviewPanel from '@/components/chat/SkillPreviewPanel';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import AuthGuard from '@/components/AuthGuard';
 import { useStreamStore } from '@/stores/streamStore';
@@ -22,6 +23,7 @@ export default function Home() {
   const isMd = useMediaQuery(BREAKPOINTS.md);
   const userMgmtMode = activeMode === 'userManagement' && isAdmin;
   const toolUnitMode = activeMode === 'toolUnit' && isAdmin;
+  const skillMode = activeMode === 'skills';
 
   // Right-panel visibility override (see ThreeColumnLayout's prop doc):
   //   desktop master-detail (user-mgmt / tool-unit) → true  (force-show)
@@ -29,12 +31,15 @@ export default function Home() {
   //                              so opening admin management while the artifact drawer
   //                              was open does not bury the master list under an empty
   //                              detail panel — admin work isn't a mobile use case)
-  //   conversation-independent takeover (including skills) → false
-  //                             (SSE artifact events must not reopen the right panel)
+  //   full-screen conversation-independent takeovers → false
   //   neither → undefined (defer to user-controlled artifactPanelVisible)
   const forceArtifactVisible = artifactVisibilityOverride(activeMode, isAdmin, isMd);
 
-  const rightContent = userMgmtMode ? (
+  const rightContent = skillMode ? (
+    <ErrorBoundary fallbackLabel="技能说明面板出错了">
+      <SkillPreviewPanel />
+    </ErrorBoundary>
+  ) : userMgmtMode ? (
     <ErrorBoundary fallbackLabel="用户管理详情面板出错了">
       <UserManagementDetailPanel />
     </ErrorBoundary>
@@ -60,6 +65,7 @@ export default function Home() {
           </ErrorBoundary>
         }
         artifact={rightContent}
+        rightPanelLabel={skillMode ? '技能说明' : '文件面板'}
         forceArtifactVisible={forceArtifactVisible}
       />
       {permissionRequest && <PermissionModal />}

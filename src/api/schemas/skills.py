@@ -62,6 +62,27 @@ class SkillListResponse(BaseModel):
     )
 
 
+class SkillDetailResponse(BaseModel):
+    """On-demand SKILL.md preview for one management-list item."""
+    id: str = Field(..., description="Stable skill id")
+    slug: str = Field(..., description="User-context skill slug")
+    name: str = Field(..., description="Display name")
+    description: str = Field(..., description="One-line description")
+    skill_md: str = Field(
+        ...,
+        description="SKILL.md guidance body with YAML frontmatter removed",
+    )
+    source: Literal["seeded", "dynamic"] = Field(
+        ..., description="Config-owned or UI-imported source"
+    )
+    visibility: Literal["private", "public", "department"] = Field(
+        ..., description="Effective catalog visibility"
+    )
+    has_extra_files: bool = Field(
+        ..., description="Whether the downloadable bundle contains files beyond SKILL.md"
+    )
+
+
 class SkillToggleRequest(BaseModel):
     """PUT /api/v1/skills/{skill_id}/enabled request body."""
     enabled: bool = Field(..., description="Personal enable/disable override for this skill.")

@@ -1,4 +1,4 @@
-"""用户侧 skill 管理 REST(C-3 列举/toggle + E-2 导入/导出/删除)。
+"""用户侧 skill 管理 REST(C-3 列举/正文预览/toggle + E-2 导入/导出/删除)。
 
 作用域 = 用户自己的 skill(个人偏好 + 私有导入;守 feedback-admin-scope-user-mgmt)。
 可见性走 SkillManager 的 EffectiveSkillSet 单点闸,不可见 skill → 404(不泄露存在性)。
@@ -10,6 +10,7 @@ from fastapi.responses import Response
 
 from api.dependencies import get_current_user, get_skill_manager
 from api.schemas.skills import (
+    SkillDetailResponse,
     SkillImportResponse,
     SkillItem,
     SkillListResponse,
@@ -44,6 +45,20 @@ async def list_skills(
     """列出对当前用户可见的 skill + 有效启用态。"""
     items = await mgr.list_for_user(user.user_id)
     return SkillListResponse(skills=[SkillItem(**it) for it in items])
+
+
+@router.get("/{skill_id}", response_model=SkillDetailResponse)
+async def get_skill_detail(
+    skill_id: str,
+    user=Depends(get_current_user),
+    mgr: SkillManager = Depends(get_skill_manager),
+) -> SkillDetailResponse:
+    """按需读取当前用户可见 skill 的 SKILL.md 正文；不可见仍返回 404。"""
+    try:
+        item = await mgr.get_detail_for_user(user.user_id, skill_id)
+    except SkillManagerError as e:
+        raise _map(e)
+    return SkillDetailResponse(**item)
 
 
 @router.post("/import", response_model=SkillImportResponse)

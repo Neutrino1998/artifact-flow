@@ -163,6 +163,35 @@ class SkillRepository:
             statement = statement.with_for_update()
         return (await self._session.execute(statement)).scalar_one_or_none()
 
+    async def get_shared_skill_detail(self, identifier: str) -> Optional[dict]:
+        """Shared-catalog preview projection, excluding the potentially large bundle."""
+        columns = (
+            Skill.id,
+            Skill.slug,
+            Skill.name,
+            Skill.description,
+            Skill.skill_md,
+            Skill.source,
+            Skill.visibility,
+            Skill.has_extra_files,
+        )
+        filters = (
+            Skill.owner_user_id.is_(None),
+            Skill.visibility.in_(["public", "department"]),
+        )
+        row = (
+            await self._session.execute(
+                select(*columns).where(Skill.id == identifier, *filters)
+            )
+        ).one_or_none()
+        if row is None:
+            row = (
+                await self._session.execute(
+                    select(*columns).where(Skill.slug == identifier, *filters)
+                )
+            ).one_or_none()
+        return dict(row._mapping) if row is not None else None
+
     async def scope_slug_exists(self, slug: str, owner_user_id: Optional[str]) -> bool:
         namespace_key = owner_user_id or ""
         return (

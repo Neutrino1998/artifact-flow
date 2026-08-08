@@ -8,9 +8,9 @@ describe('artifactVisibilityOverride', () => {
     expect(artifactVisibilityOverride('instances', true, true)).toBe(false);
   });
 
-  test('skill management force-hides the right panel for every user', () => {
-    expect(artifactVisibilityOverride('skills', true, true)).toBe(false);
-    expect(artifactVisibilityOverride('skills', false, true)).toBe(false);
+  test('skill management defers to explicit preview visibility', () => {
+    expect(artifactVisibilityOverride('skills', true, true)).toBeUndefined();
+    expect(artifactVisibilityOverride('skills', false, true)).toBeUndefined();
   });
 
   test('master-detail admin modes force-show only on desktop', () => {

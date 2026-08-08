@@ -154,6 +154,19 @@ class SkillManager:
             "can_edit": row.source == "dynamic" and row.owner_user_id is None,
         }
 
+    @staticmethod
+    def _serialize_detail(info: SkillInfo, skill_md: str) -> dict:
+        return {
+            "id": info.id,
+            "slug": info.slug,
+            "name": info.name,
+            "description": info.description,
+            "skill_md": skill_md,
+            "source": info.source,
+            "visibility": info.visibility,
+            "has_extra_files": info.has_extra_files,
+        }
+
     async def list_for_user(self, user_id: str) -> List[dict]:
         """列出该用户**可见**的 skill + 有效启用态(供设置页;保 snapshot 的 slug 顺序)。"""
         eff, overrides = await self._resolve(user_id)
@@ -181,6 +194,25 @@ class SkillManager:
             self._serialize_admin_shared(row)
             for row in await self._repo.list_shared_skills()
         ]
+
+    async def get_detail_for_user(self, user_id: str, identifier: str) -> dict:
+        """Read one visible skill's guidance body for the management preview."""
+        eff, _ = await self._resolve(user_id)
+        info = eff.accessible.get(identifier) or eff.visible.get(identifier)
+        if info is None:
+            raise SkillNotFoundError(f"skill '{identifier}' not found")
+        skill_md = await self._repo.get_skill_md(info.id)
+        if skill_md is None:
+            # The row may have been deleted after the effective-set snapshot was read.
+            raise SkillNotFoundError(f"skill '{identifier}' not found")
+        return self._serialize_detail(info, skill_md)
+
+    async def get_admin_shared_detail(self, identifier: str) -> dict:
+        """Read shared guidance without applying the admin user's department scope."""
+        item = await self._repo.get_shared_skill_detail(identifier)
+        if item is None:
+            raise SkillNotFoundError(f"shared skill '{identifier}' not found")
+        return item
 
     async def update_admin_shared(
         self,

@@ -50,6 +50,7 @@ import type {
   AgentListResponse,
   SkillItem,
   SkillListResponse,
+  SkillDetailResponse,
   SkillImportResponse,
   AdminSkillListResponse,
   AdminSkillUpdateRequest,
@@ -227,6 +228,13 @@ export function getStorageUsage() {
 // the composer picker filters to `enabled` client-side.
 export function getSkills() {
   return request<SkillListResponse>('/api/v1/skills');
+}
+
+export function getSkillDetail(skillId: string, opts?: { admin?: boolean }) {
+  const path = opts?.admin
+    ? `/api/v1/admin/skills/${encodeURIComponent(skillId)}`
+    : `/api/v1/skills/${encodeURIComponent(skillId)}`;
+  return request<SkillDetailResponse>(path);
 }
 
 export function setSkillEnabled(skillId: string, enabled: boolean) {

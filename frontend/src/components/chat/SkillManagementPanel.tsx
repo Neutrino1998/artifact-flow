@@ -86,7 +86,7 @@ export function skillRowBorderClass(skill: SkillItem): string {
 }
 
 // 用户侧技能管理(C-3 列举/toggle + E-2 导入/导出/删除)。中间面板接管(同
-// ConversationBrowser),全用户可见。个人开关写 user_skill 覆盖,控 `enabled`
+// ConversationBrowser),点击条目时按需在右栏预览正文。个人开关写 user_skill 覆盖,控 `enabled`
 // (进不进模型 L1 索引 + 对话内激活选择器),不碰 `visible`(系统定)。
 // 导入:user 私有(仅自己可见、立即启用)/ admin 可选共享(public/department、默认开关);
 // 硬门拒收 → 422 结构化 findings 逐条渲染。seeded skill 归 config 只读。
@@ -107,6 +107,9 @@ export default function SkillManagementPanel() {
   const maxPrivateSkills = useConfigStore((s) => s.maxPrivateSkills);
   const fetchConfig = useConfigStore((s) => s.fetchConfig);
   const setActiveMode = useUIStore((s) => s.setActiveMode);
+  const skillRightView = useUIStore((s) => s.skillRightView);
+  const setSkillRightView = useUIStore((s) => s.setSkillRightView);
+  const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
 
   const fetchSkills = useCallback(async () => {
     try {
@@ -169,6 +172,17 @@ export default function SkillManagementPanel() {
     }
   }, []);
 
+  const handleOpen = useCallback((skill: SkillRow) => {
+    setSkillRightView({
+      type: 'detail',
+      skillId: skill.id,
+      // Shared catalog rows use the admin channel so department-only management
+      // items remain previewable even when the admin has no matching department.
+      admin: Boolean(skill.adminShared),
+    });
+    setArtifactPanelVisible(true);
+  }, [setArtifactPanelVisible, setSkillRightView]);
+
   const handleAdminUpdate = useCallback(
     async (skill: SkillRow, patch: AdminSkillUpdateRequest) => {
       if (!skill.adminShared?.can_edit) return;
@@ -177,6 +191,12 @@ export default function SkillManagementPanel() {
       try {
         await adminUpdateSkill(skill.id, patch);
         await fetchSkills();
+        const preview = useUIStore.getState().skillRightView;
+        if (preview.type === 'detail' && preview.skillId === skill.id) {
+          // Re-read the detail metadata so its visibility badge cannot lag the
+          // just-completed admin update. The body itself remains on-demand.
+          setSkillRightView({ ...preview });
+        }
       } catch (err) {
         setRowError(err instanceof Error ? err.message : '更新共享技能失败');
       } finally {
@@ -187,7 +207,7 @@ export default function SkillManagementPanel() {
         });
       }
     },
-    [fetchSkills],
+    [fetchSkills, setSkillRightView],
   );
 
   const handleConfirmDelete = useCallback(
@@ -206,6 +226,11 @@ export default function SkillManagementPanel() {
         // 删除私人赢家后，共享同名项需要立即解除“被覆盖”状态；重新解析服务端
         // effective set，避免只删本地行后留下红框和禁用开关。
         await fetchSkills();
+        const preview = useUIStore.getState().skillRightView;
+        if (preview.type === 'detail' && preview.skillId === skill.id) {
+          setSkillRightView({ type: 'empty' });
+          setArtifactPanelVisible(false);
+        }
         setDeleteTarget(null);
       } catch (err) {
         const message = err instanceof Error ? err.message : '删除失败';
@@ -220,7 +245,12 @@ export default function SkillManagementPanel() {
         });
       }
     },
-    [deleteTarget, fetchSkills],
+    [
+      deleteTarget,
+      fetchSkills,
+      setArtifactPanelVisible,
+      setSkillRightView,
+    ],
   );
 
   const q = query.trim().toLowerCase();
@@ -268,7 +298,7 @@ export default function SkillManagementPanel() {
               </span>
             )}
           </p>
-          {/* 导入入口 + 内联导入卡片(中间面板接管,不动右面板) */}
+          {/* 导入入口 + 内联导入卡片 */}
           <button
             type="button"
             disabled={personalEntryDisabled}
@@ -338,70 +368,80 @@ export default function SkillManagementPanel() {
             const canAdminEdit = Boolean(adminShared?.can_edit);
             const canUsePersonalToggle = !skill.adminOnly;
             const exportable = !skill.adminOnly || Boolean(adminShared);
+            const selected =
+              skillRightView.type === 'detail'
+              && skillRightView.skillId === skill.id;
             return (
               <div
                 key={skill.id}
-                className={`flex items-start gap-3 px-4 py-3 rounded-xl bg-surface dark:bg-surface-dark border transition-colors ${skillRowBorderClass(skill)}`}
+                className={`flex items-start gap-3 px-4 py-3 rounded-xl bg-surface dark:bg-surface-dark border transition-colors ${skillRowBorderClass(skill)} ${selected ? 'ring-1 ring-accent' : ''}`}
               >
                 <div className="min-w-0 flex-1">
-                  <div className="flex min-h-6 items-center gap-2">
-                    <span className="text-sm font-medium text-text-primary dark:text-text-primary-dark truncate">
-                      {skill.name}
-                    </span>
-                    {skill.adminOnly && (
-                      <PillBadge
-                        tone="warning"
-                        title="当前账号不可见，但管理员仍可在共享目录中管理它"
+                  <button
+                    type="button"
+                    onClick={() => handleOpen(skill)}
+                    aria-pressed={selected}
+                    title="点击查看 SKILL.md 说明"
+                    className="block w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  >
+                    <div className="flex min-h-6 items-center gap-2">
+                      <span className="text-sm font-medium text-text-primary dark:text-text-primary-dark truncate">
+                        {skill.name}
+                      </span>
+                      {skill.adminOnly && (
+                        <PillBadge
+                          tone="warning"
+                          title="当前账号不可见，但管理员仍可在共享目录中管理它"
+                        >
+                          管理项
+                        </PillBadge>
+                      )}
+                      {skill.shadowed_by_private && (
+                        <PillBadge
+                          tone="error"
+                          title="当前运行时会优先使用你的同名私人技能"
+                        >
+                          已被私人技能覆盖
+                        </PillBadge>
+                      )}
+                      {skill.source === 'dynamic' && (
+                        <PillBadge
+                          tone="accent"
+                          title={
+                            skill.visibility === 'private'
+                              ? '你导入的私有技能，仅自己可见'
+                              : '通过界面导入的共享技能'
+                          }
+                        >
+                          {skill.visibility === 'private' ? '私有导入' : '导入'}
+                        </PillBadge>
+                      )}
+                      {skill.visibility !== 'private' && (
+                        <PillBadge
+                          tone={skill.visibility === 'department' ? 'warning' : 'neutral'}
+                          title={
+                            skill.visibility === 'department'
+                              ? '部门可见：默认不可用，需要部门授权'
+                              : '公开可见：默认全员可用，可被部门排除'
+                          }
+                        >
+                          {skill.visibility === 'department' ? '部门' : '公开'}
+                        </PillBadge>
+                      )}
+                    </div>
+                    {skill.description && (
+                      <p
+                        className="mt-0.5 text-xs text-text-secondary dark:text-text-secondary-dark line-clamp-2"
                       >
-                        管理项
-                      </PillBadge>
+                        {skill.description}
+                      </p>
                     )}
                     {skill.shadowed_by_private && (
-                      <PillBadge
-                        tone="error"
-                        title="当前运行时会优先使用你的同名私人技能"
-                      >
-                        已被私人技能覆盖
-                      </PillBadge>
+                      <p className="mt-1 text-xs text-status-error">
+                        你有一个同名私人技能；对话中使用该 slug 时，共享技能不会生效。
+                      </p>
                     )}
-                    {skill.source === 'dynamic' && (
-                      <PillBadge
-                        tone="accent"
-                        title={
-                          skill.visibility === 'private'
-                            ? '你导入的私有技能，仅自己可见'
-                            : '通过界面导入的共享技能'
-                        }
-                      >
-                        {skill.visibility === 'private' ? '私有导入' : '导入'}
-                      </PillBadge>
-                    )}
-                    {skill.visibility !== 'private' && (
-                      <PillBadge
-                        tone={skill.visibility === 'department' ? 'warning' : 'neutral'}
-                        title={
-                          skill.visibility === 'department'
-                            ? '部门可见：默认不可用，需要部门授权'
-                            : '公开可见：默认全员可用，可被部门排除'
-                        }
-                      >
-                        {skill.visibility === 'department' ? '部门' : '公开'}
-                      </PillBadge>
-                    )}
-                  </div>
-                  {skill.description && (
-                    <p
-                      className="mt-0.5 text-xs text-text-secondary dark:text-text-secondary-dark line-clamp-2"
-                      title={skill.description}
-                    >
-                      {skill.description}
-                    </p>
-                  )}
-                  {skill.shadowed_by_private && (
-                    <p className="mt-1 text-xs text-status-error">
-                      你有一个同名私人技能；对话中使用该 slug 时，共享技能不会生效。
-                    </p>
-                  )}
+                  </button>
                   {adminShared && (
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <SegmentedTabs<SharedVisibility>
@@ -447,6 +487,18 @@ export default function SkillManagementPanel() {
                 <div className="flex h-6 flex-shrink-0 items-center gap-3">
                   {/* Row actions */}
                   <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleOpen(skill)}
+                      className="flex h-6 w-6 items-center justify-center rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-accent hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+                      aria-label={`查看技能 ${skill.name} 的说明`}
+                      title="查看 SKILL.md 说明"
+                    >
+                      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M3 2.5h7.5a1 1 0 0 1 1 1V6M3 2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h7.5a1 1 0 0 0 1-1V10" />
+                        <path d="M5 6h4M5 9h2M10 8l4-4M11 4h3v3" />
+                      </svg>
+                    </button>
                     {exportable && (
                       <button
                         onClick={() => handleExport(skill)}

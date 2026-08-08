@@ -367,7 +367,7 @@ export default function Sidebar({
           </>
         ) : (
           <>
-            {/* Artifacts — skill management owns the full content width. */}
+            {/* Artifact controls stay hidden while the right panel is a skill preview. */}
             {!inSkills && (
               <IconButton onClick={handleToggleArtifactPanel} label="文件面板">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">

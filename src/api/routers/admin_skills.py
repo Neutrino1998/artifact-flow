@@ -1,5 +1,7 @@
 """Admin Skills Router —— 共享 skill 管理(admin-only)。挂 /api/v1/admin,故路径:
 - GET    /api/v1/admin/skills          列出共享 skill(含 seeded read-only)
+- GET    /api/v1/admin/skills/{skill_id}
+                                       按需读取共享 skill 正文(绕过 admin 自身部门可见性)
 - POST   /api/v1/admin/skills/import   导入为共享 skill(owner=null;可指定 public/department
                                        与默认启用;配额豁免,结构上限照查)
 - GET    /api/v1/admin/skills/{skill_id}/export
@@ -23,6 +25,7 @@ from api.schemas.skills import (
     AdminSkillItem,
     AdminSkillListResponse,
     AdminSkillUpdateRequest,
+    SkillDetailResponse,
     SkillImportResponse,
 )
 from api.services.auth import TokenPayload
@@ -39,6 +42,20 @@ async def admin_list_skills(
     """列出所有 shared skill,不按 admin 自己的部门可见性过滤。"""
     items = await mgr.list_admin_shared()
     return AdminSkillListResponse(skills=[AdminSkillItem(**it) for it in items])
+
+
+@router.get("/skills/{skill_id}", response_model=SkillDetailResponse)
+async def admin_get_skill_detail(
+    skill_id: str,
+    _admin: TokenPayload = Depends(require_admin),
+    mgr: SkillManager = Depends(get_skill_manager),
+) -> SkillDetailResponse:
+    """读取共享 skill 正文，不按当前管理员自己的部门可见性过滤。"""
+    try:
+        item = await mgr.get_admin_shared_detail(skill_id)
+    except SkillManagerError as e:
+        raise _map(e)
+    return SkillDetailResponse(**item)
 
 
 @router.post("/skills/import", response_model=SkillImportResponse)

@@ -17,6 +17,7 @@ interface ThreeColumnLayoutProps {
       }) => React.ReactNode);
   chat: React.ReactNode;
   artifact?: React.ReactNode;
+  rightPanelLabel?: string;
   // 3-state visibility override for the right panel:
   //   true       → force show (e.g. desktop master-detail mode)
   //   false      → force hide (e.g. mobile fallback that must not be auto-shown)
@@ -28,6 +29,7 @@ export default function ThreeColumnLayout({
   sidebar,
   chat,
   artifact,
+  rightPanelLabel = '文件面板',
   forceArtifactVisible,
 }: ThreeColumnLayoutProps) {
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
@@ -200,13 +202,13 @@ export default function ThreeColumnLayout({
               <div className="fixed inset-y-0 right-0 z-30 w-[85vw] max-w-lg bg-chat dark:bg-chat-dark border-l border-border dark:border-border-dark overflow-hidden pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] flex flex-col">
                 <div className="flex items-center justify-between gap-3 px-4 py-2 border-b border-border dark:border-border-dark bg-chat dark:bg-chat-dark">
                   <span className="font-medium text-text-secondary dark:text-text-secondary-dark">
-                    文件面板
+                    {rightPanelLabel}
                   </span>
                   <button
                     onClick={() => setArtifactPanelVisible(false)}
                     className="h-11 w-11 flex items-center justify-center rounded-lg text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-surface-dark"
-                    aria-label="关闭文件面板"
-                    title="关闭文件面板"
+                    aria-label={`关闭${rightPanelLabel}`}
+                    title={`关闭${rightPanelLabel}`}
                   >
                     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                       <path d="M4 4l10 10M14 4L4 14" />

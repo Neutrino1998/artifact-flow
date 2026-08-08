@@ -94,7 +94,7 @@ export default function ChatPanel() {
     return <ConversationBrowser />;
   }
 
-  // 技能管理:全用户,中间面板接管并隐藏右侧文件面板。
+  // 技能管理:全用户,中间面板接管；右栏按选择改由 SkillPreviewPanel 承载。
   if (activeMode === 'skills') {
     return <SkillManagementPanel />;
   }
