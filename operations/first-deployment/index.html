@@ -1064,7 +1064,7 @@ leaf。完整规则见<a href="../../configuration/runtime/#出站-https-信任"
 <li>启动 bundled infra（如启用）；</li>
 <li>执行数据库 migration 和 config reconcile；</li>
 <li>Reconcile Backend、Frontend 和 Caddy；</li>
-<li>通过 Caddy 等待 <code>/health/ready</code>；</li>
+<li>通过 Caddy 等待 Backend <code>/health/ready</code>，并等待本次重建的 Frontend 可服务；</li>
 <li>原子更新 <code>.artifactflow/state.json</code>；</li>
 <li>关闭维护页。</li>
 </ol>
