@@ -1,6 +1,11 @@
 import { describe, test, expect, beforeEach } from 'vitest';
 import { useArtifactStore } from './artifactStore';
-import type { ArtifactDetail } from '@/types';
+import type {
+  ArtifactDetail,
+  ArtifactSummary,
+  VersionDetail,
+  VersionSummary,
+} from '@/types';
 
 function detail(content_type: string): ArtifactDetail {
   return {
@@ -11,7 +16,38 @@ function detail(content_type: string): ArtifactDetail {
     content: 'body',
     current_version: 1,
     source: null,
-  } as ArtifactDetail;
+    original_filename: null,
+    has_blob: false,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    versions: [],
+  };
+}
+
+function versionSummary(version: number): VersionSummary {
+  return {
+    version,
+    update_type: version === 1 ? 'create' : 'update',
+    created_at: `2026-01-0${version}T00:00:00Z`,
+  };
+}
+
+function versionDetail(version: number): VersionDetail {
+  return { ...versionSummary(version), content: `version ${version}` };
+}
+
+function summary(id: string): ArtifactSummary {
+  return {
+    id,
+    content_type: 'text/markdown',
+    title: id,
+    current_version: 1,
+    source: 'agent',
+    original_filename: null,
+    has_blob: false,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+  };
 }
 
 describe('artifactStore.setCurrent → defaultViewMode', () => {
@@ -78,48 +114,191 @@ describe('artifactStore.autoSelected provenance flag', () => {
   });
 });
 
+describe('artifactStore file tabs', () => {
+  beforeEach(() => useArtifactStore.getState().reset());
+
+  test('opening details appends IDs once and preserves their order', () => {
+    const first = { ...detail('text/markdown'), id: 'A' } as ArtifactDetail;
+    const second = { ...detail('text/plain'), id: 'B' } as ArtifactDetail;
+
+    useArtifactStore.getState().setCurrent(first);
+    useArtifactStore.getState().setCurrent(second);
+    useArtifactStore.getState().setCurrent(first);
+
+    expect(useArtifactStore.getState().openArtifactIds).toEqual(['A', 'B']);
+  });
+
+  test('returning to the file tree keeps open tabs', () => {
+    useArtifactStore.getState().setCurrent(detail('text/markdown'));
+    useArtifactStore.getState().setCurrent(null);
+
+    expect(useArtifactStore.getState().current).toBeNull();
+    expect(useArtifactStore.getState().openArtifactIds).toEqual(['art-1']);
+  });
+
+  test('closing the active tab clears its detail and view-scoped state', () => {
+    useArtifactStore.getState().setCurrent(detail('text/markdown'));
+    useArtifactStore.getState().setViewMode('diff');
+    useArtifactStore.getState().closeArtifactTab('art-1');
+
+    const state = useArtifactStore.getState();
+    expect(state.openArtifactIds).toEqual([]);
+    expect(state.current).toBeNull();
+    expect(state.viewMode).toBe('preview');
+  });
+
+  test('closing an inactive tab leaves the active detail alone', () => {
+    const first = { ...detail('text/markdown'), id: 'A' } as ArtifactDetail;
+    const second = { ...detail('text/plain'), id: 'B' } as ArtifactDetail;
+    useArtifactStore.getState().setCurrent(first);
+    useArtifactStore.getState().setCurrent(second);
+
+    useArtifactStore.getState().closeArtifactTab('A');
+
+    expect(useArtifactStore.getState().openArtifactIds).toEqual(['B']);
+    expect(useArtifactStore.getState().current?.id).toBe('B');
+  });
+
+  test('reset clears tabs with the conversation-scoped artifact state', () => {
+    useArtifactStore.getState().setCurrent(detail('text/markdown'));
+    useArtifactStore.getState().reset();
+    expect(useArtifactStore.getState().openArtifactIds).toEqual([]);
+  });
+});
+
 describe('artifactStore.refreshCurrent', () => {
   beforeEach(() => useArtifactStore.getState().reset());
 
-  test('same-id refresh: updates current without touching autoSelected', () => {
-    const v1 = { ...detail('text/markdown'), current_version: 1 } as ArtifactDetail;
-    const v2 = { ...detail('text/markdown'), current_version: 2 } as ArtifactDetail;
+  test('same-id refresh atomically updates detail and versions without touching autoSelected', () => {
+    const v1 = {
+      ...detail('text/markdown'),
+      current_version: 1,
+      versions: [versionSummary(1)],
+    } as ArtifactDetail;
+    const v2 = {
+      ...detail('text/markdown'),
+      current_version: 2,
+      versions: [versionSummary(1), versionSummary(2)],
+    } as ArtifactDetail;
     useArtifactStore.getState().setCurrent(v1);  // user pick → autoSelected=false
+    useArtifactStore.getState().setVersions(v1.versions);
+    useArtifactStore.getState().setSelectedVersion(versionDetail(1));
     expect(useArtifactStore.getState().autoSelected).toBe(false);
 
-    useArtifactStore.getState().refreshCurrent(v2);
+    useArtifactStore.getState().refreshCurrent(v2, 'version 1');
 
     expect(useArtifactStore.getState().current?.current_version).toBe(2);
+    expect(useArtifactStore.getState().versions).toEqual(v2.versions);
+    expect(useArtifactStore.getState().selectedVersion).toBeNull();
+    expect(useArtifactStore.getState().diffBaseContent).toBe('version 1');
     expect(useArtifactStore.getState().autoSelected).toBe(false);  // preserved
   });
 
-  test('same-id refresh: does not reset viewMode', () => {
+  test('resolved DB diff base preserves diff viewMode', () => {
     const v1 = { ...detail('text/markdown'), current_version: 1 } as ArtifactDetail;
     const v2 = { ...detail('text/markdown'), current_version: 2 } as ArtifactDetail;
     useArtifactStore.getState().setCurrent(v1);
     useArtifactStore.getState().setViewMode('diff');  // user-chosen mode
 
-    useArtifactStore.getState().refreshCurrent(v2);
+    useArtifactStore.getState().refreshCurrent(v2, 'persisted v1');
 
     expect(useArtifactStore.getState().viewMode).toBe('diff');  // preserved
+    expect(useArtifactStore.getState().diffBaseContent).toBe('persisted v1');
   });
 
-  test('cross-id refresh: no-op (guard against accidental misuse)', () => {
+  test('failed DB diff-base request exits diff instead of showing a stale comparison', () => {
+    const v1 = { ...detail('text/markdown'), current_version: 1 } as ArtifactDetail;
+    const v2 = { ...detail('text/markdown'), current_version: 2 } as ArtifactDetail;
+    useArtifactStore.getState().setCurrent(v1);
+    useArtifactStore.getState().setDiffBaseContent('older stale base');
+    useArtifactStore.getState().setViewMode('diff');
+
+    useArtifactStore.getState().refreshCurrent(v2, undefined);
+
+    expect(useArtifactStore.getState().current?.current_version).toBe(2);
+    expect(useArtifactStore.getState().diffBaseContent).toBeNull();
+    expect(useArtifactStore.getState().viewMode).toBe('preview');
+  });
+
+  test('late refresh after a tab switch does not pollute the new current artifact', () => {
     const a = { ...detail('text/markdown'), id: 'A', current_version: 1 } as ArtifactDetail;
     const b = { ...detail('text/markdown'), id: 'B', current_version: 1 } as ArtifactDetail;
+    const bVersions = [versionSummary(1)];
+    const bSelected = versionDetail(1);
     useArtifactStore.getState().setCurrent(a);
+    useArtifactStore.getState().setCurrent(b);
+    useArtifactStore.getState().setVersions(bVersions);
+    useArtifactStore.getState().setSelectedVersion(bSelected);
 
-    useArtifactStore.getState().refreshCurrent(b);
+    useArtifactStore.getState().refreshCurrent(
+      {
+        ...a,
+        current_version: 2,
+        versions: [versionSummary(1), versionSummary(2)],
+      },
+      'A base',
+    );
 
-    expect(useArtifactStore.getState().current?.id).toBe('A');  // unchanged
+    expect(useArtifactStore.getState().current?.id).toBe('B');
+    expect(useArtifactStore.getState().versions).toEqual(bVersions);
+    expect(useArtifactStore.getState().selectedVersion).toEqual(bSelected);
+  });
+
+  test('late refresh after closing the active tab does not reopen it', () => {
+    const a = { ...detail('text/markdown'), id: 'A', current_version: 1 } as ArtifactDetail;
+    useArtifactStore.getState().setCurrent(a);
+    useArtifactStore.getState().setVersions([versionSummary(1)]);
+    useArtifactStore.getState().setSelectedVersion(versionDetail(1));
+    useArtifactStore.getState().closeArtifactTab('A');
+
+    useArtifactStore.getState().refreshCurrent(
+      {
+        ...a,
+        current_version: 2,
+        versions: [versionSummary(1), versionSummary(2)],
+      },
+      'A base',
+    );
+
+    const state = useArtifactStore.getState();
+    expect(state.current).toBeNull();
+    expect(state.openArtifactIds).toEqual([]);
+    expect(state.versions).toEqual([]);
+    expect(state.selectedVersion).toBeNull();
   });
 
   test('refresh when current is null: no-op', () => {
     const a = { ...detail('text/markdown'), id: 'A' } as ArtifactDetail;
 
-    useArtifactStore.getState().refreshCurrent(a);
+    useArtifactStore.getState().refreshCurrent(a, 'A base');
 
     expect(useArtifactStore.getState().current).toBe(null);
+  });
+
+  test('flush-error reconciliation rolls optimistic live content back to authoritative DB', () => {
+    const liveV3 = {
+      ...detail('text/markdown'),
+      content: 'live v3',
+      current_version: 3,
+      versions: [],
+    } as ArtifactDetail;
+    const staleV2 = {
+      ...detail('text/markdown'),
+      content: 'persisted DB v2',
+      current_version: 2,
+      versions: [versionSummary(1), versionSummary(2)],
+    } as ArtifactDetail;
+    useArtifactStore.getState().setCurrent(liveV3);
+    useArtifactStore.getState().setVersions([]);
+    useArtifactStore.getState().setDiffBaseContent('live base');
+
+    useArtifactStore.getState().refreshCurrent(staleV2, 'persisted v1');
+
+    const state = useArtifactStore.getState();
+    expect(state.current?.content).toBe('persisted DB v2');
+    expect(state.current?.current_version).toBe(2);
+    expect(state.versions).toEqual(staleV2.versions);
+    expect(state.diffBaseContent).toBe('persisted v1');
   });
 });
 
@@ -146,11 +325,192 @@ describe('artifactStore.addPendingUpdate', () => {
     expect(useArtifactStore.getState().pendingUpdates).toEqual(['a', 'b', 'c']);
   });
 
-  test('clearPendingUpdates resets to empty', () => {
-    useArtifactStore.getState().addPendingUpdate('a');
-    useArtifactStore.getState().addPendingUpdate('b');
-    useArtifactStore.getState().clearPendingUpdates();
-    expect(useArtifactStore.getState().pendingUpdates).toEqual([]);
+});
+
+describe('artifactStore.finishLiveTurn', () => {
+  beforeEach(() => useArtifactStore.getState().reset());
+
+  test('clears live-only state while preserving a user-selected current file', () => {
+    const store = useArtifactStore.getState();
+    store.applyArtifactCreated({
+      id: 'doc', title: 'Doc', content_type: 'text/markdown',
+      source: 'agent', current_version: 2, content: 'live content',
+    });
+    store.selectFromLive('doc');
+    store.setCurrentLoading(true);
+    store.setLocalPreviews([
+      new File(['image'], 'old-preview.png', { type: 'image/png' }),
+    ]);
+
+    useArtifactStore.getState().finishLiveTurn();
+
+    const state = useArtifactStore.getState();
+    expect(state.current?.id).toBe('doc');
+    expect(state.autoSelected).toBe(false);
+    expect(state.currentLoading).toBe(false);
+    expect(state.pendingUpdates).toEqual([]);
+    expect(state.liveContent).toEqual({});
+    expect(state.localPreviews).toEqual({});
+  });
+
+  test('returns an agent-auto-opened file to the list', () => {
+    useArtifactStore.getState().applyArtifactCreated({
+      id: 'doc', title: 'Doc', content_type: 'text/markdown',
+      source: 'agent', current_version: 1, content: 'live content',
+    });
+
+    useArtifactStore.getState().finishLiveTurn();
+
+    const state = useArtifactStore.getState();
+    expect(state.current).toBeNull();
+    expect(state.autoSelected).toBe(false);
+    expect(state.openArtifactIds).toEqual(['doc']);
+  });
+
+  test('a new turn appends markers and live content onto a clean state', () => {
+    useArtifactStore.getState().applyArtifactCreated({
+      id: 'old-doc', title: 'Old', content_type: 'text/markdown',
+      source: 'agent', current_version: 1, content: 'old turn',
+    });
+    useArtifactStore.getState().finishLiveTurn();
+
+    useArtifactStore.getState().applyArtifactCreated({
+      id: 'new-doc', title: 'New', content_type: 'text/markdown',
+      source: 'agent', current_version: 1, content: 'new turn',
+    });
+
+    const state = useArtifactStore.getState();
+    expect(state.pendingUpdates).toEqual(['new-doc']);
+    expect(Object.keys(state.liveContent)).toEqual(['new-doc']);
+  });
+});
+
+describe('artifactStore authoritative DB collection reconciliation', () => {
+  beforeEach(() => useArtifactStore.getState().reset());
+
+  test('mid-stream DB list preserves live-only files and overlays stale versions', () => {
+    const store = useArtifactStore.getState();
+    store.reconcileArtifactsFromDb([summary('existing')]);
+    store.applyArtifactUpdated({
+      id: 'existing',
+      current_version: 2,
+      content_type: 'text/markdown',
+      content: 'updated live',
+    });
+    store.applyArtifactCreated({
+      id: 'live-only',
+      title: 'Live only',
+      content_type: 'text/plain',
+      source: 'agent',
+      current_version: 1,
+      content: 'not flushed',
+    });
+
+    useArtifactStore.getState().mergeArtifactsFromDbDuringLive([summary('existing')]);
+
+    const state = useArtifactStore.getState();
+    expect(state.artifacts.map((artifact) => artifact.id)).toEqual(['existing', 'live-only']);
+    expect(state.artifacts[0].current_version).toBe(2);
+    expect(state.artifacts[1]).toMatchObject({
+      id: 'live-only',
+      title: 'Live only',
+      content_type: 'text/plain',
+      current_version: 1,
+    });
+    expect(state.openArtifactIds).toEqual(['existing', 'live-only']);
+  });
+
+  test('failed new artifact is removed from current, list and open tabs', () => {
+    const store = useArtifactStore.getState();
+    store.applyArtifactCreated({
+      id: 'ghost', title: 'Ghost', content_type: 'text/markdown',
+      source: 'agent', current_version: 1, content: 'never persisted',
+    });
+    store.selectFromLive('ghost');
+    store.setVersions([versionSummary(1)]);
+    store.setSelectedVersion(versionDetail(1));
+    store.setDiffBaseContent('stale base');
+    store.finishLiveTurn();
+
+    useArtifactStore.getState().reconcileArtifactsFromDb([]);
+
+    const state = useArtifactStore.getState();
+    expect(state.artifacts).toEqual([]);
+    expect(state.openArtifactIds).toEqual([]);
+    expect(state.current).toBeNull();
+    expect(state.versions).toEqual([]);
+    expect(state.selectedVersion).toBeNull();
+    expect(state.diffBaseContent).toBeNull();
+  });
+
+  test('only missing tabs are pruned while a persisted current file is preserved', () => {
+    const a = { ...detail('text/markdown'), id: 'A' } as ArtifactDetail;
+    const ghost = { ...detail('text/markdown'), id: 'ghost' } as ArtifactDetail;
+    const b = { ...detail('text/markdown'), id: 'B' } as ArtifactDetail;
+    const bVersions = [versionSummary(1)];
+    const bSelected = versionDetail(1);
+    const store = useArtifactStore.getState();
+    store.reconcileArtifactsFromDb([summary('A'), summary('ghost'), summary('B')]);
+    store.setCurrent(a);
+    store.setCurrent(ghost);
+    store.setCurrent(b);
+    store.setVersions(bVersions);
+    store.setSelectedVersion(bSelected);
+
+    store.reconcileArtifactsFromDb([summary('A'), summary('B')]);
+
+    const state = useArtifactStore.getState();
+    expect(state.artifacts.map((artifact) => artifact.id)).toEqual(['A', 'B']);
+    expect(state.openArtifactIds).toEqual(['A', 'B']);
+    expect(state.current?.id).toBe('B');
+    expect(state.versions).toEqual(bVersions);
+    expect(state.selectedVersion).toEqual(bSelected);
+  });
+
+  test('authoritative detail 404 removes a missing file when list reconciliation is unavailable', () => {
+    const store = useArtifactStore.getState();
+    store.applyArtifactCreated({
+      id: 'ghost', title: 'Ghost', content_type: 'text/markdown',
+      source: 'agent', current_version: 1, content: 'never persisted',
+    });
+    store.selectFromLive('ghost');
+    store.finishLiveTurn();
+
+    useArtifactStore.getState().removeArtifactMissingFromDb('ghost');
+
+    const state = useArtifactStore.getState();
+    expect(state.artifacts).toEqual([]);
+    expect(state.openArtifactIds).toEqual([]);
+    expect(state.current).toBeNull();
+  });
+
+  test('one detail 404 cannot prune a different open tab absent from the visible list', () => {
+    const store = useArtifactStore.getState();
+    store.applyArtifactCreated({
+      id: 'good', title: 'Good', content_type: 'text/markdown',
+      source: 'agent', current_version: 1, content: 'persisted later',
+    });
+    store.applyArtifactCreated({
+      id: 'ghost', title: 'Ghost', content_type: 'text/markdown',
+      source: 'agent', current_version: 1, content: 'never persisted',
+    });
+    store.selectFromLive('ghost');
+    store.finishLiveTurn();
+
+    // Reproduce the pre-fix ordering: a stale list response had hidden both
+    // summaries before the ghost detail returned 404. The 404 proves only that
+    // ghost is missing; it says nothing about good.
+    useArtifactStore.setState({ artifacts: [] });
+    useArtifactStore.getState().removeArtifactMissingFromDb('ghost');
+
+    let state = useArtifactStore.getState();
+    expect(state.openArtifactIds).toEqual(['good']);
+    expect(state.current).toBeNull();
+
+    useArtifactStore.getState().reconcileArtifactsFromDb([summary('good')]);
+    state = useArtifactStore.getState();
+    expect(state.artifacts.map((artifact) => artifact.id)).toEqual(['good']);
+    expect(state.openArtifactIds).toEqual(['good']);
   });
 });
 
@@ -279,13 +639,4 @@ describe('artifactStore live reduce (ARTIFACT_* events)', () => {
     expect(useArtifactStore.getState().selectFromLive('missing')).toBe(false);
   });
 
-  test('clearLiveContent empties the map', () => {
-    const s = useArtifactStore.getState();
-    s.applyArtifactCreated({
-      id: 'doc', title: 'Doc', content_type: 'text/markdown',
-      source: 'agent', current_version: 1, content: 'x',
-    });
-    useArtifactStore.getState().clearLiveContent();
-    expect(useArtifactStore.getState().liveContent).toEqual({});
-  });
 });

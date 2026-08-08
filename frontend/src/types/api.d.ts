@@ -193,6 +193,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/chat/{conv_id}/messages/{msg_id}/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Message Feedback
+         * @description Create or replace the current user's feedback for one assistant response.
+         */
+        put: operations["put_message_feedback_api_v1_chat__conv_id__messages__msg_id__feedback_put"];
+        post?: never;
+        /**
+         * Delete Message Feedback
+         * @description Remove feedback idempotently; cross-user/mismatched messages stay hidden.
+         */
+        delete: operations["delete_message_feedback_api_v1_chat__conv_id__messages__msg_id__feedback_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/chat/{conv_id}": {
         parameters: {
             query?: never;
@@ -416,6 +440,26 @@ export interface paths {
          *         - 前端应释放当前读流的 AbortController
          */
         get: operations["stream_events_api_v1_stream__stream_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Admin Feedback
+         * @description List message-level feedback newest-first; admin access is read-only.
+         */
+        get: operations["list_admin_feedback_api_v1_admin_feedback_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1627,6 +1671,34 @@ export interface components {
             created_at: string;
         };
         /**
+         * AdminFeedbackItem
+         * @description One message-level feedback record in the admin read-only browser.
+         */
+        AdminFeedbackItem: {
+            /** Conversation Id */
+            conversation_id: string;
+            /** Conversation Title */
+            conversation_title: string | null;
+            /** User Id */
+            user_id: string | null;
+            /** User Display Name */
+            user_display_name: string | null;
+            /** Message Id */
+            message_id: string;
+            /** User Input */
+            user_input: string;
+            feedback: components["schemas"]["MessageFeedbackResponse"];
+        };
+        /** AdminFeedbackListResponse */
+        AdminFeedbackListResponse: {
+            /** Feedback */
+            feedback: components["schemas"]["AdminFeedbackItem"][];
+            /** Total */
+            total: number;
+            /** Has More */
+            has_more: boolean;
+        };
+        /**
          * AdminInstanceEventsResponse
          * @description GET /api/v1/admin/instances/{instance_id}/events response.
          */
@@ -1664,6 +1736,7 @@ export interface components {
             execution_metrics: {
                 [key: string]: unknown;
             } | null;
+            feedback: components["schemas"]["MessageFeedbackResponse"] | null;
             /**
              * Uploaded Files
              * @description Files attached to this turn, from Message.metadata_['uploaded_files']. Display-only and best-effort until the terminal DB refresh.
@@ -2255,6 +2328,11 @@ export interface components {
              * @description Maximum number of private skills a user may own. -1 means unlimited, 0 disables personal skill imports, and a positive value is the limit. Shared/admin-imported skills do not count.
              */
             max_private_skills: number;
+            /**
+             * Message Feedback Max Detail Chars
+             * @description Maximum optional detail length for one message feedback record.
+             */
+            message_feedback_max_detail_chars: number;
         };
         /**
          * ConversationDetailResponse
@@ -2887,6 +2965,46 @@ export interface components {
             default_permission: "auto" | "confirm";
         };
         /**
+         * MessageFeedbackRequest
+         * @description Create or replace the current user's feedback for one assistant response.
+         */
+        MessageFeedbackRequest: {
+            /**
+             * Rating
+             * @enum {string}
+             */
+            rating: "positive" | "negative";
+            /** Tags */
+            tags?: ("resolved_problem" | "followed_instructions" | "high_quality" | "fast_efficient" | "helpful_initiative" | "incorrect_incomplete" | "failed_instructions" | "biased_out_of_scope" | "lost_context" | "slow_or_broken" | "safety_or_legal" | "other")[];
+            /** Detail */
+            detail?: string | null;
+        };
+        /**
+         * MessageFeedbackResponse
+         * @description Persisted current feedback for one assistant response.
+         */
+        MessageFeedbackResponse: {
+            /**
+             * Rating
+             * @enum {string}
+             */
+            rating: "positive" | "negative";
+            /** Tags */
+            tags: ("resolved_problem" | "followed_instructions" | "high_quality" | "fast_efficient" | "helpful_initiative" | "incorrect_incomplete" | "failed_instructions" | "biased_out_of_scope" | "lost_context" | "slow_or_broken" | "safety_or_legal" | "other")[];
+            /** Detail */
+            detail: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
          * MessageResponse
          * @description Message in conversation detail response
          */
@@ -2922,6 +3040,8 @@ export interface components {
              * @description Child message IDs
              */
             children: string[];
+            /** @description Current user's feedback for this assistant response. */
+            feedback: components["schemas"]["MessageFeedbackResponse"] | null;
             /**
              * Execution Metrics
              * @description Turn-level metrics from Message.metadata_['execution_metrics']: started_at, completed_at, total_duration_ms, total_token_usage, etc.
@@ -3023,6 +3143,11 @@ export interface components {
              * @description Message ID to resume
              */
             message_id: string;
+            /**
+             * Call Id
+             * @description Native tool-call ID to resume
+             */
+            call_id: string;
             /**
              * Approved
              * @description Whether the permission was approved
@@ -3896,6 +4021,72 @@ export interface operations {
             };
         };
     };
+    put_message_feedback_api_v1_chat__conv_id__messages__msg_id__feedback_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conv_id: string;
+                msg_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageFeedbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageFeedbackResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_message_feedback_api_v1_chat__conv_id__messages__msg_id__feedback_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conv_id: string;
+                msg_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_conversation_api_v1_chat__conv_id__get: {
         parameters: {
             query?: never;
@@ -4216,6 +4407,40 @@ export interface operations {
                 };
                 content: {
                     "text/event-stream": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_admin_feedback_api_v1_admin_feedback_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                q?: string | null;
+                rating?: ("positive" | "negative") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminFeedbackListResponse"];
                 };
             };
             /** @description Validation Error */

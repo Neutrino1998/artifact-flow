@@ -28,4 +28,5 @@ class ClientConfigManager:
             "lead_agent_model": lead_agent.model,
             "max_upload_size": config.MAX_UPLOAD_SIZE,
             "max_private_skills": config.SKILL_USER_MAX_PRIVATE_COUNT,
+            "message_feedback_max_detail_chars": config.MESSAGE_FEEDBACK_MAX_DETAIL_CHARS,
         }

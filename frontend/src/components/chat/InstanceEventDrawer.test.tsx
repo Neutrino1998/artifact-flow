@@ -18,6 +18,12 @@ const instance: InstanceHeartbeat = {
   instance_id: 'backend-1',
   status: 'green',
   error_count: 2,
+  started_at: '2026-07-30T06:00:00',
+  process: { cpu_pct: 12.5, open_fds: 42 },
+  db_pool: { in_use: 2, size: 10, overflow: 1 },
+  redis: { used_mb: 128 },
+  tasks_long_running: 3,
+  data_dir_mb: 256,
   last_error_ts: '2026-07-30T07:07:00',
   last_wedge: { ts: '2026-07-30T07:08:22', lag_ms: 5000, wedged: true },
 };
@@ -91,8 +97,20 @@ describe('InstanceEventDrawer', () => {
     });
 
     expect(apiMocks.getAdminInstanceEvents).toHaveBeenCalledWith('backend-1', 'error', 50);
+    expect(container.textContent).toContain('CPU');
+    expect(container.textContent).toContain('12.5%');
+    expect(container.textContent).toContain('2/10 +1');
+    expect(container.textContent).toContain('长跑任务');
+    expect(container.textContent).toContain('256M');
     expect(container.textContent).toContain('LLM call failed');
     expect(container.textContent).not.toContain('Event loop did not respond');
+
+    const runtimeDetails = Array.from(container.querySelectorAll('details')).find(
+      (details) => details.querySelector('summary')?.textContent?.trim() === '运行详情',
+    );
+    expect(runtimeDetails?.open).toBe(false);
+    await act(async () => runtimeDetails?.querySelector('summary')?.click());
+    expect(runtimeDetails?.open).toBe(true);
 
     const openConversation = Array.from(container.querySelectorAll('button')).find(
       (button) => button.textContent?.includes('在会话监控中打开'),
@@ -117,5 +135,84 @@ describe('InstanceEventDrawer', () => {
     const close = container.querySelector<HTMLButtonElement>('[aria-label="关闭实例事件详情"]');
     await act(async () => close?.click());
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  test('ignores metrics truncation while retaining Watchdog truncation warnings', async () => {
+    apiMocks.getAdminInstanceEvents.mockResolvedValue({
+      instance_id: 'backend-1',
+      sources: {
+        error_log: { available: true, truncated: false },
+        loop_lag: { available: true, truncated: true },
+        metrics: { available: true, truncated: true },
+      },
+      events: [],
+    });
+
+    await act(async () => {
+      root.render(
+        <InstanceEventDrawer
+          instance={instance}
+          initialFilter="wedge"
+          onClose={vi.fn()}
+          onOpenConversation={vi.fn()}
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('Watchdog 日志超过单次扫描上限');
+    expect(container.textContent).not.toContain('运行指标超过单次扫描上限');
+  });
+
+  test('flags only events whose earlier metric snapshot may be outside the scan', async () => {
+    apiMocks.getAdminInstanceEvents.mockResolvedValue({
+      instance_id: 'backend-1',
+      sources: {
+        error_log: { available: true, truncated: false },
+        loop_lag: { available: true, truncated: false },
+        metrics: { available: true, truncated: true },
+      },
+      events: [
+        {
+          id: 'wedge-old',
+          type: 'wedge',
+          source: 'loop_lag',
+          severity: 'error',
+          ts: '2026-07-01T07:08:22',
+          summary: 'Historical wedge',
+          instance_id: 'backend-1',
+        },
+        {
+          id: 'lag-recent',
+          type: 'loop_lag',
+          source: 'loop_lag',
+          severity: 'warning',
+          ts: '2026-07-30T07:08:22',
+          summary: 'Recent lag without a later sample',
+          instance_id: 'backend-1',
+          metrics_before: {
+            ts: '2026-07-30T07:08:00',
+            process: { cpu_pct: 1.2 },
+          },
+        },
+      ],
+    });
+
+    await act(async () => {
+      root.render(
+        <InstanceEventDrawer
+          instance={instance}
+          initialFilter="all"
+          onClose={vi.fn()}
+          onOpenConversation={vi.fn()}
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const warning = '未找到事件前运行指标，指标快照可能不完整。';
+    expect(container.textContent?.split(warning)).toHaveLength(2);
   });
 });

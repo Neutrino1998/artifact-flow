@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { parseUtcIso } from './time';
+import { formatMessageDateTime, parseUtcIso } from './time';
 
 /**
  * Regression tests for the naive-ISO → UTC parsing helper.
@@ -49,5 +49,17 @@ describe('parseUtcIso', () => {
     // both compact and colon-separated offsets.
     const d = parseUtcIso('2026-05-18T03:30:00-0500');
     expect(d.toISOString()).toBe('2026-05-18T08:30:00.000Z');
+  });
+});
+
+describe('formatMessageDateTime', () => {
+  test('returns a compact local date and minute display', () => {
+    expect(formatMessageDateTime('2026-05-18T08:30:00')).toMatch(
+      /^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}$/,
+    );
+  });
+
+  test('returns null for an invalid timestamp', () => {
+    expect(formatMessageDateTime('not-a-date')).toBeNull();
   });
 });

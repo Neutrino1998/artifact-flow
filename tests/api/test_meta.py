@@ -78,6 +78,10 @@ async def test_meta_returns_full_shape(client: AsyncClient):
     assert isinstance(data["max_private_skills"], int)
     assert data["max_private_skills"] == config.SKILL_USER_MAX_PRIVATE_COUNT
 
+    assert data["message_feedback_max_detail_chars"] == (
+        config.MESSAGE_FEEDBACK_MAX_DETAIL_CHARS
+    )
+
 
 @pytest.mark.asyncio
 async def test_meta_missing_materialized_lead_agent_is_500(

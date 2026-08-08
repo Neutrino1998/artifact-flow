@@ -13,7 +13,7 @@ Chat Router
 from typing import List, Optional
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from pydantic import ValidationError
 
 from config import config
@@ -43,6 +43,8 @@ from api.schemas.chat import (
     ConversationDetailResponse,
     ConversationSummary,
     MessageResponse,
+    MessageFeedbackRequest,
+    MessageFeedbackResponse,
     StorageUsageResponse,
 )
 from api.services.execution_launcher import ExecutionLauncher, ExecutionSpec
@@ -433,6 +435,52 @@ async def get_storage_usage(
     )
 
 
+@router.put(
+    "/{conv_id}/messages/{msg_id}/feedback",
+    response_model=MessageFeedbackResponse,
+)
+async def put_message_feedback(
+    conv_id: str,
+    msg_id: str,
+    request: MessageFeedbackRequest,
+    current_user: TokenPayload = Depends(get_current_user),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
+):
+    """Create or replace the current user's feedback for one assistant response."""
+    feedback = await conversation_manager.set_message_feedback(
+        conversation_id=conv_id,
+        message_id=msg_id,
+        user_id=current_user.user_id,
+        rating=request.rating,
+        tags=list(request.tags),
+        detail=request.detail,
+    )
+    if feedback is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return MessageFeedbackResponse.model_validate(feedback)
+
+
+@router.delete(
+    "/{conv_id}/messages/{msg_id}/feedback",
+    status_code=204,
+)
+async def delete_message_feedback(
+    conv_id: str,
+    msg_id: str,
+    current_user: TokenPayload = Depends(get_current_user),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
+):
+    """Remove feedback idempotently; cross-user/mismatched messages stay hidden."""
+    deleted = await conversation_manager.delete_message_feedback(
+        conversation_id=conv_id,
+        message_id=msg_id,
+        user_id=current_user.user_id,
+    )
+    if deleted is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return Response(status_code=204)
+
+
 @router.get("/{conv_id}", response_model=ConversationDetailResponse)
 async def get_conversation(
     conv_id: str,
@@ -468,6 +516,11 @@ async def get_conversation(
                     response=msg.response,
                     created_at=msg.created_at,
                     children=children_map.get(msg.id, []),
+                    feedback=(
+                        MessageFeedbackResponse.model_validate(msg.feedback)
+                        if msg.feedback is not None
+                        else None
+                    ),
                     execution_metrics=(msg.metadata_ or {}).get("execution_metrics"),
                     uploaded_files=(msg.metadata_ or {}).get("uploaded_files"),
                     activated_skills=(msg.metadata_ or {}).get("activated_skills"),
@@ -685,9 +738,20 @@ async def resume_execution(
         "always_allow": request.always_allow,
     }
 
-    result = await runner.store.resolve_interrupt(message_id, resume_data)
+    result = await runner.store.resolve_interrupt(
+        message_id, request.call_id, resume_data
+    )
     if result == "not_found":
         raise HTTPException(status_code=404, detail="No pending interrupt found for this message")
+    if result == "call_mismatch":
+        logger.warning(
+            "Resume rejected (409): stale permission call_id "
+            f"(conv={conv_id}, message={message_id}, call={request.call_id})"
+        )
+        raise HTTPException(
+            status_code=409,
+            detail="Permission request is stale; a different tool call is awaiting approval",
+        )
     if result == "already_resolved":
         raise HTTPException(status_code=409, detail="Interrupt already resolved for this message")
 

@@ -2,6 +2,7 @@
 Admin Router
 
 Admin-only endpoints for observability and monitoring:
+- GET /api/v1/admin/feedback — list message-level user feedback
 - GET /api/v1/admin/conversations — list all conversations with active status
 - GET /api/v1/admin/conversations/{conv_id}/events — event timeline grouped by message
 - GET /api/v1/admin/conversations/{conv_id}/stream — live active-execution events
@@ -12,7 +13,7 @@ Admin-only endpoints for observability and monitoring:
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
@@ -33,6 +34,8 @@ from api.routers.stream import SSE_OPENAPI_RESPONSES, build_stream_response
 from api.schemas.admin import (
     AdminConversationSummary,
     AdminConversationListResponse,
+    AdminFeedbackItem,
+    AdminFeedbackListResponse,
     AdminEventItem,
     AdminMessageGroup,
     AdminConversationEventsResponse,
@@ -52,6 +55,41 @@ from utils.logger import get_logger
 logger = get_logger("ArtifactFlow")
 
 router = APIRouter()
+
+
+@router.get("/feedback", response_model=AdminFeedbackListResponse)
+async def list_admin_feedback(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    q: Optional[str] = Query(default=None, max_length=200),
+    rating: Optional[Literal["positive", "negative"]] = Query(default=None),
+    _admin: TokenPayload = Depends(require_admin),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
+):
+    """List message-level feedback newest-first; admin access is read-only."""
+    rows, total, user_names = await conversation_manager.list_admin_feedback(
+        rating=rating,
+        query=q.strip() if q else None,
+        limit=limit,
+        offset=offset,
+    )
+    items = [
+        AdminFeedbackItem(
+            conversation_id=conv.id,
+            conversation_title=conv.title,
+            user_id=conv.user_id,
+            user_display_name=user_names.get(conv.user_id) if conv.user_id else None,
+            message_id=message.id,
+            user_input=message.user_input,
+            feedback=feedback,
+        )
+        for feedback, message, conv in rows
+    ]
+    return AdminFeedbackListResponse(
+        feedback=items,
+        total=total,
+        has_more=offset + len(items) < total,
+    )
 
 
 @router.get("/conversations", response_model=AdminConversationListResponse)
@@ -145,6 +183,7 @@ async def get_admin_conversation_events(
                 for e in msg_events
             ],
             execution_metrics=execution_metrics,
+            feedback=msg.feedback,
             uploaded_files=meta.get("uploaded_files"),
         ))
 

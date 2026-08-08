@@ -388,14 +388,21 @@ class TestMessageConversion:
 
 
 class TestVisionImageBlock:
-    """识图 tool_complete 携图片引用 + vision_blocks 缓存 → 块列表 vs 占位文本门控。"""
+    """识图 tool_complete 携图片引用 + call cache → carrier metadata / 占位门控。"""
 
     _IMG_EVENT = dict(
         call_id="call_image",
-        tool="read_artifact", success=True, result_data="[image artifact 'shot' v1, image/png]",
-        metadata={"image": {"artifact_id": "shot", "version": 1, "content_type": "image/png"}},
+        tool="read_artifact", success=True, result_data="[image artifact 'shot', image/png]",
+        metadata={"image": {"artifact_id": "shot", "content_type": "image/png"}},
     )
     _DATA_URI = "data:image/png;base64,AAAA"
+
+    def _cache(self):
+        return {"call_image": {
+            "artifact_id": "shot",
+            "content_type": "image/png",
+            "data_uri": self._DATA_URI,
+        }}
 
     def _events(self):
         return [_ev(StreamEventType.TOOL_COMPLETE.value, "lead_agent", dict(self._IMG_EVENT))]
@@ -403,7 +410,7 @@ class TestVisionImageBlock:
     def test_hit_and_vision_capable_attaches_ephemeral_image_metadata(self):
         msgs = build_event_history(
             self._events(), "lead_agent",
-            vision_blocks={("shot", 1): self._DATA_URI}, vision_capable=True,
+            vision_blocks_by_call=self._cache(), vision_capable=True,
         )
         assert len(msgs) == 1
         assert msgs[0]["role"] == "tool"
@@ -416,7 +423,7 @@ class TestVisionImageBlock:
         且文案主体是模型(you can't view),不诱导无效重读(重读也永远看不到)。"""
         msgs = build_event_history(
             self._events(), "lead_agent",
-            vision_blocks={("shot", 1): self._DATA_URI}, vision_capable=False,
+            vision_blocks_by_call=self._cache(), vision_capable=False,
         )
         assert len(msgs) == 1
         content = msgs[0]["content"]
@@ -429,7 +436,42 @@ class TestVisionImageBlock:
     def test_miss_falls_back_to_placeholder_even_if_vision_capable(self):
         """跨轮(state 已空、缓存未命中)→ 占位文本「需要再看就重读」(条件式,非命令)。"""
         msgs = build_event_history(
-            self._events(), "lead_agent", vision_blocks={}, vision_capable=True,
+            self._events(), "lead_agent", vision_blocks_by_call={}, vision_capable=True,
         )
         assert isinstance(msgs[0]["content"], str)
         assert "re-read artifact 'shot' if you need to view it" in msgs[0]["content"]
+
+    def test_historical_event_cannot_reuse_current_turn_call_id_cache(self):
+        """Provider call IDs are turn-unique, not conversation-global."""
+        historical = _ev(
+            StreamEventType.TOOL_COMPLETE.value,
+            "lead_agent",
+            dict(self._IMG_EVENT),
+            is_historical=True,
+        )
+        msgs = build_event_history(
+            [historical], "lead_agent",
+            vision_blocks_by_call=self._cache(), vision_capable=True,
+        )
+        assert "_meta" not in msgs[0]
+        assert "re-read artifact 'shot' if you need to view it" in msgs[0]["content"]
+
+    def test_same_artifact_reads_are_distinguished_by_call_id(self):
+        second = {
+            **self._IMG_EVENT,
+            "call_id": "call_image_new",
+        }
+        cache = {
+            **self._cache(),
+            "call_image_new": {
+                "artifact_id": "shot",
+                "content_type": "image/png",
+                "data_uri": "data:image/png;base64,BBBB",
+            },
+        }
+        msgs = build_event_history(
+            [*self._events(), _ev(StreamEventType.TOOL_COMPLETE.value, data=second)],
+            "lead_agent", vision_blocks_by_call=cache, vision_capable=True,
+        )
+        assert msgs[0]["_meta"]["image"]["data_uri"] == self._DATA_URI
+        assert msgs[1]["_meta"]["image"]["data_uri"] == "data:image/png;base64,BBBB"

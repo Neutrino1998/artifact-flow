@@ -17,7 +17,7 @@ export default function AdminConversationList({
   const [loading, setLoading] = useState(false);
   const selectedConvId = useUIStore((s) => s.observabilitySelectedConvId);
   const setSelectedConvId = useUIStore((s) => s.setObservabilitySelectedConvId);
-  const setObservabilityBrowseVisible = useUIStore((s) => s.setObservabilityBrowseVisible);
+  const setObservabilityBrowser = useUIStore((s) => s.setObservabilityBrowser);
   const refreshTick = useUIStore((s) => s.observabilityRefreshTick);
 
   const loadConversations = useCallback(async () => {
@@ -43,9 +43,9 @@ export default function AdminConversationList({
   }, [onNavigate, setSelectedConvId]);
 
   const handleShowAll = useCallback(() => {
-    setObservabilityBrowseVisible(true);
+    setObservabilityBrowser('conversations');
     onNavigate();
-  }, [onNavigate, setObservabilityBrowseVisible]);
+  }, [onNavigate, setObservabilityBrowser]);
 
   return (
     <div className="flex-1 overflow-y-auto">

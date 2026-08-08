@@ -68,6 +68,12 @@ interface ArtifactState {
   current: ArtifactDetail | null;
   currentLoading: boolean;
 
+  // File tabs. IDs are enough: display metadata comes from `artifacts` (or
+  // `current` for a just-opened detail). Detail/version state remains scoped to
+  // the single active artifact, so tabs don't duplicate the existing fetch and
+  // live-update machinery.
+  openArtifactIds: string[];
+
   // True iff `current` was placed there by the SSE auto-open path (i.e. the
   // agent updated an artifact mid-stream). Cleared the moment the user makes
   // any explicit pick or the panel is reset to list view. Two consumers:
@@ -98,7 +104,7 @@ interface ArtifactState {
   // just sent. Display-only and wholly separate from the composer draft (which is
   // cleared on send): it lets ImagePreview show an uploaded image instantly for
   // the live-this-turn window, before the blob is flushed and /raw works. Shares
-  // liveContent's exact lifecycle — cleared at COMPLETE (clearLiveContent) and on
+  // liveContent's exact lifecycle — cleared at COMPLETE (finishLiveTurn) and on
   // nav (reset) — so a later turn's same-named upload can't shadow it.
   localPreviews: Record<string, File>;
 
@@ -108,25 +114,34 @@ interface ArtifactState {
 
   // Actions
   setSessionId: (sessionId: string | null) => void;
-  setArtifacts: (artifacts: ArtifactSummary[]) => void;
+  /** Merge a lagging DB list into the live projection without pruning live files/tabs. */
+  mergeArtifactsFromDbDuringLive: (artifacts: ArtifactSummary[]) => void;
+  /** Commit an authoritative terminal DB collection, pruning missing tabs. */
+  reconcileArtifactsFromDb: (artifacts: ArtifactSummary[]) => void;
+  /** Commit an authoritative detail 404 when the collection request is absent/late. */
+  removeArtifactMissingFromDb: (artifactId: string) => void;
   setArtifactsLoading: (loading: boolean) => void;
   setCurrent: (artifact: ArtifactDetail | null) => void;
   setCurrentAuto: (artifact: ArtifactDetail) => void;
-  refreshCurrent: (artifact: ArtifactDetail) => void;
+  closeArtifactTab: (artifactId: string) => void;
+  refreshCurrent: (
+    artifact: ArtifactDetail,
+    diffBaseContent: string | undefined,
+  ) => void;
   setCurrentLoading: (loading: boolean) => void;
   setVersions: (versions: VersionSummary[]) => void;
   setSelectedVersion: (version: VersionDetail | null) => void;
   setDiffBaseContent: (content: string | null) => void;
   setViewMode: (mode: ArtifactViewMode) => void;
   addPendingUpdate: (identifier: string) => void;
-  clearPendingUpdates: () => void;
+  /** Synchronously close the live-turn window before terminal DB awaits. */
+  finishLiveTurn: () => void;
   applyArtifactCreated: (data: ArtifactCreatedData) => void;
   applyArtifactUpdated: (data: ArtifactUpdatedData) => void;
   /** Open an artifact from live (in-turn) content if we have it. Returns true
    *  when handled (caller should skip the REST fetch — REST is pure-DB and would
    *  show stale content for an artifact edited this turn). User-picked → not auto. */
   selectFromLive: (id: string) => boolean;
-  clearLiveContent: () => void;
   /** Stash the just-sent images (filtered from a send's files) as send-local
    *  previews. Non-images are ignored (nothing reads them). */
   setLocalPreviews: (files: File[]) => void;
@@ -142,6 +157,76 @@ function defaultViewMode(contentType?: string, hasBlob?: boolean): ArtifactViewM
   return 'source';
 }
 
+/**
+ * Reconcile every collection-shaped artifact state field from an authoritative
+ * terminal DB list. Live events never use this transition: during a turn the
+ * DB intentionally lags and must not prune optimistic files or tabs.
+ */
+function reconcileDbArtifactCollection(
+  state: ArtifactState,
+  artifacts: ArtifactSummary[],
+): Partial<ArtifactState> {
+  const persistedIds = new Set(artifacts.map((artifact) => artifact.id));
+  const openArtifactIds = state.openArtifactIds.filter((id) => persistedIds.has(id));
+  if (!state.current || persistedIds.has(state.current.id)) {
+    return { artifacts, openArtifactIds };
+  }
+  return {
+    artifacts,
+    openArtifactIds,
+    current: null,
+    currentLoading: false,
+    autoSelected: false,
+    versions: [],
+    selectedVersion: null,
+    diffBaseContent: null,
+    viewMode: 'preview',
+  };
+}
+
+/**
+ * Merge a pure-DB list into the visible in-turn projection. The DB list is a
+ * complete persisted collection, but it intentionally cannot see this turn's
+ * unflushed artifacts. Preserve every live entry and let its event-reduced
+ * version/content metadata win over a stale row for the same ID.
+ *
+ * This transition deliberately does not touch tabs/current: absence from a
+ * mid-stream DB response says nothing about an optimistic artifact.
+ */
+function mergeDbArtifactsWithLive(
+  state: ArtifactState,
+  dbArtifacts: ArtifactSummary[],
+): ArtifactSummary[] {
+  const merged = dbArtifacts.map((artifact) => {
+    const live = state.liveContent[artifact.id];
+    if (!live) return artifact;
+    return {
+      ...artifact,
+      content_type: live.contentType,
+      current_version: live.version,
+      has_blob: live.hasBlob,
+    };
+  });
+  const mergedIds = new Set(merged.map((artifact) => artifact.id));
+
+  for (const [id, live] of Object.entries(state.liveContent)) {
+    if (mergedIds.has(id)) continue;
+    merged.push({
+      id,
+      content_type: live.contentType,
+      title: live.title,
+      current_version: live.version,
+      source: live.source,
+      original_filename: live.originalFilename,
+      has_blob: live.hasBlob,
+      created_at: '',
+      updated_at: '',
+    });
+  }
+
+  return merged;
+}
+
 export const useArtifactStore = create<ArtifactState>((set, get) => ({
   sessionId: null,
 
@@ -150,6 +235,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
 
   current: null,
   currentLoading: false,
+  openArtifactIds: [],
   autoSelected: false,
 
   versions: [],
@@ -166,30 +252,94 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
   uploadError: null,
 
   setSessionId: (sessionId) => set({ sessionId }),
-  setArtifacts: (artifacts) => set({ artifacts }),
+  mergeArtifactsFromDbDuringLive: (artifacts) =>
+    set((state) => ({ artifacts: mergeDbArtifactsWithLive(state, artifacts) })),
+  reconcileArtifactsFromDb: (artifacts) =>
+    set((state) => reconcileDbArtifactCollection(state, artifacts)),
+  removeArtifactMissingFromDb: (artifactId) =>
+    set((state) => {
+      const artifacts = state.artifacts.filter((artifact) => artifact.id !== artifactId);
+      const openArtifactIds = state.openArtifactIds.filter((id) => id !== artifactId);
+      const liveContent = { ...state.liveContent };
+      delete liveContent[artifactId];
+      const pendingUpdates = state.pendingUpdates.filter((id) => id !== artifactId);
+
+      if (state.current?.id !== artifactId) {
+        return { artifacts, openArtifactIds, liveContent, pendingUpdates };
+      }
+      return {
+        artifacts,
+        openArtifactIds,
+        liveContent,
+        pendingUpdates,
+        current: null,
+        currentLoading: false,
+        autoSelected: false,
+        versions: [],
+        selectedVersion: null,
+        diffBaseContent: null,
+        viewMode: 'preview',
+      };
+    }),
   setArtifactsLoading: (loading) => set({ artifactsLoading: loading }),
   setCurrent: (artifact) =>
-    set({
+    set((s) => ({
       current: artifact,
       autoSelected: false,
       viewMode: artifact ? defaultViewMode(artifact.content_type, artifact.has_blob) : 'preview',
-    }),
+      openArtifactIds:
+        artifact && !s.openArtifactIds.includes(artifact.id)
+          ? [...s.openArtifactIds, artifact.id]
+          : s.openArtifactIds,
+    })),
   setCurrentAuto: (artifact) =>
-    set({
+    set((s) => ({
       current: artifact,
       autoSelected: true,
       viewMode: defaultViewMode(artifact.content_type, artifact.has_blob),
+      openArtifactIds: s.openArtifactIds.includes(artifact.id)
+        ? s.openArtifactIds
+        : [...s.openArtifactIds, artifact.id],
+    })),
+  closeArtifactTab: (artifactId) =>
+    set((s) => {
+      const openArtifactIds = s.openArtifactIds.filter((id) => id !== artifactId);
+      if (s.current?.id !== artifactId) return { openArtifactIds };
+      return {
+        openArtifactIds,
+        current: null,
+        currentLoading: false,
+        autoSelected: false,
+        versions: [],
+        selectedVersion: null,
+        diffBaseContent: null,
+        viewMode: 'preview',
+      };
     }),
-  // Same-artifact content refresh: write the new ArtifactDetail through
-  // WITHOUT touching `autoSelected` or `viewMode`. Used when a stream
-  // updates the artifact the user currently has open — we must not flip
-  // ownership back to "auto-selected" (which would yank the user to the
-  // list at stream end) and must not reset their chosen view mode (diff,
-  // source, etc). Guarded against accidental cross-id misuse.
-  refreshCurrent: (artifact) =>
-    set((s) =>
-      s.current && s.current.id === artifact.id ? { current: artifact } : s
-    ),
+  // Passive DB reconciliation: atomically update the detail, versions and
+  // diff base only while this artifact is still current. The terminal DB
+  // snapshot is authoritative even when it rolls optimistic live content back
+  // to a lower version after a flush failure. The caller owns the turn/request
+  // generation, which excludes genuinely stale responses.
+  refreshCurrent: (artifact, diffBaseContent) =>
+    set((s) => {
+      if (s.current?.id !== artifact.id) {
+        return s;
+      }
+
+      const next: Partial<ArtifactState> = {
+        current: artifact,
+        versions: artifact.versions,
+        selectedVersion: null,
+        diffBaseContent: diffBaseContent ?? null,
+      };
+      // `undefined` means the DB baseline request failed. Do not keep a Diff
+      // view whose old side is no longer trustworthy after reconciliation.
+      if (diffBaseContent === undefined && s.viewMode === 'diff') {
+        next.viewMode = defaultViewMode(artifact.content_type, artifact.has_blob);
+      }
+      return next;
+    }),
   setCurrentLoading: (loading) => set({ currentLoading: loading }),
   setVersions: (versions) => set({ versions }),
   setSelectedVersion: (version) => set({ selectedVersion: version }),
@@ -201,7 +351,29 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
         ? s.pendingUpdates
         : [...s.pendingUpdates, identifier],
     })),
-  clearPendingUpdates: () => set({ pendingUpdates: [] }),
+  // Terminal ownership is checked by useSSE immediately before this action.
+  // Keep every live-turn-only field in one synchronous transition so a new
+  // turn can only append onto a clean substrate, even if DB reconciliation is
+  // still awaiting network responses.
+  finishLiveTurn: () =>
+    set((s) => {
+      const finished: Partial<ArtifactState> = {
+        currentLoading: false,
+        pendingUpdates: [],
+        liveContent: {},
+        localPreviews: {},
+      };
+      if (!s.autoSelected) return finished;
+      return {
+        ...finished,
+        current: null,
+        autoSelected: false,
+        versions: [],
+        selectedVersion: null,
+        diffBaseContent: null,
+        viewMode: 'preview',
+      };
+    }),
 
   // ARTIFACT_CREATED: a new artifact appeared this turn. REST list no longer
   // surfaces unflushed artifacts (overlay removed), so we upsert it into the
@@ -250,6 +422,9 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
       if (!s.current || s.autoSelected) {
         next.current = liveToDetail(d.id, live, s.sessionId);
         next.autoSelected = true;
+        next.openArtifactIds = s.openArtifactIds.includes(d.id)
+          ? s.openArtifactIds
+          : [...s.openArtifactIds, d.id];
         next.viewMode = defaultViewMode(d.content_type, d.has_blob);
         next.versions = [];
         next.selectedVersion = null;
@@ -308,6 +483,9 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
       } else if (!s.current || s.autoSelected) {
         next.current = liveToDetail(d.id, live, s.sessionId);
         next.autoSelected = true;
+        next.openArtifactIds = s.openArtifactIds.includes(d.id)
+          ? s.openArtifactIds
+          : [...s.openArtifactIds, d.id];
         next.viewMode = defaultViewMode(live.contentType, live.hasBlob);
         next.versions = [];
         next.selectedVersion = null;
@@ -318,20 +496,19 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
   selectFromLive: (id) => {
     const live = get().liveContent[id];
     if (!live || live.omitted) return false;
-    set({
+    set((s) => ({
       current: liveToDetail(id, live, get().sessionId),
       autoSelected: false, // user-picked: keep them here at COMPLETE
+      openArtifactIds: s.openArtifactIds.includes(id)
+        ? s.openArtifactIds
+        : [...s.openArtifactIds, id],
       viewMode: defaultViewMode(live.contentType, live.hasBlob),
       versions: [],
       selectedVersion: null,
       diffBaseContent: null,
-    });
+    }));
     return true;
   },
-
-  // Cleared together with liveContent at COMPLETE: the live-this-turn window is
-  // over, so the local previews are no longer needed (settled artifacts read /raw).
-  clearLiveContent: () => set({ liveContent: {}, localPreviews: {} }),
 
   setLocalPreviews: (files) =>
     set((s) => {
@@ -349,6 +526,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
       sessionId: null,
       artifacts: [],
       current: null,
+      openArtifactIds: [],
       autoSelected: false,
       currentLoading: false,
       versions: [],

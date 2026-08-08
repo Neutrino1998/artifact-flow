@@ -154,6 +154,31 @@ describe('refreshArtifactList', () => {
     expect(setArtifacts).toHaveBeenCalledOnce();
   });
 
+  test('same-session response is dropped when its logical owner expires', async () => {
+    const d = deferred<{ session_id: string; artifacts: ArtifactSummary[] }>();
+    vi.mocked(api.listArtifacts).mockReturnValue(d.promise);
+    const setArtifacts = vi.fn();
+    const session = makeSessionIdStore(null);
+    let ownsRefresh = true;
+
+    const call = refreshArtifactList(
+      'sess-1',
+      setArtifacts,
+      session.set,
+      session.get,
+      () => ownsRefresh,
+    );
+
+    // A new turn started in the same conversation: session identity is still
+    // equal, but the previous terminal refresh no longer owns UI writes.
+    ownsRefresh = false;
+    d.resolve({ session_id: 'sess-1', artifacts: [art('old-turn')] });
+    await call;
+
+    expect(session.get()).toBe('sess-1');
+    expect(setArtifacts).not.toHaveBeenCalled();
+  });
+
   test('three concurrent calls: only latest generation wins', async () => {
     const d1 = deferred<{ session_id: string; artifacts: ArtifactSummary[] }>();
     const d2 = deferred<{ session_id: string; artifacts: ArtifactSummary[] }>();

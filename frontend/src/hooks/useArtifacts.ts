@@ -3,11 +3,12 @@
 import { useCallback } from 'react';
 import { useArtifactStore } from '@/stores/artifactStore';
 import { useConversationStore } from '@/stores/conversationStore';
+import { useStreamStore } from '@/stores/streamStore';
 import { useUIStore } from '@/stores/uiStore';
 import * as api from '@/lib/api';
 import { refreshArtifactList } from '@/lib/refreshArtifactList';
 import { bumpArtifactDetailGen, getArtifactDetailGen } from '@/lib/artifactDetailGen';
-import type { VersionSummary } from '@/types';
+import { findPrevVersion } from '@/lib/artifactVersions';
 
 /**
  * Resolve session ID at call time.
@@ -22,19 +23,12 @@ function resolveSessionId(): string | null {
   );
 }
 
-/**
- * Find the previous version number from a sorted versions list.
- * Version numbers can be sparse (e.g. 1, 3, 5) due to write-back folding.
- */
-function findPrevVersion(versions: VersionSummary[], currentVersion: number): number | null {
-  const sorted = versions.map((v) => v.version).sort((a, b) => a - b);
-  const idx = sorted.indexOf(currentVersion);
-  return idx > 0 ? sorted[idx - 1] : null;
-}
-
 export function useArtifacts() {
   const sessionId = useConversationStore((s) => s.current?.session_id);
-  const setArtifacts = useArtifactStore((s) => s.setArtifacts);
+  const mergeArtifactsFromDbDuringLive = useArtifactStore(
+    (s) => s.mergeArtifactsFromDbDuringLive,
+  );
+  const reconcileArtifactsFromDb = useArtifactStore((s) => s.reconcileArtifactsFromDb);
   const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
   const setArtifactsLoading = useArtifactStore((s) => s.setArtifactsLoading);
   const setCurrent = useArtifactStore((s) => s.setCurrent);
@@ -54,14 +48,26 @@ export function useArtifacts() {
       // refreshArtifactList stamps the artifact-store sessionId atomically.
       await refreshArtifactList(
         sessionId,
-        setArtifacts,
+        (artifacts) => {
+          const stream = useStreamStore.getState();
+          if (stream.isStreaming && stream.conversationId === sessionId) {
+            // During a turn DB intentionally lags: refresh the best-effort list
+            // without pruning live-only files or their tabs.
+            mergeArtifactsFromDbDuringLive(artifacts);
+          } else {
+            // Outside a live turn every successful DB list is authoritative.
+            // This also handles a manual refresh superseding the terminal list
+            // request in refreshArtifactList's latest-wins generation.
+            reconcileArtifactsFromDb(artifacts);
+          }
+        },
         setArtifactSessionId,
         () => useArtifactStore.getState().sessionId,
       );
     } finally {
       setArtifactsLoading(false);
     }
-  }, [sessionId, setArtifacts, setArtifactSessionId, setArtifactsLoading]);
+  }, [sessionId, mergeArtifactsFromDbDuringLive, reconcileArtifactsFromDb, setArtifactSessionId, setArtifactsLoading]);
 
   // selectArtifact resolves sessionId at call time via getState()
   const selectArtifact = useCallback(
@@ -76,6 +82,11 @@ export function useArtifacts() {
       if (useArtifactStore.getState().selectFromLive(artifactId)) {
         return;
       }
+      // Only an already-open tab can be closed while this fetch is pending.
+      // Remember that precondition so a late response cannot undo the user's
+      // explicit close. Newly selected files are not tabs until their detail
+      // arrives, so they remain eligible to open normally.
+      const wasOpen = useArtifactStore.getState().openArtifactIds.includes(artifactId);
       // Bump-before-await: claim "the detail view will belong to this
       // selection". Late responses (fast A→B clicks, or any selection
       // followed by a conversation switch) check this after the await
@@ -88,6 +99,9 @@ export function useArtifacts() {
       try {
         const detail = await api.getArtifact(sid, artifactId);
         if (myGen !== getArtifactDetailGen()) return;
+        if (wasOpen && !useArtifactStore.getState().openArtifactIds.includes(artifactId)) {
+          return;
+        }
         setCurrent(detail);
         setVersions(detail.versions);
         // current.content is already the latest — no need to fetch version detail.

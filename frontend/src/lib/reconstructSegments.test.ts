@@ -81,6 +81,33 @@ describe('reconstructSegments', () => {
     expect(segs[0].toolCalls[0].reason).toBeUndefined();
   });
 
+  test('permission_result joins the matching tool_start by native call_id', () => {
+    const events = [
+      makeEvent('agent_start', {}, 'lead'),
+      makeEvent('permission_result', {
+        call_id: 'call-confirmed', tool: 'bash', approved: true,
+      }, 'lead'),
+      makeEvent('tool_start', {
+        call_id: 'call-other', tool: 'read_artifact', params: {},
+      }, 'lead'),
+      makeEvent('tool_complete', {
+        call_id: 'call-other', tool: 'read_artifact', success: true, result_data: 'ok',
+      }, 'lead'),
+      makeEvent('tool_start', {
+        call_id: 'call-confirmed', tool: 'bash', params: { command: 'ls' },
+      }, 'lead'),
+      makeEvent('tool_complete', {
+        call_id: 'call-confirmed', tool: 'bash', success: true, result_data: 'done',
+      }, 'lead'),
+    ];
+
+    const [segment] = reconstructSegments(events);
+    expect(segment.toolCalls.find((call) => call.id === 'call-other')?.permission)
+      .toBeUndefined();
+    expect(segment.toolCalls.find((call) => call.id === 'call-confirmed')?.permission)
+      .toEqual({ approved: true });
+  });
+
   test('tool_complete success=false → status=error, result from data.error', () => {
     const events = [
       makeEvent('agent_start', {}, 'lead'),

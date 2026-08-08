@@ -3,6 +3,7 @@ import type {
   ConversationSummary,
   ConversationDetail,
   MessageResponse,
+  MessageFeedbackResponse,
   ActivatedSkillRef,
 } from '@/types';
 import { MessageNode, buildMessageTree, extractBranchPath } from '@/lib/messageTree';
@@ -41,6 +42,7 @@ interface ConversationState {
   setCurrentLoading: (loading: boolean) => void;
   setActiveBranch: (messageId: string | null) => void;
   updateMessages: (messages: MessageResponse[]) => void;
+  updateMessageFeedback: (messageId: string, feedback: MessageFeedbackResponse | null) => void;
   applyTerminalMessageSnapshot: (snapshot: {
     conversationId: string;
     messageId: string;
@@ -123,6 +125,20 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     }));
   },
 
+  updateMessageFeedback: (messageId, feedback) => {
+    const state = get();
+    if (!state.current) return;
+    const messages = state.current.messages.map((message) =>
+      message.id === messageId ? { ...message, feedback } : message
+    );
+    const nodeMap = buildMessageTree(messages);
+    set({
+      current: { ...state.current, messages },
+      nodeMap,
+      branchPath: extractBranchPath(nodeMap, state.activeBranch),
+    });
+  },
+
   applyTerminalMessageSnapshot: ({
     conversationId,
     messageId,
@@ -155,7 +171,10 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         parent_id: parentId,
         user_input: userInput,
         response,
-        created_at: now,
+        // The terminal event has no authoritative Message.created_at. Keep the
+        // timestamp absent until the REST detail refresh replaces this optimistic
+        // node; using `now` here would mislabel completion time as send time.
+        created_at: null,
         children: [],
         execution_metrics: executionMetrics ?? null,
         uploaded_files: uploaded ?? null,

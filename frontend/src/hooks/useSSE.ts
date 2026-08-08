@@ -11,7 +11,10 @@ import type { SSEEvent, LLMCompleteData, ToolCallProgressData, ArtifactCreatedDa
 import * as api from '@/lib/api';
 import { refreshArtifactList } from '@/lib/refreshArtifactList';
 import { bumpArtifactFetchGen } from '@/lib/artifactFetchGen';
+import { bumpArtifactDetailGen, getArtifactDetailGen } from '@/lib/artifactDetailGen';
 import { getNavGen } from '@/lib/navGen';
+import { reconcileTerminalArtifact } from '@/lib/reconcileTerminalArtifact';
+import { isTerminalRefreshOwner } from '@/lib/terminalRefreshOwnership';
 import { notifyTaskTerminal } from '@/lib/taskNotifications';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -26,11 +29,14 @@ const ARTIFACT_TOOLS = new Set([
 // operate on the same controller, preventing orphaned SSE connections.
 let _sharedAbortController: AbortController | null = null;
 
-// Most recent permission_result, latched until the next tool_start consumes
-// it. Engine guarantees serial execution, so the immediately-following
-// tool_start is the one this result belongs to (matches reconstructSegments
-// pairing). Cleared on stream start/end via endStream() consumer.
-let _pendingPermissionResult: { approved: boolean; reason?: string } | null = null;
+// Permission decisions arrive before their TOOL_START. Keep them by the same
+// native call_id used for every other tool lifecycle join instead of relying on
+// event adjacency. The map survives a reconnect within one stream and is reset
+// when a new logical stream starts.
+const _pendingPermissionResults = new Map<
+  string,
+  { approved: boolean; reason?: string }
+>();
 
 const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_BASE_DELAY_MS = 1000;
@@ -71,14 +77,12 @@ export function useSSE() {
 
   // Artifact store
   const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
-  const setArtifacts = useArtifactStore((s) => s.setArtifacts);
-  const setArtifactCurrent = useArtifactStore((s) => s.setCurrent);
-  const setArtifactVersions = useArtifactStore((s) => s.setVersions);
-  const setSelectedVersion = useArtifactStore((s) => s.setSelectedVersion);
-  const clearPendingUpdates = useArtifactStore((s) => s.clearPendingUpdates);
+  const reconcileArtifactsFromDb = useArtifactStore((s) => s.reconcileArtifactsFromDb);
+  const removeArtifactMissingFromDb = useArtifactStore((s) => s.removeArtifactMissingFromDb);
+  const refreshArtifactCurrent = useArtifactStore((s) => s.refreshCurrent);
+  const finishArtifactLiveTurn = useArtifactStore((s) => s.finishLiveTurn);
   const applyArtifactCreated = useArtifactStore((s) => s.applyArtifactCreated);
   const applyArtifactUpdated = useArtifactStore((s) => s.applyArtifactUpdated);
-  const clearLiveContent = useArtifactStore((s) => s.clearLiveContent);
 
   // UI store
   const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
@@ -116,6 +120,22 @@ export function useSSE() {
       //     populate — would briefly revive abandoned conv before the new
       //     setCurrent overwrites)
       const myNavGen = getNavGen();
+      // A delayed duplicate terminal from an older turn must not even claim
+      // the artifact-detail generation or clear a newer turn's spinner.
+      if (!isTerminalRefreshOwner(myNavGen, terminalMessageId)) {
+        if (terminalMessageId) {
+          clearConversationActiveIfMatch(conversationId, terminalMessageId);
+        }
+        return;
+      }
+      // A terminal DB reconciliation supersedes any detail request that began
+      // while the turn was live. A later user selection bumps the same counter
+      // again and therefore wins over this background refresh.
+      const myArtifactDetailGen = bumpArtifactDetailGen();
+      const ownsTerminalRefresh = () =>
+        isTerminalRefreshOwner(myNavGen, terminalMessageId);
+      const ownsArtifactRefresh = () =>
+        ownsTerminalRefresh() && myArtifactDetailGen === getArtifactDetailGen();
       // Stream just ended — invalidate every in-flight auto-open fetch
       // unconditionally. Cases this catches that the per-revert bump did
       // not: the FIRST auto-open from this stream hasn't resolved yet, so
@@ -124,6 +144,49 @@ export function useSSE() {
       // resurrect the panel after stream end. Costs nothing if there are
       // no fetches outstanding.
       bumpArtifactFetchGen();
+      // End the optimistic live window synchronously, before any await. This
+      // clears pending markers/content/previews and returns an agent-auto-opened
+      // artifact to the list. If a new turn starts while DB reads are pending,
+      // its live events now build on a clean state and the old reads are dropped
+      // by ownsTerminalRefresh below.
+      finishArtifactLiveTurn();
+      // Artifact reconciliation is independent of conversation/sidebar reads:
+      // a failure in those secondary refreshes must not leave an unpersisted
+      // live artifact copyable or downloadable after terminal.
+      const artifactSession = useArtifactStore.getState().sessionId;
+      if (artifactSession === conversationId) {
+        refreshArtifactList(
+          conversationId,
+          reconcileArtifactsFromDb,
+          setArtifactSessionId,
+          () => useArtifactStore.getState().sessionId,
+          ownsTerminalRefresh,
+        );
+
+        const { current: curArtifact } = useArtifactStore.getState();
+        if (curArtifact && ownsArtifactRefresh()) {
+          // User actively picked this artifact. The live stream is best
+          // effort; this tri-state DB reconciliation commits present/missing
+          // results and preserves state when availability is unknown.
+          void reconcileTerminalArtifact({
+            sessionId: conversationId,
+            artifactId: curArtifact.id,
+            isOwner: ownsTerminalRefresh,
+            commitPresent: (artifact, diffBaseContent) => {
+              if (ownsArtifactRefresh()) {
+                refreshArtifactCurrent(artifact, diffBaseContent);
+              }
+            },
+            // Missing is collection truth, so a later user detail selection
+            // must not invalidate it; only terminal ownership may do so.
+            commitMissing: (artifactId) => {
+              if (ownsTerminalRefresh()) {
+                removeArtifactMissingFromDb(artifactId);
+              }
+            },
+          });
+        }
+      }
       // Compare-and-clear the sidebar dot for *this* terminal's message_id
       // only. If the user already kicked off a new turn on the same conv,
       // its sendMessage() has set active_message_id to the new id, and this
@@ -161,56 +224,14 @@ export function useSSE() {
         // Everything below mutates state that belongs to "the conversation
         // the user is on". A nav-gen change means they aren't on this conv
         // anymore — drop the whole detail/artifact write path.
-        if (myNavGen !== getNavGen()) return;
+        if (!ownsTerminalRefresh()) return;
 
         setCurrent(detail);
-        clearPendingUpdates();
-        // Turn ended → live event reduce is over. Drop in-turn live content so
-        // the panel reads the DB-aligned snapshot re-pulled below (the single
-        // alignment point; decision 4). Stale live could otherwise shadow it.
-        clearLiveContent();
-
-        // Artifact refresh is further gated by artifactStore.sessionId so
-        // that conversations without artifact tools don't trigger a useless
-        // GET. Nav-gen guard above already ensured we're still on this conv.
-        const artifactSession = useArtifactStore.getState().sessionId;
-        const ownsArtifactSession = artifactSession === conversationId;
-
-        if (ownsArtifactSession) {
-          refreshArtifactList(
-            conversationId,
-            setArtifacts,
-            setArtifactSessionId,
-            () => useArtifactStore.getState().sessionId,
-          );
-        }
-        const { current: curArtifact, autoSelected } = useArtifactStore.getState();
-        if (curArtifact && ownsArtifactSession) {
-          if (autoSelected) {
-            // Stream finished and the panel is on an artifact the agent
-            // auto-opened — revert to list so the user sees the overview.
-            // The list refresh above already loaded the latest artifacts.
-            // (The unconditional bump at the top of this function has
-            // already invalidated any in-flight auto-opens.)
-            setArtifactCurrent(null);
-          } else {
-            // User actively picked this artifact — refresh content but keep
-            // them on it.
-            api.getArtifact(conversationId, curArtifact.id).then((artDetail) => {
-              // Re-check at resolution: another nav could have fired during
-              // this nested await.
-              if (myNavGen !== getNavGen()) return;
-              setArtifactCurrent(artDetail);
-              setArtifactVersions(artDetail.versions);
-              setSelectedVersion(null);
-            }).catch(() => {});
-          }
-        }
       } catch (err) {
         console.error('Failed to refresh after complete:', err);
       }
     },
-    [setCurrent, setConversations, clearConversationActiveIfMatch, clearPendingUpdates, clearLiveContent, setArtifactCurrent, setArtifacts, setArtifactSessionId, setArtifactVersions, setSelectedVersion]
+    [setCurrent, setConversations, clearConversationActiveIfMatch, finishArtifactLiveTurn, refreshArtifactCurrent, reconcileArtifactsFromDb, removeArtifactMissingFromDb, setArtifactSessionId]
   );
 
   const handleEvent = useCallback(
@@ -345,11 +366,8 @@ export function useSSE() {
             break;
           }
 
-          // Latch a just-resolved permission_result onto this tool call (the
-          // tool the user just approved/denied). Engine emits permission_result
-          // immediately before this tool_start.
-          const permission = _pendingPermissionResult ?? undefined;
-          _pendingPermissionResult = null;
+          const permission = _pendingPermissionResults.get(callId);
+          _pendingPermissionResults.delete(callId);
 
           addToolCallToSegment({
             id: callId,
@@ -427,19 +445,34 @@ export function useSSE() {
           break;
         }
 
-        case StreamEventType.PERMISSION_REQUEST:
+        case StreamEventType.PERMISSION_REQUEST: {
+          const callId = data?.call_id as string | undefined;
+          if (!callId) {
+            console.error('[useSSE] permission_request missing native call_id');
+            break;
+          }
           setPermissionRequest({
+            callId,
             toolName: data?.tool as string ?? '',
             params: data?.params as Record<string, unknown> ?? {},
             reason: data?.reason as string | undefined,
           });
           break;
+        }
 
         case StreamEventType.PERMISSION_RESULT: {
           setPermissionRequest(null);
+          const callId = data?.call_id as string | undefined;
+          if (!callId) {
+            console.error('[useSSE] permission_result missing native call_id');
+            break;
+          }
           const approved = (data?.approved as boolean) ?? false;
           const reason = data?.reason as string | undefined;
-          _pendingPermissionResult = reason ? { approved, reason } : { approved };
+          _pendingPermissionResults.set(
+            callId,
+            reason ? { approved, reason } : { approved },
+          );
           break;
         }
 
@@ -680,9 +713,8 @@ export function useSSE() {
       if (_sharedAbortController) {
         _sharedAbortController.abort();
       }
-      // Clear any leaked permission latch from a prior stream — the next
-      // tool_start in this stream is unrelated to a previous turn's modal.
-      _pendingPermissionResult = null;
+      // A provider call_id is unique within one turn, not across streams.
+      _pendingPermissionResults.clear();
 
       // Enter streaming state. Centralizing this here (rather than relying on
       // every caller to call startStream first) ensures the reconnect path

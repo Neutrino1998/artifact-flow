@@ -117,11 +117,19 @@ export type InjectResponse = S['InjectResponse'];
 export type CancelResponse = S['CancelResponse'];
 export type ResumeRequest = S['ResumeRequest'];
 export type ResumeResponse = S['ResumeResponse'];
-export type MessageResponse = S['MessageResponse'];
+export type MessageFeedbackRequest = S['MessageFeedbackRequest'];
+export type MessageFeedbackResponse = S['MessageFeedbackResponse'];
+export type MessageResponse = Omit<S['MessageResponse'], 'feedback' | 'created_at'> & {
+  feedback?: MessageFeedbackResponse | null;
+  /** Null only for a terminal snapshot awaiting authoritative REST reconciliation. */
+  created_at: string | null;
+};
 export type ActivatedSkillRef = S['ActivatedSkillRef'];
 export type ConversationSummary = S['ConversationSummary'];
 export type ConversationListResponse = S['ConversationListResponse'];
-export type ConversationDetail = S['ConversationDetailResponse'];
+export type ConversationDetail = Omit<S['ConversationDetailResponse'], 'messages'> & {
+  messages: MessageResponse[];
+};
 export type BulkDeleteRequest = S['BulkDeleteRequest'];
 export type BulkDeleteResponse = S['BulkDeleteResponse'];
 export type BulkDeleteFailedItem = S['BulkDeleteFailedItem'];

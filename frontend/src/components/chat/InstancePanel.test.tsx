@@ -29,7 +29,7 @@ describe('InstanceCard', () => {
     container.remove();
   });
 
-  test('opens the all-events drawer from the card and keeps expand local', async () => {
+  test('opens the all-events drawer from the whole card', async () => {
     const onOpenEvents = vi.fn();
     await act(async () => {
       root.render(
@@ -47,13 +47,6 @@ describe('InstanceCard', () => {
     );
     await act(async () => card?.click());
     expect(onOpenEvents).toHaveBeenCalledWith(instance);
-
-    onOpenEvents.mockClear();
-    const expand = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent?.trim() === '展开详情',
-    );
-    await act(async () => expand?.click());
-    expect(onOpenEvents).not.toHaveBeenCalled();
-    expect(container.textContent).toContain('CPU:');
+    expect(container.textContent).not.toContain('展开详情');
   });
 });

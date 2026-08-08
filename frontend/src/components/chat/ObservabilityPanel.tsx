@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { CopyIcon } from '@/components/ui/CopyIcon';
+import { FeedbackRatingIcon } from '@/components/ui/FeedbackRatingIcon';
 import { PillBadge } from '@/components/ui/PillBadge';
 import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
 import { BUTTON_SECONDARY, SELECT_COMPACT, MENU_ROW_HOVER } from '@/lib/styles';
@@ -23,10 +24,12 @@ import PanelSearchBar from './PanelSearchBar';
 import Pagination from './Pagination';
 import type {
   AdminConversationSummary,
+  AdminFeedbackItem,
   AdminMessageGroup,
   AdminEventItem,
   AdminConversationEventsResponse,
 } from '@/lib/api';
+import { FEEDBACK_TAG_LABELS } from '@/lib/messageFeedback';
 import type { ArtifactSummary, ArtifactDetail, VersionDetail } from '@/types';
 import type { NativeToolCall } from '@/types/events';
 import { useUIStore } from '@/stores/uiStore';
@@ -40,6 +43,10 @@ import {
 } from '@/lib/adminLiveEvents';
 
 const DEFAULT_PAGE_SIZE = 20;
+
+function messageAnchorId(messageId: string): string {
+  return `admin-message-${encodeURIComponent(messageId)}`;
+}
 
 // ── Event type colors ──
 // Categorical palette via the scoped `trace` tokens; agent_* shares accent
@@ -165,15 +172,6 @@ export function formatLlmTokenUsage(tokens: Record<string, number>): string {
     ? ` | cached: ${tokens.cached_input_tokens} ↻`
     : '';
   return `in: ${tokens.input_tokens ?? 0}${cached} | out: ${tokens.output_tokens ?? 0}`;
-}
-
-function formatTime(iso: string): string {
-  try {
-    const d = parseUtcIso(iso);
-    return d.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  } catch {
-    return '';
-  }
 }
 
 // ── Stats helpers ──
@@ -370,8 +368,13 @@ function ConvMetaBlock({ data, fallbackConvId }: {
 // ── Main Panel ──
 export default function ObservabilityPanel() {
   const selectedConvId = useUIStore((s) => s.observabilitySelectedConvId);
-  const browseVisible = useUIStore((s) => s.observabilityBrowseVisible);
-  const setObservabilityBrowseVisible = useUIStore((s) => s.setObservabilityBrowseVisible);
+  const browser = useUIStore((s) => s.observabilityBrowser);
+  const highlightedMessageId = useUIStore((s) => s.observabilityHighlightedMessageId);
+  const focusRequestId = useUIStore((s) => s.observabilityFocusRequestId);
+  const focusConsumedId = useUIStore((s) => s.observabilityFocusConsumedId);
+  const consumeFocusRequest = useUIStore((s) => s.consumeObservabilityFocusRequest);
+  const setObservabilityBrowser = useUIStore((s) => s.setObservabilityBrowser);
+  const openObservabilityMessage = useUIStore((s) => s.openObservabilityMessage);
   const setObservabilitySelectedConvId = useUIStore((s) => s.setObservabilitySelectedConvId);
 
   // Timeline state
@@ -418,6 +421,43 @@ export default function ObservabilityPanel() {
     });
     return () => { cancelled = true; };
   }, [selectedConvId, refreshTick]);
+
+  useEffect(() => {
+    if (browser !== 'none') return;
+    if (focusRequestId <= focusConsumedId) return;
+    if (!eventsData || !highlightedMessageId) return;
+    if (!eventsData.messages.some((message) => message.message_id === highlightedMessageId)) return;
+
+    // Selecting feedback from the already-open conversation does not change
+    // selectedConvId, so the conversation-reset effect above will not run.
+    // Restore a view in which every message is renderable, then let this effect
+    // run again after React commits that DOM before consuming the focus request.
+    if (viewMode !== 'events' || issuesOnly) {
+      setViewMode('events');
+      setIssuesOnly(false);
+      return;
+    }
+
+    const target = document.getElementById(messageAnchorId(highlightedMessageId));
+    if (!target) return;
+    setCollapsedMessages((prev) => {
+      if (!prev.has(highlightedMessageId)) return prev;
+      const next = new Set(prev);
+      next.delete(highlightedMessageId);
+      return next;
+    });
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    consumeFocusRequest(focusRequestId);
+  }, [
+    browser,
+    consumeFocusRequest,
+    eventsData,
+    focusConsumedId,
+    focusRequestId,
+    highlightedMessageId,
+    issuesOnly,
+    viewMode,
+  ]);
 
   const activeMessageId = eventsData?.active_message_id ?? null;
   const activeMessageHasPersistedTerminal = useMemo(() => {
@@ -541,11 +581,20 @@ export default function ObservabilityPanel() {
   }, [eventsData, issuesOnly]);
 
   // Browse mode: show admin conversation browser
-  if (browseVisible) {
+  if (browser === 'feedback') {
+    return (
+      <AdminFeedbackBrowser
+        onSelect={openObservabilityMessage}
+        onClose={() => setObservabilityBrowser('none')}
+      />
+    );
+  }
+
+  if (browser === 'conversations') {
     return (
       <AdminConversationBrowser
         onSelect={(id) => setObservabilitySelectedConvId(id)}
-        onClose={() => setObservabilityBrowseVisible(false)}
+        onClose={() => setObservabilityBrowser('none')}
       />
     );
   }
@@ -649,6 +698,7 @@ export default function ObservabilityPanel() {
                   <MessageGroupView
                     key={msg.message_id}
                     group={msg}
+                    focused={msg.message_id === highlightedMessageId}
                     collapsed={collapsedMessages.has(msg.message_id)}
                     onToggle={() => toggleMessageCollapse(msg.message_id)}
                     offActiveBranch={isAdminMessageOffActiveBranch(
@@ -943,6 +993,221 @@ function AdminConversationBrowser({
   );
 }
 
+type FeedbackFilter = 'all' | 'positive' | 'negative';
+
+function AdminFeedbackBrowser({
+  onSelect,
+  onClose,
+}: {
+  onSelect: (conversationId: string, messageId: string) => void;
+  onClose: () => void;
+}) {
+  const [items, setItems] = useState<AdminFeedbackItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<FeedbackFilter>('all');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const queryRef = useRef(query);
+  const filterRef = useRef(filter);
+  const pageRef = useRef(page);
+  const pageSizeRef = useRef(pageSize);
+  const refreshTick = useUIStore((s) => s.observabilityRefreshTick);
+  const claim = useLatestOnly();
+
+  const fetchFeedback = useCallback(async (
+    q: string,
+    selectedFilter: FeedbackFilter,
+    pageNum: number,
+    size: number,
+  ) => {
+    const isLatest = claim();
+    setLoading(true);
+    try {
+      const res = await api.listAdminFeedback(
+        size,
+        (pageNum - 1) * size,
+        q.trim() || undefined,
+        selectedFilter === 'all' ? undefined : selectedFilter,
+      );
+      if (!isLatest()) return;
+      const lastPage = Math.max(1, Math.ceil(res.total / size));
+      if (pageNum > lastPage) {
+        pageRef.current = lastPage;
+        setPage(lastPage);
+        void fetchFeedback(q, selectedFilter, lastPage, size);
+        return;
+      }
+      setItems(res.feedback);
+      setTotal(res.total);
+    } catch (error) {
+      if (isLatest()) console.error('Failed to load admin feedback:', error);
+    } finally {
+      if (isLatest()) setLoading(false);
+    }
+  }, [claim]);
+
+  useEffect(() => {
+    fetchFeedback(
+      queryRef.current,
+      filterRef.current,
+      pageRef.current,
+      pageSizeRef.current,
+    );
+  }, [fetchFeedback, refreshTick]);
+
+  useEffect(() => () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+  }, []);
+
+  const handleQueryChange = useCallback((value: string) => {
+    setQuery(value);
+    queryRef.current = value;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      pageRef.current = 1;
+      setPage(1);
+      fetchFeedback(value, filterRef.current, 1, pageSizeRef.current);
+    }, 300);
+  }, [fetchFeedback]);
+
+  const handleFilterChange = useCallback((value: FeedbackFilter) => {
+    setFilter(value);
+    filterRef.current = value;
+    pageRef.current = 1;
+    setPage(1);
+    fetchFeedback(queryRef.current, value, 1, pageSizeRef.current);
+  }, [fetchFeedback]);
+
+  const handlePageChange = useCallback((value: number) => {
+    setPage(value);
+    pageRef.current = value;
+    fetchFeedback(queryRef.current, filterRef.current, value, pageSizeRef.current);
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [fetchFeedback]);
+
+  const handlePageSizeChange = useCallback((value: number) => {
+    setPageSize(value);
+    pageSizeRef.current = value;
+    pageRef.current = 1;
+    setPage(1);
+    fetchFeedback(queryRef.current, filterRef.current, 1, value);
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [fetchFeedback]);
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0 bg-chat dark:bg-chat-dark">
+      <PanelSearchBar
+        value={query}
+        onChange={handleQueryChange}
+        placeholder="搜索对话标题、对话 ID 或消息 ID…"
+        countLabel={`${total} 条反馈`}
+        onClose={onClose}
+      />
+      <div className="px-4 pb-3">
+        <div className="max-w-3xl mx-auto">
+          <SegmentedTabs
+            value={filter}
+            ariaLabel="反馈类型筛选"
+            options={[
+              { value: 'all', label: '全部' },
+              {
+                value: 'positive',
+                label: (
+                  <span className="inline-flex items-center gap-1 text-status-success">
+                    <FeedbackRatingIcon rating="positive" size={13} />赞
+                  </span>
+                ),
+              },
+              {
+                value: 'negative',
+                label: (
+                  <span className="inline-flex items-center gap-1 text-status-error">
+                    <FeedbackRatingIcon rating="negative" size={13} />踩
+                  </span>
+                ),
+              },
+            ]}
+            onChange={handleFilterChange}
+          />
+        </div>
+      </div>
+
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4">
+        <div className="max-w-3xl mx-auto">
+          {items.map((item) => (
+            <button
+              key={item.message_id}
+              type="button"
+              onClick={() => onSelect(item.conversation_id, item.message_id)}
+              className={`w-full text-left rounded-lg mb-1 px-4 py-3 transition-colors ${MENU_ROW_HOVER}`}
+            >
+              <div className="flex items-center gap-2">
+                <PillBadge
+                  tone={item.feedback.rating === 'positive' ? 'success' : 'error'}
+                  size="regular"
+                  className="gap-1"
+                >
+                  <FeedbackRatingIcon rating={item.feedback.rating} size={14} />
+                  {item.feedback.rating === 'positive' ? '赞' : '踩'}
+                </PillBadge>
+                <span className="font-medium text-text-primary dark:text-text-primary-dark truncate">
+                  {item.conversation_title || 'Untitled'}
+                </span>
+                <span className="ml-auto shrink-0 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                  {formatDateTime(item.feedback.updated_at)}
+                </span>
+              </div>
+              <div className="mt-1 truncate text-sm text-text-secondary dark:text-text-secondary-dark">
+                {formatAdminInputPreview(item.user_input)}
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                <span>{item.user_display_name || item.user_id || '-'}</span>
+                <span className="font-mono" title={item.message_id}>{item.message_id}</span>
+                {item.feedback.tags.map((tag) => (
+                  <PillBadge key={tag} tone="neutral">{FEEDBACK_TAG_LABELS[tag]}</PillBadge>
+                ))}
+              </div>
+              {item.feedback.detail ? (
+                <div className="mt-1 truncate text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                  {item.feedback.detail}
+                </div>
+              ) : null}
+            </button>
+          ))}
+
+          {loading && items.length === 0 ? (
+            <div className="py-4 text-center text-xs text-text-tertiary dark:text-text-tertiary-dark">Loading...</div>
+          ) : null}
+          {!loading && items.length === 0 ? (
+            <div className="py-12 text-center text-sm text-text-tertiary dark:text-text-tertiary-dark">
+              {query ? '没有找到匹配的反馈' : '暂无反馈'}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      {total > 0 ? (
+        <div className="px-4 pt-2 pb-4">
+          <div className="max-w-3xl mx-auto">
+            <Pagination
+              page={page}
+              pageSize={pageSize}
+              total={total}
+              onPageChange={handlePageChange}
+              onPageSizeChange={handlePageSizeChange}
+              disabled={loading}
+            />
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // ── Message Group ──
 function groupIssueCounts(group: AdminMessageGroup) {
   return group.events.reduce((acc, event) => {
@@ -965,6 +1230,7 @@ function groupIssueCounts(group: AdminMessageGroup) {
 
 function MessageGroupView({
   group,
+  focused,
   collapsed,
   onToggle,
   offActiveBranch,
@@ -973,6 +1239,7 @@ function MessageGroupView({
   onSelectEvent,
 }: {
   group: AdminMessageGroup;
+  focused: boolean;
   collapsed: boolean;
   onToggle: () => void;
   offActiveBranch: boolean;
@@ -1001,7 +1268,10 @@ function MessageGroupView({
     && executionMetrics?.cached_input_tokens_partial !== false;
 
   return (
-    <div className="mb-3">
+    <div
+      id={messageAnchorId(group.message_id)}
+      className={`mb-3 scroll-mt-4 rounded-lg transition-shadow ${focused ? 'ring-2 ring-accent/60 bg-accent/5' : ''}`}
+    >
       {/* Message header */}
       <button
         onClick={onToggle}
@@ -1061,6 +1331,29 @@ function MessageGroupView({
         </span>
       </button>
 
+      <div className="ml-6 mt-1 flex flex-wrap items-center gap-2 text-[11px] text-text-tertiary dark:text-text-tertiary-dark">
+        <MetaItem label="Message"><CopyableValue value={group.message_id} mono /></MetaItem>
+        {group.feedback ? (
+          <>
+            <PillBadge
+              tone={group.feedback.rating === 'positive' ? 'success' : 'error'}
+              className="gap-1"
+            >
+              <FeedbackRatingIcon rating={group.feedback.rating} size={12} />
+              {group.feedback.rating === 'positive' ? '赞' : '踩'}
+            </PillBadge>
+            {group.feedback.tags.map((tag) => (
+              <PillBadge key={tag} tone="neutral">{FEEDBACK_TAG_LABELS[tag]}</PillBadge>
+            ))}
+          </>
+        ) : null}
+      </div>
+      {group.feedback?.detail ? (
+        <div className="ml-6 mt-1 rounded-md bg-panel-accent dark:bg-bg-dark px-2 py-1.5 text-xs text-text-secondary dark:text-text-secondary-dark whitespace-pre-wrap">
+          {group.feedback.detail}
+        </div>
+      ) : null}
+
       {group.uploaded_files && group.uploaded_files.length > 0 ? (
         <div className="ml-6 mt-1 flex flex-wrap gap-1.5">
           {group.uploaded_files.map((file, index) => (
@@ -1098,8 +1391,8 @@ function MessageGroupView({
                         : 'hover:bg-surface dark:hover:bg-bg-dark'
                 }`}
               >
-                <span className="flex-shrink-0 text-text-tertiary dark:text-text-tertiary-dark w-[52px]">
-                  {formatTime(event.created_at)}
+                <span className="flex-shrink-0 whitespace-nowrap tabular-nums text-text-tertiary dark:text-text-tertiary-dark">
+                  {formatDateTime(event.created_at)}
                 </span>
                 {event.agent_name != null ? (
                   <PillBadge tone="accent">{event.agent_name.replace('_agent', '')}</PillBadge>

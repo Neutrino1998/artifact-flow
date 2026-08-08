@@ -9,6 +9,8 @@ import type {
   ResumeResponse,
   BulkDeleteResponse,
   StorageUsageResponse,
+  MessageFeedbackRequest,
+  MessageFeedbackResponse,
   ArtifactListResponse,
   ArtifactDetail,
   VersionDetail,
@@ -464,6 +466,27 @@ export async function deleteConversation(convId: string) {
   return res;
 }
 
+export async function putMessageFeedback(
+  convId: string,
+  messageId: string,
+  body: MessageFeedbackRequest,
+) {
+  const feedback = await request<MessageFeedbackResponse>(
+    `/api/v1/chat/${encodeURIComponent(convId)}/messages/${encodeURIComponent(messageId)}/feedback`,
+    { method: 'PUT', body: JSON.stringify(body) },
+  );
+  invalidateConversationCache(convId);
+  return feedback;
+}
+
+export async function deleteMessageFeedback(convId: string, messageId: string) {
+  await request<void>(
+    `/api/v1/chat/${encodeURIComponent(convId)}/messages/${encodeURIComponent(messageId)}/feedback`,
+    { method: 'DELETE' },
+  );
+  invalidateConversationCache(convId);
+}
+
 export async function bulkDeleteConversations(ids: string[]) {
   const res = await request<BulkDeleteResponse>('/api/v1/chat/bulk-delete', {
     method: 'POST',
@@ -602,6 +625,22 @@ export interface AdminConversationListResponse {
   has_more: boolean;
 }
 
+export interface AdminFeedbackItem {
+  conversation_id: string;
+  conversation_title: string | null;
+  user_id: string | null;
+  user_display_name: string | null;
+  message_id: string;
+  user_input: string;
+  feedback: MessageFeedbackResponse;
+}
+
+export interface AdminFeedbackListResponse {
+  feedback: AdminFeedbackItem[];
+  total: number;
+  has_more: boolean;
+}
+
 export interface AdminEventItem {
   id: number;
   event_id: string | null; // 业务事件 id；agent_start 用它当 prompt 重建锚
@@ -619,6 +658,7 @@ export interface AdminMessageGroup {
   created_at: string;
   events: AdminEventItem[];
   execution_metrics: Record<string, unknown> | null;
+  feedback?: MessageFeedbackResponse | null;
   uploaded_files: { id?: string; filename: string }[] | null;
 }
 
@@ -656,6 +696,18 @@ export function listAdminConversations(
   if (query) params.set('q', query);
   if (userId) params.set('user_id', userId);
   return request<AdminConversationListResponse>(`/api/v1/admin/conversations?${params}`);
+}
+
+export function listAdminFeedback(
+  limit = 20,
+  offset = 0,
+  query?: string,
+  rating?: 'positive' | 'negative',
+) {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (query) params.set('q', query);
+  if (rating) params.set('rating', rating);
+  return request<AdminFeedbackListResponse>(`/api/v1/admin/feedback?${params}`);
 }
 
 export function getAdminConversationEvents(convId: string) {

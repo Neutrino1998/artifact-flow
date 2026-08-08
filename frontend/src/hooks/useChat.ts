@@ -31,7 +31,9 @@ export function useChat() {
   const setSendError = useStreamStore((s) => s.setSendError);
   const resetStream = useStreamStore((s) => s.reset);
   const resetArtifacts = useArtifactStore((s) => s.reset);
-  const setArtifacts = useArtifactStore((s) => s.setArtifacts);
+  const mergeArtifactsFromDbDuringLive = useArtifactStore(
+    (s) => s.mergeArtifactsFromDbDuringLive,
+  );
   const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
   const setArtifactPanelVisible = useUIStore((s) => s.setArtifactPanelVisible);
   const { connect, disconnect, reconnectIfActive } = useSSE();
@@ -264,7 +266,11 @@ export function useChat() {
         const epochBefore = useUIStore.getState().rightPanelIntentEpoch;
         refreshArtifactList(
           detail.session_id,
-          setArtifacts,
+          // The store was reset before this request, so a merge is equivalent
+          // to replacement until reconnecting SSE events arrive. If they do
+          // arrive first, the lagging DB response must preserve their live-only
+          // summaries rather than wiping the file tree.
+          mergeArtifactsFromDbDuringLive,
           setArtifactSessionId,
           () => useArtifactStore.getState().sessionId,
         ).then(() => {
@@ -283,7 +289,7 @@ export function useChat() {
         }
       }
     },
-    [current?.id, disconnect, resetStream, resetArtifacts, setCurrentLoading, setCurrent, setConversations, reconnectIfActive, setArtifacts, setArtifactSessionId, setArtifactPanelVisible]
+    [current?.id, disconnect, resetStream, resetArtifacts, setCurrentLoading, setCurrent, setConversations, reconnectIfActive, mergeArtifactsFromDbDuringLive, setArtifactSessionId, setArtifactPanelVisible]
   );
 
   // Drop into the new-conversation flow: same teardown as switchConversation

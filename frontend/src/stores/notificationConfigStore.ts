@@ -80,8 +80,10 @@ export const useNotificationConfigStore = create<NotificationConfigState>((set) 
   addNotification: () => set((s) => {
     const next = newNotification(s.items);
     return {
-      items: [...s.items, next],
-      selectedIndex: s.items.length,
+      // Display order is severity-first and stable within the same severity,
+      // so prepend newly published notices to make the newest peer appear first.
+      items: [next, ...s.items],
+      selectedIndex: 0,
       dirty: true,
       message: null,
       error: null,

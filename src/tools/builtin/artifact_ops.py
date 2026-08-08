@@ -238,10 +238,12 @@ class ReadArtifactTool(BaseTool):
         # 图片 artifact:识图路径(非文本分页)**白名单限死 png/jpeg**(上传翻转后
         # gif/webp 等异型图照收 blob 但不进识图 —— 语义坑多,见 VISION_VIEWABLE_MIMES
         # 注释),其余 image/* 落下方 blob 契约文案。取 blob → 降采样 → 返回携 data-URI
-        # 引用的 ToolResult。引擎把 data-URI 摘进本 turn 的 state["vision_blocks"]、事件
-        # 只留引用:本轮模型看得到图,下一轮 state 已空 → 占位文本(再 read 即重看)。
+        # 引用的 ToolResult。引擎把 data-URI 按 native call_id 摘进本 turn 的
+        # state["vision_blocks_by_call"]、事件只留 artifact 引用:本轮模型看得到图,
+        # 下一轮 state 已空 → 占位文本(再 read 即重看)。blob 是可变单版,current_version
+        # 不随字节覆盖递增,故图片引用刻意不携 version —— 精确读取身份由 call_id 承载。
         if content_type in VISION_VIEWABLE_MIMES:
-            return await self._read_image(session_id, artifact_id, result.get("version", 1))
+            return await self._read_image(session_id, artifact_id)
 
         # blob-only artifact(docx/pdf/异型图/未知二进制等上传,无文本表示):
         # 返回契约文案而非空 content。success=True —— 这是对"它是什么"的准确回答,
@@ -319,7 +321,7 @@ class ReadArtifactTool(BaseTool):
         )
         return ToolResult(success=True, data=render_artifact_slice(slice))
 
-    async def _read_image(self, session_id: str, artifact_id: str, version) -> ToolResult:
+    async def _read_image(self, session_id: str, artifact_id: str) -> ToolResult:
         """识图:取 blob → 降采样 → ToolResult(data=文本标记, metadata.image=引用+data_uri)。
 
         data_uri 放 metadata,引擎转 emit 前会把它摘进 state、事件只留引用(见 engine
@@ -351,10 +353,9 @@ class ReadArtifactTool(BaseTool):
         ct = blob["content_type"]
         return ToolResult(
             success=True,
-            data=f"[image artifact '{artifact_id}' v{version}, {ct}]",
+            data=f"[image artifact '{artifact_id}', {ct}]",
             metadata={"image": {
                 "artifact_id": artifact_id,
-                "version": version,
                 "content_type": ct,
                 "data_uri": data_uri,
             }},

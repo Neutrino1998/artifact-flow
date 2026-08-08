@@ -123,10 +123,12 @@ class TestInterrupt:
 
         async def _resolve_later():
             await asyncio.sleep(0.05)
-            await store.resolve_interrupt("msg-1", {"approved": True})
+            await store.resolve_interrupt("msg-1", "call-web", {"approved": True})
 
         asyncio.create_task(_resolve_later())
-        result = await store.wait_for_interrupt("msg-1", {"tool": "web_search"}, timeout=2.0)
+        result = await store.wait_for_interrupt(
+            "msg-1", {"call_id": "call-web", "tool": "web_search"}, timeout=2.0
+        )
         assert result == {"approved": True}
 
     async def test_wait_for_interrupt_timeout(self):
@@ -137,25 +139,29 @@ class TestInterrupt:
 
     async def test_resolve_nonexistent_returns_not_found(self):
         store = InMemoryRuntimeStore()
-        result = await store.resolve_interrupt("msg-x", {"approved": True})
+        result = await store.resolve_interrupt("msg-x", "call-x", {"approved": True})
         assert result == "not_found"
 
     async def test_resolve_already_resolved(self):
         store = InMemoryRuntimeStore()
         # Set up interrupt directly (bypass wait_for_interrupt which blocks)
-        store._interrupts["msg-1"] = _InterruptState(interrupt_data={})
-        await store.resolve_interrupt("msg-1", {"approved": True})
-        result = await store.resolve_interrupt("msg-1", {"approved": False})
+        store._interrupts["msg-1"] = _InterruptState(
+            interrupt_data={"call_id": "call-1"}
+        )
+        await store.resolve_interrupt("msg-1", "call-1", {"approved": True})
+        result = await store.resolve_interrupt("msg-1", "call-1", {"approved": False})
         assert result == "already_resolved"
 
     async def test_get_interrupt_data(self):
         store = InMemoryRuntimeStore()
         # Set up interrupt directly
-        store._interrupts["msg-1"] = _InterruptState(interrupt_data={"tool": "test"})
+        store._interrupts["msg-1"] = _InterruptState(
+            interrupt_data={"call_id": "call-test", "tool": "test"}
+        )
 
         data = await store.get_interrupt_data("msg-1")
         assert data is not None
-        assert data == {"tool": "test"}
+        assert data == {"call_id": "call-test", "tool": "test"}
 
         assert await store.get_interrupt_data("nonexistent") is None
 
@@ -168,14 +174,49 @@ class TestInterrupt:
             for _ in range(100):
                 data = await store.get_interrupt_data("msg-1")
                 if data is not None:
-                    assert data == {"tool": "test"}
-                    await store.resolve_interrupt("msg-1", {"approved": True})
+                    assert data == {"call_id": "call-test", "tool": "test"}
+                    await store.resolve_interrupt(
+                        "msg-1", "call-test", {"approved": True}
+                    )
                     return
                 await asyncio.sleep(0.01)
 
         asyncio.create_task(_resolve_later())
-        result = await store.wait_for_interrupt("msg-1", {"tool": "test"}, timeout=2.0)
+        result = await store.wait_for_interrupt(
+            "msg-1", {"call_id": "call-test", "tool": "test"}, timeout=2.0
+        )
         assert result == {"approved": True}
+
+    async def test_stale_call_cannot_resolve_replacement_interrupt(self):
+        """A late response for timed-out A must not approve pending B."""
+        store = InMemoryRuntimeStore()
+
+        first = await store.wait_for_interrupt(
+            "msg-1", {"call_id": "call-a", "tool": "tool_a"}, timeout=0.01
+        )
+        assert first is None
+
+        second_task = asyncio.create_task(store.wait_for_interrupt(
+            "msg-1", {"call_id": "call-b", "tool": "tool_b"}, timeout=2.0
+        ))
+        for _ in range(100):
+            data = await store.get_interrupt_data("msg-1")
+            if data and data.get("call_id") == "call-b":
+                break
+            await asyncio.sleep(0.01)
+        else:
+            pytest.fail("replacement interrupt B was not created")
+
+        stale = await store.resolve_interrupt(
+            "msg-1", "call-a", {"approved": True, "always_allow": True}
+        )
+        assert stale == "call_mismatch"
+        assert not second_task.done()
+
+        assert await store.resolve_interrupt(
+            "msg-1", "call-b", {"approved": False}
+        ) == "resolved"
+        assert await second_task == {"approved": False}
 
 
 # ============================================================

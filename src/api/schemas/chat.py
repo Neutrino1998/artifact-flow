@@ -4,9 +4,9 @@ Chat-related Pydantic schemas
 Defines request and response models for chat endpoints.
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from config import config
 
@@ -61,11 +61,94 @@ class CancelResponse(BaseModel):
 class ResumeRequest(BaseModel):
     """POST /api/v1/chat/{conv_id}/resume request body"""
     message_id: str = Field(..., description="Message ID to resume")
+    call_id: str = Field(..., min_length=1, description="Native tool-call ID to resume")
     approved: bool = Field(..., description="Whether the permission was approved")
     always_allow: bool = Field(False, description="Always allow this tool for the rest of this execution")
 
 
 MAX_BULK_DELETE_IDS = 200
+
+FeedbackRating = Literal["positive", "negative"]
+FeedbackTag = Literal[
+    "resolved_problem",
+    "followed_instructions",
+    "high_quality",
+    "fast_efficient",
+    "helpful_initiative",
+    "incorrect_incomplete",
+    "failed_instructions",
+    "biased_out_of_scope",
+    "lost_context",
+    "slow_or_broken",
+    "safety_or_legal",
+    "other",
+]
+
+POSITIVE_FEEDBACK_TAGS = {
+    "resolved_problem",
+    "followed_instructions",
+    "high_quality",
+    "fast_efficient",
+    "helpful_initiative",
+    "other",
+}
+NEGATIVE_FEEDBACK_TAGS = {
+    "incorrect_incomplete",
+    "failed_instructions",
+    "biased_out_of_scope",
+    "lost_context",
+    "slow_or_broken",
+    "safety_or_legal",
+    "other",
+}
+
+
+class MessageFeedbackRequest(BaseModel):
+    """Create or replace the current user's feedback for one assistant response."""
+
+    rating: FeedbackRating
+    tags: List[FeedbackTag] = Field(default_factory=list, max_length=7)
+    detail: Optional[str] = Field(
+        None, max_length=config.MESSAGE_FEEDBACK_MAX_DETAIL_CHARS
+    )
+
+    @field_validator("detail")
+    @classmethod
+    def normalize_detail(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @model_validator(mode="after")
+    def validate_tags_for_rating(self):
+        if len(set(self.tags)) != len(self.tags):
+            raise ValueError("feedback tags must be unique")
+        allowed = (
+            POSITIVE_FEEDBACK_TAGS
+            if self.rating == "positive"
+            else NEGATIVE_FEEDBACK_TAGS
+        )
+        if any(tag not in allowed for tag in self.tags):
+            raise ValueError("feedback tag does not match rating")
+        return self
+
+
+class MessageFeedbackResponse(BaseModel):
+    """Persisted current feedback for one assistant response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    rating: FeedbackRating
+    tags: List[FeedbackTag] = Field(default_factory=list)
+    detail: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def normalize_persisted_tags(cls, value):
+        return value or []
 
 
 class BulkDeleteRequest(BaseModel):
@@ -128,6 +211,9 @@ class MessageResponse(BaseModel):
     response: Optional[str] = Field(None, description="Assistant response")
     created_at: datetime = Field(..., description="Message creation time")
     children: List[str] = Field(default_factory=list, description="Child message IDs")
+    feedback: Optional[MessageFeedbackResponse] = Field(
+        None, description="Current user's feedback for this assistant response."
+    )
     execution_metrics: Optional[Dict[str, Any]] = Field(
         None,
         description="Turn-level metrics from Message.metadata_['execution_metrics']: started_at, completed_at, total_duration_ms, total_token_usage, etc.",

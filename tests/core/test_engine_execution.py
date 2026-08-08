@@ -496,6 +496,73 @@ class TestToolExecution:
         assert len(completes) == 1
         assert completes[0]["data"]["success"] is True
 
+    async def test_image_result_uses_call_id_cache_and_event_keeps_reference_only(self):
+        agent = _FakeAgentConfig(tools={"read_artifact": "auto"})
+        data_uri = "data:image/png;base64,aW1hZ2U="
+        tool = _FakeTool(
+            "read_artifact",
+            ToolResult(
+                success=True,
+                data="[image artifact 'shot', image/png]",
+                metadata={
+                    "image": {
+                        "artifact_id": "shot",
+                        "content_type": "image/png",
+                        "data_uri": data_uri,
+                    }
+                },
+            ),
+        )
+        calls = _native_tool_call("read_artifact", artifact_id="shot")
+        call_id = calls[0]["id"]
+        seen_messages = []
+        rounds = [
+            _tool_call_chunks(calls),
+            _simple_llm_chunks("I saw the image"),
+        ]
+        round_index = {"value": 0}
+
+        async def fake(messages, **kwargs):
+            seen_messages.append(messages)
+            index = round_index["value"]
+            round_index["value"] += 1
+            for chunk in rounds[index]:
+                yield chunk
+
+        result, emitted, _ = await _run_engine(
+            fake,
+            agents={"lead_agent": agent},
+            tools={"read_artifact": tool},
+        )
+
+        assert result["vision_blocks_by_call"] == {
+            call_id: {
+                "artifact_id": "shot",
+                "content_type": "image/png",
+                "data_uri": data_uri,
+            }
+        }
+        complete = next(
+            event for event in emitted
+            if event["type"] == "tool_complete"
+            and event["data"]["call_id"] == call_id
+        )
+        assert complete["data"]["metadata"]["image"] == {
+            "artifact_id": "shot",
+            "content_type": "image/png",
+        }
+        assert "data_uri" not in complete["data"]["metadata"]["image"]
+        assert "version" not in complete["data"]["metadata"]["image"]
+
+        image_urls = [
+            block["image_url"]["url"]
+            for message in seen_messages[1]
+            if isinstance(message.get("content"), list)
+            for block in message["content"]
+            if block.get("type") == "image_url"
+        ]
+        assert image_urls == [data_uri]
+
     async def test_search_tools_routed_renders_docs(self):
         # Deferred 工具先经 search_tools 披露完整 native schema。
         from core.effective_toolset import DeferredUnit, EffectiveToolset
@@ -764,6 +831,58 @@ class TestToolExecution:
 
 class TestPermissionInterrupt:
 
+    async def test_late_approval_for_timed_out_call_cannot_approve_next_call(self):
+        agent = _FakeAgentConfig(tools={"tool_a": "confirm", "tool_b": "confirm"})
+        tools = {
+            "tool_a": _FakeTool("tool_a", permission=ToolPermission.CONFIRM),
+            "tool_b": _FakeTool("tool_b", permission=ToolPermission.CONFIRM),
+        }
+        calls = [
+            *_native_tool_call("tool_a"),
+            *_native_tool_call("tool_b"),
+        ]
+        call_a, call_b = calls[0]["id"], calls[1]["id"]
+        store = InMemoryRuntimeStore()
+
+        async def submit_stale_a_when_b_is_pending():
+            for _ in range(200):
+                data = await store.get_interrupt_data("msg-1")
+                if data and data.get("call_id") == call_b:
+                    stale = await store.resolve_interrupt(
+                        "msg-1",
+                        call_a,
+                        {"approved": True, "always_allow": True},
+                    )
+                    assert stale == "call_mismatch"
+                    assert await store.resolve_interrupt(
+                        "msg-1", call_b, {"approved": False}
+                    ) == "resolved"
+                    return
+                await asyncio.sleep(0.005)
+            pytest.fail("second permission request was not created")
+
+        coordinator = asyncio.create_task(submit_stale_a_when_b_is_pending())
+        result, emitted, _ = await _run_engine(
+            _make_fake_stream_sequence([
+                _tool_call_chunks(calls),
+                _simple_llm_chunks("continued without either tool"),
+            ]),
+            agents={"lead_agent": agent},
+            tools=tools,
+            store=store,
+            permission_timeout=0.05,
+        )
+        await coordinator
+
+        decisions = {
+            event["data"]["call_id"]: event["data"]
+            for event in _events_of_type(emitted, "permission_result")
+        }
+        assert decisions[call_a]["approved"] is False
+        assert decisions[call_a]["reason"] == "timeout"
+        assert decisions[call_b]["approved"] is False
+        assert result["always_allowed_tools"] == []
+
     async def test_confirm_tool_emits_permission_request(self):
         agent = _FakeAgentConfig(tools={"sensitive_tool": "confirm"})
         tool = _FakeTool("sensitive_tool", permission=ToolPermission.CONFIRM)
@@ -778,7 +897,9 @@ class TestPermissionInterrupt:
             """Wait until interrupt exists, then resolve."""
             for _ in range(100):
                 if await store.get_interrupt_data("msg-1") is not None:
-                    await store.resolve_interrupt("msg-1", {"approved": True})
+                    await store.resolve_interrupt(
+                        "msg-1", xml[0]["id"], {"approved": True}
+                    )
                     return
                 await asyncio.sleep(0.01)
 
@@ -822,7 +943,9 @@ class TestPermissionInterrupt:
         async def _resolve_deny():
             for _ in range(100):
                 if await store.get_interrupt_data("msg-1") is not None:
-                    await store.resolve_interrupt("msg-1", {"approved": False})
+                    await store.resolve_interrupt(
+                        "msg-1", xml[0]["id"], {"approved": False}
+                    )
                     return
                 await asyncio.sleep(0.01)
 
@@ -866,7 +989,11 @@ class TestPermissionInterrupt:
         async def _resolve_allow():
             for _ in range(100):
                 if await store.get_interrupt_data("msg-1") is not None:
-                    await store.resolve_interrupt("msg-1", {"approved": True, "always_allow": True})
+                    await store.resolve_interrupt(
+                        "msg-1",
+                        xml[0]["id"],
+                        {"approved": True, "always_allow": True},
+                    )
                     return
                 await asyncio.sleep(0.01)
 

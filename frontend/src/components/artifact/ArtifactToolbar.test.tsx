@@ -40,21 +40,29 @@ describe('ArtifactToolbar', () => {
     useStreamStore.setState({ isStreaming: false });
   });
 
-  it('keeps the mobile back-to-list control square and restores its compact size at sm', async () => {
+  it('keeps the mobile file-tree control square and returns to the tree view', async () => {
     await act(async () => {
       root.render(<ArtifactToolbar />);
     });
 
-    const back = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Back to artifact list"]',
-    );
-    expect(back).not.toBeNull();
-    expect(back?.className).toContain('w-11');
-    expect(back?.className).toContain('h-11');
-    expect(back?.className).toContain('sm:w-7');
-    expect(back?.className).toContain('sm:h-7');
+    expect(container.querySelector('h3')?.textContent).toBe('Document');
 
-    await act(async () => back?.click());
+    const fileTree = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="查看文件系统"]',
+    );
+    expect(fileTree).not.toBeNull();
+    expect(fileTree?.className).toContain('w-11');
+    expect(fileTree?.className).toContain('h-11');
+    expect(fileTree?.className).toContain('sm:w-7');
+    expect(fileTree?.className).toContain('sm:h-7');
+    const browserIcon = fileTree?.querySelector<SVGElement>('svg.lucide-folders');
+    expect(browserIcon).not.toBeNull();
+    expect(browserIcon?.getAttribute('width')).toBe('14');
+    expect(browserIcon?.getAttribute('height')).toBe('14');
+    expect(Number(browserIcon?.getAttribute('stroke-width'))).toBeGreaterThan(2);
+
+    await act(async () => fileTree?.click());
     expect(useArtifactStore.getState().current).toBeNull();
+    expect(useArtifactStore.getState().openArtifactIds).toEqual(['artifact-1']);
   });
 });

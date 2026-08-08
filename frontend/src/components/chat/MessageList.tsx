@@ -38,10 +38,11 @@ export default function MessageList() {
             <div key={node.id} className="space-y-10">
               {/* User message (persisted path). TWIN: the live pre-refresh bubble
                   below (search `pending`) renders the SAME UserMessage component, so
-                  layout can't drift. The field SOURCES differ, though — any new
-                  per-message field surfaced here from the persisted DTO must also be
-                  mirrored into the live pending source (useChat.ts setPendingUser* +
-                  streamStore), or it'll show on reload but not live. */}
+                  layout can't drift. The field SOURCES differ, though — any field
+                  visible while pending must also be mirrored through useChat.ts +
+                  streamStore. The timestamp is intentionally authoritative-only:
+                  pending hides the action bar, and a terminal optimistic node keeps
+                  created_at null until the REST detail refresh replaces it. */}
               <UserMessage
                 content={node.user_input}
                 messageId={node.id}
@@ -50,6 +51,7 @@ export default function MessageList() {
                 siblingCount={node.siblingCount}
                 attachments={node.uploaded_files}
                 activatedSkills={node.activated_skills}
+                timestamp={node.created_at}
               />
 
               {/* Assistant response */}
@@ -57,7 +59,8 @@ export default function MessageList() {
                 <AssistantMessage
                   content={node.response}
                   messageId={node.id}
-                  executionMetrics={node.execution_metrics as { total_duration_ms?: number | null; cached_input_tokens_partial?: boolean; total_token_usage?: { total_tokens?: number | null; cached_input_tokens?: number | null } | null } | null | undefined}
+                  feedback={node.feedback}
+                  executionMetrics={node.execution_metrics as { completed_at?: string | null; total_duration_ms?: number | null; cached_input_tokens_partial?: boolean; total_token_usage?: { total_tokens?: number | null; cached_input_tokens?: number | null } | null } | null | undefined}
                 />
               )}
             </div>

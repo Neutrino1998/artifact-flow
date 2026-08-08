@@ -34,9 +34,10 @@ let _generation = 0;
 
 export async function refreshArtifactList(
   sessionId: string,
-  setArtifacts: (artifacts: ArtifactSummary[]) => void,
+  commitArtifacts: (artifacts: ArtifactSummary[]) => void,
   setSessionId: (sessionId: string | null) => void,
   getCurrentSessionId: () => string | null,
+  canCommit: () => boolean = () => true,
 ): Promise<void> {
   const myGen = ++_generation;
   // Claim: stamp our target session so a later reset() sets cur back to null
@@ -50,7 +51,12 @@ export async function refreshArtifactList(
     //     means a null cur (post-reset) blocks us even when no replacement
     //     refresh has been fired.
     if (getCurrentSessionId() !== sessionId) return;
-    setArtifacts(data.artifacts);
+    // (3) The caller's logical owner may have expired without changing the
+    //     session. COMPLETE reconciliation uses the terminal message id here:
+    //     a new turn in the same conversation must not accept the old turn's
+    //     list snapshot over its live event-reduced state.
+    if (!canCommit()) return;
+    commitArtifacts(data.artifacts);
   } catch {
     // Silent: callers decide whether/how to surface errors. This refresh is
     // a best-effort secondary update — the next refresh will retry.

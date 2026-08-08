@@ -20,6 +20,8 @@ export type ToolUnitRightView =
   | { type: 'import-unit' }
   | { type: 'edit-unit'; unitName: string; showMountReminder?: boolean };
 
+export type ObservabilityBrowser = 'none' | 'conversations' | 'feedback';
+
 // 顶层互斥 UI 模式。这是「同一时刻最多一个接管面板」这个不变量的**唯一真相源**:
 // 一个变量不可能同时取两个值,所以「两个面板同时开」按构造不可表示 —— 不再靠每个
 // setter 手动 spread `其他: false` 来维持(那是旧设计的反复漏点,如选对话不退工具管理)。
@@ -80,7 +82,14 @@ interface UIState {
   selectionMode: boolean;
   userManagementSelection: string[];
   observabilitySelectedConvId: string | null;
-  observabilityBrowseVisible: boolean;
+  observabilityBrowser: ObservabilityBrowser;
+  // Highlight is persistent display state; request/consumed ids are the
+  // independent one-shot navigation signal. Keeping them separate prevents a
+  // browser close from replaying an old scroll while still allowing the same
+  // message to be explicitly selected again.
+  observabilityHighlightedMessageId: string | null;
+  observabilityFocusRequestId: number;
+  observabilityFocusConsumedId: number;
   observabilityRefreshTick: number;
   // 实例监控刷新版本号 —— 侧栏「刷新」按钮 bump,InstancePanel 订阅触发 reload
   // (与 observabilityRefreshTick 同构:刷新动作上移到侧栏,面板不再自带按钮)。
@@ -108,7 +117,9 @@ interface UIState {
   setUserManagementSelection: (ids: string[]) => void;
   clearUserSelection: () => void;
   setObservabilitySelectedConvId: (id: string | null) => void;
-  setObservabilityBrowseVisible: (visible: boolean) => void;
+  setObservabilityBrowser: (browser: ObservabilityBrowser) => void;
+  openObservabilityMessage: (conversationId: string, messageId: string) => void;
+  consumeObservabilityFocusRequest: (id: number) => void;
   triggerObservabilityRefresh: () => void;
   triggerInstancesRefresh: () => void;
   notificationConfigDirty: boolean;
@@ -138,7 +149,9 @@ type UIData = Omit<UIState,
   | 'setActiveMode' | 'setUserManagementRightView' | 'bumpUserMgmtListVersion'
   | 'setToolUnitRightView' | 'bumpToolUnitListVersion' | 'enterSelectionMode' | 'exitSelectionMode'
   | 'toggleUserSelection' | 'setUserManagementSelection' | 'clearUserSelection'
-  | 'setObservabilitySelectedConvId' | 'setObservabilityBrowseVisible' | 'triggerObservabilityRefresh'
+  | 'setObservabilitySelectedConvId' | 'setObservabilityBrowser' | 'openObservabilityMessage'
+  | 'consumeObservabilityFocusRequest'
+  | 'triggerObservabilityRefresh'
   | 'triggerInstancesRefresh' | 'setNotificationConfigStatus'
   | 'requestNotificationConfigCreate' | 'requestNotificationConfigRefresh' | 'requestNotificationConfigSave'
   | 'requestComposerFocus' | 'consumeComposerFocusRequest'
@@ -157,7 +170,10 @@ export const INITIAL_UI_STATE: UIData = {
   selectionMode: false,
   userManagementSelection: [],
   observabilitySelectedConvId: null,
-  observabilityBrowseVisible: false,
+  observabilityBrowser: 'none',
+  observabilityHighlightedMessageId: null,
+  observabilityFocusRequestId: 0,
+  observabilityFocusConsumedId: 0,
   observabilityRefreshTick: 0,
   instancesRefreshTick: 0,
   notificationConfigDirty: false,
@@ -200,7 +216,10 @@ export const useUIStore = create<UIState>((set) => ({
       userManagementSelection: [],
       toolUnitRightView: { type: 'empty' },
       observabilitySelectedConvId: null,
-      observabilityBrowseVisible: false,
+      observabilityBrowser: 'none',
+      observabilityHighlightedMessageId: null,
+      observabilityFocusRequestId: 0,
+      observabilityFocusConsumedId: 0,
       // 进入任一接管右面板的模式(用户管理/工具管理/会话监控/实例监控)→ 收起已展开的
       // 文件面板:全屏接管的(observability/instances)本就不该露出,master-detail 的
       // (userManagement/toolUnit)则避免退出时残留的 artifactPanelVisible 让文件面板弹回。
@@ -235,13 +254,28 @@ export const useUIStore = create<UIState>((set) => ({
   }),
   setUserManagementSelection: (ids) => set({ userManagementSelection: ids }),
   clearUserSelection: () => set({ userManagementSelection: [] }),
-  setObservabilitySelectedConvId: (id) => set({
+  setObservabilitySelectedConvId: (id) => set((s) => ({
     observabilitySelectedConvId: id,
-    observabilityBrowseVisible: false,
+    observabilityBrowser: 'none',
+    observabilityHighlightedMessageId: null,
+    // Selecting a conversation without a message cancels any navigation that
+    // has not reached the DOM yet.
+    observabilityFocusConsumedId: s.observabilityFocusRequestId,
+  })),
+  setObservabilityBrowser: (browser) => set({
+    observabilityBrowser: browser,
   }),
-  setObservabilityBrowseVisible: (visible) => set({
-    observabilityBrowseVisible: visible,
-  }),
+  openObservabilityMessage: (conversationId, messageId) => set((s) => ({
+    observabilitySelectedConvId: conversationId,
+    observabilityBrowser: 'none',
+    observabilityHighlightedMessageId: messageId,
+    observabilityFocusRequestId: s.observabilityFocusRequestId + 1,
+  })),
+  consumeObservabilityFocusRequest: (id) => set((s) => (
+    id > s.observabilityFocusConsumedId
+      ? { observabilityFocusConsumedId: id }
+      : {}
+  )),
   triggerObservabilityRefresh: () => set((s) => ({
     observabilityRefreshTick: s.observabilityRefreshTick + 1,
   })),

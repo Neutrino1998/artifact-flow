@@ -465,6 +465,121 @@
         ]
       }
     },
+    "/api/v1/chat/{conv_id}/messages/{msg_id}/feedback": {
+      "put": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Put Message Feedback",
+        "description": "Create or replace the current user's feedback for one assistant response.",
+        "operationId": "put_message_feedback_api_v1_chat__conv_id__messages__msg_id__feedback_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conv_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conv Id"
+            }
+          },
+          {
+            "name": "msg_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Msg Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageFeedbackRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageFeedbackResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Delete Message Feedback",
+        "description": "Remove feedback idempotently; cross-user/mismatched messages stay hidden.",
+        "operationId": "delete_message_feedback_api_v1_chat__conv_id__messages__msg_id__feedback_delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conv_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conv Id"
+            }
+          },
+          {
+            "name": "msg_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Msg Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/chat/{conv_id}": {
       "get": {
         "tags": [
@@ -1005,6 +1120,105 @@
               "text/event-stream": {
                 "schema": {
                   "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/feedback": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Admin Feedback",
+        "description": "List message-level feedback newest-first; admin access is read-only.",
+        "operationId": "list_admin_feedback_api_v1_admin_feedback_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "name": "rating",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "positive",
+                    "negative"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Rating"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFeedbackListResponse"
                 }
               }
             }
@@ -4246,6 +4460,96 @@
         "title": "AdminEventItem",
         "description": "Single event in admin event timeline"
       },
+      "AdminFeedbackItem": {
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "title": "Conversation Id"
+          },
+          "conversation_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Title"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "user_display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Display Name"
+          },
+          "message_id": {
+            "type": "string",
+            "title": "Message Id"
+          },
+          "user_input": {
+            "type": "string",
+            "title": "User Input"
+          },
+          "feedback": {
+            "$ref": "#/components/schemas/MessageFeedbackResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "conversation_id",
+          "conversation_title",
+          "user_id",
+          "user_display_name",
+          "message_id",
+          "user_input",
+          "feedback"
+        ],
+        "title": "AdminFeedbackItem",
+        "description": "One message-level feedback record in the admin read-only browser."
+      },
+      "AdminFeedbackListResponse": {
+        "properties": {
+          "feedback": {
+            "items": {
+              "$ref": "#/components/schemas/AdminFeedbackItem"
+            },
+            "type": "array",
+            "title": "Feedback"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "type": "object",
+        "required": [
+          "feedback",
+          "total",
+          "has_more"
+        ],
+        "title": "AdminFeedbackListResponse"
+      },
       "AdminInstanceEventsResponse": {
         "properties": {
           "instance_id": {
@@ -4332,6 +4636,16 @@
             ],
             "title": "Execution Metrics"
           },
+          "feedback": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MessageFeedbackResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "uploaded_files": {
             "anyOf": [
               {
@@ -4357,6 +4671,7 @@
           "created_at",
           "events",
           "execution_metrics",
+          "feedback",
           "uploaded_files"
         ],
         "title": "AdminMessageGroup",
@@ -5352,6 +5667,12 @@
             "minimum": -1.0,
             "title": "Max Private Skills",
             "description": "Maximum number of private skills a user may own. -1 means unlimited, 0 disables personal skill imports, and a positive value is the limit. Shared/admin-imported skills do not count."
+          },
+          "message_feedback_max_detail_chars": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Message Feedback Max Detail Chars",
+            "description": "Maximum optional detail length for one message feedback record."
           }
         },
         "type": "object",
@@ -5359,7 +5680,8 @@
           "compaction_token_threshold",
           "lead_agent_model",
           "max_upload_size",
-          "max_private_skills"
+          "max_private_skills",
+          "message_feedback_max_detail_chars"
         ],
         "title": "ClientConfigResponse",
         "description": "GET /api/v1/meta response \u2014 runtime constants for the frontend."
@@ -6775,6 +7097,122 @@
         ],
         "title": "McpProviderConfigSpec"
       },
+      "MessageFeedbackRequest": {
+        "properties": {
+          "rating": {
+            "type": "string",
+            "enum": [
+              "positive",
+              "negative"
+            ],
+            "title": "Rating"
+          },
+          "tags": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "resolved_problem",
+                "followed_instructions",
+                "high_quality",
+                "fast_efficient",
+                "helpful_initiative",
+                "incorrect_incomplete",
+                "failed_instructions",
+                "biased_out_of_scope",
+                "lost_context",
+                "slow_or_broken",
+                "safety_or_legal",
+                "other"
+              ]
+            },
+            "type": "array",
+            "maxItems": 7,
+            "title": "Tags"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rating"
+        ],
+        "title": "MessageFeedbackRequest",
+        "description": "Create or replace the current user's feedback for one assistant response."
+      },
+      "MessageFeedbackResponse": {
+        "properties": {
+          "rating": {
+            "type": "string",
+            "enum": [
+              "positive",
+              "negative"
+            ],
+            "title": "Rating"
+          },
+          "tags": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "resolved_problem",
+                "followed_instructions",
+                "high_quality",
+                "fast_efficient",
+                "helpful_initiative",
+                "incorrect_incomplete",
+                "failed_instructions",
+                "biased_out_of_scope",
+                "lost_context",
+                "slow_or_broken",
+                "safety_or_legal",
+                "other"
+              ]
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rating",
+          "tags",
+          "detail",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "MessageFeedbackResponse",
+        "description": "Persisted current feedback for one assistant response."
+      },
       "MessageResponse": {
         "properties": {
           "id": {
@@ -6824,6 +7262,17 @@
             "type": "array",
             "title": "Children",
             "description": "Child message IDs"
+          },
+          "feedback": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MessageFeedbackResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current user's feedback for this assistant response."
           },
           "execution_metrics": {
             "anyOf": [
@@ -6892,6 +7341,7 @@
           "response",
           "created_at",
           "children",
+          "feedback",
           "execution_metrics",
           "uploaded_files",
           "activated_skills",
@@ -7034,6 +7484,12 @@
             "title": "Message Id",
             "description": "Message ID to resume"
           },
+          "call_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Call Id",
+            "description": "Native tool-call ID to resume"
+          },
           "approved": {
             "type": "boolean",
             "title": "Approved",
@@ -7049,6 +7505,7 @@
         "type": "object",
         "required": [
           "message_id",
+          "call_id",
           "approved"
         ],
         "title": "ResumeRequest",

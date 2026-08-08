@@ -46,7 +46,6 @@ const SOURCE_LABEL: Record<InstanceDiagnosticEvent['source'], string> = {
 const SOURCE_KEY_LABEL: Record<string, string> = {
   error_log: '错误日志',
   loop_lag: 'Watchdog 日志',
-  metrics: '运行指标',
 };
 
 const STATUS_LABEL: Record<InstanceHeartbeat['status'], string> = {
@@ -88,6 +87,7 @@ export function serializeInstanceEvents(instanceId: string, events: InstanceDiag
 function HeartbeatSummary({ instance }: { instance: InstanceHeartbeat }) {
   const wedge = instance.last_wedge;
   const heal = instance.last_autoheal;
+  const proc = instance.process ?? {};
   return (
     <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-border dark:border-border-dark bg-bg/60 dark:bg-bg-dark/60 p-3 text-xs">
       <div>
@@ -116,6 +116,51 @@ function HeartbeatSummary({ instance }: { instance: InstanceHeartbeat }) {
           </div>
         </div>
       )}
+      <details className="col-span-2 mt-1 border-t border-border dark:border-border-dark pt-2">
+        <summary className="cursor-pointer select-none font-medium text-text-secondary dark:text-text-secondary-dark">
+          运行详情
+        </summary>
+        <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2">
+          <div>
+            <div className="text-text-tertiary dark:text-text-tertiary-dark">CPU</div>
+            <div className="mt-0.5 text-text-primary dark:text-text-primary-dark">{proc.cpu_pct != null ? `${proc.cpu_pct}%` : '—'}</div>
+          </div>
+          <div>
+            <div className="text-text-tertiary dark:text-text-tertiary-dark">FDs</div>
+            <div className="mt-0.5 text-text-primary dark:text-text-primary-dark">{proc.open_fds ?? '—'}</div>
+          </div>
+          <div>
+            <div className="text-text-tertiary dark:text-text-tertiary-dark">DB pool</div>
+            <div className="mt-0.5 text-text-primary dark:text-text-primary-dark">
+              {instance.db_pool
+                ? `${instance.db_pool.in_use ?? 0}/${instance.db_pool.size ?? 0}${instance.db_pool.overflow ? ` +${instance.db_pool.overflow}` : ''}`
+                : '—'}
+            </div>
+          </div>
+          <div>
+            <div className="text-text-tertiary dark:text-text-tertiary-dark">Redis</div>
+            <div className="mt-0.5 text-text-primary dark:text-text-primary-dark">
+              {instance.redis?.used_mb != null ? `${instance.redis.used_mb}M` : '—'}
+            </div>
+          </div>
+          <div>
+            <div className="text-text-tertiary dark:text-text-tertiary-dark">长跑任务</div>
+            <div className="mt-0.5 text-text-primary dark:text-text-primary-dark">{instance.tasks_long_running ?? 0}</div>
+          </div>
+          <div>
+            <div className="text-text-tertiary dark:text-text-tertiary-dark">data/</div>
+            <div className="mt-0.5 text-text-primary dark:text-text-primary-dark">
+              {instance.data_dir_mb != null ? `${instance.data_dir_mb}M` : '—'}
+            </div>
+          </div>
+          <div className="col-span-2">
+            <div className="text-text-tertiary dark:text-text-tertiary-dark">启动时间</div>
+            <div className="mt-0.5 break-words text-text-primary dark:text-text-primary-dark">
+              {formatTime(instance.started_at)}
+            </div>
+          </div>
+        </div>
+      </details>
     </div>
   );
 }
@@ -148,12 +193,19 @@ function StackGroups({ event }: { event: InstanceDiagnosticEvent }) {
 
 function EventCard({
   event,
+  metricsScanTruncated,
   onOpenConversation,
 }: {
   event: InstanceDiagnosticEvent;
+  metricsScanTruncated: boolean;
   onOpenConversation: (conversationId: string) => void;
 }) {
   const isWedge = event.type === 'wedge';
+  const metricsMayBeIncomplete = (
+    metricsScanTruncated
+    && (event.type === 'wedge' || event.type === 'loop_lag')
+    && !event.metrics_before
+  );
   return (
     <article className="rounded-xl border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-3 shadow-float">
       <div className="flex items-start gap-2">
@@ -201,6 +253,11 @@ function EventCard({
             <div className="text-text-tertiary dark:text-text-tertiary-dark">事件后 · {formatTime(event.metrics_after?.ts)}</div>
             <div className="mt-1 text-text-secondary dark:text-text-secondary-dark">{metricText(event.metrics_after)}</div>
           </div>
+        </div>
+      )}
+      {metricsMayBeIncomplete && (
+        <div className="mt-2 text-[11px] text-text-tertiary dark:text-text-tertiary-dark">
+          未找到事件前运行指标，指标快照可能不完整。
         </div>
       )}
 
@@ -284,16 +341,11 @@ export default function InstanceEventDrawer({
       .map(([source]) => SOURCE_KEY_LABEL[source] ?? source),
     [data, relevantSourceKeys],
   );
-  const truncationSourceKeys = useMemo(() => {
-    const keys = new Set(relevantSourceKeys);
-    if (filter === 'all' || filter === 'wedge' || filter === 'loop_lag') keys.add('metrics');
-    return keys;
-  }, [filter, relevantSourceKeys]);
   const truncated = useMemo(
     () => Object.entries(data?.sources ?? {})
-      .filter(([source, state]) => truncationSourceKeys.has(source) && state.truncated)
+      .filter(([source, state]) => relevantSourceKeys.has(source) && state.truncated)
       .map(([source]) => SOURCE_KEY_LABEL[source] ?? source),
-    [data, truncationSourceKeys],
+    [data, relevantSourceKeys],
   );
 
   const handleCopy = useCallback(() => {
@@ -380,7 +432,12 @@ export default function InstanceEventDrawer({
           )}
           <div className="space-y-3">
             {visibleEvents.map((event) => (
-              <EventCard key={event.id} event={event} onOpenConversation={onOpenConversation} />
+              <EventCard
+                key={event.id}
+                event={event}
+                metricsScanTruncated={Boolean(data?.sources.metrics?.truncated)}
+                onOpenConversation={onOpenConversation}
+              />
             ))}
           </div>
         </div>

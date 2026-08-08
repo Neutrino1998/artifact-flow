@@ -34,4 +34,34 @@ describe('UserMessage context chips', () => {
     expect(html).toContain('Word 文档');
     expect(html).not.toContain('rounded-bubble');
   });
+
+  it('shows the persisted send time in the hover action bar', () => {
+    const html = renderToStaticMarkup(
+      <UserMessage
+        content="hello"
+        messageId="msg-3"
+        parentId={null}
+        timestamp="2026-08-07T08:30:00Z"
+      />,
+    );
+
+    expect(html).toContain('发送时间：');
+    expect(html).toContain('<time');
+    expect(html.indexOf('<time')).toBeLessThan(html.indexOf('aria-label="Edit message"'));
+  });
+
+  it('does not show hover metadata while the message is pending', () => {
+    const html = renderToStaticMarkup(
+      <UserMessage
+        content="hello"
+        messageId=""
+        parentId={null}
+        pending
+        timestamp="2026-08-07T08:30:00Z"
+      />,
+    );
+
+    expect(html).not.toContain('发送时间：');
+    expect(html).not.toContain('<time');
+  });
 });

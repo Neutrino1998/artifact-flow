@@ -96,7 +96,7 @@ class ContextManager:
         # 历史 + 当前轮统一来自 state["events"]，EventHistory 处理 boundary / 过滤。
         # _meta 的剥离交给 assemble（与 admin 重建路径共享同一步），这里传原始历史。
         all_messages = build_event_history(
-            state.get("events", []), agent_name, state.get("vision_blocks"),
+            state.get("events", []), agent_name, state.get("vision_blocks_by_call"),
             vision_capable=model_supports_vision(agent_config.model),
             replay_reasoning=model_replays_reasoning(agent_config.model),
         )
@@ -150,49 +150,88 @@ class ContextManager:
         （那时只前置 system + 历史，不拼 reminder）。发给 LLM 前剥离 _meta 也在此完成
         （两条路径共享），故调用方传原始 build_event_history 输出即可。
 
-        既有历史绝不原地修改；工具结果后的图片也只附着到新建的 user 尾消息。
+        既有历史绝不原地修改。每组连续 tool results 后按原位置重建一条 image
+        carrier；若图片组正好在尾部，当前 reminder 合入该 carrier，否则 reminder
+        仍作为独立尾消息。这样图片在本 turn 后续所有 LLM 调用中保持可见，同时
+        role=tool results 仍先完整闭合，绝不被 user image message 劈开。
         """
-        images = cls._trailing_tool_images(history_messages)
-        all_messages = cls._strip_meta(history_messages)
+        all_messages, trailing_image_carrier = cls._interleave_image_carriers(
+            history_messages
+        )
         if reminder is not None:
-            if images:
-                content: List[Dict[str, Any]] = [
-                    {"type": "text", "text": reminder}
-                ]
-                for image in images:
-                    content.append({
-                        "type": "text",
-                        "text": (
-                            "Image result from tool_call_id="
-                            f"{image.get('tool_call_id')}, artifact_id="
-                            f"{image.get('artifact_id')}, version={image.get('version')}, "
-                            f"content_type={image.get('content_type')}"
-                        ),
-                    })
-                    content.append({
-                        "type": "image_url",
-                        "image_url": {"url": image["data_uri"]},
-                    })
-                all_messages.append({"role": "user", "content": content})
+            if trailing_image_carrier:
+                all_messages[-1] = {
+                    **all_messages[-1],
+                    "content": [
+                        {"type": "text", "text": reminder},
+                        *all_messages[-1]["content"],
+                    ],
+                }
             else:
                 all_messages.append({"role": "user", "content": reminder})
 
         return [{"role": "system", "content": system_prompt}] + all_messages
 
-    @staticmethod
-    def _trailing_tool_images(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        images: List[Dict[str, Any]] = []
-        for message in reversed(messages):
+    @classmethod
+    def _interleave_image_carriers(
+        cls, messages: List[Dict[str, Any]]
+    ) -> tuple[List[Dict[str, Any]], bool]:
+        """Strip private metadata and rebuild one carrier per complete tool group.
+
+        EventHistory projects every native result as ``role=tool`` and attaches a
+        turn-local image only in ``_meta``. Consecutive tool messages are one
+        assistant envelope's complete result group; emit them all before the
+        synthetic user carrier required by OpenAI-compatible multimodal APIs.
+
+        Returns ``(messages, trailing_image_carrier)`` so ``assemble`` can merge
+        the current ephemeral reminder into a carrier that is already the tail.
+        """
+        projected: List[Dict[str, Any]] = []
+        trailing_image_carrier = False
+        index = 0
+        while index < len(messages):
+            message = messages[index]
             if message.get("role") != "tool":
-                break
-            image = (message.get("_meta") or {}).get("image")
-            if image:
-                images.append({
-                    **image,
-                    "tool_call_id": message.get("tool_call_id"),
+                projected.extend(cls._strip_meta([message]))
+                index += 1
+                continue
+
+            group: List[Dict[str, Any]] = []
+            images: List[Dict[str, Any]] = []
+            while index < len(messages) and messages[index].get("role") == "tool":
+                tool_message = messages[index]
+                group.append(tool_message)
+                image = (tool_message.get("_meta") or {}).get("image")
+                if image:
+                    images.append({
+                        **image,
+                        "tool_call_id": tool_message.get("tool_call_id"),
+                    })
+                index += 1
+
+            projected.extend(cls._strip_meta(group))
+            if not images:
+                continue
+
+            content: List[Dict[str, Any]] = []
+            for image in images:
+                content.append({
+                    "type": "text",
+                    "text": (
+                        "Image returned by read_artifact call_id="
+                        f"{image.get('tool_call_id')}, artifact_id="
+                        f"{image.get('artifact_id')}, "
+                        f"content_type={image.get('content_type')}:"
+                    ),
                 })
-        images.reverse()
-        return images
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": image["data_uri"]},
+                })
+            projected.append({"role": "user", "content": content})
+            trailing_image_carrier = index == len(messages)
+
+        return projected, trailing_image_carrier
 
     @classmethod
     def _build_dynamic_context(

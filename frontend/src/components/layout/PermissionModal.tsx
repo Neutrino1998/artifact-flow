@@ -21,6 +21,7 @@ export default function PermissionModal() {
       try {
         await api.resumeExecution(conversationId, {
           message_id: messageId,
+          call_id: req.callId,
           approved,
           always_allow: alwaysAllow,
         });
@@ -29,7 +30,10 @@ export default function PermissionModal() {
         // while the engine blocks on asyncio.Event.wait(). Resolving the
         // interrupt (above) lets the engine continue; events flow on the
         // same SSE stream.
-        useStreamStore.getState().setPermissionRequest(null);
+        const streamState = useStreamStore.getState();
+        if (streamState.permissionRequest?.callId === req.callId) {
+          streamState.setPermissionRequest(null);
+        }
       } catch (err) {
         console.error('Failed to resume:', err);
       } finally {

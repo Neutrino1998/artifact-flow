@@ -17,6 +17,9 @@ interface ConfigState {
   // Per-user private skill count: -1 unlimited, 0 personal imports disabled,
   // positive = limit. null until /meta loads; backend remains authoritative.
   maxPrivateSkills: number | null;
+  // Optional message-feedback detail limit. null means the client pre-gate is
+  // unavailable; the backend remains authoritative.
+  messageFeedbackMaxDetailChars: number | null;
   fetched: boolean;
   fetchConfig: () => Promise<void>;
 }
@@ -26,6 +29,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
   leadAgentModel: null,
   maxUploadSize: null,
   maxPrivateSkills: null,
+  messageFeedbackMaxDetailChars: null,
   fetched: false,
   fetchConfig: async () => {
     if (get().fetched) return;
@@ -36,6 +40,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
         leadAgentModel: cfg.lead_agent_model,
         maxUploadSize: cfg.max_upload_size,
         maxPrivateSkills: cfg.max_private_skills,
+        messageFeedbackMaxDetailChars: cfg.message_feedback_max_detail_chars,
         fetched: true,
       });
     } catch (err) {

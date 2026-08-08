@@ -23,3 +23,32 @@ export function parseUtcIso(iso: string): Date {
   const normalized = HAS_TZ_SUFFIX.test(iso) ? iso : `${iso}Z`;
   return new Date(normalized);
 }
+
+const MESSAGE_DATE_TIME_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
+/** Format a message timestamp compactly in the browser's local timezone. */
+export function formatMessageDateTime(iso: string): string | null {
+  const date = parseUtcIso(iso);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const parts = new Map(
+    MESSAGE_DATE_TIME_FORMATTER
+      .formatToParts(date)
+      .map((part) => [part.type, part.value]),
+  );
+  const year = parts.get('year');
+  const month = parts.get('month');
+  const day = parts.get('day');
+  const hour = parts.get('hour');
+  const minute = parts.get('minute');
+  if (!year || !month || !day || !hour || !minute) return null;
+
+  return `${year}/${month}/${day} ${hour}:${minute}`;
+}

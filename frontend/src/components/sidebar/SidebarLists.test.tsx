@@ -80,7 +80,7 @@ describe('sidebar navigation lists', () => {
     expect(onNavigate).toHaveBeenCalledTimes(1);
 
     await act(async () => showAll?.click());
-    expect(useUIStore.getState().observabilityBrowseVisible).toBe(true);
+    expect(useUIStore.getState().observabilityBrowser).toBe('conversations');
     expect(onNavigate).toHaveBeenCalledTimes(2);
   });
 
