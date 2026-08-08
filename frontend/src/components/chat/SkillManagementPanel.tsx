@@ -487,18 +487,6 @@ export default function SkillManagementPanel() {
                 <div className="flex h-6 flex-shrink-0 items-center gap-3">
                   {/* Row actions */}
                   <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => handleOpen(skill)}
-                      className="flex h-6 w-6 items-center justify-center rounded text-text-tertiary dark:text-text-tertiary-dark hover:text-accent hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-                      aria-label={`查看技能 ${skill.name} 的说明`}
-                      title="查看 SKILL.md 说明"
-                    >
-                      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M3 2.5h7.5a1 1 0 0 1 1 1V6M3 2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h7.5a1 1 0 0 0 1-1V10" />
-                        <path d="M5 6h4M5 9h2M10 8l4-4M11 4h3v3" />
-                      </svg>
-                    </button>
                     {exportable && (
                       <button
                         onClick={() => handleExport(skill)}
