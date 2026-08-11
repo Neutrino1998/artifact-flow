@@ -52,7 +52,6 @@ class AgentSnapshot:
     name: str
     description: str
     model: str
-    max_tool_rounds: int
     internal: bool
     role_prompt: str
     builtin_tools: Dict[str, str] = field(default_factory=dict)   # {名: enabled|disabled}
@@ -246,7 +245,6 @@ async def _load_registry_snapshot_and_unit_matches(
             name=a.name,
             description=a.description,
             model=a.model,
-            max_tool_rounds=a.max_tool_rounds,
             internal=a.internal,
             role_prompt=a.role_prompt,
             builtin_tools=dict(a.builtin_tools or {}),

@@ -73,7 +73,6 @@ def _agent_md(name="lead_agent", tools_block="  web_search: enabled\n  read_arti
         "tools:\n"
         f"{tools_block}\n"
         f"model: {model}\n"
-        "max_tool_rounds: 50\n"
         "---\n"
         f"Role prompt for {name}.\n"
     )
@@ -513,7 +512,6 @@ async def test_agent_builtin_split(db_session, cfg):
 
     agent = (await db_session.execute(select(Agent).where(Agent.name == "lead_agent"))).scalar_one()
     assert agent.model == "qwen3.7-plus"
-    assert agent.max_tool_rounds == 50
     assert agent.builtin_tools == {"web_search": "enabled", "read_artifact": "enabled"}
 
     units = (await db_session.execute(select(AgentUnit).where(AgentUnit.agent_name == "lead_agent"))).scalars().all()

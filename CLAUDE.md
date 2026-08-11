@@ -40,7 +40,7 @@ Non-obvious design choices you won't infer from reading one file.
 
 - **Agent completion routing**: an agent's no-tool-call reply is its `_run_agent` return value. Top-level lead return → `completed`/`response`; subagent return → packed by the `call_subagent` branch, caller's remaining same-round tools continue. `None` return = turn terminated inside (cancel/error, flags already set by the fault site) → callers unwind and remaining tools are skipped. Before persistence, the native-call closure pass completes the in-flight `call_subagent` and every accepted-but-unstarted sibling exactly once.
 
-- **Agents are data, not classes**: Each agent is an MD file (`config/agents/*.md`) — YAML frontmatter (model, max_tool_rounds, tool permissions) + role-prompt body. No Python to define an agent.
+- **Agents are data, not classes**: Each agent is an MD file (`config/agents/*.md`) — YAML frontmatter (model, tool membership) + role-prompt body. No Python to define an agent.
 
 - **Transaction ownership**: `DatabaseManager.session()` manages lifecycle only (create + close); transaction control (`flush` + `commit`) lives in Repository methods to keep write locks short. **Consequence: cross-Repository atomicity is intentionally sacrificed.** Post-processing writes in independent transactions (artifact flush → event persist → `Message.response`/metadata); a later-step failure can leave earlier-committed artifacts with no supporting event history. Accepted trade-off — a single transaction would mean splitting `write`/`commit` across every Repo method (philosophy change, deferred until a user-visible issue).
 

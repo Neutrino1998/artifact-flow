@@ -24,7 +24,6 @@ tools:
 # vision 依赖:model 必须是 models.yaml 里 vision:true 的条目(read_artifact 只向
 # vision 模型注入图块;文本模型只会得到占位文本)。内网部署换成本地多模态模型名。
 model: qwen3.7-plus
-max_tool_rounds: 20
 ---
 
 <role>

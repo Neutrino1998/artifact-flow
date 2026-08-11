@@ -430,7 +430,6 @@ class _FakeAgentConfig:
     description: str = "test lead"
     tools: dict = field(default_factory=dict)
     model: str = "gpt-4o-mini"
-    max_tool_rounds: int = 3
     role_prompt: str = "You are a test agent."
     internal: bool = False
 
@@ -450,8 +449,8 @@ def _patch_snapshot(fake_agents):
     agents = {
         n: AgentSnapshot(
             name=c.name, description=c.description, model=c.model,
-            max_tool_rounds=c.max_tool_rounds, internal=c.internal,
-            role_prompt=c.role_prompt, builtin_tools={}, units={},
+            internal=c.internal, role_prompt=c.role_prompt,
+            builtin_tools={}, units={},
         )
         for n, c in fake_agents.items()
     }

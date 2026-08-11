@@ -268,7 +268,6 @@ async def execute_loop(
     )
 
     message_id = state["message_id"]
-    tool_round_count: Dict[str, int] = {}  # per-agent tool round counter
 
     async def _is_cancelled() -> bool:
         """零参谓词：协作式 cancel flag（预绑定 message_id）——所有消费点的唯一入口。
@@ -494,8 +493,6 @@ async def execute_loop(
             except Exception:
                 logger.exception("sandbox status snapshot failed")  # 注入缺席即可,不阻断本轮
 
-        # max_tool_rounds 收尾提示已并入 reminder（见 ContextManager._build_dynamic_context
-        # 的 <tool_budget>）——引擎只把 live 工具轮数传进去，不再在 build 后追加独立 system 消息。
         compaction_threshold = get_compaction_threshold(agents[agent_name].model)
         messages, reminder = ContextManager.build(
             state=state,
@@ -507,7 +504,6 @@ async def execute_loop(
             artifacts_inventory=artifacts_inventory,
             model=get_litellm_model_id(agents[agent_name].model),
             sandbox_status=sandbox_status,
-            tool_round_count=tool_round_count.get(agent_name, 0),
             available_skills=available_skills,
         )
 
@@ -941,7 +937,6 @@ async def execute_loop(
                     "error": f"Invalid native tool arguments: {exc}",
                     "duration_ms": 0,
                 })
-                tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                 continue
 
             reason = fallback_reason
@@ -984,7 +979,6 @@ async def execute_loop(
                     "availability_reason": availability_reason,
                     "duration_ms": 0,
                 })
-                tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                 continue
 
             # 获取工具
@@ -999,7 +993,6 @@ async def execute_loop(
                     "error": f"Tool '{tool_name}' not found",
                     "duration_ms": 0,
                 })
-                tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                 continue
 
             # call_subagent:原地递归 await 子 agent 的循环（嵌套串行）
@@ -1080,7 +1073,6 @@ async def execute_loop(
                         "duration_ms": tool_duration_ms,
                         "metadata": subagent_result.metadata or None,
                     })
-                    tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                     continue
                 else:
                     await _emit(StreamEventType.TOOL_START.value, agent_name, {
@@ -1094,7 +1086,6 @@ async def execute_loop(
                         "error": result.error or "call_subagent failed",
                         "duration_ms": 0,
                     })
-                    tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                     continue
 
             # 权限检查（决策 11:等级唯一来源是工具定义，EffectiveToolset 已据此解析；
@@ -1106,7 +1097,6 @@ async def execute_loop(
                         call_id, tool_name, params, agent_name, effective_permission, reason
                     )
                     if not approved:
-                        tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
                         continue
 
             # 执行工具
@@ -1221,10 +1211,6 @@ async def execute_loop(
                 "params": params,
                 "metadata": tc_metadata,
             })
-
-
-            tool_round_count[agent_name] = tool_round_count.get(agent_name, 0) + 1
-
     async def _check_cancelled() -> bool:
         # 同走软化谓词:探针异常在 loop 顶/工具间穿出会被 while 外层
         # except Exception 记成 turn ERROR(一次 Redis 抖动杀掉整个 turn)。
@@ -1445,7 +1431,6 @@ async def execute_loop(
                     "agent": agent_name,
                     "content": response_content,
                 })
-                tool_round_count.pop(agent_name, None)
                 return response_content
 
             # 串行执行工具（内部可能递归 _run_agent；turn 终止由 while 顶部条件

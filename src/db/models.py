@@ -920,9 +920,6 @@ class Agent(Base):
     name: Mapped[str] = mapped_column(String(64), primary_key=True)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     model: Mapped[str] = mapped_column(String(64), nullable=False)
-    max_tool_rounds: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=3, server_default="3"
-    )
     internal: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )

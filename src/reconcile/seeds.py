@@ -91,7 +91,6 @@ class AgentSeed:
     name: str
     description: str
     model: str
-    max_tool_rounds: int
     internal: bool
     role_prompt: str
     builtin_tools: Dict[str, str]      # {builtin名: enabled|disabled}
@@ -569,7 +568,6 @@ def parse_agent_seeds(
             name=config.name,
             description=config.description,
             model=config.model,
-            max_tool_rounds=config.max_tool_rounds,
             internal=config.internal,
             role_prompt=config.role_prompt,
             builtin_tools=builtin_tools,
@@ -578,7 +576,6 @@ def parse_agent_seeds(
         seed.seed_hash = _content_hash({
             "description": seed.description,
             "model": seed.model,
-            "max_tool_rounds": seed.max_tool_rounds,
             "internal": seed.internal,
             "role_prompt": seed.role_prompt,
             "builtin_tools": seed.builtin_tools,

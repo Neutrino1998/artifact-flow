@@ -6,7 +6,6 @@ description: |
 internal: true
 model: qwen3.7-plus
 tools: {}
-max_tool_rounds: 0
 ---
 
 You are a conversation compaction agent. Your task is to produce a single detailed structured summary of the conversation so far so that subsequent turns can continue without losing context.

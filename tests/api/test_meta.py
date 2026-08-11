@@ -23,7 +23,6 @@ async def materialized_lead_agent(db_session: AsyncSession):
             name="lead_agent",
             description="test lead",
             model="gpt-4o-mini",
-            max_tool_rounds=3,
             internal=False,
             role_prompt="test",
             builtin_tools={},

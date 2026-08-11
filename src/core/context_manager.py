@@ -49,7 +49,6 @@ class ContextManager:
         artifacts_inventory: Optional[List[Dict]] = None,
         model: Optional[str] = None,
         sandbox_status: Optional[Dict] = None,
-        tool_round_count: int = 0,
         available_skills: Optional[List[Dict]] = None,  # L1 候选；仅 read_skill 可调时注入
     ) -> tuple[List[Dict[str, Any]], str]:
         """
@@ -65,8 +64,6 @@ class ContextManager:
             compaction_threshold: 当前 agent 模型的有效阈值
                 (models.yaml context_window - 服务级 reserve)
             artifacts_inventory: 预加载的 artifacts 清单（含完整内容）
-            tool_round_count: 本 agent 已用的工具轮数（命中 max_tool_rounds 时 reminder
-                里出现 <tool_budget> 收尾提示，见 _build_dynamic_context）
 
         Returns:
             (messages, reminder) —— messages 是完整 LLM 消息列表；reminder 是并入末条
@@ -123,7 +120,6 @@ class ContextManager:
             compaction_threshold=compaction_threshold,
             last_usage=last_usage,
             sandbox_status=sandbox_status,
-            tool_round_count=tool_round_count,
             available_skills=(
                 available_skills if "read_skill" in effective_toolset else None
             ),
@@ -243,7 +239,6 @@ class ContextManager:
         compaction_threshold: int,
         last_usage: Optional[int] = None,
         sandbox_status: Optional[Dict] = None,
-        tool_round_count: int = 0,
         available_skills: Optional[List[Dict]] = None,
         disclosed_tools: Optional[set[str]] = None,
     ) -> str:
@@ -251,8 +246,8 @@ class ContextManager:
 
         内容：可用工具目录（有可调工具时）+ 系统时间（始终）+ task_plan（存在时）+
         artifact 清单（仅有 artifact 工具的 agent）+ 沙盒状态（仅有沙盒工具的 agent 且
-        引擎递了快照）+ context_usage 预警（仅临近 compaction 时）+ tool_budget 收尾提示
-        （仅命中 max_tool_rounds 时）。由 build() 并入消息尾部，不进 system prompt、不持久化为 event。
+        引擎递了快照）+ context_usage 预警（仅临近 compaction 时）。由 build() 并入
+        消息尾部，不进 system prompt、不持久化为 event。
 
         语义定位是「当前世界状态的一瞥」（glance, don't act）—— 与需要 uptake 的
         持久化 meta 帧（用户上传提示 / 注入消息 / compaction frame，均用 [...] 行动帧
@@ -328,22 +323,6 @@ class ContextManager:
         context_usage = cls._build_context_usage(last_usage, compaction_threshold)
         if context_usage:
             parts.append(context_usage)
-
-        # 工具轮预算（仅命中 max_tool_rounds 时出现）—— 原为引擎在 build 后追加的一条独立
-        # system 消息，现并入 reminder：它本就是「条件触发的 per-turn 状态」，与 context_usage
-        # 同类，统一到一处既消掉散落的特例，也让「持久化 reminder = 抓全所有动态内容」成立
-        # （admin 重建 prompt 无需再特判补这条尾巴）。它是**软刹车**——引擎不按工具轮数硬停
-        # （唯一硬兜底是 execution timeout），故措辞写成「超时风险」这个真实后果，而非
-        # 「不会被执行」的假话；也因此降权进 reminder（judge-relevance 框）是自洽的。
-        max_rounds = getattr(agent_config, "max_tool_rounds", None)
-        if max_rounds and tool_round_count >= max_rounds:
-            parts.append(
-                '<tool_budget>\n'
-                f'Tool-round budget reached ({tool_round_count}/{max_rounds}). Further '
-                'tool calls risk the turn ending by timeout before you can answer — wrap '
-                'up and give your final response now.\n'
-                '</tool_budget>'
-            )
 
         # 自描述首句：声明这段是什么、怎么对待 —— 降权为「环境状态、自行判断相关性」，
         # 避免模型把工作区状态误当用户指令执行。

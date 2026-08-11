@@ -18,7 +18,7 @@ class _Tool:
 
 def _agent(name="lead_agent", builtin_tools=None, units=None):
     return AgentSnapshot(
-        name=name, description="d", model="m", max_tool_rounds=10, internal=False,
+        name=name, description="d", model="m", internal=False,
         role_prompt="", builtin_tools=builtin_tools or {}, units=units or {},
     )
 

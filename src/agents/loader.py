@@ -2,7 +2,7 @@
 Agent 加载器 — 从 MD 文件解析 AgentConfig
 
 每个 agent 是一个 MD 文件：
-- YAML frontmatter: name, description, tools, model, max_tool_rounds
+- YAML frontmatter: name, description, tools, model
 - MD body: 角色提示词（role_prompt）
 """
 
@@ -24,7 +24,6 @@ class AgentConfig:
     description: str
     model: str  # 必填,无默认 — 缺失即 loud-fail(见 load_agent),不静默兜底到某个别名
     tools: dict[str, str] = field(default_factory=dict)  # {tool_name: permission_level}
-    max_tool_rounds: int = 3
     internal: bool = False
     role_prompt: str = ""  # MD body（纯文本）
 
@@ -41,7 +40,6 @@ def load_agent(md_path: str) -> AgentConfig:
       web_search: auto
       web_fetch: confirm
     model: qwen3.7-plus
-    max_tool_rounds: 100
     ---
 
     (role prompt body here)
@@ -76,7 +74,6 @@ def load_agent(md_path: str) -> AgentConfig:
         description=frontmatter.get("description", ""),
         model=frontmatter["model"],
         tools=frontmatter.get("tools", {}),
-        max_tool_rounds=frontmatter.get("max_tool_rounds", 3),
         internal=frontmatter.get("internal", False),
         role_prompt=body,
     )

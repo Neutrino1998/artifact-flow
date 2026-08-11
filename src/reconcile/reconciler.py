@@ -394,7 +394,6 @@ def _new_agent(seed: AgentSeed) -> Agent:
         name=seed.name,
         description=seed.description,
         model=seed.model,
-        max_tool_rounds=seed.max_tool_rounds,
         internal=seed.internal,
         role_prompt=seed.role_prompt,
         builtin_tools=seed.builtin_tools,
@@ -406,7 +405,6 @@ def _new_agent(seed: AgentSeed) -> Agent:
 def _apply_agent_cols(row: Agent, seed: AgentSeed) -> None:
     row.description = seed.description
     row.model = seed.model
-    row.max_tool_rounds = seed.max_tool_rounds
     row.internal = seed.internal
     row.role_prompt = seed.role_prompt
     row.builtin_tools = seed.builtin_tools

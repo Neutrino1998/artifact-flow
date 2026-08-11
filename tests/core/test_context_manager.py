@@ -29,7 +29,6 @@ class _FakeAgentConfig:
     description: str = "Test lead agent"
     tools: dict = field(default_factory=dict)
     model: str = "openai/fake-model"
-    max_tool_rounds: int = 3
     role_prompt: str = "You are a helpful assistant."
     internal: bool = False
 
@@ -1143,25 +1142,6 @@ class TestPromptReconstructionFidelity:
             _tool_complete(),
         ])
         self._assert_roundtrip(agent, state, artifacts_inventory=artifacts)
-
-    def test_roundtrip_tool_budget_reminder(self):
-        # 命中 max_tool_rounds → reminder 含 <tool_budget>，重建路径同样带上（无需特判尾巴）
-        agent = _FakeAgentConfig(max_tool_rounds=2)
-        state = _make_state(events=[
-            _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),
-        ])
-        _, reminder = ContextManager.build(
-            agent_name=agent.name, agents={agent.name: agent},
-            state=state, tools={}, tool_round_count=2,
-            effective_toolset=effective_one(agent, {}),
-            compaction_threshold=TEST_COMPACTION_THRESHOLD,
-        )
-        assert "<tool_budget>" in reminder
-        # 重建端拿持久化 reminder 直接拼，等价
-        from core.event_history import build_event_history
-        history = build_event_history(state["events"], agent.name)
-        rebuilt = ContextManager.assemble("sys", history, reminder)
-        assert "<tool_budget>" in rebuilt[-1]["content"]
 
     def test_old_event_without_reminder_rebuilds_static_only(self):
         # reminder=None（早于本次变更的旧 agent_start）→ 只前置 system + 历史，不拼 reminder

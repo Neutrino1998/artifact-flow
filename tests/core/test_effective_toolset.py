@@ -25,7 +25,6 @@ def _agent(name="lead_agent", builtin_tools=None, units=None):
         name=name,
         description="d",
         model="m",
-        max_tool_rounds=10,
         internal=False,
         role_prompt="",
         builtin_tools=builtin_tools or {},

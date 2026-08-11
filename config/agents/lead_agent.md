@@ -21,7 +21,6 @@ tools:
   mount: enabled
   persist: enabled
 model: qwen3.7-plus
-max_tool_rounds: 100
 ---
 
 <role>

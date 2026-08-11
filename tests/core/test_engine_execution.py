@@ -2,7 +2,7 @@
 Engine execution flow tests.
 
 Covers: agent routing, tool execution, cancellation, permission interrupts,
-subagent routing, round limits, pending message drain, and metrics.
+subagent routing, pending message drain, and metrics.
 
 Mock strategy: patch("models.llm.astream_with_retry") + real RuntimeStore.
 """
@@ -36,7 +36,6 @@ class _FakeAgentConfig:
     description: str = "test lead"
     tools: dict = field(default_factory=dict)
     model: str = "gpt-4o-mini"
-    max_tool_rounds: int = 3
     role_prompt: str = "You are a test agent."
     internal: bool = False
 
@@ -1394,47 +1393,6 @@ class TestCancelProbeFailure:
         assert result["completed"] is True
         assert not result.get("error")
         assert result["response"] == "Done!"
-
-
-class TestRoundLimits:
-
-    async def test_max_tool_rounds_adds_tool_budget_reminder(self):
-        """After max_tool_rounds, a <tool_budget> wrap-up nudge is folded into the
-        reminder (merged into the last user message) — no longer a separate system message."""
-        agent = _FakeAgentConfig(tools={"my_tool": "auto"}, max_tool_rounds=1)
-        tool = _FakeTool("my_tool")
-
-        xml = _native_tool_call("my_tool", query="test")
-
-        captured_messages = []
-        call_idx = {"n": 0}
-
-        async def intercepting_stream(messages, **kwargs):
-            captured_messages.append(list(messages))
-            call_idx["n"] += 1
-            idx = min(call_idx["n"] - 1, 1)
-            chunks = [
-                _tool_call_chunks(xml),
-                _simple_llm_chunks("Done"),
-            ][idx]
-            for c in chunks:
-                yield c
-
-        result, emitted, store = await _run_engine(
-            intercepting_stream,
-            agents={"lead_agent": agent},
-            tools={"my_tool": tool},
-        )
-
-        # Second call: the budget nudge rides in the reminder on the last user message
-        assert len(captured_messages) >= 2
-        last_call_msgs = captured_messages[-1]
-        joined = "\n".join(
-            m["content"] if isinstance(m["content"], str) else str(m["content"])
-            for m in last_call_msgs
-        )
-        assert "<tool_budget>" in joined
-        assert "Tool-round budget reached" in joined
 
 
 # ============================================================

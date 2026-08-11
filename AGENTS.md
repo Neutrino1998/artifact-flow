@@ -46,7 +46,7 @@ Non-obvious design choices you won't infer from reading one file.
 
 - **Agent completion routing**: an agent's no-tool-call reply is its `_run_agent` return value. Top-level lead return → `completed`/`response`; subagent return → packed by the `call_subagent` branch, caller's remaining same-round tools continue. `None` return = turn terminated inside (cancel/error, flags already set by the fault site) → callers unwind and remaining tools are skipped. Before persistence, the native-call closure pass completes the in-flight `call_subagent` and every accepted-but-unstarted sibling exactly once.
 
-- **Agents are data, not classes**: Each agent is an MD file (`config/agents/*.md`) — YAML frontmatter (model, max_tool_rounds, tool permissions) + role-prompt body. No Python to define an agent.
+- **Agents are data, not classes**: Each agent is an MD file (`config/agents/*.md`) — YAML frontmatter (model, tool membership) + role-prompt body. No Python to define an agent.
 
 - **Lead prompt stays agent-agnostic**: `lead_agent.md` should describe generic delegation criteria only. Sub-agent-specific routing belongs in each sub-agent's `description`, which is surfaced through `<available_subagents>` at runtime; otherwise registry-driven custom agents drift out of sync with hard-coded lead text.
 
