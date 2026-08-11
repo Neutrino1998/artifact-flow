@@ -302,6 +302,28 @@ class TestLeadCompletion:
         assert result["completed"] is True
         assert result["response"] == "Done!"
 
+    async def test_user_input_is_emitted_live_and_recorded_for_replay(self):
+        result, emitted, _ = await _run_engine(
+            _make_fake_stream(_simple_llm_chunks("Done!")),
+            task="hello live monitor",
+        )
+
+        live_inputs = _events_of_type(emitted, StreamEventType.USER_INPUT.value)
+        recorded_inputs = [
+            event
+            for event in result["events"]
+            if event.event_type == StreamEventType.USER_INPUT.value
+        ]
+
+        assert len(live_inputs) == 1
+        assert len(recorded_inputs) == 1
+        assert live_inputs[0]["agent"] == "lead_agent"
+        assert live_inputs[0]["data"] == {"content": "hello live monitor"}
+        assert recorded_inputs[0].data == live_inputs[0]["data"]
+        assert emitted.index(live_inputs[0]) < emitted.index(
+            _events_of_type(emitted, StreamEventType.AGENT_START.value)[0]
+        )
+
     async def test_agent_start_and_complete_events(self):
         result, emitted, store = await _run_engine(
             _make_fake_stream(_simple_llm_chunks("ok"))

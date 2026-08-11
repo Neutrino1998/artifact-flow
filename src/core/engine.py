@@ -435,11 +435,14 @@ async def execute_loop(
                 "right after your response.]"
             )
 
-        state["events"].append(ExecutionEvent(
-            event_type=StreamEventType.USER_INPUT.value,
-            agent_name="lead_agent",
+        # USER_INPUT is both the durable history boundary and the first semantic
+        # live event.  Route it through the shared emitter so admin monitoring
+        # sees the same event immediately that replay receives after persistence.
+        await _emit(
+            StreamEventType.USER_INPUT.value,
+            agent="lead_agent",
             data={"content": "\n\n".join(parts)},
-        ))
+        )
 
     def _resolve_tool(name: str):
         """从合并后的 tools dict 查找工具"""

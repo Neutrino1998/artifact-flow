@@ -589,12 +589,22 @@ class TestChatStreamE2E:
                 events = _parse_sse_events(sse_resp.text)
                 event_types = [e.get("type") for e in events]
 
-                # Happy path: must have metadata → complete (not error)
+                # Happy path: metadata supplies the early display preview, then
+                # the fully assembled USER_INPUT must be present in the live SSE
+                # timeline before agent execution starts.  The same semantic
+                # event is persisted for replay at turn completion.
                 assert "metadata" in event_types
+                assert "user_input" in event_types
                 assert "complete" in event_types, \
                     f"Expected 'complete' terminal event, got: {event_types}"
                 assert "error" not in event_types, \
                     f"Unexpected error event in happy path: {event_types}"
+                assert event_types.index("metadata") < event_types.index("user_input")
+                assert event_types.index("user_input") < event_types.index("agent_start")
+                live_user_input = next(
+                    event for event in events if event.get("type") == "user_input"
+                )
+                assert live_user_input["data"]["content"].startswith("Hi there")
 
                 # 3. Verify conversation and response were persisted
                 async with db_manager.session() as session:
