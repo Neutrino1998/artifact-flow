@@ -23,6 +23,7 @@ import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
 import { StatusNotice } from '@/components/ui/StatusNotice';
 import DangerConfirmModal, { DangerConfirmTarget } from '@/components/layout/DangerConfirmModal';
 import PanelSearchBar from './PanelSearchBar';
+import SkillDisplayName from './SkillDisplayName';
 import { resolvePrivateSkillAllowance } from '@/lib/privateSkillLimit';
 import type {
   AdminSkillItem,
@@ -386,7 +387,7 @@ export default function SkillManagementPanel() {
                   >
                     <div className="flex min-h-6 items-center gap-2">
                       <span className="text-sm font-medium text-text-primary dark:text-text-primary-dark truncate">
-                        {skill.name}
+                        <SkillDisplayName name={skill.name} slug={skill.slug} />
                       </span>
                       {skill.adminOnly && (
                         <PillBadge

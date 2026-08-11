@@ -8,6 +8,7 @@ import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { BUTTON_GHOST_ICON } from '@/lib/styles';
 import { PillBadge } from '@/components/ui/PillBadge';
 import MarkdownPreview from '@/components/artifact/MarkdownPreview';
+import SkillDisplayName from './SkillDisplayName';
 import type { SkillDetailResponse } from '@/types';
 
 function buildPreviewContent(detail: SkillDetailResponse): string {
@@ -80,7 +81,9 @@ export default function SkillPreviewPanel() {
       <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3 dark:border-border-dark">
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           <h2 className="mr-0.5 break-words text-sm font-semibold text-text-primary dark:text-text-primary-dark">
-            {detail?.name ?? '技能说明'}
+            {detail
+              ? <SkillDisplayName name={detail.name} slug={detail.slug} />
+              : '技能说明'}
           </h2>
           {detail && (
             <>

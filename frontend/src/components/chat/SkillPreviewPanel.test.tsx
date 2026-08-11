@@ -60,10 +60,9 @@ describe('SkillPreviewPanel', () => {
 
     expect(apiMock.getSkillDetail).toHaveBeenCalledWith('shared-1', { admin: true });
     const heading = container.querySelector('h2');
-    expect(heading?.textContent).toBe('Department guide');
+    expect(heading?.textContent).toBe('Department guide（department-guide）');
     expect(heading?.parentElement?.textContent).toContain('导入');
     expect(heading?.parentElement?.textContent).toContain('部门');
-    expect(container.textContent).not.toContain('department-guide');
     const preview = container.querySelector('[data-testid="skill-markdown"]')?.textContent;
     expect(preview).toContain('### Description');
     expect(preview).toContain('Department-only guidance');
