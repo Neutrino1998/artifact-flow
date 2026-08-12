@@ -95,7 +95,28 @@ class ExecutionController:
         self.effective_skillset = effective_skillset
         self.hooks = hooks
         self.artifact_service = artifact_service
-        self.conversation_manager = conversation_manager or ConversationManager()
+
+        # Persistence has exactly two complete wiring modes:
+        #   1. db_manager: every DB touch opens a fresh retrying session;
+        #   2. bound repositories: non-Web/manual and focused tests explicitly inject
+        #      both collaborators.
+        # An incomplete bound mode used to turn event persistence into a silent
+        # success. Reject that invalid state at assembly time instead.
+        has_bound_conversation = conversation_manager is not None
+        has_bound_events = message_event_repo is not None
+        if db_manager is None:
+            if not has_bound_conversation or not has_bound_events:
+                raise ValueError(
+                    "ExecutionController requires db_manager or both "
+                    "conversation_manager and message_event_repo"
+                )
+        elif has_bound_conversation or has_bound_events:
+            raise ValueError(
+                "ExecutionController accepts either db_manager or bound persistence "
+                "collaborators, not both"
+            )
+
+        self.conversation_manager = conversation_manager
         self.message_event_repo = message_event_repo
         self._on_engine_exit = on_engine_exit
         self._db_manager = db_manager
@@ -109,13 +130,14 @@ class ExecutionController:
 
         fn: async (conv_mgr, event_repo) -> result
         有 db_manager 时委托 db_manager.with_retry（fresh session + 瞬断重试）。
-        无 db_manager 时回退到 bound 实例（不重试）。
+        无 db_manager 时使用显式注入的完整 bound persistence 模式（不重试）。
 
         **fn 必须幂等**(见 db_manager.with_retry 契约):with_retry 失败时从头重跑 fn。
         幂等键在调用前定好、跨重试稳定;写操作把「已存在」当成功(见
         ConversationManager.create / append_message 的撞重吞、batch_create 的稳定 event_id)。
         """
-        if not self._db_manager:
+        if self._db_manager is None:
+            # Constructor validation makes both collaborators non-None in this mode.
             return await fn(self.conversation_manager, self.message_event_repo)
 
         from repositories.conversation_repo import ConversationRepository
@@ -660,9 +682,7 @@ class ExecutionController:
                 # Flush dirty artifacts to DB
                 if self.artifact_service:
                     try:
-                        await self.artifact_service.flush_all(
-                            session_id, db_manager=self._db_manager
-                        )
+                        await self.artifact_service.flush_all(session_id)
                     except IntegrityError as flush_ie:
                         # Layer 2: exists() 之后到 flush 之间 conv 被删（TOCTOU）
                         logger.warning(
@@ -896,18 +916,12 @@ class ExecutionController:
         把 terminal 转成 ERROR，而不是静默吞掉。
 
         Returns:
-            True — 成功，或无需持久化（无事件 / 无 repo）
+            True — 成功，或没有本轮新事件
             False — 批量写入重试后仍失败
 
         Raises:
             IntegrityError — conv 已被删除（caller 应早返回，跳过后续阶段）
         """
-        # 能否持久化 = 有 db_manager(走 _with_db_retry 的 fresh er)或有 bound event_repo。
-        # B-5:turn 路径下 factory 不再绑 message_event_repo,持久化经 db_manager 短 session;
-        # 两者皆无(裸 controller / 部分测试)才是真的「无处可写」→ 跳过。
-        if not self._db_manager and not self.message_event_repo:
-            return True
-
         all_events = final_state.get("events", [])
         assert_native_calls_closed(final_state)
         # 只持久化本轮新产生的 events（历史 events 是 turn 开始时从 DB 载入的快照，

@@ -967,7 +967,7 @@ class ArtifactService:
     # 持久化(flush)
     # ========================================
 
-    async def flush_all(self, session_id: str, *, db_manager=None) -> None:
+    async def flush_all(self, session_id: str) -> None:
         """将所有 dirty artifacts 持久化到数据库。
 
         Write-back 语义:执行期间 create/update/rewrite 只改 WorkingSet,flush_all
@@ -980,7 +980,7 @@ class ArtifactService:
         - 已有 blob artifact 带新字节(persist 覆盖回写)→ repo.update_artifact_blob(可变单版,不产版本行)
         - 其余已有 artifact → repo.upsert_artifact_content(target_version=memory.current_version)
 
-        db_manager 提供时,每个 artifact flush 使用 fresh session + retry(对 DB 瞬时
+        service 以 db_manager 构造时,每个 artifact flush 使用 fresh session + retry(对 DB 瞬时
         失败有韧性)。只清除 flush 成功的条目。任一失败则 raise,由调用方决定终态。
         """
         if not self._ws.has_dirty():
@@ -994,7 +994,7 @@ class ArtifactService:
             if not memory:
                 continue
             try:
-                await self._flush_one(sid, aid, memory, db_manager=db_manager)
+                await self._flush_one(sid, aid, memory)
                 self._ws.clear_one(sid, aid)
                 logger.info(f"Flushed artifact '{aid}' in session '{sid}'")
             except Exception as e:
@@ -1005,8 +1005,8 @@ class ArtifactService:
             ids = ", ".join(aid for aid, _ in failed)
             raise RuntimeError(f"Failed to flush artifacts: {ids}")
 
-    async def _flush_one(self, sid: str, aid: str, memory, *, db_manager=None) -> None:
-        """Flush 单个 dirty artifact。db_manager 提供时用 fresh session + retry。"""
+    async def _flush_one(self, sid: str, aid: str, memory) -> None:
+        """Flush 单个 dirty artifact；持久化模式由构造注入决定。"""
         is_new = self._ws.is_new(sid, aid)
 
         async def _write(repo):
@@ -1035,7 +1035,7 @@ class ArtifactService:
                     source=memory.source, target_version=memory.current_version,
                 )
 
-        if db_manager:
+        if self._db_manager is not None:
             async def _attempt(session):
                 try:
                     await _write(ArtifactRepository(session))
@@ -1043,7 +1043,7 @@ class ArtifactService:
                     # 前一次 retry 已提交 — 视作成功
                     logger.info(f"Artifact '{aid}' already persisted (duplicate), skipping")
 
-            await db_manager.with_retry(_attempt)
+            await self._db_manager.with_retry(_attempt)
         else:
             await _write(self._ensure_repository())
 

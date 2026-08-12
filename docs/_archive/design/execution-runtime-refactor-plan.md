@@ -209,7 +209,7 @@ Embedded caller ────────────────→ AgentRuntime
 - 2026-08-12 完成。`ConversationManager` 只保留三个互斥写/校验入口：`create` 要求调用方提供 retry 外生成的稳定 ID，`require_owned` 对不存在与 owner 不匹配统一抛 `NotFoundError` 且不让 ORM snapshot 逃出 session，`append_message` 只接受已有 Conversation。
 - Chat send 按 ID 来源显式分流：本请求服务端分配的新 ID 只能 `create`，客户端提供的已有 ID 只能 `require_owned`；Controller 同样以是否收到 ID 决定 create/require，并把认证 `user_id` 带到两个边界。阶段 B 未移动附件转换、lease acquire、stream 创建或后台任务提交时序，A 锁定的 send/delete 空窗行为保持不变。
 - `append_message` 继续复用 Repository 的 parent 归属校验、Message + `active_branch` 提交和根消息 title 更新；retry 撞相同 Message ID 后仍继续 title 写，覆盖“Message 已 commit、title 前瞬断”的可达场景。缺失 Conversation 由显式 require/FK fail closed，不存在自动创建降级。
-- 删除 `start_conversation_async`、`ensure_conversation_exists(create_if_missing=...)`、`add_message_async(create_conversation_if_missing=...)`，不保留兼容壳；`create`/`require_owned`/`append_message` 缺 Repository 均 loud-fail，轻量单测通过显式 mock 隔离持久化，而非在生产代码加入 test-only 无持久化旁路。
+- 删除 `start_conversation_async`、`ensure_conversation_exists(create_if_missing=...)`、`add_message_async(create_conversation_if_missing=...)`，不保留兼容壳；`ConversationManager` 缺 Repository 时无法构造，轻量单测通过显式 mock/fake 隔离持久化，而非在生产代码加入 test-only 无持久化旁路。
 - 验收：Manager/Repository、Controller parent/删除/取消持久化及 send/delete 竞态定向回归 72 项通过；补齐测试镜像中既有 skill 脚本依赖后，完整后端套件 2046 项通过、45 项按环境跳过，仅保留一条既有 SQLAlchemy delete 行数 warning；其中包含“持久化入口缺 Repository 必须 loud-fail”的反向契约测试。
 
 ### C — 收口 Conversation 生命周期并提取 TaskSupervisor
@@ -350,6 +350,7 @@ Embedded caller ────────────────→ AgentRuntime
 ## 变更日志
 
 - 2026-08-12 **阶段 B 完成**：将 Conversation Manager 拆为显式 `create / require_owned / append_message`，删除隐式创建布尔参数和旧兼容入口；Chat/Controller 按 ID 来源分流且稳定 ID retry、parent/active_branch/title、删除 fail-closed 契约保持不变。未移动 lease、stream 或后台任务时序；完整后端 2046 项通过、45 项按环境跳过。
+- 2026-08-12 **阶段 B 持久化边界收紧**：删除 Controller 事件“无持久化目标即成功”、Conversation 更新/读取静默 no-op 和 SkillService 无 DB 测试模式；Controller 构造只接受完整且互斥的 `db_manager` / bound repositories 模式，registry snapshot 强制注入 DB credential resolver。手工 engine 改走与生产一致的短 session 路径；完整后端 2048 项通过、45 项按环境跳过。
 - 2026-08-12 **阶段 A 完成**：用无 sleep 的 barrier tests 稳定复现 send/delete 双顺序与当前 check→lease 空窗；补齐固定 ID post-commit retry、parent 三态、stale owner、Router runtime 返回值及 user/ops 错误双契约；盘点全部 `runner.store` 与非 Router runtime 消费者。阶段内无生产代码或 schema 变化。
 - 2026-08-11 **契约精化**：将 `append_message` 从误导性的“只 INSERT”改为“只接受已有 Conversation”，显式保留 parent 校验、active_branch 和根消息 title；把 lease loss 验收改为检测后的 fail-closed、有界 finalization、CAS cleanup 与 TTL 回收，不再承诺网络分区下零重叠/零残留；修正 ConversationTurnHandler 到 D 才提取的出现时点。
 - 2026-08-11 **reviewer 修订**：消除原 B/C 施工依赖环，B 收窄为持久化语义、C 合并 LeaseHandle/TaskSupervisor/Admission/Router 迁移；恢复稳定 ID 的 DB retry 幂等契约；将 AgentRuntime 明确为 engine outcome producer、ConversationTurnHandler 明确为唯一 finalization owner；纳入 Chat/Admin 全部 `runner.store` 真实调用并删除 named pools 预留。

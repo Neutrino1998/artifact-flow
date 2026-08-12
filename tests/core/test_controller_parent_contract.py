@@ -45,6 +45,7 @@ def _controller(manager, *, user_id=None):
         effective_toolsets={},
         hooks=hooks,
         conversation_manager=manager,
+        message_event_repo=MagicMock(),
         user_id=user_id,
     )
 

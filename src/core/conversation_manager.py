@@ -39,23 +39,19 @@ class ConversationManager:
             await manager.create(...)
     """
 
-    def __init__(self, repository: Optional[ConversationRepository] = None):
+    def __init__(self, repository: ConversationRepository):
         """
         初始化 ConversationManager
 
         Args:
-            repository: ConversationRepository 实例（可以为 None）
+            repository: ConversationRepository 实例
         """
+        if repository is None:
+            raise ValueError("ConversationManager requires a repository")
         self.repository = repository
         # DEBUG 而非 INFO:构造无上下文、每请求处理器各 new 一个(单轮可达 ~8 次),
         # INFO 下纯噪音会淹没真实里程碑。真业务事件(create 等)才打 INFO。
         logger.debug("ConversationManager initialized")
-
-    def _ensure_repository(self) -> ConversationRepository:
-        """确保 Repository 已设置"""
-        if self.repository is None:
-            raise RuntimeError("ConversationManager: repository not configured")
-        return self.repository
 
     @staticmethod
     def _generate_title(content: str) -> str:
@@ -99,7 +95,7 @@ class ConversationManager:
         Returns:
             对话ID
         """
-        repo = self._ensure_repository()
+        repo = self.repository
         try:
             await repo.create_conversation(
                 conversation_id=conversation_id,
@@ -129,7 +125,7 @@ class ConversationManager:
             conversation_id: 对话ID
             user_id: 预期 owner；None 保留非 Web/manual 的无 owner Conversation 语义
         """
-        repo = self._ensure_repository()
+        repo = self.repository
         existing = await repo.get_conversation(conversation_id)
         if not existing or existing.user_id != user_id:
             raise NotFoundError("Conversation", conversation_id)
@@ -160,7 +156,7 @@ class ConversationManager:
         """
         now = utc_now().isoformat()
 
-        repo = self._ensure_repository()
+        repo = self.repository
         try:
             await repo.add_message(
                 conversation_id=conv_id,
@@ -206,8 +202,7 @@ class ConversationManager:
             message_id: 消息ID
             response: 助手响应内容
         """
-        if self.repository:
-            await self.repository.update_response(message_id, response)
+        await self.repository.update_response(message_id, response)
 
     async def get_message_metadata_async(
         self,
@@ -222,10 +217,9 @@ class ConversationManager:
         Returns:
             metadata 字典（不存在则返回空字典）
         """
-        if self.repository:
-            msg = await self.repository.get_message(message_id)
-            if msg:
-                return msg.metadata_ or {}
+        msg = await self.repository.get_message(message_id)
+        if msg:
+            return msg.metadata_ or {}
         return {}
 
     async def update_message_metadata_async(
@@ -242,8 +236,7 @@ class ConversationManager:
             message_id: 消息ID
             metadata: 要合并的 metadata 字典
         """
-        if self.repository:
-            await self.repository.update_message_metadata(message_id, metadata)
+        await self.repository.update_message_metadata(message_id, metadata)
 
     # ========================================
     # 查询操作
@@ -259,10 +252,9 @@ class ConversationManager:
         Returns:
             活跃分支的消息ID，如果对话不存在或没有消息则返回 None
         """
-        if self.repository:
-            conv = await self.repository.get_conversation(conv_id)
-            if conv:
-                return conv.active_branch or None
+        conv = await self.repository.get_conversation(conv_id)
+        if conv:
+            return conv.active_branch or None
         return None
 
     async def load_event_history_async(
@@ -285,7 +277,7 @@ class ConversationManager:
         """
         from core.events import ExecutionEvent
 
-        repo = self._ensure_repository()
+        repo = self.repository
         path = await repo.get_conversation_path(conv_id, to_message_id)
         if not path:
             return []
@@ -331,7 +323,7 @@ class ConversationManager:
         """
         from repositories.artifact_repo import ArtifactRepository
 
-        repo = self._ensure_repository()
+        repo = self.repository
         conversations = await repo.list_conversations(
             limit=limit,
             offset=offset,
@@ -366,7 +358,7 @@ class ConversationManager:
         Returns:
             对话总数
         """
-        repo = self._ensure_repository()
+        repo = self.repository
         return await repo.count_conversations(user_id=user_id, title_query=title_query)
 
     async def get_user_upload_bytes(self, user_id: str) -> int:
@@ -382,7 +374,7 @@ class ConversationManager:
         from repositories.artifact_repo import ArtifactRepository
         from repositories.skill_repo import SkillRepository
 
-        repo = self._ensure_repository()
+        repo = self.repository
         blob_bytes = await ArtifactRepository(repo.session).get_user_blob_bytes(user_id)
         bundle_bytes = await SkillRepository(repo.session).get_user_bundle_bytes(user_id)
         return blob_bytes + bundle_bytes
@@ -420,7 +412,7 @@ class ConversationManager:
         Returns:
             对话对象（预加载消息），不存在则返回 None
         """
-        repo = self._ensure_repository()
+        repo = self.repository
         return await repo.get_conversation(conversation_id, load_messages=True)
 
     async def get_conversation_messages(self, conversation_id: str) -> List[Message]:
@@ -433,7 +425,7 @@ class ConversationManager:
         Returns:
             消息列表（按创建时间排序）
         """
-        repo = self._ensure_repository()
+        repo = self.repository
         return await repo.get_conversation_messages(conversation_id)
 
     async def get_message(self, message_id: str) -> Optional[Message]:
@@ -446,7 +438,7 @@ class ConversationManager:
         Returns:
             消息对象，不存在则返回 None
         """
-        repo = self._ensure_repository()
+        repo = self.repository
         return await repo.get_message(message_id)
 
     async def set_message_feedback(
@@ -460,7 +452,7 @@ class ConversationManager:
         detail: Optional[str],
     ) -> Optional[MessageFeedback]:
         """Create or replace feedback after checking conversation ownership."""
-        repo = self._ensure_repository()
+        repo = self.repository
         conversation = await repo.get_conversation(conversation_id)
         if not conversation or conversation.user_id != user_id:
             return None
@@ -475,7 +467,7 @@ class ConversationManager:
         self, *, conversation_id: str, message_id: str, user_id: str
     ) -> Optional[bool]:
         """Delete feedback idempotently; None means conversation/message is hidden."""
-        repo = self._ensure_repository()
+        repo = self.repository
         conversation = await repo.get_conversation(conversation_id)
         if not conversation or conversation.user_id != user_id:
             return None
@@ -498,7 +490,7 @@ class ConversationManager:
         Router 不得直接实例化 MessageEventRepository — 通过本方法复用
         ConversationManager 持有的 session。
         """
-        repo = self._ensure_repository()
+        repo = self.repository
         event_repo = MessageEventRepository(repo.session)
         if event_type:
             return await event_repo.get_by_type(message_id, event_type)
@@ -520,7 +512,7 @@ class ConversationManager:
         from sqlalchemy import select
         from db.models import User
 
-        repo = self._ensure_repository()
+        repo = self.repository
         conversations = await repo.list_conversations(
             limit=limit,
             offset=offset,
@@ -561,7 +553,7 @@ class ConversationManager:
         from sqlalchemy import select
         from db.models import User
 
-        repo = self._ensure_repository()
+        repo = self.repository
         feedback_repo = MessageFeedbackRepository(repo.session)
         rows = await feedback_repo.list_admin(
             rating=rating, query=query, limit=limit, offset=offset
@@ -594,7 +586,7 @@ class ConversationManager:
         from sqlalchemy import select
         from db.models import User
 
-        repo = self._ensure_repository()
+        repo = self.repository
         conv = await repo.get_conversation(conv_id)
         if not conv:
             return None
@@ -700,7 +692,7 @@ class ConversationManager:
         Returns:
             是否成功删除
         """
-        repo = self._ensure_repository()
+        repo = self.repository
         return await repo.delete_conversation(conversation_id)
 
     async def exists_async(self, conversation_id: str) -> bool:
@@ -709,7 +701,7 @@ class ConversationManager:
 
         controller post-processing 用来判定 conv 是否被中途 DELETE。
         """
-        repo = self._ensure_repository()
+        repo = self.repository
         return await repo.exists(conversation_id)
 
     async def count_user_conversations(self, user_id: str) -> int:
@@ -720,7 +712,7 @@ class ConversationManager:
         薄包装 ConversationRepository.count_by_user，维持 router → manager → repo
         的三层调用边界。
         """
-        repo = self._ensure_repository()
+        repo = self.repository
         return await repo.count_by_user(user_id)
 
     async def count_users_conversations(self, user_ids: list[str]) -> int:
@@ -729,5 +721,5 @@ class ConversationManager:
 
         用于 PR5a 批量硬删用户前的 impact 提示。一次 IN 查询，避免 N+1。
         """
-        repo = self._ensure_repository()
+        repo = self.repository
         return await repo.count_by_users(user_ids)

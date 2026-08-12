@@ -49,7 +49,7 @@ async def test_reconstruct_model_messages_keeps_native_call_ids():
             event_id="evt-anchor",
         ),
     ]
-    manager = ConversationManager()
+    manager = ConversationManager(AsyncMock())
     manager.load_event_history_async = AsyncMock(return_value=events)
 
     result = await manager.reconstruct_prompt("conv-1", "msg-1", "evt-anchor")
@@ -99,7 +99,7 @@ async def test_reconstruct_prompt_uses_persisted_reasoning_replay_policy():
             event_id="evt-anchor",
         ),
     ]
-    manager = ConversationManager()
+    manager = ConversationManager(AsyncMock())
     manager.load_event_history_async = AsyncMock(return_value=events)
 
     result = await manager.reconstruct_prompt("conv-1", "msg-1", "evt-anchor")

@@ -559,18 +559,12 @@ class TestRetryIdempotency:
         with pytest.raises(NotFoundError):
             await mgr.require_owned(f"conv-{uuid.uuid4().hex}", test_user.id)
 
-    async def test_persistence_entrypoints_require_repository(self):
-        """Persistence APIs fail loudly; production has no test-only no-op path."""
+    async def test_manager_requires_repository_at_construction(self):
+        """Manager has no dependencyless/test-only persistence mode."""
         from core.conversation_manager import ConversationManager
 
-        mgr = ConversationManager()
-
-        with pytest.raises(RuntimeError, match="repository not configured"):
-            await mgr.create("conv-test")
-        with pytest.raises(RuntimeError, match="repository not configured"):
-            await mgr.require_owned("conv-test")
-        with pytest.raises(RuntimeError, match="repository not configured"):
-            await mgr.append_message("conv-test", "msg-test", "hello")
+        with pytest.raises(ValueError, match="requires a repository"):
+            ConversationManager(None)
 
     async def test_fixed_conversation_id_survives_post_commit_disconnect(
         self,

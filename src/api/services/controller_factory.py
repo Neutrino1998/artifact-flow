@@ -196,8 +196,8 @@ async def create_controller(
         await store.clear_engine_interactive(conv_id, msg_id)
 
     # conversation_manager / message_event_repo 不在此绑 session(B-5):controller 经
-    # _with_db_retry 每调一次开短 session(默认 ConversationManager() 仅作 no-db_manager
-    # 回落,prod 永走 retry 路径);db_manager 在场,事件持久化 / 对话读写均不缺。
+    # _with_db_retry 每调一次开短 session。db_manager 模式与 bound-repository 模式在
+    # Controller 构造时互斥且完整，生产装配不会静默退化成无持久化执行。
     yield ExecutionController(
         agents=agents,
         tools=all_tools,

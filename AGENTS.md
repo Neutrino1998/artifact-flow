@@ -52,6 +52,8 @@ Non-obvious design choices you won't infer from reading one file.
 
 - **Transaction ownership**: `DatabaseManager.session()` manages lifecycle only (create + close); transaction control (`flush` + `commit`) lives in Repository methods to keep write locks short. **Consequence: cross-Repository atomicity is intentionally sacrificed.** Post-processing writes in independent transactions (artifact flush → event persist → `Message.response`/metadata); a later-step failure can leave earlier-committed artifacts with no supporting event history. Accepted trade-off — a single transaction would mean splitting `write`/`commit` across every Repo method (philosophy change, deferred until a user-visible issue).
 
+- **Required persistence is fail-closed at assembly**: A missing Repository/`db_manager` must never turn a durable operation into success, an empty read, or a no-op. `ExecutionController` has exactly two complete persistence modes: production `db_manager` short sessions, or an explicitly bound `ConversationManager` + `MessageEventRepository` pair; incomplete/mixed wiring is rejected by its constructor. `ConversationManager` and `SkillService` require their persistence dependency at construction. Tests inject fakes or real repositories instead of relying on dependencyless production objects. This does not prohibit explicit optional capabilities such as SSE emission or the documented in-memory RuntimeStore mode.
+
 - **Event sourcing**: All execution events are append-only to the `MessageEvent` table. `llm_chunk` is SSE-only (streaming transport), NOT persisted — `llm_complete` carries the full content.
 
 - **SSE transport**: Frontend uses `fetch` + `ReadableStream`, not `EventSource`, because EventSource cannot send a custom `Authorization` header.

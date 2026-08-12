@@ -31,6 +31,7 @@ def _make_controller() -> ExecutionController:
         effective_toolsets={},
         hooks=hooks,
         conversation_manager=conversation_manager,
+        message_event_repo=MagicMock(),
     )
 
 

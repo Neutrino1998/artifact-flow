@@ -701,14 +701,14 @@ async def test_mcp_timeout_float_fails(db_session, cfg, tmp_path):
 # --------------------------------------------------------------------------
 
 
-async def test_snapshot_reconstructs_http_tool(db_session, cfg):
+async def test_snapshot_reconstructs_http_tool(db_session, db_manager, cfg):
     tools, agents = cfg
     _write(tools / "weather.md", _singleton_tool_md(permission="confirm"))
     _write(agents / "lead_agent.md",
            _agent_md(tools_block="  web_search: enabled\n  weather: enabled"))
     await _run(db_session, cfg)
 
-    snap = await load_registry_snapshot(db_session)
+    snap = await load_registry_snapshot(db_session, db_manager=db_manager)
 
     # external 工具重建为 HttpTool
     assert "weather" in snap.external_tools
@@ -728,12 +728,14 @@ async def test_snapshot_reconstructs_http_tool(db_session, cfg):
     assert agent.units == {"weather": "enabled"}
 
 
-async def test_snapshot_keeps_mcp_unit_without_external_tool(db_session, cfg, tmp_path):
+async def test_snapshot_keeps_mcp_unit_without_external_tool(
+    db_session, db_manager, cfg, tmp_path
+):
     mcp = tmp_path / "mcp"
     _write(mcp / "inventory.md", _mcp_server_md())
     await _run_with_mcp(db_session, cfg, mcp)
 
-    snap = await load_registry_snapshot(db_session)
+    snap = await load_registry_snapshot(db_session, db_manager=db_manager)
 
     assert "inventory" in snap.units
     assert snap.units["inventory"].kind == "mcp"
@@ -743,7 +745,9 @@ async def test_snapshot_keeps_mcp_unit_without_external_tool(db_session, cfg, tm
     assert "inventory" not in snap.external_tools
 
 
-async def test_snapshot_discovers_mcp_tools_when_manager_is_available(db_session, cfg, tmp_path):
+async def test_snapshot_discovers_mcp_tools_when_manager_is_available(
+    db_session, db_manager, cfg, tmp_path
+):
     mcp = tmp_path / "mcp"
     _write(mcp / "inventory.md", _mcp_server_md())
     await _run_with_mcp(db_session, cfg, mcp)
@@ -779,13 +783,13 @@ async def test_snapshot_discovers_mcp_tools_when_manager_is_available(db_session
         ]
 
     manager = McpClientManager(list_callable=fake_list)
-    snap = await load_registry_snapshot(db_session)
+    snap = await load_registry_snapshot(db_session, db_manager=db_manager)
 
     # DB snapshot 阶段不访问外部 MCP;hydrate 阶段在 session 外填充 discovered tools。
     assert snap.units["inventory"].member_full_names == []
     assert "inventory__lookup" not in snap.external_tools
 
-    await hydrate_mcp_tools(snap, mcp_manager=manager)
+    await hydrate_mcp_tools(snap, mcp_manager=manager, db_manager=db_manager)
 
     assert snap.units["inventory"].member_full_names == [
         "inventory__lookup",
@@ -800,7 +804,9 @@ async def test_snapshot_discovers_mcp_tools_when_manager_is_available(db_session
     ) == ["bad:param"]
 
 
-async def test_hydrate_mcp_tools_respects_allowed_unit_filter(db_session, cfg):
+async def test_hydrate_mcp_tools_respects_allowed_unit_filter(
+    db_session, db_manager, cfg
+):
     calls = []
 
     async def fake_list(url, _headers, _timeout):
@@ -831,15 +837,18 @@ async def test_hydrate_mcp_tools_respects_allowed_unit_filter(db_session, cfg):
     await db_session.commit()
 
     manager = McpClientManager(list_callable=fake_list)
-    snap = await load_registry_snapshot(db_session)
-    await hydrate_mcp_tools(snap, mcp_manager=manager, allowed_unit_names={"allowed"})
+    snap = await load_registry_snapshot(db_session, db_manager=db_manager)
+    await hydrate_mcp_tools(
+        snap, mcp_manager=manager, db_manager=db_manager,
+        allowed_unit_names={"allowed"},
+    )
 
     assert calls == ["https://allowed.example/mcp"]
     assert "allowed__lookup" in snap.external_tools
     assert "denied__lookup" not in snap.external_tools
 
 
-async def test_snapshot_skips_member_shadowing_builtin(db_session, cfg):
+async def test_snapshot_skips_member_shadowing_builtin(db_session, db_manager, cfg):
     # 撞名兜底(skip+log,非 raise):绕过写校验(dynamic 行/手改 DB)塞一个
     # full_name=builtin 的 external 成员 → load_registry_snapshot 跳过它(不进
     # external_tools),让 builtin 在合并里保活;快照照常返回、不拖垮其余工具。
@@ -850,13 +859,13 @@ async def test_snapshot_skips_member_shadowing_builtin(db_session, cfg):
     ))
     await db_session.commit()
 
-    snap = await load_registry_snapshot(db_session)
+    snap = await load_registry_snapshot(db_session, db_manager=db_manager)
     assert "web_fetch" not in snap.external_tools          # 撞名成员被跳过
     assert "evil" in snap.units                            # 同 unit 的非撞名内容仍在
     assert snap.units["evil"].member_full_names == []      # 唯一成员撞名 → 不重建
 
 
-async def test_snapshot_skips_unit_shadowing_builtin(db_session, cfg):
+async def test_snapshot_skips_unit_shadowing_builtin(db_session, db_manager, cfg):
     # unit 名撞 builtin → 整 unit 不 surface(成员随之不重建),防命名空间歧义。
     db_session.add(ToolUnit(name="web_fetch", kind="tool", description="ui", source="dynamic"))
     db_session.add(ToolMember(
@@ -865,6 +874,6 @@ async def test_snapshot_skips_unit_shadowing_builtin(db_session, cfg):
     ))
     await db_session.commit()
 
-    snap = await load_registry_snapshot(db_session)
+    snap = await load_registry_snapshot(db_session, db_manager=db_manager)
     assert "web_fetch" not in snap.units                   # 撞名 unit 被跳过
     assert "web_fetch__go" not in snap.external_tools       # 其成员随之不重建

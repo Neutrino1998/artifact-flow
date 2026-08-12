@@ -1,8 +1,9 @@
 """
 Controller._persist_events unit tests.
 
-Covers the behavior introduced by commit 677b7c5:
-- returns True when there's nothing to persist (no repo / no events)
+Pins the strict persistence contract:
+- incomplete controller persistence wiring is rejected at construction
+- returns True when there are no new events
 - returns True on successful batch_create
 - returns False on batch_create failure (instead of silently swallowing)
 - only non-historical events (is_historical=False) are written — historical
@@ -35,23 +36,47 @@ def _make_controller(repo=None, db_manager=None):
         wait_for_interrupt=AsyncMock(return_value=None),
         drain_messages=AsyncMock(return_value=[]),
     )
+    kwargs = {"db_manager": db_manager} if db_manager is not None else {
+        "conversation_manager": MagicMock(),
+        "message_event_repo": repo or MagicMock(),
+    }
     return ExecutionController(
-        agents={},
-        tools={},
-        effective_toolsets={},
-        hooks=hooks,
-        message_event_repo=repo,
-        db_manager=db_manager,
+        agents={}, tools={}, effective_toolsets={}, hooks=hooks, **kwargs
     )
 
 
 class TestPersistEvents:
 
-    async def test_no_repo_returns_true(self):
-        """Without a repo, there's nothing to write — success by definition."""
-        ctrl = _make_controller(repo=None)
-        state = {"events": [_ev(StreamEventType.USER_INPUT.value, {"content": "hi"})]}
-        assert await ctrl._persist_events("msg-1", state) is True
+    def test_incomplete_persistence_wiring_is_rejected(self):
+        hooks = EngineHooks(
+            check_cancelled=AsyncMock(return_value=False),
+            wait_for_interrupt=AsyncMock(return_value=None),
+            drain_messages=AsyncMock(return_value=[]),
+        )
+        with pytest.raises(ValueError, match="requires db_manager"):
+            ExecutionController(
+                agents={}, tools={}, effective_toolsets={}, hooks=hooks
+            )
+
+        with pytest.raises(ValueError, match="requires db_manager"):
+            ExecutionController(
+                agents={}, tools={}, effective_toolsets={}, hooks=hooks,
+                conversation_manager=MagicMock(),
+            )
+
+    def test_persistence_modes_are_mutually_exclusive(self):
+        hooks = EngineHooks(
+            check_cancelled=AsyncMock(return_value=False),
+            wait_for_interrupt=AsyncMock(return_value=None),
+            drain_messages=AsyncMock(return_value=[]),
+        )
+        with pytest.raises(ValueError, match="either db_manager"):
+            ExecutionController(
+                agents={}, tools={}, effective_toolsets={}, hooks=hooks,
+                db_manager=MagicMock(),
+                conversation_manager=MagicMock(),
+                message_event_repo=MagicMock(),
+            )
 
     async def test_no_new_events_returns_true(self):
         """All events historical → nothing to write → success."""

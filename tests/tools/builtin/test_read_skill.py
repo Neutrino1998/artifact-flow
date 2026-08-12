@@ -24,6 +24,7 @@ from tools.builtin.read_skill import (
     ReadSkillTool,
     create_skill_tools,
 )
+from tools.builtin.skill_service import SkillService
 from tools.builtin.sandbox_session import SandboxError
 
 
@@ -37,6 +38,11 @@ class _FakeService:
 
     async def get_bundle(self, slug):
         return self._bundles.get(slug)
+
+
+def test_skill_service_requires_db_manager():
+    with pytest.raises(ValueError, match="requires a db_manager"):
+        SkillService(None)
 
 
 def _skillset(*slugs, has_extra_files=False, compatibility=None):

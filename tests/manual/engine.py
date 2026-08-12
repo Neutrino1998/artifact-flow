@@ -24,7 +24,6 @@ from reconcile.reconciler import reconcile_config_to_db
 from reconcile.snapshot import load_registry_snapshot
 from core.engine import EngineHooks
 from core.events import StreamEventType
-from core.conversation_manager import ConversationManager
 from agents.loader import load_all_agents
 from tools.base import BaseTool, build_tool_map
 from tools.builtin.artifact_service import ArtifactService
@@ -35,8 +34,6 @@ from tools.builtin.web_fetch import WebFetchTool
 from api.services.execution_runner import ExecutionRunner
 from api.services.runtime_store import InMemoryRuntimeStore
 from db.database import DatabaseManager
-from repositories.artifact_repo import ArtifactRepository
-from repositories.conversation_repo import ConversationRepository
 from utils.logger import set_global_debug
 
 set_global_debug(True)
@@ -269,43 +266,41 @@ class TestEnvironment:
 
     @asynccontextmanager
     async def request_scope(self):
-        """每个调用产出独立的 session + controller"""
+        """每个调用产出与生产一致的短 session controller。"""
         store = self.runner.store
 
         async with self.db_manager.session() as session:
-            artifact_repo = ArtifactRepository(session)
-            artifact_service = ArtifactService(artifact_repo)
-
             # 每请求 DB 快照(镜像 controller_factory):agents + external 工具从 DB 重建,
             # 合并进程级 builtin + 请求级 artifact 工具,resolve_all 出 effective_toolsets。
-            snapshot = await load_registry_snapshot(session)
-            all_tools = {
-                **self._tools,
-                **snapshot.external_tools,
-                **{t.name: t for t in create_artifact_tools(artifact_service)},
-            }
-            agents = snapshot.agents
-            effective_toolsets = resolve_all(snapshot, all_tools)
+            snapshot = await load_registry_snapshot(session, db_manager=self.db_manager)
 
-            conv_repo = ConversationRepository(session)
-            conv_manager = ConversationManager(conv_repo)
+        # Snapshot session closes before model/tool execution. All later DB touches use
+        # db_manager.with_retry short sessions, matching controller_factory.
+        artifact_service = ArtifactService(db_manager=self.db_manager)
+        all_tools = {
+            **self._tools,
+            **snapshot.external_tools,
+            **{t.name: t for t in create_artifact_tools(artifact_service)},
+        }
+        agents = snapshot.agents
+        effective_toolsets = resolve_all(snapshot, all_tools)
 
-            hooks = EngineHooks(
-                check_cancelled=store.is_cancelled,
-                wait_for_interrupt=store.wait_for_interrupt,
-                drain_messages=store.drain_messages,
-            )
+        hooks = EngineHooks(
+            check_cancelled=store.is_cancelled,
+            wait_for_interrupt=store.wait_for_interrupt,
+            drain_messages=store.drain_messages,
+        )
 
-            controller = ExecutionController(
-                agents=agents,
-                tools=all_tools,
-                effective_toolsets=effective_toolsets,
-                hooks=hooks,
-                artifact_service=artifact_service,
-                conversation_manager=conv_manager,
-            )
+        controller = ExecutionController(
+            agents=agents,
+            tools=all_tools,
+            effective_toolsets=effective_toolsets,
+            hooks=hooks,
+            artifact_service=artifact_service,
+            db_manager=self.db_manager,
+        )
 
-            yield controller
+        yield controller
 
     async def cleanup(self):
         if self.runner:

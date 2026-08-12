@@ -1275,7 +1275,7 @@ class TestShortSessionPath:
             session_id, "doc.md", "text/markdown", "Doc", "hello"
         )
         assert ok is True
-        await svc.flush_all(session_id, db_manager=db_manager)
+        await svc.flush_all(session_id)
 
         # 新实例 = 空 WorkingSet → list 只能来自 DB,证明短 session 读通且 flush 已落库。
         fresh = ArtifactService(db_manager=db_manager)
@@ -1289,7 +1289,7 @@ class TestShortSessionPath:
         svc.set_session(session_id)
         ok, _ = await svc.create_artifact(session_id, "dup.md", "text/markdown", "D", "x")
         assert ok is True
-        await svc.flush_all(session_id, db_manager=db_manager)
+        await svc.flush_all(session_id)
 
         fresh = ArtifactService(db_manager=db_manager)  # 空 WorkingSet → 必查 DB
         fresh.set_session(session_id)

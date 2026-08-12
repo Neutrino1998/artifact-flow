@@ -106,7 +106,7 @@ async def test_user_override_persisted(db_session):
     assert "pub" not in eff.enabled    # 用户关掉 → 不进 L1
 
 
-async def test_department_unit_match_via_ancestor_rule(db_session):
+async def test_department_unit_match_via_ancestor_rule(db_session, db_manager):
     await _tree(db_session)
     db_session.add(ToolUnit(name="reports", kind="tool", description="d"))
     await db_session.flush()
@@ -118,7 +118,7 @@ async def test_department_unit_match_via_ancestor_rule(db_session):
     dept_id = await repo.user_department_id("u1")
     ancestors = await load_ancestor_ids(db_session, dept_id)
     snap, matched_units = await load_registry_snapshot_with_unit_matches(
-        db_session, ancestors
+        db_session, ancestors, db_manager=db_manager
     )
 
     assert snap.units["reports"].visibility == "public"

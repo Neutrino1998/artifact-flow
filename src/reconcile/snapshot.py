@@ -111,7 +111,7 @@ def build_http_tool(
 
 
 async def load_registry_snapshot(
-    session: AsyncSession, *, db_manager=None
+    session: AsyncSession, *, db_manager
 ) -> RegistrySnapshot:
     snapshot, _ = await _load_registry_snapshot_and_unit_matches(
         session, db_manager=db_manager, dept_ids=None
@@ -120,7 +120,7 @@ async def load_registry_snapshot(
 
 
 async def load_registry_snapshot_with_unit_matches(
-    session: AsyncSession, dept_ids: List[str], *, db_manager=None
+    session: AsyncSession, dept_ids: List[str], *, db_manager
 ) -> tuple[RegistrySnapshot, Set[str]]:
     """Load registry snapshot and department-unit rule matches in one unit projection.
 
@@ -136,7 +136,7 @@ async def load_registry_snapshot_with_unit_matches(
 
 
 async def _load_registry_snapshot_and_unit_matches(
-    session: AsyncSession, *, db_manager=None, dept_ids: Optional[List[str]]
+    session: AsyncSession, *, db_manager, dept_ids: Optional[List[str]]
 ) -> tuple[RegistrySnapshot, Set[str]]:
     """一次性读全部注册表行,重建 external 工具 + unit 元数据 + agent 元数据。
 
@@ -153,8 +153,7 @@ async def _load_registry_snapshot_and_unit_matches(
     """
     # 凭证 resolver 持 db_manager(非本快照 session):execute 期按 unit 开短 session lazy
     # 解密(B-5)—— 本 session 只读注册表行、读完即关,不被凭证解析骑成 turn-long 连接。
-    # db_manager 缺省(测试 / 进程级重建脚本不带)→ resolver=None,HttpTool 回落 env。
-    credential_resolver = CredentialResolver(db_manager) if db_manager is not None else None
+    credential_resolver = CredentialResolver(db_manager)
 
     dept_match_expr = (
         exists().where(
@@ -266,7 +265,7 @@ async def hydrate_mcp_tools(
     snapshot: RegistrySnapshot,
     *,
     mcp_manager,
-    db_manager=None,
+    db_manager,
     allowed_unit_names: Optional[Set[str]] = None,
 ) -> RegistrySnapshot:
     """Session-free MCP discovery pass.
@@ -279,7 +278,7 @@ async def hydrate_mcp_tools(
     `allowed_unit_names`(G-0) lets the caller apply department visibility before
     discovery, so a dept-denied MCP server is not contacted at all.
     """
-    credential_resolver = CredentialResolver(db_manager) if db_manager is not None else None
+    credential_resolver = CredentialResolver(db_manager)
     for unit in snapshot.units.values():
         if unit.provider != "mcp":
             continue
