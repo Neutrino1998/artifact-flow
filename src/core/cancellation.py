@@ -16,10 +16,10 @@ engine task，工具早已被要求 cancel-safe（终态契约见 core/post_proc
 与外部 cancel（lease fencing / EXECUTION_TIMEOUT deadline）的辨析：那些路径
 cancel 的是**调用方所在的 task**，会在 asyncio.wait / flag 轮询处以
 CancelledError 抛进来 —— 此处转发给子 task 后原样 re-raise（绝不吞、绝不转换），
-两条路径不混淆（与 controller.py 对 asyncio.timeout 的同款辨析一致）。
+两条路径不混淆（与 AgentRuntime 对 asyncio.timeout 的辨析一致）。
 
 GIL 警告（同 EXECUTION_TIMEOUT）：task.cancel() 是协作式的，打不断钉住 GIL 的
-同步 CPU 工具 —— 工具作者仍自己兜 wall-clock（CLAUDE.md「Tool authors own
+同步 CPU 工具 —— 工具作者仍自己兜 wall-clock（AGENTS.md「Tool authors own
 CPU-cost discipline」）。
 """
 

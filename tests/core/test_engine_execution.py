@@ -15,7 +15,8 @@ from unittest.mock import patch
 
 import pytest
 
-from core.engine import EngineHooks, create_initial_state, execute_loop
+from core.agent_runtime import RuntimeHooks
+from core.engine import create_initial_state, execute_loop
 from core.events import StreamEventType, ExecutionEvent
 from models.llm import LLMContextOverflowError
 from tests.core._toolset import effective_for
@@ -192,9 +193,9 @@ class _RecordingArtifactService:
         return True, "ok", f"tool_{tool_name}_0001"
 
 
-def _hooks_from_store(store: InMemoryRuntimeStore) -> EngineHooks:
-    """Build EngineHooks wired to a real RuntimeStore."""
-    return EngineHooks(
+def _hooks_from_store(store: InMemoryRuntimeStore) -> RuntimeHooks:
+    """Build RuntimeHooks wired to a real RuntimeStore."""
+    return RuntimeHooks(
         check_cancelled=store.is_cancelled,
         wait_for_interrupt=store.wait_for_interrupt,
         drain_messages=store.drain_messages,
@@ -217,6 +218,7 @@ async def _run_engine(
     agent_progressive_state=None,
     user_id=None,
     compaction_threshold=100_000,
+    entry_agent="lead_agent",
 ):
     """Helper to run engine with given LLM factory and return (state, emitted).
 
@@ -231,6 +233,7 @@ async def _run_engine(
         path_events=path_events or [],
         force_compact=force_compact,
         agent_progressive_state=agent_progressive_state,
+        entry_agent=entry_agent,
     )
 
     if store is None:
@@ -266,6 +269,7 @@ async def _run_engine(
             artifact_service=artifact_service,
             emit=capture_emit,
             user_id=user_id,
+            entry_agent=entry_agent,
         )
 
     return result, emitted, store
@@ -281,6 +285,26 @@ def _events_of_type(emitted, event_type):
 
 
 class TestLeadCompletion:
+
+    async def test_non_default_entry_agent_owns_top_level_turn_semantics(self):
+        entry = _FakeAgentConfig(name="research_agent")
+        result, emitted, _ = await _run_engine(
+            _make_fake_stream(_simple_llm_chunks("research done")),
+            agents={"research_agent": entry},
+            entry_agent="research_agent",
+        )
+
+        assert result["current_agent"] == "research_agent"
+        assert result["response"] == "research done"
+        assert _events_of_type(emitted, StreamEventType.USER_INPUT.value)[0][
+            "agent"
+        ] == "research_agent"
+        assert _events_of_type(emitted, StreamEventType.AGENT_START.value)[0][
+            "agent"
+        ] == "research_agent"
+        assert _events_of_type(emitted, StreamEventType.AGENT_COMPLETE.value)[0][
+            "agent"
+        ] == "research_agent"
 
     async def test_authenticated_user_id_reaches_llm_adapter(self):
         captured = {}
@@ -1271,7 +1295,7 @@ class TestCancelProbeFailure:
 
     @staticmethod
     def _hooks_with_flaky_probe(store, flaky):
-        return EngineHooks(
+        return RuntimeHooks(
             check_cancelled=flaky,
             wait_for_interrupt=store.wait_for_interrupt,
             drain_messages=store.drain_messages,

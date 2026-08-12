@@ -195,7 +195,7 @@ async def bulk_user_action(
     在 DB 中找不到对应部门 → 整批 400（fail-fast，省掉无谓的 N 次失败）。
 
     delete 走 hard_delete（DB CASCADE）。若用户当前正在跑 engine，
-    被级联删的 conversation 行由 PR2a 的 controller exists() / IntegrityError
+    被级联删的 conversation 行由 ConversationTurnHandler 的 exists() / IntegrityError
     catch 兜住；本端点直接 fire-and-forget。
     """
     # set_department 预校验：非 null department_id 必须存在
@@ -697,7 +697,7 @@ async def delete_user(
     硬删用户（仅 Admin）
 
     FK CASCADE 一并删除其所有会话 / messages / events / artifacts。
-    若用户当前有正在跑的 engine，被级联删的 conversation 行会被 controller
+    若用户当前有正在跑的 engine，被级联删的 conversation 行会被 turn handler
     post-processing 的 exists() 检查兜住（PR2a），不会撞 FK。
 
     保护：admin 不能删自己。配合"不能改自己 role/is_active"，足以保证

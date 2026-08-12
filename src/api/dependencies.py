@@ -227,9 +227,9 @@ def _load_tools() -> Dict[str, BaseTool]:
     """启动时加载进程级全局 builtin 工具（无状态，跨请求共享）。
 
     external 工具(config/tools/*.md)不在此加载 —— 它们物化进 DB(reconcile),由
-    controller_factory 每 turn 从注册表快照重建。这里只留真正进程级、无状态的
+    conversation_turn_factory 每 turn 从注册表快照重建。这里只留真正进程级、无状态的
     builtin(web_search / web_fetch / call_subagent / search_tools)；请求级 artifact /
-    沙盒工具仍在 controller_factory 现造。
+    沙盒工具仍在 conversation_turn_factory 现造。
     """
     from tools.builtin.call_subagent import CallSubagentTool
     from tools.builtin.web_search import WebSearchTool

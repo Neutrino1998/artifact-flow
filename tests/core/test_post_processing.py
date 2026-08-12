@@ -6,9 +6,9 @@ post_processing.py 纯函数单元测试 — 参数化矩阵锁定 4 条 invaria
 3. 已有 semantic terminal 不被 late-cancel 改   (ensure_terminal adopt 既有 terminal)
 4. 只在无 terminal 时才写 system placeholder    (choose_response_for_terminal 看 cancel_source)
 
-invariant 1/2 由 controller 调用方负责检查,不在这里测;矩阵测试覆盖 3/4 的核心决策
-函数 (decide_terminal / ensure_terminal / choose_response_for_terminal)。controller
-集成行为见 tests/core/test_controller_cancel_persist.py。
+invariant 1/2 由 Handler 调用方负责检查,不在这里测;矩阵测试覆盖 3/4 的核心决策
+函数 (decide_terminal / ensure_terminal / choose_response_for_terminal)。Handler
+集成行为见 tests/api/services/test_conversation_turn_handler_cancel.py。
 """
 
 import pytest
@@ -20,7 +20,6 @@ from core.post_processing import (
     choose_response_for_terminal,
     decide_terminal,
     ensure_terminal,
-    make_external_cancelled_event,
 )
 
 
@@ -140,9 +139,21 @@ class TestDecideTerminal:
         # SSE data carries display fallback for snapshot
         assert pp.terminal_event.data["response"] == config.CANCELLED_RESPONSE_BY_USER
 
+    def test_external_cancel_path_uses_system_display_and_audit_reason(self):
+        pp = PostProcessState(
+            conversation_id="c", message_id="m",
+            final_state={"response": "partial", "cancelled": True},
+            cancel_source="external",
+        )
+        decide_terminal(pp)
+        assert pp.terminal_type == StreamEventType.CANCELLED.value
+        assert pp.cancel_source == "external"
+        assert pp.terminal_event.data["response"] == config.CANCELLED_RESPONSE_BY_SYSTEM
+        assert pp.terminal_event.data["reason"] == "external_cancel"
+
     def test_error_path_builds_terminal_from_detail(self):
         """统一终态发射点:engine 内部错误只记 state["error_detail"],decide_terminal
-        在此构建唯一的 ERROR 终态(带 error/agent/request_id),由 controller
+        在此构建唯一的 ERROR 终态(带 error/agent/request_id),由 Handler
         append+yield。不再像旧版那样留 event=None 等 engine 自发。"""
         pp = PostProcessState(
             conversation_id="c", message_id="m",
@@ -162,12 +173,12 @@ class TestDecideTerminal:
         assert pp.terminal_event.data["error"] == "LLM call failed: boom"
         assert pp.terminal_event.data["agent"] == "lead_agent"
         assert pp.terminal_event.data["request_id"] == "req-123"
-        # 不预先标 appended —— 留给 controller append(与 COMPLETE/CANCELLED 一致)
+        # 不预先标 appended —— 留给 Handler append(与 COMPLETE/CANCELLED 一致)
         assert pp.terminal_appended is False
 
     def test_flush_error_overrides_cancelled(self):
-        """flush_error 在 controller 里产生,作为新的 ERROR terminal append。
-        是 controller 自身写的失败,优先级高于 engine 报告的 cancelled。"""
+        """flush_error 在 Handler 里产生,作为新的 ERROR terminal append。
+        是 Handler 自身写的失败,优先级高于 engine 报告的 cancelled。"""
         pp = PostProcessState(
             conversation_id="c", message_id="m",
             final_state={"response": "", "cancelled": True},
@@ -405,28 +416,3 @@ class TestEnsureTerminal:
         appended = pp.final_state["events"][0]
         assert appended.event_type == StreamEventType.CANCELLED.value
         assert appended.data["reason"] == "external_cancel_post_processing"
-
-
-# ============================================================================
-# make_external_cancelled_event — 共享 builder,engine_task 和 ensure_terminal 行为对齐
-# ============================================================================
-
-
-class TestMakeExternalCancelledEvent:
-
-    def test_basic_shape(self):
-        ev = make_external_cancelled_event(
-            conversation_id="conv", message_id="msg", reason="external_cancel",
-        )
-        assert ev.event_type == StreamEventType.CANCELLED.value
-        assert ev.data["success"] is False
-        assert ev.data["cancelled"] is True
-        assert ev.data["reason"] == "external_cancel"
-        assert "execution_metrics" not in ev.data
-
-    def test_with_metrics(self):
-        ev = make_external_cancelled_event(
-            conversation_id="conv", message_id="msg", reason="external_cancel",
-            execution_metrics={"total_duration_ms": 100},
-        )
-        assert ev.data["execution_metrics"] == {"total_duration_ms": 100}

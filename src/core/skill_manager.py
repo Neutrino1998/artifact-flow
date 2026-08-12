@@ -106,7 +106,7 @@ class SkillManager:
 
     async def _resolve(self, user_id: str) -> Tuple[EffectiveSkillSet, Dict[str, bool]]:
         """解析该用户的 EffectiveSkillSet + user_overrides(列举/toggle 复用,同
-        controller_factory._load_skills 的口径 —— 单点可见性,杜绝注入有闸/管理没闸漂移)。"""
+        conversation_turn_factory._load_skills 的口径 —— 单点可见性,杜绝注入有闸/管理没闸漂移)。"""
         dept_id = await self._repo.user_department_id(user_id)
         ancestors = await load_ancestor_ids(self._session, dept_id)
         snapshot, dept_matched = await load_skill_snapshot_with_matches(

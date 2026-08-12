@@ -124,7 +124,7 @@ class RedisStreamTransport:
         meta_key = self._meta_key(stream_id)
         # ⚠️ 已知竞态窗口：HGET → XADD 之间 close_stream 可能将 status 置为 closed，
         # 导致事件写入已关闭的 stream。当前不修复，原因：
-        # 1. close_stream 和 push_event 在同一执行流中由 controller 顺序调用，close 一定在最后一个 push 之后
+        # 1. close_stream 和 push_event 在同一 turn 流中顺序调用，close 一定在最后一个 push 之后
         # 2. 即使未来引入外部强制关闭，孤儿事件有 TTL 自动清理
         # 3. events 已通过 _persist_events 持久化到 DB，stream 只是 SSE 传输通道
         status = await self._redis.hget(meta_key, "status")

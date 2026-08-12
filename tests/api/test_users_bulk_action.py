@@ -7,7 +7,7 @@ Covers:
 
 Auth + each action's happy path + self-protection + not-found + set_department
 validation + capacity + impact aggregation. Engine fail-soft on active execution
-is covered by tests/core/test_controller_skip_on_delete.py (PR2a layer).
+is covered by tests/api/services/test_conversation_turn_handler_delete.py (PR2a layer).
 """
 
 import uuid

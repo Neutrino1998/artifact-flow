@@ -4,7 +4,7 @@
 (parent ∪ 注入 去重)。可见性 gate 在此;空 body gate 另在取正文时(需 DB,不在此)。
 """
 
-from core.controller import resolve_skill_activation
+from api.services.conversation_turn_handler import resolve_skill_activation
 
 
 def test_first_activation_injects_and_lists():

@@ -1,9 +1,9 @@
 """
-ExecutionController.stream_execute 入口不变量测试。
+ConversationTurnHandler.run 入口不变量测试。
 
 核心入口自己保证前置条件：一轮执行需要非空输入（文本或附件）。空文本且无附件会让
 USER_INPUT 事件正文为空 → 被 EventHistory 过滤 → 空 history → ContextManager.build
-在 all_messages[-1] 崩。stream_execute 在任何 yield / DB 写之前就拒掉（router 另留
+在 all_messages[-1] 崩。run 在任何 yield / DB 写之前就拒掉（router 另留
 422 作为 HTTP 快速边界），不依赖调用方先校验。
 """
 
@@ -11,21 +11,20 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.controller import ExecutionController
-from core.engine import EngineHooks
+from api.services.conversation_turn_handler import ConversationTurnHandler
+from core.agent_runtime import RuntimeHooks
 
 
-def _make_controller() -> ExecutionController:
-    """最小 controller；解析后空轮测试用显式 mock 隔离持久化边界。"""
-    hooks = EngineHooks(
+def _make_handler() -> ConversationTurnHandler:
+    """最小 handler；解析后空轮测试用显式 mock 隔离持久化边界。"""
+    hooks = RuntimeHooks(
         check_cancelled=AsyncMock(return_value=False),
         wait_for_interrupt=AsyncMock(return_value=None),
         drain_messages=AsyncMock(return_value=[]),
     )
     conversation_manager = MagicMock()
-    conversation_manager.create = AsyncMock()
-    conversation_manager.get_active_branch = AsyncMock(return_value=None)
-    return ExecutionController(
+    conversation_manager.require_owned = AsyncMock()
+    return ConversationTurnHandler(
         agents={},
         tools={},
         effective_toolsets={},
@@ -37,25 +36,37 @@ def _make_controller() -> ExecutionController:
 
 class TestStreamExecuteInputValidation:
 
+    @staticmethod
+    def _turn_args(**overrides):
+        return {
+            "user_input": "hello",
+            "conversation_id": "conv-test",
+            "message_id": "msg-test",
+            "parent_message_id": None,
+            **overrides,
+        }
+
     async def test_none_input_rejected(self):
-        ctrl = _make_controller()
+        ctrl = _make_handler()
         with pytest.raises(ValueError, match="required"):
-            async for _ in ctrl.stream_execute(user_input=None):
+            async for _ in ctrl.run(**self._turn_args(user_input=None)):
                 pass
 
     @pytest.mark.parametrize("blank", ["", "   ", "\n\t "])
     async def test_blank_input_no_attachments_rejected(self, blank):
         """空 / 纯空白文本且无附件 → ValueError（核心侧不变量，不靠 router）。"""
-        ctrl = _make_controller()
+        ctrl = _make_handler()
         with pytest.raises(ValueError, match="non-empty"):
-            async for _ in ctrl.stream_execute(user_input=blank):
+            async for _ in ctrl.run(**self._turn_args(user_input=blank)):
                 pass
 
     async def test_blank_input_with_unresolvable_skills_rejected(self):
-        """空文本 + activate_skills 但 skill 解析后为空(此 controller 无 effective_skillset →
+        """空文本 + activate_skills 但 skill 解析后为空(此 handler 无 effective_skillset →
         visible 空 → 任何 slug 都被滤掉)→ 权威闸拒(#1)。顶层闸放行 raw activate_skills,
         但 turn_has_content 按**解析后**的 bodies 收口 —— 无内容可注入 = 空轮,该拒。"""
-        ctrl = _make_controller()
+        ctrl = _make_handler()
         with pytest.raises(ValueError, match="empty content"):
-            async for _ in ctrl.stream_execute(user_input="", activate_skills=["s"]):
+            async for _ in ctrl.run(**self._turn_args(
+                user_input="", activate_skills=["s"]
+            )):
                 pass

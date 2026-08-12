@@ -1,8 +1,8 @@
 """
-Controller._persist_events unit tests.
+Handler._persist_events unit tests.
 
 Pins the strict persistence contract:
-- incomplete controller persistence wiring is rejected at construction
+- incomplete handler persistence wiring is rejected at construction
 - returns True when there are no new events
 - returns True on successful batch_create
 - returns False on batch_create failure (instead of silently swallowing)
@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from core.controller import ExecutionController
-from core.engine import EngineHooks
+from api.services.conversation_turn_handler import ConversationTurnHandler
+from core.agent_runtime import RuntimeHooks
 from core.events import ExecutionEvent, StreamEventType
 
 
@@ -29,9 +29,9 @@ def _ev(event_type, data=None, is_historical=False, agent_name="lead_agent"):
     )
 
 
-def _make_controller(repo=None, db_manager=None):
-    """Minimal controller suitable for testing _persist_events in isolation."""
-    hooks = EngineHooks(
+def _make_handler(repo=None, db_manager=None):
+    """Minimal handler suitable for testing _persist_events in isolation."""
+    hooks = RuntimeHooks(
         check_cancelled=AsyncMock(return_value=False),
         wait_for_interrupt=AsyncMock(return_value=None),
         drain_messages=AsyncMock(return_value=[]),
@@ -40,7 +40,7 @@ def _make_controller(repo=None, db_manager=None):
         "conversation_manager": MagicMock(),
         "message_event_repo": repo or MagicMock(),
     }
-    return ExecutionController(
+    return ConversationTurnHandler(
         agents={}, tools={}, effective_toolsets={}, hooks=hooks, **kwargs
     )
 
@@ -48,30 +48,30 @@ def _make_controller(repo=None, db_manager=None):
 class TestPersistEvents:
 
     def test_incomplete_persistence_wiring_is_rejected(self):
-        hooks = EngineHooks(
+        hooks = RuntimeHooks(
             check_cancelled=AsyncMock(return_value=False),
             wait_for_interrupt=AsyncMock(return_value=None),
             drain_messages=AsyncMock(return_value=[]),
         )
         with pytest.raises(ValueError, match="requires db_manager"):
-            ExecutionController(
+            ConversationTurnHandler(
                 agents={}, tools={}, effective_toolsets={}, hooks=hooks
             )
 
         with pytest.raises(ValueError, match="requires db_manager"):
-            ExecutionController(
+            ConversationTurnHandler(
                 agents={}, tools={}, effective_toolsets={}, hooks=hooks,
                 conversation_manager=MagicMock(),
             )
 
     def test_persistence_modes_are_mutually_exclusive(self):
-        hooks = EngineHooks(
+        hooks = RuntimeHooks(
             check_cancelled=AsyncMock(return_value=False),
             wait_for_interrupt=AsyncMock(return_value=None),
             drain_messages=AsyncMock(return_value=[]),
         )
         with pytest.raises(ValueError, match="either db_manager"):
-            ExecutionController(
+            ConversationTurnHandler(
                 agents={}, tools={}, effective_toolsets={}, hooks=hooks,
                 db_manager=MagicMock(),
                 conversation_manager=MagicMock(),
@@ -80,7 +80,7 @@ class TestPersistEvents:
 
     async def test_no_new_events_returns_true(self):
         """All events historical → nothing to write → success."""
-        ctrl = _make_controller(repo=MagicMock())
+        ctrl = _make_handler(repo=MagicMock())
         state = {"events": [
             _ev(StreamEventType.USER_INPUT.value, {"content": "old"}, is_historical=True),
             _ev(StreamEventType.LLM_COMPLETE.value, {"content": "old-a"}, is_historical=True),
@@ -88,7 +88,7 @@ class TestPersistEvents:
         assert await ctrl._persist_events("msg-1", state) is True
 
     async def test_empty_events_returns_true(self):
-        ctrl = _make_controller(repo=MagicMock())
+        ctrl = _make_handler(repo=MagicMock())
         assert await ctrl._persist_events("msg-1", {"events": []}) is True
 
     async def test_historical_filtered_out(self):
@@ -106,7 +106,7 @@ class TestPersistEvents:
             er.batch_create = capture_batch
             return await fn(None, er)
 
-        ctrl = _make_controller(repo=MagicMock())
+        ctrl = _make_handler(repo=MagicMock())
         ctrl._with_db_retry = fake_with_retry  # type: ignore
 
         state = {"events": [
@@ -131,7 +131,7 @@ class TestPersistEvents:
         async def fake_with_retry(fn):
             raise RuntimeError("DB exploded")
 
-        ctrl = _make_controller(repo=MagicMock())
+        ctrl = _make_handler(repo=MagicMock())
         ctrl._with_db_retry = fake_with_retry  # type: ignore
 
         state = {"events": [_ev(StreamEventType.USER_INPUT.value, {"content": "hi"})]}
@@ -140,13 +140,13 @@ class TestPersistEvents:
 
     async def test_integrity_error_reraises(self):
         """
-        IntegrityError 透传给 caller — 让 stream_execute 区分"基础设施失败"
+        IntegrityError 透传给 caller — 让 run 区分"基础设施失败"
         和"被外部删除（FK 违规）"。后者不应被当作普通持久化失败而把整轮转 ERROR。
         """
         async def fake_with_retry(fn):
             raise IntegrityError("FK violation", None, None)
 
-        ctrl = _make_controller(repo=MagicMock())
+        ctrl = _make_handler(repo=MagicMock())
         ctrl._with_db_retry = fake_with_retry  # type: ignore
 
         state = {"events": [_ev(StreamEventType.USER_INPUT.value, {"content": "hi"})]}
@@ -167,7 +167,7 @@ class TestPersistEvents:
             er.batch_create = capture_batch
             return await fn(None, er)
 
-        ctrl = _make_controller(repo=MagicMock())
+        ctrl = _make_handler(repo=MagicMock())
         ctrl._with_db_retry = fake_with_retry  # type: ignore
 
         state = {"events": [

@@ -2,5 +2,5 @@
 
 Keeping this package initializer side-effect free is part of the embeddable
 runtime boundary: importing ``core.task_supervisor`` must not eagerly import
-the Conversation controller, database models, or Web application stack.
+the Conversation turn handler, database models, or Web application stack.
 """

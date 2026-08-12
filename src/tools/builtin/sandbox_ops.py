@@ -5,7 +5,7 @@
 (拍定 2026-06-03:分立参数面更小、对小模型更可读;共享 session 是实现层事实)。
 lazy 创建 key 在「首个沙盒工具调用」—— mount 也会起容器(模型可能先 mount 再 bash)。
 
-工厂 create_sandbox_tools 由 controller_factory 按请求调用(同
+工厂 create_sandbox_tools 由 conversation_turn_factory 按请求调用(同
 create_artifact_tools idiom),session / artifact_service 构造注入。
 
 staging 走宿主直写直读(mount 写 / persist 读 session.workspace_dir),不走

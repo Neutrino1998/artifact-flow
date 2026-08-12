@@ -1,6 +1,6 @@
 # 执行运行时边界与 Conversation Admission 重构 —— 实施计划
 
-> 状态：阶段 C 完成
+> 状态：阶段 D 完成
 > 起草：2026-08-10 · 最后更新：2026-08-12
 > 关联文档：
 > - `docs/how-it-works.md` —— 当前 Agent turn、SSE、持久化与运行时的产品级说明；本计划完成后同步更新。
@@ -15,14 +15,14 @@
 
 ## 进度
 
-**当前**：阶段 C 已完成，Conversation send/delete 已收口到同一 Admission lease，通用 TaskSupervisor 与 Conversation 生命周期完成解耦，旧 Runner/Launcher 已删除。下一步进入 D，在稳定的 TaskSupervisor + ConversationExecutionService 边界上提取 AgentRuntime 与单一 finalization owner。
+**当前**：阶段 D 已完成。Pi-style loop 已收成不依赖 Web/DB/Redis 的 `AgentRuntime` 调用边界，Chat 由只接受 admitted turn 的 `ConversationTurnHandler` 统一负责 Artifact flush、terminal、事件与 response 持久化；旧 Controller/factory 已删除。下一步进入 E，补 embedded/Web/Admin/Redis 集成 smoke 与活动文档同步。
 
 | 阶段 | 内容 | 依赖 | 状态 |
 |---|---|---|---|
 | A | 冻结现有生命周期与竞态契约 | 无 | 已完成 |
 | B | 拆分显式 Conversation 持久化语义 | A | 已完成 |
 | C | 收口 Conversation 生命周期并提取 TaskSupervisor | B | 已完成 |
-| D | 收成可嵌入 AgentRuntime 与单一 finalization | C | 未开始 |
+| D | 收成可嵌入 AgentRuntime 与单一 finalization | C | 已完成 |
 | E | 集成验收、文档与 embedded smoke | C、D | 未开始 |
 
 依赖关系：
@@ -106,10 +106,10 @@
    - `ExecutionLauncher` 没有独立 policy 或 lifecycle，职责并入 ConversationExecutionService。
    - `ExecutionRunner` 的通用部分进入 TaskSupervisor，Conversation 部分进入协调层；Chat 的 active-stream/inject/cancel/list/resume/delete 和 Admin observability 均迁移到应用服务后删除原类，避免留下 `runner.store` 服务定位器。
 
-**尚未决定**：
+**已落实的接口决定**：
 
-- TaskScope、ConversationLeaseHandle 与 stream/sandbox cleanup 的具体交接 API —— 最晚 C 开工前用“acquire 即 heartbeat、提交只交接不重拿、易失资源先清、lease 最后放”的测试反推最小接口；不能用一组通用生命周期 callbacks 重建新的 god-object。
-- AgentRuntime 的最终模块路径和 outcome DTO —— 最晚 D 开工前根据现有 `execute_loop`、controller post-processing 和 embedded smoke 的最小共同输入确定；DTO 必须表达 stop reason，但不能携带已裁决 terminal 或 Repository。
+- C 采用 `TaskScope` 有界 LIFO cleanup 与一次性交接的 `ConversationLeaseHandle`；sandbox/interactive/message state/stream/lease 的生产清理顺序由测试锁定，没有引入通用 lifecycle callback 容器。
+- D 将 runtime 放在 `core/agent_runtime.py`，以 `AgentInvocation + RuntimeHooks + EventSink → EngineOutcome(state, StopReason)` 为最小契约；stop reason 明确区分 complete、timeout、cooperative cancel、external cancel 与 error，但 DTO 不携带 terminal 或任何 Repository。
 
 ## 目标责任图
 
@@ -291,7 +291,12 @@ Embedded caller ────────────────→ AgentRuntime
 
 **进展**：
 
-- 尚未开始。
+- 2026-08-12 完成。新增 `core.agent_runtime`：`AgentRuntime` 只持 Agent/Tool/EffectiveToolset 快照，运行 `execute_loop` 并归一化 `complete / timeout / cooperative_cancel / external_cancel / error`；deadline 只覆盖 loop，outcome 不生成或持久化 terminal。模块通过独立子进程导入测试，未加载 FastAPI、SQLAlchemy、Redis、Conversation service 或 Repository。
+- `execute_loop` 与 `CompactionRunner` 参数化 `entry_agent`，USER_INPUT、queued inject、顶层 token metrics、manual/overflow compaction 与最终 `_run_agent` 均跟随该入口；Chat factory 显式传 `lead_agent`，非默认 `research_agent` 的事件归属与完成路由由回归测试覆盖，nested-serial/subagent 顺序未改。
+- 将旧 `ExecutionController` 拆为只接受 Admission 已分配 `conversation_id / message_id / resolved parent` 的 `ConversationTurnHandler`；Conversation 创建、owner 校验与 active-branch 解析继续归 `ConversationExecutionService`。生产装配改为 `conversation_turn_factory`，旧 controller、factory、`stream_execute` 与对应兼容入口全部删除。
+- 外部 task cancel 先取消并 drain runtime child 取得 partial outcome，再进入与正常/timeout/cooperative/error 共用的 `PostProcessState` 路径。若取消落在 SSE transport push、Handler 正暂停于 `yield`，forwarder 会显式 close/drain Handler，使其在不再发 SSE 的情况下仍执行持久化 finalization；重复 cancel 不会中断 runtime/Handler drain。
+- Artifact flush 增加 ledger phase：cancel-mid-flush 会幂等重试未决 flush，再进行 native-call closure、唯一 terminal dispatcher、events-first persistence 与 response slot-claim。engine-exit、flush、event persistence、response update 和 runtime drain 的 barrier tests 均验证无丢事件、双 terminal 或 response-before-events。
+- 验收：阶段 D 关联矩阵 244 项通过，覆盖 AgentRuntime outcome/import boundary、engine/nested serial、compaction、native-call closure、permission、Conversation service/SSE 与全部 finalization cancel 窗口；项目约定完整并行 lane `pytest -n 4 -m "not external and not serial"` 为 2050 项通过，仅保留一条既有 SQLAlchemy delete 行数 warning。未改变 API schema，未触发 OpenAPI/前端类型再生成。
 
 ### E — 集成验收、文档与 embedded smoke
 
@@ -354,6 +359,7 @@ Embedded caller ────────────────→ AgentRuntime
 
 ## 变更日志
 
+- 2026-08-12 **阶段 D 完成**：提取不依赖 Web/Conversation 持久化的 `AgentRuntime` 与明确 stop reasons，参数化 `entry_agent`；以 admitted-only `ConversationTurnHandler` 替换并删除旧 Controller/factory，所有 runtime 与 late cancel 汇入 flush 后唯一 terminal/events/response finalization。补齐 runtime drain、SSE transport push、engine-exit、artifact flush、event persistence 与 response update 的确定性取消测试；完整并行后端 2050 项通过。
 - 2026-08-12 **阶段 B 完成**：将 Conversation Manager 拆为显式 `create / require_owned / append_message`，删除隐式创建布尔参数和旧兼容入口；Chat/Controller 按 ID 来源分流且稳定 ID retry、parent/active_branch/title、删除 fail-closed 契约保持不变。未移动 lease、stream 或后台任务时序；完整后端 2046 项通过、45 项按环境跳过。
 - 2026-08-12 **阶段 B 持久化边界收紧**：删除 Controller 事件“无持久化目标即成功”、Conversation 更新/读取静默 no-op 和 SkillService 无 DB 测试模式；Controller 构造只接受完整且互斥的 `db_manager` / bound repositories 模式，registry snapshot 强制注入 DB credential resolver。手工 engine 改走与生产一致的短 session 路径；完整后端 2048 项通过、45 项按环境跳过。
 - 2026-08-12 **阶段 A 完成**：用无 sleep 的 barrier tests 稳定复现 send/delete 双顺序与当前 check→lease 空窗；补齐固定 ID post-commit retry、parent 三态、stale owner、Router runtime 返回值及 user/ops 错误双契约；盘点全部 `runner.store` 与非 Router runtime 消费者。阶段内无生产代码或 schema 变化。

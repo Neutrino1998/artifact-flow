@@ -1,17 +1,16 @@
 """
-PR-3 — controller persist-on-external-cancel tests.
+PR-3 — handler persist-on-external-cancel tests.
 
 Bug ④ (2026-05-14 incident): when the outer execution task is cancelled
 externally (lease fencing / shutdown), `CancelledError` is `BaseException` and
-bypassed the controller's `except Exception` event-persist boundary, so the
-in-memory `state["events"]` died with the task. This violated CLAUDE.md's
+bypassed the handler's `except Exception` event-persist boundary, so the
+in-memory `state["events"]` died with the task. This violated AGENTS.md's
 "events persist unconditionally" invariant — the turn left no history and was
 unrecoverable on the next message.
 
-Fix (controller.py): stream_execute's finally cancels the inner engine_task,
-and run_engine's `except asyncio.CancelledError` branch calls _persist_events
-directly inside engine_task (its own task, unaffected by outer cancel) before
-re-raising. These tests pin that contract.
+Fix: the Handler cancels and drains its AgentRuntime child to obtain a partial
+EngineOutcome, then routes external cancel through the same PostProcessState
+ledger as every other stop reason before re-raising cancellation.
 """
 
 import asyncio
@@ -19,13 +18,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.controller import ExecutionController
-from core.engine import EngineHooks
+from api.services.conversation_turn_factory import run_and_push
+from api.services.conversation_turn_handler import ConversationTurnHandler
+from core.agent_runtime import EngineOutcome, StopReason
+from core.agent_runtime import RuntimeHooks
 from core.events import ExecutionEvent, StreamEventType
 
 
 # ============================================================
-# Helpers (mirror tests/core/test_controller_skip_on_delete.py)
+# Helpers (mirror tests/core/test_handler_skip_on_delete.py)
 # ============================================================
 
 
@@ -50,13 +51,13 @@ def _make_mock_artifact_service():
     return am
 
 
-def _make_controller(conv_mgr, event_repo, art_mgr):
-    hooks = EngineHooks(
+def _make_handler(conv_mgr, event_repo, art_mgr, *, on_engine_exit=None):
+    hooks = RuntimeHooks(
         check_cancelled=AsyncMock(return_value=False),
         wait_for_interrupt=AsyncMock(return_value=None),
         drain_messages=AsyncMock(return_value=[]),
     )
-    return ExecutionController(
+    return ConversationTurnHandler(
         agents={},
         tools={},
         effective_toolsets={},
@@ -64,6 +65,7 @@ def _make_controller(conv_mgr, event_repo, art_mgr):
         artifact_service=art_mgr,
         conversation_manager=conv_mgr,
         message_event_repo=event_repo,
+        on_engine_exit=on_engine_exit,
         db_manager=None,
     )
 
@@ -101,17 +103,14 @@ class TestPersistOnExternalCancel:
 
     async def test_external_cancel_persists_accumulated_events(self):
         """
-        Outer task cancelled while execute_loop is still running → engine_task's
-        except CancelledError branch must persist the accumulated events plus a
-        terminal CANCELLED event. Post-processing (exists / flush_all / update_response)
-        is intentionally skipped on this path — it would never have run for a
-        normally-completing externally-cancelled turn either, and engine_task
-        owns the persistence contract here.
+        Outer task cancelled while execute_loop is still running → Runtime returns
+        a partial external-cancel outcome and the Handler's sole finalization path
+        persists it after artifact flush.
         """
         cm = _make_mock_conversation_manager()
         am = _make_mock_artifact_service()
         er, batches = _capturing_event_repo()
-        ctrl = _make_controller(cm, er, am)
+        ctrl = _make_handler(cm, er, am)
 
         started = asyncio.Event()
 
@@ -130,17 +129,17 @@ class TestPersistOnExternalCancel:
             raise AssertionError("execute_loop should have been cancelled")
 
         async def consume():
-            return [event async for event in ctrl.stream_execute(
+            return [event async for event in ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
                 parent_message_id=None,
                 message_id="msg-test",
             )]
 
-        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             consume_task = asyncio.create_task(consume())
             await asyncio.wait_for(started.wait(), timeout=5)
-            # Yield once to ensure engine_task is actually awaiting the sleep
+            # Yield once to ensure runtime_child is actually awaiting the sleep
             await asyncio.sleep(0)
             consume_task.cancel()
             with pytest.raises(asyncio.CancelledError):
@@ -168,28 +167,24 @@ class TestPersistOnExternalCancel:
         assert cancelled[0]["data"]["reason"] == "external_cancel"
         assert cancelled[0]["data"]["message_id"] == "msg-test"
 
-        # Post-processing exists / flush are the cooperative-cancel path —
-        # external cancel propagates out of the generator before reaching them.
-        cm.exists_async.assert_not_called()
-        am.flush_all.assert_not_called()
-        # But update_response IS called from engine_task's cancel handler so
-        # the frontend renders the bubble + event flow at all (MessageList
-        # gates on Message.response non-empty; events list is nested inside).
+        # External cancel now shares the full finalization path.
+        cm.exists_async.assert_awaited_once_with("conv-test")
+        am.flush_all.assert_awaited_once_with("conv-test")
         from config import config
         cm.update_response_async.assert_called_once()
         assert cm.update_response_async.call_args.kwargs["response"] == config.CANCELLED_RESPONSE_BY_SYSTEM
 
-    async def test_external_cancel_propagates_engine_task_cancel(self):
+    async def test_external_cancel_propagates_runtime_child_cancel(self):
         """
-        stream_execute's finally must explicitly cancel engine_task — otherwise
-        engine_task keeps running independently (this is exactly how bug ③ /
+        run's finally must explicitly cancel runtime_child — otherwise
+        runtime_child keeps running independently (this is exactly how bug ③ /
         bug ④ wedged the loop for 96 min: outer cancelled, inner ran to natural
         completion). We verify by checking execute_loop saw CancelledError.
         """
         cm = _make_mock_conversation_manager()
         am = _make_mock_artifact_service()
         er, _ = _capturing_event_repo()
-        ctrl = _make_controller(cm, er, am)
+        ctrl = _make_handler(cm, er, am)
 
         cancel_observed = asyncio.Event()
         started = asyncio.Event()
@@ -204,14 +199,14 @@ class TestPersistOnExternalCancel:
             raise AssertionError("execute_loop should have been cancelled")
 
         async def consume():
-            return [event async for event in ctrl.stream_execute(
+            return [event async for event in ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
                 parent_message_id=None,
                 message_id="msg-test",
             )]
 
-        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             consume_task = asyncio.create_task(consume())
             await asyncio.wait_for(started.wait(), timeout=5)
             await asyncio.sleep(0)
@@ -220,18 +215,203 @@ class TestPersistOnExternalCancel:
                 await consume_task
 
         assert cancel_observed.is_set(), (
-            "engine_task did not receive CancelledError — stream_execute's finally "
-            "must call engine_task.cancel() so the inner task can persist events "
+            "runtime_child did not receive CancelledError — run's finally "
+            "must call runtime_child.cancel() so the inner task can persist events "
             "before exiting (otherwise we regress bug ③ — outer cancel can't kill "
             "a same-task synchronous wedge, but it must at least signal sibling tasks)."
         )
+
+    async def test_second_cancel_during_runtime_drain_does_not_skip_finalization(self):
+        cm = _make_mock_conversation_manager()
+        am = _make_mock_artifact_service()
+        er, batches = _capturing_event_repo()
+        handler = _make_handler(cm, er, am)
+        started = asyncio.Event()
+        draining = asyncio.Event()
+        release_drain = asyncio.Event()
+
+        async def runtime_run(invocation, **_kwargs):
+            started.set()
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                draining.set()
+                await release_drain.wait()
+                state = invocation.state
+                state["events"].append(ExecutionEvent(
+                    event_type=StreamEventType.LLM_COMPLETE.value,
+                    agent_name="lead_agent",
+                    data={"content": "partial"},
+                ))
+                state["cancelled"] = True
+                state["completed"] = True
+                return EngineOutcome(state, StopReason.EXTERNAL_CANCEL)
+
+        async def consume():
+            return [event async for event in handler.run(
+                user_input="hi",
+                conversation_id="conv-test",
+                parent_message_id=None,
+                message_id="msg-test",
+            )]
+
+        with patch.object(handler.runtime, "run", side_effect=runtime_run):
+            consume_task = asyncio.create_task(consume())
+            await started.wait()
+            consume_task.cancel()
+            await draining.wait()
+            consume_task.cancel()
+            await asyncio.sleep(0)
+            release_drain.set()
+            with pytest.raises(asyncio.CancelledError):
+                await consume_task
+
+        assert len(batches) == 1
+        terminal_types = [
+            event["event_type"]
+            for event in batches[0]
+            if event["event_type"] in {
+                StreamEventType.COMPLETE.value,
+                StreamEventType.CANCELLED.value,
+                StreamEventType.TIMED_OUT.value,
+                StreamEventType.ERROR.value,
+            }
+        ]
+        assert terminal_types == [StreamEventType.CANCELLED.value]
+        am.flush_all.assert_awaited_once_with("conv-test")
+
+    async def test_cancel_while_transport_pushes_closes_handler_and_finalizes(self):
+        """A cancel between async-generator pulls must still reach the Handler."""
+        cm = _make_mock_conversation_manager()
+        am = _make_mock_artifact_service()
+        er, batches = _capturing_event_repo()
+        handler = _make_handler(cm, er, am)
+        push_started = asyncio.Event()
+        runtime_cancelled = asyncio.Event()
+
+        class BlockingTransport:
+            async def push_event(self, _stream_id, event):
+                if event["type"] == StreamEventType.AGENT_START.value:
+                    push_started.set()
+                    await asyncio.sleep(60)
+                return True
+
+        async def fake_execute_loop(**kwargs):
+            await kwargs["emit"]({
+                "type": StreamEventType.AGENT_START.value,
+                "agent": "lead_agent",
+                "data": {},
+            })
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                runtime_cancelled.set()
+                raise
+
+        async def forward():
+            await run_and_push(
+                BlockingTransport(),
+                "msg-test",
+                handler.run(
+                    user_input="hi",
+                    conversation_id="conv-test",
+                    parent_message_id=None,
+                    message_id="msg-test",
+                ),
+            )
+
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+            task = asyncio.create_task(forward())
+            await push_started.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        assert runtime_cancelled.is_set()
+        assert len(batches) == 1
+        terminals = [
+            event for event in batches[0]
+            if event["event_type"] == StreamEventType.CANCELLED.value
+        ]
+        assert len(terminals) == 1
+        assert terminals[0]["data"]["reason"] == "external_cancel"
+        am.flush_all.assert_awaited_once_with("conv-test")
+
+    async def test_second_cancel_during_late_recovery_does_not_skip_persist(self):
+        cm = _make_mock_conversation_manager()
+        exists_started = asyncio.Event()
+
+        async def blocked_exists(_conversation_id):
+            exists_started.set()
+            await asyncio.sleep(60)
+
+        cm.exists_async = AsyncMock(side_effect=blocked_exists)
+        am = _make_mock_artifact_service()
+        persist_started = asyncio.Event()
+        release_persist = asyncio.Event()
+        batches = []
+        er = MagicMock()
+
+        async def blocked_persist(events):
+            persist_started.set()
+            await release_persist.wait()
+            batches.append(events)
+            return []
+
+        er.batch_create = blocked_persist
+        handler = _make_handler(cm, er, am)
+
+        async def fake_execute_loop(**kwargs):
+            state = kwargs["state"]
+            state["events"].append(ExecutionEvent(
+                event_type=StreamEventType.LLM_COMPLETE.value,
+                agent_name="lead_agent",
+                data={"content": "done"},
+            ))
+            state["completed"] = True
+            state["response"] = "done"
+            return state
+
+        async def consume():
+            return [event async for event in handler.run(
+                user_input="hi",
+                conversation_id="conv-test",
+                parent_message_id=None,
+                message_id="msg-test",
+            )]
+
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+            task = asyncio.create_task(consume())
+            await exists_started.wait()
+            task.cancel()
+            await persist_started.wait()
+            task.cancel()
+            await asyncio.sleep(0)
+            release_persist.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        assert len(batches) == 1
+        terminals = [
+            event for event in batches[0]
+            if event["event_type"] in {
+                StreamEventType.COMPLETE.value,
+                StreamEventType.CANCELLED.value,
+                StreamEventType.TIMED_OUT.value,
+                StreamEventType.ERROR.value,
+            }
+        ]
+        assert [event["event_type"] for event in terminals] == [
+            StreamEventType.CANCELLED.value
+        ]
+        cm.update_response_async.assert_awaited_once()
 
     async def test_external_cancel_during_exists_async_persists_events(self):
         """
         Reviewer-flagged gap: when the outer cancel arrives AFTER execute_loop has
         already returned (during post-processing — exists_async / flush_all / etc.),
-        engine_task is already done. stream_execute's finally is a no-op, and
-        run_engine's `except CancelledError` cannot fire (it already returned
+        runtime_child is already done. run's finally is a no-op, and
+        AgentRuntime's `except CancelledError` cannot fire (it already returned
         successfully). Without an outer cancel-boundary around post-processing,
         the CancelledError propagates past _persist_events and events die.
 
@@ -248,7 +428,7 @@ class TestPersistOnExternalCancel:
 
         am = _make_mock_artifact_service()
         er, batches = _capturing_event_repo()
-        ctrl = _make_controller(cm, er, am)
+        ctrl = _make_handler(cm, er, am)
 
         exists_called = asyncio.Event()
         original_exists = cm.exists_async
@@ -278,14 +458,14 @@ class TestPersistOnExternalCancel:
             }
 
         async def consume():
-            return [event async for event in ctrl.stream_execute(
+            return [event async for event in ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
                 parent_message_id=None,
                 message_id="msg-test",
             )]
 
-        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             consume_task = asyncio.create_task(consume())
             # Wait until post-processing is blocked inside exists_async
             await asyncio.wait_for(exists_called.wait(), timeout=5)
@@ -316,6 +496,101 @@ class TestPersistOnExternalCancel:
         cm.update_response_async.assert_called_once()
         assert cm.update_response_async.call_args.kwargs["response"] == config.CANCELLED_RESPONSE_BY_SYSTEM
 
+    async def test_cancel_during_engine_exit_hook_still_flushes_and_persists(self):
+        cm = _make_mock_conversation_manager()
+        am = _make_mock_artifact_service()
+        er, batches = _capturing_event_repo()
+        exit_started = asyncio.Event()
+
+        async def slow_engine_exit(_conversation_id, _message_id):
+            exit_started.set()
+            await asyncio.sleep(60)
+
+        handler = _make_handler(
+            cm, er, am, on_engine_exit=slow_engine_exit
+        )
+
+        async def fake_execute_loop(**kwargs):
+            kwargs["state"]["events"].append(ExecutionEvent(
+                event_type=StreamEventType.LLM_COMPLETE.value,
+                agent_name="lead_agent",
+                data={"content": "done"},
+            ))
+            kwargs["state"]["completed"] = True
+            kwargs["state"]["response"] = "done"
+            return kwargs["state"]
+
+        async def consume():
+            return [event async for event in handler.run(
+                user_input="hi",
+                conversation_id="conv-test",
+                parent_message_id=None,
+                message_id="msg-test",
+            )]
+
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+            task = asyncio.create_task(consume())
+            await exit_started.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        am.flush_all.assert_awaited_once_with("conv-test")
+        assert len(batches) == 1
+        assert [
+            event["event_type"] for event in batches[0]
+            if event["event_type"] == StreamEventType.CANCELLED.value
+        ] == [StreamEventType.CANCELLED.value]
+
+    async def test_cancel_during_artifact_flush_retries_idempotent_phase(self):
+        cm = _make_mock_conversation_manager()
+        am = _make_mock_artifact_service()
+        er, batches = _capturing_event_repo()
+        handler = _make_handler(cm, er, am)
+        flush_started = asyncio.Event()
+        flush_calls = 0
+
+        async def cancellable_flush(_session_id):
+            nonlocal flush_calls
+            flush_calls += 1
+            if flush_calls == 1:
+                flush_started.set()
+                await asyncio.sleep(60)
+
+        am.flush_all = AsyncMock(side_effect=cancellable_flush)
+
+        async def fake_execute_loop(**kwargs):
+            kwargs["state"]["events"].append(ExecutionEvent(
+                event_type=StreamEventType.LLM_COMPLETE.value,
+                agent_name="lead_agent",
+                data={"content": "done"},
+            ))
+            kwargs["state"]["completed"] = True
+            kwargs["state"]["response"] = "done"
+            return kwargs["state"]
+
+        async def consume():
+            return [event async for event in handler.run(
+                user_input="hi",
+                conversation_id="conv-test",
+                parent_message_id=None,
+                message_id="msg-test",
+            )]
+
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+            task = asyncio.create_task(consume())
+            await flush_started.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        assert flush_calls == 2
+        assert len(batches) == 1
+        assert [
+            event["event_type"] for event in batches[0]
+            if event["event_type"] == StreamEventType.CANCELLED.value
+        ] == [StreamEventType.CANCELLED.value]
+
     async def test_late_cancel_keeps_existing_terminal_event(self):
         """
         If post-processing appended a COMPLETE/ERROR terminal (line 397) but cancel
@@ -341,7 +616,7 @@ class TestPersistOnExternalCancel:
             return []
 
         er.batch_create = slow_batch_create
-        ctrl = _make_controller(cm, er, am)
+        ctrl = _make_handler(cm, er, am)
 
         async def fake_execute_loop(**kwargs):
             kwargs["state"]["events"].append(ExecutionEvent(
@@ -377,14 +652,14 @@ class TestPersistOnExternalCancel:
         er.batch_create = conditional_slow_batch
 
         async def consume():
-            return [event async for event in ctrl.stream_execute(
+            return [event async for event in ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
                 parent_message_id=None,
                 message_id="msg-test",
             )]
 
-        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             consume_task = asyncio.create_task(consume())
             await asyncio.wait_for(persist_started.wait(), timeout=5)
             await asyncio.sleep(0)
@@ -413,20 +688,15 @@ class TestPersistOnExternalCancel:
 
     async def test_late_cancel_on_engine_error_path_still_persists(self):
         """
-        Reviewer P2: when execute_loop raises a normal Exception, run_engine's
-        `except Exception` appends an ERROR event to initial_state["events"] but
-        never assigns final_state — it stays None until the post-processing
-        fallback runs. If a cancel arrives during _on_engine_exit (or any await
-        before that fallback), the late-cancel handler used to see
-        final_state=None and skip persistence, losing the ERROR-marked turn.
-
-        Fix moves `final_state = initial_state` ahead of _on_engine_exit, and
-        the late-cancel handler also falls back to initial_state defensively.
+        execute_loop raises a normal Exception, so AgentRuntime records the error
+        on the shared state without emitting a terminal. If cancellation then lands
+        in _on_engine_exit, late-cancel recovery must let the same dispatcher build
+        and persist the ERROR terminal rather than replacing it with CANCELLED.
         """
         cm = _make_mock_conversation_manager()
         am = _make_mock_artifact_service()
         er, batches = _capturing_event_repo()
-        ctrl = _make_controller(cm, er, am)
+        ctrl = _make_handler(cm, er, am)
 
         # Slow _on_engine_exit so we can cancel mid-await on the engine-error path
         on_exit_started = asyncio.Event()
@@ -448,14 +718,14 @@ class TestPersistOnExternalCancel:
             raise RuntimeError("engine exploded")
 
         async def consume():
-            return [event async for event in ctrl.stream_execute(
+            return [event async for event in ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
                 parent_message_id=None,
                 message_id="msg-test",
             )]
 
-        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             consume_task = asyncio.create_task(consume())
             await asyncio.wait_for(on_exit_started.wait(), timeout=5)
             await asyncio.sleep(0)
@@ -472,8 +742,8 @@ class TestPersistOnExternalCancel:
         event_types = [e["event_type"] for e in batch]
         # The pre-error work survived
         assert StreamEventType.LLM_COMPLETE.value in event_types
-        # run_engine's except Exception appended an ERROR terminal — late-cancel
-        # handler must preserve it (engine errored; cancel only hit infrastructure)
+        # AgentRuntime recorded the error; the late-cancel dispatcher must turn it
+        # into exactly one ERROR terminal (cancel only hit infrastructure afterward).
         error_terminals = [e for e in batch if e["event_type"] == StreamEventType.ERROR.value]
         assert len(error_terminals) == 1, (
             f"Existing ERROR terminal must be preserved; got types: {event_types}"
@@ -496,7 +766,7 @@ class TestPersistOnExternalCancel:
         """
         cm = _make_mock_conversation_manager()
         am = _make_mock_artifact_service()  # flush_all is an AsyncMock → succeeds
-        ctrl = _make_controller(cm, _make_failing_event_repo(), am)
+        ctrl = _make_handler(cm, _make_failing_event_repo(), am)
 
         async def fake_execute_loop(**kwargs):
             state = kwargs["state"]
@@ -511,14 +781,14 @@ class TestPersistOnExternalCancel:
             return state
 
         async def consume():
-            return [event async for event in ctrl.stream_execute(
+            return [event async for event in ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
                 parent_message_id=None,
                 message_id="msg-test",
             )]
 
-        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             events = await asyncio.create_task(consume())
 
         am.flush_all.assert_called_once()  # flush ran → artifacts in DB
@@ -541,7 +811,7 @@ class TestPersistOnExternalCancel:
         cm = _make_mock_conversation_manager()
         am = _make_mock_artifact_service()
         er, _ = _capturing_event_repo()
-        ctrl = _make_controller(cm, er, am)
+        ctrl = _make_handler(cm, er, am)
 
         async def fake_execute_loop(**kwargs):
             # Mimic the engine's cooperative-cancel exit: cancelled=True,
@@ -561,8 +831,8 @@ class TestPersistOnExternalCancel:
                 "response": "",  # cancelled mid-stream → no display content
             }
 
-        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
-            events = [event async for event in ctrl.stream_execute(
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+            events = [event async for event in ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
                 parent_message_id=None,
@@ -602,7 +872,7 @@ class TestPersistOnExternalCancel:
         cm = _make_mock_conversation_manager()
         am = _make_mock_artifact_service()
         er, _ = _capturing_event_repo()
-        ctrl = _make_controller(cm, er, am)
+        ctrl = _make_handler(cm, er, am)
 
         update_response_calls = []
 
@@ -630,14 +900,14 @@ class TestPersistOnExternalCancel:
             }
 
         async def consume():
-            return [event async for event in ctrl.stream_execute(
+            return [event async for event in ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
                 parent_message_id=None,
                 message_id="msg-test",
             )]
 
-        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             with pytest.raises(asyncio.CancelledError):
                 await consume()
 
@@ -679,7 +949,7 @@ class TestPersistOnExternalCancel:
 
         am = _make_mock_artifact_service()
         er, _ = _capturing_event_repo()
-        ctrl = _make_controller(cm, er, am)
+        ctrl = _make_handler(cm, er, am)
 
         async def fake_execute_loop(**kwargs):
             state = kwargs["state"]
@@ -700,14 +970,14 @@ class TestPersistOnExternalCancel:
             }
 
         async def consume():
-            return [event async for event in ctrl.stream_execute(
+            return [event async for event in ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
                 parent_message_id=None,
                 message_id="msg-test",
             )]
 
-        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             consume_task = asyncio.create_task(consume())
             await asyncio.wait_for(metadata_started.wait(), timeout=5)
             await asyncio.sleep(0)
@@ -722,7 +992,7 @@ class TestPersistOnExternalCancel:
         assert cm.update_response_async.call_count == 1, (
             f"Expected 1 update_response_async call (success-path only), got "
             f"{cm.update_response_async.call_count}. Late-cancel handler must "
-            f"check response_updated flag before writing the placeholder."
+            f"check response_update_attempted before writing the placeholder."
         )
         assert cm.update_response_async.call_args.kwargs["response"] == "real engine output", (
             f"Real response was clobbered by late-cancel placeholder: "
@@ -744,7 +1014,7 @@ class TestPersistOnExternalCancel:
         # the CancelledError.
         er = MagicMock()
         er.batch_create = AsyncMock(side_effect=RuntimeError("DB exploded mid-cancel"))
-        ctrl = _make_controller(cm, er, am)
+        ctrl = _make_handler(cm, er, am)
 
         started = asyncio.Event()
 
@@ -759,14 +1029,14 @@ class TestPersistOnExternalCancel:
             await asyncio.sleep(60)
 
         async def consume():
-            return [event async for event in ctrl.stream_execute(
+            return [event async for event in ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
                 parent_message_id=None,
                 message_id="msg-test",
             )]
 
-        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             consume_task = asyncio.create_task(consume())
             await asyncio.wait_for(started.wait(), timeout=5)
             await asyncio.sleep(0)
@@ -776,7 +1046,7 @@ class TestPersistOnExternalCancel:
                 await consume_task
 
         # batch_create was attempted (and failed) — the swallow must be loud-logged
-        # by the controller, but we just assert it was called.
+        # by the handler, but we just assert it was called.
         er.batch_create.assert_called_once()
 
         # CRITICAL invariant: when events fail to persist, Message.response MUST
@@ -789,7 +1059,7 @@ class TestPersistOnExternalCancel:
     async def test_multiturn_late_cancel_skips_historical_terminal(self):
         """
         多轮对话:parent turn 已 COMPLETE,events 在 DB 里。turn 启动时
-        controller 通过 load_event_history_async 把 path events 全标 is_historical=True
+        handler 通过 load_event_history_async 把 path events 全标 is_historical=True
         放进 state["events"]。
 
         当前 turn engine 跑完后,cancel 落在 exists_async(decide_terminal 之前)。
@@ -833,7 +1103,7 @@ class TestPersistOnExternalCancel:
 
         am = _make_mock_artifact_service()
         er, batches = _capturing_event_repo()
-        ctrl = _make_controller(cm, er, am)
+        ctrl = _make_handler(cm, er, am)
 
         async def fake_execute_loop(**kwargs):
             # 本轮 engine 跑完,append 一个 non-historical LLM_COMPLETE
@@ -852,14 +1122,14 @@ class TestPersistOnExternalCancel:
             }
 
         async def consume():
-            return [event async for event in ctrl.stream_execute(
+            return [event async for event in ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
                 parent_message_id="parent-msg",   # 触发 load_event_history_async
                 message_id="msg-test",
             )]
 
-        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             consume_task = asyncio.create_task(consume())
             await asyncio.wait_for(exists_started.wait(), timeout=5)
             await asyncio.sleep(0)
@@ -929,7 +1199,7 @@ class TestPersistOnExternalCancel:
 
         er = MagicMock()
         er.batch_create = racing_batch_create
-        ctrl = _make_controller(cm, er, am)
+        ctrl = _make_handler(cm, er, am)
 
         async def fake_execute_loop(**kwargs):
             kwargs["state"]["events"].append(ExecutionEvent(
@@ -947,14 +1217,14 @@ class TestPersistOnExternalCancel:
             }
 
         async def consume():
-            return [event async for event in ctrl.stream_execute(
+            return [event async for event in ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
                 parent_message_id=None,
                 message_id="msg-test",
             )]
 
-        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             with pytest.raises(asyncio.CancelledError):
                 await consume()
 
@@ -980,10 +1250,10 @@ class TestPersistOnExternalCancel:
     async def test_late_cancel_persist_failure_does_not_write_response(self):
         """
         Twin of the previous test, but for the post-processing late-cancel path
-        (controller.py late-cancel handler). When the late _persist_events call
+        (handler.py late-cancel handler). When the late _persist_events call
         fails (or raises), the handler must not write the cancel placeholder to
-        Message.response — same "events-in-DB invariant" as the engine_task path.
-        Reviewer reproduced this gap on the engine_task path; the late-cancel
+        Message.response — same "events-in-DB invariant" as the runtime_child path.
+        Reviewer reproduced this gap on the runtime_child path; the late-cancel
         handler had the same bug.
         """
         cm = _make_mock_conversation_manager()
@@ -1001,7 +1271,7 @@ class TestPersistOnExternalCancel:
         # batch_create blows up — late-cancel persist will fail
         er = MagicMock()
         er.batch_create = AsyncMock(side_effect=RuntimeError("DB exploded mid-late-cancel"))
-        ctrl = _make_controller(cm, er, am)
+        ctrl = _make_handler(cm, er, am)
 
         async def fake_execute_loop(**kwargs):
             kwargs["state"]["events"].append(ExecutionEvent(
@@ -1019,14 +1289,14 @@ class TestPersistOnExternalCancel:
             }
 
         async def consume():
-            return [event async for event in ctrl.stream_execute(
+            return [event async for event in ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
                 parent_message_id=None,
                 message_id="msg-test",
             )]
 
-        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             consume_task = asyncio.create_task(consume())
             await asyncio.wait_for(exists_started.wait(), timeout=5)
             await asyncio.sleep(0)
@@ -1047,8 +1317,8 @@ class TestPersistOnExternalCancel:
 
 
 class TestTimeoutTerminal:
-    """超时不再停在传输层(run_and_push 的裸 SSE error),而是下沉到 engine_task 的
-    asyncio.timeout → run_engine 的 except TimeoutError「带 flag 正常返回」→ 走完整
+    """超时不再停在传输层(run_and_push 的裸 SSE error),而是下沉到 runtime_child 的
+    asyncio.timeout → AgentRuntime 的 except TimeoutError「带 flag 正常返回」→ 走完整
     post-processing → decide_terminal 产出唯一的 TIMED_OUT 终态。SSE 与 DB 同源。"""
 
     async def test_engine_timeout_produces_timed_out_terminal(self):
@@ -1060,7 +1330,7 @@ class TestTimeoutTerminal:
         cm = _make_mock_conversation_manager()
         am = _make_mock_artifact_service()
         er, batches = _capturing_event_repo()
-        ctrl = _make_controller(cm, er, am)
+        ctrl = _make_handler(cm, er, am)
 
         started = asyncio.Event()
 
@@ -1077,7 +1347,7 @@ class TestTimeoutTerminal:
             raise AssertionError("execute_loop should have been timed out")
 
         async def consume():
-            return [event async for event in ctrl.stream_execute(
+            return [event async for event in ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
                 parent_message_id=None,
@@ -1085,9 +1355,9 @@ class TestTimeoutTerminal:
             )]
 
         # 把 deadline 压到很小,让 asyncio.timeout 在 slow_execute_loop 挂起时触发。
-        # 注意:这是内层 engine_task 的超时,consume 正常结束(无需手动 cancel)。
+        # 注意:这是内层 runtime_child 的超时,consume 正常结束(无需手动 cancel)。
         with patch.object(config, "EXECUTION_TIMEOUT", 0.1):
-            with patch("core.controller.execute_loop", side_effect=slow_execute_loop):
+            with patch("core.agent_runtime.execute_loop", side_effect=slow_execute_loop):
                 events = await asyncio.wait_for(consume(), timeout=5)
 
         # events 落库一次,含本轮 LLM_COMPLETE + TIMED_OUT 终态

@@ -147,7 +147,7 @@ async def _load_registry_snapshot_and_unit_matches(
     order-preserving `JSON` 列(非 `JSONB`)在 PG/SQLite 都保序,不归这里的 order_by 管。
 
     撞名兜底(skip+log,非 raise):external 名撞 builtin/reserved 时**跳过该行 + 打
-    WARNING**,让 builtin 对象在 controller_factory 合并里继续活(消除遮蔽 = 权限绕过)。
+    WARNING**,让 builtin 对象在 conversation_turn_factory 合并里继续活(消除遮蔽 = 权限绕过)。
     不 raise —— 本函数每 turn 每用户都跑,一行坏数据 raise 会拖垮全机群;主防线是写入期
     loud-fail(reconcile / B-4 CRUD),这里只作兜底,不该有全局爆炸半径。
     """
@@ -215,7 +215,7 @@ async def _load_registry_snapshot_and_unit_matches(
     external_tools: Dict[str, BaseTool] = {}
     for m in member_rows:
         # 撞名兜底:full_name 撞 builtin/reserved → 跳过(不进 external_tools),让
-        # builtin 在 controller_factory 合并里保活(消除遮蔽 = 权限绕过)。skip+log
+        # builtin 在 conversation_turn_factory 合并里保活(消除遮蔽 = 权限绕过)。skip+log
         # 而非 raise:本函数每 turn 每用户跑,raise = 一行坏数据拖垮全机群;主防线在
         # 写入期(reconcile / B-4 CRUD loud-fail),这里只兜绕过写校验的行。
         if is_builtin_name(m.full_name):
@@ -333,7 +333,7 @@ async def _load_skill_snapshot_and_matches(
 ) -> tuple[Dict[str, SkillInfo], Set[str]]:
     """读全部 skill 行,重建轻量 user-agnostic 元数据(`{skill_id: SkillInfo}`)。
 
-    每 turn 一次快照(同 load_registry_snapshot,controller_factory 调用,C-2 接入);
+    每 turn 一次快照(同 load_registry_snapshot,conversation_turn_factory 调用,C-2 接入);
     per-user 解析(user_skill 覆盖 + dept 规则)另在 `EffectiveSkillSet` 做(C-2)。
     slug 定序保 L1 渲染顺序稳定(APC / prompt 快照)。skill_md / bundle 字节**不入快照**(大,
     L2/L3 按需读)—— `bundle` 对正常行恒存在,快照只投影 `has_extra_files` 来决定

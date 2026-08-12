@@ -112,7 +112,7 @@ class ConversationRepository(BaseRepository[Conversation]):
         """
         判断对话是否存在（轻量 COUNT 查询）
 
-        用于 controller post-processing 入口判定 conversation 是否被
+        用于 ConversationTurnHandler post-processing 入口判定 conversation 是否被
         中途 DELETE：删除路径不抢 lease，conv 行可能在 engine 跑完前消失，
         此时 post-processing 写库会撞 FK，需要用此方法早返回跳过。
         """

@@ -32,6 +32,7 @@ from typing import (
 from datetime import datetime
 
 from config import config
+from core.agent_runtime import RuntimeHooks
 from core.events import StreamEventType, ExecutionEvent
 from core.context_manager import ContextManager
 from core.effective_toolset import EffectiveToolset
@@ -44,18 +45,6 @@ from utils.logger import get_logger, get_request_id
 from utils.time import utc_now
 
 logger = get_logger("ArtifactFlow")
-
-
-# ============================================================
-# EngineHooks — engine 与外部交互的回调接口
-# ============================================================
-
-@dataclass
-class EngineHooks:
-    """Engine 通过 hooks 与 RuntimeStore 交互，避免 core→api/services 层级倒置。"""
-    check_cancelled: Callable[[str], Awaitable[bool]]
-    wait_for_interrupt: Callable[[str, Dict[str, Any], float], Awaitable[Optional[Dict[str, Any]]]]
-    drain_messages: Callable[[str], Awaitable[List[str]]]
 
 
 # ============================================================
@@ -134,6 +123,7 @@ def create_initial_state(
     activated_skill_bodies: Optional[List[Dict[str, Any]]] = None,
     uploaded_files: Optional[List[Dict[str, Any]]] = None,
     force_compact: bool = False,
+    entry_agent: str = "lead_agent",
 ) -> Dict[str, Any]:
     """
     创建初始执行状态
@@ -152,13 +142,14 @@ def create_initial_state(
                         USER_INPUT 正文追加归属说明（仅 LLM 可见）。不在 chat 路由即时 commit。
         agent_progressive_state: 按 agent 隔离的 sticky skill/tool 披露状态。
         activated_skill_bodies: 本轮按钮勾选、要注入正文的 skill [{"slug","name","body"}, ...]
-                       (controller 取自 skill_md,已过可见性/空 body 过滤)。execute_loop 在
+                       (turn handler 取自 skill_md,已过可见性/空 body 过滤)。execute_loop 在
                        USER_INPUT 正文注入(仅 LLM 可见,同 force_compact/上传归属路径),让模型即刻
                        看到指令 —— 与模型自调 read_skill 得正文等价,入口是用户按钮。**重勾一个往轮
                        已激活的 skill 会重新注入正文**(对齐 read_skill 每次都返回正文,补压缩后重
-                       提醒缺口);名单/能力仍幂等去重(见 controller)。
+                       提醒缺口);名单/能力仍幂等去重(见 ConversationTurnHandler)。
         force_compact: 用户手动触发的一次性压缩。execute_loop 据此在 USER_INPUT 正文注入压缩
-                       指令；compaction_runner 在 lead 回答后无视阈值强制压缩一次并消费此标志。
+                       指令；compaction_runner 在 entry agent 回答后无视阈值强制压缩一次并消费此标志。
+        entry_agent: 顶层执行入口；Chat 传 lead_agent，embedded caller 可指定其他 agent。
     """
     return {
         "current_task": task,
@@ -166,7 +157,7 @@ def create_initial_state(
         "message_id": message_id,
         "completed": False,
         "error": False,
-        "current_agent": "lead_agent",
+        "current_agent": entry_agent,
         "always_allowed_tools": list(always_allowed_tools) if always_allowed_tools else [],
         "agent_progressive_state": {
             agent: {
@@ -228,12 +219,13 @@ async def execute_loop(
     agents: Dict[str, Any],  # {name: AgentSnapshot}
     tools: Dict[str, Any],   # {name: BaseTool}
     effective_toolsets: Dict[str, EffectiveToolset],  # {agent_name: 可调集+等级}(决策 11 单一解析点)
-    hooks: EngineHooks,
+    hooks: RuntimeHooks,
     artifact_service: Optional[Any] = None,
     emit: Optional[EmitFn] = None,
     sandbox_session: Optional[Any] = None,
     available_skills: Optional[List[Dict[str, Any]]] = None,
     user_id: Optional[str] = None,
+    entry_agent: str = "lead_agent",
 ) -> Dict[str, Any]:
     """
     Pi-style 扁平 while loop 执行引擎
@@ -246,15 +238,16 @@ async def execute_loop(
             工具集 + 等级（决策 11 单一解析点），引擎按 current agent 索引，替代旧
             的 `AgentConfig.tools` 直读
 
-        hooks: EngineHooks（check_cancelled / wait_for_interrupt / drain_messages）
+        hooks: RuntimeHooks（check_cancelled / wait_for_interrupt / drain_messages）
         artifact_service: ArtifactService 实例（duck-typed 协作者：set_session /
             list_artifacts / ingest_tool_result / create_from_upload / bind_emit）
         emit: 事件推送回调（推 SSE）
         sandbox_session: SandboxSession 实例（duck-typed:status_snapshot），仅用于
-            动态上下文的 <sandbox_status> 快照——生命周期/拆除归 controller_factory
+            动态上下文的 <sandbox_status> 快照——生命周期/拆除归 conversation_turn_factory
             + TaskScope cleanup，引擎不管理它
         user_id: 当前认证用户 ID，仅传给 LLM adapter 派生 provider cache salt；
             不写入 prompt / event
+        entry_agent: 顶层 Agent 名称；subagent 仍按 call_subagent 原地递归执行。
     Returns:
         最终执行状态
     """
@@ -289,7 +282,11 @@ async def execute_loop(
             return False
 
     compaction_runner = CompactionRunner(
-        agents=agents, emit=emit, check_cancelled=_is_cancelled, user_id=user_id
+        agents=agents,
+        emit=emit,
+        check_cancelled=_is_cancelled,
+        user_id=user_id,
+        entry_agent=entry_agent,
     )
 
     # NOTE: the USER_INPUT event (+ uploaded-file attribution + force_compact
@@ -386,7 +383,7 @@ async def execute_loop(
             # 作为唯一终态发射点统一构建 + 发射 ERROR(带 request_id)。
             state["error_detail"] = {
                 "error": staging_error,
-                "agent": "lead_agent",
+                "agent": entry_agent,
                 "request_id": get_request_id() or None,
             }
             state["completed"] = True
@@ -398,9 +395,9 @@ async def execute_loop(
     # 3a. 记录用户原始输入为事件（统一 context 构建路径）。USER_INPUT 正文 = 用户原始输入
     # + 本轮**增补**(turn augmentations，仅 LLM 可见，不入 Message.user_input display)。
     # 三类增补 —— 上传归属串 / skill 正文 / 压缩指令 —— 产地各异(上传 stage 后拿 id、skill
-    # 由 controller 从 DB 取、compact 静态)，但都汇到这一处:塞进 `parts` list、末尾 join 一次
+    # 由 turn handler 从 DB 取、compact 静态)，但都汇到这一处:塞进 `parts` list、末尾 join 一次
     # (取代过去三段各自 `f"{c}\n\n{x}" if c.strip() else x` 的复制注入)。turn 非空的唯一真相
-    # = `bool(parts)`，由 stream_execute 的权威闸 `turn_has_content(解析后)` 保证 —— 到这里
+    # = `bool(parts)`，由 ConversationTurnHandler.run 的权威闸保证 —— 到这里
     # parts 必非空(空 → 空 USER_INPUT → 被 EventHistory 过滤 → 击穿 context_manager 的 [-1])。
     # `if not completed`: staging 失败已置 completed/error 并 emit 过 ERROR —— turn 在 setup
     # 阶段就终止,不再构建 USER_INPUT(否则事件流会变成 [ERROR, USER_INPUT] 的错序)。
@@ -419,7 +416,7 @@ async def execute_loop(
             )
 
         # 用户点按钮激活 skill：注入新激活 skill 的正文（与模型自调 read_skill 等价,入口是用户
-        # 按钮）。能力(grants)已由 controller seed active_skills 烤开,这里只让正文可见;正文入
+        # 按钮）。能力(grants)已由 handler seed active_skills 烤开,这里只让正文可见;正文入
         # USER_INPUT 后随历史带下,故只注本轮新激活的(往轮的早在其当轮 USER_INPUT 里)。
         for s in (state.get("activated_skill_bodies") or []):
             parts.append(
@@ -439,7 +436,7 @@ async def execute_loop(
         # sees the same event immediately that replay receives after persistence.
         await _emit(
             StreamEventType.USER_INPUT.value,
-            agent="lead_agent",
+            agent=entry_agent,
             data={"content": "\n\n".join(parts)},
         )
 
@@ -465,14 +462,14 @@ async def execute_loop(
         <system-reminder> 原文，供调用处落进 agent_start 事件（持久化动态上下文，
         admin 据此重建 messages）；native_tools 只在本次调用内使用。
         """
-        if agent_name == "lead_agent":
+        if agent_name == entry_agent:
             for msg in await hooks.drain_messages(message_id):
                 wrapped = (
                     "[The user has injected a message during execution. "
                     "Consider this input and adjust your approach as needed.]\n"
                     + msg
                 )
-                await _emit(StreamEventType.QUEUED_MESSAGE.value, "lead_agent", {"content": wrapped})
+                await _emit(StreamEventType.QUEUED_MESSAGE.value, entry_agent, {"content": wrapped})
 
         artifacts_inventory = None
         if artifact_service and state.get("session_id"):
@@ -639,7 +636,7 @@ async def execute_loop(
             state["cancelled"] = True
             # 只有已流出的普通文本才作为 display 快照写入 state["response"]。
             # Native tool-call deltas 在 adapter 内尚未接受，纯 reasoning / TTFT 阶段
-            # 取消时 response_content 为空，由 controller 兜底成占位文案。
+            # 取消时 response_content 为空，由 turn finalization 兜底成占位文案。
             if response_content:
                 state["response"] = response_content
             logger.info(f"[{agent_name}] LLM stream cancelled mid-flight, partial content persisted")
@@ -670,8 +667,8 @@ async def execute_loop(
 
         accumulate_token_usage(state["execution_metrics"], normalized_usage)
 
-        # Track per-turn token metrics for lead_agent (used by compaction + context budgeting)
-        if agent_name == "lead_agent":
+        # Track per-turn token metrics for the top-level entry agent.
+        if agent_name == entry_agent:
             metrics = state["execution_metrics"]
             if metrics["first_input_tokens"] == 0:
                 metrics["first_input_tokens"] = normalized_usage["input_tokens"]
@@ -1038,7 +1035,7 @@ async def execute_loop(
 
                     if sub_response is None:
                         # turn 已在子 agent 内终止（cancel / error，state 标志已由
-                        # 故障点设好）。剩余工具不再执行；controller 在任何持久化前
+                        # 故障点设好）。剩余工具不再执行；Handler 在任何持久化前
                         # 统一为本调用和未开始的 sibling calls 补齐失败结果。
                         break
 
@@ -1412,7 +1409,7 @@ async def execute_loop(
             if not tool_calls:
                 # Lead 无工具调用但队列中有待处理消息 → 不退出，继续循环
                 # 这处理了 inject 消息在最后一次 LLM 调用期间到达的情况
-                if agent_name == "lead_agent":
+                if agent_name == entry_agent:
                     pending = await hooks.drain_messages(message_id)
                     if pending:
                         for msg in pending:
@@ -1421,7 +1418,7 @@ async def execute_loop(
                                 "Consider this input and adjust your approach as needed.]\n"
                                 + msg
                             )
-                            await _emit(StreamEventType.QUEUED_MESSAGE.value, "lead_agent", {"content": wrapped})
+                            await _emit(StreamEventType.QUEUED_MESSAGE.value, entry_agent, {"content": wrapped})
                         continue  # 回到 while loop 顶部，下次 _build_context 会看到新事件
 
                 # 无待处理消息 → 该 agent 正常完成，最终文本即返回值
@@ -1449,11 +1446,11 @@ async def execute_loop(
     #  unbound in the finally below.)
 
     try:
-        final_response = await _run_agent("lead_agent")
+        final_response = await _run_agent(entry_agent)
         if final_response is not None:
             state["completed"] = True
             state["response"] = final_response
-            logger.info("Lead agent completed, execution done")
+            logger.info(f"Entry agent {entry_agent} completed, execution done")
 
     except Exception as e:
         logger.exception(f"Execution loop error: {e}")

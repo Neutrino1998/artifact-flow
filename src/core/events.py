@@ -15,11 +15,11 @@ class StreamEventType(Enum):
     兼容旧 SSE 事件格式（value 不变），前端无需修改。
     """
 
-    # ========== Controller 层 ==========
+    # ========== Turn finalization 层 ==========
     METADATA = "metadata"                # 会话元数据（conversation_id, message_id）
     COMPLETE = "complete"                # 整体完成（含 execution_metrics）
     CANCELLED = "cancelled"              # 用户主动取消执行
-    TIMED_OUT = "timed_out"              # 执行超时（EXECUTION_TIMEOUT，经 controller 既有 dispatcher 产出的一等终态）
+    TIMED_OUT = "timed_out"              # 执行超时（AgentRuntime 事实经 Handler dispatcher 产出的一等终态）
     ERROR = "error"                      # 错误
 
     # ========== Agent 层 ==========
@@ -80,7 +80,7 @@ class ExecutionEvent:
     event_type: str          # StreamEventType.value
     agent_name: Optional[str] = None
     data: Any = None
-    event_id: Optional[str] = None  # stable dedupe key, set by controller before persist
+    event_id: Optional[str] = None  # stable dedupe key, set by turn handler before persist
     created_at: datetime = field(default_factory=utc_now)
     # True 表示从 DB 载入的历史事件（prior turn）；False 表示本轮新产生的事件。
     # 用于：持久化过滤（只写 False 的）、compaction preserve 边界（不跨轮）、

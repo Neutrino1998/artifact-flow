@@ -1,5 +1,5 @@
 """
-Post-processing ledger — 把分散在 controller.stream_execute 后半段的"决策 + IO 进度"
+Post-processing ledger — 把 ConversationTurnHandler 后半段的"决策 + IO 进度"
 显式化成一个 dataclass + 几个纯函数,让 cancel handler 不需要重新推断 "我现在在哪、
 该补什么"。
 
@@ -25,7 +25,7 @@ Post-processing ledger — 把分散在 controller.stream_execute 后半段的"�
     4. 只在无 terminal 时才写 system placeholder   (choose_response_for_terminal 看 cancel_source)
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from config import config
@@ -53,18 +53,14 @@ class PostProcessState:
 
     # IO 进度
     conv_alive: Optional[bool] = None
+    artifact_flush_completed: bool = False          # success 或已记录 flush_error；cancel-mid-await 保持 False
     terminal_appended: bool = False                  # terminal_event 已加入 final_state["events"]
     events_persisted: bool = False                   # _persist_events 返回 True
     # response_update_attempted 必须在 `await update_response_async` 之前 set,
     # 不是之后 —— cancel 可能落在 await 中间(DB commit 已发出但 Python 没看到返回),
     # late handler 看 attempted=False 会再写一遍 placeholder 覆盖真实 response。
-    # 见 controller.stream_execute 的 race rationale 注释。
+    # 见 ConversationTurnHandler.run 的 race rationale 注释。
     response_update_attempted: bool = False
-    response_updated: bool = False
-    metadata_updated: bool = False
-
-    # SSE 用:success path 通过 controller yield 出去的终态事件 dict(派生自 terminal_event)
-    sse_terminal: Optional[Dict[str, Any]] = field(default=None, repr=False)
 
 
 # ============================================================================
@@ -79,11 +75,11 @@ def decide_terminal(pp: PostProcessState) -> None:
     cancel handler 都读 pp。
 
     特殊语义:
-    - has_error 时 engine/controller 不再自己 append ERROR,只把详情记进
-      state["error_detail"](见 run_engine / controller 的 except 分支)。decide_terminal
-      在 flush 之后据此构建唯一的 ERROR terminal_event,由 controller 统一 append + yield
+    - has_error 时 engine/runtime 不 append ERROR,只把详情记进
+      state["error_detail"]。decide_terminal 在 flush 之后据此构建唯一的
+      ERROR terminal_event,由 ConversationTurnHandler 统一 append + yield
       —— 好处是 ERROR 也走 flush 后路径,无 decide_terminal 之外的第二个 ERROR 发射点。
-    - flush_error 优先于 has_error / is_cancelled:artifact 持久化失败是 controller
+    - flush_error 优先于 has_error / is_cancelled:artifact 持久化失败是 Handler
       自己产生的 ERROR,同样构建新的 terminal_event。
     """
     s = pp.final_state
@@ -110,7 +106,7 @@ def decide_terminal(pp: PostProcessState) -> None:
         return
 
     # timed_out 与 is_cancelled 是兄弟终因(都"非错误地中止执行"),互斥:超时路径
-    # (run_engine 的 except TimeoutError)只置 timed_out,协作式取消只置 cancelled。
+    # AgentRuntime timeout 只置 timed_out,协作式取消只置 cancelled。
     # 放在 flush_error 之后保持"持久化失败即便在超时轮也以 ERROR 暴露"的既有
     # 优先级(flush_error > 终因 > has_error > complete)。
     if timed_out:
@@ -132,27 +128,34 @@ def decide_terminal(pp: PostProcessState) -> None:
 
     if is_cancelled:
         pp.terminal_type = StreamEventType.CANCELLED.value
-        pp.cancel_source = "cooperative"
+        pp.cancel_source = pp.cancel_source or "cooperative"
         # SSE 数据里带 response 是历史约定(前端用作 snapshot)
-        display = response or config.CANCELLED_RESPONSE_BY_USER
+        display = (
+            config.CANCELLED_RESPONSE_BY_SYSTEM
+            if pp.cancel_source == "external"
+            else response or config.CANCELLED_RESPONSE_BY_USER
+        )
+        data = {
+            "success": False,
+            "cancelled": True,
+            "conversation_id": pp.conversation_id,
+            "message_id": pp.message_id,
+            "response": display,
+            "execution_metrics": metrics,
+        }
+        if pp.cancel_source == "external":
+            data["reason"] = "external_cancel"
         pp.terminal_event = ExecutionEvent(
             event_type=StreamEventType.CANCELLED.value,
             agent_name=None,
-            data={
-                "success": False,
-                "cancelled": True,
-                "conversation_id": pp.conversation_id,
-                "message_id": pp.message_id,
-                "response": display,
-                "execution_metrics": metrics,
-            },
+            data=data,
         )
         return
 
     if has_error:
-        # 统一终态发射点:engine/controller 的内部错误不再自己 emit ERROR,只把详情记进
+        # 统一终态发射点:engine/runtime 的内部错误不 emit ERROR,只把详情记进
         # state["error_detail"];这里(flush 之后)构建并发射唯一的 ERROR 终态,带
-        # request_id。controller 现有的 append + yield 自动接手 —— engine-error 也走
+        # request_id。Handler 的 append + yield 自动接手 —— engine-error 也走
         # flush 后路径,不再有 decide_terminal 之外的第二个 ERROR 发射点。
         detail = s.get("error_detail") or {}
         pp.terminal_type = StreamEventType.ERROR.value
@@ -225,10 +228,9 @@ def ensure_terminal(pp: PostProcessState) -> None:
         if pp.terminal_type is None:
             pp.terminal_type = existing.event_type
             if existing.event_type == StreamEventType.CANCELLED.value:
-                # engine_task 路径 append 的 CANCELLED 带 reason="external_cancel";
-                # cooperative path 走 decide_terminal 不带 reason 字段(只在 data 里有
-                # response/cancelled/...)。用 reason 字段存在与否区分来源 —— engine_task
-                # 路径不走 decide_terminal,所以这里推断必要。
+                # Handler 为 external cancel 生成的 CANCELLED 带 reason；cooperative
+                # cancel 不带。late-cancel 若落在 decide_terminal 与 persist 之间，会
+                # 从已经 append 的事件恢复来源，因此这里仍需按 reason 推断。
                 data = existing.data if isinstance(existing.data, dict) else {}
                 pp.cancel_source = "external" if data.get("reason") else "cooperative"
         return
@@ -305,30 +307,3 @@ def choose_response_for_terminal(pp: PostProcessState) -> str:
 
     # 无 terminal —— 不该被调用到,fail-safe 返回空串
     return ""
-
-
-def make_external_cancelled_event(
-    conversation_id: str,
-    message_id: str,
-    reason: str,
-    execution_metrics: Optional[Dict[str, Any]] = None,
-) -> ExecutionEvent:
-    """engine_task 的 except CancelledError 用:append CANCELLED terminal with reason。
-
-    抽出来主要是为了让"external CANCELLED 长什么样"只在一个地方定义 —— ensure_terminal
-    合成的 CANCELLED 和 engine_task 直接 append 的 CANCELLED 用同一个 builder。
-    """
-    data: Dict[str, Any] = {
-        "success": False,
-        "cancelled": True,
-        "conversation_id": conversation_id,
-        "message_id": message_id,
-        "reason": reason,
-    }
-    if execution_metrics is not None:
-        data["execution_metrics"] = execution_metrics
-    return ExecutionEvent(
-        event_type=StreamEventType.CANCELLED.value,
-        agent_name=None,
-        data=data,
-    )

@@ -9,7 +9,8 @@ import pytest
 from dataclasses import dataclass, field
 from unittest.mock import patch, AsyncMock
 
-from core.engine import EngineHooks, create_initial_state, execute_loop
+from core.agent_runtime import RuntimeHooks
+from core.engine import create_initial_state, execute_loop
 from core.events import StreamEventType
 from tests.core._toolset import effective_for
 
@@ -38,8 +39,8 @@ def _make_fake_stream(chunks: list[dict]):
     return fake
 
 
-def _noop_hooks() -> EngineHooks:
-    """EngineHooks stub: nothing cancelled, no interrupts, no messages."""
+def _noop_hooks() -> RuntimeHooks:
+    """RuntimeHooks stub: nothing cancelled, no interrupts, no messages."""
     async def _check_cancelled(_mid):
         return False
 
@@ -49,7 +50,7 @@ def _noop_hooks() -> EngineHooks:
     async def _drain_messages(_mid):
         return []
 
-    return EngineHooks(
+    return RuntimeHooks(
         check_cancelled=_check_cancelled,
         wait_for_interrupt=_wait_for_interrupt,
         drain_messages=_drain_messages,

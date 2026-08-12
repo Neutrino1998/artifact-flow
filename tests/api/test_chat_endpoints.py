@@ -532,9 +532,9 @@ class _FakeAgentConfig:
 
 @contextmanager
 def _patch_snapshot(fake_agents):
-    """Patch the per-turn registry snapshot the flipped controller_factory loads.
+    """Patch the per-turn registry snapshot the flipped conversation_turn_factory loads.
 
-    Post-B-2 `create_controller` no longer reads `deps._agents`/`get_agents()` —
+    Post-B-2 `create_turn_handler` no longer reads `deps._agents`/`get_agents()` —
     it builds agents + external tools from registry snapshot loaders (DB).
     These E2E tests mock only the LLM and don't reconcile config into the test DB,
     so we synthesize a snapshot from the fake agent configs instead. builtin_tools
@@ -601,7 +601,7 @@ class TestChatStreamE2E:
     """
     End-to-end: POST /chat → background execution → GET /stream → SSE events.
 
-    Mock only the LLM; exercises real ExecutionController, TaskSupervisor,
+    Mock only the LLM; exercises real ConversationTurnHandler, TaskSupervisor,
     InMemoryStreamTransport, conversation persistence, and event persistence.
     """
 

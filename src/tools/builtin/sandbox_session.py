@@ -1,7 +1,7 @@
 """
 SandboxSession — per-turn 沙盒容器生命周期(C 阶段)
 
-一个 turn 一个 session 对象壳:在 controller_factory 创建(同 ArtifactService,
+一个 turn 一个 session 对象壳:在 conversation_turn_factory 创建(同 ArtifactService,
 构造注入沙盒工具),**容器 lazy 于首个沙盒工具调用** —— 多数 turn 不开沙盒,
 eager 等于在多数 turn 上空转创建+销毁。拆除挂 TaskScope 的
 真 finally（经 TaskScope 注册 LIFO cleanup），与 lease 同生灭。

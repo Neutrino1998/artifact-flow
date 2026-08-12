@@ -13,7 +13,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.engine import EngineHooks, create_initial_state, execute_loop
+from core.agent_runtime import RuntimeHooks
+from core.engine import create_initial_state, execute_loop
 from core.events import StreamEventType
 from tests.core._toolset import effective_for
 from api.services.runtime_store import InMemoryRuntimeStore
@@ -131,8 +132,8 @@ def _make_fake_stream_sequence(rounds: list[list[dict]]):
     return fake
 
 
-def _hooks(store: InMemoryRuntimeStore) -> EngineHooks:
-    return EngineHooks(
+def _hooks(store: InMemoryRuntimeStore) -> RuntimeHooks:
+    return RuntimeHooks(
         check_cancelled=store.is_cancelled,
         wait_for_interrupt=store.wait_for_interrupt,
         drain_messages=store.drain_messages,

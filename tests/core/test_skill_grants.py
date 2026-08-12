@@ -132,7 +132,7 @@ def test_resolve_all_threads_skill_snapshot():
 
 
 def test_grants_baked_only_for_visible_skills():
-    """controller_factory 组合(Finding 1):full snapshot → EffectiveSkillSet → 只从
+    """conversation_turn_factory 组合(Finding 1):full snapshot → EffectiveSkillSet → 只从
     visible 子集烤授予。看不见的 skill(dept 无 grant)其授予不烤 → 跨回合恢复 active_skills
     时 activate_skill 对它是空操作(能力跟随可见性,by-construction)。"""
     full = {
@@ -142,7 +142,7 @@ def test_grants_baked_only_for_visible_skills():
     eff_skill = resolve_effective_skillset("u1", full, {}, dept_matched=set())
     assert "pub" in eff_skill.visible and "dept" not in eff_skill.visible
 
-    # 复刻 controller_factory:只把 visible 子集喂进 resolver
+    # 复刻 conversation_turn_factory:只把 visible 子集喂进 resolver
     visible_snap = {s: full[s] for s in eff_skill.visible}
     agent = _agent(builtin_tools={"bash": "disabled"})
     tools = {"bash": _Tool("bash", ToolPermission.CONFIRM)}

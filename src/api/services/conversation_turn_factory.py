@@ -1,8 +1,4 @@
-"""
-Controller Factory — ExecutionController 组装 + 执行推送
-
-从 chat.py 提取，将 controller 组装和执行推送逻辑与路由层解耦。
-"""
+"""Assemble an admitted ConversationTurnHandler and forward its events."""
 
 import asyncio
 from contextlib import asynccontextmanager
@@ -16,6 +12,7 @@ from api.dependencies import (
 )
 from api.services.runtime_store import RuntimeStore
 from api.services.stream_transport import StreamTransport
+from api.services.conversation_turn_handler import ConversationTurnHandler
 from core.engine import EmptyTurnInputError
 from core.task_supervisor import TaskScope
 from utils.logger import get_logger, get_request_id
@@ -46,36 +43,35 @@ def sanitize_error_event(event: dict, client_safe: bool = False) -> dict:
 
 
 @asynccontextmanager
-async def create_controller(
+async def create_turn_handler(
     conversation_id: str,
     message_id: str,
     user_id: str,
     *,
     task_scope: TaskScope,
     runtime_store: RuntimeStore,
-) -> AsyncGenerator:
+) -> AsyncGenerator[ConversationTurnHandler, None]:
     """
-    Build a fresh ExecutionController wired to the db_manager factory.
+    Build a fresh ConversationTurnHandler wired to the db_manager factory.
 
-    Why not Depends(get_controller)? send_message() launches a background task whose
+    The handler belongs to a background task whose
     lifetime exceeds the HTTP request, so it can't ride the request-scoped session.
 
     B-5: rather than pre-open ONE turn-long session for the whole background task (held
     idle-in-transaction while awaiting LLM / authorization, and the turn's only DB read
-    with no fresh-session retry), the controller holds the db_manager and opens a SHORT
+    with no fresh-session retry), the handler holds the db_manager and opens a SHORT
     retrying session per DB touch — artifact (ArtifactService.db_manager) / conversation
-    + event (controller._with_db_retry) / credential (resolver.with_retry). Only the
+    + event (handler._with_db_retry) / credential (resolver.with_retry). Only the
     one-shot registry snapshot is read here (also on a short session); everything else is
-    lazy inside stream_execute.
+    lazy inside the handler's ``run`` method.
 
     The Conversation execution service supplies the TaskScope and RuntimeStore;
     direct callers should use that service rather than assemble this factory.
     """
-    from core.controller import ExecutionController
     from core.department_resolver import load_ancestor_ids
     from core.effective_skillset import resolve_effective_skillset
     from core.effective_toolset import resolve_all, unit_visible_by_department
-    from core.engine import EngineHooks
+    from core.agent_runtime import RuntimeHooks
     from reconcile.snapshot import (
         hydrate_mcp_tools,
         load_registry_snapshot_with_unit_matches,
@@ -189,7 +185,7 @@ async def create_controller(
         dept_matched_units=dept_matched_units,
     )
 
-    hooks = EngineHooks(
+    hooks = RuntimeHooks(
         check_cancelled=store.is_cancelled,
         wait_for_interrupt=store.wait_for_interrupt,
         drain_messages=store.drain_messages,
@@ -198,10 +194,10 @@ async def create_controller(
     async def _on_engine_exit(conv_id: str, msg_id: str) -> None:
         await store.clear_engine_interactive(conv_id, msg_id)
 
-    # conversation_manager / message_event_repo 不在此绑 session(B-5):controller 经
+    # conversation_manager / message_event_repo 不在此绑 session(B-5):handler 经
     # _with_db_retry 每调一次开短 session。db_manager 模式与 bound-repository 模式在
-    # Controller 构造时互斥且完整，生产装配不会静默退化成无持久化执行。
-    yield ExecutionController(
+    # Handler 构造时互斥且完整，生产装配不会静默退化成无持久化执行。
+    yield ConversationTurnHandler(
         agents=agents,
         tools=all_tools,
         effective_toolsets=effective_toolsets,
@@ -212,6 +208,7 @@ async def create_controller(
         sandbox_session=sandbox_session,
         effective_skillset=effective_skillset,
         user_id=user_id,
+        entry_agent="lead_agent",
     )
 
 
@@ -221,7 +218,7 @@ async def run_and_push(
     event_stream: AsyncIterator[dict],
 ) -> None:
     """
-    Consume events from a controller stream and push them to the StreamTransport.
+    Consume turn events and push them to the StreamTransport.
 
     Handles timeout and unexpected errors, pushing sanitized error events.
     Execution runs to completion even if the SSE client disconnects. The owning
@@ -244,10 +241,10 @@ async def run_and_push(
                 stream_closed = True
         last_flush_time = asyncio.get_event_loop().time()
 
-    # 纯转发器:不再裹 asyncio.timeout —— 超时裁判已下沉到 controller 的 engine_task
-    # (run_engine 的 asyncio.timeout(EXECUTION_TIMEOUT) → TIMED_OUT 终态),与 DB 终态
+    # 纯转发器:不再裹 asyncio.timeout —— 超时事实由 AgentRuntime 产生，并由 Handler
+    # 的唯一 dispatcher 转成 TIMED_OUT 终态，与 DB 终态
     # 同源、经同一个 decide_terminal dispatcher 产出。这里只转发包括 TIMED_OUT 在内的
-    # 所有事件。(后处理的 wall-clock 上界由 DB 层负责,见 controller.run_engine 注释。)
+    # 所有事件。(后处理的 wall-clock 上界由 DB 层负责。)
     try:
         async for event in event_stream:
             if stream_closed:
@@ -274,6 +271,35 @@ async def run_and_push(
                     stream_closed = True
 
         await flush_pending()  # 流结束 flush 残余
+
+    except asyncio.CancelledError as cancel_exc:
+        # Cancellation can land while this forwarder is awaiting StreamTransport,
+        # leaving ConversationTurnHandler suspended at `yield`.  Explicitly close
+        # the generator so GeneratorExit reaches the Handler; it cancels/drains its
+        # runtime child and completes persistence-only finalization before cleanup.
+        close = getattr(event_stream, "aclose", None)
+        if close is not None:
+            close_task = asyncio.create_task(close())
+            try:
+                while not close_task.done():
+                    try:
+                        await asyncio.shield(close_task)
+                    except asyncio.CancelledError:
+                        # A second fence/shutdown cancel must not strand Handler
+                        # finalization. The original cancellation is re-raised below.
+                        continue
+                await close_task
+            except asyncio.CancelledError:
+                logger.error(
+                    "Turn event stream close was itself cancelled; preserving outer cancel"
+                )
+            except Exception:
+                # Closing is cleanup for the already-cancelled workload. Loud-log a
+                # Handler bug, but never replace the supervisor-visible cancellation.
+                logger.exception(
+                    "Turn event stream close failed during cancellation"
+                )
+        raise cancel_exc
 
     except EmptyTurnInputError as e:
         # client-caused 预期失败(如 stale picker:勾选的 skill 已被删/不可见)。两受众分开:

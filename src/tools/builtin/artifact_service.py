@@ -33,7 +33,7 @@ from utils.time import utc_now
 logger = get_logger("ArtifactFlow")
 
 # Artifact live 事件类型值。**不在顶层 import core.events**:tools 包被 core 先
-# import,顶层引 core 会触发 core/__init__ → controller → 本模块的循环 import。
+# import,保持 tools 层不反向依赖 core runtime。
 # 故延迟到首次调用(那时各模块都加载完了)再从权威 enum 取值并缓存 —— 值由 enum
 # 直接派生,字面量复制带来的 drift 结构上不再可能(无需再靠 drift 测兜底)。
 @lru_cache(maxsize=1)

@@ -16,7 +16,7 @@ class SSEEvent(BaseModel):
     """
     Unified SSE event format
 
-    Used for all streaming events from Agent/Engine/Controller layers.
+    Used for all streaming events from AgentRuntime/ConversationTurnHandler layers.
     """
     type: str = Field(..., description="Event type from StreamEventType")
     timestamp: datetime = Field(default_factory=utc_now, description="Event timestamp")

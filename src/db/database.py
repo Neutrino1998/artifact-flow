@@ -425,7 +425,7 @@ class DatabaseManager:
                 # DB 层。setdefault → DSN 显式 ?command_timeout=(必须 >0)优先(parser 已放进
                 # connect_args)。本参数 =0 → 跳过注入(禁用入口)。DSN 给 0 不是禁用 —— asyncpg
                 # 拒绝 ≤0 会启动失败。仅 PostgreSQL(asyncpg);MySQL 无等价钩子。
-                # 与 controller post-processing 的 per-query deadline 契约对齐。
+                # 与 turn-handler post-processing 的 per-query deadline 契约对齐。
                 if driver == "postgres" and self._command_timeout > 0:
                     engine_kwargs["connect_args"].setdefault(
                         "command_timeout", self._command_timeout

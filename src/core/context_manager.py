@@ -106,7 +106,7 @@ class ContextManager:
         # / queued_message / compaction_summary），故直接并入末条 —— 无需定位最近
         # assistant、也不会劈开多工具的结果组。
         # all_messages 必非空（不在此兜底）：每个 agent 启动事件都携带非空内容 ——
-        # 空文本且无附件的 user_input 被核心入口 stream_execute 拒（router 另有 422 快速
+        # 空文本且无附件的 user_input 被 ConversationTurnHandler.run 拒（router 另有 422 快速
         # 边界校验）、空 instruction 被 call_subagent 拒，故 USER_INPUT / subagent_instruction
         # 必产出 ≥1 条 message。真为空 = 上游不变量被破坏，让它在 [-1] 上响亮失败。
         # 上一次 call 的 input+output(compaction 触发口径)——build 在 LLM call 之前拼，

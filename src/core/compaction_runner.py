@@ -60,7 +60,7 @@ class CompactionRunner:
     """
     引擎内 compaction 执行器。
 
-    生命周期等同 execute_loop —— 每次 stream_execute 调用创建一次，用完即丢。
+    生命周期等同 execute_loop —— 每次 AgentRuntime 调用创建一次，用完即丢。
     """
 
     def __init__(
@@ -69,10 +69,12 @@ class CompactionRunner:
         emit: Optional[EmitFn] = None,
         check_cancelled: Optional[Callable[[], Awaitable[bool]]] = None,
         user_id: Optional[str] = None,
+        entry_agent: str = "lead_agent",
     ):
         self._agents = agents
         self._emit = emit
         self._user_id = user_id
+        self._entry_agent = entry_agent
         # 零参 async 谓词（engine 预绑定 message_id）。提供时 compaction LLM 调用
         # 变为可被协作式 cancel 打断（抛 CooperativeCancelled）—— 否则该调用是
         # 长达 COMPACTION_TIMEOUT 的 cancel 盲窗。None = 不轮询（独立测试场景）。
@@ -92,10 +94,10 @@ class CompactionRunner:
         超阈值则生成 compaction_summary 并**追加到 state["events"] 尾部**。
         非超阈值 / 无 compact_agent 时静默跳过。
 
-        state["force_compact"]（用户手动触发）为真且 agent 为 lead 时无视阈值强制压缩一次：
+        state["force_compact"]（用户手动触发）为真且 agent 为 entry agent 时无视阈值强制压缩一次：
         在此立即消费标志（置 False），故一轮内只压一次、后续 LLM call 不会重复触发。
         """
-        forced = bool(state.get("force_compact")) and agent_name == "lead_agent"
+        forced = bool(state.get("force_compact")) and agent_name == self._entry_agent
         if forced:
             state["force_compact"] = False
 
@@ -123,7 +125,7 @@ class CompactionRunner:
         failed provider call cannot make progress without a new history boundary.
         The caller owns the exactly-once retry guard.
         """
-        if agent_name == "lead_agent":
+        if agent_name == self._entry_agent:
             # Overflow recovery fulfills a pending manual compaction request too;
             # leaving the flag set would compact a second time after the retry.
             state["force_compact"] = False
@@ -275,19 +277,18 @@ class CompactionRunner:
 
         # 下一轮 gauge 准确性：把 compaction call 的 output_tokens（= summary 大小，
         # 亦即折叠后下一次 call 实际载入的「历史」内容大小）回写为 last_input_tokens,
-        # 作为「下一次 lead call 输入大小」的实测代理（纯依赖 usage,不调 tokenizer,
+        # 作为「下一次 entry-agent call 输入大小」的实测代理（纯依赖 usage,不调 tokenizer,
         # 对齐与 maybe_trigger 同源的可移植性约束）。
         # 这条写入只在「compaction 触发在 final response 之后、loop 即将结束」这一窗口
-        # 实际生效 —— 其他情况后续 lead call 会以真实 input_tokens 覆盖（engine.py:425）,
+        # 实际生效 —— 其他情况后续 entry-agent call 会以真实 input_tokens 覆盖,
         # 本写入被自然丢弃；故无需特判「是不是终态前一次」。
-        # 仅对 lead 写入：last_input_tokens 是 lead-only 字段（约束见 engine.py:425 +
-        # engine.py 的 lead-only metric 约定），subagent compaction 不能污染此字段 —— 否则若
-        # subagent 压缩后、下次 lead call 覆盖前发生 cancel/timeout/error,持久化会留下
+        # 仅对 entry agent 写入：subagent compaction 不能污染此字段 —— 否则若
+        # subagent 压缩后、下次 entry-agent call 覆盖前发生 cancel/timeout/error,持久化会留下
         # subagent summary 的 token 数,导致 composer gauge 显著低估 lead 上下文。
         # gauge 分子 = last_input + last_output（与 compaction 触发口径 input+output 对齐）,
         # 故这里把 output 项一并归零：压缩后上下文只剩 summary（= 下一次 call 的 input,
         # 尚无 output 分量),不归零会让 stale last_output 叠进 gauge,削弱「压缩后回落」。
-        if agent_name == "lead_agent":
+        if agent_name == self._entry_agent:
             metrics = state.get("execution_metrics")
             if metrics is not None:
                 metrics["last_input_tokens"] = usage.get("output_tokens", 0)
@@ -400,7 +401,7 @@ class CompactionRunner:
             # 下全系统最长的 cancel 盲窗）。CooperativeCancelled 穿透到 maybe_trigger
             # 配对 success=False 占位 summary，再由 engine 路由 CANCELLED 终态。
             # asyncio.timeout 在子 task 内、只转换自己 deadline 的取消 —— 与外层
-            # run_cancellable 的 task.cancel() 不混淆（3.11+ 语义，同 controller.py）。
+            # run_cancellable 的 task.cancel() 不混淆（3.11+ 语义，同 AgentRuntime）。
             await run_cancellable(
                 _guarded_stream(), self._check_cancelled, config.CANCEL_CHECK_INTERVAL
             )

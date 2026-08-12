@@ -274,15 +274,15 @@ async def test_initialization_failure_is_sanitized_and_scope_closes_stream(
     streams = service._streams
 
     @asynccontextmanager
-    async def broken_controller(*_args, **_kwargs):
+    async def broken_handler(*_args, **_kwargs):
         raise RuntimeError("secret initialization detail")
         yield  # pragma: no cover
 
     monkeypatch.setattr(
-        "api.services.conversation_execution_service.create_controller",
-        broken_controller,
+        "api.services.conversation_execution_service.create_turn_handler",
+        broken_handler,
     )
-    monkeypatch.setattr("api.services.controller_factory.config.DEBUG", False)
+    monkeypatch.setattr("api.services.conversation_turn_factory.config.DEBUG", False)
     ops_log = MagicMock()
     monkeypatch.setattr(
         "api.services.conversation_execution_service.logger.exception", ops_log

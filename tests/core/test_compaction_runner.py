@@ -61,6 +61,27 @@ async def _fake_stream_raises(messages, model=None):
 
 class TestThresholdCheck:
 
+    async def test_manual_compaction_follows_configured_entry_agent(self):
+        runner = CompactionRunner(
+            {"compact_agent": _FakeAgent()},
+            emit=None,
+            entry_agent="research_agent",
+        )
+        runner._compact = AsyncMock()
+        state = {"events": [], "force_compact": True}
+
+        await runner.maybe_trigger(
+            state,
+            "research_agent",
+            input_tokens=1,
+            output_tokens=1,
+            compaction_threshold=100,
+        )
+
+        assert state["force_compact"] is False
+        runner._compact.assert_awaited_once()
+        assert runner._compact.await_args.kwargs["reason"] == "forced"
+
     async def test_below_threshold_no_trigger(self):
         agents = {"compact_agent": _FakeAgent()}
         runner = CompactionRunner(agents, emit=None)

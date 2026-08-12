@@ -7,8 +7,8 @@ from typing import Any, Dict, Literal, Optional, Sequence
 from uuid import uuid4
 
 from config import config
-from api.services.controller_factory import (
-    create_controller,
+from api.services.conversation_turn_factory import (
+    create_turn_handler,
     run_and_push,
     sanitize_error_event,
 )
@@ -239,7 +239,7 @@ class ConversationExecutionService:
                 })
 
             def workload_factory(scope: TaskScope):
-                # LIFO: sandbox (registered by controller factory) -> interactive
+                # LIFO: sandbox (registered by turn factory) -> interactive
                 # -> message runtime state -> stream -> heartbeat/lease.
                 scope.add_cleanup("conversation lease", lease.release)
                 scope.add_cleanup(
@@ -353,17 +353,17 @@ class ConversationExecutionService:
         resolved_parent: Optional[str],
     ) -> None:
         try:
-            async with create_controller(
+            async with create_turn_handler(
                 conversation_id,
                 message_id,
                 request.user_id,
                 task_scope=scope,
                 runtime_store=self._store,
-            ) as controller:
+            ) as handler:
                 await run_and_push(
                     self._streams,
                     message_id,
-                    controller.stream_execute(
+                    handler.run(
                         user_input=request.user_input,
                         conversation_id=conversation_id,
                         message_id=message_id,

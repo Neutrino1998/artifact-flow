@@ -1,5 +1,5 @@
 """
-PR2a — controller post-processing skip-on-delete tests.
+PR2a — handler post-processing skip-on-delete tests.
 
 Covers the defensive scenario where the conversation row is deleted by an
 admin hard-delete CASCADE or an out-of-band writer while the engine is running.
@@ -19,8 +19,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from core.controller import ExecutionController
-from core.engine import EngineHooks
+from api.services.conversation_turn_handler import ConversationTurnHandler
+from core.agent_runtime import RuntimeHooks
 from core.events import StreamEventType
 from repositories.base import NotFoundError
 
@@ -45,7 +45,7 @@ def _make_engine_noop_state(message_id: str):
 
 
 def _make_mock_conversation_manager(exists_value: bool = True):
-    """A conversation_manager AsyncMock pre-wired with the methods stream_execute uses."""
+    """A conversation_manager AsyncMock pre-wired with the methods run uses."""
     cm = MagicMock()
     cm.create = AsyncMock(return_value="conv-test")
     cm.require_owned = AsyncMock()
@@ -78,13 +78,13 @@ def _make_mock_event_repo(batch_create_side_effect=None):
     return er
 
 
-def _make_controller(conv_mgr, event_repo, art_mgr):
-    hooks = EngineHooks(
+def _make_handler(conv_mgr, event_repo, art_mgr):
+    hooks = RuntimeHooks(
         check_cancelled=AsyncMock(return_value=False),
         wait_for_interrupt=AsyncMock(return_value=None),
         drain_messages=AsyncMock(return_value=[]),
     )
-    return ExecutionController(
+    return ConversationTurnHandler(
         agents={},
         tools={},
         effective_toolsets={},
@@ -111,13 +111,13 @@ class TestMetadataPreview:
         cm = _make_mock_conversation_manager(exists_value=False)
         am = _make_mock_artifact_service()
         er = _make_mock_event_repo()
-        ctrl = _make_controller(cm, er, am)
+        ctrl = _make_handler(cm, er, am)
 
         async def fake_execute_loop(**kwargs):
             return _make_engine_noop_state(kwargs["state"]["message_id"])
 
-        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
-            events = await _consume(ctrl.stream_execute(
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+            events = await _consume(ctrl.run(
                 user_input="review this",
                 conversation_id="conv-test",
                 parent_message_id=None,
@@ -146,11 +146,11 @@ class TestSetupNoResurrection:
         cm.require_owned.side_effect = NotFoundError(
             "Conversation", "conv-test"
         )
-        ctrl = _make_controller(cm, _make_mock_event_repo(), _make_mock_artifact_service())
+        ctrl = _make_handler(cm, _make_mock_event_repo(), _make_mock_artifact_service())
 
         execute = AsyncMock()
-        with patch("core.controller.execute_loop", execute):
-            events = await _consume(ctrl.stream_execute(
+        with patch("core.agent_runtime.execute_loop", execute):
+            events = await _consume(ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
                 parent_message_id=None,
@@ -168,11 +168,11 @@ class TestSetupNoResurrection:
         cm.append_message.side_effect = NotFoundError(
             "Conversation", "conv-test"
         )
-        ctrl = _make_controller(cm, _make_mock_event_repo(), _make_mock_artifact_service())
+        ctrl = _make_handler(cm, _make_mock_event_repo(), _make_mock_artifact_service())
 
         execute = AsyncMock()
-        with patch("core.controller.execute_loop", execute):
-            events = await _consume(ctrl.stream_execute(
+        with patch("core.agent_runtime.execute_loop", execute):
+            events = await _consume(ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
                 parent_message_id=None,
@@ -194,13 +194,13 @@ class TestPostProcessingSkipOnDelete:
         cm = _make_mock_conversation_manager(exists_value=False)
         am = _make_mock_artifact_service()
         er = _make_mock_event_repo()
-        ctrl = _make_controller(cm, er, am)
+        ctrl = _make_handler(cm, er, am)
 
         async def fake_execute_loop(**kwargs):
             return _make_engine_noop_state(kwargs["state"]["message_id"])
 
-        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
-            events = await _consume(ctrl.stream_execute(
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+            events = await _consume(ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
                 parent_message_id=None,
@@ -230,13 +230,13 @@ class TestPostProcessingSkipOnDelete:
             flush_side_effect=IntegrityError("FK violation", None, None)
         )
         er = _make_mock_event_repo()
-        ctrl = _make_controller(cm, er, am)
+        ctrl = _make_handler(cm, er, am)
 
         async def fake_execute_loop(**kwargs):
             return _make_engine_noop_state(kwargs["state"]["message_id"])
 
-        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
-            events = await _consume(ctrl.stream_execute(
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+            events = await _consume(ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
                 parent_message_id=None,
@@ -262,7 +262,7 @@ class TestPostProcessingSkipOnDelete:
         er = _make_mock_event_repo(
             batch_create_side_effect=IntegrityError("FK violation", None, None)
         )
-        ctrl = _make_controller(cm, er, am)
+        ctrl = _make_handler(cm, er, am)
 
         # Engine emits one new event so _persist_events actually attempts batch_create
         from core.events import ExecutionEvent
@@ -277,8 +277,8 @@ class TestPostProcessingSkipOnDelete:
             ))
             return {**_make_engine_noop_state(state["message_id"]), "events": state["events"]}
 
-        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
-            events = await _consume(ctrl.stream_execute(
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+            events = await _consume(ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
                 parent_message_id=None,
@@ -302,13 +302,13 @@ class TestPostProcessingSkipOnDelete:
         cm = _make_mock_conversation_manager(exists_value=True)
         am = _make_mock_artifact_service()
         er = _make_mock_event_repo()
-        ctrl = _make_controller(cm, er, am)
+        ctrl = _make_handler(cm, er, am)
 
         async def fake_execute_loop(**kwargs):
             return _make_engine_noop_state(kwargs["state"]["message_id"])
 
-        with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
-            events = await _consume(ctrl.stream_execute(
+        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+            events = await _consume(ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
                 parent_message_id=None,
