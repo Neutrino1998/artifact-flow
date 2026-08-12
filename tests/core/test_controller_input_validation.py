@@ -7,7 +7,7 @@ USER_INPUT 事件正文为空 → 被 EventHistory 过滤 → 空 history → Co
 422 作为 HTTP 快速边界），不依赖调用方先校验。
 """
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -16,13 +16,22 @@ from core.engine import EngineHooks
 
 
 def _make_controller() -> ExecutionController:
-    """最小可用 controller —— 入口校验在任何依赖被触达之前触发，故无需 DB / repo。"""
+    """最小 controller；解析后空轮测试用显式 mock 隔离持久化边界。"""
     hooks = EngineHooks(
         check_cancelled=AsyncMock(return_value=False),
         wait_for_interrupt=AsyncMock(return_value=None),
         drain_messages=AsyncMock(return_value=[]),
     )
-    return ExecutionController(agents={}, tools={}, effective_toolsets={}, hooks=hooks)
+    conversation_manager = MagicMock()
+    conversation_manager.create = AsyncMock()
+    conversation_manager.get_active_branch = AsyncMock(return_value=None)
+    return ExecutionController(
+        agents={},
+        tools={},
+        effective_toolsets={},
+        hooks=hooks,
+        conversation_manager=conversation_manager,
+    )
 
 
 class TestStreamExecuteInputValidation:

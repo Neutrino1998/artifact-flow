@@ -221,33 +221,32 @@ async def test_delete_wins_between_send_check_and_lease_reproduces_current_gap(
 async def test_send_cannot_resurrect_conversation_deleted_after_ownership_check(
     client, app, db_manager, test_user: User
 ):
-    """Existing send must fail closed if DELETE wins before its final ensure."""
+    """Existing send must fail closed if DELETE wins before its final require."""
     conv_id = await _seed_conversation(db_manager, test_user.id)
-    reached_final_ensure = asyncio.Event()
+    reached_final_require = asyncio.Event()
     continue_send = asyncio.Event()
-    original_ensure = ConversationManager.ensure_conversation_exists
+    original_require = ConversationManager.require_owned
+    require_calls = 0
 
-    async def blocked_ensure(
+    async def blocked_require(
         manager,
         conversation_id,
         user_id=None,
-        *,
-        create_if_missing=True,
     ):
+        nonlocal require_calls
         if conversation_id == conv_id:
-            reached_final_ensure.set()
-            await continue_send.wait()
-        return await original_ensure(
-            manager,
-            conversation_id,
-            user_id=user_id,
-            create_if_missing=create_if_missing,
-        )
+            require_calls += 1
+            # First call is the early ownership check. Pause only at the final
+            # post-conversion require so DELETE lands in the characterized gap.
+            if require_calls == 2:
+                reached_final_require.set()
+                await continue_send.wait()
+        return await original_require(manager, conversation_id, user_id=user_id)
 
     with patch.object(
         ConversationManager,
-        "ensure_conversation_exists",
-        new=blocked_ensure,
+        "require_owned",
+        new=blocked_require,
     ):
         send_task = asyncio.create_task(
             client.post(
@@ -264,7 +263,7 @@ async def test_send_cannot_resurrect_conversation_deleted_after_ownership_check(
             )
         )
         try:
-            await asyncio.wait_for(reached_final_ensure.wait(), timeout=2)
+            await asyncio.wait_for(reached_final_require.wait(), timeout=2)
             delete_response = await client.delete(f"/api/v1/chat/{conv_id}")
             assert delete_response.status_code == 200
         finally:

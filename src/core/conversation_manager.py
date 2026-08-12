@@ -36,7 +36,7 @@ class ConversationManager:
         async with db_manager.session() as session:
             repo = ConversationRepository(session)
             manager = ConversationManager(repo)
-            await manager.start_conversation(...)
+            await manager.create(...)
     """
 
     def __init__(self, repository: Optional[ConversationRepository] = None):
@@ -48,7 +48,7 @@ class ConversationManager:
         """
         self.repository = repository
         # DEBUG 而非 INFO:构造无上下文、每请求处理器各 new 一个(单轮可达 ~8 次),
-        # INFO 下纯噪音会淹没真实里程碑。真业务事件(start_conversation_async 等)才打 INFO。
+        # INFO 下纯噪音会淹没真实里程碑。真业务事件(create 等)才打 INFO。
         logger.debug("ConversationManager initialized")
 
     def _ensure_repository(self) -> ConversationRepository:
@@ -81,85 +81,72 @@ class ConversationManager:
     # 对话操作
     # ========================================
 
-    async def start_conversation_async(
+    async def create(
         self,
-        conversation_id: Optional[str] = None,
+        conversation_id: str,
         user_id: Optional[str] = None,
     ) -> str:
-        """
-        开始新对话（支持持久化）
+        """显式创建一个由调用方分配 ID 的 Conversation。
+
+        ID 必须在任何 ``with_retry`` 边界外生成并在重试间保持稳定。同一操作
+        首次已 commit、确认响应瞬断后的 Duplicate 视为幂等成功；客户端提供的
+        已有 Conversation ID 不得进入本方法。
 
         Args:
-            conversation_id: 指定的对话ID（None 则自动生成）
+            conversation_id: 调用方预先分配的稳定对话ID
             user_id: 用户ID（认证隔离）
 
         Returns:
             对话ID
         """
-        from uuid import uuid4
+        repo = self._ensure_repository()
+        try:
+            await repo.create_conversation(
+                conversation_id=conversation_id,
+                title=None,
+                user_id=user_id,
+            )
+        except DuplicateError:
+            logger.debug(
+                f"Conversation {conversation_id} already exists (idempotent retry)"
+            )
 
-        conv_id = conversation_id or f"conv-{uuid4().hex}"
+        logger.info(f"Created conversation: {conversation_id}")
+        return conversation_id
 
-        if self.repository:
-            try:
-                await self.repository.create_conversation(
-                    conversation_id=conv_id,
-                    title=None,
-                    user_id=user_id,
-                )
-            except DuplicateError:
-                logger.debug(f"Conversation {conv_id} already exists")
-            except Exception as e:
-                logger.warning(f"Failed to persist conversation: {e}")
-                raise
-
-        logger.info(f"Started conversation: {conv_id}")
-        return conv_id
-
-    async def ensure_conversation_exists(
+    async def require_owned(
         self,
         conversation_id: str,
         user_id: Optional[str] = None,
-        *,
-        create_if_missing: bool = True,
     ) -> None:
-        """
-        确保对话存在。
+        """要求 Conversation 已存在且归属指定用户，否则按 404 语义失败。
 
-        ``create_if_missing=False`` 用于已有对话的执行路径：路由层已经
-        建好并校验过对话，后台任务若再发现它不存在，只能说明用户
-        在 submit 后删除了它。此时必须 fail closed，不能用缺省
-        ``user_id=None`` 把已删对话复活成孤儿。
+        本方法只做校验，不返回 ORM snapshot；这样通过 ``with_retry`` 的 fresh
+        session 调用时不会让 ORM 实例逃出其加载 session。不存在和 owner 不匹配
+        使用同一个 ``NotFoundError``，避免泄露资源是否存在。
 
         Args:
             conversation_id: 对话ID
-            user_id: 用户ID（创建时使用）
-            create_if_missing: 不存在时是否创建；False 则抛 NotFoundError
+            user_id: 预期 owner；None 保留非 Web/manual 的无 owner Conversation 语义
         """
-        if self.repository:
-            existing = await self.repository.get_conversation(conversation_id)
-            if existing:
-                return
-        if not create_if_missing:
+        repo = self._ensure_repository()
+        existing = await repo.get_conversation(conversation_id)
+        if not existing or existing.user_id != user_id:
             raise NotFoundError("Conversation", conversation_id)
-        await self.start_conversation_async(conversation_id, user_id=user_id)
 
     # ========================================
     # 消息操作
     # ========================================
 
-    async def add_message_async(
+    async def append_message(
         self,
         conv_id: str,
         message_id: str,
         user_input: str,
         parent_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
-        *,
-        create_conversation_if_missing: bool = True,
     ) -> Dict:
-        """
-        添加消息到对话（支持持久化）
+        """向一个已存在的 Conversation 追加消息，绝不创建父 Conversation。
 
         Args:
             conv_id: 对话ID
@@ -167,40 +154,34 @@ class ConversationManager:
             user_input: 消息内容
             parent_id: 父消息ID（分支时使用）
             metadata: 与用户输入同时确定的 display-only 快照
-            create_conversation_if_missing: 保留旧调用方的自动创建语义；
-                已有对话的执行路径应传 False，防止删除后复活
 
         Returns:
             消息对象字典
         """
-        await self.ensure_conversation_exists(
-            conv_id,
-            create_if_missing=create_conversation_if_missing,
-        )
-
         now = utc_now().isoformat()
 
-        if self.repository:
-            try:
-                await self.repository.add_message(
-                    conversation_id=conv_id,
-                    message_id=message_id,
-                    user_input=user_input,
-                    parent_id=parent_id,
-                    metadata=metadata,
-                )
-            except DuplicateError:
-                # 幂等(with_retry 契约):本方法被 _with_db_retry 包裹,瞬断会从头重跑;
-                # 若上次尝试已 commit 了这条 message(message_id 是稳定幂等键),重跑会撞重 —
-                # 当作上次已成功,不 raise(否则非瞬断异常逃出 with_retry → 整轮崩,即便消息
-                # 已落库)。与兄弟 start_conversation_async 同范式。title 重设天然幂等,照常走。
-                logger.debug(f"Message {message_id} already exists (idempotent retry)")
+        repo = self._ensure_repository()
+        try:
+            await repo.add_message(
+                conversation_id=conv_id,
+                message_id=message_id,
+                user_input=user_input,
+                parent_id=parent_id,
+                metadata=metadata,
+            )
+        except DuplicateError:
+            # 幂等(with_retry 契约):本方法被 _with_db_retry 包裹,瞬断会从头重跑;
+            # 若上次尝试已 commit 了这条 message(message_id 是稳定幂等键),重跑会撞重 —
+            # 当作上次已成功,不 raise(否则非瞬断异常逃出 with_retry → 整轮崩,即便消息
+            # 已落库)。与兄弟 create 同范式。title 重设天然幂等,照常走。
+            logger.debug(f"Message {message_id} already exists (idempotent retry)")
 
-            # 如果是第一条消息（无 parent），自动生成 title
-            if parent_id is None:
-                title = self._generate_title(user_input)
-                await self.repository.update_title(conv_id, title)
-                logger.debug(f"Auto-generated title for conversation {conv_id}: {title}")
+        # 如果是第一条消息（无 parent），自动生成 title。Duplicate 分支也必须继续到
+        # 这里：Message/active_branch 可能已 commit，而上次尝试在 title 写前瞬断。
+        if parent_id is None:
+            title = self._generate_title(user_input)
+            await repo.update_title(conv_id, title)
+            logger.debug(f"Auto-generated title for conversation {conv_id}: {title}")
 
         return {
             "message_id": message_id,
@@ -423,9 +404,9 @@ class ConversationManager:
         Returns:
             True 如果归属匹配，False 如果不存在或不匹配
         """
-        repo = self._ensure_repository()
-        conv = await repo.get_conversation(conversation_id)
-        if not conv or conv.user_id != user_id:
+        try:
+            await self.require_owned(conversation_id, user_id)
+        except NotFoundError:
             return False
         return True
 

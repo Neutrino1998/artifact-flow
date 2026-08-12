@@ -47,12 +47,12 @@ def _make_engine_noop_state(message_id: str):
 def _make_mock_conversation_manager(exists_value: bool = True):
     """A conversation_manager AsyncMock pre-wired with the methods stream_execute uses."""
     cm = MagicMock()
-    cm.start_conversation_async = AsyncMock(return_value="conv-test")
-    cm.ensure_conversation_exists = AsyncMock()
+    cm.create = AsyncMock(return_value="conv-test")
+    cm.require_owned = AsyncMock()
     cm.get_active_branch = AsyncMock(return_value=None)
     cm.get_message_metadata_async = AsyncMock(return_value={})
     cm.load_event_history_async = AsyncMock(return_value=[])
-    cm.add_message_async = AsyncMock()
+    cm.append_message = AsyncMock()
     cm.exists_async = AsyncMock(return_value=exists_value)
     cm.update_response_async = AsyncMock()
     cm.update_message_metadata_async = AsyncMock()
@@ -143,7 +143,7 @@ class TestSetupNoResurrection:
     async def test_missing_conversation_aborts_before_setup(self):
         """A queued turn must not recreate a conversation deleted before it starts."""
         cm = _make_mock_conversation_manager()
-        cm.ensure_conversation_exists.side_effect = NotFoundError(
+        cm.require_owned.side_effect = NotFoundError(
             "Conversation", "conv-test"
         )
         ctrl = _make_controller(cm, _make_mock_event_repo(), _make_mock_artifact_service())
@@ -158,16 +158,14 @@ class TestSetupNoResurrection:
             ))
 
         assert events == []
-        cm.ensure_conversation_exists.assert_awaited_once_with(
-            "conv-test", create_if_missing=False
-        )
-        cm.add_message_async.assert_not_awaited()
+        cm.require_owned.assert_awaited_once_with("conv-test", None)
+        cm.append_message.assert_not_awaited()
         execute.assert_not_awaited()
 
     async def test_delete_between_setup_and_message_insert_aborts(self):
         """The second write boundary also fails closed on a concurrent DELETE."""
         cm = _make_mock_conversation_manager()
-        cm.add_message_async.side_effect = NotFoundError(
+        cm.append_message.side_effect = NotFoundError(
             "Conversation", "conv-test"
         )
         ctrl = _make_controller(cm, _make_mock_event_repo(), _make_mock_artifact_service())
@@ -182,9 +180,7 @@ class TestSetupNoResurrection:
             ))
 
         assert [event["type"] for event in events] == [StreamEventType.METADATA.value]
-        assert cm.add_message_async.await_args.kwargs[
-            "create_conversation_if_missing"
-        ] is False
+        cm.append_message.assert_awaited_once()
         execute.assert_not_awaited()
 
 

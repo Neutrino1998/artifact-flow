@@ -112,8 +112,8 @@ class ExecutionController:
         无 db_manager 时回退到 bound 实例（不重试）。
 
         **fn 必须幂等**(见 db_manager.with_retry 契约):with_retry 失败时从头重跑 fn。
-        幂等键在调用前定好、跨重试稳定;写操作把「已存在」当成功(见 add_message_async /
-        start_conversation_async 的撞重吞、batch_create 的稳定 event_id)。
+        幂等键在调用前定好、跨重试稳定;写操作把「已存在」当成功(见
+        ConversationManager.create / append_message 的撞重吞、batch_create 的稳定 event_id)。
         """
         if not self._db_manager:
             return await fn(self.conversation_manager, self.message_event_repo)
@@ -181,17 +181,15 @@ class ExecutionController:
         if not conversation_id:
             # conv_id 在 retry 边界**之前**生成(幂等键稳定):否则瞬断重试会另生成一个
             # uuid、提交出第二个孤儿会话(reviewer #2)。传入固定 id → 重试复用同 id →
-            # create_conversation 撞重被 start_conversation_async 吞掉 → 幂等。
+            # create_conversation 撞重被 ConversationManager.create 吞掉 → 幂等。
             conversation_id = f"conv-{uuid4().hex}"
             await self._with_db_retry(
-                lambda cm, er: cm.start_conversation_async(conversation_id)
+                lambda cm, er: cm.create(conversation_id, user_id=self.user_id)
             )
         else:
             try:
                 await self._with_db_retry(
-                    lambda cm, er: cm.ensure_conversation_exists(
-                        conversation_id, create_if_missing=False
-                    )
+                    lambda cm, er: cm.require_owned(conversation_id, self.user_id)
                 )
             except NotFoundError:
                 logger.info(
@@ -394,7 +392,7 @@ class ExecutionController:
         # 添加消息到 conversation (after all pre-engine setup to avoid orphaned rows on failure)
         try:
             await self._with_db_retry(
-                lambda cm, er: cm.add_message_async(
+                lambda cm, er: cm.append_message(
                     conv_id=conversation_id,
                     message_id=message_id,
                     user_input=user_input,
@@ -403,7 +401,6 @@ class ExecutionController:
                         {"activated_skills": activated_skills}
                         if activated_skills else None
                     ),
-                    create_conversation_if_missing=False,
                 )
             )
         except NotFoundError:

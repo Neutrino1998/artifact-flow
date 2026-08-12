@@ -463,25 +463,26 @@ class TestRetryIdempotency:
     """ConversationManager 的 setup 写被 controller._with_db_retry 包裹;with_retry 在瞬断后
     从头重跑 fn → 这些写必须幂等(同 id 第二遍不得抛)。锁定 reviewer #1/#2 的修复。"""
 
-    async def test_add_message_async_idempotent_on_retry(
+    async def test_append_message_idempotent_on_retry(
         self, conversation_repo: ConversationRepository, test_user: User
     ):
-        # 模拟 with_retry:首次已 commit message 后瞬断 → 重跑 add_message_async。
+        # 模拟 with_retry:首次已 commit message 后瞬断 → 重跑 append_message。
         # 修复前第二遍撞 DuplicateError(非瞬断)逃出 with_retry → 整轮崩;修复后撞重当成功。
         from core.conversation_manager import ConversationManager
         mgr = ConversationManager(conversation_repo)
         conv_id = f"conv-{uuid.uuid4().hex}"
         msg_id = f"msg-{uuid.uuid4().hex}"
+        await mgr.create(conv_id, user_id=test_user.id)
 
         activated = [{"slug": "docx", "name": "Word documents"}]
-        await mgr.add_message_async(
+        await mgr.append_message(
             conv_id=conv_id,
             message_id=msg_id,
             user_input="hi",
             metadata={"activated_skills": activated},
         )
         # 第二遍(= retry 从头重跑)不得抛
-        await mgr.add_message_async(
+        await mgr.append_message(
             conv_id=conv_id,
             message_id=msg_id,
             user_input="hi",
@@ -492,15 +493,16 @@ class TestRetryIdempotency:
         assert message is not None
         assert message.metadata_["activated_skills"] == activated
 
-    async def test_add_message_async_blank_root_title_falls_back(
+    async def test_append_message_blank_root_title_falls_back(
         self, conversation_repo: ConversationRepository, test_user: User
     ):
         from core.conversation_manager import ConversationManager
         mgr = ConversationManager(conversation_repo)
         conv_id = f"conv-{uuid.uuid4().hex}"
         msg_id = f"msg-{uuid.uuid4().hex}"
+        await mgr.create(conv_id, user_id=test_user.id)
 
-        await mgr.add_message_async(
+        await mgr.append_message(
             conv_id=conv_id,
             message_id=msg_id,
             user_input="",
@@ -511,26 +513,25 @@ class TestRetryIdempotency:
         assert conv is not None
         assert conv.title == "Untitled"
 
-    async def test_add_message_can_require_existing_conversation(
+    async def test_append_message_requires_existing_conversation(
         self, conversation_repo: ConversationRepository
     ):
-        """Execution callers can fail closed instead of resurrecting a deleted row."""
+        """Append fails closed instead of resurrecting a deleted parent row."""
         from core.conversation_manager import ConversationManager
 
         mgr = ConversationManager(conversation_repo)
         conv_id = f"conv-{uuid.uuid4().hex}"
 
         with pytest.raises(NotFoundError):
-            await mgr.add_message_async(
+            await mgr.append_message(
                 conv_id=conv_id,
                 message_id=f"msg-{uuid.uuid4().hex}",
                 user_input="hi",
-                create_conversation_if_missing=False,
             )
 
         assert await conversation_repo.get_conversation(conv_id) is None
 
-    async def test_start_conversation_async_idempotent_on_same_id(
+    async def test_create_idempotent_on_same_stable_id(
         self, conversation_repo: ConversationRepository, test_user: User
     ):
         # #2 的修法(controller 在 retry 边界外定 conv_id 再传入)依赖此幂等:固定 id
@@ -539,8 +540,37 @@ class TestRetryIdempotency:
         mgr = ConversationManager(conversation_repo)
         conv_id = f"conv-{uuid.uuid4().hex}"
 
-        assert await mgr.start_conversation_async(conv_id) == conv_id
-        assert await mgr.start_conversation_async(conv_id) == conv_id
+        assert await mgr.create(conv_id, user_id=test_user.id) == conv_id
+        assert await mgr.create(conv_id, user_id=test_user.id) == conv_id
+
+    async def test_require_owned_hides_missing_and_wrong_owner(
+        self, conversation_repo: ConversationRepository, test_user: User
+    ):
+        from core.conversation_manager import ConversationManager
+
+        mgr = ConversationManager(conversation_repo)
+        conv_id = f"conv-{uuid.uuid4().hex}"
+        await mgr.create(conv_id, user_id=test_user.id)
+
+        assert await mgr.require_owned(conv_id, test_user.id) is None
+
+        with pytest.raises(NotFoundError):
+            await mgr.require_owned(conv_id, "different-user")
+        with pytest.raises(NotFoundError):
+            await mgr.require_owned(f"conv-{uuid.uuid4().hex}", test_user.id)
+
+    async def test_persistence_entrypoints_require_repository(self):
+        """Persistence APIs fail loudly; production has no test-only no-op path."""
+        from core.conversation_manager import ConversationManager
+
+        mgr = ConversationManager()
+
+        with pytest.raises(RuntimeError, match="repository not configured"):
+            await mgr.create("conv-test")
+        with pytest.raises(RuntimeError, match="repository not configured"):
+            await mgr.require_owned("conv-test")
+        with pytest.raises(RuntimeError, match="repository not configured"):
+            await mgr.append_message("conv-test", "msg-test", "hello")
 
     async def test_fixed_conversation_id_survives_post_commit_disconnect(
         self,
@@ -582,7 +612,7 @@ class TestRetryIdempotency:
             nonlocal attempts
             attempts += 1
             manager = ConversationManager(ConversationRepository(session))
-            return await manager.start_conversation_async(
+            return await manager.create(
                 conv_id,
                 user_id=test_user.id,
             )
@@ -646,12 +676,11 @@ class TestRetryIdempotency:
             nonlocal attempts
             attempts += 1
             manager = ConversationManager(ConversationRepository(session))
-            return await manager.add_message_async(
+            return await manager.append_message(
                 conv_id=conv_id,
                 message_id=msg_id,
                 user_input="Stable retry title",
                 parent_id=None,
-                create_conversation_if_missing=False,
             )
 
         await db_manager.with_retry(

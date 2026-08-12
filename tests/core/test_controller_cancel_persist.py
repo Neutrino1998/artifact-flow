@@ -31,12 +31,12 @@ from core.events import ExecutionEvent, StreamEventType
 
 def _make_mock_conversation_manager():
     cm = MagicMock()
-    cm.start_conversation_async = AsyncMock(return_value="conv-test")
-    cm.ensure_conversation_exists = AsyncMock()
+    cm.create = AsyncMock(return_value="conv-test")
+    cm.require_owned = AsyncMock()
     cm.get_active_branch = AsyncMock(return_value=None)
     cm.get_message_metadata_async = AsyncMock(return_value={})
     cm.load_event_history_async = AsyncMock(return_value=[])
-    cm.add_message_async = AsyncMock()
+    cm.append_message = AsyncMock()
     cm.exists_async = AsyncMock(return_value=True)
     cm.update_response_async = AsyncMock()
     cm.update_message_metadata_async = AsyncMock()

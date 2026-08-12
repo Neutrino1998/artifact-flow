@@ -203,16 +203,15 @@ async def send_message(
                 ),
             )
 
-    # 只有本请求分配 ID 的新 conversation 才允许创建。已有 conversation 的 ownership
-    # 检查与这里之间可能并发 DELETE；此时必须 404，不能把同 ID 的已删 conversation
-    # 复活。submit 取得 lease 后 controller 还会再做一次 no-create 检查，覆盖这里与
-    # lease 获取之间的更窄窗口。
+    # 只有本请求分配 ID 的新 conversation 才进入显式 create。客户端传入的已有 ID
+    # 只能 require_owned；ownership 早检查与这里之间若并发 DELETE，此处返回 404，绝不
+    # 把同 ID 的已删 conversation 复活。submit 取得 lease 后 controller 还会再 require
+    # 一次，覆盖这里与 lease 获取之间的更窄窗口（真正消除该空窗要到阶段 C）。
     try:
-        await conversation_manager.ensure_conversation_exists(
-            conversation_id,
-            user_id=user_id,
-            create_if_missing=is_new_conversation,
-        )
+        if is_new_conversation:
+            await conversation_manager.create(conversation_id, user_id=user_id)
+        else:
+            await conversation_manager.require_owned(conversation_id, user_id)
     except NotFoundError:
         raise HTTPException(
             status_code=404,

@@ -6,8 +6,8 @@ The transport preserves three distinct user intents:
 - explicit message ID: branch from exactly that message;
 - explicit null: start a root branch and do not load prior path state.
 
-These tests pin the controller behavior before the persistence API is renamed
-in phase B.  Repository-level parent ownership and active_branch writes remain
+These tests pin the controller behavior across the phase-B persistence API
+split. Repository-level parent ownership and active_branch writes remain
 covered by ``tests/repositories/test_conversation_repo.py``.
 """
 
@@ -21,18 +21,19 @@ from core.engine import EngineHooks
 
 def _conversation_manager(active_parent: str):
     manager = MagicMock()
-    manager.ensure_conversation_exists = AsyncMock()
+    manager.create = AsyncMock(return_value="conv-created")
+    manager.require_owned = AsyncMock()
     manager.get_active_branch = AsyncMock(return_value=active_parent)
     manager.load_event_history_async = AsyncMock(return_value=[])
     manager.get_message_metadata_async = AsyncMock(return_value={})
-    manager.add_message_async = AsyncMock()
+    manager.append_message = AsyncMock()
     # End after engine execution without exercising post-processing; that
     # lifecycle has its own exhaustive cancellation/persistence matrix.
     manager.exists_async = AsyncMock(return_value=False)
     return manager
 
 
-def _controller(manager):
+def _controller(manager, *, user_id=None):
     hooks = EngineHooks(
         check_cancelled=AsyncMock(return_value=False),
         wait_for_interrupt=AsyncMock(return_value=None),
@@ -44,6 +45,7 @@ def _controller(manager):
         effective_toolsets={},
         hooks=hooks,
         conversation_manager=manager,
+        user_id=user_id,
     )
 
 
@@ -103,9 +105,40 @@ async def test_parent_tristate_reaches_message_append_unchanged(
     else:
         manager.get_message_metadata_async.assert_not_awaited()
 
-    manager.add_message_async.assert_awaited_once()
-    append_kwargs = manager.add_message_async.await_args.kwargs
+    manager.require_owned.assert_awaited_once_with("conv-test", None)
+    manager.create.assert_not_awaited()
+    manager.append_message.assert_awaited_once()
+    append_kwargs = manager.append_message.await_args.kwargs
     assert append_kwargs["conv_id"] == "conv-test"
     assert append_kwargs["message_id"] == "msg-new"
     assert append_kwargs["parent_id"] == expected_parent
-    assert append_kwargs["create_conversation_if_missing"] is False
+
+
+async def test_controller_allocates_id_before_explicit_create():
+    manager = _conversation_manager(active_parent="unused")
+    controller = _controller(manager, user_id="user-1")
+
+    async def fake_execute_loop(**kwargs):
+        state = kwargs["state"]
+        state.update({
+            "response": "ok",
+            "error": False,
+            "cancelled": False,
+            "always_allowed_tools": [],
+            "execution_metrics": {},
+        })
+        return state
+
+    with patch("core.controller.execute_loop", side_effect=fake_execute_loop):
+        events = await _consume(controller.stream_execute(
+            user_input="new conversation",
+            parent_message_id=None,
+            message_id="msg-new",
+        ))
+
+    created_id = manager.create.await_args.args[0]
+    assert created_id.startswith("conv-")
+    manager.create.assert_awaited_once_with(created_id, user_id="user-1")
+    manager.require_owned.assert_not_awaited()
+    assert events[0]["data"]["conversation_id"] == created_id
+    assert manager.append_message.await_args.kwargs["conv_id"] == created_id
