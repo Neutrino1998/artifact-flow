@@ -40,7 +40,7 @@ class UserRepository(BaseRepository[User]):
             # constraint names.
             if await self.get_by_username(username) is not None:
                 raise DuplicateError("User", username) from exc
-            raise UserWriteError(str(exc)) from exc
+            raise UserWriteError() from exc
 
     async def save_user(self, user: User) -> User:
         """Commit one already-loaded user mutation."""
@@ -51,7 +51,7 @@ class UserRepository(BaseRepository[User]):
             return user
         except IntegrityError as exc:
             await self._session.rollback()
-            raise UserWriteError(str(exc)) from exc
+            raise UserWriteError() from exc
 
     async def get_by_username(self, username: str) -> Optional[User]:
         """根据用户名查询用户"""
@@ -180,4 +180,13 @@ class UserRepository(BaseRepository[User]):
 
 
 class UserWriteError(Exception):
-    """A user mutation failed after validation, usually due to a concurrent FK change."""
+    """Safe application error for a user write integrity failure.
+
+    The original database exception remains available through ``__cause__``
+    for stack diagnostics.  Its text is deliberately not copied here because
+    SQLAlchemy statement parameters may contain password hashes or other
+    sensitive values.
+    """
+
+    def __init__(self):
+        super().__init__("User write failed")

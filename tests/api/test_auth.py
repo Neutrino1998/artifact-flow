@@ -139,8 +139,10 @@ class TestAdminCRUD:
         assert resp.status_code == 409
 
     async def test_create_user_department_deleted_after_precheck(
-        self, admin_client: AsyncClient, monkeypatch
+        self, admin_client: AsyncClient, monkeypatch, caplog
     ):
+        import logging
+
         from repositories.department_repo import DepartmentRepository
         from repositories.user_repo import UserRepository, UserWriteError
 
@@ -152,28 +154,30 @@ class TestAdminCRUD:
             return object() if department_reads == 1 else None
 
         async def foreign_key_failure(self, user):
-            raise UserWriteError("simulated department FK race")
+            raise UserWriteError()
 
         monkeypatch.setattr(
             DepartmentRepository, "get_by_id", disappearing_department
         )
         monkeypatch.setattr(UserRepository, "create_user", foreign_key_failure)
 
-        resp = await admin_client.post(
-            "/api/v1/admin/users",
-            json={
-                "username": f"dept-race-{uuid.uuid4().hex[:8]}",
-                "password": "Somepass1234!",
-                "role": "user",
-                "department_id": "dept-disappeared",
-            },
-        )
+        with caplog.at_level(logging.WARNING, logger="ArtifactFlow"):
+            resp = await admin_client.post(
+                "/api/v1/admin/users",
+                json={
+                    "username": f"dept-race-{uuid.uuid4().hex[:8]}",
+                    "password": "Somepass1234!",
+                    "role": "user",
+                    "department_id": "dept-disappeared",
+                },
+            )
 
         assert resp.status_code == 400
         assert (
             resp.json()["detail"]
             == "department_id does not reference an existing department"
         )
+        assert "User write failed" not in caplog.text
 
     async def test_create_user_as_regular_user(self, client: AsyncClient):
         resp = await client.post(

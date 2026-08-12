@@ -125,9 +125,8 @@ class AdminUserManager:
                 and await self._departments.get_by_id(department_id) is None
             ):
                 logger.warning(
-                    "User creation rejected after department %s disappeared: %s",
+                    "User creation rejected after department %s disappeared",
                     department_id,
-                    exc,
                 )
                 raise AdminUserInvalidError(
                     "department_id does not reference an existing department"
@@ -223,9 +222,12 @@ class AdminUserManager:
                 continue
             try:
                 await self._users.save_user(user)
-            except UserWriteError as exc:
+            except UserWriteError:
                 logger.warning(
-                    "bulk_user_action %s failed for %s: %s", action, user_id, exc
+                    "bulk_user_action %s failed for %s due to a user write "
+                    "integrity error",
+                    action,
+                    user_id,
                 )
                 failed.append({"id": user_id, "reason": "internal_error"})
                 continue
@@ -396,10 +398,9 @@ class AdminUserManager:
                 ):
                     logger.warning(
                         "Bulk user import row %d rejected after department %s "
-                        "disappeared: %s",
+                        "disappeared",
                         row.row_number,
                         department_id,
-                        exc,
                     )
                     failed.append(
                         {

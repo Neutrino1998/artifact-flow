@@ -175,8 +175,10 @@ class TestDepartments:
             assert "contiguous" in f["reason"]
 
     async def test_department_deleted_before_insert_fails_row_not_username_skip(
-        self, admin_client: AsyncClient, db_manager, monkeypatch
+        self, admin_client: AsyncClient, db_manager, monkeypatch, caplog
     ):
+        import logging
+
         from repositories.department_repo import DepartmentRepository
         from repositories.user_repo import UserRepository, UserWriteError
 
@@ -194,7 +196,7 @@ class TestDepartments:
             return await real_get_by_id(self, department_id)
 
         async def foreign_key_failure(self, user):
-            raise UserWriteError("simulated department FK race")
+            raise UserWriteError()
 
         monkeypatch.setattr(
             DepartmentRepository, "get_by_id", missing_after_insert_failure
@@ -205,7 +207,8 @@ class TestDepartments:
             "username,password,dept_l1\n"
             "dept-race-user,Imp0rt#2026,Race Department\n"
         )
-        resp = await _post_csv(admin_client, csv)
+        with caplog.at_level(logging.WARNING, logger="ArtifactFlow"):
+            resp = await _post_csv(admin_client, csv)
 
         assert resp.status_code == 200
         body = resp.json()
@@ -218,6 +221,7 @@ class TestDepartments:
                 "reason": "department_id does not reference an existing department",
             }
         ]
+        assert "User write failed" not in caplog.text
 
 
 # ============================================================

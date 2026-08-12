@@ -490,6 +490,7 @@ class TestSessionTzInjection:
         # SQLite path keeps only check_same_thread — no server_settings /
         # init_command leakage.
         assert captured["kwargs"]["connect_args"] == {"check_same_thread": False}
+        assert captured["kwargs"]["hide_parameters"] is True
 
     @pytest.mark.asyncio
     async def test_initialize_mysql_preserves_dsn_init_command(self):

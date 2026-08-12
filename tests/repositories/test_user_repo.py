@@ -5,6 +5,7 @@ Covers CRUD, count/pagination, and inherited BaseRepository methods.
 """
 
 import uuid
+import traceback
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -79,7 +80,7 @@ class TestUserCRUD:
         user = User(
             id=str(uuid.uuid4()),
             username=f"fk-race-{uuid.uuid4().hex[:8]}",
-            hashed_password=hash_password("other"),
+            hashed_password="SENSITIVE_HASH_MUST_NOT_APPEAR",
             role="user",
             is_active=True,
             department_id="deleted-department",
@@ -88,7 +89,15 @@ class TestUserCRUD:
         with pytest.raises(UserWriteError) as exc_info:
             await user_repo.create_user(user)
 
-        assert isinstance(exc_info.value.__cause__, IntegrityError)
+        cause = exc_info.value.__cause__
+        assert str(exc_info.value) == "User write failed"
+        assert isinstance(cause, IntegrityError)
+        assert "SENSITIVE_HASH_MUST_NOT_APPEAR" not in str(cause)
+        assert "SQL parameters hidden" in str(cause)
+        rendered_traceback = "".join(
+            traceback.format_exception(exc_info.value)
+        )
+        assert "SENSITIVE_HASH_MUST_NOT_APPEAR" not in rendered_traceback
 
     async def test_update_user_fields(self, user_repo: UserRepository, test_user: User):
         test_user.display_name = "Updated Name"

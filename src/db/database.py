@@ -359,6 +359,10 @@ class DatabaseManager:
         # 创建异步引擎
         engine_kwargs = {
             "echo": self.echo,
+            # Keep SQL shape/error codes available while preventing bound
+            # values (password hashes, credential ciphertext, user content)
+            # from appearing in StatementError text or SQL echo logs.
+            "hide_parameters": True,
         }
         # engine_url 默认是 self.database_url;PG 单 URL 路径可能 sanitize 后覆盖
         # (见非 SQLite 分支 difference_update_query),其余 path 不动。

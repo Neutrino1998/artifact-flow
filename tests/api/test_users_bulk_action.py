@@ -294,7 +294,7 @@ class TestSetDepartment:
 
         async def faulty_save(self, entity):
             if entity.id == u_bad.id:
-                raise UserWriteError("simulated FK violation")
+                raise UserWriteError()
             return await real_save(self, entity)
 
         monkeypatch.setattr(UserRepository, "save_user", faulty_save)
