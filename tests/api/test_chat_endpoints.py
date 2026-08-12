@@ -290,6 +290,35 @@ class TestSendMessageValidation:
         assert resp.status_code == 422
         assert "user_input must not be blank" in str(resp.json())
 
+    async def test_empty_conversation_id_rejected_without_side_effects(
+        self, client: AsyncClient, app
+    ):
+        """空 ID 不是新会话别名：schema 422，且准入生命周期完全不启动。"""
+        store = app.dependency_overrides[get_runtime_store]()
+        transport = app.dependency_overrides[get_stream_transport]()
+        supervisor: TaskSupervisor = app.dependency_overrides[get_task_supervisor]()
+        before = (await client.get("/api/v1/chat")).json()["total"]
+
+        resp = await client.post(
+            "/api/v1/chat",
+            files={
+                "payload": (
+                    None,
+                    json.dumps({
+                        "user_input": "start",
+                        "conversation_id": "",
+                    }),
+                ),
+            },
+        )
+
+        assert resp.status_code == 422
+        assert "conversation_id" in str(resp.json())
+        assert (await client.get("/api/v1/chat")).json()["total"] == before
+        assert await store.list_active_executions() == {}
+        assert supervisor.active_task_count == 0
+        assert transport.streams == {}
+
     async def test_stale_parent_message_id_rejected_before_submit(
         self, client: AsyncClient, conv_with_messages, monkeypatch
     ):

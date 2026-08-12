@@ -18,7 +18,11 @@ from config import config
 class ChatRequest(BaseModel):
     """POST /api/v1/chat request body"""
     user_input: str = Field(..., max_length=config.MAX_MESSAGE_CHARS, description="User message content")
-    conversation_id: Optional[str] = Field(None, description="Continue existing conversation")
+    conversation_id: Optional[str] = Field(
+        None,
+        min_length=1,
+        description="Continue existing conversation",
+    )
     parent_message_id: Optional[str] = Field(None, description="Branch from specific message")
     force_compact: bool = Field(
         False,

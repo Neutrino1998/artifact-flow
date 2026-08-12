@@ -159,8 +159,13 @@ class ConversationExecutionService:
     async def submit_turn(
         self, request: ConversationTurnRequest
     ) -> ConversationExecutionHandle:
-        is_new = request.conversation_id is None
-        conversation_id = request.conversation_id or f"conv-{uuid4().hex}"
+        requested_conversation_id = request.conversation_id
+        if requested_conversation_id is None:
+            is_new = True
+            conversation_id = f"conv-{uuid4().hex}"
+        else:
+            is_new = False
+            conversation_id = requested_conversation_id
         message_id = f"msg-{uuid4().hex}"
         set_request_context(message_id=message_id, conv_id=conversation_id)
 
