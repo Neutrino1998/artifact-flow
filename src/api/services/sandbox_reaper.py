@@ -1,7 +1,7 @@
 """
 SandboxReaper — lease-anchored 孤儿沙盒回收(C 阶段二级兜底)
 
-正常路径下,每条退出(成功/超时/协作取消/外部取消)都经 execution_runner._wrapped
+正常路径下,每条退出(成功/超时/协作取消/外部取消)都经 TaskScope
 的真 finally → SandboxSession.close() 拆容器 + 删 scratch。reaper 兜的是 finally
 **不执行**的那条:worker 被 SIGKILL / OOM 杀,容器归 daemon(DooD)不随 worker 死,
 孤儿继续烧 CPU(2026-05-14 同型失效)。
@@ -128,13 +128,13 @@ class SandboxReaper:
                 logger.exception("Sandbox reaper aiodocker client close failed")
 
     async def final_sweep(self) -> "ReapStats":
-        """停机最后一扫(main lifespan 在 runner.shutdown 之后、close 之前调)。
+        """停机最后一扫(main lifespan 在 supervisor shutdown 之后、close 之前调)。
 
         兜住 shutdown 期间 SandboxSession.close() 超时/失败漏下的孤儿 —— 单副本停机后
         不会再有 reaper 收尾,这些孤儿会一直跑到下次启动(P2)。先停周期 task 免与本扫
         并发,docker client 留到随后的 stop() 关。
 
-        **只对本进程(WORKER_ID)自己的资源无 grace**:runner 已 shutdown = 我的 turn
+        **只对本进程(WORKER_ID)自己的资源无 grace**:supervisor 已 shutdown = 我的 turn
         全部结束,带我 worker-id 的容器/目录必是孤儿,新鲜的也立即收(闭合单副本 Redis
         刚建即漏的缺口)。别的 worker 的资源照常走 grace —— 与副本数无关地正确,不靠
         lease 时序论证(兄弟的活资源即便 lease 暂不可见,也因 worker-id 不同而被 grace 护住)。

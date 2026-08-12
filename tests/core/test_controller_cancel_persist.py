@@ -734,7 +734,7 @@ class TestPersistOnExternalCancel:
         If _persist_events itself fails inside the cancel-handler, the failure must
         be logged but must NOT swallow the propagating CancelledError — the outer
         task still needs to honor the cancel request, and re-raising preserves
-        normal task-cancellation semantics for the runner's cleanup path.
+        normal task-cancellation semantics for the supervisor cleanup path.
         """
         cm = _make_mock_conversation_manager()
         am = _make_mock_artifact_service()

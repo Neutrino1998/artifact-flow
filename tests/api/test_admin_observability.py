@@ -5,7 +5,7 @@ import uuid
 import pytest
 from httpx import AsyncClient
 
-from api.dependencies import get_execution_runner, get_stream_transport
+from api.dependencies import get_runtime_store, get_stream_transport
 from db.database import DatabaseManager
 from db.models import User
 from repositories.conversation_repo import ConversationRepository
@@ -39,11 +39,11 @@ async def observed_conversation(
 
 
 async def _make_active(app, conv_id: str, message_id: str, owner_id: str):
-    runner = app.dependency_overrides[get_execution_runner]()
+    store = app.dependency_overrides[get_runtime_store]()
     transport = app.dependency_overrides[get_stream_transport]()
-    assert await runner.store.try_acquire_lease(conv_id, message_id) is None
+    assert await store.try_acquire_lease(conv_id, message_id) is None
     await transport.create_stream(message_id, owner_user_id=owner_id)
-    return runner, transport
+    return store, transport
 
 
 class TestAdminConversationActivity:
@@ -55,7 +55,7 @@ class TestAdminConversationActivity:
         observed_conversation: tuple[str, str],
     ):
         conv_id, message_id = observed_conversation
-        runner, transport = await _make_active(app, conv_id, message_id, test_user.id)
+        store, transport = await _make_active(app, conv_id, message_id, test_user.id)
         try:
             listing = await admin_client.get("/api/v1/admin/conversations")
             assert listing.status_code == 200
@@ -76,7 +76,7 @@ class TestAdminConversationActivity:
             ]
         finally:
             await transport.close_stream(message_id)
-            await runner.store.release_lease(conv_id, message_id)
+            await store.release_lease(conv_id, message_id)
 
     async def test_admin_can_subscribe_to_owner_stream(
         self,
@@ -87,7 +87,7 @@ class TestAdminConversationActivity:
         observed_conversation: tuple[str, str],
     ):
         conv_id, message_id = observed_conversation
-        runner, transport = await _make_active(app, conv_id, message_id, test_user.id)
+        store, transport = await _make_active(app, conv_id, message_id, test_user.id)
         await transport.push_event(message_id, {
             "type": "agent_start",
             "timestamp": "2026-07-13T00:00:00",
@@ -130,7 +130,7 @@ class TestAdminConversationActivity:
             assert "event: complete" in response.text
         finally:
             await transport.close_stream(message_id)
-            await runner.store.release_lease(conv_id, message_id)
+            await store.release_lease(conv_id, message_id)
 
     async def test_regular_user_cannot_open_admin_stream(
         self,

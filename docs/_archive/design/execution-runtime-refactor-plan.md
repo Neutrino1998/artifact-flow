@@ -1,6 +1,6 @@
 # 执行运行时边界与 Conversation Admission 重构 —— 实施计划
 
-> 状态：阶段 B 完成
+> 状态：阶段 C 完成
 > 起草：2026-08-10 · 最后更新：2026-08-12
 > 关联文档：
 > - `docs/how-it-works.md` —— 当前 Agent turn、SSE、持久化与运行时的产品级说明；本计划完成后同步更新。
@@ -15,13 +15,13 @@
 
 ## 进度
 
-**当前**：阶段 B 已完成，Conversation 持久化入口已拆为互斥的 `create / require_owned / append_message`，旧隐式创建布尔入口已删除。下一步进入 C，在不改变 DB durable truth 的前提下收口 lease、Admission、TaskSupervisor 和 Router runtime 边界。
+**当前**：阶段 C 已完成，Conversation send/delete 已收口到同一 Admission lease，通用 TaskSupervisor 与 Conversation 生命周期完成解耦，旧 Runner/Launcher 已删除。下一步进入 D，在稳定的 TaskSupervisor + ConversationExecutionService 边界上提取 AgentRuntime 与单一 finalization owner。
 
 | 阶段 | 内容 | 依赖 | 状态 |
 |---|---|---|---|
 | A | 冻结现有生命周期与竞态契约 | 无 | 已完成 |
 | B | 拆分显式 Conversation 持久化语义 | A | 已完成 |
-| C | 收口 Conversation 生命周期并提取 TaskSupervisor | B | 未开始 |
+| C | 收口 Conversation 生命周期并提取 TaskSupervisor | B | 已完成 |
 | D | 收成可嵌入 AgentRuntime 与单一 finalization | C | 未开始 |
 | E | 集成验收、文档与 embedded smoke | C、D | 未开始 |
 
@@ -255,7 +255,12 @@ Embedded caller ────────────────→ AgentRuntime
 
 **进展**：
 
-- 尚未开始。
+- 2026-08-12 完成。新增 `ConversationLeaseHandle`/协调器：lease acquire 成功即启动 heartbeat，归属丢失或续租异常立即 fail closed，并通过一次性 fence 取消已交接任务；释放统一走 owner CAS，acquire 响应不明时也只按本 owner best-effort compare-and-release，失败由 lease TTL 有界恢复。
+- 从旧 Runner 提取 `core.task_supervisor`：通用层只保留 task registry、单一 semaphore、重复 task ID 拒绝、queued event seam、cancel/shutdown、long-running 观测与逐回调有界的 LIFO `TaskScope` cleanup；模块不依赖 Conversation、RuntimeStore、StreamTransport、SQLAlchemy 或 FastAPI。无 Conversation/SSE 的 workload、排队取消、异常、shutdown、cleanup timeout 均由独立测试覆盖。
+- `ConversationExecutionService` 成为 send、inject、cancel、resume、single/bulk delete 的应用边界。Send 在 lease 内完成 create/require、ownership、parent/active-branch 最终校验，成功后创建 stream，并把同一个 handle 交给 TaskSupervisor，不再二次 acquire；delete 也在同类 handle 内重复权威 ownership 校验后提交。短 TTL + Event barrier 测试分别证明 Admission 与 delete 阻塞期间 heartbeat 已运行。
+- QUEUED 只持 lease；取得 capacity gate 后以 owner CAS 标记 interactive。TaskScope 的生产清理顺序已锁定为 Sandbox → interactive → message runtime state → stream → heartbeat/lease；单项 timeout/异常不阻断后续释放。InMemory 的 clear/release/renew 同样按 owner 校验，避免测试形态掩盖 Redis 下的 stale-owner 竞态。
+- Chat/Admin、controller factory、lifespan SandboxReaper、observability sampler/runtime snapshot 全部迁移到 `ConversationExecutionService`、`RuntimeStatusReader` 或 `TaskSupervisor`；Router 不再直访 runtime store。旧 `ExecutionLauncher`、`ExecutionSpec`、`ExecutionRunner`、组合式 `cleanup_execution` 及对应兼容入口均删除，bulk delete 继续逐 entity 执行且保持输入顺序的 best-effort 结果，不新增跨 slot 多 key 操作。
+- 竞态与故障验收覆盖 send-wins/delete-wins、Admission/delete 提前 heartbeat、单次 handle handoff、续租 false/异常 fencing、indeterminate acquire → 503、初始化失败脱敏 + ops log、stale owner CAS、排队取消、shutdown 与 LIFO cleanup。阶段 C 非 external 定向回归 136 项通过；临时 Redis 7 下的 RuntimeStore + 核心阶段 C 组合回归 51 项通过（其中 Redis RuntimeStore 25 项）；项目约定完整并行 lane `pytest -n 4 -m "not external and not serial"` 为 2039 项通过，另有 2 个 subtests 通过。
 
 ### D — 收成 AgentRuntime 与单一 finalization
 

@@ -305,7 +305,7 @@ class TestMessageQueue:
 
 class TestCleanup:
 
-    async def test_cleanup_execution_clears_all_dicts(self):
+    async def test_explicit_cleanup_clears_all_runtime_axes(self):
         store = InMemoryRuntimeStore()
         await store.try_acquire_lease("conv-1", "msg-1")
         await store.mark_engine_interactive("conv-1", "msg-1")
@@ -313,7 +313,9 @@ class TestCleanup:
         store._cancellations["msg-1"] = asyncio.Event()
         store._queues["msg-1"] = asyncio.Queue()
 
-        await store.cleanup_execution("conv-1", "msg-1")
+        await store.cleanup_message_state("msg-1")
+        await store.clear_engine_interactive("conv-1", "msg-1")
+        await store.release_lease("conv-1", "msg-1")
 
         assert await store.get_leased_message_id("conv-1") is None
         assert await store.get_interactive_message_id("conv-1") is None
@@ -329,11 +331,15 @@ class TestCleanup:
 
         # Simulate the old lease ending and a replacement turn becoming active
         # before the old task reaches its composite cleanup callback.
-        await store.cleanup_execution("conv-1", "msg-old")
+        await store.cleanup_message_state("msg-old")
+        await store.clear_engine_interactive("conv-1", "msg-old")
+        await store.release_lease("conv-1", "msg-old")
         await store.try_acquire_lease("conv-1", "msg-new")
         await store.mark_engine_interactive("conv-1", "msg-new")
 
-        await store.cleanup_execution("conv-1", "msg-old")
+        await store.cleanup_message_state("msg-old")
+        await store.clear_engine_interactive("conv-1", "msg-old")
+        await store.release_lease("conv-1", "msg-old")
 
         assert await store.get_leased_message_id("conv-1") == "msg-new"
         assert await store.get_interactive_message_id("conv-1") == "msg-new"
@@ -350,7 +356,7 @@ class TestCleanup:
         assert interrupt.event.is_set()
         assert interrupt.resume_data == {"approved": False, "reason": "shutdown"}
 
-    async def test_shutdown_cleanup_clears_all_state(self):
+    async def test_shutdown_cleanup_preserves_owned_state_until_task_cleanup(self):
         store = InMemoryRuntimeStore()
         await store.try_acquire_lease("conv-1", "msg-1")
         await store.mark_engine_interactive("conv-1", "msg-1")
@@ -360,15 +366,27 @@ class TestCleanup:
 
         await store.shutdown_cleanup()
 
-        assert len(store._conversation_leases) == 0
-        assert len(store._engine_interactive) == 0
-        assert len(store._interrupts) == 0
-        assert len(store._cancellations) == 0
-        assert len(store._queues) == 0
+        assert store._conversation_leases == {"conv-1": "msg-1"}
+        assert store._engine_interactive == {"conv-1": "msg-1"}
+        assert "msg-1" in store._interrupts
+        assert "msg-1" in store._cancellations
+        assert "msg-1" in store._queues
 
-    async def test_renew_lease_is_noop(self):
+        await store.cleanup_message_state("msg-1")
+        await store.clear_engine_interactive("conv-1", "msg-1")
+        await store.release_lease("conv-1", "msg-1")
+        assert not store._conversation_leases
+        assert not store._engine_interactive
+        assert not store._interrupts
+        assert not store._cancellations
+        assert not store._queues
+
+    async def test_renew_lease_confirms_current_owner(self):
         store = InMemoryRuntimeStore()
-        await store.renew_lease("conv-1", "msg-1", 30.0)  # should not raise
+        assert await store.renew_lease("conv-1", "msg-1", 30.0) is False
+        await store.try_acquire_lease("conv-1", "msg-1")
+        assert await store.renew_lease("conv-1", "msg-1", 30.0) is True
+        assert await store.renew_lease("conv-1", "msg-stale", 30.0) is False
 
 
 # Owner-key primitives (acquire/renew/release/get_owner) were removed together

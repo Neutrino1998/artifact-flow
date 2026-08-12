@@ -211,7 +211,7 @@ export function useSSE() {
         setConversations(list.conversations, list.total, list.has_more);
         // Belt-and-suspenders CAS after the refresh: the list snapshot may
         // have been captured before the lease release landed on the server
-        // (lease is released in execution_runner's finally AFTER push_event),
+        // (lease is released by TaskScope cleanup AFTER push_event),
         // so the server view can still report THIS terminal's message_id
         // as active right after we got the terminal SSE locally. CAS only
         // fixes that one direction (ghost dot for an already-finished turn).

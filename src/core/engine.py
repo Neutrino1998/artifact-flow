@@ -252,7 +252,7 @@ async def execute_loop(
         emit: 事件推送回调（推 SSE）
         sandbox_session: SandboxSession 实例（duck-typed:status_snapshot），仅用于
             动态上下文的 <sandbox_status> 快照——生命周期/拆除归 controller_factory
-            + runner cleanup，引擎不管理它
+            + TaskScope cleanup，引擎不管理它
         user_id: 当前认证用户 ID，仅传给 LLM adapter 派生 provider cache salt；
             不写入 prompt / event
     Returns:
@@ -275,7 +275,7 @@ async def execute_loop(
         探针失败（Redis 瞬断等）按「未取消」处理（fail-open + warning）：探针是纯
         UX 信号，失灵的最坏后果是取消晚一拍生效（下个 CANCEL_CHECK_INTERVAL 自然
         重试）；store 持续不可用的 fail-closed 兜底在 heartbeat/lease 层（连续失败
-        → 外部 task.cancel，execution_runner）。绝不让探针异常往上穿 —— 否则它落
+        → 外部 task.cancel，Conversation lease fencing）。绝不让探针异常往上穿 —— 否则它落
         在哪个消费点就伪装成哪个消费点的故障（工具被杀且记成工具失败 / 流式期间记
         成 "LLM call failed" / loop 顶记成 turn ERROR）。
         """

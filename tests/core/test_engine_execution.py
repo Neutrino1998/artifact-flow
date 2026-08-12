@@ -1267,7 +1267,7 @@ class TestCancelProbeFailure:
     """check_cancelled 探针故障（Redis 瞬断）的 fail-open 语义（reviewer F2 回归）：
     探针异常绝不伪装成它所落的消费点的故障 —— 工具不被杀、流式不记 "LLM call
     failed"、loop 顶不 ERROR 整个 turn。持续故障的 fail-closed 兜底在
-    heartbeat/lease 层（execution_runner 连续失败 → 外部 task.cancel），不在探针。"""
+    heartbeat/lease 层（ConversationLeaseHandle 失效 → 外部 task.cancel），不在探针。"""
 
     @staticmethod
     def _hooks_with_flaky_probe(store, flaky):

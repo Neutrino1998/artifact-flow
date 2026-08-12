@@ -55,7 +55,7 @@ def test_reads_error_wedge_and_metrics(monkeypatch, tmp_path):
         "tasks": [{
             "name": "exec-msg-1",
             "done": False,
-            "stack": ["execution_runner.py:194 in _wrapped"],
+            "stack": ["task_supervisor.py:104 in _wrapped"],
         }],
         "threads": [{
             "name": "MainThread",

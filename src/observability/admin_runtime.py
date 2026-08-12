@@ -23,8 +23,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from config import config
 from api.schemas.admin import AdminInstanceEventsResponse
 from api.dependencies import (
-    get_runtime_store,
-    get_execution_runner,
+    get_runtime_status_reader,
+    get_task_supervisor,
     get_redis_client,
     require_admin,
 )
@@ -83,11 +83,11 @@ async def get_runtime(
         }
     """
     sampler = get_sampler()
-    runner = get_execution_runner()
-    store = get_runtime_store()
+    supervisor = get_task_supervisor()
+    status_reader = get_runtime_status_reader()
 
     try:
-        active_conv_ids = await store.list_active_conversations()
+        active_conv_ids = await status_reader.list_active_conversations()
     except Exception:
         active_conv_ids = []
 
@@ -98,7 +98,7 @@ async def get_runtime(
         "instance_id": INSTANCE_ID,
         "sampler": snapshot,
         "active_conversations": active_conv_ids,
-        "active_tasks": runner.active_task_count,
+        "active_tasks": supervisor.active_task_count,
     }
 
 

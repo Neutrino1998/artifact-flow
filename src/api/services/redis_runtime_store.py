@@ -79,7 +79,7 @@ return 0
 # mark-interactive-if-owner: 仅当 lease 仍归 ARGV[1] 时才 SET interactive。
 # QUEUED→RUNNING 边的原子 compare-and-set —— 防止「排队中丢了 lease 的旧 task
 # 取得 semaphore 后覆盖新 owner 的 interactive key」（misroute inject + 跑无 fence 旧轮）。
-# 不是 owner 返回 0 → runner 据此 abort，不启动引擎（避免第二写者）。
+# 不是 owner 返回 0 → execution service 据此 abort，不启动引擎（避免第二写者）。
 # KEYS[1]=lease_key, KEYS[2]=interactive_key —— 二者都 {prefix:conv_id} hash-tag、
 # 同 slot，多 key Lua 在 Cluster 安全。ARGV[1]=msg_id, ARGV[2]=ttl
 _LUA_MARK_INTERACTIVE_IF_OWNER = """
@@ -233,8 +233,9 @@ class RedisRuntimeStore:
 
         Atomic compare-and-set (lease owner → SET interactive). Returns True if
         marked (still owner), False if the lease was lost/taken over while queued
-        — in which case the runner must abort instead of clobbering the new
-        owner's interactive key and running a second writer on the conversation.
+        — in which case the execution service must abort instead of clobbering
+        the new owner's interactive key and running a second writer on the
+        conversation.
         """
         result = await self._script_mark_interactive_if_owner(
             keys=[self._lease_key(conversation_id), self._interactive_key(conversation_id)],
@@ -472,20 +473,12 @@ class RedisRuntimeStore:
 
     # ── Lifecycle ──
 
-    async def cleanup_execution(self, conversation_id: str, message_id: str) -> None:
-        """清理指定 message_id 的所有运行时 key"""
+    async def cleanup_message_state(self, message_id: str) -> None:
+        """清理指定 message_id 的 interrupt/cancel/queue key。"""
         await self._redis.delete(
             self._interrupt_key(message_id),
             self._cancel_key(message_id),
             self._queue_key(message_id),
-        )
-        # lease（连带 owner）和 interactive：compare-and-del（只删自己持有的）
-        await self._script_release_lease(
-            keys=[self._lease_key(conversation_id), self._lease_owner_key(conversation_id)],
-            args=[message_id],
-        )
-        await self._script_compare_and_del(
-            keys=[self._interactive_key(conversation_id)], args=[message_id]
         )
         self._local_subscriptions.discard(message_id)
         logger.debug(f"Execution {message_id} cleaned up from Redis")

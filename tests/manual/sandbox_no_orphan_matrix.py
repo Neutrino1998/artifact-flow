@@ -11,7 +11,7 @@
   2. while-true      容器内 timeout --signal=KILL 真杀(exit 137,时长≈上限)
   3. 协作/外部取消   exec 进行中 task.cancel(),finally close
   4. 起容器中取消    ensure_container 进行中 task.cancel(),close 收半成品
-  5. runner 集成     register_cleanup → _wrapped finally 拆除(成功+取消两条)
+  5. supervisor 集成 TaskScope LIFO cleanup 拆除(成功+取消两条)
   6. 超额杀          watchdog du 超 SANDBOX_WORKSPACE_QUOTA → 杀容器 + sticky
                      (验收④:本机普通目录模拟池子,loop host-prep 真机验归 D)
   7. stage 往返      mount(宿主写)→ bash 读改(容器)→ persist(宿主读回)
@@ -50,7 +50,8 @@ from tools.builtin.sandbox_session import (  # noqa: E402
     SandboxUnavailableError,
 )
 from tools.builtin.sandbox_ops import MountArtifactTool, PersistFileTool  # noqa: E402
-from api.services.execution_runner import ExecutionRunner  # noqa: E402
+from api.services.runtime_store import InMemoryRuntimeStore  # noqa: E402
+from core.task_supervisor import TaskSupervisor  # noqa: E402
 
 PASS, FAIL = "\033[32mPASS\033[0m", "\033[31mFAIL\033[0m"
 results: list[tuple[str, bool, str]] = []
@@ -167,42 +168,57 @@ async def case_4_cancel_mid_start():
     await assert_no_residue("起容器中取消", session)
 
 
-class _NullTransport:
-    async def create_stream(self, *a, **k): pass
-    async def close_stream(self, *a): return True
-    async def push_event(self, *a): return True
+async def _submit_scoped(
+    supervisor: TaskSupervisor,
+    store: InMemoryRuntimeStore,
+    conversation_id: str,
+    message_id: str,
+    session: SandboxSession,
+    workload,
+):
+    conflict = await store.try_acquire_lease(conversation_id, message_id)
+    assert conflict is None, f"unexpected lease conflict: {conflict}"
+
+    def factory(scope):
+        # Registration order mirrors production: LIFO closes sandbox before lease.
+        scope.add_cleanup(
+            "conversation lease",
+            lambda: store.release_lease(conversation_id, message_id),
+        )
+        scope.add_cleanup("sandbox session", session.close)
+        return workload
+
+    return await supervisor.submit(message_id, factory)
 
 
-async def case_5_runner_integrated():
-    print("\n=== 5. runner 集成(register_cleanup → _wrapped finally)===")
-    runner = ExecutionRunner(max_concurrent=2)
+async def case_5_supervisor_integrated():
+    print("\n=== 5. supervisor 集成(TaskScope LIFO cleanup)===")
+    supervisor = TaskSupervisor(max_concurrent=2)
+    store = InMemoryRuntimeStore()
 
     # 5a. 成功路径
     conv, msg = _ids()
     session = SandboxSession(conv, msg)
-    runner.register_cleanup(msg, session.close)
-
     async def good_turn():
-        result = await session.exec("echo runner-path")
-        assert "runner-path" in result.output
+        result = await session.exec("echo supervisor-path")
+        assert "supervisor-path" in result.output
 
-    task = await runner.submit(conv, msg, good_turn, user_id="u1", stream_transport=_NullTransport())
+    task = await _submit_scoped(supervisor, store, conv, msg, session, good_turn)
     await asyncio.gather(task, return_exceptions=True)
-    await assert_no_residue("runner 成功路径", session)
+    await assert_no_residue("supervisor 成功路径", session)
 
     # 5b. 外部取消
     conv, msg = _ids()
     session = SandboxSession(conv, msg)
-    runner.register_cleanup(msg, session.close)
-
     async def long_turn():
         await session.exec("sleep 60")
 
-    task = await runner.submit(conv, msg, long_turn, user_id="u1", stream_transport=_NullTransport())
+    task = await _submit_scoped(supervisor, store, conv, msg, session, long_turn)
     await asyncio.sleep(3)
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
-    await assert_no_residue("runner 外部取消", session)
+    await assert_no_residue("supervisor 外部取消", session)
+    await supervisor.shutdown()
 
 
 async def case_6_over_quota():
@@ -301,30 +317,30 @@ async def case_8_reaper_collects_orphan():
     session = SandboxSession(conv, msg)
     await session.ensure_container()
     await session.exec("echo orphan > f.txt")  # 容器在跑、scratch 落地
-    # SIGKILL 下 _wrapped finally 不执行 = close() 不跑。这里只取消 watchdog task
+    # SIGKILL 下 TaskScope finally 不执行 = close() 不跑。这里只取消 watchdog task
     # 免 pending-task 警告(它不删容器),容器+目录留作孤儿;不碰 close。
     if session._watchdog_task is not None:
         session._watchdog_task.cancel()
         await asyncio.gather(session._watchdog_task, return_exceptions=True)
 
     # --- 另起一个"活跃"turn:持 lease,验 reaper 零误杀 ---
-    runner = ExecutionRunner(max_concurrent=2)
+    supervisor = TaskSupervisor(max_concurrent=2)
+    store = InMemoryRuntimeStore()
     live_conv, live_msg = _ids()
     live = SandboxSession(live_conv, live_msg)
-    runner.register_cleanup(live_msg, live.close)  # 与生产一致:_wrapped finally 拆除
     live_done = asyncio.Event()
 
     async def live_turn():
         await live.exec("echo alive > f.txt")
         await live_done.wait()  # 卡住,持 lease 不放,直到 reaper 扫完
 
-    live_task = await runner.submit(
-        live_conv, live_msg, live_turn, user_id="u1", stream_transport=_NullTransport()
+    live_task = await _submit_scoped(
+        supervisor, store, live_conv, live_msg, live, live_turn
     )
     await asyncio.sleep(3)  # live 容器起好、lease 在握
 
     # reaper:孤儿无 lease → 回收;live 有 lease → 即便 grace 外也不碰
-    reaper = SandboxReaper(runner.store, grace_sec=0, interval_sec=1)
+    reaper = SandboxReaper(store, grace_sec=0, interval_sec=1)
     reaper._docker = aiodocker.Docker()
     try:
         stats = await reaper.reap_once()
@@ -349,6 +365,7 @@ async def case_8_reaper_collects_orphan():
     # 收尾 live turn
     live_done.set()
     await asyncio.gather(live_task, return_exceptions=True)
+    await supervisor.shutdown()
     await assert_no_residue("live turn 正常收尾", live)
     # 孤儿 session 残留的 aiodocker client(close 没跑过)单独关掉,免泄漏警告
     if session._docker is not None:
@@ -367,9 +384,9 @@ async def case_9_final_sweep_fresh_orphan():
         session._watchdog_task.cancel()
         await asyncio.gather(session._watchdog_task, return_exceptions=True)
 
-    runner = ExecutionRunner(max_concurrent=1)  # 空 store
+    store = InMemoryRuntimeStore()  # 空 store
     # grace 留默认 60s:新鲜孤儿(age 几秒)远在 grace 内
-    reaper = SandboxReaper(runner.store, interval_sec=1)
+    reaper = SandboxReaper(store, interval_sec=1)
     reaper._docker = aiodocker.Docker()
     try:
         # 周期扫:grace 护着,新鲜孤儿不动
@@ -399,7 +416,7 @@ async def main():
     await case_2_while_true()
     await case_3_cancel_mid_exec()
     await case_4_cancel_mid_start()
-    await case_5_runner_integrated()
+    await case_5_supervisor_integrated()
     await case_6_over_quota()
     await case_7_stage_roundtrip()
     await case_8_reaper_collects_orphan()

@@ -7,7 +7,7 @@ in-process via ASGITransport (no server needed).
 Dependency overrides:
 - get_db_manager    → test db_manager (session-scoped in-memory SQLite)
 - get_stream_transport → fresh InMemoryStreamTransport per test
-- get_execution_runner → fresh ExecutionRunner per test
+- runtime services → fresh Store/Supervisor/Conversation service per test
 
 NOT overridden (by design):
 - get_db_session: uses the real implementation, which creates a fresh
@@ -17,7 +17,7 @@ NOT overridden (by design):
   call to get_db_manager() resolves correctly without Depends().
 - get_current_user: real JWT verification is used. Fixtures sign tokens
   with the same JWT_SECRET set in tests/conftest.py.
-- Execution engine endpoints (POST /chat, resume) require ExecutionRunner
+- Execution engine endpoints (POST /chat, resume) require ConversationExecutionService
   and StreamTransport. Override will be added when chat/stream integration
   tests are implemented.
 """
@@ -30,13 +30,19 @@ from api.main import create_app
 from api.dependencies import (
     get_db_manager,
     get_stream_transport,
-    get_execution_runner,
+    get_conversation_execution_service,
+    get_runtime_status_reader,
+    get_runtime_store,
+    get_task_supervisor,
     get_login_rate_limiter,
 )
 from api.services.auth import create_access_token
 from api.services.stream_transport import InMemoryStreamTransport
-from api.services.execution_runner import ExecutionRunner
+from api.services.conversation_execution_service import ConversationExecutionService
+from api.services.conversation_lease import ConversationLeaseCoordinator
+from api.services.runtime_status_reader import RuntimeStatusReader
 from api.services.runtime_store import InMemoryRuntimeStore
+from core.task_supervisor import TaskSupervisor
 from api.services.login_rate_limiter import InMemoryLoginRateLimiter
 from config import config
 from db.database import DatabaseManager
@@ -56,7 +62,18 @@ async def app(db_manager: DatabaseManager):
     application = create_app()
 
     stream_transport = InMemoryStreamTransport(ttl_seconds=30)
-    execution_runner = ExecutionRunner(max_concurrent=5, store=InMemoryRuntimeStore())
+    runtime_store = InMemoryRuntimeStore()
+    task_supervisor = TaskSupervisor(max_concurrent=5)
+    execution_service = ConversationExecutionService(
+        db_manager=db_manager,
+        store=runtime_store,
+        stream_transport=stream_transport,
+        lease_coordinator=ConversationLeaseCoordinator(runtime_store, lease_ttl=0),
+        task_supervisor=task_supervisor,
+    )
+    runtime_status = RuntimeStatusReader(
+        runtime_store, runtime_store, stream_transport
+    )
     # 每个 test 一个全新 InMemory 频控器 —— 失败计数不跨 test 泄漏(尤其
     # per-IP key:ASGITransport 下所有请求共享同一 client IP)。
     login_rate_limiter = InMemoryLoginRateLimiter(
@@ -70,14 +87,17 @@ async def app(db_manager: DatabaseManager):
 
     application.dependency_overrides[get_db_manager] = lambda: db_manager
     application.dependency_overrides[get_stream_transport] = lambda: stream_transport
-    application.dependency_overrides[get_execution_runner] = lambda: execution_runner
+    application.dependency_overrides[get_conversation_execution_service] = lambda: execution_service
+    application.dependency_overrides[get_runtime_status_reader] = lambda: runtime_status
+    application.dependency_overrides[get_runtime_store] = lambda: runtime_store
+    application.dependency_overrides[get_task_supervisor] = lambda: task_supervisor
     application.dependency_overrides[get_login_rate_limiter] = lambda: login_rate_limiter
 
     yield application
 
     application.dependency_overrides.clear()
     deps._db_manager = old_db_manager
-    await execution_runner.shutdown()
+    await execution_service.shutdown()
 
 
 @pytest.fixture

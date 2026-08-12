@@ -52,7 +52,7 @@ class StreamEventType(Enum):
     COMPACTION_SUMMARY = "compaction_summary"  # compaction 结果（持久化，作为历史 boundary）
 
     # ========== Runtime / 排队层 ==========
-    # 任务进入 ExecutionRunner 的并发信号量等待队列时由 runner 推送（SSE-only，不持久化）。
+    # 任务进入 TaskSupervisor 的并发信号量等待队列时由 Conversation adapter 推送。
     # 抵达 agent_start 后前端应自行清理 — 历史 replay 不需要这个事件。
     EXECUTION_QUEUED = "execution_queued"
 

@@ -6,7 +6,9 @@ FastAPI 依赖注入
 全局单例（init_globals 初始化，跨请求共享）：
     get_db_manager()          # DatabaseManager — 连接池
     get_stream_transport()    # StreamTransport — SSE 事件缓冲队列
-    get_execution_runner()    # ExecutionRunner — 后台任务调度 + RuntimeStore
+    get_task_supervisor()     # TaskSupervisor — 进程内任务监管
+    get_conversation_execution_service()  # Conversation admission/runtime commands
+    get_runtime_status_reader()            # 只读 live status
     get_agents()              # Agent 配置字典
     get_tools()               # 全局工具字典
     get_mcp_client_manager()  # MCP client manager — per-worker discovery/call facade
@@ -30,7 +32,9 @@ from typing import AsyncGenerator, Any, Dict, Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from api.services.stream_transport import StreamTransport
     from api.services.runtime_store import RuntimeStore
-    from api.services.execution_runner import ExecutionRunner
+    from api.services.conversation_execution_service import ConversationExecutionService
+    from api.services.runtime_status_reader import RuntimeStatusReader
+    from core.task_supervisor import TaskSupervisor
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -54,7 +58,10 @@ logger = get_logger("ArtifactFlow")
 
 _db_manager: Optional[DatabaseManager] = None
 _stream_transport: Optional["StreamTransport"] = None
-_execution_runner: Optional["ExecutionRunner"] = None
+_runtime_store: Optional["RuntimeStore"] = None
+_task_supervisor: Optional["TaskSupervisor"] = None
+_conversation_execution_service: Optional["ConversationExecutionService"] = None
+_runtime_status_reader: Optional["RuntimeStatusReader"] = None
 _redis_client: Optional[Any] = None               # redis.asyncio.Redis (optional)
 _login_rate_limiter: Optional[Any] = None         # Redis / InMemory LoginRateLimiter
 _mcp_client_manager: Optional[Any] = None         # tools.custom.mcp_client.McpClientManager
@@ -72,7 +79,9 @@ async def init_globals() -> None:
     """
     from pathlib import Path
 
-    global _db_manager, _stream_transport, _execution_runner, _redis_client, _agents, _tools
+    global _db_manager, _stream_transport, _runtime_store, _task_supervisor
+    global _conversation_execution_service, _runtime_status_reader
+    global _redis_client, _agents, _tools
     global _login_rate_limiter, _mcp_client_manager
 
     # 0. 确保 data 目录存在
@@ -104,8 +113,7 @@ async def init_globals() -> None:
     await _db_manager.initialize()
     logger.info("Database manager initialized")
 
-    # 2+3. StreamTransport + ExecutionRunner (Redis or InMemory)
-    from api.services.execution_runner import ExecutionRunner
+    # 2+3. RuntimeStore + StreamTransport (Redis or InMemory)
 
     if config.REDIS_URL:
         from redis.asyncio import Redis, RedisCluster
@@ -135,14 +143,14 @@ async def init_globals() -> None:
         await _redis_client.ping()  # fail fast
         logger.info(f"Redis connected: {config.REDIS_URL}")
 
-        runtime_store = RedisRuntimeStore(
+        _runtime_store = RedisRuntimeStore(
             _redis_client,
             lease_ttl=config.LEASE_TTL,
             execution_timeout=config.EXECUTION_TIMEOUT,
             permission_timeout=config.PERMISSION_TIMEOUT,
             key_prefix=config.REDIS_KEY_PREFIX,
         )
-        runtime_store.init_scripts()
+        _runtime_store.init_scripts()
 
         _stream_transport = RedisStreamTransport(
             _redis_client,
@@ -152,11 +160,6 @@ async def init_globals() -> None:
             key_prefix=config.REDIS_KEY_PREFIX,
         )
         _stream_transport.init_scripts()
-        _execution_runner = ExecutionRunner(
-            max_concurrent=config.MAX_CONCURRENT_TASKS,
-            store=runtime_store,
-            lease_ttl=config.LEASE_TTL,
-        )
         logger.info("Redis runtime initialized (RuntimeStore + StreamTransport)")
     else:
         from api.services.stream_transport import InMemoryStreamTransport
@@ -166,11 +169,32 @@ async def init_globals() -> None:
             ttl_seconds=config.EXECUTION_TIMEOUT + config.STREAM_TTL_GRACE,
             cleanup_ttl=config.STREAM_CLEANUP_TTL,
         )
-        _execution_runner = ExecutionRunner(
-            max_concurrent=config.MAX_CONCURRENT_TASKS,
-            store=InMemoryRuntimeStore(),
-        )
+        _runtime_store = InMemoryRuntimeStore()
         logger.info("InMemory runtime initialized (no REDIS_URL)")
+
+    from api.services.conversation_execution_service import ConversationExecutionService
+    from api.services.conversation_lease import ConversationLeaseCoordinator
+    from api.services.runtime_status_reader import RuntimeStatusReader
+    from core.task_supervisor import TaskSupervisor
+
+    _task_supervisor = TaskSupervisor(max_concurrent=config.MAX_CONCURRENT_TASKS)
+    lease_ttl = config.LEASE_TTL if config.REDIS_URL else 0
+    lease_coordinator = ConversationLeaseCoordinator(
+        _runtime_store,
+        lease_ttl=lease_ttl,
+    )
+    _conversation_execution_service = ConversationExecutionService(
+        db_manager=_db_manager,
+        store=_runtime_store,
+        stream_transport=_stream_transport,
+        lease_coordinator=lease_coordinator,
+        task_supervisor=_task_supervisor,
+    )
+    _runtime_status_reader = RuntimeStatusReader(
+        _runtime_store,
+        _runtime_store,
+        _stream_transport,
+    )
 
     # 3.5 登录频控器（ACC-01）。Redis(多 worker 共享)或 InMemory(单机)。
     if _redis_client is not None:
@@ -233,13 +257,15 @@ async def close_globals() -> None:
 
     在 FastAPI lifespan 中调用。
     """
-    global _db_manager, _stream_transport, _execution_runner, _redis_client, _login_rate_limiter
+    global _db_manager, _stream_transport, _runtime_store, _task_supervisor
+    global _conversation_execution_service, _runtime_status_reader
+    global _redis_client, _login_rate_limiter
     global _mcp_client_manager
 
-    # 1. 先关闭 ExecutionRunner（等待运行中的任务完成）
-    if _execution_runner:
-        await _execution_runner.shutdown()
-        logger.info("Execution runner shut down")
+    # 1. 先关闭 Conversation runtime（唤醒 interrupt，再等任务）
+    if _conversation_execution_service:
+        await _conversation_execution_service.shutdown()
+        logger.info("Conversation execution service shut down")
 
     # 2. 关闭 Redis 连接
     if _redis_client:
@@ -251,7 +277,10 @@ async def close_globals() -> None:
         await _db_manager.close()
         logger.info("Database manager closed")
 
-    _execution_runner = None
+    _conversation_execution_service = None
+    _runtime_status_reader = None
+    _task_supervisor = None
+    _runtime_store = None
     _redis_client = None
     _db_manager = None
     _stream_transport = None
@@ -259,16 +288,31 @@ async def close_globals() -> None:
     _mcp_client_manager = None
 
 
-def get_execution_runner() -> "ExecutionRunner":
-    """获取 ExecutionRunner 单例"""
-    if _execution_runner is None:
-        raise RuntimeError("ExecutionRunner not initialized. Call init_globals() first.")
-    return _execution_runner
+def get_task_supervisor() -> "TaskSupervisor":
+    if _task_supervisor is None:
+        raise RuntimeError("TaskSupervisor not initialized. Call init_globals() first.")
+    return _task_supervisor
+
+
+def get_conversation_execution_service() -> "ConversationExecutionService":
+    if _conversation_execution_service is None:
+        raise RuntimeError(
+            "ConversationExecutionService not initialized. Call init_globals() first."
+        )
+    return _conversation_execution_service
+
+
+def get_runtime_status_reader() -> "RuntimeStatusReader":
+    if _runtime_status_reader is None:
+        raise RuntimeError("RuntimeStatusReader not initialized. Call init_globals() first.")
+    return _runtime_status_reader
 
 
 def get_runtime_store() -> "RuntimeStore":
-    """获取 RuntimeStore 单例（从 ExecutionRunner 获取）"""
-    return get_execution_runner().store
+    """获取 RuntimeStore 组合实现（非 Router 业务入口）。"""
+    if _runtime_store is None:
+        raise RuntimeError("RuntimeStore not initialized. Call init_globals() first.")
+    return _runtime_store
 
 
 def get_stream_transport() -> "StreamTransport":

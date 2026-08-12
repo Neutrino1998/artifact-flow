@@ -37,13 +37,13 @@ async def test_start_then_stop_observability_smoke(tmp_path, monkeypatch):
     monkeypatch.setattr("config.config.OBS_SAMPLE_INTERVAL_SEC", 1)
     monkeypatch.setattr("config.config.WATCHDOG_DEADMAN_TIMEOUT_MS", 500)
 
-    # Fake 出 ExecutionRunner / DatabaseManager / Redis,绕过 init_globals
+    # Fake 出 TaskSupervisor / DatabaseManager / Redis,绕过 init_globals
     from api import dependencies, main as main_mod
 
-    fake_runner = MagicMock()
-    fake_runner._tasks = {}
-    fake_runner.active_task_count = 0
-    monkeypatch.setattr(dependencies, "_execution_runner", fake_runner)
+    fake_supervisor = MagicMock()
+    fake_supervisor._tasks = {}
+    fake_supervisor.active_task_count = 0
+    monkeypatch.setattr(dependencies, "_task_supervisor", fake_supervisor)
 
     fake_db = MagicMock()
     fake_db._engine = None  # sampler 会优雅返回 {}

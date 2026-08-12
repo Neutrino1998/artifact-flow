@@ -85,7 +85,7 @@ class ExecutionController:
         on_engine_exit: Optional[Callable[[str, str], Awaitable[None]]] = None,
         db_manager: Optional[Any] = None,
         sandbox_session: Optional[Any] = None,  # duck-typed: status_snapshot(动态上下文快照用,
-                                                # 生命周期归 controller_factory + runner cleanup)
+                                                # 生命周期归 controller_factory + TaskScope cleanup)
         effective_skillset: Optional[Any] = None,  # EffectiveSkillSet(C-2;None = 无 skill)
         user_id: Optional[str] = None,  # 当前认证用户；仅供 LLM cache salt 派生
     ):
@@ -675,7 +675,7 @@ class ExecutionController:
                     f"Conversation {conversation_id} deleted during execution, "
                     f"skip persistence (message_id={message_id})"
                 )
-                # Lease 由 runner 的 _wrapped finally → cleanup_execution 兜底释放
+                # Lease 由 TaskScope 的最外层 finally 兜底释放
                 return
 
             try:
@@ -866,7 +866,7 @@ class ExecutionController:
                     )
             except Exception as persist_err:
                 # Loud-log but never shadow the propagating CancelledError —
-                # the runner's cleanup needs to see a cancelled task.
+                # the supervisor's cleanup needs to see a cancelled task.
                 logger.exception(
                     f"Late-cancel persist failed for {pp.message_id}: {persist_err}"
                 )

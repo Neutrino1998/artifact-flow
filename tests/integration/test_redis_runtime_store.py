@@ -76,13 +76,15 @@ class TestLease:
         await store.release_lease(conv, "msg-own")
         assert await store.get_lease_owner(conv) is None
 
-    async def test_cleanup_execution_clears_owner(self, store):
+    async def test_explicit_cleanup_clears_owner_state(self, store):
         from utils.instance import INSTANCE_ID
 
         conv = "test_conv_owner_cleanup"
         await store.try_acquire_lease(conv, "msg-oc")
         assert await store.get_lease_owner(conv) == INSTANCE_ID
-        await store.cleanup_execution(conv, "msg-oc")
+        await store.cleanup_message_state("msg-oc")
+        await store.clear_engine_interactive(conv, "msg-oc")
+        await store.release_lease(conv, "msg-oc")
         assert await store.get_lease_owner(conv) is None
 
     async def test_list_active_executions_pairs_conv_with_msg(self, store):
@@ -367,12 +369,14 @@ class TestMessageQueue:
 
 
 class TestCleanup:
-    async def test_cleanup_execution(self, store):
+    async def test_cleanup_message_state(self, store):
         await store.try_acquire_lease("test_conv_clean", "test_msg_clean")
         await store.mark_engine_interactive("test_conv_clean", "test_msg_clean")
         await store.inject_message("test_msg_clean", "data")
 
-        await store.cleanup_execution("test_conv_clean", "test_msg_clean")
+        await store.cleanup_message_state("test_msg_clean")
+        await store.clear_engine_interactive("test_conv_clean", "test_msg_clean")
+        await store.release_lease("test_conv_clean", "test_msg_clean")
 
         assert await store.get_leased_message_id("test_conv_clean") is None
         assert await store.get_interactive_message_id("test_conv_clean") is None

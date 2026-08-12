@@ -3,8 +3,8 @@ SandboxSession — per-turn 沙盒容器生命周期(C 阶段)
 
 一个 turn 一个 session 对象壳:在 controller_factory 创建(同 ArtifactService,
 构造注入沙盒工具),**容器 lazy 于首个沙盒工具调用** —— 多数 turn 不开沙盒,
-eager 等于在多数 turn 上空转创建+销毁。拆除挂 execution_runner._wrapped 的
-真 finally(cleanup_execution 旁,经 register_cleanup 注册),与 lease 同生灭。
+eager 等于在多数 turn 上空转创建+销毁。拆除挂 TaskScope 的
+真 finally（经 TaskScope 注册 LIFO cleanup），与 lease 同生灭。
 
 所有 aiodocker 调用收口在本类这一个 seam 后(编排器可换性:将来 Docker↔k8s
 只换该层,引擎无感)。容器创建参数(镜像/挂载/runtime/配额)全部来自代码侧
@@ -508,7 +508,7 @@ class SandboxSession:
     async def close(self) -> None:
         """拆容器 + 删 scratch + 关 client。幂等;每步独立 best-effort。
 
-        由 execution_runner._wrapped 的真 finally 调用(成功/超时/协作取消/
+        由 TaskScope 的最外层 finally 调用(成功/超时/协作取消/
         外部取消/崩溃五条退出都经过);任一步失败只记日志 —— reaper 兜底。
         """
         if self._closed:

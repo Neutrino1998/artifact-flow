@@ -31,7 +31,6 @@ from tools.builtin.artifact_ops import create_artifact_tools
 from tools.builtin.call_subagent import CallSubagentTool
 from tools.builtin.web_search import WebSearchTool
 from tools.builtin.web_fetch import WebFetchTool
-from api.services.execution_runner import ExecutionRunner
 from api.services.runtime_store import InMemoryRuntimeStore
 from db.database import DatabaseManager
 from utils.logger import set_global_debug
@@ -224,13 +223,13 @@ class TestEnvironment:
     测试环境管理器
 
     模拟 API 层的依赖注入模式：
-    - db_manager 和 execution_runner 是全局共享的
+    - db_manager 和 runtime_store 是全局共享的
     - 每个 "请求" 通过 request_scope() 获得独立的 session/manager/controller
     """
 
     def __init__(self):
         self.db_manager: Optional[DatabaseManager] = None
-        self.runner: Optional[ExecutionRunner] = None
+        self.store: Optional[InMemoryRuntimeStore] = None
         self._tools: Optional[Dict[str, BaseTool]] = None
 
     async def setup(self):
@@ -259,15 +258,15 @@ class TestEnvironment:
         builtin = [CallSubagentTool(valid_agents=valid_agents), WebSearchTool(), WebFetchTool()]
         self._tools = build_tool_map(builtin, [])
 
-        # 4. ExecutionRunner + RuntimeStore
-        self.runner = ExecutionRunner(max_concurrent=5, store=InMemoryRuntimeStore())
+        # 4. RuntimeStore（本手动 harness 直接驱动 controller，不需要 task supervision）
+        self.store = InMemoryRuntimeStore()
 
         return self
 
     @asynccontextmanager
     async def request_scope(self):
         """每个调用产出与生产一致的短 session controller。"""
-        store = self.runner.store
+        store = self.store
 
         async with self.db_manager.session() as session:
             # 每请求 DB 快照(镜像 controller_factory):agents + external 工具从 DB 重建,
@@ -303,8 +302,8 @@ class TestEnvironment:
         yield controller
 
     async def cleanup(self):
-        if self.runner:
-            await self.runner.shutdown()
+        if self.store:
+            await self.store.shutdown_cleanup()
         if self.db_manager:
             await self.db_manager.close()
         print("Test environment cleaned up")
@@ -412,7 +411,7 @@ async def demo_permission():
     env = await TestEnvironment().setup()
     try:
         handler = StreamEventHandler(verbose=True)
-        store = env.runner.store
+        store = env.store
 
         # 发送会触发 web_fetch 的消息
         print("\n用户: 请抓取 https://example.com 的内容")

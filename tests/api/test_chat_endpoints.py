@@ -20,8 +20,12 @@ from config import config
 from db.models import Skill, User
 from db.database import DatabaseManager
 from repositories.conversation_repo import ConversationRepository
-from api.services.execution_runner import ExecutionRunner
-from api.dependencies import get_execution_runner, get_stream_transport
+from api.dependencies import (
+    get_runtime_store,
+    get_stream_transport,
+    get_task_supervisor,
+)
+from core.task_supervisor import TaskScope, TaskSupervisor
 import api.dependencies as deps
 
 
@@ -50,12 +54,6 @@ async def _seed_conversation(
     return conv_id, [msg1_id, msg2_id]
 
 
-class _MockStreamTransport:
-    """Minimal mock for StreamTransport — satisfies submit() orchestration."""
-    async def create_stream(self, stream_id, owner_user_id=None, lease_check_key=None, lease_expected_owner=None): pass
-    async def close_stream(self, stream_id): return True
-
-
 async def _simulate_active_task(app, conv_id: str, msg_id: str) -> asyncio.Event:
     """
     Submit a sleeping coroutine to simulate an active (RUNNING) task.
@@ -65,18 +63,29 @@ async def _simulate_active_task(app, conv_id: str, msg_id: str) -> asyncio.Event
     (which gates on interactive) would race the not-yet-scheduled _wrapped.
     Returns a blocker event that can be set to let the task complete.
     """
-    runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+    store = app.dependency_overrides[get_runtime_store]()
+    supervisor: TaskSupervisor = app.dependency_overrides[get_task_supervisor]()
+    assert await store.try_acquire_lease(conv_id, msg_id) is None
 
     blocker = asyncio.Event()
     started = asyncio.Event()
 
-    def sleeping_factory():
+    def sleeping_factory(scope: TaskScope):
+        scope.add_cleanup(
+            "lease", lambda: store.release_lease(conv_id, msg_id)
+        )
+        scope.add_cleanup(
+            "interactive",
+            lambda: store.clear_engine_interactive(conv_id, msg_id),
+        )
+
         async def sleeping():
+            assert await store.mark_engine_interactive(conv_id, msg_id)
             started.set()
             await blocker.wait()
-        return sleeping()
+        return sleeping
 
-    await runner.submit(conv_id, msg_id, sleeping_factory, user_id="test-user", stream_transport=_MockStreamTransport())
+    await supervisor.submit(msg_id, sleeping_factory)
     await started.wait()
     return blocker
 
@@ -109,9 +118,9 @@ class TestActiveStream:
     ):
         conv_id, msg_ids = conv_with_messages
         message_id = msg_ids[0]
-        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        store = app.dependency_overrides[get_runtime_store]()
         transport = app.dependency_overrides[get_stream_transport]()
-        assert await runner.store.try_acquire_lease(conv_id, message_id) is None
+        assert await store.try_acquire_lease(conv_id, message_id) is None
         await transport.create_stream(message_id, owner_user_id=test_user.id)
         try:
             resp = await client.get(f"/api/v1/chat/{conv_id}/active-stream")
@@ -124,7 +133,7 @@ class TestActiveStream:
             }
         finally:
             await transport.close_stream(message_id)
-            await runner.store.release_lease(conv_id, message_id)
+            await store.release_lease(conv_id, message_id)
 
     async def test_no_active_stream_is_empty_state(
         self, client: AsyncClient, conv_with_messages
@@ -144,8 +153,8 @@ class TestActiveStream:
         self, client: AsyncClient, app, conv_with_messages
     ):
         conv_id, msg_ids = conv_with_messages
-        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
-        assert await runner.store.try_acquire_lease(conv_id, msg_ids[0]) is None
+        store = app.dependency_overrides[get_runtime_store]()
+        assert await store.try_acquire_lease(conv_id, msg_ids[0]) is None
         try:
             resp = await client.get(f"/api/v1/chat/{conv_id}/active-stream")
             assert resp.status_code == 200
@@ -155,7 +164,7 @@ class TestActiveStream:
             assert body["message_id"] is None
             assert body["stream_url"] is None
         finally:
-            await runner.store.release_lease(conv_id, msg_ids[0])
+            await store.release_lease(conv_id, msg_ids[0])
 
 
 # ============================================================
@@ -181,8 +190,8 @@ class TestInject:
         assert "stream" in body["stream_url"]
 
         # Verify the message was actually enqueued in RuntimeStore
-        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
-        drained = await runner.store.drain_messages(msg_ids[0])
+        store = app.dependency_overrides[get_runtime_store]()
+        drained = await store.drain_messages(msg_ids[0])
         assert drained == ["additional input"]
 
         blocker.set()
@@ -193,11 +202,11 @@ class TestInject:
         conv_id, msg_ids = conv_with_messages
         message_id = msg_ids[0]
         blocker = await _simulate_active_task(app, conv_id, message_id)
-        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        store = app.dependency_overrides[get_runtime_store]()
 
         try:
             for i in range(config.MAX_INJECT_QUEUE_SIZE):
-                await runner.store.inject_message(message_id, f"pending-{i}")
+                await store.inject_message(message_id, f"pending-{i}")
 
             resp = await client.post(
                 f"/api/v1/chat/{conv_id}/inject",
@@ -206,7 +215,7 @@ class TestInject:
 
             assert resp.status_code == 429
             assert "retry shortly" in resp.json()["detail"]
-            assert len(await runner.store.drain_messages(message_id)) == (
+            assert len(await store.drain_messages(message_id)) == (
                 config.MAX_INJECT_QUEUE_SIZE
             )
         finally:
@@ -232,9 +241,9 @@ class TestInject:
         into it is rejected until it starts running.
         """
         conv_id, msg_ids = conv_with_messages
-        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        store = app.dependency_overrides[get_runtime_store]()
         # Simulate QUEUED directly: acquire the lease without marking interactive.
-        await runner.store.try_acquire_lease(conv_id, msg_ids[0])
+        await store.try_acquire_lease(conv_id, msg_ids[0])
         try:
             resp = await client.post(
                 f"/api/v1/chat/{conv_id}/inject",
@@ -242,7 +251,7 @@ class TestInject:
             )
             assert resp.status_code == 409
         finally:
-            await runner.store.release_lease(conv_id, msg_ids[0])
+            await store.release_lease(conv_id, msg_ids[0])
 
     async def test_inject_cross_user(
         self, admin_client: AsyncClient, app, conv_with_messages
@@ -328,8 +337,8 @@ class TestCancel:
         assert body["message_id"] == msg_ids[0]
 
         # Verify cancellation was requested
-        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
-        assert await runner.store.is_cancelled(msg_ids[0]) is True
+        store = app.dependency_overrides[get_runtime_store]()
+        assert await store.is_cancelled(msg_ids[0]) is True
 
         blocker.set()
 
@@ -351,17 +360,17 @@ class TestCancel:
         wait (the cross-layer tear that the r4 round-1/2 findings kept exposing).
         """
         conv_id, msg_ids = conv_with_messages
-        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        store = app.dependency_overrides[get_runtime_store]()
         # Simulate QUEUED directly: acquire the lease without marking interactive.
-        await runner.store.try_acquire_lease(conv_id, msg_ids[0])
+        await store.try_acquire_lease(conv_id, msg_ids[0])
         try:
             resp = await client.post(f"/api/v1/chat/{conv_id}/cancel")
             assert resp.status_code == 409
             assert "queued" in resp.json()["detail"].lower()
             # No cancel flag must have been set for a queued turn.
-            assert await runner.store.is_cancelled(msg_ids[0]) is False
+            assert await store.is_cancelled(msg_ids[0]) is False
         finally:
-            await runner.store.release_lease(conv_id, msg_ids[0])
+            await store.release_lease(conv_id, msg_ids[0])
 
     async def test_cancel_cross_user(
         self, admin_client: AsyncClient, app, conv_with_messages
@@ -563,7 +572,7 @@ class TestChatStreamE2E:
     """
     End-to-end: POST /chat → background execution → GET /stream → SSE events.
 
-    Mock only the LLM; exercises real ExecutionController, ExecutionRunner,
+    Mock only the LLM; exercises real ExecutionController, TaskSupervisor,
     InMemoryStreamTransport, conversation persistence, and event persistence.
     """
 
@@ -577,7 +586,8 @@ class TestChatStreamE2E:
         a per-turn display snapshot on Message metadata.
         """
         fake_agents = {"lead_agent": _FakeAgentConfig()}
-        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        store = app.dependency_overrides[get_runtime_store]()
+        supervisor: TaskSupervisor = app.dependency_overrides[get_task_supervisor]()
         observed_llm_messages: dict = {}
 
         async with db_manager.session() as session:
@@ -604,14 +614,11 @@ class TestChatStreamE2E:
             async for chunk in _make_fake_llm_stream("Hello from agent")(messages, **kwargs):
                 yield chunk
 
-        # _create_controller() calls get_execution_runner/get_agents/get_tools directly,
-        # so we must set the module-level globals (not just dependency_overrides).
+        # Controller assembly still reads process-level agent/tool registries.
         old_agents = deps._agents
         old_tools = deps._tools
-        old_runner = deps._execution_runner
         deps._agents = fake_agents
         deps._tools = {}
-        deps._execution_runner = runner
 
         try:
             with patch("models.llm.astream_with_retry", fake_llm), \
@@ -635,7 +642,7 @@ class TestChatStreamE2E:
 
                 # Wait for background execution to complete
                 for _ in range(50):
-                    if message_id not in runner._tasks:
+                    if message_id not in supervisor._tasks:
                         break
                     await asyncio.sleep(0.1)
 
@@ -706,12 +713,11 @@ class TestChatStreamE2E:
                     assert "complete" in db_event_types
 
                 # 5. Verify lease was cleaned up
-                assert await runner.store.get_leased_message_id(conv_id) is None
-                assert await runner.store.get_interactive_message_id(conv_id) is None
+                assert await store.get_leased_message_id(conv_id) is None
+                assert await store.get_interactive_message_id(conv_id) is None
         finally:
             deps._agents = old_agents
             deps._tools = old_tools
-            deps._execution_runner = old_runner
 
     async def test_chat_with_attachment_creates_artifact_and_attribution(
         self, client: AsyncClient, app, db_manager: DatabaseManager
@@ -723,14 +729,12 @@ class TestChatStreamE2E:
         but NOT surfaced in the prompt (the model identifies a doc by id; the
         human-readable name is already in the artifacts inventory title)."""
         fake_agents = {"lead_agent": _FakeAgentConfig()}
-        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        supervisor: TaskSupervisor = app.dependency_overrides[get_task_supervisor]()
 
         old_agents = deps._agents
         old_tools = deps._tools
-        old_runner = deps._execution_runner
         deps._agents = fake_agents
         deps._tools = {}
-        deps._execution_runner = runner
 
         try:
             with patch("models.llm.astream_with_retry", _make_fake_llm_stream("Done")), \
@@ -751,7 +755,7 @@ class TestChatStreamE2E:
                 message_id = body["message_id"]
 
                 for _ in range(50):
-                    if message_id not in runner._tasks:
+                    if message_id not in supervisor._tasks:
                         break
                     await asyncio.sleep(0.1)
 
@@ -789,4 +793,3 @@ class TestChatStreamE2E:
         finally:
             deps._agents = old_agents
             deps._tools = old_tools
-            deps._execution_runner = old_runner

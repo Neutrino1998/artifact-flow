@@ -21,7 +21,7 @@ from db.models import User
 from db.database import DatabaseManager
 from repositories.conversation_repo import ConversationRepository
 from repositories.artifact_repo import ArtifactRepository
-from api.services.execution_runner import ExecutionRunner
+from api.dependencies import get_runtime_store
 
 
 async def _seed_conv_with_blob(
@@ -171,12 +171,10 @@ class TestListConversations:
         seed_conversation: Tuple[str, List[str]],
     ):
         """The sidebar receives the lease's message ID, not a lossy boolean."""
-        from api.dependencies import get_execution_runner
-
         conv_id, msg_ids = seed_conversation
         message_id = msg_ids[0]
-        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
-        assert await runner.store.try_acquire_lease(conv_id, message_id) is None
+        store = app.dependency_overrides[get_runtime_store]()
+        assert await store.try_acquire_lease(conv_id, message_id) is None
         try:
             resp = await client.get("/api/v1/chat")
             assert resp.status_code == 200
@@ -186,7 +184,7 @@ class TestListConversations:
             )
             assert row["active_message_id"] == message_id
         finally:
-            await runner.store.release_lease(conv_id, message_id)
+            await store.release_lease(conv_id, message_id)
 
     async def test_list_pagination(
         self,
@@ -322,14 +320,12 @@ class TestResumeInterrupt:
         conv_id, msg_ids = seed_conversation
         message_id = msg_ids[0]
 
-        # Get the ExecutionRunner injected into the app
-        from api.dependencies import get_execution_runner
-        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        store = app.dependency_overrides[get_runtime_store]()
 
         # Simulate an interrupt that the engine would create (bypass wait_for_interrupt
         # which would block; directly populate internal state)
         from api.services.runtime_store import _InterruptState
-        runner.store._interrupts[message_id] = _InterruptState(interrupt_data={
+        store._interrupts[message_id] = _InterruptState(interrupt_data={
             "call_id": "call-web-search",
             "tool": "web_search",
             "params": {"query": "test"},
@@ -380,16 +376,15 @@ class TestResumeInterrupt:
         conv_id, msg_ids = seed_conversation
         message_id = msg_ids[0]
 
-        from api.dependencies import get_execution_runner
         from api.services.runtime_store import _InterruptState
 
-        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        store = app.dependency_overrides[get_runtime_store]()
         current = _InterruptState(interrupt_data={
             "call_id": "call-b",
             "tool": "sensitive_b",
             "params": {},
         })
-        runner.store._interrupts[message_id] = current
+        store._interrupts[message_id] = current
         ops_warning = MagicMock()
         monkeypatch.setattr("api.routers.chat.logger.warning", ops_warning)
 

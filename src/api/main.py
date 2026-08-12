@@ -22,7 +22,9 @@ from config import config, validate_config
 from api.dependencies import (
     init_globals, close_globals,
     get_db_manager, get_redis_client,
-    get_execution_runner,
+    get_conversation_execution_service,
+    get_runtime_status_reader,
+    get_task_supervisor,
 )
 from api.middleware import RequestContextMiddleware
 from api.routers import (
@@ -154,7 +156,7 @@ def _start_observability(loop: asyncio.AbstractEventLoop) -> None:
     _sampler = RuntimeSampler(
         sink=_metrics_sink,
         watchdog=_watchdog,
-        execution_runner=get_execution_runner(),
+        task_supervisor=get_task_supervisor(),
         db_manager=get_db_manager(),
         redis_client=redis_client,
         long_task_age_sec=config.OBS_LONG_TASK_AGE_SEC,
@@ -224,7 +226,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     应用生命周期管理
 
-    启动时：初始化全局单例（数据库、StreamTransport、ExecutionRunner）+ 观测组件
+    启动时：初始化全局单例（数据库、stream、runtime services）+ 观测组件
     关闭时：对称清理
     """
     # 启动
@@ -236,18 +238,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from utils.logger import set_global_debug
     set_global_debug(config.DEBUG)
 
-    # 观测组件(在 init_globals 之后,依赖 ExecutionRunner / DatabaseManager / Redis 单例)
+    # 观测组件(在 init_globals 之后,依赖 TaskSupervisor / DatabaseManager / Redis 单例)
     try:
         _start_observability(asyncio.get_running_loop())
     except Exception:
         # 观测层失败不挂应用启动 — 但留 ERROR 便于发现
         logger.exception("Observability bootstrap failed; continuing without it")
 
-    # 沙盒孤儿回收器(在 init_globals 之后:依赖 ExecutionRunner.store 取活跃集)。
+    # 沙盒孤儿回收器(在 init_globals 之后:依赖只读 runtime status)。
     # 启动失败不挂应用 —— 它是兜底,缺它只是 SIGKILL 路径少一层防护。
     global _sandbox_reaper
-    store = get_execution_runner().store
-    store_is_shared = getattr(store, "is_shared", False)
+    status_reader = get_runtime_status_reader()
+    store_is_shared = status_reader.is_shared
     start_reaper, reason = _should_start_reaper(
         enabled=config.SANDBOX_REAP_ENABLED,
         store_is_shared=store_is_shared,
@@ -256,7 +258,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if start_reaper:
         try:
             from api.services.sandbox_reaper import SandboxReaper
-            _sandbox_reaper = SandboxReaper(store)
+            _sandbox_reaper = SandboxReaper(status_reader)
             _sandbox_reaper.start()
             if not store_is_shared:
                 # opt-in 路径:契约提醒。多 worker 误配在此会删活沙盒,留显眼 WARNING。
@@ -278,15 +280,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # 关闭
     logger.info("Shutting down ArtifactFlow API...")
-    # Runner 先优雅停:在途 turn 跑完/取消 → 各自 _wrapped finally → SandboxSession.close()
+    # Conversation runtime 先优雅停:在途 turn 跑完/取消 → TaskScope cleanup
     # (部分 close 可能超时/失败)。提前到此(close_globals 内会再调一次,_tasks 已空 →
     # no-op),好让 reaper 在 store/docker 仍存活时做最后一扫,兜住 shutdown 期间漏拆的孤儿
     # (P2:单副本停机后不再有 reaper 收尾,孤儿会一直跑到下次启动)。
     if _sandbox_reaper is not None:
         try:
-            await get_execution_runner().shutdown()
+            await get_conversation_execution_service().shutdown()
         except Exception:
-            logger.exception("Execution runner early shutdown failed; continuing")
+            logger.exception("Conversation runtime early shutdown failed; continuing")
         try:
             await _sandbox_reaper.final_sweep()
         except Exception:

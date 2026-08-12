@@ -67,7 +67,7 @@ export function useChat() {
 
       // Capture nav-gen BEFORE the await. If the user clicks New Chat or
       // switches to another conversation while api.sendMessage() is in
-      // flight, the engine still runs server-side (runner.submit is
+      // flight, the engine still runs server-side (TaskSupervisor submission is
       // fire-and-forget — the turn will complete, write events, persist
       // artifacts); we just must not redirect the abandoned response into
       // the new UI context. reconnectIfActive() reattaches if the user

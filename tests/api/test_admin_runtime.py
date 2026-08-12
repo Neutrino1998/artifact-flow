@@ -5,8 +5,12 @@ import asyncio
 from httpx import AsyncClient
 
 import api.dependencies as deps
-from api.dependencies import get_execution_runner, get_stream_transport
-from api.services.execution_runner import ExecutionRunner
+from api.dependencies import (
+    get_runtime_status_reader,
+    get_runtime_store,
+    get_task_supervisor,
+)
+from core.task_supervisor import TaskScope, TaskSupervisor
 from observability import admin_runtime
 from utils.instance import INSTANCE_ID
 
@@ -20,27 +24,33 @@ async def test_admin_runtime_reports_process_tasks_and_shared_leases(
     app,
     admin_client: AsyncClient,
 ):
-    runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
-    transport = app.dependency_overrides[get_stream_transport]()
+    store = app.dependency_overrides[get_runtime_store]()
+    supervisor: TaskSupervisor = app.dependency_overrides[get_task_supervisor]()
+    status_reader = app.dependency_overrides[get_runtime_status_reader]()
     blocker = asyncio.Event()
     started = asyncio.Event()
 
-    async def workload():
-        started.set()
-        await blocker.wait()
+    assert await store.try_acquire_lease("conv-runtime", "msg-runtime") is None
 
-    old_runner = deps._execution_runner
+    def workload_factory(scope: TaskScope):
+        scope.add_cleanup(
+            "lease",
+            lambda: store.release_lease("conv-runtime", "msg-runtime"),
+        )
+
+        async def workload():
+            started.set()
+            await blocker.wait()
+        return workload
+
+    old_supervisor = deps._task_supervisor
+    old_status_reader = deps._runtime_status_reader
     old_sampler = admin_runtime.get_sampler()
-    deps._execution_runner = runner
+    deps._task_supervisor = supervisor
+    deps._runtime_status_reader = status_reader
     admin_runtime.set_sampler(_Sampler())
     try:
-        await runner.submit(
-            "conv-runtime",
-            "msg-runtime",
-            workload,
-            user_id="runtime-user",
-            stream_transport=transport,
-        )
+        await supervisor.submit("msg-runtime", workload_factory)
         await started.wait()
 
         response = await admin_client.get("/api/v1/admin/runtime")
@@ -57,6 +67,7 @@ async def test_admin_runtime_reports_process_tasks_and_shared_leases(
         assert body["ts"]
     finally:
         blocker.set()
-        await runner.shutdown(timeout=2)
-        deps._execution_runner = old_runner
+        await supervisor.shutdown(timeout=2)
+        deps._task_supervisor = old_supervisor
+        deps._runtime_status_reader = old_status_reader
         admin_runtime.set_sampler(old_sampler)

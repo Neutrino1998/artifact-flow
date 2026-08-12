@@ -7,10 +7,9 @@ from unittest.mock import MagicMock, patch
 
 from sqlalchemy import select
 
-from api.dependencies import get_execution_runner
-from api.services.execution_runner import ExecutionRunner
+from api.dependencies import get_conversation_execution_service, get_runtime_store
 from core.conversation_manager import ConversationManager
-from db.models import Conversation, Message, User
+from db.models import Conversation, User
 from repositories.conversation_repo import ConversationRepository
 
 
@@ -32,14 +31,6 @@ async def _exists(db_manager, conv_id: str) -> bool:
         return result.scalar_one_or_none() is not None
 
 
-async def _message_exists(db_manager, message_id: str) -> bool:
-    async with db_manager.session() as session:
-        result = await session.execute(
-            select(Message.id).where(Message.id == message_id)
-        )
-        return result.scalar_one_or_none() is not None
-
-
 def _chat_payload(conv_id: str) -> dict:
     return {
         "payload": (
@@ -56,11 +47,13 @@ async def test_single_delete_rejects_queued_or_running_lease(
     client, app, db_manager, test_user: User, monkeypatch
 ):
     conv_id = await _seed_conversation(db_manager, test_user.id)
-    runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+    store = app.dependency_overrides[get_runtime_store]()
     message_id = f"msg-{uuid.uuid4().hex}"
-    await runner.store.try_acquire_lease(conv_id, message_id)
+    await store.try_acquire_lease(conv_id, message_id)
     ops_warning = MagicMock()
-    monkeypatch.setattr("api.routers.chat.logger.warning", ops_warning)
+    monkeypatch.setattr(
+        "api.services.conversation_execution_service.logger.warning", ops_warning
+    )
 
     try:
         response = await client.delete(f"/api/v1/chat/{conv_id}")
@@ -73,7 +66,7 @@ async def test_single_delete_rejects_queued_or_running_lease(
         assert conv_id in logged
         assert message_id in logged
     finally:
-        await runner.store.release_lease(conv_id, message_id)
+        await store.release_lease(conv_id, message_id)
 
 
 async def test_bulk_delete_skips_active_and_deletes_inactive(
@@ -81,9 +74,9 @@ async def test_bulk_delete_skips_active_and_deletes_inactive(
 ):
     active_id = await _seed_conversation(db_manager, test_user.id)
     inactive_id = await _seed_conversation(db_manager, test_user.id)
-    runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+    store = app.dependency_overrides[get_runtime_store]()
     message_id = f"msg-{uuid.uuid4().hex}"
-    await runner.store.try_acquire_lease(active_id, message_id)
+    await store.try_acquire_lease(active_id, message_id)
 
     try:
         response = await client.post(
@@ -99,7 +92,7 @@ async def test_bulk_delete_skips_active_and_deletes_inactive(
         assert await _exists(db_manager, active_id)
         assert not await _exists(db_manager, inactive_id)
     finally:
-        await runner.store.release_lease(active_id, message_id)
+        await store.release_lease(active_id, message_id)
 
 
 async def test_delete_commit_is_not_turned_into_500_when_lease_release_fails(
@@ -107,14 +100,14 @@ async def test_delete_commit_is_not_turned_into_500_when_lease_release_fails(
 ):
     """An irreversible DELETE stays successful while ops gets the stack."""
     conv_id = await _seed_conversation(db_manager, test_user.id)
-    runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+    store = app.dependency_overrides[get_runtime_store]()
     ops_error = MagicMock()
-    monkeypatch.setattr("api.routers.chat.logger.exception", ops_error)
+    monkeypatch.setattr("api.services.conversation_lease.logger.exception", ops_error)
 
     async def fail_release(conversation_id: str, owner_id: str):
         raise ConnectionError("redis unavailable during release")
 
-    monkeypatch.setattr(runner.store, "release_lease", fail_release)
+    monkeypatch.setattr(store, "release_lease", fail_release)
 
     response = await client.delete(f"/api/v1/chat/{conv_id}")
 
@@ -130,12 +123,11 @@ async def test_send_wins_lease_before_delete_returns_conflict_without_sleep(
     """The send-side lease is the deterministic winner, so DELETE sees it.
 
     The test pauses ``try_acquire_lease`` *after* the send has acquired the
-    lease but before ``ExecutionRunner.submit`` can return.  No scheduler sleep
+    lease but before admission can continue.  No scheduler sleep
     is involved: DELETE can only run after the lease is observable.
     """
     conv_id = await _seed_conversation(db_manager, test_user.id)
-    runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
-    store = runner.store
+    store = app.dependency_overrides[get_runtime_store]()
     original_acquire = store.try_acquire_lease
     send_has_lease = asyncio.Event()
     allow_send_submit = asyncio.Event()
@@ -164,24 +156,22 @@ async def test_send_wins_lease_before_delete_returns_conflict_without_sleep(
 
     send_response = await send_task
     assert send_response.status_code == 200
-    await runner.shutdown(timeout=2)
+    execution_service = app.dependency_overrides[get_conversation_execution_service]()
+    await execution_service.shutdown(timeout=2)
 
 
-async def test_delete_wins_between_send_check_and_lease_reproduces_current_gap(
+async def test_delete_wins_before_send_acquire_returns_synchronous_not_found(
     client, app, db_manager, test_user: User, monkeypatch
 ):
-    """Characterize the current check→lease gap without timing guesses.
+    """Delete wins after the security precheck but before send admission.
 
     Reaching the gated send acquire proves that all current router-side DB
     checks have completed.  DELETE then acquires/releases the same conversation
-    lease and commits before send is allowed to acquire it.  Phase C changes
-    the final send expectation from 200 to 404 by moving the authoritative
-    require inside the lease; Phase A intentionally records today's reachable
-    behavior while also proving the deleted row is never resurrected.
+    lease and commits before send is allowed to acquire it. The authoritative
+    require inside the handle then returns 404 before stream/task creation.
     """
     conv_id = await _seed_conversation(db_manager, test_user.id)
-    runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
-    store = runner.store
+    store = app.dependency_overrides[get_runtime_store]()
     original_acquire = store.try_acquire_lease
     send_reached_acquire = asyncio.Event()
     allow_send_acquire = asyncio.Event()
@@ -205,23 +195,16 @@ async def test_delete_wins_between_send_check_and_lease_reproduces_current_gap(
     finally:
         allow_send_acquire.set()
 
-    # Current behavior: submit succeeds after DELETE releases its lease, then
-    # the background controller's no-create check aborts the turn.  C will make
-    # this request fail synchronously with 404 before stream/task creation.
     send_response = await send_task
-    assert send_response.status_code == 200
-    message_id = send_response.json()["message_id"]
-
-    await runner.shutdown(timeout=2)
+    assert send_response.status_code == 404
     assert not await _exists(db_manager, conv_id)
-    assert not await _message_exists(db_manager, message_id)
     assert await store.get_leased_message_id(conv_id) is None
 
 
-async def test_send_cannot_resurrect_conversation_deleted_after_ownership_check(
+async def test_authoritative_require_is_protected_by_send_lease(
     client, app, db_manager, test_user: User
 ):
-    """Existing send must fail closed if DELETE wins before its final require."""
+    """DELETE cannot pass while send is in its handle-scoped final require."""
     conv_id = await _seed_conversation(db_manager, test_user.id)
     reached_final_require = asyncio.Event()
     continue_send = asyncio.Event()
@@ -265,16 +248,18 @@ async def test_send_cannot_resurrect_conversation_deleted_after_ownership_check(
         try:
             await asyncio.wait_for(reached_final_require.wait(), timeout=2)
             delete_response = await client.delete(f"/api/v1/chat/{conv_id}")
-            assert delete_response.status_code == 200
+            assert delete_response.status_code == 409
         finally:
             continue_send.set()
 
         send_response = await send_task
 
-    assert send_response.status_code == 404
-    assert not await _exists(db_manager, conv_id)
-    runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
-    assert await runner.store.get_leased_message_id(conv_id) is None
+    assert send_response.status_code == 200
+    assert await _exists(db_manager, conv_id)
+    execution_service = app.dependency_overrides[get_conversation_execution_service]()
+    await execution_service.shutdown(timeout=2)
+    store = app.dependency_overrides[get_runtime_store]()
+    assert await store.get_leased_message_id(conv_id) is None
 
 
 def test_single_delete_openapi_declares_active_execution_conflict(app):

@@ -11,12 +11,13 @@ from typing import AsyncGenerator, AsyncIterator
 from config import config
 from api.dependencies import (
     get_db_manager,
-    get_execution_runner,
     get_mcp_client_manager,
     get_tools,
 )
+from api.services.runtime_store import RuntimeStore
 from api.services.stream_transport import StreamTransport
 from core.engine import EmptyTurnInputError
+from core.task_supervisor import TaskScope
 from utils.logger import get_logger, get_request_id
 from utils.time import utc_now
 
@@ -46,7 +47,12 @@ def sanitize_error_event(event: dict, client_safe: bool = False) -> dict:
 
 @asynccontextmanager
 async def create_controller(
-    conversation_id: str, message_id: str, user_id: str
+    conversation_id: str,
+    message_id: str,
+    user_id: str,
+    *,
+    task_scope: TaskScope,
+    runtime_store: RuntimeStore,
 ) -> AsyncGenerator:
     """
     Build a fresh ExecutionController wired to the db_manager factory.
@@ -62,10 +68,8 @@ async def create_controller(
     one-shot registry snapshot is read here (also on a short session); everything else is
     lazy inside stream_execute.
 
-    Usage:
-        async with create_controller(conv_id, msg_id) as ctrl:
-            async for event in ctrl.stream_execute(...):
-                ...
+    The Conversation execution service supplies the TaskScope and RuntimeStore;
+    direct callers should use that service rather than assemble this factory.
     """
     from core.controller import ExecutionController
     from core.department_resolver import load_ancestor_ids
@@ -86,15 +90,14 @@ async def create_controller(
     from tools.builtin.skill_service import SkillService
 
     db_manager = get_db_manager()
-    runner = get_execution_runner()
-    store = runner.store
+    store = runtime_store
 
     # per-turn 沙盒 session:对象壳在此创建(同 ArtifactService,构造注入工具),
     # 容器 lazy 于首个沙盒工具调用 —— 无沙盒 turn 壳零成本。拆除句柄注册进
-    # runner,在 _wrapped 真 finally(cleanup_execution 旁)执行,与 lease 同生灭;
+    # TaskScope,在 supervised task 的最外层 finally 执行,与 lease 同生灭;
     # close 幂等不依赖 DB session,故晚于本 context manager 退出也安全。
     sandbox_session = SandboxSession(conversation_id, message_id)
-    runner.register_cleanup(message_id, sandbox_session.close)
+    task_scope.add_cleanup("sandbox session", sandbox_session.close)
 
     # ArtifactService 持 db_manager(不绑一条 turn-long session):turn 期每次 DB 读/写各开
     # 短 retrying session 读完即关(B-5),WorkingSet 留实例做 turn-live 缓存。
@@ -221,8 +224,8 @@ async def run_and_push(
     Consume events from a controller stream and push them to the StreamTransport.
 
     Handles timeout and unexpected errors, pushing sanitized error events.
-    Execution runs to completion even if the SSE client disconnects.
-    Stream is always closed by the producer in the finally block.
+    Execution runs to completion even if the SSE client disconnects. The owning
+    Conversation TaskScope closes the stream after sandbox/runtime cleanup.
     """
     stream_closed = False
     # llm_chunk coalescing: 保留最新快照，定时 flush（80ms）
@@ -289,7 +292,3 @@ async def run_and_push(
             "timestamp": utc_now().isoformat(),
             "data": {"success": False, "error": str(e)}
         }))
-
-    finally:
-        # Producer 侧关闭 stream — 设 closed 状态 + 延迟清理 TTL
-        await stream_transport.close_stream(stream_id)

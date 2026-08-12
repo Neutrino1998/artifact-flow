@@ -21,9 +21,8 @@ from api.event_projection import project_event_data_for_user
 from api.dependencies import (
     get_conversation_manager,
     get_current_user,
-    get_db_session,
-    get_stream_transport,
-    get_execution_runner,
+    get_conversation_execution_service,
+    get_runtime_status_reader,
 )
 from api.services.auth import TokenPayload
 from api.schemas.chat import (
@@ -47,9 +46,21 @@ from api.schemas.chat import (
     MessageFeedbackResponse,
     StorageUsageResponse,
 )
-from api.services.execution_launcher import ExecutionLauncher, ExecutionSpec
-from api.services.stream_transport import StreamTransport
-from api.services.execution_runner import ConflictError, ExecutionRunner
+from api.services.conversation_execution_service import (
+    AUTO_PARENT,
+    ConversationAdmissionUnavailable,
+    ConversationExecutionConflict,
+    ConversationExecutionService,
+    ConversationTurnRequest,
+    ExecutionStillQueued,
+    InvalidParentMessage,
+    NoActiveExecution,
+    PendingInterruptAlreadyResolved,
+    PendingInterruptNotFound,
+    PendingInterruptStale,
+    UploadQuotaExceeded,
+)
+from api.services.runtime_status_reader import RuntimeStatusReader
 from api.services.runtime_store import InjectQueueFull
 from api.routers.artifacts import convert_uploaded_file
 from core.conversation_manager import ConversationManager
@@ -69,32 +80,14 @@ async def _verify_ownership(
         raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
 
 
-async def _verify_parent_message(
-    conv_id: str,
-    parent_message_id: str,
-    conversation_manager: ConversationManager,
-) -> None:
-    """校验显式 parent_message_id 属于当前 conversation，避免写出悬空消息树。"""
-    parent = await conversation_manager.get_message(parent_message_id)
-    if not parent or parent.conversation_id != conv_id:
-        logger.warning(
-            "Chat rejected (422): invalid parent_message_id for conversation "
-            f"(conv={conv_id}, parent={parent_message_id})"
-        )
-        raise HTTPException(
-            status_code=422,
-            detail="parent_message_id does not belong to this conversation",
-        )
-
-
 @router.post("", response_model=ChatResponse)
 async def send_message(
     payload: str = Form(...),
     files: List[UploadFile] = File(default=[]),
     current_user: TokenPayload = Depends(get_current_user),
-    conversation_manager: ConversationManager = Depends(get_conversation_manager),
-    stream_transport: StreamTransport = Depends(get_stream_transport),
-    runner: ExecutionRunner = Depends(get_execution_runner),
+    execution_service: ConversationExecutionService = Depends(
+        get_conversation_execution_service
+    ),
 ):
     """
     发送新消息（multipart/form-data）
@@ -103,8 +96,6 @@ async def send_message(
     前同步转成 artifact（source=user_upload）落库，并把 (id, filename) 透传进
     USER_INPUT 事件正文，让 agent 知道哪些是本轮新传的。返回 stream_url 供前端订阅。
     """
-    from uuid import uuid4
-
     # 解析 + 校验 JSON payload：model_validate_json 保留 model_fields_set，
     # 故 parent_message_id 的 omit/null/id 三态语义不变；超 max_length 等失败 → 422
     try:
@@ -141,26 +132,7 @@ async def send_message(
             detail="user_input must not be blank when no files are attached",
         )
 
-    # 为新消息准备 ID
-    is_new_conversation = not request.conversation_id
-    conversation_id = request.conversation_id
-    if is_new_conversation:
-        conversation_id = f"conv-{uuid4().hex}"
-
-    message_id = f"msg-{uuid4().hex}"
     user_id = current_user.user_id
-
-    # 已有会话：校验归属（只读检查，尽早拒绝；不在此创建任何行）
-    if not is_new_conversation:
-        await _verify_ownership(conversation_id, current_user, conversation_manager)
-
-    if (
-        "parent_message_id" in request.model_fields_set
-        and request.parent_message_id is not None
-    ):
-        await _verify_parent_message(
-            conversation_id, request.parent_message_id, conversation_manager
-        )
 
     # 附件:相一 **纯转换**（bytes → 文本），不碰 DB、不 commit 任何 artifact。任一附件
     # 格式不支持 / 无法解码 / 转换失败 → 在此抛 422/500，此时 conversation 与 artifact 都
@@ -178,46 +150,6 @@ async def send_message(
         if f.filename  # 空 file part（前端无附件时不应出现，防御性跳过）
     ]
 
-    # blob 存储配额准入挡板：本次新增 blob 字节 + 该用户已占用 > 配额 → 413，让用户
-    # 删对话腾空间(删 conversation 级联清 artifact/blob)。只数 blob —— 二进制是灌爆盘的
-    # 唯一向量,文本不计(见 config.ARTIFACT_USER_QUOTA_BYTES)。在建会话 / stage 前拦,
-    # 拒绝时零 DB 状态。软上限:并发上传可略微超额,挡量级不挡字节。0 = 禁用挡板。
-    # business-rule reject → loud 落原因(req-id ↔ 用户+用量),否则 grep 只见一条 413。
-    incoming_blob_bytes = sum(len(c.blob) for c in converted if c.blob is not None)
-    if config.ARTIFACT_USER_QUOTA_BYTES > 0 and incoming_blob_bytes > 0:
-        used_bytes = await conversation_manager.get_user_upload_bytes(user_id)
-        if used_bytes + incoming_blob_bytes > config.ARTIFACT_USER_QUOTA_BYTES:
-            quota_mb = config.ARTIFACT_USER_QUOTA_BYTES / 1024 / 1024
-            logger.warning(
-                f"Upload rejected (413): user={user_id} quota exceeded — "
-                f"used={used_bytes} incoming={incoming_blob_bytes} "
-                f"quota={config.ARTIFACT_USER_QUOTA_BYTES}"
-            )
-            raise HTTPException(
-                status_code=413,
-                detail=(
-                    f"存储空间不足：本次上传（{incoming_blob_bytes / 1024 / 1024:.1f}MB）"
-                    f"将超出你的 {quota_mb:.0f}MB 存储配额"
-                    f"（当前已用 {used_bytes / 1024 / 1024:.1f}MB）。"
-                    f"请删除一些对话或已导入的技能以释放空间后重试。"
-                ),
-            )
-
-    # 只有本请求分配 ID 的新 conversation 才进入显式 create。客户端传入的已有 ID
-    # 只能 require_owned；ownership 早检查与这里之间若并发 DELETE，此处返回 404，绝不
-    # 把同 ID 的已删 conversation 复活。submit 取得 lease 后 controller 还会再 require
-    # 一次，覆盖这里与 lease 获取之间的更窄窗口（真正消除该空窗要到阶段 C）。
-    try:
-        if is_new_conversation:
-            await conversation_manager.create(conversation_id, user_id=user_id)
-        else:
-            await conversation_manager.require_owned(conversation_id, user_id)
-    except NotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Conversation '{conversation_id}' not found",
-        )
-
     # 转换后内容打包 closure-carry 给控制器（不 commit）。
     uploaded_files: List[dict] = [
         {
@@ -230,30 +162,56 @@ async def send_message(
         for c in converted
     ]
 
-    # Launcher 只收拢现有 create_controller → run_and_push → runner.submit
-    # 调用链；conversation 准备、上传转换和配额闸仍归本用例。
-    spec_kwargs = {}
-    if "parent_message_id" in request.model_fields_set:
-        # 保留 omit/null/id 三态：omit 让 controller 自动取 active branch；显式
-        # null 从根分支；id 从指定父消息分支。
-        spec_kwargs["parent_message_id"] = request.parent_message_id
-    launcher = ExecutionLauncher(runner, stream_transport)
+    parent_message_id = (
+        request.parent_message_id
+        if "parent_message_id" in request.model_fields_set
+        else AUTO_PARENT
+    )
     try:
-        handle = await launcher.submit(ExecutionSpec(
+        handle = await execution_service.submit_turn(ConversationTurnRequest(
             user_id=user_id,
-            conversation_id=conversation_id,
-            message_id=message_id,
             user_input=request.user_input,
+            conversation_id=request.conversation_id,
+            parent_message_id=parent_message_id,
             uploaded_files=uploaded_files,
             force_compact=request.force_compact,
             activate_skills=request.activate_skills,
-            **spec_kwargs,
         ))
-    except ConflictError:
+    except NotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Conversation '{request.conversation_id}' not found",
+        )
+    except InvalidParentMessage:
+        logger.warning(
+            "Chat rejected (422): invalid parent_message_id for conversation "
+            f"(conv={request.conversation_id}, parent={request.parent_message_id})"
+        )
+        raise HTTPException(
+            status_code=422,
+            detail="parent_message_id does not belong to this conversation",
+        )
+    except UploadQuotaExceeded as exc:
+        quota_mb = exc.quota_bytes / 1024 / 1024
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"存储空间不足：本次上传（{exc.incoming_bytes / 1024 / 1024:.1f}MB）"
+                f"将超出你的 {quota_mb:.0f}MB 存储配额"
+                f"（当前已用 {exc.used_bytes / 1024 / 1024:.1f}MB）。"
+                "请删除一些对话或已导入的技能以释放空间后重试。"
+            ),
+        )
+    except ConversationExecutionConflict:
         raise HTTPException(
             status_code=409,
             detail="An execution is already active for this conversation. "
                    "Use POST /chat/{conv_id}/inject to send input to the running execution.",
+        )
+    except ConversationAdmissionUnavailable:
+        raise HTTPException(
+            status_code=503,
+            detail="Execution admission could not confirm ownership; please retry.",
         )
 
     return ChatResponse(
@@ -268,18 +226,13 @@ async def get_active_stream(
     conv_id: str,
     current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
-    stream_transport: StreamTransport = Depends(get_stream_transport),
-    runner: ExecutionRunner = Depends(get_execution_runner),
+    runtime_status: RuntimeStatusReader = Depends(get_runtime_status_reader),
 ):
     """查询会话是否有活跃的执行流，用于断线重连。无活跃流是正常空状态。"""
     await _verify_ownership(conv_id, current_user, conversation_manager)
 
-    message_id = await runner.store.get_leased_message_id(conv_id)
+    message_id = await runtime_status.get_active_stream_message_id(conv_id)
     if not message_id:
-        return ActiveStreamResponse(active=False, conversation_id=conv_id)
-
-    # 校验 stream 是否仍存活（meta key 未过期）
-    if not await stream_transport.is_stream_alive(message_id):
         return ActiveStreamResponse(active=False, conversation_id=conv_id)
 
     return ActiveStreamResponse(
@@ -295,8 +248,9 @@ async def inject_message(
     conv_id: str,
     request: InjectRequest,
     current_user: TokenPayload = Depends(get_current_user),
-    conversation_manager: ConversationManager = Depends(get_conversation_manager),
-    runner: ExecutionRunner = Depends(get_execution_runner),
+    execution_service: ConversationExecutionService = Depends(
+        get_conversation_execution_service
+    ),
 ):
     """
     向活跃执行注入消息
@@ -309,17 +263,14 @@ async def inject_message(
     可通过 GET /chat/{conv_id}/messages/{msg_id}/events 查询。
     不创建独立 Message 记录（注入是同一轮执行的补充输入，非独立对话轮次）。
     """
-    await _verify_ownership(conv_id, current_user, conversation_manager)
-
-    # inject gate 在 interactive（== RUNNING：semaphore 取得后 → 引擎退出）。
-    # 还在排队（持 lease 但未 interactive）的 turn 返回 409 —— inject 的语义是
-    # "给一个正在跑的引擎追加输入"，引擎没起跑前没有消费者来 drain 这个队列。
-    active_msg_id = await runner.store.get_interactive_message_id(conv_id)
-    if not active_msg_id:
-        raise HTTPException(status_code=409, detail="No active execution for this conversation")
-
     try:
-        await runner.store.inject_message(active_msg_id, request.content)
+        active_msg_id = await execution_service.inject(
+            conv_id, current_user.user_id, request.content
+        )
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
+    except NoActiveExecution:
+        raise HTTPException(status_code=409, detail="No active execution for this conversation")
     except InjectQueueFull:
         # Transient backpressure: the queue drains every LLM round, so the
         # client can retry shortly. The running turn is unaffected.
@@ -338,16 +289,15 @@ async def inject_message(
 async def cancel_execution(
     conv_id: str,
     current_user: TokenPayload = Depends(get_current_user),
-    conversation_manager: ConversationManager = Depends(get_conversation_manager),
-    runner: ExecutionRunner = Depends(get_execution_runner),
+    execution_service: ConversationExecutionService = Depends(
+        get_conversation_execution_service
+    ),
 ):
     """
     取消活跃执行
 
     请求取消 conversation 当前正在运行的执行。引擎会在下一个检查点优雅退出。
     """
-    await _verify_ownership(conv_id, current_user, conversation_manager)
-
     # cancel gate 在 interactive（== RUNNING），与 inject 对称：只作用于正在跑的执行。
     # 引擎在 hooks.check_cancelled 检查点读 flag；跨 worker 正确（flag 共享在 Redis，由
     # 持有该轮的 worker 读取），且 flag 在 RUNNING 期间几秒内即被读取、不会跨越任何
@@ -358,18 +308,18 @@ async def cancel_execution(
     # 就得把 cancel flag 跨「Redis 观察不到的等待」续命 —— 反复制造 cancel 语义撕裂
     # （HA review r4 round-1/2 同形状反复的根因）。排队轮无害、瞬态、很快起跑，起跑后
     # 即可取消。故 QUEUED 返回 409（显式 best-effort 契约），且**不**置任何 flag。
-    active_msg_id = await runner.store.get_interactive_message_id(conv_id)
-    if not active_msg_id:
-        # 仅为给更清楚的 409 而读一次 lease（只读、不置 flag）：区分「排队中」与「无执行」。
-        if await runner.store.get_leased_message_id(conv_id):
-            raise HTTPException(
-                status_code=409,
-                detail="Execution is queued (waiting for a concurrency slot); "
-                       "it becomes cancellable once it starts running.",
-            )
+    try:
+        active_msg_id = await execution_service.cancel(conv_id, current_user.user_id)
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
+    except ExecutionStillQueued:
+        raise HTTPException(
+            status_code=409,
+            detail="Execution is queued (waiting for a concurrency slot); "
+                   "it becomes cancellable once it starts running.",
+        )
+    except NoActiveExecution:
         raise HTTPException(status_code=409, detail="No active execution for this conversation")
-
-    await runner.store.request_cancel(active_msg_id)
 
     return CancelResponse(message_id=active_msg_id)
 
@@ -381,7 +331,7 @@ async def list_conversations(
     q: Optional[str] = Query(default=None, max_length=200),
     current_user: TokenPayload = Depends(get_current_user),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
-    runner: ExecutionRunner = Depends(get_execution_runner),
+    runtime_status: RuntimeStatusReader = Depends(get_runtime_status_reader),
 ):
     """列出对话列表"""
     user_id = current_user.user_id
@@ -397,7 +347,7 @@ async def list_conversations(
     # terminal 会误清新 turn 的指示点(详见 ConversationSummary 注释)。
     # RuntimeStore 不持有 user_id,但返回的 conv_id 与本用户列表求交后天
     # 然只命中当前用户自己的会话。
-    active_executions = await runner.store.list_active_executions()
+    active_executions = await runtime_status.list_active_executions()
 
     return ConversationListResponse(
         conversations=[
@@ -552,49 +502,29 @@ async def get_conversation(
 async def delete_conversation(
     conv_id: str,
     current_user: TokenPayload = Depends(get_current_user),
-    conversation_manager: ConversationManager = Depends(get_conversation_manager),
-    runner: ExecutionRunner = Depends(get_execution_runner),
+    execution_service: ConversationExecutionService = Depends(
+        get_conversation_execution_service
+    ),
 ):
     """删除对话"""
     try:
-        await _verify_ownership(conv_id, current_user, conversation_manager)
-
-        # Use the execution lease as the delete mutex, not a read-then-delete
-        # check. Otherwise a concurrent send can acquire the lease between the
-        # check and DELETE, leaving a live engine whose conversation disappears.
-        delete_lease_owner = f"delete:{conv_id}"
-        active_message_id = await runner.store.try_acquire_lease(
-            conv_id, delete_lease_owner
-        )
-        if active_message_id:
-            logger.warning(
-                "Conversation delete rejected (409): active execution "
-                f"(conv={conv_id}, msg={active_message_id})"
-            )
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    "Conversation has an active execution. Wait for it to finish, "
-                    "or cancel it once running, before deleting."
-                ),
-            )
-
-        try:
-            success = await conversation_manager.delete_conversation(conv_id)
-        finally:
-            try:
-                await runner.store.release_lease(conv_id, delete_lease_owner)
-            except Exception:
-                # DELETE may already have committed. Do not turn a successful,
-                # irreversible delete into a misleading 5xx; the lease has a TTL.
-                logger.exception(
-                    f"Failed to release conversation delete lease (conv={conv_id})"
-                )
-        if not success:
-            raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
+        await execution_service.delete(conv_id, current_user.user_id)
 
         return {"success": True, "message": f"Conversation '{conv_id}' deleted"}
 
+    except ConversationExecutionConflict:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Conversation has an active execution. Wait for it to finish, "
+                "or cancel it once running, before deleting."
+            ),
+        )
+    except ConversationAdmissionUnavailable:
+        raise HTTPException(
+            status_code=503,
+            detail="Conversation delete could not confirm ownership; please retry.",
+        )
     except NotFoundError:
         raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
 
@@ -603,8 +533,9 @@ async def delete_conversation(
 async def bulk_delete_conversations(
     request: BulkDeleteRequest,
     current_user: TokenPayload = Depends(get_current_user),
-    conversation_manager: ConversationManager = Depends(get_conversation_manager),
-    runner: ExecutionRunner = Depends(get_execution_runner),
+    execution_service: ConversationExecutionService = Depends(
+        get_conversation_execution_service
+    ),
 ):
     """
     批量删除对话（用户视角，仅删自己的）
@@ -623,52 +554,20 @@ async def bulk_delete_conversations(
     此时第 1 条就会失败、循环本就进不下去；与 CLAUDE.md "不为不会发生的场景
     加防御代码" 一致，故不做广泛 except。
     """
-    user_id = current_user.user_id
-    deleted: list[str] = []
-    failed: list[BulkDeleteFailedItem] = []
-    seen: set[str] = set()
-
-    for conv_id in request.ids:
-        if conv_id in seen:
-            continue
-        seen.add(conv_id)
-
-        try:
-            if not await conversation_manager.verify_ownership(conv_id, user_id):
-                failed.append(BulkDeleteFailedItem(id=conv_id, reason="not_found"))
-                continue
-
-            delete_lease_owner = f"delete:{conv_id}"
-            active_message_id = await runner.store.try_acquire_lease(
-                conv_id, delete_lease_owner
-            )
-            if active_message_id:
-                logger.warning(
-                    "Bulk conversation delete skipped active execution "
-                    f"(conv={conv_id}, msg={active_message_id})"
-                )
-                failed.append(
-                    BulkDeleteFailedItem(id=conv_id, reason="active_execution")
-                )
-                continue
-
-            try:
-                success = await conversation_manager.delete_conversation(conv_id)
-            finally:
-                try:
-                    await runner.store.release_lease(conv_id, delete_lease_owner)
-                except Exception:
-                    logger.exception(
-                        f"Failed to release conversation delete lease (conv={conv_id})"
-                    )
-            if success:
-                deleted.append(conv_id)
-            else:
-                failed.append(BulkDeleteFailedItem(id=conv_id, reason="not_found"))
-        except NotFoundError:
-            failed.append(BulkDeleteFailedItem(id=conv_id, reason="not_found"))
-
-    return BulkDeleteResponse(deleted=deleted, failed=failed)
+    try:
+        result = await execution_service.bulk_delete(
+            request.ids, current_user.user_id
+        )
+    except ConversationAdmissionUnavailable:
+        raise HTTPException(
+            status_code=503,
+            detail="Conversation delete could not confirm ownership; please retry.",
+        )
+    failed = [
+        BulkDeleteFailedItem(id=item.conversation_id, reason=item.reason)
+        for item in result.failed
+    ]
+    return BulkDeleteResponse(deleted=result.deleted, failed=failed)
 
 
 @router.get("/{conv_id}/messages/{msg_id}/events")
@@ -710,9 +609,9 @@ async def resume_execution(
     conv_id: str,
     request: ResumeRequest,
     current_user: TokenPayload = Depends(get_current_user),
-    conversation_manager: ConversationManager = Depends(get_conversation_manager),
-    stream_transport: StreamTransport = Depends(get_stream_transport),
-    runner: ExecutionRunner = Depends(get_execution_runner),
+    execution_service: ConversationExecutionService = Depends(
+        get_conversation_execution_service
+    ),
 ):
     """
     恢复中断的执行（权限确认后）
@@ -721,28 +620,25 @@ async def resume_execution(
     """
     message_id = request.message_id
 
-    # 校验 conversation 归属
-    await _verify_ownership(conv_id, current_user, conversation_manager)
-
-    # 校验 message 归属
-    message = await conversation_manager.get_message(message_id)
-    if not message:
-        raise HTTPException(status_code=404, detail="Message not found")
-    if message.conversation_id != conv_id:
-        raise HTTPException(status_code=404, detail="Message not found")
-
-    # 解决 interrupt（唤醒 coroutine）
-    resume_data = {
-        "approved": request.approved,
-        "always_allow": request.always_allow,
-    }
-
-    result = await runner.store.resolve_interrupt(
-        message_id, request.call_id, resume_data
-    )
-    if result == "not_found":
+    try:
+        await execution_service.resume(
+            conversation_id=conv_id,
+            user_id=current_user.user_id,
+            message_id=message_id,
+            call_id=request.call_id,
+            approved=request.approved,
+            always_allow=request.always_allow,
+        )
+    except NotFoundError as exc:
+        detail = (
+            "Message not found"
+            if exc.entity_type == "Message"
+            else f"Conversation '{conv_id}' not found"
+        )
+        raise HTTPException(status_code=404, detail=detail)
+    except PendingInterruptNotFound:
         raise HTTPException(status_code=404, detail="No pending interrupt found for this message")
-    if result == "call_mismatch":
+    except PendingInterruptStale:
         logger.warning(
             "Resume rejected (409): stale permission call_id "
             f"(conv={conv_id}, message={message_id}, call={request.call_id})"
@@ -751,7 +647,7 @@ async def resume_execution(
             status_code=409,
             detail="Permission request is stale; a different tool call is awaiting approval",
         )
-    if result == "already_resolved":
+    except PendingInterruptAlreadyResolved:
         raise HTTPException(status_code=409, detail="Interrupt already resolved for this message")
 
     # 不需要创建新 stream — 原来的 coroutine 继续执行，
