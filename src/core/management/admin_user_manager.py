@@ -119,6 +119,20 @@ class AdminUserManager:
             raise AdminUserConflictError(
                 f"Username '{username}' already exists"
             ) from exc
+        except UserWriteError as exc:
+            if (
+                department_id is not None
+                and await self._departments.get_by_id(department_id) is None
+            ):
+                logger.warning(
+                    "User creation rejected after department %s disappeared: %s",
+                    department_id,
+                    exc,
+                )
+                raise AdminUserInvalidError(
+                    "department_id does not reference an existing department"
+                ) from exc
+            raise
         logger.info("User created: %s (role=%s)", user.username, user.role)
         return self._serialize(user)
 
@@ -375,6 +389,30 @@ class AdminUserManager:
                     }
                 )
                 continue
+            except UserWriteError as exc:
+                if (
+                    department_id is not None
+                    and await self._departments.get_by_id(department_id) is None
+                ):
+                    logger.warning(
+                        "Bulk user import row %d rejected after department %s "
+                        "disappeared: %s",
+                        row.row_number,
+                        department_id,
+                        exc,
+                    )
+                    failed.append(
+                        {
+                            "row": row.row_number,
+                            "username": row.username,
+                            "reason": (
+                                "department_id does not reference an existing "
+                                "department"
+                            ),
+                        }
+                    )
+                    continue
+                raise
             created.append(self._serialize(user))
 
         logger.info(

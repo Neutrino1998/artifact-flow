@@ -10,7 +10,8 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from db.models import User
-from repositories.user_repo import UserRepository
+from repositories.base import DuplicateError
+from repositories.user_repo import UserRepository, UserWriteError
 from api.services.auth import hash_password
 
 
@@ -57,6 +58,37 @@ class TestUserCRUD:
         )
         with pytest.raises(IntegrityError):
             await user_repo.add(duplicate)
+
+    async def test_create_user_normalizes_confirmed_username_race(
+        self, user_repo: UserRepository, test_user: User
+    ):
+        duplicate = User(
+            id=str(uuid.uuid4()),
+            username=test_user.username,
+            hashed_password=hash_password("other"),
+            role="user",
+            is_active=True,
+        )
+
+        with pytest.raises(DuplicateError):
+            await user_repo.create_user(duplicate)
+
+    async def test_create_user_preserves_non_username_integrity_error(
+        self, user_repo: UserRepository
+    ):
+        user = User(
+            id=str(uuid.uuid4()),
+            username=f"fk-race-{uuid.uuid4().hex[:8]}",
+            hashed_password=hash_password("other"),
+            role="user",
+            is_active=True,
+            department_id="deleted-department",
+        )
+
+        with pytest.raises(UserWriteError) as exc_info:
+            await user_repo.create_user(user)
+
+        assert isinstance(exc_info.value.__cause__, IntegrityError)
 
     async def test_update_user_fields(self, user_repo: UserRepository, test_user: User):
         test_user.display_name = "Updated Name"

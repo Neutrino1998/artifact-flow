@@ -33,7 +33,14 @@ class UserRepository(BaseRepository[User]):
             return user
         except IntegrityError as exc:
             await self._session.rollback()
-            raise DuplicateError("User", username) from exc
+            # ``users`` also has a department FK (and a primary key), so an
+            # IntegrityError is not sufficient evidence of a username race.
+            # Re-read after rollback: under READ COMMITTED this sees the winner
+            # of a concurrent username insert without parsing dialect-specific
+            # constraint names.
+            if await self.get_by_username(username) is not None:
+                raise DuplicateError("User", username) from exc
+            raise UserWriteError(str(exc)) from exc
 
     async def save_user(self, user: User) -> User:
         """Commit one already-loaded user mutation."""
