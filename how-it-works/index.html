@@ -997,26 +997,44 @@
 <pre class="mermaid"><code>sequenceDiagram
     participant User as 用户
     participant API as API
-    participant Lead as Lead Agent
+    participant Admission as Conversation Admission
+    participant Supervisor as TaskSupervisor
+    participant Handler as ConversationTurnHandler
+    participant Runtime as AgentRuntime
+    participant Stream as event sink / SSE
     participant Model as LLM
     participant Tool as Tool / Subagent
     participant DB as Database
 
     User-&gt;&gt;API: 发送消息和附件
+    API-&gt;&gt;Admission: 准入请求
+    Admission-&gt;&gt;Admission: acquire lease 并立即 heartbeat
+    Admission-&gt;&gt;DB: create / require + parent 最终校验
+    Admission-&gt;&gt;Supervisor: 交接同一个 lease handle
+    Admission--&gt;&gt;API: conversation / message / stream ID
     API--&gt;&gt;User: 返回 stream 地址
-    API-&gt;&gt;Lead: 启动本轮执行
-    loop 直到 Lead 给出无工具调用的回复
-        Lead-&gt;&gt;Model: 当前上下文与可用能力
-        Model--&gt;&gt;Lead: 文本和可选工具调用
-        Lead--&gt;&gt;User: SSE 流式事件
+    Supervisor-&gt;&gt;Handler: 取得进程内并发槽后启动
+    Handler-&gt;&gt;Runtime: AgentInvocation + hooks + event sink
+    loop 直到入口 Agent 给出无工具调用的回复
+        Runtime-&gt;&gt;Model: 当前上下文与可用能力
+        Model--&gt;&gt;Runtime: 文本和可选工具调用
+        Runtime--&gt;&gt;Stream: 非终态 event
+        Stream--&gt;&gt;User: SSE
         opt 调用工具或 Subagent
-            Lead-&gt;&gt;Tool: 串行执行
-            Tool--&gt;&gt;Lead: ToolResult / Subagent result
+            Runtime-&gt;&gt;Tool: 串行执行
+            Tool--&gt;&gt;Runtime: ToolResult / Subagent result
         end
     end
-    Lead-&gt;&gt;DB: 落库消息、事件和 Artifact
-    Lead--&gt;&gt;User: complete</code></pre>
-<p>引擎是一个 per-agent 的普通循环：构造上下文、调用模型、解析并串行执行工具，然后把结果放回下一次模型调用。<code>call_subagent</code> 会原地进入目标 Agent 的同类循环；Subagent 结束后，结果像普通工具结果一样回到调用者。</p>
+    Runtime--&gt;&gt;Handler: EngineOutcome(state + stop reason)
+    Handler-&gt;&gt;DB: flush Artifact
+    Handler-&gt;&gt;Handler: 单一 terminal 决策
+    Handler-&gt;&gt;DB: 先写事件，再写展示 response
+    Handler--&gt;&gt;Stream: complete / cancelled / timed_out / error
+    Stream--&gt;&gt;User: SSE terminal
+    Supervisor-&gt;&gt;Supervisor: LIFO cleanup，最后释放 lease</code></pre>
+<p>发送与用户删除使用同一条 Conversation lease 做准入线性化。Lease 获取成功就开始续租；任务排队时持有 lease 但还不能注入或取消，取得唯一并发槽并通过 owner CAS 后才进入可交互的 RUNNING 状态。TaskSupervisor 只监管进程内任务、容量与通用 LIFO cleanup，不理解 Conversation、Redis 或 SSE；Conversation 服务负责组合 lease、stream、interactive 与 Sandbox 生命周期。</p>
+<p><code>AgentRuntime</code> 是可嵌入的核心调用边界：调用方提供 Agent/Tool 配置、初始 state、hooks 和可选 event sink，Runtime 返回 state 与事实性的 stop reason。它不要求 Conversation、Web、数据库、Redis 或 SSE，也不产生最终 terminal；Web Chat 由 <code>ConversationTurnHandler</code> 统一完成 Artifact flush、terminal 决策、事件持久化和展示 response 写入。这样 embedded 调用可以直接复用同一引擎，而 Web 路径仍保留完整的持久化和实时交互语义。</p>
+<p>引擎内部是一个 per-agent 的普通循环：构造上下文、调用模型、解析并串行执行工具，然后把结果放回下一次模型调用。<code>call_subagent</code> 会原地进入目标 Agent 的同类循环；Subagent 结束后，结果像普通工具结果一样回到调用者。</p>
 <p>Lead Agent 是唯一的用户回复出口。Subagent 的最终文本不会直接发送给用户。</p>
 <h2 id="配置怎样生效">配置怎样生效</h2>
 <p>配置分成三个层次：</p>
@@ -1041,10 +1059,10 @@
 <ul>
 <li>模型片段、工具状态和 Artifact 变更通过 SSE 实时发送。</li>
 <li><code>confirm</code> 级工具在执行前等待用户批准；<code>auto</code> 级工具直接执行。</li>
-<li>同一对话通过 lease 保证同一时刻只有一个执行。</li>
+<li>同一对话通过 lease 保证同一时刻只有一个发送或删除操作；续租归属不明时 fail closed。</li>
 <li>取消、超时、错误和正常完成最终都进入统一的终态处理，随后持久化本轮事件。</li>
 </ul>
-<p>本地试用使用进程内 RuntimeStore 和 StreamTransport。生产多副本使用 Redis 保存 lease、interrupt、cancel 和流式传输状态；PostgreSQL 保存用户、对话、事件、配置注册表和 Artifact。</p>
+<p>本地试用使用进程内 RuntimeStore 和 StreamTransport。生产多副本使用 Redis 保存 lease、interactive owner、interrupt、cancel 和流式传输等 <strong>live state</strong>；这些状态用于当前执行的协调和观测，会过期且不承担历史恢复。PostgreSQL 保存用户、对话、消息事件、配置注册表和 Artifact 等 <strong>durable state</strong>。TaskSupervisor 的 task 引用也只属于当前进程，不会被投影到两种存储之间。</p>
 <h2 id="sandbox-边界">Sandbox 边界</h2>
 <p><code>bash</code>、<code>mount</code>、<code>persist</code> 共享一个按轮创建的临时 Sandbox：</p>
 <ul>

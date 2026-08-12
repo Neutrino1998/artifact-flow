@@ -1029,7 +1029,7 @@
 <tr>
 <td><code>ARTIFACTFLOW_EXECUTION_TIMEOUT</code></td>
 <td style="text-align: right;"><code>3600</code> 秒</td>
-<td>单轮任务总 deadline</td>
+<td>Agent 引擎 loop 的 deadline；含权限等待，不含结束后的持久化</td>
 </tr>
 <tr>
 <td><code>ARTIFACTFLOW_PERMISSION_TIMEOUT</code></td>
@@ -1069,6 +1069,9 @@
 </tbody>
 </table>
 <p><code>src/config.py</code> 还有算法护栏和内部实现常量。它们即使能被环境变量覆盖，也不等于常规部署契约；没有具体容量或故障证据时不要照单调大。</p>
+<p><code>ARTIFACTFLOW_MAX_CONCURRENT_TASKS</code> 对每个 Backend 进程内唯一的 TaskSupervisor capacity gate 生效。超过容量的 Conversation turn 保持 QUEUED：它继续持有并续租 Conversation lease，但尚未标记为可交互 RUNNING，因此 inject/cancel 会按现有 409 契约拒绝。多 Backend 副本必须使用 Redis，让 lease、interactive、interrupt、cancel 与 SSE 状态跨进程共享；进程内 TaskSupervisor 只保留本进程 task 引用，不承担崩溃恢复。</p>
+<p><code>ARTIFACTFLOW_EXECUTION_TIMEOUT</code> 只包住 <code>AgentRuntime</code> 的引擎 loop。触发后 Runtime 返回 timeout stop reason，再由 Conversation turn 的统一结束路径写入 <code>timed_out</code> terminal、事件和展示 response；Artifact flush、事件写入等 post-processing 刻意位于该 deadline 之外。持久化查询由 <code>ARTIFACTFLOW_DB_COMMAND_TIMEOUT</code> 分别约束，因此不要把 execution timeout 当成包含所有 DB cleanup 的 HTTP 请求总时限。</p>
+<p>Redis 中的 lease、interactive、interrupt、cancel 和 stream 是会过期的 live coordination state，不是执行历史；PostgreSQL 中的 Conversation、MessageEvent、配置注册表和 Artifact 才是 durable state。Admin runtime 页面只读观察这些状态，不会把某一侧反写或同步成另一侧。未配置 Redis 的进程内模式只适合单 Backend，本地进程退出后其 live state 会自然消失。</p>
 <h2 id="出站-https-信任">出站 HTTPS 信任</h2>
 <p>HTTP Tool、MCP 以及其他 Backend HTTPS 客户端默认验证服务端证书。内网服务由
 企业私有 CA 签发，或确实使用自签 leaf 时，把信任证书放在：</p>
