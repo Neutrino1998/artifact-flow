@@ -810,7 +810,7 @@ class ToolUnit(Base):
         String(16), nullable=False, default="public", server_default="public"
     )
 
-    # 渐进式披露开关:True → <available_tools> 只出索引行,完整 schema 由 search_tools
+    # 渐进式披露开关:True → <available_tool_units> 只出索引行,完整 schema 由 search_tools
     # 按需补。显式开关、不按 token 自动(私有化无 tokenizer,原则 7)。
     defer: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")

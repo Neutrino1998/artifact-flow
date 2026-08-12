@@ -1,7 +1,7 @@
 """
 search_tools —— 渐进式披露的「按需补全描述」工具(B-3)。
 
-deferred tool unit 在 `<available_tools>` 里只出索引行(成员 full_name,无 param
+deferred tool unit 在 `<available_tool_units>` 里只出索引行(成员 full_name,无 param
 schema)。模型要调用前先用 `search_tools` 把完整 schema 取回来 —— 结果作 tool_result
 进历史(被压缩则模型见索引行自己再 search,不维护已发现集,decision 2)。
 
@@ -35,7 +35,7 @@ class SearchToolsTool(BaseTool):
         super().__init__(
             name=SEARCH_TOOLS_NAME,
             description=(
-                "Load the full parameter schemas for tools that <available_tools> lists "
+                "Load the full parameter schemas for tools that <available_tool_units> lists "
                 "by name only (deferred tool units). Call this BEFORE calling such a tool. "
                 "Query forms: `select:full_name,full_name` to fetch exact tools by name, "
                 "or a plain keyword to search tool names + descriptions. The returned tool "

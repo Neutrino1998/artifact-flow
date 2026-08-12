@@ -35,7 +35,7 @@ from tools.base import (
 
 @dataclass
 class DeferredUnit:
-    """一个 deferred unit 在 `<available_tools>` 里渲染索引行所需的信息。
+    """一个 deferred unit 在 `<available_tool_units>` 里渲染索引行所需的信息。
 
     `member_full_names` 已过滤到本 turn **可调且工具对象存在**的成员(与 permissions
     同口径)—— 索引行只列模型真能 search 出来的工具,不挂死链。
@@ -80,7 +80,7 @@ class EffectiveToolset:
     成员判定与等级查询的单一入口;读点只问它「在不在」「什么等级」。
 
     `deferred_units`:本 agent 宇宙里 `defer=True` 的 unit(B-3 渐进式披露)——
-    它们的成员仍在 `permissions`(可调),但 `<available_tools>` 只渲索引行、完整
+    它们的成员仍在 `permissions`(可调),但 `<available_tool_units>` 只渲索引行、完整
     schema 由 `search_tools` 按需补。defer 分组在 resolver 一处算好,context_manager
     只消费 effective_toolset(不再碰 snapshot),维持单一解析点。
     """

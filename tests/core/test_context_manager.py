@@ -237,9 +237,9 @@ class TestSystemPrompt:
         ])
 
         messages = _build(agent, state=state, tools={})
-        # 无工具 → system prompt 不注入语法块，reminder 也无 <available_tools>
+        # 无工具 → system prompt 不注入语法块，reminder 也无 <available_tool_units>
         assert "tool_call" not in messages[0]["content"].lower()
-        assert "<available_tools>" not in messages[-1]["content"]
+        assert "<available_tool_units>" not in messages[-1]["content"]
 
 
 # ============================================================
@@ -724,7 +724,7 @@ class TestDynamicContextReminder:
 
 
 class TestAvailableTools:
-    """B-3:<available_tools> 渲染 —— non-deferred 出完整 doc,deferred unit 只出索引行。"""
+    """B-3:<available_tool_units> 渲染 —— unit 成员只出索引行和加载状态。"""
 
     def _tool(self, name, description, permission=None):
         from tools.base import BaseTool, ToolPermission, ToolResult
