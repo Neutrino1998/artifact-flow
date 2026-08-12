@@ -10,3 +10,11 @@
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
 pytest-xdist>=3.6.0
+
+# Preinstalled skill / observability test coverage. Keep these pins aligned with
+# sandbox/requirements.txt so local tests exercise the deployed skill runtime's
+# library versions without adding them to the backend production image.
+pandas==2.2.3
+python-docx==1.2.0
+python-pptx==1.0.2
+lxml==6.1.1
