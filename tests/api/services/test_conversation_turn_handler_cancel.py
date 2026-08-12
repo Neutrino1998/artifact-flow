@@ -402,11 +402,12 @@ class TestPersistOnExternalCancel:
             }
         ]
         assert [event["event_type"] for event in terminals] == [
-            StreamEventType.CANCELLED.value
+            StreamEventType.COMPLETE.value
         ]
         cm.update_response_async.assert_awaited_once()
+        assert cm.update_response_async.call_args.kwargs["response"] == "done"
 
-    async def test_external_cancel_during_exists_async_persists_events(self):
+    async def test_cancel_during_exists_after_runtime_complete_preserves_complete(self):
         """
         Reviewer-flagged gap: when the outer cancel arrives AFTER execute_loop has
         already returned (during post-processing — exists_async / flush_all / etc.),
@@ -420,18 +421,11 @@ class TestPersistOnExternalCancel:
         try/except CancelledError late-persists once.
         """
         cm = _make_mock_conversation_manager()
-        # Make exists_async block long enough for us to cancel mid-await
-        async def slow_exists(*args, **kwargs):
-            await asyncio.sleep(60)
-            return True
-        cm.exists_async = AsyncMock(side_effect=slow_exists)
-
         am = _make_mock_artifact_service()
         er, batches = _capturing_event_repo()
         ctrl = _make_handler(cm, er, am)
 
         exists_called = asyncio.Event()
-        original_exists = cm.exists_async
 
         async def signal_then_block(*args, **kwargs):
             exists_called.set()
@@ -483,18 +477,16 @@ class TestPersistOnExternalCancel:
         event_types = [e["event_type"] for e in batch]
         # LLM_COMPLETE produced by execute_loop survived
         assert StreamEventType.LLM_COMPLETE.value in event_types
-        # Late-cancel handler appended a CANCELLED terminal with the
-        # post_processing-specific reason
-        cancelled = [e for e in batch if e["event_type"] == StreamEventType.CANCELLED.value]
-        assert len(cancelled) == 1
-        assert cancelled[0]["data"]["reason"] == "external_cancel_post_processing"
+        complete = [e for e in batch if e["event_type"] == StreamEventType.COMPLETE.value]
+        assert len(complete) == 1
+        assert not any(
+            e["event_type"] == StreamEventType.CANCELLED.value for e in batch
+        )
 
-        # Late-cancel handler also writes Message.response so the frontend
-        # actually renders the cancelled turn (MessageList gates on response
-        # non-empty; events flow is nested inside AssistantMessage).
-        from config import config
+        # Workload cancellation still propagates to TaskSupervisor, but the durable
+        # turn keeps AgentRuntime's already-established COMPLETE + real response.
         cm.update_response_async.assert_called_once()
-        assert cm.update_response_async.call_args.kwargs["response"] == config.CANCELLED_RESPONSE_BY_SYSTEM
+        assert cm.update_response_async.call_args.kwargs["response"] == "ok"
 
     async def test_cancel_during_engine_exit_hook_still_flushes_and_persists(self):
         cm = _make_mock_conversation_manager()
@@ -537,10 +529,17 @@ class TestPersistOnExternalCancel:
 
         am.flush_all.assert_awaited_once_with("conv-test")
         assert len(batches) == 1
-        assert [
+        terminal_types = [
             event["event_type"] for event in batches[0]
-            if event["event_type"] == StreamEventType.CANCELLED.value
-        ] == [StreamEventType.CANCELLED.value]
+            if event["event_type"] in {
+                StreamEventType.COMPLETE.value,
+                StreamEventType.CANCELLED.value,
+                StreamEventType.TIMED_OUT.value,
+                StreamEventType.ERROR.value,
+            }
+        ]
+        assert terminal_types == [StreamEventType.COMPLETE.value]
+        assert cm.update_response_async.call_args.kwargs["response"] == "done"
 
     async def test_cancel_during_artifact_flush_retries_idempotent_phase(self):
         cm = _make_mock_conversation_manager()
@@ -586,10 +585,17 @@ class TestPersistOnExternalCancel:
 
         assert flush_calls == 2
         assert len(batches) == 1
-        assert [
+        terminal_types = [
             event["event_type"] for event in batches[0]
-            if event["event_type"] == StreamEventType.CANCELLED.value
-        ] == [StreamEventType.CANCELLED.value]
+            if event["event_type"] in {
+                StreamEventType.COMPLETE.value,
+                StreamEventType.CANCELLED.value,
+                StreamEventType.TIMED_OUT.value,
+                StreamEventType.ERROR.value,
+            }
+        ]
+        assert terminal_types == [StreamEventType.COMPLETE.value]
+        assert cm.update_response_async.call_args.kwargs["response"] == "done"
 
     async def test_late_cancel_keeps_existing_terminal_event(self):
         """
@@ -1063,9 +1069,9 @@ class TestPersistOnExternalCancel:
         放进 state["events"]。
 
         当前 turn engine 跑完后,cancel 落在 exists_async(decide_terminal 之前)。
-        ensure_terminal 必须忽略 historical 段的 COMPLETE,合成本轮的 external
-        CANCELLED;否则:
-        - ensure_terminal adopt parent COMPLETE → 不合成 → terminal_appended=True
+        ensure_terminal 必须忽略 historical 段的 COMPLETE，并按本轮 runtime
+        StopReason.COMPLETE 生成新的 COMPLETE；否则:
+        - ensure_terminal adopt parent COMPLETE → terminal_appended=True
         - _persist_events 过滤掉 historical → 本轮 batch 只有 [LLM_COMPLETE],没有
           任何 terminal
         - 下一轮 EventHistory 重建会撞到无终态的半截 turn(沉默失败,不抛异常,DB
@@ -1147,18 +1153,22 @@ class TestPersistOnExternalCancel:
         # 本轮 LLM_COMPLETE 存在(它是 non-historical,正常入库)
         assert StreamEventType.LLM_COMPLETE.value in event_types
 
-        # CRITICAL: 本轮 batch 必须包含 CANCELLED terminal,否则下一轮 EventHistory
-        # 重建会撞到无终态的 turn。Reviewer 复现:不修时 batch == ['llm_complete']。
-        cancelled = [
+        # 本轮 batch 必须包含自己的 COMPLETE terminal；既不能 adopt 父轮 terminal，
+        # 也不能因 post-processing cancel 改写 runtime 已完成的事实。
+        complete = [
             e for e in batch
-            if e["event_type"] == StreamEventType.CANCELLED.value
+            if e["event_type"] == StreamEventType.COMPLETE.value
         ]
-        assert len(cancelled) == 1, (
+        assert len(complete) == 1, (
             f"本轮 batch 必须有 terminal。ensure_terminal 误 adopt 父轮 historical "
-            f"COMPLETE → 跳过合成 → _persist_events 过滤 historical → 本轮 DB 里没有 "
+            f"COMPLETE → _persist_events 过滤 historical → 本轮 DB 里没有 "
             f"任何 terminal。实际 batch: {event_types}"
         )
-        assert cancelled[0]["data"]["reason"] == "external_cancel_post_processing"
+        assert complete[0]["data"]["response"] == "current turn output"
+        assert not any(
+            e["event_type"] == StreamEventType.CANCELLED.value for e in batch
+        )
+        assert cm.update_response_async.call_args.kwargs["response"] == "current turn output"
 
         # historical events 不应该被重复写入 DB
         for ev in batch:

@@ -102,9 +102,9 @@ class Settings(BaseSettings):
     # Cancel-path Message.response placeholders.
     # 三条 cancel 路径都要写一个非空占位 —— 前端 MessageList 用 node.response 非空
     # gate AssistantMessage 渲染(同时也是事件流容器),空 response 整条消息+事件流
-    # 不显示。BY_USER 给 cooperative cancel(用户主动)；BY_SYSTEM 给 lease fencing /
-    # shutdown / late-cancel post-processing。Operator 视角的更细分原因走 events 表
-    # 的 reason 字段(external_cancel / external_cancel_post_processing)。
+    # 不显示。BY_USER 给 cooperative cancel(用户主动)；BY_SYSTEM 给 runtime 执行中
+    # 遭遇 lease fencing / shutdown 的 external cancel。若 runtime 已经完成，随后
+    # post-processing 才收到 task cancel，durable terminal 仍保留 runtime 事实终因。
     CANCELLED_RESPONSE_BY_USER: str = "*Task cancelled by user*"
     CANCELLED_RESPONSE_BY_SYSTEM: str = "*Task cancelled by system*"
     # 超时占位:执行超过 EXECUTION_TIMEOUT 时 Message.response 写入的显示串。

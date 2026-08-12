@@ -508,11 +508,7 @@ class ConversationTurnHandler:
                 conversation_id=conversation_id,
                 message_id=message_id,
                 final_state=final_state,
-                cancel_source=(
-                    "external"
-                    if runtime_outcome.stop_reason == StopReason.EXTERNAL_CANCEL
-                    else None
-                ),
+                stop_reason=runtime_outcome.stop_reason,
             )
 
             # Engine 已退出，不会再 drain 消息 — 立即取消活跃映射，
@@ -745,7 +741,7 @@ class ConversationTurnHandler:
         1. events 落库前不写 Message.response          (gate: pp.events_persisted)
         2. response slot 一旦 claimed 不再覆盖          (gate: pp.response_update_attempted)
         3. 已有 semantic terminal 不被 late-cancel 改   (ensure_terminal adopt path)
-        4. 只在无 terminal 时才写 system placeholder    (choose_response_for_terminal 按 cancel_source 分)
+        4. 只有 runtime external cancel 才写 system placeholder (按 stop_reason 区分)
         """
         # Phase 0: cancel may have landed inside ArtifactService.flush_all after
         # its DB commit but before the await returned. flush_all is structurally

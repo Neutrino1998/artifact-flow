@@ -4,7 +4,7 @@ post_processing.py 纯函数单元测试 — 参数化矩阵锁定 4 条 invaria
 1. events 落库前不写 Message.response          (caller 检查 pp.events_persisted)
 2. response slot 一旦 claimed 不再覆盖          (caller 检查 pp.response_update_attempted)
 3. 已有 semantic terminal 不被 late-cancel 改   (ensure_terminal adopt 既有 terminal)
-4. 只在无 terminal 时才写 system placeholder    (choose_response_for_terminal 看 cancel_source)
+4. 只有 runtime external cancel 才写 system placeholder
 
 invariant 1/2 由 Handler 调用方负责检查,不在这里测;矩阵测试覆盖 3/4 的核心决策
 函数 (decide_terminal / ensure_terminal / choose_response_for_terminal)。Handler
@@ -14,6 +14,7 @@ invariant 1/2 由 Handler 调用方负责检查,不在这里测;矩阵测试覆�
 import pytest
 
 from config import config
+from core.agent_runtime import StopReason
 from core.events import ExecutionEvent, StreamEventType
 from core.post_processing import (
     PostProcessState,
@@ -24,12 +25,12 @@ from core.post_processing import (
 
 
 # ============================================================================
-# choose_response_for_terminal — invariant 4: (terminal_type × cancel_source) → display
+# choose_response_for_terminal — invariant 4: (terminal_type × stop_reason) → display
 # ============================================================================
 
 
 class TestChooseResponseMatrix:
-    """穷举 (terminal_type, cancel_source, state.response) → 期望 display 字符串。
+    """穷举 (terminal_type, stop_reason, state.response) → 期望 display 字符串。
 
     success path 跟 late-cancel handler 都调这个函数 —— 一旦矩阵改变,两处行为同步
     变化,杜绝"两份计算各自漂"。
@@ -43,6 +44,7 @@ class TestChooseResponseMatrix:
         pp = PostProcessState(
             conversation_id="c", message_id="m",
             final_state={"response": state_response},
+            stop_reason=StopReason.COMPLETE,
             terminal_type=StreamEventType.COMPLETE.value,
         )
         assert choose_response_for_terminal(pp) == expected
@@ -55,6 +57,7 @@ class TestChooseResponseMatrix:
         pp = PostProcessState(
             conversation_id="c", message_id="m",
             final_state={"response": state_response},
+            stop_reason=StopReason.ERROR,
             terminal_type=StreamEventType.ERROR.value,
         )
         assert choose_response_for_terminal(pp) == expected
@@ -67,8 +70,8 @@ class TestChooseResponseMatrix:
         pp = PostProcessState(
             conversation_id="c", message_id="m",
             final_state={"response": state_response},
+            stop_reason=StopReason.COOPERATIVE_CANCEL,
             terminal_type=StreamEventType.CANCELLED.value,
-            cancel_source="cooperative",
         )
         assert choose_response_for_terminal(pp) == expected
 
@@ -82,21 +85,19 @@ class TestChooseResponseMatrix:
         pp = PostProcessState(
             conversation_id="c", message_id="m",
             final_state={"response": state_response},
+            stop_reason=StopReason.EXTERNAL_CANCEL,
             terminal_type=StreamEventType.CANCELLED.value,
-            cancel_source="external",
         )
         assert choose_response_for_terminal(pp) == config.CANCELLED_RESPONSE_BY_SYSTEM
 
-    @pytest.mark.parametrize("cancel_source", [None, "external", "cooperative"])
     @pytest.mark.parametrize("state_response", ["", "engine had partial output before timeout"])
-    def test_timed_out_always_returns_timeout_placeholder(self, cancel_source, state_response):
-        """超时是基础设施事件:始终写 TIMED_OUT_RESPONSE,与 cancel_source / state.response 无关。
-        (adopt 路径下 cancel_source 可能为 None;无论如何都走同一占位串。)"""
+    def test_timed_out_always_returns_timeout_placeholder(self, state_response):
+        """超时始终写 TIMED_OUT_RESPONSE，与 state.response 无关。"""
         pp = PostProcessState(
             conversation_id="c", message_id="m",
             final_state={"response": state_response},
+            stop_reason=StopReason.TIMEOUT,
             terminal_type=StreamEventType.TIMED_OUT.value,
-            cancel_source=cancel_source,
         )
         assert choose_response_for_terminal(pp) == config.TIMED_OUT_RESPONSE
 
@@ -105,6 +106,7 @@ class TestChooseResponseMatrix:
         pp = PostProcessState(
             conversation_id="c", message_id="m",
             final_state={"response": "anything"},
+            stop_reason=StopReason.COMPLETE,
         )
         assert choose_response_for_terminal(pp) == ""
 
@@ -120,22 +122,22 @@ class TestDecideTerminal:
         pp = PostProcessState(
             conversation_id="c", message_id="m",
             final_state={"response": "hello", "execution_metrics": {"ms": 100}},
+            stop_reason=StopReason.COMPLETE,
         )
         decide_terminal(pp)
         assert pp.terminal_type == StreamEventType.COMPLETE.value
         assert pp.terminal_event is not None
         assert pp.terminal_event.data["response"] == "hello"
         assert pp.terminal_event.data["success"] is True
-        assert pp.cancel_source is None
 
     def test_cooperative_cancel_path(self):
         pp = PostProcessState(
             conversation_id="c", message_id="m",
             final_state={"response": "", "cancelled": True},
+            stop_reason=StopReason.COOPERATIVE_CANCEL,
         )
         decide_terminal(pp)
         assert pp.terminal_type == StreamEventType.CANCELLED.value
-        assert pp.cancel_source == "cooperative"
         # SSE data carries display fallback for snapshot
         assert pp.terminal_event.data["response"] == config.CANCELLED_RESPONSE_BY_USER
 
@@ -143,11 +145,10 @@ class TestDecideTerminal:
         pp = PostProcessState(
             conversation_id="c", message_id="m",
             final_state={"response": "partial", "cancelled": True},
-            cancel_source="external",
+            stop_reason=StopReason.EXTERNAL_CANCEL,
         )
         decide_terminal(pp)
         assert pp.terminal_type == StreamEventType.CANCELLED.value
-        assert pp.cancel_source == "external"
         assert pp.terminal_event.data["response"] == config.CANCELLED_RESPONSE_BY_SYSTEM
         assert pp.terminal_event.data["reason"] == "external_cancel"
 
@@ -166,6 +167,7 @@ class TestDecideTerminal:
                     "request_id": "req-123",
                 },
             },
+            stop_reason=StopReason.ERROR,
         )
         decide_terminal(pp)
         assert pp.terminal_type == StreamEventType.ERROR.value
@@ -182,6 +184,7 @@ class TestDecideTerminal:
         pp = PostProcessState(
             conversation_id="c", message_id="m",
             final_state={"response": "", "cancelled": True},
+            stop_reason=StopReason.COOPERATIVE_CANCEL,
             flush_error="Artifact persistence failed: disk full",
         )
         decide_terminal(pp)
@@ -195,6 +198,7 @@ class TestDecideTerminal:
             conversation_id="c", message_id="m",
             final_state={"response": "partial", "timed_out": True,
                          "execution_metrics": {"ms": 1800000}},
+            stop_reason=StopReason.TIMEOUT,
         )
         decide_terminal(pp)
         assert pp.terminal_type == StreamEventType.TIMED_OUT.value
@@ -202,7 +206,6 @@ class TestDecideTerminal:
         assert pp.terminal_event.data["success"] is False
         assert pp.terminal_event.data["timed_out"] is True
         assert pp.terminal_event.data["response"] == config.TIMED_OUT_RESPONSE
-        assert pp.cancel_source is None
 
     def test_flush_error_overrides_timed_out(self):
         """优先级 flush_error > timed_out:超时轮里 artifact 持久化失败仍以 ERROR 暴露,
@@ -210,6 +213,7 @@ class TestDecideTerminal:
         pp = PostProcessState(
             conversation_id="c", message_id="m",
             final_state={"response": "", "timed_out": True},
+            stop_reason=StopReason.TIMEOUT,
             flush_error="Artifact persistence failed: disk full",
         )
         decide_terminal(pp)
@@ -229,6 +233,7 @@ class TestEnsureTerminal:
         pp = PostProcessState(
             conversation_id="c", message_id="m",
             final_state={"events": []},
+            stop_reason=StopReason.COMPLETE,
             terminal_appended=True,
         )
         ensure_terminal(pp)
@@ -245,6 +250,7 @@ class TestEnsureTerminal:
         pp = PostProcessState(
             conversation_id="c", message_id="m",
             final_state={"events": [existing]},
+            stop_reason=StopReason.COMPLETE,
         )
         ensure_terminal(pp)
         assert pp.terminal_appended is True
@@ -261,15 +267,14 @@ class TestEnsureTerminal:
         pp = PostProcessState(
             conversation_id="c", message_id="m",
             final_state={"events": [existing]},
+            stop_reason=StopReason.ERROR,
         )
         ensure_terminal(pp)
         assert pp.terminal_appended is True
         assert pp.terminal_type == StreamEventType.ERROR.value
         assert len(pp.final_state["events"]) == 1
 
-    def test_adopts_existing_cancelled_external_with_reason(self):
-        """engine_task 路径 append 的 CANCELLED 带 reason 字段 → 推断 cancel_source=external。
-        choose_response 会因此返回 BY_SYSTEM 而非 BY_USER。"""
+    def test_adopts_existing_external_cancelled_terminal(self):
         existing = ExecutionEvent(
             event_type=StreamEventType.CANCELLED.value,
             agent_name=None,
@@ -278,14 +283,12 @@ class TestEnsureTerminal:
         pp = PostProcessState(
             conversation_id="c", message_id="m",
             final_state={"events": [existing]},
+            stop_reason=StopReason.EXTERNAL_CANCEL,
         )
         ensure_terminal(pp)
         assert pp.terminal_type == StreamEventType.CANCELLED.value
-        assert pp.cancel_source == "external"
 
-    def test_adopts_existing_cancelled_cooperative_no_reason(self):
-        """decide_terminal 走 cooperative 分支时 append 的 CANCELLED 不带 reason →
-        推断 cancel_source=cooperative。"""
+    def test_adopts_existing_cooperative_cancelled_terminal(self):
         existing = ExecutionEvent(
             event_type=StreamEventType.CANCELLED.value,
             agent_name=None,
@@ -294,12 +297,12 @@ class TestEnsureTerminal:
         pp = PostProcessState(
             conversation_id="c", message_id="m",
             final_state={"events": [existing]},
+            stop_reason=StopReason.COOPERATIVE_CANCEL,
         )
         ensure_terminal(pp)
         assert pp.terminal_type == StreamEventType.CANCELLED.value
-        assert pp.cancel_source == "cooperative"
 
-    def test_ignores_historical_terminal_synthesizes_current(self):
+    def test_ignores_historical_terminal_and_builds_current_from_stop_reason(self):
         """多轮场景:state["events"] = [parent turn historical, current turn fresh]。
         historical COMPLETE 不算本轮 terminal —— 否则 ensure_terminal adopt 后
         _persist_events 过滤 historical → 本轮 DB 里没有 terminal,EventHistory
@@ -318,17 +321,20 @@ class TestEnsureTerminal:
         )
         pp = PostProcessState(
             conversation_id="c", message_id="m",
-            final_state={"events": [historical_complete, current_llm]},
+            final_state={
+                "events": [historical_complete, current_llm],
+                "response": "current turn output",
+            },
+            stop_reason=StopReason.COMPLETE,
         )
         ensure_terminal(pp)
-        # 必须合成本轮 external CANCELLED,而不是 adopt historical COMPLETE
-        assert pp.terminal_type == StreamEventType.CANCELLED.value
-        assert pp.cancel_source == "external"
-        # historical + current_llm + 新合成的 CANCELLED
+        # 必须生成本轮 COMPLETE，而不是 adopt historical COMPLETE 或把
+        # post-processing cancel 错当成 runtime external cancel。
+        assert pp.terminal_type == StreamEventType.COMPLETE.value
         assert len(pp.final_state["events"]) == 3
         appended = pp.final_state["events"][-1]
-        assert appended.event_type == StreamEventType.CANCELLED.value
-        assert appended.data["reason"] == "external_cancel_post_processing"
+        assert appended.event_type == StreamEventType.COMPLETE.value
+        assert appended.data["response"] == "current turn output"
         assert getattr(appended, "is_historical", False) is False, (
             "合成的 terminal 必须是本轮事件(非 historical),否则 _persist_events "
             "会把它过滤掉"
@@ -353,18 +359,17 @@ class TestEnsureTerminal:
         pp = PostProcessState(
             conversation_id="c", message_id="m",
             final_state={"events": [historical_complete, current_cancelled]},
+            stop_reason=StopReason.EXTERNAL_CANCEL,
         )
         ensure_terminal(pp)
-        # adopt 本轮的 CANCELLED,推断 cancel_source=external(有 reason)
+        # adopt 本轮的 CANCELLED，不被 historical COMPLETE 干扰。
         assert pp.terminal_type == StreamEventType.CANCELLED.value
-        assert pp.cancel_source == "external"
         # 没有新 append
         assert len(pp.final_state["events"]) == 2
 
     def test_adopts_existing_timed_out_terminal(self):
         """events 已有本轮 TIMED_OUT(post-processing append 后 cancel 落在 persist 前),
-        late-cancel adopt 它而非合成 CANCELLED。cancel_source 留 None,choose_response
-        对 TIMED_OUT 不依赖 cancel_source。"""
+        late-cancel adopt 它而非合成 CANCELLED。"""
         existing = ExecutionEvent(
             event_type=StreamEventType.TIMED_OUT.value,
             agent_name=None,
@@ -374,11 +379,11 @@ class TestEnsureTerminal:
         pp = PostProcessState(
             conversation_id="c", message_id="m",
             final_state={"events": [existing]},
+            stop_reason=StopReason.TIMEOUT,
         )
         ensure_terminal(pp)
         assert pp.terminal_appended is True
         assert pp.terminal_type == StreamEventType.TIMED_OUT.value
-        assert pp.cancel_source is None
 
     def test_late_cancel_on_errored_turn_preserves_error_not_cancelled(self):
         """统一后 engine 错误只记 state["error"]+error_detail、不再实时 append ERROR。
@@ -392,6 +397,7 @@ class TestEnsureTerminal:
                 "error": True,
                 "error_detail": {"error": "LLM call failed: boom", "agent": "lead_agent"},
             },
+            stop_reason=StopReason.ERROR,
         )
         ensure_terminal(pp)
         assert pp.terminal_type == StreamEventType.ERROR.value
@@ -402,17 +408,17 @@ class TestEnsureTerminal:
         # 没有合成第二个 terminal
         assert len(pp.final_state["events"]) == 1
 
-    def test_synthesizes_external_cancelled_when_no_terminal(self):
-        """events 里没 terminal → 合成 external CANCELLED 并 append。"""
+    def test_builds_external_cancelled_from_runtime_stop_reason(self):
+        """events 里没 terminal，但 runtime 事实是 external cancel。"""
         pp = PostProcessState(
             conversation_id="c", message_id="m",
             final_state={"events": []},
+            stop_reason=StopReason.EXTERNAL_CANCEL,
         )
         ensure_terminal(pp)
         assert pp.terminal_appended is True
         assert pp.terminal_type == StreamEventType.CANCELLED.value
-        assert pp.cancel_source == "external"
         assert len(pp.final_state["events"]) == 1
         appended = pp.final_state["events"][0]
         assert appended.event_type == StreamEventType.CANCELLED.value
-        assert appended.data["reason"] == "external_cancel_post_processing"
+        assert appended.data["reason"] == "external_cancel"

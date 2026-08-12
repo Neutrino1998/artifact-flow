@@ -12,23 +12,24 @@ Post-processing ledger — 把 ConversationTurnHandler 后半段的"决策 + IO 
 
 设计：
     - PostProcessState        所有跨 await 状态(布尔进度 + 已决定的 terminal/response)
-    - decide_terminal()       纯决策(无 IO):final_state → (terminal_event, terminal_type, response_text)
-    - ensure_terminal()       late-cancel handler 用:已有 terminal 就 adopt,没有就 synthesize external CANCELLED
+    - decide_terminal()       纯决策(无 IO):runtime stop reason + final_state → terminal
+    - ensure_terminal()       late-cancel handler 用:已有本轮 terminal 就 adopt,否则按事实终因生成
     - choose_response_for_terminal()
-                              terminal_type × cancel_source → display 字符串。SUCCESS PATH
+                              terminal_type × stop_reason → display 字符串。SUCCESS PATH
                               和 late-cancel handler 都调它 —— 单一真相源,杜绝漂移
 
 不变量(由结构而非纪律保证)：
     1. events 落库前不写 Message.response          (caller 检查 pp.events_persisted)
     2. response slot 一旦 claimed 不再覆盖         (caller 检查 pp.response_update_attempted)
     3. 已有 semantic terminal 不被 late-cancel 改  (ensure_terminal adopt)
-    4. 只在无 terminal 时才写 system placeholder   (choose_response_for_terminal 看 cancel_source)
+    4. 只有 runtime external cancel 才写 system placeholder
 """
 
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from config import config
+from core.agent_runtime import StopReason
 from core.events import ExecutionEvent, StreamEventType, TERMINAL_EVENT_TYPES
 from utils.instance import INSTANCE_ID
 
@@ -44,11 +45,13 @@ class PostProcessState:
     conversation_id: str
     message_id: str
     final_state: Dict[str, Any]
+    # AgentRuntime 已经裁定的事实终因。必须进入 ledger，不能在 late-cancel 时
+    # 从 state flags / terminal 是否已 append 反推；否则 COMPLETE 会被误猜成 CANCELLED。
+    stop_reason: StopReason
 
     # 决策(decide_terminal / ensure_terminal 设置)
     terminal_event: Optional[ExecutionEvent] = None  # None = 尚未决策;decide_terminal 后必非 None
     terminal_type: Optional[str] = None              # COMPLETE / ERROR / CANCELLED
-    cancel_source: Optional[str] = None              # "cooperative" / "external" (仅 terminal_type=CANCELLED 时有效)
     flush_error: Optional[str] = None                # artifact flush 异常文本,被 decide_terminal 转成 ERROR terminal
 
     # IO 进度
@@ -69,23 +72,20 @@ class PostProcessState:
 
 
 def decide_terminal(pp: PostProcessState) -> None:
-    """根据 final_state 决定 terminal_event + terminal_type + cancel_source。
+    """根据 runtime 事实终因决定 terminal_event + terminal_type。
 
     调用时机:exists/flush 之后、persist 之前。一次决策,后续 success path 和
     cancel handler 都读 pp。
 
     特殊语义:
-    - has_error 时 engine/runtime 不 append ERROR,只把详情记进
+    - ERROR 时 engine/runtime 不 append ERROR,只把详情记进
       state["error_detail"]。decide_terminal 在 flush 之后据此构建唯一的
       ERROR terminal_event,由 ConversationTurnHandler 统一 append + yield
       —— 好处是 ERROR 也走 flush 后路径,无 decide_terminal 之外的第二个 ERROR 发射点。
-    - flush_error 优先于 has_error / is_cancelled:artifact 持久化失败是 Handler
+    - flush_error 优先于所有 runtime stop reasons：artifact 持久化失败是 Handler
       自己产生的 ERROR,同样构建新的 terminal_event。
     """
     s = pp.final_state
-    has_error = s.get("error", False)
-    is_cancelled = s.get("cancelled", False)
-    timed_out = s.get("timed_out", False)
     metrics = s.get("execution_metrics", {})
     response = s.get("response", "")
 
@@ -105,11 +105,7 @@ def decide_terminal(pp: PostProcessState) -> None:
         )
         return
 
-    # timed_out 与 is_cancelled 是兄弟终因(都"非错误地中止执行"),互斥:超时路径
-    # AgentRuntime timeout 只置 timed_out,协作式取消只置 cancelled。
-    # 放在 flush_error 之后保持"持久化失败即便在超时轮也以 ERROR 暴露"的既有
-    # 优先级(flush_error > 终因 > has_error > complete)。
-    if timed_out:
+    if pp.stop_reason == StopReason.TIMEOUT:
         pp.terminal_type = StreamEventType.TIMED_OUT.value
         pp.terminal_event = ExecutionEvent(
             event_type=StreamEventType.TIMED_OUT.value,
@@ -126,13 +122,16 @@ def decide_terminal(pp: PostProcessState) -> None:
         )
         return
 
-    if is_cancelled:
+    if pp.stop_reason in {
+        StopReason.COOPERATIVE_CANCEL,
+        StopReason.EXTERNAL_CANCEL,
+    }:
         pp.terminal_type = StreamEventType.CANCELLED.value
-        pp.cancel_source = pp.cancel_source or "cooperative"
+        is_external = pp.stop_reason == StopReason.EXTERNAL_CANCEL
         # SSE 数据里带 response 是历史约定(前端用作 snapshot)
         display = (
             config.CANCELLED_RESPONSE_BY_SYSTEM
-            if pp.cancel_source == "external"
+            if is_external
             else response or config.CANCELLED_RESPONSE_BY_USER
         )
         data = {
@@ -143,7 +142,7 @@ def decide_terminal(pp: PostProcessState) -> None:
             "response": display,
             "execution_metrics": metrics,
         }
-        if pp.cancel_source == "external":
+        if is_external:
             data["reason"] = "external_cancel"
         pp.terminal_event = ExecutionEvent(
             event_type=StreamEventType.CANCELLED.value,
@@ -152,7 +151,7 @@ def decide_terminal(pp: PostProcessState) -> None:
         )
         return
 
-    if has_error:
+    if pp.stop_reason == StopReason.ERROR:
         # 统一终态发射点:engine/runtime 的内部错误不 emit ERROR,只把详情记进
         # state["error_detail"];这里(flush 之后)构建并发射唯一的 ERROR 终态,带
         # request_id。Handler 的 append + yield 自动接手 —— engine-error 也走
@@ -176,6 +175,7 @@ def decide_terminal(pp: PostProcessState) -> None:
         )
         return
 
+    # StopReason 是本地封闭枚举；前面的分支已穷尽其余终因，剩余即 COMPLETE。
     pp.terminal_type = StreamEventType.COMPLETE.value
     pp.terminal_event = ExecutionEvent(
         event_type=StreamEventType.COMPLETE.value,
@@ -196,12 +196,12 @@ def ensure_terminal(pp: PostProcessState) -> None:
     分三种情况:
     1. pp.terminal_appended 已是 True:啥都不做(success path 已经 append 过,或
        decide_terminal 标记过 ERROR 路径"engine 自己 append 了")。
-    2. final_state["events"] 里有 terminal 但 pp 没标(cancel 卡在 decide_terminal
-       和 persist 之间或更早):adopt 它 —— 把 type/cancel_source 抄进 pp,标
+    2. final_state["events"] 里有本轮 terminal 但 pp 没标(cancel 卡在
+       decide_terminal 和 persist 之间):adopt 它 —— 把 type 抄进 pp,标
        terminal_appended,不重复 append。这种情况下 engine 在语义上已经完成,cancel
        只命中了基础设施,要保留 engine 的终态语义。
-    3. final_state["events"] 里也没有 terminal:cancel 真的中断了执行,合成一个
-       external CANCELLED 并 append。
+    3. final_state["events"] 里没有本轮 terminal:按 pp.stop_reason 调统一 dispatcher
+       生成并 append。不能从“尚无 terminal”推断 external cancel。
     """
     if pp.terminal_appended:
         return
@@ -225,47 +225,15 @@ def ensure_terminal(pp: PostProcessState) -> None:
     )
     if existing is not None:
         pp.terminal_appended = True
+        pp.terminal_event = existing
         if pp.terminal_type is None:
             pp.terminal_type = existing.event_type
-            if existing.event_type == StreamEventType.CANCELLED.value:
-                # Handler 为 external cancel 生成的 CANCELLED 带 reason；cooperative
-                # cancel 不带。late-cancel 若落在 decide_terminal 与 persist 之间，会
-                # 从已经 append 的事件恢复来源，因此这里仍需按 reason 推断。
-                data = existing.data if isinstance(existing.data, dict) else {}
-                pp.cancel_source = "external" if data.get("reason") else "cooperative"
         return
 
-    # 没有现成 terminal 可 adopt。engine 是否已记录了真实终因?
-    # 统一后 engine 内部错误只记 state["error"]+error_detail、不再实时 append ERROR,
-    # 所以 late-cancel 落在 decide_terminal 之前时,events 里没有 ERROR 可 adopt。此时若
-    # engine 语义上已到达 error/timeout/cooperative-cancel(只是还没被 decide_terminal
-    # 发射),应保留该真实终因 —— 委托 decide_terminal 统一构建,而不是一律掩成 external
-    # CANCELLED 把错误/超时丢掉(那是"事实上出错的轮被记成取消"的静默失真)。
-    s = pp.final_state
-    if s.get("error") or s.get("timed_out") or s.get("cancelled"):
-        decide_terminal(pp)
-        if pp.terminal_event is not None and not pp.terminal_appended:
-            pp.final_state["events"].append(pp.terminal_event)
-            pp.terminal_appended = True
-        return
-
-    # engine 啥终因都没记 → cancel 真的中断了执行中途 → 合成 external CANCELLED
-    pp.final_state["cancelled"] = True  # 同步 state,future code path 看得到
-    pp.terminal_type = StreamEventType.CANCELLED.value
-    pp.cancel_source = "external"
-    pp.terminal_event = ExecutionEvent(
-        event_type=StreamEventType.CANCELLED.value,
-        agent_name=None,
-        data={
-            "success": False,
-            "cancelled": True,
-            "conversation_id": pp.conversation_id,
-            "message_id": pp.message_id,
-            "reason": "external_cancel_post_processing",
-        },
-    )
-    pp.final_state["events"].append(pp.terminal_event)
-    pp.terminal_appended = True
+    decide_terminal(pp)
+    if pp.terminal_event is not None:
+        pp.final_state["events"].append(pp.terminal_event)
+        pp.terminal_appended = True
 
 
 def choose_response_for_terminal(pp: PostProcessState) -> str:
@@ -279,8 +247,8 @@ def choose_response_for_terminal(pp: PostProcessState) -> str:
     - COMPLETE           → state["response"](engine 的真实输出)
     - TIMED_OUT          → TIMED_OUT_RESPONSE(基础设施事件,忽略 state.response)
     - ERROR              → state["response"] 或 "An error occurred during execution."
-    - CANCELLED (coop)   → state["response"] 或 CANCELLED_RESPONSE_BY_USER
-    - CANCELLED (ext)    → CANCELLED_RESPONSE_BY_SYSTEM
+    - CANCELLED + cooperative stop → state["response"] 或 CANCELLED_RESPONSE_BY_USER
+    - CANCELLED + external stop    → CANCELLED_RESPONSE_BY_SYSTEM
 
     Caller 责任:调用前必须确认 pp.events_persisted=True 且 pp.response_update_attempted=False,
     否则违反"events-first"和"slot-claim"不变量。这里不做检查 —— 让 caller 显式表达意图。
@@ -299,10 +267,8 @@ def choose_response_for_terminal(pp: PostProcessState) -> str:
         return response or "An error occurred during execution."
 
     if pp.terminal_type == StreamEventType.CANCELLED.value:
-        if pp.cancel_source == "external":
+        if pp.stop_reason == StopReason.EXTERNAL_CANCEL:
             return config.CANCELLED_RESPONSE_BY_SYSTEM
-        # cooperative(用户主动)或未指定(防御性 fallback,但 decide_terminal /
-        # ensure_terminal 都会显式 set)
         return response or config.CANCELLED_RESPONSE_BY_USER
 
     # 无 terminal —— 不该被调用到,fail-safe 返回空串

@@ -275,6 +275,7 @@ Embedded caller ────────────────→ AgentRuntime
 - ConversationTurnHandler 持有历史、Message、Artifact、事件持久化和 post-processing；AgentRuntime 只运行智能循环并归一化 complete/timeout/cancel/error 原因。
 - 外层 task cancel：取消并 drain AgentRuntime 子任务，取得可 finalization 的 outcome/state，再进入受保护的 post-processing；不得让 `CancelledError` 直接绕过 Artifact/Event/response 持久化。
 - 保留 timeout 只包 engine loop、post-processing 在 timeout 外；复用 late-cancel ledger 处理 cancel 落在 engine-exit、flush、events、response 或 metadata await 的情况。
+- runtime outcome 的 stop reason 必须进入 late-cancel ledger，并在 flush 后作为 terminal 的事实终因；runtime 已返回 `COMPLETE` 后命中后处理 await 的取消只触发恢复落盘，不得把真实回答改写成系统取消。Artifact flush 失败仍优先产出 `ERROR`。
 - 由 flush 后唯一 dispatcher 决定 terminal；保持 events-first、Message.response slot-claim-before-await、error sanitization 和 terminal precedence。
 
 **不包含**：
@@ -285,7 +286,7 @@ Embedded caller ────────────────→ AgentRuntime
 
 - AgentRuntime 不 import FastAPI、Redis、StreamTransport、ConversationManager 或 Repository，也不 emit/persist 最终 terminal。
 - complete/timeout/cooperative cancel/external cancel/error 分别产出 engine outcome，最终 terminal 只由 ConversationTurnHandler 的 flush 后 dispatcher 产生。
-- 外部 cancel 在 runtime 执行中、runtime drain、engine-exit、artifact flush、event persistence 和 response update 各落点的确定性测试通过；没有未落盘事件、双 terminal 或 response-before-events。
+- 外部 cancel 在 runtime 执行中、runtime drain、engine-exit、artifact flush、event persistence 和 response update 各落点的确定性测试通过；runtime 内 cancel 产出 `CANCELLED`，runtime 已完成后的 cancel 保留 `COMPLETE` 与真实回答；没有未落盘事件、双 terminal 或 response-before-events。
 - nested serial、同轮多 tool/subagent 顺序、native-call closure、compaction 和 permission interrupt 回归通过。
 - Conversation SSE/replay、active stream、inject/resume/cancel、timeout、error sanitization、terminal persistence 与 Sandbox cleanup 行为不变。
 
@@ -294,9 +295,9 @@ Embedded caller ────────────────→ AgentRuntime
 - 2026-08-12 完成。新增 `core.agent_runtime`：`AgentRuntime` 只持 Agent/Tool/EffectiveToolset 快照，运行 `execute_loop` 并归一化 `complete / timeout / cooperative_cancel / external_cancel / error`；deadline 只覆盖 loop，outcome 不生成或持久化 terminal。模块通过独立子进程导入测试，未加载 FastAPI、SQLAlchemy、Redis、Conversation service 或 Repository。
 - `execute_loop` 与 `CompactionRunner` 参数化 `entry_agent`，USER_INPUT、queued inject、顶层 token metrics、manual/overflow compaction 与最终 `_run_agent` 均跟随该入口；Chat factory 显式传 `lead_agent`，非默认 `research_agent` 的事件归属与完成路由由回归测试覆盖，nested-serial/subagent 顺序未改。
 - 将旧 `ExecutionController` 拆为只接受 Admission 已分配 `conversation_id / message_id / resolved parent` 的 `ConversationTurnHandler`；Conversation 创建、owner 校验与 active-branch 解析继续归 `ConversationExecutionService`。生产装配改为 `conversation_turn_factory`，旧 controller、factory、`stream_execute` 与对应兼容入口全部删除。
-- 外部 task cancel 先取消并 drain runtime child 取得 partial outcome，再进入与正常/timeout/cooperative/error 共用的 `PostProcessState` 路径。若取消落在 SSE transport push、Handler 正暂停于 `yield`，forwarder 会显式 close/drain Handler，使其在不再发 SSE 的情况下仍执行持久化 finalization；重复 cancel 不会中断 runtime/Handler drain。
+- 外部 task cancel 先取消并 drain runtime child 取得 partial outcome，再把 factual stop reason 带入与正常/timeout/cooperative/error 共用的 `PostProcessState` 路径。若取消落在 SSE transport push、Handler 正暂停于 `yield`，forwarder 会显式 close/drain Handler，使其在不再发 SSE 的情况下仍执行持久化 finalization；重复 cancel 不会中断 runtime/Handler drain。若 runtime 已经返回 `COMPLETE`，随后命中 engine-exit、exists 或 Artifact flush 的 cancel 只启动恢复落盘，terminal 与 response 仍按 `COMPLETE` 生成；只有 runtime 内的 `EXTERNAL_CANCEL` 使用系统取消文案，flush error 仍具有最高优先级。
 - Artifact flush 增加 ledger phase：cancel-mid-flush 会幂等重试未决 flush，再进行 native-call closure、唯一 terminal dispatcher、events-first persistence 与 response slot-claim。engine-exit、flush、event persistence、response update 和 runtime drain 的 barrier tests 均验证无丢事件、双 terminal 或 response-before-events。
-- 验收：阶段 D 关联矩阵 244 项通过，覆盖 AgentRuntime outcome/import boundary、engine/nested serial、compaction、native-call closure、permission、Conversation service/SSE 与全部 finalization cancel 窗口；项目约定完整并行 lane `pytest -n 4 -m "not external and not serial"` 为 2050 项通过，仅保留一条既有 SQLAlchemy delete 行数 warning。未改变 API schema，未触发 OpenAPI/前端类型再生成。
+- 验收：阶段 D 变更文件矩阵 252 项通过，覆盖 AgentRuntime outcome/import boundary、engine/nested serial、compaction、native-call closure、permission、Conversation service/SSE 与全部 finalization cancel 窗口；项目约定完整并行 lane `pytest -n 4 -m "not external and not serial"` 为 2046 项通过，仅保留一条既有 SQLAlchemy delete 行数 warning。测试总数净减 4 是删除 `cancel_source` 后移除了 TIMEOUT 与三个无效 cancel-source 值的笛卡尔组合，并非覆盖缺失。未改变 API schema，未触发 OpenAPI/前端类型再生成。
 
 ### E — 集成验收、文档与 embedded smoke
 
@@ -359,7 +360,7 @@ Embedded caller ────────────────→ AgentRuntime
 
 ## 变更日志
 
-- 2026-08-12 **阶段 D 完成**：提取不依赖 Web/Conversation 持久化的 `AgentRuntime` 与明确 stop reasons，参数化 `entry_agent`；以 admitted-only `ConversationTurnHandler` 替换并删除旧 Controller/factory，所有 runtime 与 late cancel 汇入 flush 后唯一 terminal/events/response finalization。补齐 runtime drain、SSE transport push、engine-exit、artifact flush、event persistence 与 response update 的确定性取消测试；完整并行后端 2050 项通过。
+- 2026-08-12 **阶段 D 完成**：提取不依赖 Web/Conversation 持久化的 `AgentRuntime` 与明确 stop reasons，参数化 `entry_agent`；以 admitted-only `ConversationTurnHandler` 替换并删除旧 Controller/factory，所有 runtime 与 late cancel 汇入 flush 后唯一 terminal/events/response finalization。`PostProcessState` 必须携带 runtime factual stop reason，后处理取消不会把已经完成的 runtime 改写为系统取消，flush error 优先级保持不变。补齐 runtime drain、SSE transport push、engine-exit、artifact flush、event persistence 与 response update 的确定性取消测试；完整并行后端 2046 项通过。
 - 2026-08-12 **阶段 B 完成**：将 Conversation Manager 拆为显式 `create / require_owned / append_message`，删除隐式创建布尔参数和旧兼容入口；Chat/Controller 按 ID 来源分流且稳定 ID retry、parent/active_branch/title、删除 fail-closed 契约保持不变。未移动 lease、stream 或后台任务时序；完整后端 2046 项通过、45 项按环境跳过。
 - 2026-08-12 **阶段 B 持久化边界收紧**：删除 Controller 事件“无持久化目标即成功”、Conversation 更新/读取静默 no-op 和 SkillService 无 DB 测试模式；Controller 构造只接受完整且互斥的 `db_manager` / bound repositories 模式，registry snapshot 强制注入 DB credential resolver。手工 engine 改走与生产一致的短 session 路径；完整后端 2048 项通过、45 项按环境跳过。
 - 2026-08-12 **阶段 A 完成**：用无 sleep 的 barrier tests 稳定复现 send/delete 双顺序与当前 check→lease 空窗；补齐固定 ID post-commit retry、parent 三态、stale owner、Router runtime 返回值及 user/ops 错误双契约；盘点全部 `runner.store` 与非 Router runtime 消费者。阶段内无生产代码或 schema 变化。
