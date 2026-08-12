@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
+from core.agent_runtime import StopReason
 from core.events import ExecutionEvent, StreamEventType
 
 
@@ -12,12 +13,15 @@ class NativeCallClosureError(RuntimeError):
     """Persisted native call/result structure would be ambiguous or orphaned."""
 
 
-def terminal_reason_from_state(state: Dict[str, Any]) -> str:
-    if state.get("timed_out"):
+def terminal_reason_for_stop(stop_reason: StopReason) -> str:
+    if stop_reason is StopReason.TIMEOUT:
         return "execution timed out"
-    if state.get("cancelled"):
+    if stop_reason in {
+        StopReason.COOPERATIVE_CANCEL,
+        StopReason.EXTERNAL_CANCEL,
+    }:
         return "execution was cancelled"
-    if state.get("error"):
+    if stop_reason is StopReason.ERROR:
         return "execution ended with an error"
     return "execution ended before this call completed"
 

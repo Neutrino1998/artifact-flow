@@ -46,7 +46,7 @@ class PostProcessState:
     message_id: str
     final_state: Dict[str, Any]
     # AgentRuntime 已经裁定的事实终因。必须进入 ledger，不能在 late-cancel 时
-    # 从 state flags / terminal 是否已 append 反推；否则 COMPLETE 会被误猜成 CANCELLED。
+    # 从 terminal 是否已 append 反推；否则 COMPLETE 会被误猜成 CANCELLED。
     stop_reason: StopReason
 
     # 决策(decide_terminal / ensure_terminal 设置)

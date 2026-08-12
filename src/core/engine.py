@@ -32,7 +32,12 @@ from typing import (
 from datetime import datetime
 
 from config import config
-from core.agent_runtime import RuntimeHooks
+from core.agent_runtime import (
+    RuntimeHooks,
+    StopReason,
+    get_stop_reason,
+    stop_execution,
+)
 from core.events import StreamEventType, ExecutionEvent
 from core.context_manager import ContextManager
 from core.effective_toolset import EffectiveToolset
@@ -155,8 +160,9 @@ def create_initial_state(
         "current_task": task,
         "session_id": session_id,
         "message_id": message_id,
-        "completed": False,
-        "error": False,
+        # None = running; a StopReason value is the invocation's sole
+        # control-plane terminal. Execution events remain the durable history.
+        "stop_reason": None,
         "current_agent": entry_agent,
         "always_allowed_tools": list(always_allowed_tools) if always_allowed_tools else [],
         "agent_progressive_state": {
@@ -184,6 +190,38 @@ class EmptyTurnInputError(ValueError):
     """解析后本轮无任何可注入内容 —— client-caused 的预期失败(典型:stale skill picker,
     勾选的 skill 已被删/不可见/空正文)。上层按 4xx 档处理:warning + 原文案放行给用户,
     不走 exception+脱敏(那是服务端 5xx 档待遇)。"""
+
+
+@dataclass(frozen=True)
+class _PreparedToolCall:
+    """One accepted native call after protocol and invocation-snapshot checks."""
+
+    call_id: str
+    tool_name: str
+    params: Dict[str, Any]
+    reason: str
+    tool: BaseTool
+
+
+@dataclass(frozen=True)
+class _RejectedToolCall:
+    """A native call rejected before authorization or execution."""
+
+    call_id: str
+    tool_name: str
+    params: Dict[str, Any]
+    reason: str
+    error: str
+    availability_reason: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class _ExecutedToolCall:
+    """Execution result awaiting shared result persistence and state updates."""
+
+    result: ToolResult
+    duration_ms: int
+    include_params: bool
 
 
 def turn_has_content(
@@ -386,11 +424,13 @@ async def execute_loop(
                 "agent": entry_agent,
                 "request_id": get_request_id() or None,
             }
-            state["completed"] = True
-            state["error"] = True
-            # 不 early-return:置 completed 后落到下方统一尾部(主循环因 completed=True
+            state["response"] = (
+                f"Failed to attach file '{f.get('filename')}'. Please check the file and retry."
+            )
+            stop_execution(state, StopReason.ERROR)
+            # 不 early-return:置终态后落到下方统一尾部(主循环因已有 stop_reason
             # 自然跳过 → finally 解绑 emit → finalize_metrics 序列化 datetime metrics)。
-            # 下方 USER_INPUT 构建块由 `if not state["completed"]` 跳过(turn 已在 setup 终止)。
+            # 下方 USER_INPUT 构建块由 stop_reason gate 跳过(turn 已在 setup 终止)。
 
     # 3a. 记录用户原始输入为事件（统一 context 构建路径）。USER_INPUT 正文 = 用户原始输入
     # + 本轮**增补**(turn augmentations，仅 LLM 可见，不入 Message.user_input display)。
@@ -399,9 +439,9 @@ async def execute_loop(
     # (取代过去三段各自 `f"{c}\n\n{x}" if c.strip() else x` 的复制注入)。turn 非空的唯一真相
     # = `bool(parts)`，由 ConversationTurnHandler.run 的权威闸保证 —— 到这里
     # parts 必非空(空 → 空 USER_INPUT → 被 EventHistory 过滤 → 击穿 context_manager 的 [-1])。
-    # `if not completed`: staging 失败已置 completed/error 并 emit 过 ERROR —— turn 在 setup
-    # 阶段就终止,不再构建 USER_INPUT(否则事件流会变成 [ERROR, USER_INPUT] 的错序)。
-    if not state["completed"]:
+    # stop_reason gate: staging 失败已选择 ERROR 终因 —— turn 在 setup 阶段就终止,
+    # 不再构建 USER_INPUT。ERROR 仍由 turn finalization 的唯一 dispatcher 产生。
+    if get_stop_reason(state) is None:
         _task = state["current_task"]
         parts: List[str] = [_task] if _task.strip() else []
 
@@ -609,9 +649,8 @@ async def execute_loop(
                 "agent": agent_name,
                 "request_id": get_request_id() or None,
             }
-            state["completed"] = True
-            state["error"] = True
-            state["response"] = f"LLM call failed: {str(llm_error)}"
+            state["response"] = "Model request failed. Please retry."
+            stop_execution(state, StopReason.ERROR)
             return None
         finally:
             # break 退出 async for 不会自动关闭生成器（参考 redis_stream_transport
@@ -632,8 +671,7 @@ async def execute_loop(
                 "model": model,
                 "duration_ms": llm_duration_ms,
             })
-            state["completed"] = True
-            state["cancelled"] = True
+            stop_execution(state, StopReason.COOPERATIVE_CANCEL)
             # 只有已流出的普通文本才作为 display 快照写入 state["response"]。
             # Native tool-call deltas 在 adapter 内尚未接受，纯 reasoning / TTFT 阶段
             # 取消时 response_content 为空，由 turn finalization 兜底成占位文案。
@@ -896,325 +934,351 @@ async def execute_loop(
         persisted.metadata["original_size_chars"] = len(data)
         return persisted
 
+    def _prepare_tool_call(
+        tool_call: dict,
+        invocation_tool_names: set[str],
+        unexposed_tool_reasons: Dict[str, str],
+    ) -> Union[_PreparedToolCall, _RejectedToolCall]:
+        """Parse and resolve one call against the frozen provider invocation."""
+        call_id = tool_call["id"]
+        function = tool_call["function"]
+        tool_name = function["name"]
+        reason = f"模型请求调用 {tool_name}"
+        try:
+            params = json.loads(function.get("arguments", ""))
+            if not isinstance(params, dict):
+                raise ValueError("arguments must decode to a JSON object")
+        except (json.JSONDecodeError, ValueError) as exc:
+            return _RejectedToolCall(
+                call_id=call_id,
+                tool_name=tool_name,
+                params={},
+                reason=reason,
+                error=f"Invalid native tool arguments: {exc}",
+            )
+
+        # Tool availability is frozen to the schemas actually sent for this
+        # provider invocation. Earlier sibling calls cannot retroactively expose
+        # a deferred or skill-activated tool in the same assistant envelope.
+        if tool_name not in invocation_tool_names:
+            availability_reason = unexposed_tool_reasons.get(
+                tool_name, "unavailable"
+            )
+            if availability_reason == "deferred":
+                error = (
+                    f"Tool '{tool_name}' is enabled but its schema was deferred in "
+                    "this LLM invocation. Disclose it with search_tools if needed, "
+                    "then retry in the next response."
+                )
+            elif availability_reason == "disabled_activatable":
+                error = (
+                    f"Tool '{tool_name}' was disabled when this LLM invocation "
+                    "began but can be activated by a relevant skill. Activate that "
+                    "skill if needed, then retry in the next response."
+                )
+            elif availability_reason == "disabled":
+                error = (
+                    f"Tool '{tool_name}' is disabled for this agent and cannot be "
+                    "called in the current configuration. Do not retry it."
+                )
+            else:
+                error = (
+                    f"Tool '{tool_name}' is unavailable to this agent. Do not retry it."
+                )
+            return _RejectedToolCall(
+                call_id=call_id,
+                tool_name=tool_name,
+                params=params,
+                reason=reason,
+                error=error,
+                availability_reason=availability_reason,
+            )
+
+        tool = _resolve_tool(tool_name)
+        if tool is None:
+            return _RejectedToolCall(
+                call_id=call_id,
+                tool_name=tool_name,
+                params=params,
+                reason=reason,
+                error=f"Tool '{tool_name}' not found",
+            )
+        return _PreparedToolCall(
+            call_id=call_id,
+            tool_name=tool_name,
+            params=params,
+            reason=reason,
+            tool=tool,
+        )
+
+    async def _finalize_rejected_tool_call(
+        rejected: _RejectedToolCall,
+        agent_name: str,
+    ) -> None:
+        await _emit(StreamEventType.TOOL_START.value, agent_name, {
+            "call_id": rejected.call_id,
+            "tool": rejected.tool_name,
+            "params": rejected.params,
+            "reason": rejected.reason,
+        })
+        data = {
+            "call_id": rejected.call_id,
+            "tool": rejected.tool_name,
+            "success": False,
+            "error": rejected.error,
+            "duration_ms": 0,
+        }
+        if rejected.availability_reason is not None:
+            data["availability_reason"] = rejected.availability_reason
+        await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, data)
+
+    async def _authorize_tool_call(
+        prepared: _PreparedToolCall,
+        agent_name: str,
+    ) -> bool:
+        """Resolve the permission interrupt before any normal tool side effect."""
+        # call_subagent has always used its dedicated AUTO execution path.
+        if prepared.tool_name == "call_subagent":
+            return True
+        effective_permission = (
+            effective_toolsets[agent_name].level(prepared.tool_name)
+            or prepared.tool.permission
+        )
+        if (
+            effective_permission == ToolPermission.CONFIRM
+            and prepared.tool_name not in state.get("always_allowed_tools", [])
+        ):
+            return await _handle_permission(
+                prepared.call_id,
+                prepared.tool_name,
+                prepared.params,
+                agent_name,
+                effective_permission,
+                prepared.reason,
+            )
+        return True
+
+    async def _execute_prepared_tool_call(
+        prepared: _PreparedToolCall,
+        agent_name: str,
+    ) -> Optional[_ExecutedToolCall]:
+        """Execute one authorized call; None means the whole turn terminated."""
+        if prepared.tool_name == "call_subagent":
+            try:
+                validation_result = await prepared.tool(**prepared.params)
+            except Exception as exc:
+                logger.exception(f"call_subagent execution error: {exc}")
+                validation_result = ToolResult(success=False, error=str(exc))
+
+            if not validation_result.success:
+                await _emit(StreamEventType.TOOL_START.value, agent_name, {
+                    "call_id": prepared.call_id,
+                    "tool": prepared.tool_name,
+                    "params": prepared.params,
+                    "reason": prepared.reason,
+                })
+                return _ExecutedToolCall(
+                    result=ToolResult(
+                        success=False,
+                        error=validation_result.error or "call_subagent failed",
+                        metadata=validation_result.metadata,
+                    ),
+                    duration_ms=0,
+                    include_params=False,
+                )
+
+            target_agent = prepared.params["agent_name"]
+            instruction = prepared.params["instruction"]
+            fresh_start = prepared.params.get("fresh_start", True)
+            started_at = utc_now()
+            await _emit(StreamEventType.TOOL_START.value, agent_name, {
+                "call_id": prepared.call_id,
+                "tool": prepared.tool_name,
+                "params": {
+                    "agent_name": target_agent,
+                    "instruction": instruction,
+                    "fresh_start": fresh_start,
+                },
+                "reason": prepared.reason,
+            })
+            state["events"].append(ExecutionEvent(
+                event_type=StreamEventType.SUBAGENT_INSTRUCTION.value,
+                agent_name=target_agent,
+                data={"instruction": instruction, "fresh_start": fresh_start},
+            ))
+
+            logger.info(f"Delegating to subagent: {target_agent}")
+            sub_response = await _run_agent(target_agent)
+            # Restore attribution only after a normal recursive return. If the
+            # child raises, the outer error remains attributed to that child.
+            state["current_agent"] = agent_name
+            if sub_response is None:
+                # Handler closure supplies exactly one failure result for this
+                # in-flight call and every accepted-but-unstarted sibling.
+                return None
+
+            duration_ms = int((utc_now() - started_at).total_seconds() * 1000)
+            return _ExecutedToolCall(
+                result=ToolResult(
+                    success=True,
+                    data=(
+                        f'<subagent_result agent="{target_agent}">'
+                        f'\n{sub_response}'
+                        f'\n</subagent_result>'
+                    ),
+                    metadata={"subagent": target_agent},
+                ),
+                duration_ms=duration_ms,
+                include_params=False,
+            )
+
+        started_at = utc_now()
+        await _emit(StreamEventType.TOOL_START.value, agent_name, {
+            "call_id": prepared.call_id,
+            "tool": prepared.tool_name,
+            "params": prepared.params,
+            "reason": prepared.reason,
+        })
+        try:
+            # Context is per-call because tool instances are shared by concurrent
+            # turns. Parameter binding also stays inside this per-tool boundary.
+            tool_coro = (
+                prepared.tool(_context=ToolExecutionContext(
+                    agent_name=agent_name,
+                    effective_toolset=effective_toolsets[agent_name],
+                    tools=tools,
+                    disclosed_tools=set(
+                        state.get("agent_progressive_state", {})
+                        .get(agent_name, {})
+                        .get("disclosed_tools", [])
+                    ),
+                ), **prepared.params)
+                if getattr(prepared.tool, "wants_context", False)
+                else prepared.tool(**prepared.params)
+            )
+            result = await run_cancellable(
+                tool_coro, _is_cancelled, config.CANCEL_CHECK_INTERVAL
+            )
+        except CooperativeCancelled:
+            logger.info(
+                f"Tool '{prepared.tool_name}' interrupted by user cancel mid-flight"
+            )
+            result = ToolResult(
+                success=False,
+                error=(
+                    "Cancelled by user while the tool was running. "
+                    "Side effects may or may not have been applied "
+                    "(the operation was already in flight)."
+                ),
+            )
+        except Exception as exc:
+            logger.exception(f"Tool '{prepared.tool_name}' execution error: {exc}")
+            result = ToolResult(success=False, error=str(exc))
+        return _ExecutedToolCall(
+            result=result,
+            duration_ms=int((utc_now() - started_at).total_seconds() * 1000),
+            include_params=True,
+        )
+
+    async def _finalize_tool_call(
+        prepared: _PreparedToolCall,
+        executed: _ExecutedToolCall,
+        agent_name: str,
+    ) -> None:
+        """Persist/normalize a result, update progressive state, then close it."""
+        result = await _maybe_persist_tool_result(
+            prepared.tool_name, prepared.tool, executed.result
+        )
+
+        # Keep image bytes turn-local; only their stable artifact reference enters
+        # the event log. EventHistory rehydrates the block during this turn.
+        event_metadata = result.metadata or None
+        image = event_metadata.get("image") if event_metadata else None
+        if isinstance(image, dict) and "data_uri" in image:
+            state.setdefault("vision_blocks_by_call", {})[prepared.call_id] = dict(
+                image
+            )
+            event_metadata = {
+                **event_metadata,
+                "image": {key: value for key, value in image.items() if key != "data_uri"},
+            }
+
+        progressive = state.setdefault("agent_progressive_state", {}).setdefault(
+            agent_name, {"active_skills": [], "disclosed_tools": []}
+        )
+        activated = (
+            (result.metadata or {}).get("activated_skill") if result.success else None
+        )
+        if activated:
+            active_list = progressive.setdefault("active_skills", [])
+            if activated not in active_list:
+                active_list.append(activated)
+                effective = effective_toolsets[agent_name]
+                grant = effective.skill_grants.get(activated)
+                granted = set(grant.permissions) if grant is not None else set()
+                effective.activate_skill(activated)
+                logger.info(
+                    "Skill %r activated for %s via read_skill (message %s); enabled tools: %s",
+                    activated,
+                    agent_name,
+                    message_id,
+                    sorted(granted) or "(none)",
+                )
+
+        disclosed = (
+            (result.metadata or {}).get("disclosed_tools", [])
+            if result.success else []
+        )
+        disclosed_list = progressive.setdefault("disclosed_tools", [])
+        for full_name in disclosed:
+            if full_name not in disclosed_list:
+                disclosed_list.append(full_name)
+
+        data = {
+            "call_id": prepared.call_id,
+            "tool": prepared.tool_name,
+            "success": result.success,
+            "result_data": result.data if result.success else None,
+            "error": result.error if not result.success else None,
+            "duration_ms": executed.duration_ms,
+        }
+        if executed.include_params:
+            data["params"] = prepared.params
+        # Preserve the established event shape: ordinary tools always include
+        # metadata, while call_subagent validation failures do not.
+        if executed.include_params or executed.result.success:
+            data["metadata"] = event_metadata
+        await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, data)
+
     async def _execute_tools(
         tool_calls: list,
         agent_name: str,
         invocation_tool_names: set[str],
         unexposed_tool_reasons: Dict[str, str],
     ) -> None:
-        """按模型给出的自然序串行执行工具列表，处理权限中断。
-        call_subagent 与常规工具同一条流水线：原地递归 await 子 agent，返回后
-        继续执行同轮剩余工具（[tool, subagent, tool] 混合序成立）。
-        turn 在某个工具/子 agent 内终止（cancel / error）→ break，剩余工具不执行。
-        """
+        """Strictly serial prepare → authorize → execute → finalize pipeline."""
         for tool_call in tool_calls:
             if await _check_cancelled():
                 break
-
-            call_id = tool_call["id"]
-            function = tool_call["function"]
-            tool_name = function["name"]
-            raw_arguments = function.get("arguments", "")
-            fallback_reason = f"模型请求调用 {tool_name}"
-            try:
-                params = json.loads(raw_arguments)
-                if not isinstance(params, dict):
-                    raise ValueError("arguments must decode to a JSON object")
-            except (json.JSONDecodeError, ValueError) as exc:
-                await _emit(StreamEventType.TOOL_START.value, agent_name, {
-                    "call_id": call_id,
-                    "tool": tool_name,
-                    "params": {},
-                    "reason": fallback_reason,
-                })
-                await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
-                    "call_id": call_id,
-                    "tool": tool_name,
-                    "success": False,
-                    "error": f"Invalid native tool arguments: {exc}",
-                    "duration_ms": 0,
-                })
-                continue
-
-            reason = fallback_reason
-
-            # 冻结在本次请求实际发送的 native schemas；同 envelope 里更早的
-            # skill 激活或 deferred 披露不能追溯放行 sibling call。
-            if tool_name not in invocation_tool_names:
-                availability_reason = unexposed_tool_reasons.get(
-                    tool_name, "unavailable"
-                )
-                if availability_reason == "deferred":
-                    error = (
-                        f"Tool '{tool_name}' is enabled but its schema was deferred in "
-                        "this LLM invocation. Disclose it with search_tools if needed, "
-                        "then retry in the next response."
-                    )
-                elif availability_reason == "disabled_activatable":
-                    error = (
-                        f"Tool '{tool_name}' was disabled when this LLM invocation "
-                        "began but can be activated by a relevant skill. Activate that "
-                        "skill if needed, then retry in the next response."
-                    )
-                elif availability_reason == "disabled":
-                    error = (
-                        f"Tool '{tool_name}' is disabled for this agent and cannot be "
-                        "called in the current configuration. Do not retry it."
-                    )
-                else:
-                    error = (
-                        f"Tool '{tool_name}' is unavailable to this agent. "
-                        "Do not retry it."
-                    )
-                await _emit(StreamEventType.TOOL_START.value, agent_name, {
-                    "call_id": call_id, "tool": tool_name,
-                    "params": params, "reason": reason,
-                })
-                await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
-                    "call_id": call_id, "tool": tool_name, "success": False,
-                    "error": error,
-                    "availability_reason": availability_reason,
-                    "duration_ms": 0,
-                })
-                continue
-
-            # 获取工具
-            tool = _resolve_tool(tool_name)
-            if not tool:
-                await _emit(StreamEventType.TOOL_START.value, agent_name, {
-                    "call_id": call_id, "tool": tool_name,
-                    "params": params, "reason": reason,
-                })
-                await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
-                    "call_id": call_id, "tool": tool_name, "success": False,
-                    "error": f"Tool '{tool_name}' not found",
-                    "duration_ms": 0,
-                })
-                continue
-
-            # call_subagent:原地递归 await 子 agent 的循环（嵌套串行）
-            if tool_name == "call_subagent":
-                try:
-                    result = await tool(**params)
-                except Exception as e:
-                    logger.exception(f"call_subagent execution error: {e}")
-                    result = ToolResult(success=False, error=str(e))
-
-                if result.success:
-                    target_agent = params["agent_name"]
-                    instruction = params["instruction"]
-                    fresh_start = params.get("fresh_start", True)
-
-                    subagent_start_time = utc_now()
-                    await _emit(StreamEventType.TOOL_START.value, agent_name, {
-                        "call_id": call_id,
-                        "tool": "call_subagent",
-                        "params": {
-                            "agent_name": target_agent,
-                            "instruction": instruction,
-                            "fresh_start": fresh_start,
-                        },
-                        "reason": reason,
-                    })
-
-                    # 注入 instruction 到 subagent 的事件流（仅内存，不推 SSE）
-                    # fresh_start=True 时 EventHistory 会把此事件视作 subagent 历史边界，
-                    # 之前该 subagent 的 events 对本次调用不可见。
-                    state["events"].append(ExecutionEvent(
-                        event_type=StreamEventType.SUBAGENT_INSTRUCTION.value,
-                        agent_name=target_agent,
-                        data={"instruction": instruction, "fresh_start": fresh_start},
-                    ))
-
-                    logger.info(f"Delegating to subagent: {target_agent}")
-                    sub_response = await _run_agent(target_agent)
-                    # 归因恢复：递归正常返回后当前 agent 是调用方。_run_agent 若抛
-                    # 异常则不经过这里 —— 外层 except 按 current_agent 归因到出事的
-                    # 子 agent（与旧 switch 模型的归因语义一致）。
-                    state["current_agent"] = agent_name
-
-                    if sub_response is None:
-                        # turn 已在子 agent 内终止（cancel / error，state 标志已由
-                        # 故障点设好）。剩余工具不再执行；Handler 在任何持久化前
-                        # 统一为本调用和未开始的 sibling calls 补齐失败结果。
-                        break
-
-                    tool_duration_ms = int(
-                        (utc_now() - subagent_start_time).total_seconds() * 1000
-                    )
-                    # call_subagent 是执行方式特殊，不是结果契约特殊：包装后的返回值同样
-                    # 经过统一内联阈值。超限时完整子 agent 结果落 artifact，调用方只拿
-                    # 预览句柄；落盘失败则沿用普通工具的 loud-fail 契约。
-                    subagent_result = ToolResult(
-                        success=True,
-                        data=(
-                            f'<subagent_result agent="{target_agent}">'
-                            f'\n{sub_response}'
-                            f'\n</subagent_result>'
-                        ),
-                        metadata={"subagent": target_agent},
-                    )
-                    subagent_result = await _maybe_persist_tool_result(
-                        "call_subagent", tool, subagent_result
-                    )
-                    await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
-                        "call_id": call_id,
-                        "tool": "call_subagent",
-                        "success": subagent_result.success,
-                        "result_data": (
-                            subagent_result.data if subagent_result.success else None
-                        ),
-                        "error": (
-                            subagent_result.error if not subagent_result.success else None
-                        ),
-                        "duration_ms": tool_duration_ms,
-                        "metadata": subagent_result.metadata or None,
-                    })
-                    continue
-                else:
-                    await _emit(StreamEventType.TOOL_START.value, agent_name, {
-                        "call_id": call_id, "tool": "call_subagent",
-                        "params": params, "reason": reason,
-                    })
-                    await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
-                        "call_id": call_id,
-                        "tool": "call_subagent",
-                        "success": False,
-                        "error": result.error or "call_subagent failed",
-                        "duration_ms": 0,
-                    })
-                    continue
-
-            # 权限检查（决策 11:等级唯一来源是工具定义，EffectiveToolset 已据此解析；
-            # 绑定不再覆盖等级。gate 已确保成员，level 必非 None，仍兜底到 tool.permission）
-            effective_permission = effective_toolsets[agent_name].level(tool_name) or tool.permission
-            if effective_permission == ToolPermission.CONFIRM:
-                if tool_name not in state.get("always_allowed_tools", []):
-                    approved = await _handle_permission(
-                        call_id, tool_name, params, agent_name, effective_permission, reason
-                    )
-                    if not approved:
-                        continue
-
-            # 执行工具
-            tool_start_time = utc_now()
-            await _emit(StreamEventType.TOOL_START.value, agent_name, {
-                "call_id": call_id, "tool": tool_name,
-                "params": params, "reason": reason,
-            })
-
-            # 可打断 await：cancel flag 在工具在飞期间按 CANCEL_CHECK_INTERVAL 被轮询，
-            # 命中即 task.cancel() 在飞工具 —— cancel 延迟不再受 per-tool 超时
-            # （bash SANDBOX_COMMAND_TIMEOUT / HttpTool per-MD timeout）支配。
-            # 取消落入正常 TOOL_COMPLETE 流（success=False）：START/COMPLETE 配对
-            # 不变量保持，下一轮 history 里模型能看到"这次调用被用户打断"。
-            # 随后的 _check_cancelled（下个工具前 / while 顶部）置终态 flag 收口。
-            try:
-                # wants_context 工具(如 search_tools)在 execute 期需要引擎上下文(调用方
-                # agent 的可调视图 + 本 turn 工具注册表):调用时注入 ToolExecutionContext,
-                # 不存实例态(进程级实例并发 turn 共享,故 per-call 注入而非 per-instance)。
-                # context 只装非密事实(secret 走 B-4 credential resolver,不走这条)。
-                # 协程构造放 try 内:`tool(...)` 的**参数绑定**在 call 那一刻同步发生(协程
-                # 体尚未运行),任何绑定异常(如模型误吐 `_context` 与注入键撞车)需被这层
-                # per-tool except 接住、降级为单工具失败,而非漏到 turn 级掀翻整轮。
-                tool_coro = (
-                    tool(_context=ToolExecutionContext(
-                        agent_name=agent_name,
-                        effective_toolset=effective_toolsets[agent_name],
-                        tools=tools,
-                        disclosed_tools=set(
-                            state.get("agent_progressive_state", {})
-                            .get(agent_name, {})
-                            .get("disclosed_tools", [])
-                        ),
-                    ), **params)
-                    if getattr(tool, "wants_context", False)
-                    else tool(**params)
-                )
-                tool_result = await run_cancellable(
-                    tool_coro, _is_cancelled, config.CANCEL_CHECK_INTERVAL
-                )
-            except CooperativeCancelled:
-                logger.info(f"Tool '{tool_name}' interrupted by user cancel mid-flight")
-                tool_result = ToolResult(
-                    success=False,
-                    error=(
-                        "Cancelled by user while the tool was running. "
-                        "Side effects may or may not have been applied "
-                        "(the operation was already in flight)."
-                    ),
-                )
-            except Exception as e:
-                logger.exception(f"Tool '{tool_name}' execution error: {e}")
-                tool_result = ToolResult(success=False, error=str(e))
-
-            tool_end_time = utc_now()
-            tool_duration_ms = int((tool_end_time - tool_start_time).total_seconds() * 1000)
-
-            # 超长成功结果统一落盘为 artifact，回填预览；必须落盘的结果(artifact spec /
-            # 超长)落盘失败 → loud-fail 替换为 error 结果，不放行原文（见 callee docstring）
-            tool_result = await _maybe_persist_tool_result(tool_name, tool, tool_result)
-
-            # 识图:把图块 data-URI 从将入事件的 metadata 里摘出 → 按 provider-issued
-            # native call_id 存进本 turn 的 state["vision_blocks_by_call"](仅内存、不
-            # 持久化、跨轮自然失效);事件只留引用(artifact_id/content_type)。call_id
-            # 是同 turn accepted calls 的唯一结构键,也能区分同一可变单版 blob 覆盖前后
-            # 的两次 read；artifact current_version 对 blob 字节不递增，不能作快照身份。
-            # context build 据 state 还原:本轮命中 → 注入图块;下一轮 state 已空 →
-            # 占位文本(模型再 read_artifact 即可重看)。
-            # 字节绝不进事件表(撑爆 + 与「blob 有专属持久家」冲突)。
-            tc_metadata = tool_result.metadata or None
-            _img = tc_metadata.get("image") if tc_metadata else None
-            if isinstance(_img, dict) and "data_uri" in _img:
-                state.setdefault("vision_blocks_by_call", {})[call_id] = dict(_img)
-                tc_metadata = {
-                    **tc_metadata,
-                    "image": {k: v for k, v in _img.items() if k != "data_uri"},
-                }
-
-            progressive = state.setdefault("agent_progressive_state", {}).setdefault(
-                agent_name, {"active_skills": [], "disclosed_tools": []}
+            prepared = _prepare_tool_call(
+                tool_call, invocation_tool_names, unexposed_tool_reasons
             )
-            _activated = (tool_result.metadata or {}).get("activated_skill") if tool_result.success else None
-            if _activated:
-                active_list = progressive.setdefault("active_skills", [])
-                if _activated not in active_list:
-                    active_list.append(_activated)
-                    ets = effective_toolsets[agent_name]
-                    grant = ets.skill_grants.get(_activated)
-                    granted = set(grant.permissions) if grant is not None else set()
-                    ets.activate_skill(_activated)
-                    logger.info(
-                        "Skill %r activated for %s via read_skill (message %s); enabled tools: %s",
-                        _activated, agent_name, message_id, sorted(granted) or "(none)",
-                    )
+            if isinstance(prepared, _RejectedToolCall):
+                await _finalize_rejected_tool_call(prepared, agent_name)
+                continue
+            if not await _authorize_tool_call(prepared, agent_name):
+                continue
+            executed = await _execute_prepared_tool_call(prepared, agent_name)
+            if executed is None:
+                break
+            await _finalize_tool_call(prepared, executed, agent_name)
 
-            disclosed = (
-                (tool_result.metadata or {}).get("disclosed_tools", [])
-                if tool_result.success else []
-            )
-            disclosed_list = progressive.setdefault("disclosed_tools", [])
-            for full_name in disclosed:
-                if full_name not in disclosed_list:
-                    disclosed_list.append(full_name)
-
-            await _emit(StreamEventType.TOOL_COMPLETE.value, agent_name, {
-                "call_id": call_id,
-                "tool": tool_name,
-                "success": tool_result.success,
-                "result_data": tool_result.data if tool_result.success else None,
-                "error": tool_result.error if not tool_result.success else None,
-                "duration_ms": tool_duration_ms,
-                "params": params,
-                "metadata": tc_metadata,
-            })
     async def _check_cancelled() -> bool:
         # 同走软化谓词:探针异常在 loop 顶/工具间穿出会被 while 外层
         # except Exception 记成 turn ERROR(一次 Redis 抖动杀掉整个 turn)。
         if await _is_cancelled():
-            state["completed"] = True
-            state["cancelled"] = True
             state["response"] = state.get("response", "") or ""
+            stop_execution(state, StopReason.COOPERATIVE_CANCEL)
             return True
         return False
 
@@ -1229,22 +1293,20 @@ async def execute_loop(
         事件序 = 执行序，取消/超时/终态管线不感知递归深度。
 
         Returns:
-            该 agent 的最终文本；None = turn 已终止（cancel / error，state 标志
+            该 agent 的最终文本；None = turn 已终止（cancel / error，stop_reason
             已由故障点按 record-not-emit 设好），调用方据此逐层退栈。
         """
         if agent_name not in agents:
             logger.error(f"Agent '{agent_name}' not found")
-            state["error"] = True
-            state["response"] = f"Agent '{agent_name}' not found"
+            state["response"] = f"Agent '{agent_name}' is unavailable."
             # record-not-emit:turn 末由 decide_terminal 统一发射 ERROR。
             state["error_detail"] = {
                 "error": f"Agent '{agent_name}' not found",
                 "agent": agent_name,
                 "request_id": get_request_id() or None,
             }
-            # completed 一并置位：递归调用方的 while 靠它退栈（decide_terminal
-            # 以 error flag 定终态，completed 不改变 ERROR 判定 —— 同 staging 失败路径）。
-            state["completed"] = True
+            # stop_reason 一并置位：递归调用方的 while 靠它退栈。
+            stop_execution(state, StopReason.ERROR)
             return None
 
         state["current_agent"] = agent_name  # 错误归因 + 外部观察
@@ -1253,7 +1315,7 @@ async def execute_loop(
         # its own overflow; a second consecutive overflow fails loudly.
         overflow_retry_attempted = False
 
-        while not state["completed"]:
+        while get_stop_reason(state) is None:
             if await _check_cancelled():
                 return None
 
@@ -1317,9 +1379,11 @@ async def execute_loop(
                         "agent": agent_name,
                         "request_id": get_request_id() or None,
                     }
-                    state["completed"] = True
-                    state["error"] = True
-                    state["response"] = message
+                    state["response"] = (
+                        "The model context remained too large after compaction. "
+                        "Start a new conversation or reduce the input."
+                    )
+                    stop_execution(state, StopReason.ERROR)
                     return None
 
                 overflow_retry_attempted = True
@@ -1333,9 +1397,8 @@ async def execute_loop(
                     logger.info(
                         f"Overflow compaction for {agent_name} interrupted by user cancel"
                     )
-                    state["completed"] = True
-                    state["cancelled"] = True
                     state["response"] = state.get("response", "") or ""
+                    stop_execution(state, StopReason.COOPERATIVE_CANCEL)
                     return None
                 except Exception as compact_error:
                     logger.exception(
@@ -1347,9 +1410,10 @@ async def execute_loop(
                         "agent": agent_name,
                         "request_id": get_request_id() or None,
                     }
-                    state["completed"] = True
-                    state["error"] = True
-                    state["response"] = message
+                    state["response"] = (
+                        "Context recovery failed during compaction. Please retry."
+                    )
+                    stop_execution(state, StopReason.ERROR)
                     return None
                 continue
 
@@ -1389,9 +1453,8 @@ async def execute_loop(
                 logger.info(
                     f"Compaction for {agent_name} interrupted by user cancel"
                 )
-                state["completed"] = True
-                state["cancelled"] = True
                 state["response"] = state.get("response", "") or ""
+                stop_execution(state, StopReason.COOPERATIVE_CANCEL)
                 return None
             except Exception as compact_error:
                 logger.error(f"Compaction failed for {agent_name}: {compact_error}")
@@ -1401,9 +1464,8 @@ async def execute_loop(
                     "agent": agent_name,
                     "request_id": get_request_id() or None,
                 }
-                state["completed"] = True
-                state["error"] = True
-                state["response"] = f"Compaction failed: {str(compact_error)}"
+                state["response"] = "Conversation compaction failed. Please retry."
+                stop_execution(state, StopReason.ERROR)
                 return None
 
             if not tool_calls:
@@ -1422,7 +1484,7 @@ async def execute_loop(
                         continue  # 回到 while loop 顶部，下次 _build_context 会看到新事件
 
                 # 无待处理消息 → 该 agent 正常完成，最终文本即返回值
-                # （lead → 顶层收口 completed/response；subagent → call_subagent
+                # （lead → 顶层收口 stop_reason/response；subagent → call_subagent
                 # 分支包成 <subagent_result> tool_complete）
                 await _emit(StreamEventType.AGENT_COMPLETE.value, agent_name, {
                     "agent": agent_name,
@@ -1439,7 +1501,7 @@ async def execute_loop(
                 unexposed_tool_reasons,
             )
 
-        return None  # while 因 state["completed"]（cancel / 递归内 error）退出
+        return None  # while 因 stop_reason（cancel / 递归内 error）退出
 
     # ── main loop ──
     # (_emit already bound to artifact_service above, before upload staging;
@@ -1448,8 +1510,8 @@ async def execute_loop(
     try:
         final_response = await _run_agent(entry_agent)
         if final_response is not None:
-            state["completed"] = True
             state["response"] = final_response
+            stop_execution(state, StopReason.COMPLETE)
             logger.info(f"Entry agent {entry_agent} completed, execution done")
 
     except Exception as e:
@@ -1460,8 +1522,8 @@ async def execute_loop(
             "agent": state.get("current_agent"),
             "request_id": get_request_id() or None,
         }
-        state["error"] = True
-        state["response"] = f"Execution failed: {str(e)}"
+        state["response"] = "Execution failed unexpectedly. Please retry."
+        stop_execution(state, StopReason.ERROR)
 
     finally:
         if _bind_emit:

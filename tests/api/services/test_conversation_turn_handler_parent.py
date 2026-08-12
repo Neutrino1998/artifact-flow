@@ -60,8 +60,6 @@ async def test_resolved_parent_reaches_message_append_unchanged(
         state = kwargs["state"]
         state.update({
             "response": "ok",
-            "error": False,
-            "cancelled": False,
             "always_allowed_tools": [],
             "execution_metrics": {},
         })

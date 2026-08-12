@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
-from core.agent_runtime import RuntimeHooks
+from core.agent_runtime import RuntimeHooks, StopReason
 from core.engine import create_initial_state, execute_loop
 from core.events import StreamEventType, ExecutionEvent
 from models.llm import LLMContextOverflowError
@@ -322,7 +322,7 @@ class TestLeadCompletion:
         result, emitted, store = await _run_engine(
             _make_fake_stream(_simple_llm_chunks("Done!"))
         )
-        assert result["completed"] is True
+        assert result["stop_reason"] is StopReason.COMPLETE
         assert result["response"] == "Done!"
 
     async def test_user_input_is_emitted_live_and_recorded_for_replay(self):
@@ -419,7 +419,7 @@ class TestSubagentRouting:
             tools={"call_subagent": CallSubagentTool()},
         )
 
-        assert result["completed"] is True
+        assert result["stop_reason"] is StopReason.COMPLETE
         assert result["response"] == "Final answer"
 
         # Should have subagent_instruction event in state events
@@ -678,8 +678,7 @@ class TestToolExecution:
         completes = [e for e in emitted if e["type"] == "tool_complete" and e["data"]["tool"] == "search_tools"]
         assert len(completes) == 1
         assert completes[0]["data"]["success"] is False     # 工具级失败
-        assert result.get("error") is not True              # turn 未被掀翻
-        assert result.get("completed") is True              # 第二轮正常收尾
+        assert result["stop_reason"] is StopReason.COMPLETE  # turn 未被掀翻
 
     async def test_search_tools_blocked_when_not_in_toolset(self):
         # 未授 search_tools(无 deferred unit / 未声明)→ 走白名单闸,不路由
@@ -856,7 +855,7 @@ class TestToolExecution:
             tools={"my_tool": _FakeTool("my_tool")},
         )
 
-        assert result["completed"] is True
+        assert result["stop_reason"] is StopReason.COMPLETE
 
         starts = [e for e in emitted if e["type"] == "tool_start"]
         completes = [e for e in emitted if e["type"] == "tool_complete"]
@@ -1131,8 +1130,7 @@ class TestCancellation:
             message_id="msg-1",
         )
 
-        assert result["completed"] is True
-        assert result.get("cancelled") is True
+        assert result["stop_reason"] is StopReason.COOPERATIVE_CANCEL
 
     async def test_cancel_between_tools(self):
         """Cancel during tool execution → break out of tool loop."""
@@ -1166,10 +1164,9 @@ class TestCancellation:
                 emit=capture_emit,
             )
 
-        assert result["completed"] is True
-        assert result.get("cancelled") is True
+        assert result["stop_reason"] is StopReason.COOPERATIVE_CANCEL
 
-    async def test_cancelled_state_flags(self):
+    async def test_cancelled_stop_reason(self):
         store = InMemoryRuntimeStore()
         store._cancellations["msg-1"] = asyncio.Event()
         store._cancellations["msg-1"].set()
@@ -1180,8 +1177,7 @@ class TestCancellation:
             message_id="msg-1",
         )
 
-        assert result["cancelled"] is True
-        assert result["completed"] is True
+        assert result["stop_reason"] is StopReason.COOPERATIVE_CANCEL
 
     async def test_cancel_interrupts_in_flight_tool(self):
         """Cancel while a tool await is in flight → run_cancellable cancels the
@@ -1222,9 +1218,7 @@ class TestCancellation:
             cancel_check_interval=0.01,
         )
 
-        assert result["completed"] is True
-        assert result["cancelled"] is True
-        assert not result.get("error")
+        assert result["stop_reason"] is StopReason.COOPERATIVE_CANCEL
         # The in-flight tool task was actually cancelled, not abandoned
         assert child_cancelled.is_set()
         # START/COMPLETE pairing invariant holds on the cancel path
@@ -1251,8 +1245,7 @@ class TestCancellation:
             cancel_check_interval=0,
         )
 
-        assert result["cancelled"] is True
-        assert result["completed"] is True
+        assert result["stop_reason"] is StopReason.COOPERATIVE_CANCEL
         # prose accumulated up to the cancel point becomes the display snapshot
         assert result["response"] == "Hello, this is a partial "
         # llm_complete is the history source of truth — must carry the partial content
@@ -1275,7 +1268,7 @@ class TestCancellation:
             cancel_check_interval=0,
         )
 
-        assert result["cancelled"] is True
+        assert result["stop_reason"] is StopReason.COOPERATIVE_CANCEL
         assert not result.get("response")  # reasoning is not a display snapshot
         llm_completes = _events_of_type(emitted, StreamEventType.LLM_COMPLETE.value)
         assert len(llm_completes) == 1
@@ -1349,9 +1342,7 @@ class TestCancelProbeFailure:
                 emit=capture,
             )
 
-        assert result["completed"] is True
-        assert not result.get("cancelled")
-        assert not result.get("error")
+        assert result["stop_reason"] is StopReason.COMPLETE
         assert result["response"] == "Done"
         completes = _events_of_type(emitted, "tool_complete")
         assert len(completes) == 1
@@ -1384,8 +1375,7 @@ class TestCancelProbeFailure:
                 emit=None,
             )
 
-        assert result["completed"] is True
-        assert not result.get("error")
+        assert result["stop_reason"] is StopReason.COMPLETE
         assert result["response"] == "Done!"
 
     async def test_probe_failure_mid_stream_not_llm_failure(self):
@@ -1414,8 +1404,7 @@ class TestCancelProbeFailure:
             )
 
         assert calls["n"] >= 2  # 故障确实落在流式轮询上
-        assert result["completed"] is True
-        assert not result.get("error")
+        assert result["stop_reason"] is StopReason.COMPLETE
         assert result["response"] == "Done!"
 
 
@@ -1448,7 +1437,7 @@ class TestPendingMessageDrain:
             message_id="msg-1",
         )
 
-        assert result["completed"] is True
+        assert result["stop_reason"] is StopReason.COMPLETE
         assert result["response"] == "final response"
 
         # Should have queued_message event
@@ -1717,9 +1706,7 @@ class TestInEngineCompaction:
                 compaction_threshold=100,
             )
 
-        assert result["completed"] is True
-        assert result["cancelled"] is True
-        assert not result.get("error")
+        assert result["stop_reason"] is StopReason.COOPERATIVE_CANCEL
         assert compact_call_cancelled.is_set()
 
         # compaction_start has its paired success=False terminator (no boundary
@@ -1743,7 +1730,7 @@ class TestInEngineCompaction:
         )
 
         # Engine should complete normally
-        assert result["completed"] is True
+        assert result["stop_reason"] is StopReason.COMPLETE
         assert result["response"] == "Done"
 
         event_types = [e.event_type for e in result["events"]]
@@ -1927,9 +1914,8 @@ class TestInEngineCompaction:
         )
 
         assert calls["n"] == 3  # failed lead + compact + retried lead
-        assert result["completed"] is True
+        assert result["stop_reason"] is StopReason.COMPLETE
         assert result["response"] == "Recovered"
-        assert not result.get("error")
         starts = [
             e for e in result["events"]
             if e.event_type == StreamEventType.COMPACTION_START.value
@@ -1966,9 +1952,12 @@ class TestInEngineCompaction:
         )
 
         assert calls["n"] == 3
-        assert result["completed"] is True
-        assert result["error"] is True
-        assert "after one compact-and-retry attempt" in result["response"]
+        assert result["stop_reason"] is StopReason.ERROR
+        assert result["response"] == (
+            "The model context remained too large after compaction. "
+            "Start a new conversation or reduce the input."
+        )
+        assert "after one compact-and-retry attempt" in result["error_detail"]["error"]
         assert sum(
             e.event_type == StreamEventType.COMPACTION_START.value
             for e in result["events"]
@@ -2219,7 +2208,7 @@ class TestMixedSerialDelegation:
             },
         )
 
-        assert result["completed"] is True
+        assert result["stop_reason"] is StopReason.COMPLETE
         assert result["response"] == "Final answer"
 
         # 自然序:call_subagent 不再被排到末尾
@@ -2296,8 +2285,7 @@ class TestMixedSerialDelegation:
             cancel_check_interval=0,
         )
 
-        assert result["completed"] is True
-        assert result.get("cancelled") is True
+        assert result["stop_reason"] is StopReason.COOPERATIVE_CANCEL
         start_names = [e["data"]["tool"] for e in _events_of_type(emitted, "tool_start")]
         assert start_names == ["call_subagent"]  # tool_b 从未启动
         sub_completes = [
@@ -2337,7 +2325,8 @@ class TestMixedSerialDelegation:
             },
         )
 
-        assert result["error"] is True
+        assert result["stop_reason"] is StopReason.ERROR
+        assert result["response"] == "Model request failed. Please retry."
         assert result["error_detail"]["agent"] == "sub_a"
         assert "llm boom" in result["error_detail"]["error"]
         start_names = [e["data"]["tool"] for e in _events_of_type(emitted, "tool_start")]

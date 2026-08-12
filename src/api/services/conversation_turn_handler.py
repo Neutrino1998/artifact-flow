@@ -17,7 +17,7 @@ from core.skill_guidance import can_access_skill_bundle, render_skill_guidance
 from core.native_call_closure import (
     assert_native_calls_closed,
     close_open_native_calls,
-    terminal_reason_from_state,
+    terminal_reason_for_stop,
 )
 from core.conversation_manager import ConversationManager
 from core.post_processing import (
@@ -482,8 +482,7 @@ class ConversationTurnHandler:
                 # Defensive fallback for cancellation before the child coroutine
                 # entered AgentRuntime.run.  The runtime_started barrier makes this
                 # unreachable in normal execution, but finalization still fails safe.
-                initial_state["cancelled"] = True
-                initial_state["completed"] = True
+                initial_state["stop_reason"] = StopReason.EXTERNAL_CANCEL
                 runtime_outcome = EngineOutcome(
                     state=initial_state,
                     stop_reason=StopReason.EXTERNAL_CANCEL,
@@ -562,7 +561,7 @@ class ConversationTurnHandler:
                     pp.artifact_flush_completed = True
 
                 closure_events = close_open_native_calls(
-                    pp.final_state, terminal_reason_from_state(pp.final_state)
+                    pp.final_state, terminal_reason_for_stop(pp.stop_reason)
                 )
                 for closure_event in closure_events:
                     if not consumer_closed:
@@ -773,7 +772,7 @@ class ConversationTurnHandler:
         # Phase 1: ensure events are in DB
         if not pp.events_persisted:
             close_open_native_calls(
-                pp.final_state, terminal_reason_from_state(pp.final_state)
+                pp.final_state, terminal_reason_for_stop(pp.stop_reason)
             )
             ensure_terminal(pp)
             try:

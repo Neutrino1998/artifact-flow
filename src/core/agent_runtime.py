@@ -50,6 +50,33 @@ class StopReason(str, Enum):
     ERROR = "error"
 
 
+def get_stop_reason(state: Mapping[str, Any]) -> Optional[StopReason]:
+    """Return the invocation's control-plane terminal, if one was chosen."""
+    value = state.get("stop_reason")
+    if value is None or isinstance(value, StopReason):
+        return value
+    return StopReason(value)
+
+
+def stop_execution(
+    state: Dict[str, Any],
+    reason: StopReason,
+    *,
+    replace: bool = False,
+) -> StopReason:
+    """Transition one invocation from running to a terminal reason.
+
+    Engine paths use the default first-terminal-wins behavior.  Runtime boundary
+    failures may replace the reason when they are the later authoritative fact
+    (most notably the outer execution deadline).
+    """
+    current = get_stop_reason(state)
+    if current is not None and not replace:
+        return current
+    state["stop_reason"] = reason
+    return reason
+
+
 @dataclass(frozen=True)
 class AgentInvocation:
     """Per-call inputs that are independent of a Web or Conversation adapter."""
@@ -112,7 +139,9 @@ class AgentRuntime:
                 )
             return EngineOutcome(
                 state=final_state,
-                stop_reason=self._reason_from_state(final_state),
+                # A normal loop return is COMPLETE unless the loop recorded a
+                # more specific terminal first.
+                stop_reason=stop_execution(final_state, StopReason.COMPLETE),
             )
         except TimeoutError:
             logger.warning(
@@ -120,8 +149,7 @@ class AgentRuntime:
                 timeout,
                 state.get("message_id", "(unknown)"),
             )
-            state["timed_out"] = True
-            state["completed"] = True
+            stop_execution(state, StopReason.TIMEOUT, replace=True)
             self._finalize_metrics_once(state, "timeout")
             return EngineOutcome(state=state, stop_reason=StopReason.TIMEOUT)
         except asyncio.CancelledError:
@@ -129,7 +157,7 @@ class AgentRuntime:
             # loop.  Otherwise this is infrastructure cancellation (lease fence,
             # shutdown, supervisor cancellation), returned so the caller can
             # drain the child and finalize the accumulated state exactly once.
-            recorded = self._reason_from_state(state, default=None)
+            recorded = get_stop_reason(state)
             if recorded is not None and recorded is not StopReason.COMPLETE:
                 self._finalize_metrics_once(state, recorded.value)
                 return EngineOutcome(state=state, stop_reason=recorded)
@@ -138,8 +166,7 @@ class AgentRuntime:
                 "Agent runtime cancelled externally for %s; returning partial state",
                 state.get("message_id", "(unknown)"),
             )
-            state["cancelled"] = True
-            state["completed"] = True
+            stop_execution(state, StopReason.EXTERNAL_CANCEL, replace=True)
             self._finalize_metrics_once(state, "external cancel")
             return EngineOutcome(
                 state=state,
@@ -147,9 +174,8 @@ class AgentRuntime:
             )
         except Exception as exc:
             logger.exception("Agent runtime failed: %s", exc)
-            state["error"] = True
-            state["completed"] = True
-            state["response"] = f"Engine error: {exc}"
+            stop_execution(state, StopReason.ERROR, replace=True)
+            state["response"] = "Execution failed unexpectedly. Please retry."
             state["error_detail"] = {
                 "error": str(exc),
                 "agent": state.get("current_agent"),
@@ -157,20 +183,6 @@ class AgentRuntime:
             }
             self._finalize_metrics_once(state, "error")
             return EngineOutcome(state=state, stop_reason=StopReason.ERROR)
-
-    @staticmethod
-    def _reason_from_state(
-        state: Dict[str, Any],
-        *,
-        default: Optional[StopReason] = StopReason.COMPLETE,
-    ) -> Optional[StopReason]:
-        if state.get("timed_out"):
-            return StopReason.TIMEOUT
-        if state.get("cancelled"):
-            return StopReason.COOPERATIVE_CANCEL
-        if state.get("error"):
-            return StopReason.ERROR
-        return default
 
     @staticmethod
     def _finalize_metrics_once(state: Dict[str, Any], path: str) -> None:
@@ -192,4 +204,6 @@ __all__ = [
     "EventSink",
     "RuntimeHooks",
     "StopReason",
+    "get_stop_reason",
+    "stop_execution",
 ]

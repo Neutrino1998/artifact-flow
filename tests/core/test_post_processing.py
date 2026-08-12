@@ -133,7 +133,7 @@ class TestDecideTerminal:
     def test_cooperative_cancel_path(self):
         pp = PostProcessState(
             conversation_id="c", message_id="m",
-            final_state={"response": "", "cancelled": True},
+            final_state={"response": ""},
             stop_reason=StopReason.COOPERATIVE_CANCEL,
         )
         decide_terminal(pp)
@@ -144,7 +144,7 @@ class TestDecideTerminal:
     def test_external_cancel_path_uses_system_display_and_audit_reason(self):
         pp = PostProcessState(
             conversation_id="c", message_id="m",
-            final_state={"response": "partial", "cancelled": True},
+            final_state={"response": "partial"},
             stop_reason=StopReason.EXTERNAL_CANCEL,
         )
         decide_terminal(pp)
@@ -159,8 +159,7 @@ class TestDecideTerminal:
         pp = PostProcessState(
             conversation_id="c", message_id="m",
             final_state={
-                "response": "Engine error: x",
-                "error": True,
+                "response": "Model request failed. Please retry.",
                 "error_detail": {
                     "error": "LLM call failed: boom",
                     "agent": "lead_agent",
@@ -175,6 +174,7 @@ class TestDecideTerminal:
         assert pp.terminal_event.data["error"] == "LLM call failed: boom"
         assert pp.terminal_event.data["agent"] == "lead_agent"
         assert pp.terminal_event.data["request_id"] == "req-123"
+        assert choose_response_for_terminal(pp) == "Model request failed. Please retry."
         # 不预先标 appended —— 留给 Handler append(与 COMPLETE/CANCELLED 一致)
         assert pp.terminal_appended is False
 
@@ -183,7 +183,7 @@ class TestDecideTerminal:
         是 Handler 自身写的失败,优先级高于 engine 报告的 cancelled。"""
         pp = PostProcessState(
             conversation_id="c", message_id="m",
-            final_state={"response": "", "cancelled": True},
+            final_state={"response": ""},
             stop_reason=StopReason.COOPERATIVE_CANCEL,
             flush_error="Artifact persistence failed: disk full",
         )
@@ -196,8 +196,10 @@ class TestDecideTerminal:
         """timed_out → 一等 TIMED_OUT 终态,success=False,data 带 TIMED_OUT_RESPONSE。"""
         pp = PostProcessState(
             conversation_id="c", message_id="m",
-            final_state={"response": "partial", "timed_out": True,
-                         "execution_metrics": {"ms": 1800000}},
+            final_state={
+                "response": "partial",
+                "execution_metrics": {"ms": 1800000},
+            },
             stop_reason=StopReason.TIMEOUT,
         )
         decide_terminal(pp)
@@ -212,7 +214,7 @@ class TestDecideTerminal:
         与 flush_error > cancelled 的既有优先级一致。"""
         pp = PostProcessState(
             conversation_id="c", message_id="m",
-            final_state={"response": "", "timed_out": True},
+            final_state={"response": ""},
             stop_reason=StopReason.TIMEOUT,
             flush_error="Artifact persistence failed: disk full",
         )
@@ -386,7 +388,7 @@ class TestEnsureTerminal:
         assert pp.terminal_type == StreamEventType.TIMED_OUT.value
 
     def test_late_cancel_on_errored_turn_preserves_error_not_cancelled(self):
-        """统一后 engine 错误只记 state["error"]+error_detail、不再实时 append ERROR。
+        """统一后 engine 错误只记 stop_reason+error_detail、不再实时 append ERROR。
         若 external cancel 落在 decide_terminal 之前,events 里没有 ERROR 可 adopt ——
         ensure_terminal 必须委托 decide_terminal 保留真实的 ERROR 终因,而不是一律
         合成 external CANCELLED 把错误静默掩成取消。"""
@@ -394,7 +396,6 @@ class TestEnsureTerminal:
             conversation_id="c", message_id="m",
             final_state={
                 "events": [],
-                "error": True,
                 "error_detail": {"error": "LLM call failed: boom", "agent": "lead_agent"},
             },
             stop_reason=StopReason.ERROR,

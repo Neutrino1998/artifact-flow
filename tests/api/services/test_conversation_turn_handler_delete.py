@@ -35,8 +35,6 @@ def _make_engine_noop_state(message_id: str):
     return {
         "events": [],
         "response": "ok",
-        "error": False,
-        "cancelled": False,
         "always_allowed_tools": [],
         "execution_metrics": {},
         "session_id": "conv-test",

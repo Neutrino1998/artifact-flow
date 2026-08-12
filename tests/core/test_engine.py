@@ -9,7 +9,7 @@ import pytest
 from dataclasses import dataclass, field
 from unittest.mock import patch, AsyncMock
 
-from core.agent_runtime import RuntimeHooks
+from core.agent_runtime import RuntimeHooks, StopReason
 from core.engine import create_initial_state, execute_loop
 from core.events import StreamEventType
 from tests.core._toolset import effective_for
@@ -119,7 +119,7 @@ class TestAgentNotFound:
 
         # State must be marked as error, with the detail recorded for the
         # unified terminal authority (decide_terminal) to build the ERROR event.
-        assert result["error"] is True
+        assert result["stop_reason"] is StopReason.ERROR
         assert "lead_agent" in result["response"]
         assert "lead_agent" in result["error_detail"]["error"]
         assert result["error_detail"]["agent"] == "lead_agent"
@@ -203,9 +203,11 @@ class TestUploadStagingAbort:
             emit=capture_emit,
         )
 
-        # Loud abort: turn marked error + completed.
-        assert result["error"] is True
-        assert result["completed"] is True
+        # Loud abort: turn reaches one ERROR terminal reason.
+        assert result["stop_reason"] is StopReason.ERROR
+        assert result["response"] == (
+            "Failed to attach file 'b.md'. Please check the file and retry."
+        )
 
         # Atomic: the already-staged first file was rolled back so flush_all
         # persists nothing this turn (no _N collision on the user's retry).
@@ -256,7 +258,7 @@ class TestLlmChunkAccumulation:
         assert llm_chunks[2]["data"]["content"] == "让我来分析这个问题"
 
         # Final state
-        assert result["completed"] is True
+        assert result["stop_reason"] is StopReason.COMPLETE
         assert result["response"] == "让我来分析这个问题"
 
     async def test_reasoning_chunks_are_cumulative(self):

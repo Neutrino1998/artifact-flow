@@ -13,6 +13,8 @@ from core.agent_runtime import (
     AgentInvocation,
     AgentRuntime,
     StopReason,
+    get_stop_reason,
+    stop_execution,
 )
 from core.agent_runtime import RuntimeHooks
 from core.engine import create_initial_state
@@ -45,13 +47,27 @@ def _runtime(*, timeout: float = 10) -> AgentRuntime:
     )
 
 
+def test_stop_transition_is_first_terminal_wins_unless_boundary_replaces_it():
+    state = {"stop_reason": None}
+
+    assert stop_execution(state, StopReason.ERROR) is StopReason.ERROR
+    assert stop_execution(state, StopReason.COMPLETE) is StopReason.ERROR
+    assert get_stop_reason(state) is StopReason.ERROR
+
+    assert (
+        stop_execution(state, StopReason.TIMEOUT, replace=True)
+        is StopReason.TIMEOUT
+    )
+    assert get_stop_reason(state) is StopReason.TIMEOUT
+
+
 async def test_complete_outcome_and_entry_agent_are_forwarded():
     state = _state()
     seen = {}
 
     async def complete(**kwargs):
         seen.update(kwargs)
-        kwargs["state"]["completed"] = True
+        kwargs["state"]["stop_reason"] = StopReason.COMPLETE
         kwargs["state"]["response"] = "done"
         return kwargs["state"]
 
@@ -70,8 +86,7 @@ async def test_cooperative_cancel_is_distinct_from_external_cancel():
     state = _state()
 
     async def cooperative(**kwargs):
-        kwargs["state"]["cancelled"] = True
-        kwargs["state"]["completed"] = True
+        kwargs["state"]["stop_reason"] = StopReason.COOPERATIVE_CANCEL
         return kwargs["state"]
 
     with patch("core.agent_runtime.execute_loop", side_effect=cooperative):
@@ -94,7 +109,7 @@ async def test_timeout_returns_state_without_emitting_terminal():
         )
 
     assert outcome.stop_reason == StopReason.TIMEOUT
-    assert state["timed_out"] is True
+    assert state["stop_reason"] is StopReason.TIMEOUT
     assert not any(
         event.event_type in {
             StreamEventType.COMPLETE.value,
@@ -129,7 +144,7 @@ async def test_task_cancel_returns_external_cancel_outcome_with_partial_state():
 
     assert outcome.stop_reason == StopReason.EXTERNAL_CANCEL
     assert outcome.state is state
-    assert state["cancelled"] is True
+    assert state["stop_reason"] is StopReason.EXTERNAL_CANCEL
     assert [event.event_type for event in state["events"]] == [
         StreamEventType.LLM_COMPLETE.value
     ]
@@ -147,7 +162,8 @@ async def test_unexpected_runtime_error_is_recorded_not_emitted():
         )
 
     assert outcome.stop_reason == StopReason.ERROR
-    assert state["error"] is True
+    assert state["stop_reason"] is StopReason.ERROR
+    assert state["response"] == "Execution failed unexpectedly. Please retry."
     assert state["error_detail"]["error"] == "boom"
     assert state["events"] == []
 

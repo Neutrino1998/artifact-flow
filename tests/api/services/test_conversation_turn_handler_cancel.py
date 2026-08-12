@@ -243,8 +243,7 @@ class TestPersistOnExternalCancel:
                     agent_name="lead_agent",
                     data={"content": "partial"},
                 ))
-                state["cancelled"] = True
-                state["completed"] = True
+                state["stop_reason"] = StopReason.EXTERNAL_CANCEL
                 return EngineOutcome(state, StopReason.EXTERNAL_CANCEL)
 
         async def consume():
@@ -368,7 +367,6 @@ class TestPersistOnExternalCancel:
                 agent_name="lead_agent",
                 data={"content": "done"},
             ))
-            state["completed"] = True
             state["response"] = "done"
             return state
 
@@ -445,10 +443,7 @@ class TestPersistOnExternalCancel:
             ))
             return {
                 **kwargs["state"],
-                "completed": True,
                 "response": "ok",
-                "error": False,
-                "cancelled": False,
             }
 
         async def consume():
@@ -633,10 +628,7 @@ class TestPersistOnExternalCancel:
             ))
             return {
                 **kwargs["state"],
-                "completed": True,
                 "response": "ok",
-                "error": False,
-                "cancelled": False,
             }
 
         # Track all batches via a second patch — the late-cancel retry uses the
@@ -782,7 +774,6 @@ class TestPersistOnExternalCancel:
                 data={"content": "done"},
                 is_historical=False,
             ))
-            state["completed"] = True
             state["response"] = "all done"
             return state
 
@@ -806,7 +797,7 @@ class TestPersistOnExternalCancel:
     async def test_cooperative_cancel_writes_response_by_user(self):
         """
         Cooperative cancel (user clicks cancel — execute_loop's _check_cancelled
-        sets state['cancelled']=True and returns normally) goes through the
+        selects StopReason.COOPERATIVE_CANCEL and returns normally) goes through the
         success-shaped post-processing path. Message.response must be the
         user-facing placeholder so the frontend renders the bubble (it gates
         on response being non-empty); CANCELLED_RESPONSE_BY_USER signals
@@ -820,8 +811,8 @@ class TestPersistOnExternalCancel:
         ctrl = _make_handler(cm, er, am)
 
         async def fake_execute_loop(**kwargs):
-            # Mimic the engine's cooperative-cancel exit: cancelled=True,
-            # completed=True, returns normally (no CancelledError raised).
+            # Mimic the engine's cooperative-cancel exit: a single stop reason,
+            # returned normally (no CancelledError raised).
             state = kwargs["state"]
             state["events"].append(ExecutionEvent(
                 event_type=StreamEventType.LLM_COMPLETE.value,
@@ -831,9 +822,7 @@ class TestPersistOnExternalCancel:
             ))
             return {
                 **state,
-                "completed": True,
-                "cancelled": True,
-                "error": False,
+                "stop_reason": StopReason.COOPERATIVE_CANCEL,
                 "response": "",  # cancelled mid-stream → no display content
             }
 
@@ -899,9 +888,6 @@ class TestPersistOnExternalCancel:
             ))
             return {
                 **kwargs["state"],
-                "completed": True,
-                "cancelled": False,
-                "error": False,
                 "response": "real engine output",
             }
 
@@ -967,9 +953,6 @@ class TestPersistOnExternalCancel:
             ))
             return {
                 **state,
-                "completed": True,
-                "cancelled": False,
-                "error": False,
                 "response": "real engine output",
                 "always_allowed_tools": [],
                 "execution_metrics": {"total_duration_ms": 100},  # non-empty triggers metadata update
@@ -1121,10 +1104,7 @@ class TestPersistOnExternalCancel:
             ))
             return {
                 **kwargs["state"],
-                "completed": True,
                 "response": "current turn output",
-                "error": False,
-                "cancelled": False,
             }
 
         async def consume():
@@ -1220,9 +1200,6 @@ class TestPersistOnExternalCancel:
             ))
             return {
                 **kwargs["state"],
-                "completed": True,
-                "cancelled": False,
-                "error": False,
                 "response": "real engine output",
             }
 
@@ -1292,9 +1269,6 @@ class TestPersistOnExternalCancel:
             ))
             return {
                 **kwargs["state"],
-                "completed": True,
-                "cancelled": False,
-                "error": False,
                 "response": "",
             }
 
