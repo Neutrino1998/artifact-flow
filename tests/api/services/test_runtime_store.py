@@ -321,6 +321,23 @@ class TestCleanup:
         assert await store.is_cancelled("msg-1") is False
         assert await store.drain_messages("msg-1") == []
 
+    async def test_stale_cleanup_does_not_clear_replacement_owner(self):
+        """Late old-turn cleanup is compare-and-clear, not conversation-wide."""
+        store = InMemoryRuntimeStore()
+        await store.try_acquire_lease("conv-1", "msg-old")
+        await store.mark_engine_interactive("conv-1", "msg-old")
+
+        # Simulate the old lease ending and a replacement turn becoming active
+        # before the old task reaches its composite cleanup callback.
+        await store.cleanup_execution("conv-1", "msg-old")
+        await store.try_acquire_lease("conv-1", "msg-new")
+        await store.mark_engine_interactive("conv-1", "msg-new")
+
+        await store.cleanup_execution("conv-1", "msg-old")
+
+        assert await store.get_leased_message_id("conv-1") == "msg-new"
+        assert await store.get_interactive_message_id("conv-1") == "msg-new"
+
     async def test_shutdown_cleanup_wakes_interrupts(self):
         store = InMemoryRuntimeStore()
         store._interrupts["msg-1"] = _InterruptState(interrupt_data={})

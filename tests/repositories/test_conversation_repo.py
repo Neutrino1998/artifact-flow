@@ -9,8 +9,11 @@ import uuid
 from datetime import datetime, timedelta
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
+from core.conversation_manager import ConversationManager
 from db.models import User, Conversation, Message
+from db.database import DatabaseManager
 from repositories.conversation_repo import ConversationRepository
 from repositories.base import NotFoundError, DuplicateError
 
@@ -538,3 +541,132 @@ class TestRetryIdempotency:
 
         assert await mgr.start_conversation_async(conv_id) == conv_id
         assert await mgr.start_conversation_async(conv_id) == conv_id
+
+    async def test_fixed_conversation_id_survives_post_commit_disconnect(
+        self,
+        db_manager: DatabaseManager,
+        test_user: User,
+        monkeypatch,
+    ):
+        """A retry after commit reuses the caller-allocated conversation ID.
+
+        Raising ``OperationalError`` after the repository returns models the
+        reachable "commit succeeded, acknowledgement/post-commit work failed"
+        shape.  ``DatabaseManager.with_retry`` opens a fresh session and reruns
+        the whole operation; the duplicate fixed ID is idempotent success.
+        """
+        conv_id = f"conv-{uuid.uuid4().hex}"
+        original_create = ConversationRepository.create_conversation
+        disconnected = False
+        attempts = 0
+
+        async def create_then_disconnect(repo, *args, **kwargs):
+            nonlocal disconnected
+            result = await original_create(repo, *args, **kwargs)
+            if kwargs.get("conversation_id") == conv_id and not disconnected:
+                disconnected = True
+                raise OperationalError(
+                    "post-commit acknowledgement",
+                    {},
+                    ConnectionError("connection lost after commit"),
+                )
+            return result
+
+        monkeypatch.setattr(
+            ConversationRepository,
+            "create_conversation",
+            create_then_disconnect,
+        )
+
+        async def create_with_fresh_session(session):
+            nonlocal attempts
+            attempts += 1
+            manager = ConversationManager(ConversationRepository(session))
+            return await manager.start_conversation_async(
+                conv_id,
+                user_id=test_user.id,
+            )
+
+        result = await db_manager.with_retry(
+            create_with_fresh_session,
+            max_retries=1,
+            base_delay=0,
+        )
+
+        assert result == conv_id
+        assert attempts == 2
+        async with db_manager.session() as session:
+            persisted = await ConversationRepository(session).get_conversation(conv_id)
+            assert persisted is not None
+            assert persisted.user_id == test_user.id
+
+    async def test_message_retry_after_insert_commit_still_finishes_root_title(
+        self,
+        db_manager: DatabaseManager,
+        test_user: User,
+        monkeypatch,
+    ):
+        """Retry must continue past Duplicate and finish the later title write.
+
+        ``add_message`` commits Message + active_branch before ``update_title``.
+        A disconnect at that boundary reruns the whole manager operation: the
+        stable message ID collides, is treated as success, and title update must
+        still execute instead of returning early from the Duplicate branch.
+        """
+        conv_id = f"conv-{uuid.uuid4().hex}"
+        msg_id = f"msg-{uuid.uuid4().hex}"
+        async with db_manager.session() as session:
+            await ConversationRepository(session).create_conversation(
+                conversation_id=conv_id,
+                user_id=test_user.id,
+            )
+
+        original_update_title = ConversationRepository.update_title
+        disconnected = False
+        attempts = 0
+
+        async def disconnect_before_first_title(repo, conversation_id, title):
+            nonlocal disconnected
+            if conversation_id == conv_id and not disconnected:
+                disconnected = True
+                raise OperationalError(
+                    "title update after committed message",
+                    {},
+                    ConnectionError("connection lost before title update"),
+                )
+            return await original_update_title(repo, conversation_id, title)
+
+        monkeypatch.setattr(
+            ConversationRepository,
+            "update_title",
+            disconnect_before_first_title,
+        )
+
+        async def append_with_fresh_session(session):
+            nonlocal attempts
+            attempts += 1
+            manager = ConversationManager(ConversationRepository(session))
+            return await manager.add_message_async(
+                conv_id=conv_id,
+                message_id=msg_id,
+                user_input="Stable retry title",
+                parent_id=None,
+                create_conversation_if_missing=False,
+            )
+
+        await db_manager.with_retry(
+            append_with_fresh_session,
+            max_retries=1,
+            base_delay=0,
+        )
+
+        assert attempts == 2
+        async with db_manager.session() as session:
+            repo = ConversationRepository(session)
+            persisted = await repo.get_message(msg_id)
+            conversation = await repo.get_conversation(conv_id)
+            assert persisted is not None
+            assert persisted.parent_id is None
+            assert conversation is not None
+            assert conversation.active_branch == msg_id
+            assert conversation.title == "Stable retry title"

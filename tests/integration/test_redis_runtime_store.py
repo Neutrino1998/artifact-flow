@@ -205,6 +205,22 @@ class TestLease:
         assert await store.mark_engine_interactive(conv, "owner-A") is False
         assert await store.get_interactive_message_id(conv) == "owner-C"  # stale mark didn't clobber
 
+    async def test_stale_clear_and_release_do_not_touch_replacement_owner(self, store):
+        """Late callbacks from an expired owner are CAS no-ops after takeover."""
+        conv = "test_conv_stale_cleanup"
+        await store.try_acquire_lease(conv, "owner-old")
+        assert await store.mark_engine_interactive(conv, "owner-old") is True
+
+        await store.release_lease(conv, "owner-old")
+        await store.try_acquire_lease(conv, "owner-new")
+        assert await store.mark_engine_interactive(conv, "owner-new") is True
+
+        await store.clear_engine_interactive(conv, "owner-old")
+        await store.release_lease(conv, "owner-old")
+
+        assert await store.get_leased_message_id(conv) == "owner-new"
+        assert await store.get_interactive_message_id(conv) == "owner-new"
+
 
 class TestLeaseAtomicity:
     async def test_concurrent_acquire_no_orphan(self, store):

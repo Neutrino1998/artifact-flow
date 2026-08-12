@@ -11,16 +11,17 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Tuple, List
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from httpx import AsyncClient
 
+from config import config
 from db.models import Skill, User
 from db.database import DatabaseManager
 from repositories.conversation_repo import ConversationRepository
 from api.services.execution_runner import ExecutionRunner
-from api.dependencies import get_execution_runner
+from api.dependencies import get_execution_runner, get_stream_transport
 import api.dependencies as deps
 
 
@@ -99,6 +100,32 @@ async def conv_with_messages(
 
 class TestActiveStream:
 
+    async def test_live_owned_stream_returns_reconnect_handle(
+        self,
+        client: AsyncClient,
+        app,
+        conv_with_messages,
+        test_user: User,
+    ):
+        conv_id, msg_ids = conv_with_messages
+        message_id = msg_ids[0]
+        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        transport = app.dependency_overrides[get_stream_transport]()
+        assert await runner.store.try_acquire_lease(conv_id, message_id) is None
+        await transport.create_stream(message_id, owner_user_id=test_user.id)
+        try:
+            resp = await client.get(f"/api/v1/chat/{conv_id}/active-stream")
+            assert resp.status_code == 200
+            assert resp.json() == {
+                "active": True,
+                "conversation_id": conv_id,
+                "message_id": message_id,
+                "stream_url": f"/api/v1/stream/{message_id}",
+            }
+        finally:
+            await transport.close_stream(message_id)
+            await runner.store.release_lease(conv_id, message_id)
+
     async def test_no_active_stream_is_empty_state(
         self, client: AsyncClient, conv_with_messages
     ):
@@ -159,6 +186,31 @@ class TestInject:
         assert drained == ["additional input"]
 
         blocker.set()
+
+    async def test_inject_full_queue_returns_transient_429(
+        self, client: AsyncClient, app, conv_with_messages
+    ):
+        conv_id, msg_ids = conv_with_messages
+        message_id = msg_ids[0]
+        blocker = await _simulate_active_task(app, conv_id, message_id)
+        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+
+        try:
+            for i in range(config.MAX_INJECT_QUEUE_SIZE):
+                await runner.store.inject_message(message_id, f"pending-{i}")
+
+            resp = await client.post(
+                f"/api/v1/chat/{conv_id}/inject",
+                json={"content": "one too many"},
+            )
+
+            assert resp.status_code == 429
+            assert "retry shortly" in resp.json()["detail"]
+            assert len(await runner.store.drain_messages(message_id)) == (
+                config.MAX_INJECT_QUEUE_SIZE
+            )
+        finally:
+            blocker.set()
 
     async def test_inject_no_active_execution(
         self, client: AsyncClient, conv_with_messages
@@ -230,10 +282,12 @@ class TestSendMessageValidation:
         assert "user_input must not be blank" in str(resp.json())
 
     async def test_stale_parent_message_id_rejected_before_submit(
-        self, client: AsyncClient, conv_with_messages
+        self, client: AsyncClient, conv_with_messages, monkeypatch
     ):
         """显式 parent 必须属于当前 conversation，避免写出无 root 的消息树。"""
         conv_id, _ = conv_with_messages
+        ops_warning = MagicMock()
+        monkeypatch.setattr("api.routers.chat.logger.warning", ops_warning)
         resp = await client.post(
             "/api/v1/chat",
             files={
@@ -249,6 +303,10 @@ class TestSendMessageValidation:
         )
         assert resp.status_code == 422
         assert "parent_message_id does not belong" in str(resp.json())
+        ops_warning.assert_called_once()
+        logged = ops_warning.call_args.args[0]
+        assert conv_id in logged
+        assert "msg-does-not-exist" in logged
 
 
 # ============================================================

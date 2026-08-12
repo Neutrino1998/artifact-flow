@@ -1,6 +1,7 @@
 """ExecutionLauncher thin-facade contract tests."""
 
 from contextlib import asynccontextmanager
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -10,6 +11,7 @@ from api.services.execution_launcher import (
     ExecutionSpec,
 )
 from api.services.execution_runner import ConflictError
+from utils.logger import reset_request_id, set_request_id
 
 
 class _FakeController:
@@ -157,14 +159,20 @@ async def test_initialization_failure_is_sanitized_and_closes_stream(monkeypatch
 
     monkeypatch.setattr(launcher_module, "create_controller", broken_controller)
     monkeypatch.setattr("api.services.controller_factory.config.DEBUG", False)
+    ops_log = MagicMock()
+    monkeypatch.setattr(launcher_module.logger, "exception", ops_log)
 
     transport = _FakeTransport()
-    await ExecutionLauncher(_ImmediateRunner(), transport).submit(ExecutionSpec(
-        user_id="user-1",
-        conversation_id="conv-1",
-        message_id="msg-1",
-        user_input="hello",
-    ))
+    request_token = set_request_id("req-init-failure")
+    try:
+        await ExecutionLauncher(_ImmediateRunner(), transport).submit(ExecutionSpec(
+            user_id="user-1",
+            conversation_id="conv-1",
+            message_id="msg-1",
+            user_input="hello",
+        ))
+    finally:
+        reset_request_id(request_token)
 
     assert transport.closed == ["msg-1"]
     assert len(transport.events) == 1
@@ -172,6 +180,9 @@ async def test_initialization_failure_is_sanitized_and_closes_stream(monkeypatch
     assert stream_id == "msg-1"
     assert event["type"] == "error"
     assert event["data"]["error"] == "Internal server error"
+    assert event["data"]["request_id"] == "req-init-failure"
+    ops_log.assert_called_once()
+    assert "secret initialization detail" in ops_log.call_args.args[0]
 
 
 async def test_runner_conflict_propagates():

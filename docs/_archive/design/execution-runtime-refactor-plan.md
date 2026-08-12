@@ -1,7 +1,7 @@
 # 执行运行时边界与 Conversation Admission 重构 —— 实施计划
 
-> 状态：规划完成
-> 起草：2026-08-10 · 最后更新：2026-08-11
+> 状态：阶段 A 完成
+> 起草：2026-08-10 · 最后更新：2026-08-12
 > 关联文档：
 > - `docs/how-it-works.md` —— 当前 Agent turn、SSE、持久化与运行时的产品级说明；本计划完成后同步更新。
 > - `docs/configuration/runtime.md` —— 当前 Redis、执行并发和 timeout 的运维契约；本计划不改变现有配置语义。
@@ -15,11 +15,11 @@
 
 ## 进度
 
-**当前**：已完成现状走查、目标边界评估和首轮 reviewer 修订，尚未开始代码修改。下一步是在新特性分支补齐并发/生命周期 characterization tests，再拆分 Conversation 持久化语义。
+**当前**：阶段 A 已完成，现有生命周期、持久化 retry、send/delete 结构空窗与 Router runtime 契约已有可回归测试锚点。下一步进入 B，只拆分 `create / require_owned / append_message` 持久化语义，不移动 lease、stream 或后台任务边界。
 
 | 阶段 | 内容 | 依赖 | 状态 |
 |---|---|---|---|
-| A | 冻结现有生命周期与竞态契约 | 无 | 未开始 |
+| A | 冻结现有生命周期与竞态契约 | 无 | 已完成 |
 | B | 拆分显式 Conversation 持久化语义 | A | 未开始 |
 | C | 收口 Conversation 生命周期并提取 TaskSupervisor | B | 未开始 |
 | D | 收成可嵌入 AgentRuntime 与单一 finalization | C | 未开始 |
@@ -166,7 +166,15 @@ Embedded caller ────────────────→ AgentRuntime
 
 **进展**：
 
-- 尚未开始。
+- 2026-08-12 完成。阶段内只修改测试和本文进度，没有修改生产代码、API schema 或运行时状态。
+- send/delete 双顺序由 `RuntimeStore.try_acquire_lease` 测试包装器 + `asyncio.Event` 精确控制，不依赖 `sleep`：send 先取得 lease 时 delete 稳定 409；delete 在 send 已完成 DB 检查但尚未 acquire lease 时提交，稳定复现当前 send 仍返回 200 的结构空窗，同时证明后台 no-create 防线不会复活 Conversation 或留下 Message。C 完成后同一用例把 send 预期改为同步 404。
+- 固定 Conversation/Message ID 的测试通过真实 `DatabaseManager.with_retry` 模拟“首次 commit 成功、后续确认/步骤瞬断、fresh session 整体重试”；Message Duplicate 分支继续完成根消息 title，锁定 B 不得提前 return。
+- parent omit / explicit ID / explicit null 三态已在 controller 调用边界冻结，并由 Repository 测试继续覆盖 parent 归属、`active_branch` 与根消息 title。
+- QUEUED/RUNNING、lease owner CAS、旧 owner cleanup、外层 task cancel 持久化、timeout、post-processing、Sandbox cleanup-before-lease-release 均有回归锚点；Redis 集成测试另锁定 stale owner 的 clear/release 不影响 replacement owner。
+- Chat runtime 迁移清单：active-stream、inject、cancel、conversation list、single/bulk delete、resume；Admin 迁移清单：conversation list、event detail、active stream，以及 `/admin/runtime` 的 active conversation/task snapshot。非 Router 消费者另有 `controller_factory` 的 hooks/interactive clear、ExecutionRunner 自身 lease/heartbeat、lifespan SandboxReaper 和 observability sampler，C 迁移时不能只搜索 Router。
+- 错误双契约已冻结：初始化失败和未捕获 5xx 同时具备脱敏用户响应、request ID 与 exception ops log；active delete 409、上传配额 413、非法 parent 422、stale resume 409 保留可定位 warning；自明 404/401/schema 422 不增加噪音日志。
+- 删除边界明确分层：用户 single/bulk delete 走 conversation lease；管理员删用户级联与库外删除不走该 lease，继续由 FK 和 controller post-processing fail-soft 测试兜底，不把后两者误写成 Admission 保证。
+- 验收：阶段 A 目标测试全部通过；Redis RuntimeStore 集成测试 24 项通过；完整后端套件 2018 项通过、67 项按环境跳过，测试容器缺少文档/Sandbox 依赖导致的 3 项在补齐已钉住依赖后单独复跑全部通过。
 
 ### B — 拆分显式 Conversation 持久化语义
 
@@ -337,6 +345,7 @@ Embedded caller ────────────────→ AgentRuntime
 
 ## 变更日志
 
+- 2026-08-12 **阶段 A 完成**：用无 sleep 的 barrier tests 稳定复现 send/delete 双顺序与当前 check→lease 空窗；补齐固定 ID post-commit retry、parent 三态、stale owner、Router runtime 返回值及 user/ops 错误双契约；盘点全部 `runner.store` 与非 Router runtime 消费者。阶段内无生产代码或 schema 变化。
 - 2026-08-11 **契约精化**：将 `append_message` 从误导性的“只 INSERT”改为“只接受已有 Conversation”，显式保留 parent 校验、active_branch 和根消息 title；把 lease loss 验收改为检测后的 fail-closed、有界 finalization、CAS cleanup 与 TTL 回收，不再承诺网络分区下零重叠/零残留；修正 ConversationTurnHandler 到 D 才提取的出现时点。
 - 2026-08-11 **reviewer 修订**：消除原 B/C 施工依赖环，B 收窄为持久化语义、C 合并 LeaseHandle/TaskSupervisor/Admission/Router 迁移；恢复稳定 ID 的 DB retry 幂等契约；将 AgentRuntime 明确为 engine outcome producer、ConversationTurnHandler 明确为唯一 finalization owner；纳入 Chat/Admin 全部 `runner.store` 真实调用并删除 named pools 预留。
 - 2026-08-10 **起草**：由 Skill 上传安全扫描的复用需求反查现有执行边界，确认 `ExecutionLauncher` 无独立生命周期价值、`ExecutionRunner` 混合进程监管与 Conversation 语义，并将 send/delete TOCTOU 收口为统一 Admission。锁定本期不加 Chat DB status、不提前实现 Job 系统，以 embedded runtime 作为可复用边界验收。
