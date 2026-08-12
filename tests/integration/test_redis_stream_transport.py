@@ -6,61 +6,24 @@ RedisStreamTransport 集成测试
 """
 
 import asyncio
-import os
-
 import pytest
 import pytest_asyncio
-
-REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
-
-try:
-    import redis.asyncio as aioredis
-    _redis_available = True
-except ImportError:
-    _redis_available = False
 
 pytestmark = [
     pytest.mark.asyncio,
     pytest.mark.external,
-    pytest.mark.skipif(not _redis_available, reason="redis package not installed"),
 ]
 
 
-async def _check_redis() -> bool:
-    try:
-        client = aioredis.from_url(REDIS_URL, decode_responses=True)
-        await client.ping()
-        await client.aclose()
-        return True
-    except Exception:
-        return False
-
-
-TEST_PREFIX = "test"
-
-
 @pytest_asyncio.fixture
-async def redis_client():
-    if not await _check_redis():
-        pytest.skip("Redis not available")
-    client = aioredis.from_url(REDIS_URL, decode_responses=True)
-    yield client
-    # Cleanup test keys (match {test:...}:* pattern)
-    keys = await client.keys(f"{{{TEST_PREFIX}:*}}:*")
-    if keys:
-        await client.delete(*keys)
-    await client.aclose()
-
-
-@pytest_asyncio.fixture
-async def transport(redis_client):
+async def transport(redis_client, redis_key_prefix):
     from api.services.redis_stream_transport import RedisStreamTransport
 
     t = RedisStreamTransport(
         redis_client,
         cleanup_ttl=30,
         execution_timeout=60,
-        key_prefix=TEST_PREFIX,
+        key_prefix=redis_key_prefix,
     )
     t.init_scripts()
     return t
@@ -119,13 +82,25 @@ class TestStreamLifecycle:
 
 
 class TestCrossInstance:
-    async def test_push_and_consume_separate(self, redis_client):
+    async def test_push_and_consume_separate(
+        self, redis_client, redis_key_prefix
+    ):
         """Simulate cross-worker: one pushes, another consumes."""
         from api.services.redis_stream_transport import RedisStreamTransport
 
-        producer = RedisStreamTransport(redis_client, cleanup_ttl=30, execution_timeout=60, key_prefix=TEST_PREFIX)
+        producer = RedisStreamTransport(
+            redis_client,
+            cleanup_ttl=30,
+            execution_timeout=60,
+            key_prefix=redis_key_prefix,
+        )
         producer.init_scripts()
-        consumer = RedisStreamTransport(redis_client, cleanup_ttl=30, execution_timeout=60, key_prefix=TEST_PREFIX)
+        consumer = RedisStreamTransport(
+            redis_client,
+            cleanup_ttl=30,
+            execution_timeout=60,
+            key_prefix=redis_key_prefix,
+        )
         consumer.init_scripts()
 
         stream_id = "test_stream_cross"

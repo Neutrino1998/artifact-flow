@@ -6,7 +6,12 @@ because `config.py` has a module-level Settings() instantiation.
 """
 
 import base64
+import logging
 import os
+import re
+import shutil
+import tempfile
+from pathlib import Path
 
 # --- env must be set before any api import ---
 os.environ.setdefault("ARTIFACTFLOW_JWT_SECRET", "test-secret-do-not-use-in-production")
@@ -15,10 +20,18 @@ os.environ.setdefault("ARTIFACTFLOW_JWT_SECRET", "test-secret-do-not-use-in-prod
 os.environ.setdefault(
     "ARTIFACTFLOW_CREDENTIAL_KEY", base64.urlsafe_b64encode(b"0" * 32).decode()
 )
-# 测试日志隔离到 tests/logs,别污染生产 data/logs(尤其故意抛异常的中间件/路由
-# 测试会写整段 traceback)。必须在任何 app import 前设置,否则 import 时已建好的
-# logger 还是指向 data/logs。
-os.environ.setdefault("ARTIFACTFLOW_LOG_DIR", "tests/logs")
+# 每个 pytest 进程使用独立临时日志目录，避免 xdist worker 共享
+# RotatingFileHandler 的 rename/覆盖竞态。必须在任何项目模块 import 前设置；
+# pytest_unconfigure 会在正常退出时关闭该目录下的 handler 并精确删除目录。
+_test_run_id = os.environ.get("PYTEST_XDIST_TESTRUNUID", f"local-{os.getpid()}")
+_test_worker_id = os.environ.get("PYTEST_XDIST_WORKER", "main")
+_test_log_label = re.sub(
+    r"[^A-Za-z0-9._-]",
+    "-",
+    f"{_test_run_id}-{_test_worker_id}",
+)
+_TEST_LOG_DIR = Path(tempfile.mkdtemp(prefix=f"artifactflow-pytest-{_test_log_label}-"))
+os.environ["ARTIFACTFLOW_LOG_DIR"] = str(_TEST_LOG_DIR)
 
 import uuid
 
@@ -33,6 +46,24 @@ from repositories.conversation_repo import ConversationRepository
 from repositories.artifact_repo import ArtifactRepository
 from repositories.department_repo import DepartmentRepository
 from api.services.auth import hash_password
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config) -> None:
+    """Close this process's file handlers, then remove its exact temp log dir."""
+    log_root = _TEST_LOG_DIR.resolve()
+    for logger_object in list(logging.Logger.manager.loggerDict.values()):
+        if not isinstance(logger_object, logging.Logger):
+            continue
+        for handler in list(logger_object.handlers):
+            filename = getattr(handler, "baseFilename", None)
+            if filename is None:
+                continue
+            if not Path(filename).resolve().is_relative_to(log_root):
+                continue
+            logger_object.removeHandler(handler)
+            handler.close()
+    shutil.rmtree(_TEST_LOG_DIR)
 
 
 # ============================================================

@@ -6,57 +6,17 @@ RedisRuntimeStore 集成测试
 """
 
 import asyncio
-import os
-
 import pytest
 import pytest_asyncio
-
-# 检查 Redis 可用性
-REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
-
-try:
-    import redis.asyncio as aioredis
-    _redis_available = True
-except ImportError:
-    _redis_available = False
 
 pytestmark = [
     pytest.mark.asyncio,
     pytest.mark.external,
-    pytest.mark.skipif(not _redis_available, reason="redis package not installed"),
 ]
 
 
-async def _check_redis() -> bool:
-    """Check if Redis is reachable."""
-    try:
-        client = aioredis.from_url(REDIS_URL, decode_responses=True)
-        await client.ping()
-        await client.aclose()
-        return True
-    except Exception:
-        return False
-
-
-TEST_PREFIX = "test"
-
-
 @pytest_asyncio.fixture
-async def redis_client():
-    """Provide a Redis client, skip if not available."""
-    if not await _check_redis():
-        pytest.skip("Redis not available")
-    client = aioredis.from_url(REDIS_URL, decode_responses=True)
-    yield client
-    # Cleanup test keys (match {test:...}:* pattern)
-    keys = await client.keys(f"{{{TEST_PREFIX}:*}}:*")
-    if keys:
-        await client.delete(*keys)
-    await client.aclose()
-
-
-@pytest_asyncio.fixture
-async def store(redis_client):
+async def store(redis_client, redis_key_prefix):
     """Provide a RedisRuntimeStore instance."""
     from api.services.redis_runtime_store import RedisRuntimeStore
 
@@ -65,7 +25,7 @@ async def store(redis_client):
         lease_ttl=10,
         execution_timeout=60,
         permission_timeout=30,
-        key_prefix=TEST_PREFIX,
+        key_prefix=redis_key_prefix,
     )
     s.init_scripts()
     return s
