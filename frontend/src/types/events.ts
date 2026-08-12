@@ -3,7 +3,7 @@
 // ============================================================
 
 export enum StreamEventType {
-  // Controller layer
+  // Conversation turn / terminal layer
   METADATA = 'metadata',
   COMPLETE = 'complete',
   CANCELLED = 'cancelled',

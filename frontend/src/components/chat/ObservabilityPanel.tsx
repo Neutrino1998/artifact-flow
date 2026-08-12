@@ -518,7 +518,7 @@ export default function ObservabilityPanel() {
 
           // Transport-generated errors (expired stream / lost lease) deliberately
           // have no message_id and are not execution terminals.  Only the
-          // controller's ERROR for this message is authoritative terminal state.
+          // turn handler's ERROR for this message is authoritative terminal state.
           const isExecutionTerminal = ADMIN_TERMINAL_EVENTS.has(String(event.type))
             && !isTransportError;
           if (isExecutionTerminal) {

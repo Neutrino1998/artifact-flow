@@ -460,7 +460,7 @@ class TestBranchPath:
 
 
 class TestRetryIdempotency:
-    """ConversationManager 的 setup 写被 controller._with_db_retry 包裹;with_retry 在瞬断后
+    """ConversationManager 的 setup 写被 turn handler 的 retry 边界包裹;with_retry 在瞬断后
     从头重跑 fn → 这些写必须幂等(同 id 第二遍不得抛)。锁定 reviewer #1/#2 的修复。"""
 
     async def test_append_message_idempotent_on_retry(
@@ -534,7 +534,7 @@ class TestRetryIdempotency:
     async def test_create_idempotent_on_same_stable_id(
         self, conversation_repo: ConversationRepository, test_user: User
     ):
-        # #2 的修法(controller 在 retry 边界外定 conv_id 再传入)依赖此幂等:固定 id
+        # #2 的修法(turn handler 在 retry 边界外定 conv_id 再传入)依赖此幂等:固定 id
         # 重复调用返回同 id、不抛(撞重被 manager 吞)。
         from core.conversation_manager import ConversationManager
         mgr = ConversationManager(conversation_repo)

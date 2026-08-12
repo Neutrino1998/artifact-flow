@@ -643,7 +643,7 @@ class TestChatStreamE2E:
             async for chunk in _make_fake_llm_stream("Hello from agent")(messages, **kwargs):
                 yield chunk
 
-        # Controller assembly still reads process-level agent/tool registries.
+        # Turn assembly still reads process-level agent/tool registries.
         old_agents = deps._agents
         old_tools = deps._tools
         deps._agents = fake_agents

@@ -2040,7 +2040,7 @@ class TestSkillActivation:
                 hooks=_hooks_from_store(store), emit=capture_emit,
             )
 
-        # 激活持久进 state(回合末由 controller 写 metadata)
+        # 激活持久进 state(回合末由 turn handler 写 metadata)
         assert result["agent_progressive_state"]["lead_agent"]["active_skills"] == ["s"]
         # granted_tool 被激活后翻进可调集
         assert "granted_tool" in eff
@@ -2093,7 +2093,7 @@ class TestSkillActivation:
         assert "granted_tool" not in eff
 
     async def test_button_activation_injects_body_into_user_input(self):
-        """C-3:用户按钮激活 → controller 传 activated_skill_bodies → engine 注入 USER_INPUT
+        """C-3:用户按钮激活 → turn handler 传 activated_skill_bodies → engine 注入 USER_INPUT
         正文(仅 LLM 可见,同 force_compact/上传路径),让模型即刻看到 skill 指令。"""
         from core.effective_toolset import EffectiveToolset
         from core.skill_guidance import render_skill_guidance

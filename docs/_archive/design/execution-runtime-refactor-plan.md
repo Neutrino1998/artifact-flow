@@ -1,6 +1,6 @@
 # 执行运行时边界与 Conversation Admission 重构 —— 实施计划
 
-> 状态：阶段 D 完成
+> 状态：阶段 E 自动化实施完成，待手工 Web 验收
 > 起草：2026-08-10 · 最后更新：2026-08-12
 > 关联文档：
 > - `docs/how-it-works.md` —— 当前 Agent turn、SSE、持久化与运行时的产品级说明；本计划完成后同步更新。
@@ -15,7 +15,7 @@
 
 ## 进度
 
-**当前**：阶段 D 已完成。Pi-style loop 已收成不依赖 Web/DB/Redis 的 `AgentRuntime` 调用边界，Chat 由只接受 admitted turn 的 `ConversationTurnHandler` 统一负责 Artifact flush、terminal、事件与 response 持久化；旧 Controller/factory 已删除。下一步进入 E，补 embedded/Web/Admin/Redis 集成 smoke 与活动文档同步。
+**当前**：阶段 E 的代码、离线 embedded smoke、自动化 Web/Admin/Redis/frontend 回归和活动文档同步已完成。实际 dev server 浏览器验收按本阶段约定由用户执行；确认前阶段保持“验收中”，不把有限自动化 smoke 表述成完整人工产品验收。
 
 | 阶段 | 内容 | 依赖 | 状态 |
 |---|---|---|---|
@@ -23,7 +23,7 @@
 | B | 拆分显式 Conversation 持久化语义 | A | 已完成 |
 | C | 收口 Conversation 生命周期并提取 TaskSupervisor | B | 已完成 |
 | D | 收成可嵌入 AgentRuntime 与单一 finalization | C | 已完成 |
-| E | 集成验收、文档与 embedded smoke | C、D | 未开始 |
+| E | 集成验收、文档与 embedded smoke | C、D | 验收中（自动化完成） |
 
 依赖关系：
 
@@ -323,7 +323,11 @@ Embedded caller ────────────────→ AgentRuntime
 
 **进展**：
 
-- 尚未开始。
+- 2026-08-12 自动化实施完成。新增隔离子进程 embedded smoke：读取实际 `config/agents`、`config/tools` 和模型配置，重建 registry/effective toolsets，使用真实 builtin tool 对象、no-op hooks、event sink 与 fake LLM 直接调用 `AgentRuntime`；断言 outcome/事件顺序、Runtime 不产生 terminal，并确认没有加载应用 assembly、Router、RuntimeStore/SSE 或 Redis client 路径。
+- 活动文档已同步为 `Conversation Admission → TaskSupervisor → ConversationTurnHandler → AgentRuntime` 责任链，明确 Runtime 只返回 factual stop reason、Handler 独占 Artifact flush/terminal/events/response；`ARTIFACTFLOW_EXECUTION_TIMEOUT` 只覆盖 engine loop，Redis live coordination state 与 PostgreSQL durable state 不互相投影。
+- 清理活动代码与注释中的旧 Controller/factory 称谓；重新导出 OpenAPI 并生成前端类型，使阶段 D 已更新的 Admin endpoint 描述与生成物一致。退役入口扫描确认生产 `src/`、Router 和 deploy 路径不存在 `create_if_missing`、`ExecutionLauncher`、`ExecutionRunner`、`ExecutionController`、`controller_factory` 或 `runner.store`。
+- 自动化验收：阶段 A–E 目标矩阵 117 项通过；项目常规并行后端 lane 2047 项通过、2 subtests 通过；临时 Redis 7.4.9 上 RuntimeStore/StreamTransport external integration 39 项通过；前端 67 个文件、423 项通过。LiteLLM 仅提示环境未安装可选 `botocore`，不影响当前 provider 测试。
+- 按“有限 smoke + 用户自行运行 dev server 做 Web 实测”的范围，没有新增大型浏览器 E2E、正式 embedded SDK 或真实模型 smoke。待人工确认新/已有会话、inject/cancel/reconnect、single/bulk delete、terminal/Artifact 持久化和 Admin active 观测后，将阶段 E 标记完成。
 
 ### 整体完成条件
 
@@ -360,6 +364,7 @@ Embedded caller ────────────────→ AgentRuntime
 
 ## 变更日志
 
+- 2026-08-12 **阶段 E 自动化实施完成**：增加真实配置 + fake LLM 的隔离 embedded runtime smoke；同步活动架构/运维文档、旧命名与生成 API 描述；后端常规 lane 2047 项、Redis external 39 项、前端 423 项通过。阶段保持验收中，等待用户完成 dev server 浏览器 smoke。
 - 2026-08-12 **阶段 D 完成**：提取不依赖 Web/Conversation 持久化的 `AgentRuntime` 与明确 stop reasons，参数化 `entry_agent`；以 admitted-only `ConversationTurnHandler` 替换并删除旧 Controller/factory，所有 runtime 与 late cancel 汇入 flush 后唯一 terminal/events/response finalization。`PostProcessState` 必须携带 runtime factual stop reason，后处理取消不会把已经完成的 runtime 改写为系统取消，flush error 优先级保持不变。补齐 runtime drain、SSE transport push、engine-exit、artifact flush、event persistence 与 response update 的确定性取消测试；完整并行后端 2046 项通过。
 - 2026-08-12 **阶段 B 完成**：将 Conversation Manager 拆为显式 `create / require_owned / append_message`，删除隐式创建布尔参数和旧兼容入口；Chat/Controller 按 ID 来源分流且稳定 ID retry、parent/active_branch/title、删除 fail-closed 契约保持不变。未移动 lease、stream 或后台任务时序；完整后端 2046 项通过、45 项按环境跳过。
 - 2026-08-12 **阶段 B 持久化边界收紧**：删除 Controller 事件“无持久化目标即成功”、Conversation 更新/读取静默 no-op 和 SkillService 无 DB 测试模式；Controller 构造只接受完整且互斥的 `db_manager` / bound repositories 模式，registry snapshot 强制注入 DB credential resolver。手工 engine 改走与生产一致的短 session 路径；完整后端 2048 项通过、45 项按环境跳过。

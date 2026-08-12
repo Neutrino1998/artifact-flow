@@ -225,7 +225,7 @@ class TestUploadStagingAbort:
         ]
 
         # Reached the unified tail: finalize_metrics ran → started_at serialized
-        # to an ISO string (datetime would break controller's metadata write).
+        # to an ISO string (datetime would break the turn handler's metadata write).
         assert isinstance(result["execution_metrics"]["started_at"], str)
         assert "total_duration_ms" in result["execution_metrics"]
 

@@ -69,7 +69,7 @@ ready_timeout_seconds = 120
 
 | 变量 | 默认 | 何时调整 |
 |---|---:|---|
-| `ARTIFACTFLOW_EXECUTION_TIMEOUT` | `3600` 秒 | 单轮任务总 deadline |
+| `ARTIFACTFLOW_EXECUTION_TIMEOUT` | `3600` 秒 | Agent 引擎 loop 的 deadline；含权限等待，不含结束后的持久化 |
 | `ARTIFACTFLOW_PERMISSION_TIMEOUT` | `300` 秒 | 等待一次用户确认的时间 |
 | `ARTIFACTFLOW_MAX_CONCURRENT_TASKS` | `32` | 按模型、DB 和主机容量限制并发 |
 | `ARTIFACTFLOW_MAX_UPLOAD_SIZE` | `200 MiB` | 单文件上传上限；代理另有批量总量上限 |
@@ -81,6 +81,10 @@ ready_timeout_seconds = 120
 `src/config.py` 还有算法护栏和内部实现常量。它们即使能被环境变量覆盖，也不等于常规部署契约；没有具体容量或故障证据时不要照单调大。
 
 `ARTIFACTFLOW_MAX_CONCURRENT_TASKS` 对每个 Backend 进程内唯一的 TaskSupervisor capacity gate 生效。超过容量的 Conversation turn 保持 QUEUED：它继续持有并续租 Conversation lease，但尚未标记为可交互 RUNNING，因此 inject/cancel 会按现有 409 契约拒绝。多 Backend 副本必须使用 Redis，让 lease、interactive、interrupt、cancel 与 SSE 状态跨进程共享；进程内 TaskSupervisor 只保留本进程 task 引用，不承担崩溃恢复。
+
+`ARTIFACTFLOW_EXECUTION_TIMEOUT` 只包住 `AgentRuntime` 的引擎 loop。触发后 Runtime 返回 timeout stop reason，再由 Conversation turn 的统一结束路径写入 `timed_out` terminal、事件和展示 response；Artifact flush、事件写入等 post-processing 刻意位于该 deadline 之外。持久化查询由 `ARTIFACTFLOW_DB_COMMAND_TIMEOUT` 分别约束，因此不要把 execution timeout 当成包含所有 DB cleanup 的 HTTP 请求总时限。
+
+Redis 中的 lease、interactive、interrupt、cancel 和 stream 是会过期的 live coordination state，不是执行历史；PostgreSQL 中的 Conversation、MessageEvent、配置注册表和 Artifact 才是 durable state。Admin runtime 页面只读观察这些状态，不会把某一侧反写或同步成另一侧。未配置 Redis 的进程内模式只适合单 Backend，本地进程退出后其 live state 会自然消失。
 
 ## 出站 HTTPS 信任
 
