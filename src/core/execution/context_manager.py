@@ -454,6 +454,18 @@ class ContextManager:
         # running
         entries = sandbox_status.get("entries")
         lines = ['<sandbox_status state="running">']
+        recovery = sandbox_status.get("recovery")
+        if isinstance(recovery, dict) and recovery.get("succeeded") is True:
+            generation = xml_escape(
+                str(recovery.get("generation", sandbox_status.get("generation", 2)))
+            )
+            failure_kind = xml_escape(str(recovery.get("failure_kind", "runtime failure")))
+            lines.append(
+                f"This is fresh sandbox generation {generation}, started after "
+                f"{failure_kind}. The previous /workspace was discarded; mounted artifacts, "
+                "mounted skills, and unpersisted files from that generation are gone. "
+                "Re-mount or recreate anything still needed."
+            )
         if entries is None:
             lines.append("Workspace listing unavailable (run `ls /workspace` to check).")
         elif not entries:

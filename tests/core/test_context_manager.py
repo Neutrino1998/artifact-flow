@@ -1044,6 +1044,33 @@ class TestSandboxStatus:
                           sandbox_status=status)[-1]["content"]
         assert "Workspace (/workspace) is empty." in reminder
 
+    def test_recovered_generation_restates_destructive_workspace_reset(self):
+        agent = _FakeAgentConfig(tools={"bash": "auto"})
+        status = {
+            "state": "running",
+            "generation": 2,
+            "entries": [],
+            "truncated": False,
+            "recovery": {
+                "attempted": True,
+                "succeeded": True,
+                "generation": 2,
+                "workspace_reset": True,
+                "failure_kind": "oom",
+            },
+        }
+        reminder = _build(
+            agent, state=self._state(), tools={}, sandbox_status=status
+        )[-1]["content"]
+        assert "fresh sandbox generation 2" in reminder
+        assert "started after oom" in reminder
+        assert "previous /workspace was discarded" in reminder
+        assert "mounted artifacts" in reminder
+        assert "mounted skills" in reminder
+        assert "unpersisted files" in reminder
+        assert "Re-mount or recreate" in reminder
+        assert "Workspace (/workspace) is empty." in reminder
+
     def test_running_listing_failed_degrades(self):
         agent = _FakeAgentConfig(tools={"bash": "confirm"})
         status = {"state": "running", "entries": None, "truncated": False}

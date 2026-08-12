@@ -8,6 +8,7 @@ from config import config
 from tools.base import ToolPermission
 from tools.builtin.sandbox_ops import BashTool, create_sandbox_tools
 from tools.builtin.sandbox_session import (
+    SandboxCommandError,
     SandboxExecResult,
     SandboxUnavailableError,
 )
@@ -108,6 +109,31 @@ class TestBashTool:
         )(command="echo hi")
         assert not result.success
         assert "not found" in result.error
+        assert result.metadata == diagnostics
+
+    async def test_recovered_sandbox_still_returns_failed_tool_result_with_reset_notice(self):
+        diagnostics = {
+            "sandbox_failure": {"failure_kind": "oom"},
+            "sandbox_recovery": {
+                "attempted": True,
+                "succeeded": True,
+                "generation": 2,
+                "workspace_reset": True,
+            },
+        }
+        result = await BashTool(
+            FakeSession(
+                error=SandboxCommandError(
+                    "The command failed. A fresh empty sandbox has started successfully. "
+                    "The failed command was not retried.",
+                    diagnostics=diagnostics,
+                )
+            )
+        )(command="python eat_memory.py")
+
+        assert not result.success
+        assert "fresh empty sandbox" in result.error
+        assert "not retried" in result.error
         assert result.metadata == diagnostics
 
     async def test_blank_command_rejected(self):

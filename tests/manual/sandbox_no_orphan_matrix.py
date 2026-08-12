@@ -21,6 +21,8 @@
                      另起一个活跃 turn 验 reaper 零误杀(grace 外仍不碰活资源)
   9. 停机新鲜孤儿    grace 内(age << grace)的本进程孤儿:周期扫 skip,但 final_sweep
                      按 worker-id 绕 grace 收(闭合单副本 Redis 刚建即漏缺口)
+ 10. 容器死亡恢复    generation 1 写文件后外部 SIGKILL → 当前命令失败但自动换成
+                     generation 2 空现场；旧文件消失、后续显式命令可继续、原命令不重放
 
 每条跑完断言:daemon 上无该 turn label 的容器 + scratch 目录已删(双零残留)。
 顺带自验 aiodocker exec multiplexed stream 的 demux(stdout/stderr 分流)。
@@ -46,6 +48,7 @@ if len(sys.argv) > 1:
 
 from tools.builtin.sandbox_session import (  # noqa: E402
     LABEL_MESSAGE,
+    SandboxCommandError,
     SandboxSession,
     SandboxUnavailableError,
 )
@@ -408,6 +411,40 @@ async def case_9_final_sweep_fresh_orphan():
         await session._docker.close()
 
 
+async def case_10_empty_generation_recovery():
+    print("\n=== 10. 容器外部 SIGKILL → generation 2 空现场恢复 ===")
+    conv, msg = _ids()
+    session = SandboxSession(conv, msg)
+    try:
+        await session.exec("echo old-generation > old.txt")
+        old_path = os.path.join(session.workspace_dir, "old.txt")
+        assert os.path.exists(old_path)
+
+        # 模拟 OOM / runtime 外力杀：命令在飞时从 Docker 控制面杀容器。不要用容器内
+        # `kill 1`，PID namespace 的 init 语义会让它在部分 runtime 下不形成稳定触发。
+        failing = asyncio.create_task(session.exec("sleep 30"))
+        await asyncio.sleep(1)
+        await session._container.kill(signal="SIGKILL")
+        try:
+            await failing
+            assert False, "容器死亡时的在飞命令不应返回成功"
+        except SandboxCommandError as e:
+            recovery = e.diagnostics.get("sandbox_recovery", {})
+            assert recovery.get("succeeded") is True, recovery
+            assert recovery.get("generation") == 2, recovery
+            assert "not retried" in str(e)
+            print(f"  当前命令 loud-fail + generation 2 已启动: {e}")
+
+        assert session.generation == 2
+        assert not os.path.exists(old_path), "旧 generation 文件未被清空"
+        resumed = await session.exec("echo replacement-ok")
+        assert resumed.exit_code == 0 and "replacement-ok" in resumed.output
+        print("  旧 /workspace 已清空 ✓, 后续显式命令可继续 ✓")
+    finally:
+        await session.close()
+    await assert_no_residue("容器死亡后空现场恢复", session)
+
+
 async def main():
     print(f"镜像: {config.SANDBOX_IMAGE}")
     print(f"scratch 根: {config.SANDBOX_SCRATCH_ROOT}")
@@ -421,6 +458,7 @@ async def main():
     await case_7_stage_roundtrip()
     await case_8_reaper_collects_orphan()
     await case_9_final_sweep_fresh_orphan()
+    await case_10_empty_generation_recovery()
 
     print("\n" + "=" * 50)
     failed = [name for name, ok, _ in results if not ok]

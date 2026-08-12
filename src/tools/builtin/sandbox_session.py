@@ -50,6 +50,7 @@ LABEL_NAMESPACE = f"{SANDBOX_LABEL}.namespace"
 LABEL_CONVERSATION = f"{SANDBOX_LABEL}.conversation-id"
 LABEL_MESSAGE = f"{SANDBOX_LABEL}.message-id"
 LABEL_WORKER = f"{SANDBOX_LABEL}.worker-id"
+LABEL_GENERATION = f"{SANDBOX_LABEL}.generation"
 
 # 本进程(worker/副本)代次唯一标识,import 时生成一次。每个容器/scratch 目录都打上它,
 # reaper 的停机 final_sweep 据此**只无 grace 回收本进程自己的**资源(我的 turn 此刻都已
@@ -108,10 +109,14 @@ class SandboxError(Exception):
 
 
 class SandboxUnavailableError(SandboxError):
-    """容器创建失败 / 中途停止 / session 已关闭 —— 该 turn 沙盒不可用。"""
+    """启动/准入/sticky/恢复失败或 session 已关闭 —— 该 turn 沙盒不可用。"""
 
 
-class SandboxExecTimeoutError(SandboxError):
+class SandboxCommandError(SandboxError):
+    """当前命令失败，但 session 可能已换成一个可继续使用的空沙盒。"""
+
+
+class SandboxExecTimeoutError(SandboxCommandError):
     """asyncio 弃等护栏触发(exec 通道无响应,超出容器内 timeout + grace)。"""
 
 
@@ -128,7 +133,7 @@ class SandboxSession:
     """per-turn 沙盒容器壳。
 
     壳本身零成本;首个 exec 才 lazy 起容器。引擎对单 turn 内的工具调用是串行
-    执行(见 core/engine.py),故无并发起容器问题,不加锁。
+    执行(见 core/execution/engine.py),故无并发起容器问题,不加锁。
 
     close() 幂等,且每步独立 best-effort(容器 → scratch → client):任一步失败
     记日志继续,残留由 lease-anchored reaper(C-reap)兜底。
@@ -147,9 +152,10 @@ class SandboxSession:
         self._docker: Optional["aiodocker.Docker"] = None
         self._container = None
         self._closed = False
-        # sticky 失败通道:创建失败 / 准入水位拒绝 / watchdog 超额杀,本 turn 不重试
-        # (loud-fail 一次,后续调用立即复述原因)。失败原因多为环境性(镜像缺失 /
-        # daemon 不可达 / 池子满),turn 内重试只会重复烧启动超时或重蹈超额。
+        # sticky 失败通道:创建失败 / 准入水位拒绝 / watchdog 超额杀 / 恢复失败,
+        # 本 turn 不再重试(loud-fail 一次,后续调用立即复述原因)。已成功启动过的
+        # 容器若 OOM/死亡/exec 通道失效，会先尝试一次「删旧现场 + 起全新空容器」；
+        # 这不是状态恢复，旧 /workspace 与 /tmp 必须整体丢弃。
         self._sticky_failure: Optional[str] = None
         # 与 sticky 文案同生灭的 admin-only 结构化证据。后续工具重撞时
         # 也能复述原始根因，不会因容器已删而退化成通用错误。
@@ -160,6 +166,13 @@ class SandboxSession:
         )
         self._scratch_created = False
         self._watchdog_task: Optional[asyncio.Task] = None
+        # generation 1 是首次 lazy 容器；同 turn 至多 rollover 一次到 generation 2。
+        # bool 闸比可调计数更贴合产品契约，也让无限重启循环不可表达。
+        self._generation = 1
+        self._recovery_attempted = False
+        # 成功 rollover 后保留到 turn 结束，供每次动态状态注入持续纠正模型：
+        # 当前目录是空的新现场，历史中的 mount / skill / 中间文件均已失效。
+        self._last_recovery: Optional[dict] = None
 
     @property
     def started(self) -> bool:
@@ -168,7 +181,7 @@ class SandboxSession:
     @property
     def sticky_failure(self) -> Optional[str]:
         """本 turn 已记录的沙盒不可用原因(创建失败 / 准入拒绝 / 超额杀 /
-        容器中途死),None = 无。供不触发 ensure_container 的工具(persist)在
+        rollover 失败或次数用尽),None = 无。供不触发 ensure_container 的工具(persist)在
         其前置检查里复述配额失败,与 bash/mount 的 sticky 行为一致(P3)。"""
         return self._sticky_failure
 
@@ -176,6 +189,11 @@ class SandboxSession:
     def sticky_diagnostics(self) -> dict:
         """Sticky 失败的有界 admin-only 证据；调用方不应修改。"""
         return self._sticky_diagnostics
+
+    @property
+    def generation(self) -> int:
+        """当前沙盒代次；首次容器为 1，一次性空现场恢复成功后为 2。"""
+        return self._generation
 
     @staticmethod
     def _container_id(container: Any) -> str:
@@ -233,22 +251,45 @@ class SandboxSession:
         sticky 优先于 started 判定:超额杀后容器句柄已清但原因要复述。
         """
         if self._sticky_failure:
-            return {"state": "unavailable", "reason": self._sticky_failure}
+            snapshot = {
+                "state": "unavailable",
+                "reason": self._sticky_failure,
+            }
+            if self._generation > 1:
+                snapshot["generation"] = self._generation
+            return snapshot
         if not self.started:
-            return {"state": "not_started"}
+            snapshot = {"state": "not_started"}
+            if self._generation > 1:
+                snapshot["generation"] = self._generation
+            return snapshot
         cap = config.SANDBOX_STATUS_MAX_ENTRIES
         try:
             entries = sandbox_fs.list_dir(self.workspace_dir, max_entries=cap + 1)
         except OSError:
             logger.exception(f"workspace listing failed for {self.message_id}")
-            return {"state": "running", "entries": None, "truncated": False}
+            snapshot = {
+                "state": "running",
+                "entries": None,
+                "truncated": False,
+            }
+            if self._generation > 1:
+                snapshot["generation"] = self._generation
+            if self._last_recovery is not None:
+                snapshot["recovery"] = dict(self._last_recovery)
+            return snapshot
         truncated = len(entries) > cap
         shown = sorted(entries[:cap], key=lambda t: t[0])
-        return {
+        snapshot = {
             "state": "running",
             "entries": [(name, is_dir) for name, is_dir, _ in shown],
             "truncated": truncated,
         }
+        if self._generation > 1:
+            snapshot["generation"] = self._generation
+        if self._last_recovery is not None:
+            snapshot["recovery"] = dict(self._last_recovery)
+        return snapshot
 
     # ------------------------------------------------------------------
     # 容器生命周期
@@ -293,6 +334,7 @@ class SandboxSession:
                 LABEL_CONVERSATION: self.conversation_id,
                 LABEL_MESSAGE: self.message_id,
                 LABEL_WORKER: WORKER_ID,
+                LABEL_GENERATION: str(self._generation),
             },
             "HostConfig": host_config,
         }
@@ -349,7 +391,11 @@ class SandboxSession:
                     self._docker = self._docker_factory()
                 container = await self._docker.containers.create(
                     config=self._container_config(),
-                    name=f"af-sandbox-{self.message_id}",
+                    name=(
+                        f"af-sandbox-{self.message_id}"
+                        if self._generation == 1
+                        else f"af-sandbox-{self.message_id}-g{self._generation}"
+                    ),
                 )
                 # 先记句柄再 start:start 失败/中途取消时 close() 仍能删到它
                 self._container = container
@@ -405,7 +451,8 @@ class SandboxSession:
 
         logger.info(
             f"Sandbox container started for {self.message_id} "
-            f"(container_id={self._container_id(self._container)}, "
+            f"(generation={self._generation}, "
+            f"container_id={self._container_id(self._container)}, "
             f"image={config.SANDBOX_IMAGE}, runtime={config.SANDBOX_RUNTIME or 'default'})"
         )
 
@@ -505,6 +552,215 @@ class SandboxSession:
                 f"Over-quota sandbox container delete failed for {self.message_id}"
             )
 
+    async def _stop_watchdog(self) -> None:
+        """停止并清空当前 generation 的 watchdog；close / rollover 共用。"""
+        watchdog, self._watchdog_task = self._watchdog_task, None
+        if watchdog is None:
+            return
+        # 当前仅 close / exec 故障恢复会调用；防未来从 watchdog 自身调用时自等死。
+        if watchdog is asyncio.current_task():
+            return
+        watchdog.cancel()
+        try:
+            await watchdog
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception(f"Sandbox watchdog teardown failed for {self.message_id}")
+
+    @staticmethod
+    def _diagnostics_with_recovery(
+        diagnostics: dict,
+        *,
+        succeeded: bool,
+        generation: int,
+        workspace_reset: bool,
+        failure_stage: Optional[str] = None,
+    ) -> dict:
+        merged = dict(diagnostics)
+        recovery = {
+            "attempted": True,
+            "succeeded": succeeded,
+            "generation": generation,
+            "workspace_reset": workspace_reset,
+        }
+        if failure_stage is not None:
+            recovery["failure_stage"] = failure_stage
+        merged["sandbox_recovery"] = recovery
+        return merged
+
+    def _permanent_failure_after_recovery(
+        self,
+        cause: str,
+        diagnostics: dict,
+        *,
+        generation: int,
+        workspace_reset: bool,
+        failure_stage: str,
+    ) -> SandboxUnavailableError:
+        merged = self._diagnostics_with_recovery(
+            diagnostics,
+            succeeded=False,
+            generation=generation,
+            workspace_reset=workspace_reset,
+            failure_stage=failure_stage,
+        )
+        message = (
+            f"{cause} Automatic sandbox recovery failed; sandbox tools are unavailable "
+            "for the rest of this turn."
+        )
+        self._set_sticky_failure(message, merged)
+        return self._sticky_error()
+
+    async def _recover_after_runtime_failure(
+        self,
+        *,
+        container: Any,
+        failure_kind: str,
+        diagnostics: dict,
+    ) -> SandboxError:
+        """把已启动后损坏的容器 rollover 成一个全新空 generation。
+
+        当前命令永不重放：即使 Docker 没返回结果，它也可能已经产生过部分副作用。
+        新容器只有在旧容器删除和整个 scratch 删除都得到确认后才启动，故不会出现
+        两个 generation 共用同一 bind 目录。每 turn 只允许一次尝试；第二次故障、
+        任一清理/启动失败均转 sticky。workspace quota 不会走到本函数。
+        """
+        cause = self._failure_message(failure_kind)
+
+        # watchdog 可能恰在 exec 归因期间先写入更精确的 quota sticky；先停再复查，
+        # quota 事实优先且不消耗一次 runtime recovery。
+        await self._stop_watchdog()
+        if self._sticky_failure is not None:
+            return self._sticky_error()
+
+        if self._recovery_attempted:
+            logger.warning(
+                f"Sandbox recovery not retried for generation {self._generation} "
+                f"of {self.message_id} after {failure_kind}: one-turn allowance already used"
+            )
+            message = (
+                f"{cause} The sandbox has already been restarted once this turn, so it "
+                "will not be restarted again. Sandbox tools are unavailable for the rest "
+                "of this turn."
+            )
+            self._set_sticky_failure(message, diagnostics)
+            return self._sticky_error()
+
+        self._recovery_attempted = True
+        target_generation = self._generation + 1
+
+        # 删除成功或 404 才能交出旧句柄所有权；超时/不明错误保留句柄给 close/reaper，
+        # 且绝不删除 scratch / 起新容器。
+        try:
+            async with asyncio.timeout(EXEC_ABANDON_GRACE_SEC):
+                await container.delete(force=True)
+        except asyncio.CancelledError:
+            raise
+        except DockerError as e:
+            if e.status != 404:
+                logger.error(
+                    f"Sandbox recovery could not delete generation {self._generation} "
+                    f"for {self.message_id} (status={e.status}); refusing replacement"
+                )
+                return self._permanent_failure_after_recovery(
+                    cause,
+                    diagnostics,
+                    generation=target_generation,
+                    workspace_reset=False,
+                    failure_stage="container_delete",
+                )
+        except TimeoutError:
+            logger.error(
+                f"Sandbox recovery timed out deleting generation {self._generation} "
+                f"for {self.message_id}; refusing replacement"
+            )
+            return self._permanent_failure_after_recovery(
+                cause,
+                diagnostics,
+                generation=target_generation,
+                workspace_reset=False,
+                failure_stage="container_delete",
+            )
+        except Exception:
+            logger.exception(
+                f"Sandbox recovery failed deleting generation {self._generation} "
+                f"for {self.message_id}; refusing replacement"
+            )
+            return self._permanent_failure_after_recovery(
+                cause,
+                diagnostics,
+                generation=target_generation,
+                workspace_reset=False,
+                failure_stage="container_delete",
+            )
+
+        if self._container is container:
+            self._container = None
+
+        try:
+            if self._scratch_created:
+                await asyncio.to_thread(shutil.rmtree, self._scratch_dir)
+            self._scratch_created = False
+        except FileNotFoundError:
+            self._scratch_created = False
+        except Exception:
+            logger.exception(
+                f"Sandbox recovery failed clearing scratch for generation "
+                f"{self._generation} ({self.message_id}); refusing replacement"
+            )
+            return self._permanent_failure_after_recovery(
+                cause,
+                diagnostics,
+                generation=target_generation,
+                workspace_reset=False,
+                failure_stage="workspace_cleanup",
+            )
+
+        self._generation = target_generation
+        try:
+            await self.ensure_container()
+        except asyncio.CancelledError:
+            raise
+        except SandboxError:
+            # ensure_container 已按启动故障类型写 ops 日志；这里把模型面契约收回到
+            # 原命令失败 + recovery 失败，并保留原始 runtime 诊断为主证据。
+            return self._permanent_failure_after_recovery(
+                cause,
+                diagnostics,
+                generation=target_generation,
+                workspace_reset=True,
+                failure_stage="container_start",
+            )
+
+        recovery = {
+            "attempted": True,
+            "succeeded": True,
+            "generation": target_generation,
+            "workspace_reset": True,
+            "failure_kind": failure_kind,
+        }
+        self._last_recovery = recovery
+        merged = self._diagnostics_with_recovery(
+            diagnostics,
+            succeeded=True,
+            generation=target_generation,
+            workspace_reset=True,
+        )
+        message = (
+            f"{cause} The failed command was not retried. A fresh empty sandbox has "
+            "started successfully. Everything previously under /workspace, including "
+            "mounted artifacts, mounted skills, and unpersisted files, was discarded. "
+            "Re-mount or recreate required files before continuing."
+        )
+        logger.info(
+            f"Sandbox recovered with empty generation {target_generation} for "
+            f"{self.message_id} after {failure_kind}"
+        )
+        if failure_kind == "exec_channel_timeout":
+            return SandboxExecTimeoutError(message, diagnostics=merged)
+        return SandboxCommandError(message, diagnostics=merged)
+
     async def close(self) -> None:
         """拆容器 + 删 scratch + 关 client。幂等;每步独立 best-effort。
 
@@ -516,15 +772,7 @@ class SandboxSession:
         self._closed = True
 
         # 先停 watchdog 再拆容器:避免它和 close 并发删同一容器 / 扫已删目录
-        watchdog, self._watchdog_task = self._watchdog_task, None
-        if watchdog is not None:
-            watchdog.cancel()
-            try:
-                await watchdog
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                logger.exception(f"Sandbox watchdog teardown failed for {self.message_id}")
+        await self._stop_watchdog()
 
         container, self._container = self._container, None
         if container is not None:
@@ -678,17 +926,15 @@ class SandboxSession:
         if failure_kind == "oom":
             return (
                 f"The sandbox container exceeded its {config.SANDBOX_MEM_LIMIT_MB}MB "
-                "memory limit and was terminated. Sandbox tools are unavailable for this turn."
+                "memory limit and was terminated."
             )
         if failure_kind == "container_stopped":
+            return "The sandbox container died while the command was running."
+        if failure_kind == "exec_channel_timeout":
             return (
-                "The sandbox container died while the command was running. "
-                "Sandbox tools are unavailable for this turn."
+                "The sandbox command channel remained unresponsive past the command timeout."
             )
-        return (
-            "The sandbox command channel failed. "
-            "Sandbox tools are unavailable for this turn."
-        )
+        return "The sandbox command channel failed."
 
     # ------------------------------------------------------------------
     # exec
@@ -726,7 +972,8 @@ class SandboxSession:
                 output, truncated = await self._drain_exec(exec_)
                 exit_code = await self._resolve_exit_code(exec_)
         except TimeoutError as e:
-            # 弃等不等于杀死:容器内进程可能还活着,turn 末拆容器收尾
+            # 弃等不等于杀死:容器内进程可能还活着。原命令绝不重放；只有确认
+            # force-delete 旧容器 + 清空 scratch 后才起一个新 generation。
             duration = loop.time() - started_at
             diagnostics = self._build_failure_diagnostics(
                 container,
@@ -738,14 +985,14 @@ class SandboxSession:
                 f"Sandbox exec abandoned after "
                 f"{config.SANDBOX_COMMAND_TIMEOUT + EXEC_ABANDON_GRACE_SEC}s "
                 f"(container_id={self._container_id(container)}, msg={self.message_id}); "
-                "container will be torn down at turn end"
+                "attempting one-time empty sandbox recovery"
             )
-            raise SandboxExecTimeoutError(
-                "Command did not return (exec channel unresponsive past the "
-                f"{config.SANDBOX_COMMAND_TIMEOUT}s command timeout). "
-                "The sandbox will be torn down at the end of this turn.",
+            error = await self._recover_after_runtime_failure(
+                container=container,
+                failure_kind="exec_channel_timeout",
                 diagnostics=diagnostics,
-            ) from e
+            )
+            raise error from e
         except DockerError as e:
             # 容器中途消失(watchdog 超额杀 / 外力 rm):优先按 sticky 归因
             if self._sticky_failure is not None:
@@ -781,9 +1028,12 @@ class SandboxSession:
                 e.message,
                 diagnostics["sandbox_failure"],
             )
-            message = self._failure_message(failure_kind)
-            self._set_sticky_failure(message, diagnostics)
-            raise self._sticky_error() from e
+            error = await self._recover_after_runtime_failure(
+                container=container,
+                failure_kind=failure_kind,
+                diagnostics=diagnostics,
+            )
+            raise error from e
 
         # 探针②:watchdog 杀容器时 in-flight exec 多半正常返回 exit=137(stream
         # EOF、ExitCode 可解析)—— 裸 137 会被误读;sticky 已置时按配额失败归因。
@@ -815,9 +1065,12 @@ class SandboxSession:
                 self._container_id(container),
                 diagnostics["sandbox_failure"],
             )
-            message = self._failure_message(failure_kind)
-            self._set_sticky_failure(message, diagnostics)
-            raise self._sticky_error()
+            error = await self._recover_after_runtime_failure(
+                container=container,
+                failure_kind=failure_kind,
+                diagnostics=diagnostics,
+            )
+            raise error
 
         return SandboxExecResult(
             exit_code=exit_code,
