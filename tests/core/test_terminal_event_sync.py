@@ -10,7 +10,7 @@
 副本忘了同步,就在这里红线。
 """
 
-from core.events import TERMINAL_EVENT_TYPES, StreamEventType
+from core.execution.events import TERMINAL_EVENT_TYPES, StreamEventType
 
 
 def test_canonical_set_matches_expected():
@@ -39,8 +39,8 @@ def test_inmemory_transport_terminal_set_in_sync():
 
 
 def test_stream_router_terminal_set_in_sync():
-    from api.routers.stream import _TERMINAL_EVENTS
+    from api.services.stream_response import _TERMINAL_EVENTS
     assert set(_TERMINAL_EVENTS) == TERMINAL_EVENT_TYPES, (
-        "stream router._TERMINAL_EVENTS 与权威集合漂移 —— "
+        "stream response._TERMINAL_EVENTS 与权威集合漂移 —— "
         "SSE 不会在缺失的终态上关闭连接 (P1#2)"
     )

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 from sqlalchemy import select
 
 from api.dependencies import get_conversation_execution_service, get_runtime_store
-from core.conversation_manager import ConversationManager
+from core.management.conversation_manager import ConversationManager
 from db.models import Conversation, User
 from repositories.conversation_repo import ConversationRepository
 

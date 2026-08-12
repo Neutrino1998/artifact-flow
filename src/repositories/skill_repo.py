@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import DepartmentSkillRule, Skill, User, UserSkill
+from repositories.base import DuplicateError
 
 
 class SkillRepository:
@@ -203,15 +204,19 @@ class SkillRepository:
             )
         ).scalar_one_or_none() is not None
 
-    def stage_insert_skill(self, **fields) -> None:
-        """stage 一行新 skill(commit 归 Manager;并发撞 slug 由 commit 的
-        IntegrityError 暴露,Manager 折成 409)。"""
+    async def insert_skill(self, **fields) -> None:
+        """Insert and commit one skill, normalizing concurrent slug collisions."""
         self._session.add(Skill(**fields))
+        try:
+            await self._session.commit()
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise DuplicateError("Skill", fields.get("slug")) from exc
 
     async def delete_skill(self, skill_id: str) -> None:
-        """stage 删除(commit 归 Manager)。user_skill / dept 规则由 DB FK CASCADE 清,
-        零 app-side 清理。"""
+        """Delete one skill; related rules disappear through FK cascades."""
         await self._session.execute(delete(Skill).where(Skill.id == skill_id))
+        await self._session.commit()
 
     async def clear_dept_rules(self, skill_id: str) -> None:
         """Clear department rules for one skill when its visibility changes."""
@@ -219,9 +224,12 @@ class SkillRepository:
             delete(DepartmentSkillRule).where(DepartmentSkillRule.skill_id == skill_id)
         )
 
+    async def commit_changes(self) -> None:
+        """Commit mutations of rows loaded by this repository."""
+        await self._session.commit()
+
     async def set_user_override(self, user_id: str, skill_id: str, enabled: bool) -> None:
-        """Upsert user_skill 稀疏覆盖行(个人 enable/disable)。stage-only,commit 归 Manager
-        (事务边界 = 每个 use-case,同 ToolRegistryManager)。
+        """Upsert and commit one sparse personal enable/disable override.
 
         SELECT→INSERT 非原子:两请求(两标签页/重试客户端)同用户同 skill 首次并发 toggle 会
         都读到 None、都 insert → 后者撞复合 PK IntegrityError。捕获 → rollback → 重读改 UPDATE
@@ -255,3 +263,4 @@ class SkillRepository:
             await self._session.rollback()
             await _apply()
             await self._session.flush()
+        await self._session.commit()

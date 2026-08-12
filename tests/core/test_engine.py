@@ -9,9 +9,9 @@ import pytest
 from dataclasses import dataclass, field
 from unittest.mock import patch, AsyncMock
 
-from core.agent_runtime import RuntimeHooks, StopReason
-from core.engine import create_initial_state, execute_loop
-from core.events import StreamEventType
+from core.execution.agent_runtime import RuntimeHooks, StopReason
+from core.execution.engine import create_initial_state, execute_loop
+from core.execution.events import StreamEventType
 from tests.core._toolset import effective_for
 
 

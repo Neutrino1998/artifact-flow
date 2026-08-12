@@ -1,17 +1,29 @@
 """
 API Routers
 
-Contains route handlers for admin, auth, chat, artifacts, and streaming.
+Contains public router modules; admin-only routers live in ``routers.admin``.
 """
 
-from . import admin, admin_site_config, auth, chat, artifacts, notifications, stream
+from . import (
+    admin,
+    artifacts,
+    auth,
+    chat,
+    departments,
+    meta,
+    notifications,
+    skills,
+    stream,
+)
 
 __all__ = [
     "admin",
-    "admin_site_config",
     "auth",
     "chat",
     "artifacts",
+    "departments",
+    "meta",
     "notifications",
+    "skills",
     "stream",
 ]

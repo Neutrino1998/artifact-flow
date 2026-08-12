@@ -51,7 +51,7 @@ from tools.builtin.sandbox_session import (  # noqa: E402
 )
 from tools.builtin.sandbox_ops import MountArtifactTool, PersistFileTool  # noqa: E402
 from api.services.runtime_store import InMemoryRuntimeStore  # noqa: E402
-from core.task_supervisor import TaskSupervisor  # noqa: E402
+from core.execution.task_supervisor import TaskSupervisor  # noqa: E402
 
 PASS, FAIL = "\033[32mPASS\033[0m", "\033[31mFAIL\033[0m"
 results: list[tuple[str, bool, str]] = []

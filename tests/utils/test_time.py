@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from core.events import ExecutionEvent
+from core.execution.events import ExecutionEvent
 from utils.time import utc_now
 
 

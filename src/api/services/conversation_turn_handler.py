@@ -4,23 +4,23 @@ import asyncio
 from typing import Awaitable, Callable, Dict, List, Optional, Any, AsyncGenerator, Tuple
 from sqlalchemy.exc import IntegrityError
 
-from core.agent_runtime import (
+from core.execution.agent_runtime import (
     AgentInvocation,
     AgentRuntime,
     EngineOutcome,
     RuntimeHooks,
     StopReason,
 )
-from core.engine import EmptyTurnInputError, create_initial_state, turn_has_content
-from core.events import StreamEventType
-from core.skill_guidance import can_access_skill_bundle, render_skill_guidance
-from core.native_call_closure import (
+from core.execution.engine import EmptyTurnInputError, create_initial_state, turn_has_content
+from core.execution.events import StreamEventType
+from core.capabilities.skill_guidance import can_access_skill_bundle, render_skill_guidance
+from core.execution.native_call_closure import (
     assert_native_calls_closed,
     close_open_native_calls,
     terminal_reason_for_stop,
 )
-from core.conversation_manager import ConversationManager
-from core.post_processing import (
+from core.management.conversation_manager import ConversationManager
+from core.execution.post_processing import (
     PostProcessState,
     choose_response_for_terminal,
     decide_terminal,

@@ -25,7 +25,7 @@ from api.dependencies import (
     get_stream_transport,
     get_task_supervisor,
 )
-from core.task_supervisor import TaskScope, TaskSupervisor
+from core.execution.task_supervisor import TaskScope, TaskSupervisor
 import api.dependencies as deps
 
 

@@ -7,17 +7,16 @@ Artifacts Router
 - GET /api/v1/artifacts/{session_id}/{artifact_id}/versions/{version} - 特定版本
 """
 
-from dataclasses import dataclass
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
 from config import config
 from api.dependencies import get_artifact_service, get_conversation_manager, get_current_user
 from api.artifact_raw_response import RAW_ARTIFACT_RESPONSES, build_artifact_blob_response
 from api.services.auth import TokenPayload
-from core.conversation_manager import ConversationManager
+from core.management.conversation_manager import ConversationManager
 from api.schemas.artifact import (
     ArtifactListResponse,
     ArtifactResponse,
@@ -26,7 +25,6 @@ from api.schemas.artifact import (
     VersionSummary,
 )
 from tools.builtin.artifact_service import ArtifactService
-from utils.doc_converter import DocConverter
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -40,81 +38,6 @@ async def _verify_session_ownership(
     """校验 session（= conversation）归属当前用户"""
     if not await conversation_manager.verify_ownership(session_id, user.user_id):
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
-
-
-@dataclass
-class ConvertedUpload:
-    """One uploaded file after size-check + conversion, before any DB write.
-
-    Phase-1 output of POST /chat's two-phase attachment flow (convert-all →
-    commit-all). Holds the converted text representation, plus — for blob-backed
-    types (images / rich formats) — the raw bytes to persist into ArtifactBlob.
-    XOR: a blob upload carries content="" and content_type = the blob's true MIME
-    (no separate blob MIME). Pure-text uploads carry blob=None and free their bytes,
-    so a batch of text files does not pin raw bytes in RAM; an image/docx batch
-    necessarily retains its bytes (they must be stored anyway).
-    """
-    filename: str
-    content: str
-    content_type: str
-    metadata: dict
-    blob: bytes | None = None
-
-
-async def convert_uploaded_file(file: UploadFile) -> ConvertedUpload:
-    """Size-check + read + convert ONE uploaded file. Performs NO DB writes.
-
-    Raises HTTPException on oversize (422), unsupported/invalid file (422), or
-    conversion failure (500). Separated from the DB commit so POST /chat can
-    validate+convert every attachment BEFORE creating the conversation or any
-    artifact row: a bad file in the batch then aborts with zero DB state (no
-    ghost conversation, no orphan artifacts) instead of leaving committed the
-    files that happened to precede it in the loop. convert() is pure (bytes →
-    text, no DB / session needed), which is what makes the early phase possible.
-    """
-    # Size-check BEFORE read so an oversize part is rejected without
-    # materializing it in RAM. Starlette's multipart parser spools each part to
-    # a temp file (rolls to disk past ~1MB) and sets UploadFile.size to the full
-    # part length — so reading a 1GB part here would spike RAM even though
-    # parsing kept it on disk. Caddy caps the total multipart body at the edge;
-    # this is the per-file in-app guard for anything that bypasses it.
-    max_mb = config.MAX_UPLOAD_SIZE / 1024 / 1024
-    if file.size is not None and file.size > config.MAX_UPLOAD_SIZE:
-        detail = f"File too large: {file.size / 1024 / 1024:.1f}MB (max {max_mb:.0f}MB)"
-        # 体积超限在进 converter 前就拒,也要落原因(同 ValueError 分支),否则
-        # grep req-id 对超大文件仍只看到一条裸 422 access log。
-        logger.warning(f"Upload rejected (422) for {file.filename!r}: {detail}")
-        raise HTTPException(status_code=422, detail=detail)
-    file_bytes = await file.read()
-    # Fallback if the parser didn't populate .size (keeps the 422 contract;
-    # the bytes are already in RAM by here, so the pre-check above is the real
-    # memory guard).
-    if len(file_bytes) > config.MAX_UPLOAD_SIZE:
-        detail = f"File too large: {len(file_bytes) / 1024 / 1024:.1f}MB (max {max_mb:.0f}MB)"
-        logger.warning(f"Upload rejected (422) for {file.filename!r}: {detail}")
-        raise HTTPException(status_code=422, detail=detail)
-
-    converter = DocConverter()
-    try:
-        result = await converter.convert(file_bytes, file.filename or "untitled")
-    except ValueError as e:
-        # 预期内的客户端错误(改后缀 / 超限 / 编码失败):用 WARNING 落原因,把
-        # req-id ↔ 拒绝理由绑起来(否则 grep req-id 只看到一条 422 access log,
-        # 看不出为什么)。不用 exception —— 无需堆栈,reason 字符串足够。
-        logger.warning(f"Upload rejected (422) for {file.filename!r}: {e}")
-        raise HTTPException(status_code=422, detail=str(e))
-    except RuntimeError as e:
-        logger.exception(f"File conversion failed for {file.filename!r}: {e}")
-        error_detail = str(e) if config.DEBUG else "Internal server error"
-        raise HTTPException(status_code=500, detail=error_detail)
-
-    return ConvertedUpload(
-        filename=file.filename or "untitled",
-        content=result.content,
-        content_type=result.content_type,
-        metadata=result.metadata or {},
-        blob=result.blob,
-    )
 
 
 @router.get("/{session_id}", response_model=ArtifactListResponse)

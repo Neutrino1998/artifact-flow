@@ -28,12 +28,6 @@ from api.dependencies import (
 )
 from api.middleware import RequestContextMiddleware
 from api.routers import (
-    admin,
-    admin_department_access,
-    admin_site_config,
-    admin_skills,
-    admin_tools,
-    admin_users,
     artifacts,
     auth,
     chat,
@@ -42,6 +36,14 @@ from api.routers import (
     notifications,
     skills,
     stream,
+)
+from api.routers.admin import (
+    department_access as admin_department_access,
+    observability as admin_observability,
+    site_config as admin_site_config,
+    skills as admin_skills,
+    tools as admin_tools,
+    users as admin_users,
 )
 from observability import (
     LoopLagWatchdog, DeadmanSwitch, RuntimeSampler, JsonlSink,
@@ -373,7 +375,7 @@ def create_app() -> FastAPI:
         tags=["stream"]
     )
     app.include_router(
-        admin.router,
+        admin_observability.router,
         prefix="/api/v1/admin",
         tags=["admin"]
     )

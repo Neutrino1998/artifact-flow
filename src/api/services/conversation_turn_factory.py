@@ -13,8 +13,8 @@ from api.dependencies import (
 from api.services.runtime_store import RuntimeStore
 from api.services.stream_transport import StreamTransport
 from api.services.conversation_turn_handler import ConversationTurnHandler
-from core.engine import EmptyTurnInputError
-from core.task_supervisor import TaskScope
+from core.execution.engine import EmptyTurnInputError
+from core.execution.task_supervisor import TaskScope
 from utils.logger import get_logger, get_request_id
 from utils.time import utc_now
 
@@ -68,10 +68,10 @@ async def create_turn_handler(
     The Conversation execution service supplies the TaskScope and RuntimeStore;
     direct callers should use that service rather than assemble this factory.
     """
-    from core.department_resolver import load_ancestor_ids
-    from core.effective_skillset import resolve_effective_skillset
-    from core.effective_toolset import resolve_all, unit_visible_by_department
-    from core.agent_runtime import RuntimeHooks
+    from repositories.department_repo import load_ancestor_ids
+    from core.capabilities.effective_skillset import resolve_effective_skillset
+    from core.capabilities.effective_toolset import resolve_all, unit_visible_by_department
+    from core.execution.agent_runtime import RuntimeHooks
     from reconcile.snapshot import (
         hydrate_mcp_tools,
         load_registry_snapshot_with_unit_matches,

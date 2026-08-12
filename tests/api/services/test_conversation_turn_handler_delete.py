@@ -20,8 +20,8 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from api.services.conversation_turn_handler import ConversationTurnHandler
-from core.agent_runtime import RuntimeHooks
-from core.events import StreamEventType
+from core.execution.agent_runtime import RuntimeHooks
+from core.execution.events import StreamEventType
 from repositories.base import NotFoundError
 
 
@@ -114,7 +114,7 @@ class TestMetadataPreview:
         async def fake_execute_loop(**kwargs):
             return _make_engine_noop_state(kwargs["state"]["message_id"])
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             events = await _consume(ctrl.run(
                 user_input="review this",
                 conversation_id="conv-test",
@@ -147,7 +147,7 @@ class TestSetupNoResurrection:
         ctrl = _make_handler(cm, _make_mock_event_repo(), _make_mock_artifact_service())
 
         execute = AsyncMock()
-        with patch("core.agent_runtime.execute_loop", execute):
+        with patch("core.execution.agent_runtime.execute_loop", execute):
             events = await _consume(ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
@@ -169,7 +169,7 @@ class TestSetupNoResurrection:
         ctrl = _make_handler(cm, _make_mock_event_repo(), _make_mock_artifact_service())
 
         execute = AsyncMock()
-        with patch("core.agent_runtime.execute_loop", execute):
+        with patch("core.execution.agent_runtime.execute_loop", execute):
             events = await _consume(ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
@@ -197,7 +197,7 @@ class TestPostProcessingSkipOnDelete:
         async def fake_execute_loop(**kwargs):
             return _make_engine_noop_state(kwargs["state"]["message_id"])
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             events = await _consume(ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
@@ -233,7 +233,7 @@ class TestPostProcessingSkipOnDelete:
         async def fake_execute_loop(**kwargs):
             return _make_engine_noop_state(kwargs["state"]["message_id"])
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             events = await _consume(ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
@@ -263,7 +263,7 @@ class TestPostProcessingSkipOnDelete:
         ctrl = _make_handler(cm, er, am)
 
         # Engine emits one new event so _persist_events actually attempts batch_create
-        from core.events import ExecutionEvent
+        from core.execution.events import ExecutionEvent
 
         async def fake_execute_loop(**kwargs):
             state = kwargs["state"]
@@ -275,7 +275,7 @@ class TestPostProcessingSkipOnDelete:
             ))
             return {**_make_engine_noop_state(state["message_id"]), "events": state["events"]}
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             events = await _consume(ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
@@ -305,7 +305,7 @@ class TestPostProcessingSkipOnDelete:
         async def fake_execute_loop(**kwargs):
             return _make_engine_noop_state(kwargs["state"]["message_id"])
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             events = await _consume(ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",

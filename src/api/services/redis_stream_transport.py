@@ -28,7 +28,7 @@ from utils.logger import get_logger, get_request_id
 logger = get_logger("ArtifactFlow")
 
 # 终结事件类型(consumer 见到即 return)。本地副本——传输层不依赖执行语义;
-# 与 core.events.TERMINAL_EVENT_TYPES 的一致性由 tests/core/test_terminal_event_sync.py 守护。
+# 与 core.execution.events.TERMINAL_EVENT_TYPES 的一致性由 tests/core/test_terminal_event_sync.py 守护。
 _TERMINAL_EVENTS = frozenset(("complete", "cancelled", "timed_out", "error"))
 
 # XADD + 首次 EXPIRE 原子合一。pipeline(transaction=False) 只是批量发送、非原子：

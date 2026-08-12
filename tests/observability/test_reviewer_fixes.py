@@ -47,7 +47,7 @@ class _FakeSupervisor:
 
 def test_task_supervisor_long_running_count():
     """TaskSupervisor.long_running_count returns ages over threshold."""
-    from core.task_supervisor import TaskSupervisor
+    from core.execution.task_supervisor import TaskSupervisor
 
     supervisor = TaskSupervisor(max_concurrent=4)
     now = time.monotonic()
@@ -64,7 +64,7 @@ def test_task_supervisor_long_running_count():
 
 def test_task_supervisor_long_running_empty():
     """No tracked tasks → 0, no exception."""
-    from core.task_supervisor import TaskSupervisor
+    from core.execution.task_supervisor import TaskSupervisor
 
     supervisor = TaskSupervisor(max_concurrent=4)
     assert supervisor.long_running_count(60) == 0

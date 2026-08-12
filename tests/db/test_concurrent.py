@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from config import config
-from core.skill_manager import SkillCountLimitError, SkillManager
+from core.management.skill_manager import SkillCountLimitError, SkillManager
 from db.database import DatabaseManager
 from db.models import Skill, User
 from repositories.user_repo import UserRepository

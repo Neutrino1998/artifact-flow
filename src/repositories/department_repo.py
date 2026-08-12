@@ -9,11 +9,33 @@ Department Repository
 
 from typing import Optional, List
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Department, User
 from repositories.base import BaseRepository
+from repositories.base import DuplicateError
+
+
+async def load_ancestor_ids(
+    session: AsyncSession, department_id: Optional[str]
+) -> List[str]:
+    """Return ``[self, parent, ..., root]`` with cycle protection."""
+    if not department_id:
+        return []
+    ids: List[str] = []
+    seen: set[str] = set()
+    current: Optional[str] = department_id
+    while current and current not in seen:
+        seen.add(current)
+        ids.append(current)
+        current = (
+            await session.execute(
+                select(Department.parent_id).where(Department.id == current)
+            )
+        ).scalar_one_or_none()
+    return ids
 
 
 class DepartmentRepository(BaseRepository[Department]):
@@ -38,6 +60,17 @@ class DepartmentRepository(BaseRepository[Department]):
             select(Department).order_by(Department.parent_id, Department.name)
         )
         return list(result.scalars().all())
+
+    async def user_counts_by_department(self) -> dict[str, int]:
+        """Return direct-user counts keyed by department id."""
+        rows = (
+            await self._session.execute(
+                select(User.department_id, func.count())
+                .where(User.department_id.is_not(None))
+                .group_by(User.department_id)
+            )
+        ).all()
+        return {dept_id: count for dept_id, count in rows}
 
     async def find_by_parent_and_name(
         self, parent_id: Optional[str], name: str
@@ -118,3 +151,34 @@ class DepartmentRepository(BaseRepository[Department]):
             cursor = row.scalar_one_or_none()
         # 走到这里说明链超过 100 层 — 数据已经异常，按环处理拒绝
         return True
+
+    async def create_department(
+        self,
+        *,
+        department_id: str,
+        parent_id: Optional[str],
+        name: str,
+    ) -> Department:
+        """Create and commit one department, normalizing uniqueness races."""
+        department = Department(id=department_id, parent_id=parent_id, name=name)
+        self._session.add(department)
+        try:
+            await self._session.flush()
+            await self._session.commit()
+            await self._session.refresh(department)
+            return department
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise DuplicateError("Department", (parent_id, name)) from exc
+
+    async def update_department(self, department: Department) -> Department:
+        """Commit a rename/move and normalize sibling-name races."""
+        conflict_key = (department.parent_id, department.name)
+        try:
+            await self._session.flush()
+            await self._session.commit()
+            await self._session.refresh(department)
+            return department
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise DuplicateError("Department", conflict_key) from exc

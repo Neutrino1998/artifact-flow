@@ -4,7 +4,7 @@
 (非绑定)、缺席 unit 跳过、resolve_all 全 agent。
 """
 
-from core.effective_toolset import (
+from core.capabilities.effective_toolset import (
     EffectiveToolset,
     resolve_all,
     resolve_effective_toolset,

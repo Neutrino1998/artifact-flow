@@ -21,10 +21,12 @@ from api.services.conversation_lease import (
 )
 from api.services.runtime_store import RuntimeStore
 from api.services.stream_transport import StreamTransport
-from core.conversation_manager import ConversationManager
-from core.events import StreamEventType
-from core.task_supervisor import TaskQueued, TaskScope, TaskSupervisor
-from repositories.base import NotFoundError
+from core.management.conversation_manager import (
+    ConversationManager,
+    ConversationResourceNotFoundError,
+)
+from core.execution.events import StreamEventType
+from core.execution.task_supervisor import TaskQueued, TaskScope, TaskSupervisor
 from repositories.conversation_repo import ConversationRepository
 from utils.logger import get_logger, set_request_context
 from utils.time import utc_now
@@ -416,7 +418,7 @@ class ConversationExecutionService:
     ) -> None:
         await self._require_owned(conversation_id, user_id)
         if not await self._message_belongs(conversation_id, message_id):
-            raise NotFoundError("Message", message_id)
+            raise ConversationResourceNotFoundError("Message", message_id)
         result = await self._store.resolve_interrupt(
             message_id,
             call_id,
@@ -456,7 +458,7 @@ class ConversationExecutionService:
                 deleted = await manager.delete_conversation(conversation_id)
             self._ensure_lease(lease)
             if not deleted:
-                raise NotFoundError("Conversation", conversation_id)
+                raise ConversationResourceNotFoundError("Conversation", conversation_id)
         finally:
             await lease.release()
 
@@ -472,7 +474,7 @@ class ConversationExecutionService:
             seen.add(conversation_id)
             try:
                 await self.delete(conversation_id, user_id)
-            except NotFoundError:
+            except ConversationResourceNotFoundError:
                 failed.append(BulkDeleteFailure(conversation_id, "not_found"))
             except ConversationExecutionConflict:
                 failed.append(BulkDeleteFailure(conversation_id, "active_execution"))

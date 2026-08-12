@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from api.dependencies import get_current_user, get_site_config_manager
 from api.schemas.site_config import SiteNotificationsResponse
 from api.services.auth import TokenPayload
-from core.site_config_manager import SiteConfigManager
+from core.management.site_config_manager import SiteConfigManager
 
 router = APIRouter()
 

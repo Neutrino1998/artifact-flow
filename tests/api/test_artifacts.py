@@ -204,7 +204,7 @@ class TestUploadSizeGuard:
     async def test_oversize_rejected_before_read(self, monkeypatch):
         from fastapi import HTTPException
         from config import config as cfg
-        from api.routers import artifacts as art
+        from api.services import upload_conversion
 
         monkeypatch.setattr(cfg, "MAX_UPLOAD_SIZE", 10)
         f = self._FakeUpload(size=11)  # parser-reported part length over the cap
@@ -212,7 +212,7 @@ class TestUploadSizeGuard:
             # The size guard lives in convert_uploaded_file (phase 1, pure
             # transform). The old convert_and_create_artifact wrapper was removed
             # when uploads moved to in-engine staging (no immediate commit).
-            await art.convert_uploaded_file(f)
+            await upload_conversion.convert_uploaded_file(f)
         assert ei.value.status_code == 422
         assert "too large" in ei.value.detail.lower()
         # The whole point: the body was never materialized.
@@ -221,7 +221,7 @@ class TestUploadSizeGuard:
     async def test_fallback_len_check_when_size_unset(self, monkeypatch):
         from fastapi import HTTPException
         from config import config as cfg
-        from api.routers import artifacts as art
+        from api.services import upload_conversion
 
         monkeypatch.setattr(cfg, "MAX_UPLOAD_SIZE", 10)
         # .size is None → pre-check skipped; the post-read len() guard catches it.
@@ -230,7 +230,7 @@ class TestUploadSizeGuard:
             # The size guard lives in convert_uploaded_file (phase 1, pure
             # transform). The old convert_and_create_artifact wrapper was removed
             # when uploads moved to in-engine staging (no immediate commit).
-            await art.convert_uploaded_file(f)
+            await upload_conversion.convert_uploaded_file(f)
         assert ei.value.status_code == 422
         assert f.read_called is True
 

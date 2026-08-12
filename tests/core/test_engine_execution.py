@@ -15,9 +15,9 @@ from unittest.mock import patch
 
 import pytest
 
-from core.agent_runtime import RuntimeHooks, StopReason
-from core.engine import create_initial_state, execute_loop
-from core.events import StreamEventType, ExecutionEvent
+from core.execution.agent_runtime import RuntimeHooks, StopReason
+from core.execution.engine import create_initial_state, execute_loop
+from core.execution.events import StreamEventType, ExecutionEvent
 from models.llm import LLMContextOverflowError
 from tests.core._toolset import effective_for
 from api.services.runtime_store import InMemoryRuntimeStore
@@ -249,7 +249,7 @@ async def _run_engine(
 
     with patch("models.llm.astream_with_retry", llm_factory), \
          patch("models.llm.get_compaction_threshold", return_value=compaction_threshold), \
-         patch("core.engine.config") as mock_config:
+         patch("core.execution.engine.config") as mock_config:
         # Copy real config values then override permission_timeout for fast tests
         from config import config as real_config
         for attr in dir(real_config):
@@ -610,7 +610,7 @@ class TestToolExecution:
 
     async def test_search_tools_routed_renders_docs(self):
         # Deferred 工具先经 search_tools 披露完整 native schema。
-        from core.effective_toolset import DeferredUnit, EffectiveToolset
+        from core.capabilities.effective_toolset import DeferredUnit, EffectiveToolset
         from tools.builtin.search_tools import SearchToolsTool
 
         agent = _FakeAgentConfig(tools={"search_tools": "auto", "weather": "auto"})
@@ -726,7 +726,7 @@ class TestToolExecution:
         assert "Do not retry" in completes[0]["data"]["error"]
 
     async def test_disabled_tool_reports_inactive_configuration(self):
-        from core.effective_toolset import EffectiveToolset
+        from core.capabilities.effective_toolset import EffectiveToolset
 
         agent = _FakeAgentConfig(tools={})
         tool = _FakeTool("my_tool")
@@ -753,7 +753,7 @@ class TestToolExecution:
         assert "disabled for this agent" in complete["data"]["error"]
 
     async def test_skill_activatable_tool_reports_recovery_path(self):
-        from core.effective_toolset import EffectiveToolset, SkillGrant
+        from core.capabilities.effective_toolset import EffectiveToolset, SkillGrant
 
         agent = _FakeAgentConfig(tools={})
         tool = _FakeTool("my_tool")
@@ -786,7 +786,7 @@ class TestToolExecution:
         assert "relevant skill" in complete["data"]["error"]
 
     async def test_deferred_tool_reports_search_tools_recovery(self):
-        from core.effective_toolset import DeferredUnit, EffectiveToolset
+        from core.capabilities.effective_toolset import DeferredUnit, EffectiveToolset
 
         agent = _FakeAgentConfig(tools={})
         tool = _FakeTool("my_tool")
@@ -958,7 +958,7 @@ class TestPermissionInterrupt:
         ]
 
         with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
-             patch("core.engine.config.PERMISSION_TIMEOUT", 5):
+             patch("core.execution.engine.config.PERMISSION_TIMEOUT", 5):
             result = await execute_loop(
                 state=state,
                 agents={"lead_agent": agent},
@@ -1004,7 +1004,7 @@ class TestPermissionInterrupt:
         ]
 
         with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
-             patch("core.engine.config.PERMISSION_TIMEOUT", 5):
+             patch("core.execution.engine.config.PERMISSION_TIMEOUT", 5):
             result = await execute_loop(
                 state=state,
                 agents={"lead_agent": agent},
@@ -1053,7 +1053,7 @@ class TestPermissionInterrupt:
         ]
 
         with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
-             patch("core.engine.config.PERMISSION_TIMEOUT", 5):
+             patch("core.execution.engine.config.PERMISSION_TIMEOUT", 5):
             result = await execute_loop(
                 state=state,
                 agents={"lead_agent": agent},
@@ -1332,7 +1332,7 @@ class TestCancelProbeFailure:
             emitted.append(e)
 
         with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
-             patch("core.engine.config.CANCEL_CHECK_INTERVAL", 0.01):
+             patch("core.execution.engine.config.CANCEL_CHECK_INTERVAL", 0.01):
             result = await execute_loop(
                 state=state,
                 agents={"lead_agent": lead},
@@ -1392,7 +1392,7 @@ class TestCancelProbeFailure:
         state = create_initial_state(task="t", session_id="s1", message_id="msg-1", path_events=[])
 
         with patch("models.llm.astream_with_retry", _make_fake_stream(_simple_llm_chunks("Done!"))), \
-             patch("core.engine.config.CANCEL_CHECK_INTERVAL", 0):
+             patch("core.execution.engine.config.CANCEL_CHECK_INTERVAL", 0):
             agents = {"lead_agent": _FakeAgentConfig()}
             result = await execute_loop(
                 state=state,
@@ -1597,7 +1597,7 @@ class TestInEngineCompaction:
 
     These tests intentionally go through execute_loop (not just
     CompactionRunner.maybe_trigger) so that deleting the `await
-    compaction_runner.maybe_trigger(...)` call in src/core/engine.py
+    compaction_runner.maybe_trigger(...)` call in src/core/execution/engine.py
     would fail CI — the unit tests alone would not catch that regression.
     """
 
@@ -1697,7 +1697,7 @@ class TestInEngineCompaction:
         lead = _FakeAgentConfig(tools={})
         compact = _FakeAgentConfig(name="compact_agent", role_prompt="Compactor.", tools={})
 
-        with patch("core.compaction_runner.config.CANCEL_CHECK_INTERVAL", 0.01):
+        with patch("core.execution.compaction_runner.config.CANCEL_CHECK_INTERVAL", 0.01):
             result, emitted, _ = await _run_engine(
                 fake_llm,
                 agents={"lead_agent": lead, "compact_agent": compact},
@@ -1990,7 +1990,7 @@ class _ActivatingTool(BaseTool):
 
 class TestSkillActivation:
     async def test_read_skill_activates_and_grants_tool_mid_turn(self):
-        from core.effective_toolset import EffectiveToolset, SkillGrant
+        from core.capabilities.effective_toolset import EffectiveToolset, SkillGrant
 
         read_skill = _ActivatingTool("s")
         granted = _FakeTool("granted_tool", ToolResult(success=True, data="granted-ran"))
@@ -2018,7 +2018,7 @@ class TestSkillActivation:
             emitted.append(e)
 
         with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
-             patch("core.engine.config") as mock_config:
+             patch("core.execution.engine.config") as mock_config:
             from config import config as real_config
             for attr in dir(real_config):
                 if attr.isupper():
@@ -2040,7 +2040,7 @@ class TestSkillActivation:
         assert completes.get("granted_tool") is True
 
     async def test_failed_read_skill_does_not_activate(self):
-        from core.effective_toolset import EffectiveToolset, SkillGrant
+        from core.capabilities.effective_toolset import EffectiveToolset, SkillGrant
 
         class _FailRead(BaseTool):
             def __init__(self):
@@ -2063,7 +2063,7 @@ class TestSkillActivation:
         store = InMemoryRuntimeStore()
 
         with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
-             patch("core.engine.config") as mock_config:
+             patch("core.execution.engine.config") as mock_config:
             from config import config as real_config
             for attr in dir(real_config):
                 if attr.isupper():
@@ -2084,8 +2084,8 @@ class TestSkillActivation:
     async def test_button_activation_injects_body_into_user_input(self):
         """C-3:用户按钮激活 → turn handler 传 activated_skill_bodies → engine 注入 USER_INPUT
         正文(仅 LLM 可见,同 force_compact/上传路径),让模型即刻看到 skill 指令。"""
-        from core.effective_toolset import EffectiveToolset
-        from core.skill_guidance import render_skill_guidance
+        from core.capabilities.effective_toolset import EffectiveToolset
+        from core.capabilities.skill_guidance import render_skill_guidance
 
         state = create_initial_state(
             task="use it", session_id="sess", message_id="msg-b",
@@ -2108,7 +2108,7 @@ class TestSkillActivation:
         store = InMemoryRuntimeStore()
 
         with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
-             patch("core.engine.config") as mock_config:
+             patch("core.execution.engine.config") as mock_config:
             from config import config as real_config
             for attr in dir(real_config):
                 if attr.isupper():
@@ -2132,7 +2132,7 @@ class TestSkillActivation:
 
     async def test_activation_only_turn_body_becomes_content(self):
         """纯激活轮(无文本):skill 正文即 USER_INPUT 正文,让 lead 总有可回应输入。"""
-        from core.effective_toolset import EffectiveToolset
+        from core.capabilities.effective_toolset import EffectiveToolset
 
         state = create_initial_state(
             task="", session_id="sess", message_id="msg-b2",
@@ -2145,7 +2145,7 @@ class TestSkillActivation:
         store = InMemoryRuntimeStore()
 
         with patch("models.llm.astream_with_retry", _make_fake_stream_sequence(rounds)), \
-             patch("core.engine.config") as mock_config:
+             patch("core.execution.engine.config") as mock_config:
             from config import config as real_config
             for attr in dir(real_config):
                 if attr.isupper():

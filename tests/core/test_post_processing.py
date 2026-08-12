@@ -14,9 +14,9 @@ invariant 1/2 由 Handler 调用方负责检查,不在这里测;矩阵测试覆�
 import pytest
 
 from config import config
-from core.agent_runtime import StopReason
-from core.events import ExecutionEvent, StreamEventType
-from core.post_processing import (
+from core.execution.agent_runtime import StopReason
+from core.execution.events import ExecutionEvent, StreamEventType
+from core.execution.post_processing import (
     PostProcessState,
     choose_response_for_terminal,
     decide_terminal,

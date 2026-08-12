@@ -8,7 +8,7 @@ from typing import Optional, Any, Dict
 from datetime import datetime
 from pydantic import BaseModel, Field
 
-from core.events import StreamEventType
+from core.execution.events import StreamEventType
 from utils.time import utc_now
 
 

@@ -16,8 +16,8 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from api.services.conversation_turn_handler import ConversationTurnHandler
-from core.agent_runtime import RuntimeHooks
-from core.events import ExecutionEvent, StreamEventType
+from core.execution.agent_runtime import RuntimeHooks
+from core.execution.events import ExecutionEvent, StreamEventType
 
 
 def _ev(event_type, data=None, is_historical=False, agent_name="lead_agent"):

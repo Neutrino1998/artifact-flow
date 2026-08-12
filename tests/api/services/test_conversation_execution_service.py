@@ -12,7 +12,7 @@ from api.dependencies import (
     get_task_supervisor,
 )
 from api.services.conversation_lease import ConversationLeaseCoordinator
-from core.conversation_manager import ConversationManager
+from core.management.conversation_manager import ConversationManager
 from db.models import User
 from repositories.conversation_repo import ConversationRepository
 

@@ -4,8 +4,8 @@
 external unit 两路、等级取自工具对象、resolve_all 透传、activate_skill 合并 + 幂等。
 """
 
-from core.effective_skillset import resolve_effective_skillset
-from core.effective_toolset import resolve_all, resolve_effective_toolset
+from core.capabilities.effective_skillset import resolve_effective_skillset
+from core.capabilities.effective_toolset import resolve_all, resolve_effective_toolset
 from reconcile.snapshot import AgentSnapshot, RegistrySnapshot, SkillInfo, UnitInfo
 from tools.base import ToolPermission
 

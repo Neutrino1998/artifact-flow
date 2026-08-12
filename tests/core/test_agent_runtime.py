@@ -9,16 +9,16 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-from core.agent_runtime import (
+from core.execution.agent_runtime import (
     AgentInvocation,
     AgentRuntime,
     StopReason,
     get_stop_reason,
     stop_execution,
 )
-from core.agent_runtime import RuntimeHooks
-from core.engine import create_initial_state
-from core.events import ExecutionEvent, StreamEventType
+from core.execution.agent_runtime import RuntimeHooks
+from core.execution.engine import create_initial_state
+from core.execution.events import ExecutionEvent, StreamEventType
 
 
 def _hooks() -> RuntimeHooks:
@@ -71,7 +71,7 @@ async def test_complete_outcome_and_entry_agent_are_forwarded():
         kwargs["state"]["response"] = "done"
         return kwargs["state"]
 
-    with patch("core.agent_runtime.execute_loop", side_effect=complete):
+    with patch("core.execution.agent_runtime.execute_loop", side_effect=complete):
         outcome = await _runtime().run(
             AgentInvocation(state=state, entry_agent="research_agent"),
             hooks=_hooks(),
@@ -89,7 +89,7 @@ async def test_cooperative_cancel_is_distinct_from_external_cancel():
         kwargs["state"]["stop_reason"] = StopReason.COOPERATIVE_CANCEL
         return kwargs["state"]
 
-    with patch("core.agent_runtime.execute_loop", side_effect=cooperative):
+    with patch("core.execution.agent_runtime.execute_loop", side_effect=cooperative):
         outcome = await _runtime().run(
             AgentInvocation(state=state), hooks=_hooks()
         )
@@ -103,7 +103,7 @@ async def test_timeout_returns_state_without_emitting_terminal():
     async def blocked(**_kwargs):
         await asyncio.sleep(60)
 
-    with patch("core.agent_runtime.execute_loop", side_effect=blocked):
+    with patch("core.execution.agent_runtime.execute_loop", side_effect=blocked):
         outcome = await _runtime(timeout=0.01).run(
             AgentInvocation(state=state), hooks=_hooks()
         )
@@ -134,7 +134,7 @@ async def test_task_cancel_returns_external_cancel_outcome_with_partial_state():
         started.set()
         await asyncio.sleep(60)
 
-    with patch("core.agent_runtime.execute_loop", side_effect=blocked):
+    with patch("core.execution.agent_runtime.execute_loop", side_effect=blocked):
         task = asyncio.create_task(
             _runtime().run(AgentInvocation(state=state), hooks=_hooks())
         )
@@ -156,7 +156,7 @@ async def test_unexpected_runtime_error_is_recorded_not_emitted():
     async def fail(**_kwargs):
         raise RuntimeError("boom")
 
-    with patch("core.agent_runtime.execute_loop", side_effect=fail):
+    with patch("core.execution.agent_runtime.execute_loop", side_effect=fail):
         outcome = await _runtime().run(
             AgentInvocation(state=state), hooks=_hooks()
         )
@@ -176,7 +176,7 @@ def test_import_does_not_load_web_database_or_redis_modules():
     }
     code = """
 import sys
-import core.agent_runtime
+import core.execution.agent_runtime
 forbidden = ('fastapi', 'sqlalchemy', 'redis', 'api.services', 'repositories')
 loaded = sorted(name for name in sys.modules if name.startswith(forbidden))
 assert not loaded, loaded
@@ -202,10 +202,10 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-from core.agent_runtime import AgentInvocation, AgentRuntime, RuntimeHooks, StopReason
-from core.effective_toolset import resolve_all
-from core.engine import create_initial_state
-from core.events import StreamEventType
+from core.execution.agent_runtime import AgentInvocation, AgentRuntime, RuntimeHooks, StopReason
+from core.capabilities.effective_toolset import resolve_all
+from core.execution.engine import create_initial_state
+from core.execution.events import StreamEventType
 from models.llm import validate_agent_model_config
 from reconcile.seeds import parse_agent_seeds, parse_tool_seeds
 from reconcile.snapshot import AgentSnapshot, RegistrySnapshot, UnitInfo, build_http_tool

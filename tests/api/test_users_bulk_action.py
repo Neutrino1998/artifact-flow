@@ -16,13 +16,12 @@ from typing import List
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 
 from db.database import DatabaseManager
 from db.models import Conversation, Department, User
 from repositories.conversation_repo import ConversationRepository
 from repositories.department_repo import DepartmentRepository
-from repositories.user_repo import UserRepository
+from repositories.user_repo import UserRepository, UserWriteError
 from api.services.auth import hash_password
 
 
@@ -283,22 +282,22 @@ class TestSetDepartment:
     ):
         """
         Reviewer P1 regression: 模拟 set_department 的 dept 在 loop 外预校验
-        通过后被另一个 admin 删了 → 中间一行 update 撞 FK，应当 rollback
-        session 让后续行正常处理，而不是把整批拖进 PendingRollbackError。
+        通过后被另一个 admin 删了 → Repository 将中间一行的 FK 失败
+        rollback 并归一化为 UserWriteError，后续行仍可正常处理。
         """
         dept = await _seed_department(db_manager)
         u_first = await _seed_user(db_manager)
         u_bad = await _seed_user(db_manager)
         u_last = await _seed_user(db_manager)
 
-        real_update = UserRepository.update
+        real_save = UserRepository.save_user
 
-        async def faulty_update(self, entity):
+        async def faulty_save(self, entity):
             if entity.id == u_bad.id:
-                raise IntegrityError("simulated FK violation", None, Exception())
-            return await real_update(self, entity)
+                raise UserWriteError("simulated FK violation")
+            return await real_save(self, entity)
 
-        monkeypatch.setattr(UserRepository, "update", faulty_update)
+        monkeypatch.setattr(UserRepository, "save_user", faulty_save)
 
         resp = await admin_client.post(
             "/api/v1/admin/users/bulk-action",
@@ -326,7 +325,8 @@ class TestSetDepartment:
         monkeypatch,
     ):
         """
-        非 IntegrityError 的异常（编程错误 / 真正的基础设施故障）不被路由静默 catch，
+        非 Repository 可归一化写入错误的异常（编程错误 / 真正的基础设施故障）
+        不被业务层静默 catch，
         而是冒泡到 app 边界。RequestContextMiddleware（app 级 catch-all）在边界上
         logger.exception 落完整堆栈（loud failure 落日志），并返回带 request_id 的
         脱敏 500 —— 而不是吞成 per-id internal_error 假装好了。
@@ -338,10 +338,10 @@ class TestSetDepartment:
         dept = await _seed_department(db_manager)
         u = await _seed_user(db_manager)
 
-        async def boom_update(self, entity):
+        async def boom_save(self, entity):
             raise RuntimeError("unexpected programming error")
 
-        monkeypatch.setattr(UserRepository, "update", boom_update)
+        monkeypatch.setattr(UserRepository, "save_user", boom_save)
 
         resp = await admin_client.post(
             "/api/v1/admin/users/bulk-action",

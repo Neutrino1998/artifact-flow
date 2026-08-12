@@ -4,7 +4,7 @@
 无匹配的引导文案 / unknown 名提示 / 空 query loud-fail。
 """
 
-from core.effective_toolset import DeferredUnit, EffectiveToolset
+from core.capabilities.effective_toolset import DeferredUnit, EffectiveToolset
 from tools.base import ToolPermission
 from tools.builtin.search_tools import search_tools_result
 

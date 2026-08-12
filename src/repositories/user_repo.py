@@ -8,10 +8,11 @@ import re
 from typing import Optional, List
 
 from sqlalchemy import select, func, or_, delete, false
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import User, Department
-from repositories.base import BaseRepository
+from repositories.base import BaseRepository, DuplicateError
 from utils.department_tree import expand_subtree
 
 
@@ -20,6 +21,30 @@ class UserRepository(BaseRepository[User]):
 
     def __init__(self, session: AsyncSession):
         super().__init__(session, User)
+
+    async def create_user(self, user: User) -> User:
+        """Create one user and normalize username races."""
+        username = user.username
+        self._session.add(user)
+        try:
+            await self._session.flush()
+            await self._session.commit()
+            await self._session.refresh(user)
+            return user
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise DuplicateError("User", username) from exc
+
+    async def save_user(self, user: User) -> User:
+        """Commit one already-loaded user mutation."""
+        try:
+            await self._session.flush()
+            await self._session.commit()
+            await self._session.refresh(user)
+            return user
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise UserWriteError(str(exc)) from exc
 
     async def get_by_username(self, username: str) -> Optional[User]:
         """根据用户名查询用户"""
@@ -41,6 +66,22 @@ class UserRepository(BaseRepository[User]):
             select(User.username).where(User.username.in_(usernames))
         )
         return set(result.scalars().all())
+
+    async def display_names(self, user_ids: set[str]) -> dict[str, str]:
+        """Return display-name projections without leaking ORM rows upward."""
+        if not user_ids:
+            return {}
+        rows = (
+            await self._session.execute(
+                select(User.id, User.display_name, User.username).where(
+                    User.id.in_(user_ids)
+                )
+            )
+        ).all()
+        return {
+            user_id: display_name or username
+            for user_id, display_name, username in rows
+        }
 
     async def _apply_search_filter(self, query, search_query: Optional[str]):
         """
@@ -129,3 +170,7 @@ class UserRepository(BaseRepository[User]):
         )
         await self._session.commit()
         return result.rowcount > 0
+
+
+class UserWriteError(Exception):
+    """A user mutation failed after validation, usually due to a concurrent FK change."""

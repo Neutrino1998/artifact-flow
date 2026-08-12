@@ -16,8 +16,7 @@ FastAPI 依赖注入
 请求级依赖（每次 HTTP 请求独立创建）：
     get_db_session()            # AsyncSession
         ├──► get_artifact_service()
-        ├──► get_conversation_manager()
-        └──► get_user_repository()
+        └──► get_conversation_manager() / use-case managers
 
 认证依赖：
     get_current_user()          # JWT 校验 + DB 查活
@@ -34,14 +33,14 @@ if TYPE_CHECKING:
     from api.services.runtime_store import RuntimeStore
     from api.services.conversation_execution_service import ConversationExecutionService
     from api.services.runtime_status_reader import RuntimeStatusReader
-    from core.task_supervisor import TaskSupervisor
+    from core.execution.task_supervisor import TaskSupervisor
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import config
-from core.conversation_manager import ConversationManager
+from core.management.conversation_manager import ConversationManager
 from tools.base import BaseTool, build_tool_map
 from tools.builtin.artifact_service import ArtifactService
 from db.database import DatabaseManager
@@ -175,7 +174,7 @@ async def init_globals() -> None:
     from api.services.conversation_execution_service import ConversationExecutionService
     from api.services.conversation_lease import ConversationLeaseCoordinator
     from api.services.runtime_status_reader import RuntimeStatusReader
-    from core.task_supervisor import TaskSupervisor
+    from core.execution.task_supervisor import TaskSupervisor
 
     _task_supervisor = TaskSupervisor(max_concurrent=config.MAX_CONCURRENT_TASKS)
     lease_ttl = config.LEASE_TTL if config.REDIS_URL else 0
@@ -398,7 +397,7 @@ async def get_tool_registry_manager(
     session: AsyncSession = Depends(get_db_session),
 ):
     """每个请求获得独立的 ToolRegistryManager(external 工具 CRUD;B-4)。"""
-    from core.tool_registry_manager import ToolRegistryManager
+    from core.management.tool_registry_manager import ToolRegistryManager
     return ToolRegistryManager(session)
 
 
@@ -406,7 +405,7 @@ async def get_skill_manager(
     session: AsyncSession = Depends(get_db_session),
 ):
     """每个请求获得独立的 SkillManager(用户侧 skill 列举 + 个人 toggle;C-3)。"""
-    from core.skill_manager import SkillManager
+    from core.management.skill_manager import SkillManager
     return SkillManager(session)
 
 
@@ -414,15 +413,54 @@ async def get_department_access_manager(
     session: AsyncSession = Depends(get_db_session),
 ):
     """每个请求获得独立的 DepartmentAccessManager(dept 授权规则;G-1)。"""
-    from core.department_access_manager import DepartmentAccessManager
+    from core.management.department_access_manager import DepartmentAccessManager
     return DepartmentAccessManager(session)
+
+
+async def get_department_manager(
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Return the request-scoped department use-case manager."""
+    from core.management.department_manager import DepartmentManager
+    from repositories.department_repo import DepartmentRepository
+
+    return DepartmentManager(DepartmentRepository(session))
+
+
+async def get_admin_user_manager(
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Return the administrative user use-case manager."""
+    from core.management.admin_user_manager import AdminUserManager
+    from core.management.department_manager import DepartmentManager
+    from repositories.department_repo import DepartmentRepository
+    from repositories.user_repo import UserRepository
+
+    department_repository = DepartmentRepository(session)
+    return AdminUserManager(
+        UserRepository(session),
+        department_repository,
+        DepartmentManager(department_repository),
+        ConversationManager(ConversationRepository(session)),
+    )
+
+
+async def get_user_account_manager(
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Return authenticated-user account use cases."""
+    from core.management.user_account_manager import UserAccountManager
+    from repositories.department_repo import DepartmentRepository
+    from repositories.user_repo import UserRepository
+
+    return UserAccountManager(UserRepository(session), DepartmentRepository(session))
 
 
 async def get_site_config_manager(
     session: AsyncSession = Depends(get_db_session),
 ):
     """每个请求一个 DB-backed 通知配置 Manager。"""
-    from core.site_config_manager import SiteConfigManager
+    from core.management.site_config_manager import SiteConfigManager
     from repositories.site_notification_repo import SiteNotificationRepository
 
     return SiteConfigManager(SiteNotificationRepository(session))
@@ -432,7 +470,7 @@ async def get_client_config_manager(
     session: AsyncSession = Depends(get_db_session),
 ):
     """前端 runtime meta 的真实数据源聚合器。"""
-    from core.client_config_manager import ClientConfigManager
+    from core.management.client_config_manager import ClientConfigManager
 
     return ClientConfigManager(session)
 
@@ -501,19 +539,3 @@ async def require_admin(
     if user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
-
-
-async def get_user_repository(
-    session: AsyncSession = Depends(get_db_session),
-) -> "UserRepository":
-    """获取 UserRepository 实例"""
-    from repositories.user_repo import UserRepository
-    return UserRepository(session)
-
-
-async def get_department_repository(
-    session: AsyncSession = Depends(get_db_session),
-) -> "DepartmentRepository":
-    """获取 DepartmentRepository 实例"""
-    from repositories.department_repo import DepartmentRepository
-    return DepartmentRepository(session)

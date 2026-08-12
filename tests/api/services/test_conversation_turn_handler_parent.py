@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from api.services.conversation_turn_handler import ConversationTurnHandler
-from core.agent_runtime import RuntimeHooks
+from core.execution.agent_runtime import RuntimeHooks
 
 
 def _conversation_manager(active_parent: str):
@@ -72,7 +72,7 @@ async def test_resolved_parent_reaches_message_append_unchanged(
         "parent_message_id": expected_parent,
     }
 
-    with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+    with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
         await _consume(handler.run(**call_kwargs))
 
     manager.get_active_branch.assert_not_awaited()

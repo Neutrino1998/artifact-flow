@@ -42,7 +42,7 @@ from api.services.conversation_execution_service import ConversationExecutionSer
 from api.services.conversation_lease import ConversationLeaseCoordinator
 from api.services.runtime_status_reader import RuntimeStatusReader
 from api.services.runtime_store import InMemoryRuntimeStore
-from core.task_supervisor import TaskSupervisor
+from core.execution.task_supervisor import TaskSupervisor
 from api.services.login_rate_limiter import InMemoryLoginRateLimiter
 from config import config
 from db.database import DatabaseManager

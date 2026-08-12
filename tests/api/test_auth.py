@@ -48,23 +48,23 @@ class TestLogin:
         不做脆弱的墙钟断言 —— 用 spy 直接验证「verify_password 被调用一次,
         且 hash 参数 = DUMMY_PASSWORD_HASH」即证明两分支都过 bcrypt。
         """
-        import api.routers.auth as auth_router
+        from core.security import passwords
 
         calls: list[str] = []
-        real = auth_router.verify_password
+        real = passwords.verify_password
 
         def _spy(plain: str, hashed: str) -> bool:
             calls.append(hashed)
             return real(plain, hashed)
 
-        monkeypatch.setattr(auth_router, "verify_password", _spy)
+        monkeypatch.setattr(passwords, "verify_password", _spy)
 
         resp = await anon_client.post(
             "/api/v1/auth/login",
             json={"username": "no-such-user-xyz", "password": "whatever1!"},
         )
         assert resp.status_code == 401
-        assert calls == [auth_router.DUMMY_PASSWORD_HASH]
+        assert calls == [passwords.DUMMY_PASSWORD_HASH]
 
     async def test_login_inactive_user(
         self,

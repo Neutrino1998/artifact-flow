@@ -1,0 +1,1 @@
+"""Effective runtime capability resolution."""

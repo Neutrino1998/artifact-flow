@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from core.task_supervisor import (
+from core.execution.task_supervisor import (
     DuplicateTaskError,
     TaskQueued,
     TaskScope,

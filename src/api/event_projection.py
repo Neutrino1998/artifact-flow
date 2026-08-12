@@ -8,7 +8,7 @@ only the public shape of event types that carry internal execution context.
 from typing import Any, Dict
 
 from config import config
-from core.events import StreamEventType
+from core.execution.events import StreamEventType
 
 
 def project_event_data_for_user(event_type: str, data: Any) -> Any:

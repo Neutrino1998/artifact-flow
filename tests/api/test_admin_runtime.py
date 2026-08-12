@@ -10,7 +10,7 @@ from api.dependencies import (
     get_runtime_store,
     get_task_supervisor,
 )
-from core.task_supervisor import TaskScope, TaskSupervisor
+from core.execution.task_supervisor import TaskScope, TaskSupervisor
 from observability import admin_runtime
 from utils.instance import INSTANCE_ID
 

@@ -42,8 +42,8 @@ from scripts.native_tool_history_migration import (
     _require_postgresql_source,
     _run_generate_task,
 )
-from core.event_history import build_event_history
-from core.events import ExecutionEvent
+from core.execution.event_history import build_event_history
+from core.execution.events import ExecutionEvent
 from db.models import Base, Conversation, Message, MessageEvent
 
 
@@ -395,7 +395,7 @@ def test_checkpoint_rejects_obsolete_schema(tmp_path):
 
 
 def test_offline_boundary_event_names_match_runtime_contract():
-    from core.events import StreamEventType
+    from core.execution.events import StreamEventType
 
     assert COMPACTION_START == StreamEventType.COMPACTION_START.value
     assert COMPACTION_SUMMARY == StreamEventType.COMPACTION_SUMMARY.value

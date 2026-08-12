@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from api.services.auth import hash_password
 from config import config
-from core.skill_manager import SkillManager
+from core.management.skill_manager import SkillManager
 from db.models import Department, DepartmentSkillRule, Skill, User, UserSkill
 from utils.skill_validator import validate_skill_zip
 

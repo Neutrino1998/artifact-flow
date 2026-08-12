@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import List, Sequence
 
 from sqlalchemy import case, delete, exists, literal, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import (
@@ -186,6 +187,13 @@ class DepartmentAccessRepository:
             self._session.add(
                 DepartmentSkillRule(department_id=dept_id, skill_id=skill_id)
             )
+        try:
+            await self._session.flush()
+            await self._session.commit()
+        except IntegrityError:
+            await self._session.rollback()
+            if not await self.has_skill_rule(dept_id, skill_id):
+                raise
 
     async def delete_skill_rule(self, dept_id: str, skill_id: str) -> None:
         await self._session.execute(
@@ -194,6 +202,7 @@ class DepartmentAccessRepository:
                 DepartmentSkillRule.skill_id == skill_id,
             )
         )
+        await self._session.commit()
 
     async def add_unit_rule(self, dept_id: str, unit_name: str) -> None:
         existing = await self._session.get(DepartmentUnitRule, (dept_id, unit_name))
@@ -201,6 +210,13 @@ class DepartmentAccessRepository:
             self._session.add(
                 DepartmentUnitRule(department_id=dept_id, unit_name=unit_name)
             )
+        try:
+            await self._session.flush()
+            await self._session.commit()
+        except IntegrityError:
+            await self._session.rollback()
+            if not await self.has_unit_rule(dept_id, unit_name):
+                raise
 
     async def has_skill_rule(self, dept_id: str, skill_id: str) -> bool:
         return (
@@ -221,13 +237,7 @@ class DepartmentAccessRepository:
                 DepartmentUnitRule.unit_name == unit_name,
             )
         )
-
-    async def commit(self) -> None:
-        await self._session.flush()
         await self._session.commit()
-
-    async def rollback(self) -> None:
-        await self._session.rollback()
 
 
 def _rule_match_columns(

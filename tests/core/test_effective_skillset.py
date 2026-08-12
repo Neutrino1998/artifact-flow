@@ -4,7 +4,7 @@
 =grant)三态;enabled = default_enabled + user_skill 覆盖;available_for_l1 过滤 + 顺序。
 """
 
-from core.effective_skillset import resolve_effective_skillset
+from core.capabilities.effective_skillset import resolve_effective_skillset
 from reconcile.snapshot import SkillInfo
 
 

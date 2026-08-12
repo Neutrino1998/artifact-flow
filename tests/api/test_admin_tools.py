@@ -13,7 +13,7 @@ from httpx import AsyncClient
 
 from api.dependencies import get_mcp_client_manager
 from config import config
-from core.tool_registry_manager import ToolRegistryManager
+from core.management.tool_registry_manager import ToolRegistryManager
 from db.models import Agent, AgentUnit, ToolMember, ToolUnit
 from tools.custom.seed_bundle import MAX_SEED_UPLOAD_BYTES
 from tools.custom.mcp_client import McpListResult, McpToolDefinition

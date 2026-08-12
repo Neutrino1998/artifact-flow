@@ -79,7 +79,7 @@ type Conversation = components['schemas']['ConversationDetailResponse']
 
 ### SSE 事件类型
 
-后端 `src/core/events.py` 中的 `StreamEventType` 定义了所有事件类型。前端在 `src/types/` 中维护对应的枚举，事件处理的 switch 语句加 `default` 分支打 warning，以便发现后端新增了未处理的事件。
+后端 `src/core/execution/events.py` 中的 `StreamEventType` 定义了所有事件类型。前端在 `src/types/` 中维护对应的枚举，事件处理的 switch 语句加 `default` 分支打 warning，以便发现后端新增了未处理的事件。
 
 ### 流式渲染性能
 

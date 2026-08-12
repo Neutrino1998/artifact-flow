@@ -24,7 +24,7 @@ DEFAULT_MAX_HISTORY = 1000
 
 # Event types that terminate the stream (consumer should exit after yielding).
 # Local copy — the transport stays execution-semantics-free; kept in sync with
-# core.events.TERMINAL_EVENT_TYPES by tests/core/test_terminal_event_sync.py.
+# core.execution.events.TERMINAL_EVENT_TYPES by tests/core/test_terminal_event_sync.py.
 _TERMINAL_EVENTS = ("complete", "cancelled", "timed_out", "error")
 
 

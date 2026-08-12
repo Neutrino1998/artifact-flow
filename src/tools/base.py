@@ -75,11 +75,11 @@ class ToolExecutionContext:
     **secret(凭证 / OAuth)永不走这条**:它走 B-4 的独立 credential resolver(懒解、
     只解被调工具、对沙盒不发放),否则会同时撞穿沙盒红线 + 日志泄露面 + lazy 纪律。
 
-    `effective_toolset` 故意宽松类型(``Any``)—— 它的实体是 `core.effective_toolset.
+    `effective_toolset` 故意宽松类型(``Any``)—— 它的实体是 `core.capabilities.effective_toolset.
     EffectiveToolset`,但 tools 层不该反向依赖 core(core 已依赖 tools)。
     """
     agent_name: str
-    effective_toolset: Any        # core.effective_toolset.EffectiveToolset(鸭子类型,避免 tools→core)
+    effective_toolset: Any        # core.capabilities.effective_toolset.EffectiveToolset(鸭子类型,避免 tools→core)
     tools: Dict[str, "BaseTool"]  # 本 turn 合并后的全量工具对象(name -> BaseTool)
     disclosed_tools: Set[str] = field(default_factory=set)
 

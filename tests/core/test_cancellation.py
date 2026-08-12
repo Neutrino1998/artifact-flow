@@ -16,7 +16,7 @@ import asyncio
 
 import pytest
 
-from core.cancellation import CooperativeCancelled, run_cancellable
+from core.execution.cancellation import CooperativeCancelled, run_cancellable
 
 
 async def _never_cancelled() -> bool:

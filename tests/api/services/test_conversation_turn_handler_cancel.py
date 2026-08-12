@@ -20,9 +20,9 @@ import pytest
 
 from api.services.conversation_turn_factory import run_and_push
 from api.services.conversation_turn_handler import ConversationTurnHandler
-from core.agent_runtime import EngineOutcome, StopReason
-from core.agent_runtime import RuntimeHooks
-from core.events import ExecutionEvent, StreamEventType
+from core.execution.agent_runtime import EngineOutcome, StopReason
+from core.execution.agent_runtime import RuntimeHooks
+from core.execution.events import ExecutionEvent, StreamEventType
 
 
 # ============================================================
@@ -136,7 +136,7 @@ class TestPersistOnExternalCancel:
                 message_id="msg-test",
             )]
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             consume_task = asyncio.create_task(consume())
             await asyncio.wait_for(started.wait(), timeout=5)
             # Yield once to ensure runtime_child is actually awaiting the sleep
@@ -206,7 +206,7 @@ class TestPersistOnExternalCancel:
                 message_id="msg-test",
             )]
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             consume_task = asyncio.create_task(consume())
             await asyncio.wait_for(started.wait(), timeout=5)
             await asyncio.sleep(0)
@@ -319,7 +319,7 @@ class TestPersistOnExternalCancel:
                 ),
             )
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             task = asyncio.create_task(forward())
             await push_started.wait()
             task.cancel()
@@ -378,7 +378,7 @@ class TestPersistOnExternalCancel:
                 message_id="msg-test",
             )]
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             task = asyncio.create_task(consume())
             await exists_started.wait()
             task.cancel()
@@ -454,7 +454,7 @@ class TestPersistOnExternalCancel:
                 message_id="msg-test",
             )]
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             consume_task = asyncio.create_task(consume())
             # Wait until post-processing is blocked inside exists_async
             await asyncio.wait_for(exists_called.wait(), timeout=5)
@@ -515,7 +515,7 @@ class TestPersistOnExternalCancel:
                 message_id="msg-test",
             )]
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             task = asyncio.create_task(consume())
             await exit_started.wait()
             task.cancel()
@@ -571,7 +571,7 @@ class TestPersistOnExternalCancel:
                 message_id="msg-test",
             )]
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             task = asyncio.create_task(consume())
             await flush_started.wait()
             task.cancel()
@@ -657,7 +657,7 @@ class TestPersistOnExternalCancel:
                 message_id="msg-test",
             )]
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             consume_task = asyncio.create_task(consume())
             await asyncio.wait_for(persist_started.wait(), timeout=5)
             await asyncio.sleep(0)
@@ -723,7 +723,7 @@ class TestPersistOnExternalCancel:
                 message_id="msg-test",
             )]
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             consume_task = asyncio.create_task(consume())
             await asyncio.wait_for(on_exit_started.wait(), timeout=5)
             await asyncio.sleep(0)
@@ -785,7 +785,7 @@ class TestPersistOnExternalCancel:
                 message_id="msg-test",
             )]
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             events = await asyncio.create_task(consume())
 
         am.flush_all.assert_called_once()  # flush ran → artifacts in DB
@@ -826,7 +826,7 @@ class TestPersistOnExternalCancel:
                 "response": "",  # cancelled mid-stream → no display content
             }
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             events = [event async for event in ctrl.run(
                 user_input="hi",
                 conversation_id="conv-test",
@@ -899,7 +899,7 @@ class TestPersistOnExternalCancel:
                 message_id="msg-test",
             )]
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             with pytest.raises(asyncio.CancelledError):
                 await consume()
 
@@ -966,7 +966,7 @@ class TestPersistOnExternalCancel:
                 message_id="msg-test",
             )]
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             consume_task = asyncio.create_task(consume())
             await asyncio.wait_for(metadata_started.wait(), timeout=5)
             await asyncio.sleep(0)
@@ -1025,7 +1025,7 @@ class TestPersistOnExternalCancel:
                 message_id="msg-test",
             )]
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             consume_task = asyncio.create_task(consume())
             await asyncio.wait_for(started.wait(), timeout=5)
             await asyncio.sleep(0)
@@ -1115,7 +1115,7 @@ class TestPersistOnExternalCancel:
                 message_id="msg-test",
             )]
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             consume_task = asyncio.create_task(consume())
             await asyncio.wait_for(exists_started.wait(), timeout=5)
             await asyncio.sleep(0)
@@ -1211,7 +1211,7 @@ class TestPersistOnExternalCancel:
                 message_id="msg-test",
             )]
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             with pytest.raises(asyncio.CancelledError):
                 await consume()
 
@@ -1280,7 +1280,7 @@ class TestPersistOnExternalCancel:
                 message_id="msg-test",
             )]
 
-        with patch("core.agent_runtime.execute_loop", side_effect=fake_execute_loop):
+        with patch("core.execution.agent_runtime.execute_loop", side_effect=fake_execute_loop):
             consume_task = asyncio.create_task(consume())
             await asyncio.wait_for(exists_started.wait(), timeout=5)
             await asyncio.sleep(0)
@@ -1341,7 +1341,7 @@ class TestTimeoutTerminal:
         # 把 deadline 压到很小,让 asyncio.timeout 在 slow_execute_loop 挂起时触发。
         # 注意:这是内层 runtime_child 的超时,consume 正常结束(无需手动 cancel)。
         with patch.object(config, "EXECUTION_TIMEOUT", 0.1):
-            with patch("core.agent_runtime.execute_loop", side_effect=slow_execute_loop):
+            with patch("core.execution.agent_runtime.execute_loop", side_effect=slow_execute_loop):
                 events = await asyncio.wait_for(consume(), timeout=5)
 
         # events 落库一次,含本轮 LLM_COMPLETE + TIMED_OUT 终态

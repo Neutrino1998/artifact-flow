@@ -14,7 +14,7 @@ import uuid
 
 import pytest
 
-from core.events import StreamEventType
+from core.execution.events import StreamEventType
 from db.models import User
 from repositories.artifact_repo import ArtifactRepository
 from repositories.conversation_repo import ConversationRepository

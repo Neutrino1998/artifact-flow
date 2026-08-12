@@ -62,9 +62,11 @@ from api.services.conversation_execution_service import (
 )
 from api.services.runtime_status_reader import RuntimeStatusReader
 from api.services.runtime_store import InjectQueueFull
-from api.routers.artifacts import convert_uploaded_file
-from core.conversation_manager import ConversationManager
-from repositories.base import NotFoundError
+from api.services.upload_conversion import convert_uploaded_file
+from core.management.conversation_manager import (
+    ConversationManager,
+    ConversationResourceNotFoundError,
+)
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -177,7 +179,7 @@ async def send_message(
             force_compact=request.force_compact,
             activate_skills=request.activate_skills,
         ))
-    except NotFoundError:
+    except ConversationResourceNotFoundError:
         raise HTTPException(
             status_code=404,
             detail=f"Conversation '{request.conversation_id}' not found",
@@ -267,7 +269,7 @@ async def inject_message(
         active_msg_id = await execution_service.inject(
             conv_id, current_user.user_id, request.content
         )
-    except NotFoundError:
+    except ConversationResourceNotFoundError:
         raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
     except NoActiveExecution:
         raise HTTPException(status_code=409, detail="No active execution for this conversation")
@@ -310,7 +312,7 @@ async def cancel_execution(
     # 即可取消。故 QUEUED 返回 409（显式 best-effort 契约），且**不**置任何 flag。
     try:
         active_msg_id = await execution_service.cancel(conv_id, current_user.user_id)
-    except NotFoundError:
+    except ConversationResourceNotFoundError:
         raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
     except ExecutionStillQueued:
         raise HTTPException(
@@ -486,7 +488,7 @@ async def get_conversation(
             updated_at=conversation.updated_at,
         )
 
-    except NotFoundError:
+    except ConversationResourceNotFoundError:
         raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
 
 
@@ -525,7 +527,7 @@ async def delete_conversation(
             status_code=503,
             detail="Conversation delete could not confirm ownership; please retry.",
         )
-    except NotFoundError:
+    except ConversationResourceNotFoundError:
         raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
 
 
@@ -629,7 +631,7 @@ async def resume_execution(
             approved=request.approved,
             always_allow=request.always_allow,
         )
-    except NotFoundError as exc:
+    except ConversationResourceNotFoundError as exc:
         detail = (
             "Message not found"
             if exc.entity_type == "Message"

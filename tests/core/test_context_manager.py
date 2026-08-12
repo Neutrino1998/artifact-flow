@@ -11,8 +11,8 @@ from unittest.mock import patch
 import pytest
 
 from config import config
-from core.context_manager import ContextManager
-from core.events import StreamEventType, ExecutionEvent
+from core.execution.context_manager import ContextManager
+from core.execution.events import StreamEventType, ExecutionEvent
 from tests.core._toolset import effective_one
 
 TEST_COMPACTION_THRESHOLD = 100_000
@@ -137,7 +137,7 @@ class TestSystemPrompt:
         ])
 
         with patch(
-            "core.context_manager.model_replays_reasoning", return_value=False
+            "core.execution.context_manager.model_replays_reasoning", return_value=False
         ):
             messages = _build(agent, state=state, tools={})
 
@@ -745,8 +745,8 @@ class TestAvailableTools:
         return _T()
 
     def test_non_external_catalog_schema_is_not_rendered_as_prompt_text(self):
-        from core.context_manager import ContextManager
-        from core.effective_toolset import EffectiveToolset
+        from core.execution.context_manager import ContextManager
+        from core.capabilities.effective_toolset import EffectiveToolset
         from tools.base import ToolPermission
 
         tools = {"weather": self._tool("weather", "Query the weather forecast")}
@@ -758,8 +758,8 @@ class TestAvailableTools:
         assert native["function"]["parameters"]["properties"]["q"]["type"] == "string"
 
     def test_bash_renders_platform_and_data_boundaries(self):
-        from core.context_manager import ContextManager
-        from core.effective_toolset import EffectiveToolset
+        from core.execution.context_manager import ContextManager
+        from core.capabilities.effective_toolset import EffectiveToolset
         from tools.base import ToolPermission
 
         names = ("bash", "mount", "persist", "update_artifact")
@@ -777,8 +777,8 @@ class TestAvailableTools:
         assert '<tool name="bash">' not in block
 
     def test_bash_without_stage_tools_omits_data_boundary(self):
-        from core.context_manager import ContextManager
-        from core.effective_toolset import EffectiveToolset
+        from core.execution.context_manager import ContextManager
+        from core.capabilities.effective_toolset import EffectiveToolset
         from tools.base import ToolPermission
 
         tools = {"bash": self._tool("bash", "Run shell commands")}
@@ -791,8 +791,8 @@ class TestAvailableTools:
         assert "separate copies with no automatic sync" not in block
 
     def test_deferred_unit_renders_index_line_only(self):
-        from core.context_manager import ContextManager
-        from core.effective_toolset import EffectiveToolset, DeferredUnit
+        from core.execution.context_manager import ContextManager
+        from core.capabilities.effective_toolset import EffectiveToolset, DeferredUnit
         from tools.base import ToolPermission
 
         tools = {
@@ -824,8 +824,8 @@ class TestAvailableTools:
         assert "Open issue" not in block
 
     def test_mixed_deferred_and_full(self):
-        from core.context_manager import ContextManager
-        from core.effective_toolset import EffectiveToolset, DeferredUnit
+        from core.execution.context_manager import ContextManager
+        from core.capabilities.effective_toolset import EffectiveToolset, DeferredUnit
         from tools.base import ToolPermission
 
         tools = {
@@ -852,15 +852,15 @@ class TestAvailableTools:
         assert "deferred member" not in block
 
     def test_empty_toolset_renders_nothing(self):
-        from core.context_manager import ContextManager
-        from core.effective_toolset import EffectiveToolset
+        from core.execution.context_manager import ContextManager
+        from core.capabilities.effective_toolset import EffectiveToolset
         assert ContextManager._build_available_tools(EffectiveToolset({}), {}, set()) == ""
 
     def test_deferred_flows_through_build_into_reminder(self):
         """端到端:build 把 effective_toolset 的 deferred 分组接进尾部 reminder,
         system prompt 只留语法前缀。"""
-        from core.context_manager import ContextManager
-        from core.effective_toolset import EffectiveToolset, DeferredUnit
+        from core.execution.context_manager import ContextManager
+        from core.capabilities.effective_toolset import EffectiveToolset, DeferredUnit
         from tools.base import ToolPermission
 
         agent = _FakeAgentConfig()
@@ -1106,7 +1106,7 @@ class TestSandboxStatus:
 class TestPromptReconstructionFidelity:
 
     def _assert_roundtrip(self, agent, state, **build_kwargs):
-        from core.event_history import build_event_history
+        from core.execution.event_history import build_event_history
 
         live_messages, reminder = ContextManager.build(
             agent_name=agent.name, agents={agent.name: agent},
@@ -1144,7 +1144,7 @@ class TestPromptReconstructionFidelity:
 
     def test_old_event_without_reminder_rebuilds_static_only(self):
         # reminder=None（早于本次变更的旧 agent_start）→ 只前置 system + 历史，不拼 reminder
-        from core.event_history import build_event_history
+        from core.execution.event_history import build_event_history
         agent = _FakeAgentConfig()
         state = _make_state(events=[
             _make_event(StreamEventType.USER_INPUT.value, data={"content": "hi"}),

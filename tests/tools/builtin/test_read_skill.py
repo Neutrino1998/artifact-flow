@@ -15,8 +15,8 @@ from types import SimpleNamespace
 import pytest
 
 from config import config
-from core.effective_skillset import EffectiveSkillSet
-from core.effective_toolset import EffectiveToolset, SkillGrant
+from core.capabilities.effective_skillset import EffectiveSkillSet
+from core.capabilities.effective_toolset import EffectiveToolset, SkillGrant
 from reconcile.snapshot import SkillInfo
 from tools.base import ToolExecutionContext, ToolPermission
 from tools.builtin.read_skill import (

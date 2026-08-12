@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy.exc import OperationalError
 
-from core.conversation_manager import ConversationManager
+from core.management.conversation_manager import ConversationManager
 from db.models import User, Conversation, Message
 from db.database import DatabaseManager
 from repositories.conversation_repo import ConversationRepository
@@ -468,7 +468,7 @@ class TestRetryIdempotency:
     ):
         # 模拟 with_retry:首次已 commit message 后瞬断 → 重跑 append_message。
         # 修复前第二遍撞 DuplicateError(非瞬断)逃出 with_retry → 整轮崩;修复后撞重当成功。
-        from core.conversation_manager import ConversationManager
+        from core.management.conversation_manager import ConversationManager
         mgr = ConversationManager(conversation_repo)
         conv_id = f"conv-{uuid.uuid4().hex}"
         msg_id = f"msg-{uuid.uuid4().hex}"
@@ -496,7 +496,7 @@ class TestRetryIdempotency:
     async def test_append_message_blank_root_title_falls_back(
         self, conversation_repo: ConversationRepository, test_user: User
     ):
-        from core.conversation_manager import ConversationManager
+        from core.management.conversation_manager import ConversationManager
         mgr = ConversationManager(conversation_repo)
         conv_id = f"conv-{uuid.uuid4().hex}"
         msg_id = f"msg-{uuid.uuid4().hex}"
@@ -517,7 +517,7 @@ class TestRetryIdempotency:
         self, conversation_repo: ConversationRepository
     ):
         """Append fails closed instead of resurrecting a deleted parent row."""
-        from core.conversation_manager import ConversationManager
+        from core.management.conversation_manager import ConversationManager
 
         mgr = ConversationManager(conversation_repo)
         conv_id = f"conv-{uuid.uuid4().hex}"
@@ -536,7 +536,7 @@ class TestRetryIdempotency:
     ):
         # #2 的修法(turn handler 在 retry 边界外定 conv_id 再传入)依赖此幂等:固定 id
         # 重复调用返回同 id、不抛(撞重被 manager 吞)。
-        from core.conversation_manager import ConversationManager
+        from core.management.conversation_manager import ConversationManager
         mgr = ConversationManager(conversation_repo)
         conv_id = f"conv-{uuid.uuid4().hex}"
 
@@ -546,7 +546,7 @@ class TestRetryIdempotency:
     async def test_require_owned_hides_missing_and_wrong_owner(
         self, conversation_repo: ConversationRepository, test_user: User
     ):
-        from core.conversation_manager import ConversationManager
+        from core.management.conversation_manager import ConversationManager
 
         mgr = ConversationManager(conversation_repo)
         conv_id = f"conv-{uuid.uuid4().hex}"
@@ -561,7 +561,7 @@ class TestRetryIdempotency:
 
     async def test_manager_requires_repository_at_construction(self):
         """Manager has no dependencyless/test-only persistence mode."""
-        from core.conversation_manager import ConversationManager
+        from core.management.conversation_manager import ConversationManager
 
         with pytest.raises(ValueError, match="requires a repository"):
             ConversationManager(None)

@@ -6,7 +6,7 @@ default 与覆盖态区分(is_overridden)。可见性口径复用 EffectiveSkill
 
 import pytest
 
-from core.skill_manager import SkillManager, SkillNotFoundError
+from core.management.skill_manager import SkillManager, SkillNotFoundError
 from db.models import Department, DepartmentSkillRule, Skill, User, UserSkill
 
 

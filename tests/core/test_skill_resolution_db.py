@@ -6,8 +6,8 @@
 import pytest
 from sqlalchemy import select
 
-from core.department_resolver import load_ancestor_ids
-from core.effective_skillset import resolve_effective_skillset
+from repositories.department_repo import load_ancestor_ids
+from core.capabilities.effective_skillset import resolve_effective_skillset
 from db.models import (
     Department,
     DepartmentSkillRule,

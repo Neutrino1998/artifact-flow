@@ -2,10 +2,10 @@
 
 作用域 = 用户自己的 skill(个人偏好 + 私有导入;守 feedback-admin-scope-user-mgmt)。
 可见性走 SkillManager 的 EffectiveSkillSet 单点闸,不可见 skill → 404(不泄露存在性)。
-admin 共享导入/删除在 routers/admin_skills.py。dept 授权 UI 留 G。
+admin 共享导入/删除在 routers/admin/skills.py。dept 授权 UI 留 G。
 """
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import Response
 
 from api.dependencies import get_current_user, get_skill_manager
@@ -16,25 +16,10 @@ from api.schemas.skills import (
     SkillListResponse,
     SkillToggleRequest,
 )
-from core.skill_manager import SkillManager, SkillManagerError, SkillValidationError
+from core.management.skill_manager import SkillManager, SkillManagerError
+from api.utils.skill_errors import map_skill_error
 
 router = APIRouter()
-
-
-def _map(e: SkillManagerError) -> HTTPException:
-    if isinstance(e, SkillValidationError):
-        # 硬门拒收:findings 结构化透出,前端逐条渲染(rule + severity badge + message)
-        return HTTPException(
-            status_code=e.status_code,
-            detail={
-                "message": str(e),
-                "findings": [
-                    {"rule": f.rule, "severity": f.severity, "message": f.message}
-                    for f in e.findings
-                ],
-            },
-        )
-    return HTTPException(status_code=getattr(e, "status_code", 400), detail=str(e))
 
 
 @router.get("", response_model=SkillListResponse)
@@ -57,7 +42,7 @@ async def get_skill_detail(
     try:
         item = await mgr.get_detail_for_user(user.user_id, skill_id)
     except SkillManagerError as e:
-        raise _map(e)
+        raise map_skill_error(e)
     return SkillDetailResponse(**item)
 
 
@@ -75,7 +60,7 @@ async def import_skill(
             user.user_id, blob, file.filename or "", audience="private"
         )
     except SkillManagerError as e:
-        raise _map(e)
+        raise map_skill_error(e)
     return SkillImportResponse(**result)
 
 
@@ -89,7 +74,7 @@ async def export_skill(
     try:
         slug, blob = await mgr.export_bundle(user.user_id, skill_id)
     except SkillManagerError as e:
-        raise _map(e)
+        raise map_skill_error(e)
     return Response(
         content=blob,
         media_type="application/zip",
@@ -107,7 +92,7 @@ async def delete_skill(
     try:
         await mgr.delete_skill(user.user_id, skill_id)
     except SkillManagerError as e:
-        raise _map(e)
+        raise map_skill_error(e)
 
 
 @router.put("/{skill_id}/enabled", response_model=SkillItem)
@@ -121,5 +106,5 @@ async def set_skill_enabled(
     try:
         item = await mgr.set_enabled(user.user_id, skill_id, body.enabled)
     except SkillManagerError as e:
-        raise _map(e)
+        raise map_skill_error(e)
     return SkillItem(**item)

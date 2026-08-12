@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from core.conversation_manager import ConversationManager
-from core.events import ExecutionEvent, StreamEventType
+from core.management.conversation_manager import ConversationManager
+from core.execution.events import ExecutionEvent, StreamEventType
 
 
 @pytest.mark.asyncio

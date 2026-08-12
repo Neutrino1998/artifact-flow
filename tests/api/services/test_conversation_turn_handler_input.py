@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from api.services.conversation_turn_handler import ConversationTurnHandler
-from core.agent_runtime import RuntimeHooks
+from core.execution.agent_runtime import RuntimeHooks
 
 
 def _make_handler() -> ConversationTurnHandler:

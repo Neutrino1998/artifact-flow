@@ -18,8 +18,8 @@ from unittest.mock import patch, AsyncMock
 
 import pytest
 
-from core.compaction_runner import CompactionRunner
-from core.events import ExecutionEvent, StreamEventType
+from core.execution.compaction_runner import CompactionRunner
+from core.execution.events import ExecutionEvent, StreamEventType
 
 
 @dataclass
@@ -267,7 +267,7 @@ class TestCancelInterrupt:
         paired. Partial streamed content is discarded — no boundary from a
         half-built summary."""
         import asyncio
-        from core.cancellation import CooperativeCancelled
+        from core.execution.cancellation import CooperativeCancelled
 
         flag = {"v": False}
 
@@ -290,7 +290,7 @@ class TestCancelInterrupt:
         ])
 
         with patch("models.llm.astream_with_retry", hanging_stream), \
-             patch("core.compaction_runner.config.CANCEL_CHECK_INTERVAL", 0.01):
+             patch("core.execution.compaction_runner.config.CANCEL_CHECK_INTERVAL", 0.01):
             with pytest.raises(CooperativeCancelled):
                 await runner.maybe_trigger(
                     state, "lead_agent", input_tokens=80, output_tokens=30,

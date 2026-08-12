@@ -25,8 +25,8 @@ import shlex
 import zipfile
 from typing import List, Optional
 
-from core.effective_skillset import EffectiveSkillSet
-from core.skill_guidance import can_access_skill_bundle, render_skill_guidance
+from core.capabilities.effective_skillset import EffectiveSkillSet
+from core.capabilities.skill_guidance import can_access_skill_bundle, render_skill_guidance
 from tools.base import (
     MOUNT_SKILL_NAME,
     READ_SKILL_NAME,

@@ -20,12 +20,12 @@ from contextlib import asynccontextmanager
 from uuid import uuid4
 
 from api.services.conversation_turn_handler import ConversationTurnHandler
-from core.effective_toolset import resolve_all
+from core.capabilities.effective_toolset import resolve_all
 from reconcile.reconciler import reconcile_config_to_db
 from reconcile.snapshot import load_registry_snapshot
-from core.agent_runtime import RuntimeHooks
-from core.conversation_manager import ConversationManager
-from core.events import StreamEventType
+from core.execution.agent_runtime import RuntimeHooks
+from core.management.conversation_manager import ConversationManager
+from core.execution.events import StreamEventType
 from agents.loader import load_all_agents
 from tools.base import BaseTool, build_tool_map
 from tools.builtin.artifact_service import ArtifactService
