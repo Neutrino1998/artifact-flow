@@ -22,6 +22,7 @@ except ImportError:
 
 pytestmark = [
     pytest.mark.asyncio,
+    pytest.mark.external,
     pytest.mark.skipif(not _redis_available, reason="redis package not installed"),
 ]
 

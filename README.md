@@ -126,8 +126,17 @@ cd frontend && npm run generate-types
 测试：
 
 ```bash
+# 完整串行回归（便于调试）
 pytest
+
+# 日常无外部依赖回归；普通测试默认必须支持 xdist 并行
+pytest -n 4 -m "not external and not serial"
+
+# 真实 Redis 集成回归
+REDIS_URL=redis://localhost:6379 pytest -m external
+
 cd frontend && npm run test:run
+go test ./...
 ```
 
 ## 文档

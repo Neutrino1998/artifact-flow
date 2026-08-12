@@ -119,13 +119,31 @@ def department_repo(db_session: AsyncSession) -> DepartmentRepository:
 # ============================================================
 
 
+@pytest.fixture(scope="session")
+def standard_password_hashes() -> dict[str, str]:
+    """Hash shared fixture passwords once per pytest worker.
+
+    bcrypt hashes are immutable and carry their work factor in the encoded value.
+    Recomputing the same two production-cost hashes for every DB-backed test adds
+    CPU time without improving isolation; authentication-specific tests still call
+    ``hash_password`` directly when hashing behavior is the subject under test.
+    """
+    return {
+        "testpass": hash_password("testpass"),
+        "adminpass": hash_password("adminpass"),
+    }
+
+
 @pytest.fixture
-async def test_user(user_repo: UserRepository) -> User:
+async def test_user(
+    user_repo: UserRepository,
+    standard_password_hashes: dict[str, str],
+) -> User:
     """A pre-created regular user."""
     user = User(
         id=str(uuid.uuid4()),
         username="testuser",
-        hashed_password=hash_password("testpass"),
+        hashed_password=standard_password_hashes["testpass"],
         role="user",
         is_active=True,
     )
@@ -133,12 +151,15 @@ async def test_user(user_repo: UserRepository) -> User:
 
 
 @pytest.fixture
-async def test_admin(user_repo: UserRepository) -> User:
+async def test_admin(
+    user_repo: UserRepository,
+    standard_password_hashes: dict[str, str],
+) -> User:
     """A pre-created admin user."""
     admin = User(
         id=str(uuid.uuid4()),
         username="testadmin",
-        hashed_password=hash_password("adminpass"),
+        hashed_password=standard_password_hashes["adminpass"],
         role="admin",
         is_active=True,
     )

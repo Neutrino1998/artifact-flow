@@ -1,7 +1,9 @@
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = ["--strict-markers"]
 markers = [
-    "slow: tests that take more than 5 seconds",
+    "external: requires a provisioned external service or runtime",
+    "serial: requires exclusive access to a host-global resource and must not run under xdist",
 ]
 filterwarnings = []
