@@ -1,93 +1,111 @@
 """Best-effort guard against high-confidence implementation-history labels."""
 
 import re
+import subprocess
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_DIRS = (
-    ROOT / "src",
-    ROOT / "frontend" / "src",
-    ROOT / "sandbox",
-    ROOT / "scripts",
-    ROOT / "deploy",
-    ROOT / "config",
-)
-ROOT_SOURCE_FILES = (
-    ROOT / "Dockerfile",
-    ROOT / "requirements.txt",
-    ROOT / "docker-compose.dev.yml",
-)
-SOURCE_SUFFIXES = {
-    ".py",
-    ".pyi",
-    ".ts",
-    ".tsx",
-    ".js",
-    ".jsx",
-    ".sh",
-    ".bash",
-    ".yml",
-    ".yaml",
-    ".toml",
-    ".md",
-    ".txt",
-    ".sql",
-}
-SOURCE_FILENAMES = {"Dockerfile", "Caddyfile"}
-RUNTIME_MARKDOWN_ROOT = ROOT / "config"
 EXCLUDED_FILES = {
-    ROOT / "frontend" / "src" / "types" / "api.d.ts",
-    ROOT / "frontend" / "src" / "types" / "openapi.json",
+    "frontend/src/types/api.d.ts",
+    "frontend/src/types/openapi.json",
 }
-EXCLUDED_DIR_NAMES = {"__pycache__", "node_modules", "dist"}
+EXCLUDED_TOP_LEVEL_DIRS = {"docs", "site", "tests"}
+EXCLUDED_DIR_NAMES = {"__tests__", "test-utils"}
+EXCLUDED_LOCKFILES = {
+    "frontend/package-lock.json",
+    "requirements.lock",
+}
+EXCLUDED_ASSET_SUFFIXES = {".svg"}
 
 FORBIDDEN_PATTERNS = (
     (
         "archived-doc reference",
         re.compile(r"docs[/\\]_archive(?:[/\\]|$)", re.IGNORECASE),
     ),
-    ("PR label", re.compile(r"\bPR\s*#?\s*\d+[a-z]?\b", re.IGNORECASE)),
+    (
+        "PR label",
+        re.compile(
+            r"(?i:\bPR\s*#?\s*\d+[a-z]?\b)|"
+            r"\bPR-(?:\d+[a-z]?|[a-z][a-z0-9]*(?:-[a-z0-9]+)+)\b",
+        ),
+    ),
     (
         "decision label",
-        re.compile(r"\bdecision\s*#?\s*\d+[a-z]?\b", re.IGNORECASE),
+        re.compile(
+            r"\bdecision\s*#?\s*\d+[a-z]?\b|决策\s*#?\s*\d+",
+            re.IGNORECASE,
+        ),
     ),
+    ("finding label", re.compile(r"\bFinding\s*#?\s*\d+[a-z]?\b", re.IGNORECASE)),
     ("plan section", re.compile(r"\bplan\s*§\s*\S+", re.IGNORECASE)),
     (
         "numbered review",
         re.compile(
             r"\breview(?:er)?\s*(?:#|r)\s*\d+\b|"
+            r"\breview(?:er)?\s+(?:P[0-3]|N\d+)\b|"
+            r"\breview(?:er)?\s+round\s+\d+\b|"
             r"(?:\d+|[一二两三四五六七八九十]+)\s*轮\s*review\b",
             re.IGNORECASE,
+        ),
+    ),
+    (
+        "roadmap phase",
+        re.compile(
+            r"(?i:\b(?:phase|stage))\s+[A-F]\b|"
+            r"(?<![A-Za-z])[A-F]-phase\b|"
+            r"(?<![A-Za-z])[A-F]-\d+\b|"
+            r"(?<![A-Za-z])[A-F][′']?\s*阶段",
         ),
     ),
 )
 
 
-def _is_test_file(path: Path) -> bool:
+def _is_test_file(relative_path: Path) -> bool:
     return (
-        "__tests__" in path.parts
-        or ".test." in path.name
-        or ".spec." in path.name
-        or path.name.startswith("test_")
+        bool(EXCLUDED_DIR_NAMES.intersection(relative_path.parts))
+        or ".test." in relative_path.name
+        or ".spec." in relative_path.name
+        or relative_path.name.startswith("test_")
+        or relative_path.name.endswith("_test.go")
     )
 
 
+def _is_excluded(relative_path: Path) -> bool:
+    relative_name = relative_path.as_posix()
+    if relative_name in EXCLUDED_FILES or relative_name in EXCLUDED_LOCKFILES:
+        return True
+    if relative_path.suffix.lower() in EXCLUDED_ASSET_SUFFIXES:
+        return True
+    if relative_path.parts[0] in EXCLUDED_TOP_LEVEL_DIRS:
+        return True
+    if _is_test_file(relative_path):
+        return True
+    # Ordinary Markdown is documentation. Markdown under config/ is runtime
+    # agent/tool/skill input and remains in scope.
+    if relative_path.suffix.lower() == ".md" and relative_path.parts[0] != "config":
+        return True
+    return False
+
+
 def _iter_source_files():
-    for source_dir in SOURCE_DIRS:
-        for path in sorted(source_dir.rglob("*")):
-            if not path.is_file() or path in EXCLUDED_FILES:
-                continue
-            if EXCLUDED_DIR_NAMES.intersection(path.parts) or _is_test_file(path):
-                continue
-            if (
-                path.suffix.lower() == ".md"
-                and RUNTIME_MARKDOWN_ROOT not in path.parents
-            ):
-                continue
-            if path.suffix.lower() in SOURCE_SUFFIXES or path.name in SOURCE_FILENAMES:
-                yield path
-    yield from (path for path in ROOT_SOURCE_FILES if path.is_file())
+    tracked = subprocess.check_output(
+        ["git", "ls-files", "-z"], cwd=ROOT
+    ).decode("utf-8")
+    for relative_name in tracked.split("\0"):
+        if not relative_name:
+            continue
+        relative_path = Path(relative_name)
+        if _is_excluded(relative_path):
+            continue
+        path = ROOT / relative_path
+        if not path.is_file():
+            continue
+        try:
+            path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        yield path
 
 
 def _matches_forbidden_pattern(text: str) -> bool:
@@ -97,12 +115,23 @@ def _matches_forbidden_pattern(text: str) -> bool:
 def test_annotation_guard_patterns_stay_narrow():
     forbidden_examples = (
         "PR5a",
+        "PR-obs-lite",
+        "PR-tz-unify",
         "decision 11",
+        "决策 10",
+        "Finding 1",
         "review r4",
         "reviewer #2",
+        "reviewer P2",
+        "reviewer round 4",
+        "reviewer N4",
         "两轮 review",
         "plan §B",
         "docs/_archive/design.md",
+        "B-5",
+        "C 阶段",
+        "Phase C",
+        "B-phase",
     )
     allowed_examples = (
         "Phase 0",
@@ -111,10 +140,35 @@ def test_annotation_guard_patterns_stay_narrow():
         "--author Reviewer",
         "peer-reviewed source",
         "2026-05-14",
+        "H-264",
     )
 
     assert all(_matches_forbidden_pattern(text) for text in forbidden_examples)
     assert not any(_matches_forbidden_pattern(text) for text in allowed_examples)
+
+
+def test_source_enumeration_covers_production_entrypoints_only():
+    source_files = {path.relative_to(ROOT).as_posix() for path in _iter_source_files()}
+
+    assert {
+        "cmd/afctl/main.go",
+        "internal/afctl/controller.go",
+        "frontend/Dockerfile",
+        "docker-compose.yml",
+        "run_server.py",
+        "setup.py",
+        "deploy/caddy/common.caddy",
+    } <= source_files
+    assert {
+        "internal/afctl/afctl_test.go",
+        "frontend/src/app/login/page.test.tsx",
+        "frontend/src/types/api.d.ts",
+        "frontend/src/types/openapi.json",
+        "frontend/package-lock.json",
+        "requirements.lock",
+        "docs/index.md",
+        "frontend/public/cat-sleep-dark.svg",
+    }.isdisjoint(source_files)
 
 
 def test_production_source_has_no_historical_implementation_labels():
