@@ -48,7 +48,10 @@ def build_stream_response(
                 if event_view == "user":
                     event = project_event_for_user(event)
                 elif event_view == "admin":
-                    event = project_event_for_admin(event)
+                    projected_event = project_event_for_admin(event)
+                    if projected_event is None:
+                        continue
+                    event = projected_event
                 stream_entry_id = event.pop("_stream_id", None)
                 yield format_sse_event(
                     event, event=event.get("type"), id=stream_entry_id

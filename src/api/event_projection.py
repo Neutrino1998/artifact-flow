@@ -1,12 +1,12 @@
-"""User-facing projection for execution-event payloads.
+"""Observer-specific projection for execution-event payloads.
 
-Raw events are retained in the stream transport and MessageEvent storage for
-admin observability and prompt reconstruction.  Ordinary-user APIs must expose
-only the public shape of event types that carry internal execution context.
+Ordinary-user APIs expose only the public shape of internal execution events.
+Admin observability retains semantic diagnostic events, while the optional
+privacy boundary suppresses direct artifact live transports.
 """
 
 import re
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from api.admin_privacy import project_admin_uploaded_files
 from config import config
@@ -76,26 +76,18 @@ def project_event_data_for_admin(event_type: str, data: Any) -> Any:
                 ),
             }
 
-    if (
-        event_type == StreamEventType.ARTIFACT_CREATED.value
-        and data.get("source") == "user_upload"
-    ):
-        redacted = {
-            **data,
-            "id": "__redacted_upload__",
-            "title": "上传文件",
-        }
-        redacted.pop("original_filename", None)
-        return redacted
-
     return data
 
 
-def project_event_for_admin(event: Dict[str, Any]) -> Dict[str, Any]:
-    """Project a live admin event without mutating the buffered transport value."""
+def project_event_for_admin(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Project one live admin event, or suppress a direct artifact transport."""
+    event_type = str(event.get("type", ""))
+    if config.ADMIN_PRIVACY_MODE and event_type in {
+        StreamEventType.ARTIFACT_CREATED.value,
+        StreamEventType.ARTIFACT_UPDATED.value,
+    }:
+        return None
     return {
         **event,
-        "data": project_event_data_for_admin(
-            str(event.get("type", "")), event.get("data")
-        ),
+        "data": project_event_data_for_admin(event_type, event.get("data")),
     }

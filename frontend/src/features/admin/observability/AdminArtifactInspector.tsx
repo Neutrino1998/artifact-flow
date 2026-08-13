@@ -84,7 +84,7 @@ export default function AdminArtifactInspector({
   const [versionLoading, setVersionLoading] = useState(false);
   const [downloadLoading, setDownloadLoading] = useState(false);
 
-  const protectedUploadCount = list?.filter(
+  const protectedArtifactCount = list?.filter(
     (artifact) => artifact.content_accessible === false,
   ).length ?? 0;
   const accessibleArtifacts = list?.filter(
@@ -233,9 +233,9 @@ export default function AdminArtifactInspector({
   if (selectedId == null) {
     return (
       <div className="flex-1 min-h-0 flex flex-col">
-        {protectedUploadCount > 0 ? (
+        {protectedArtifactCount > 0 ? (
           <div className="mx-3 mt-3 shrink-0 rounded-lg bg-panel-accent px-3 py-2 text-xs text-text-secondary dark:bg-surface-dark dark:text-text-secondary-dark">
-            {protectedUploadCount} 个用户上传文件受隐私保护，管理员不能预览或下载。
+            {protectedArtifactCount} 个会话文件受隐私保护，管理员不能预览或下载。
           </div>
         ) : null}
         <ArtifactTree
@@ -245,7 +245,7 @@ export default function AdminArtifactInspector({
           heading="会话文件"
           emptyMessage={listError
             ? '文件列表加载失败'
-            : protectedUploadCount > 0
+            : protectedArtifactCount > 0
               ? '没有可查看的会话文件'
               : '该会话暂无文件'}
           showTypeLabel={false}

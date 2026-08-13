@@ -184,8 +184,8 @@ class Settings(BaseSettings):
     OBS_ADMIN_EVENT_MAX_TASKS: int = Field(default=50, ge=1, le=500)
 
     # Admin 会话监控的部署级隐私边界。开启后，后端去除会话与反馈中的账户关联
-    # 字段、脱敏上传文件名，并拒绝 admin 读取源自用户上传的 artifact 内容。
-    # 普通对话/模型/工具文本不做内容扫描，以保留故障排查能力。
+    # 字段、脱敏上传文件名，并拒绝 admin 读取任何 artifact 内容。Artifact live
+    # 事件不向 admin 转发；对话/模型/工具文本和 Prompt 重建保留，不做自由文本扫描。
     ADMIN_PRIVACY_MODE: bool = False
 
     # Redis（空 = InMemory fallback，非空 = Redis）

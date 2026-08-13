@@ -7,6 +7,7 @@ from httpx import AsyncClient
 
 from api.dependencies import get_runtime_store, get_stream_transport
 from config import config
+from core.management.conversation_manager import ConversationManager
 from db.database import DatabaseManager
 from db.models import User
 from repositories.conversation_repo import ConversationRepository
@@ -92,7 +93,7 @@ class TestAdminConversationActivity:
         )
         assert response.status_code == 400
 
-    async def test_privacy_mode_disables_prompt_reconstruction(
+    async def test_privacy_mode_keeps_prompt_reconstruction(
         self,
         monkeypatch,
         admin_client: AsyncClient,
@@ -101,12 +102,39 @@ class TestAdminConversationActivity:
         monkeypatch.setattr(config, "ADMIN_PRIVACY_MODE", True)
         conv_id, message_id = observed_conversation
 
+        async def reconstruct_prompt(
+            _self,
+            requested_conv_id,
+            requested_message_id,
+            event_id,
+        ):
+            return {
+                "conversation_id": requested_conv_id,
+                "message_id": requested_message_id,
+                "agent_start_event_id": event_id,
+                "agent_name": "lead_agent",
+                "model": "test-model",
+                "exposed_tool_names": ["read_artifact"],
+                "has_reminder": True,
+                "messages": [
+                    {"role": "system", "content": "system"},
+                    {"role": "user", "content": "diagnostic prompt snapshot"},
+                ],
+            }
+
+        monkeypatch.setattr(
+            ConversationManager,
+            "reconstruct_prompt",
+            reconstruct_prompt,
+        )
+
         response = await admin_client.get(
             f"/api/v1/admin/conversations/{conv_id}/messages/{message_id}/reconstruct",
             params={"agent_start_event_id": "evt-anchor"},
         )
 
-        assert response.status_code == 404
+        assert response.status_code == 200
+        assert response.json()["messages"][-1]["content"] == "diagnostic prompt snapshot"
 
     async def test_list_and_detail_expose_active_message_id(
         self,
@@ -197,7 +225,7 @@ class TestAdminConversationActivity:
             await transport.close_stream(message_id)
             await store.release_lease(conv_id, message_id)
 
-    async def test_privacy_mode_redacts_upload_names_in_admin_stream(
+    async def test_privacy_mode_suppresses_artifact_events_in_admin_stream(
         self,
         monkeypatch,
         app,
@@ -225,11 +253,34 @@ class TestAdminConversationActivity:
                 "title": "Payroll-Alice.xlsx",
                 "source": "user_upload",
                 "original_filename": "Payroll-Alice.xlsx",
+                "content": "private-created-content",
+            },
+        })
+        await transport.push_event(message_id, {
+            "type": "artifact_updated",
+            "timestamp": "2026-07-13T00:00:02",
+            "data": {
+                "id": "payroll-alice",
+                "content": "private-updated-content",
+                "delta": {
+                    "offset": 0,
+                    "deleted_len": 0,
+                    "inserted_text": "private-delta-content",
+                },
+            },
+        })
+        await transport.push_event(message_id, {
+            "type": "tool_complete",
+            "timestamp": "2026-07-13T00:00:03",
+            "data": {
+                "tool": "read_artifact",
+                "success": True,
+                "result_data": "semantic-diagnostic-content",
             },
         })
         await transport.push_event(message_id, {
             "type": "complete",
-            "timestamp": "2026-07-13T00:00:02",
+            "timestamp": "2026-07-13T00:00:04",
             "data": {"success": True, "message_id": message_id},
         })
         try:
@@ -239,8 +290,14 @@ class TestAdminConversationActivity:
             assert response.status_code == 200
             assert "Payroll-Alice.xlsx" not in response.text
             assert "payroll-alice" not in response.text
+            assert "private-created-content" not in response.text
+            assert "private-updated-content" not in response.text
+            assert "private-delta-content" not in response.text
             assert "上传文件 1" in response.text
-            assert "__redacted_upload__" in response.text
+            assert "event: artifact_created" not in response.text
+            assert "event: artifact_updated" not in response.text
+            assert "event: tool_complete" in response.text
+            assert "semantic-diagnostic-content" in response.text
         finally:
             await transport.close_stream(message_id)
             await store.release_lease(conv_id, message_id)

@@ -105,14 +105,14 @@ describe('AdminArtifactInspector', () => {
     expect(container.textContent).not.toContain('Artifact ID');
   });
 
-  it('does not offer previews or downloads for protected user uploads', async () => {
+  it('does not offer previews or downloads for protected artifacts', async () => {
     apiMocks.listAdminConversationArtifacts.mockResolvedValue({
       session_id: 'conv-1',
       artifacts: [{
         ...summary,
-        id: '__redacted_upload_1__',
-        title: '上传文件 1',
-        source: 'user_upload',
+        id: '__protected_artifact_1__',
+        title: '受保护文件 1',
+        source: 'agent',
         original_filename: null,
         content_accessible: false,
       }],
@@ -122,7 +122,7 @@ describe('AdminArtifactInspector', () => {
       root.render(<AdminArtifactInspector conversationId="conv-1" refreshTick={0} />);
     });
 
-    expect(container.textContent).toContain('1 个用户上传文件受隐私保护');
+    expect(container.textContent).toContain('1 个会话文件受隐私保护');
     expect(container.textContent).toContain('没有可查看的会话文件');
     expect(container.querySelector('button[aria-label="下载文件"]')).toBeNull();
     expect(apiMocks.getAdminConversationArtifact).not.toHaveBeenCalled();

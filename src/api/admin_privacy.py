@@ -1,9 +1,9 @@
 """Backend-owned projection for the optional admin privacy boundary.
 
-The mode removes direct account linkage from observability responses and marks
-user-uploaded artifacts as content-inaccessible.  It intentionally does not
-redact free-form conversation, model, or tool text so operational diagnostics
-remain useful.
+The mode removes direct account linkage from observability responses and makes
+all artifacts content-inaccessible through admin APIs.  It intentionally does
+not redact free-form conversation, model, or tool text so operational
+diagnostics remain useful.
 """
 
 from typing import Any, Mapping, Optional, Sequence
@@ -49,35 +49,25 @@ def project_admin_uploaded_files(
     return redacted
 
 
-def admin_artifact_content_accessible(
-    source: Optional[str],
-    *,
-    user_upload_origin: bool = False,
-) -> bool:
+def admin_artifact_content_accessible() -> bool:
     """Whether an admin may read artifact content under the active policy."""
-    return not (
-        config.ADMIN_PRIVACY_MODE
-        and (source == "user_upload" or user_upload_origin)
-    )
+    return not config.ADMIN_PRIVACY_MODE
 
 
 def project_admin_artifact_summary(
     artifact: Mapping[str, Any],
     *,
-    redacted_index: int,
+    protected_index: int,
 ) -> dict[str, Any]:
-    """Project artifact metadata without exposing upload-derived names or ids."""
+    """Project artifact metadata without exposing protected names or ids."""
     projected = dict(artifact)
-    accessible = admin_artifact_content_accessible(
-        artifact.get("source"),
-        user_upload_origin=bool(artifact.get("user_upload_origin")),
-    )
+    accessible = admin_artifact_content_accessible()
     projected["content_accessible"] = accessible
     if not accessible:
         projected.update(
             {
-                "id": f"__redacted_upload_{redacted_index}__",
-                "title": f"上传文件 {redacted_index}",
+                "id": f"__protected_artifact_{protected_index}__",
+                "title": f"受保护文件 {protected_index}",
                 "original_filename": None,
             }
         )

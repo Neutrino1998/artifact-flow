@@ -64,21 +64,9 @@ logger = get_logger("ArtifactFlow")
 router = APIRouter()
 
 
-async def _require_admin_artifact_content_access(
-    artifact_service: ArtifactService,
-    conv_id: str,
-    artifact_id: str,
-) -> None:
-    """Return 404 when the active policy hides a user-owned upload's content."""
-    if not config.ADMIN_PRIVACY_MODE:
-        return
-    artifact = await artifact_service.get_artifact(conv_id, artifact_id)
-    if artifact is not None and not admin_artifact_content_accessible(
-        artifact.source,
-        user_upload_origin=bool(
-            (artifact.metadata or {}).get("user_upload_origin")
-        ),
-    ):
+def _require_admin_artifact_content_access() -> None:
+    """Return 404 when the active policy hides all artifact content."""
+    if not admin_artifact_content_accessible():
         raise HTTPException(status_code=404, detail="Artifact not found")
 
 
@@ -301,11 +289,6 @@ async def reconstruct_admin_prompt(
     不重新生成动态内容，也不声称还原未持久化的 native tools schema —— 详见
     ConversationManager.reconstruct_prompt。
     """
-    if config.ADMIN_PRIVACY_MODE:
-        # Persisted reminders may contain upload inventory previews and original
-        # artifact ids. Prompt reconstruction is therefore a content-read path,
-        # not merely execution metadata, under the privacy boundary.
-        raise HTTPException(status_code=404, detail="Prompt snapshot not found")
     result = await conversation_manager.reconstruct_prompt(
         conv_id, message_id, agent_start_event_id
     )
@@ -349,16 +332,10 @@ async def list_admin_conversation_artifacts(
         include_content=False,
     )
     projected_artifacts = []
-    redacted_index = 0
-    for art in artifacts:
-        if not admin_artifact_content_accessible(
-            art.get("source"),
-            user_upload_origin=bool(art.get("user_upload_origin")),
-        ):
-            redacted_index += 1
+    for artifact_index, art in enumerate(artifacts, start=1):
         projected = project_admin_artifact_summary(
             art,
-            redacted_index=redacted_index,
+            protected_index=artifact_index,
         )
         projected_artifacts.append(
             AdminArtifactSummary(
@@ -388,9 +365,7 @@ async def get_admin_conversation_artifact(
     artifact_service: ArtifactService = Depends(get_artifact_service),
 ):
     """Get current artifact content + version list (DB-only)."""
-    await _require_admin_artifact_content_access(
-        artifact_service, conv_id, artifact_id
-    )
+    _require_admin_artifact_content_access()
     result = await artifact_service.read_artifact(
         session_id=conv_id,
         artifact_id=artifact_id,
@@ -439,9 +414,7 @@ async def get_admin_conversation_artifact_raw(
     artifact_service: ArtifactService = Depends(get_artifact_service),
 ):
     """Serve raw blob bytes for an artifact in any conversation (admin-only)."""
-    await _require_admin_artifact_content_access(
-        artifact_service, conv_id, artifact_id
-    )
+    _require_admin_artifact_content_access()
     blob = await artifact_service.get_blob(conv_id, artifact_id)
     if blob is None:
         raise HTTPException(
@@ -463,9 +436,7 @@ async def get_admin_conversation_artifact_version(
     artifact_service: ArtifactService = Depends(get_artifact_service),
 ):
     """Get a specific historical version's content (DB-only)."""
-    await _require_admin_artifact_content_access(
-        artifact_service, conv_id, artifact_id
-    )
+    _require_admin_artifact_content_access()
     ver = await artifact_service.get_version(conv_id, artifact_id, version)
     if ver is None:
         raise HTTPException(

@@ -406,8 +406,8 @@ class TestHasBlobField:
         )
         assert listing.status_code == 200
         (item,) = listing.json()["artifacts"]
-        assert item["id"] == "__redacted_upload_1__"
-        assert item["title"] == "上传文件 1"
+        assert item["id"] == "__protected_artifact_1__"
+        assert item["title"] == "受保护文件 1"
         assert item["original_filename"] is None
         assert item["content_accessible"] is False
         assert artifact_id not in listing.text
@@ -426,7 +426,7 @@ class TestHasBlobField:
         assert raw.status_code == 404
         assert version.status_code == 404
 
-    async def test_admin_privacy_mode_keeps_generated_artifacts_accessible(
+    async def test_admin_privacy_mode_blocks_generated_artifacts_too(
         self,
         monkeypatch,
         admin_client: AsyncClient,
@@ -440,16 +440,22 @@ class TestHasBlobField:
         )
         assert listing.status_code == 200
         (item,) = listing.json()["artifacts"]
-        assert item["id"] == artifact_id
-        assert item["content_accessible"] is True
+        assert item["id"] == "__protected_artifact_1__"
+        assert item["title"] == "受保护文件 1"
+        assert item["content_accessible"] is False
+        assert artifact_id not in listing.text
+        assert "Test Artifact" not in listing.text
 
         detail = await admin_client.get(
             f"/api/v1/admin/conversations/{session_id}/artifacts/{artifact_id}"
         )
-        assert detail.status_code == 200
-        assert detail.json()["content"] == "# Version 2"
+        version = await admin_client.get(
+            f"/api/v1/admin/conversations/{session_id}/artifacts/{artifact_id}/versions/1"
+        )
+        assert detail.status_code == 404
+        assert version.status_code == 404
 
-    async def test_admin_privacy_mode_keeps_rewritten_upload_protected(
+    async def test_admin_privacy_mode_blocks_legacy_rewritten_artifact_without_marker(
         self,
         monkeypatch,
         admin_client: AsyncClient,
@@ -473,10 +479,7 @@ class TestHasBlobField:
                 content_type="text/plain",
                 title="private-notes",
                 content="rewritten by the agent",
-                metadata={
-                    "original_filename": "Private Notes.txt",
-                    "user_upload_origin": True,
-                },
+                metadata={"original_filename": "Private Notes.txt"},
                 source="agent",
             )
 
@@ -489,5 +492,6 @@ class TestHasBlobField:
 
         assert listing.status_code == 200
         assert listing.json()["artifacts"][0]["content_accessible"] is False
+        assert artifact_id not in listing.text
         assert "Private Notes.txt" not in listing.text
         assert detail.status_code == 404
