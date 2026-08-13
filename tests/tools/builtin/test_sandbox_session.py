@@ -200,7 +200,7 @@ class TestLifecycle:
         assert os.path.isdir(session.workspace_dir)
         assert os.path.isdir(session.tmp_dir)
         assert os.path.isdir(os.path.join(session.tmp_dir, "home"))
-        # 容器内 uid 1000 须可写(D 阶段在真实 Linux 上复验属主策略)
+        # 容器内 uid 1000 须可写；属主策略需在真实 Linux 上复验。
         for d in (session.scratch_dir, session.workspace_dir, session.tmp_dir):
             assert os.stat(d).st_mode & 0o777 == 0o777
 

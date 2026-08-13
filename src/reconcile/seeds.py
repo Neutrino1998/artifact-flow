@@ -74,7 +74,7 @@ class ToolUnitSeed:
     description: str          # set 级描述(singleton == member 描述)
     visibility: str
     defer: bool
-    provider: str             # http(B) | mcp(F)
+    provider: str             # http | mcp
     members: List[MemberSeed]
     provider_config: Optional[Dict] = None
     seed_hash: str = ""

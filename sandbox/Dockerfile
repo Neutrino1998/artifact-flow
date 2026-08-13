@@ -36,7 +36,7 @@ RUN mkdir -p /tmp/merman /opt/merman/licenses && \
 FROM python:3.11-slim
 
 LABEL maintainer="1998neutrino@gmail.com"
-LABEL description="ArtifactFlow sandbox runtime (gVisor verification, plan §B)"
+LABEL description="ArtifactFlow sandbox runtime for gVisor verification"
 
 # MPLBACKEND=Agg — headless matplotlib backend; without it `import
 # matplotlib.pyplot` may try to reach an X server, which under runsc/--network=none
@@ -113,7 +113,7 @@ RUN git config --system user.name "sandbox" && \
     git config --system init.defaultBranch main && \
     git config --system safe.directory '*'
 
-# Scientific stack — the real ENOSYS workload under runsc (plan §B "验什么").
+# Scientific stack — the real ENOSYS workload under runsc.
 COPY sandbox/requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
@@ -131,8 +131,8 @@ RUN chmod 755 /usr/local/bin/text-edit /usr/local/bin/artifactflow-office
 # dist/ sidecar so ops can diff bundles without loading the tar.
 RUN pip freeze > /opt/sandbox-wheels.lock.txt
 
-# Offline-install fixture (plan §B: verify the tier-2/3 find-links delivery path
-# under runsc). Build a trivial pure-Python wheel HERE (networked build host)
+# Offline-install fixture for the tier-2/3 find-links delivery path under runsc.
+# Build a trivial pure-Python wheel HERE (networked build host)
 # into /opt/stub-wheels so the in-sandbox probe can:
 #   pip install --no-index --find-links /opt/stub-wheels af-sandbox-stub
 # with zero network — proving offline `pip install` survives Sentry.
@@ -140,7 +140,7 @@ COPY sandbox/stub-pkg /tmp/stub-pkg
 RUN pip wheel --no-deps -w /opt/stub-wheels /tmp/stub-pkg && rm -rf /tmp/stub-pkg
 
 # Non-root: untrusted code must not run as root inside the sandbox. Fixed uid
-# 1000 + a known-owned /work so the bind-mount uid-mapping check (plan §B) has a
+# 1000 + a known-owned /work so the bind-mount uid-mapping check has a
 # concrete owner to assert against on the host side.
 RUN useradd --create-home --uid 1000 sandbox && \
     mkdir -p /work && chown sandbox:sandbox /work

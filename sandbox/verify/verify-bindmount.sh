@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-# HOST-side bind-mount + uid-mapping probe (plan §B). The container (non-root
+# HOST-side bind-mount + uid-mapping probe. The container (non-root
 # uid 1000) writes into a host-mounted dir; the host reads it back and reports
 # the resulting owner uid. Also runs ripgrep over the mounted tree from inside
 # the sandbox — the FS-traversal (getdents64/statx) syscall surface on the gofer

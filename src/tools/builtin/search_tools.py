@@ -2,8 +2,8 @@
 search_tools —— 渐进式披露的“按需补全描述”工具。
 
 deferred tool unit 在 `<available_tool_units>` 里只出索引行(成员 full_name,无 param
-schema)。模型要调用前先用 `search_tools` 把完整 schema 取回来 —— 结果作 tool_result
-进历史(被压缩则模型见索引行自己再 search,不维护已发现集,decision 2)。
+schema)。模型要调用前先用 `search_tools` 把完整 schema 取回来；结果作 tool_result
+进历史。压缩后模型仍可根据索引行重新搜索，因此无需维护已发现集。
 
 渲染依赖 **per-agent 的 EffectiveToolset + 本 turn 的 tools 字典**。该工具 `wants_context`
 = True:引擎在正常工具路径里注入 `ToolExecutionContext`,故 search_tools 走**正常路由**

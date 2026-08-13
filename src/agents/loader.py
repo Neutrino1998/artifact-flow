@@ -97,9 +97,8 @@ def load_all_agents(agents_dir: Optional[str] = None) -> dict[str, AgentConfig]:
     agents = {}
     errors = []
     for filename in sorted(os.listdir(agents_dir)):
-        # 隐藏文件(`.` 前缀)永远不是配置:macOS 传输垃圾(AppleDouble `._x.md`、
-        # .DS_Store)/编辑器临时文件混进目录时不应阻断启动(2026-06-12 内网部署
-        # `._lead_agent.md` 二进制解码失败拒启)。真实坏配置(非隐藏)仍 loud-fail。
+        # 隐藏文件(`.` 前缀)永远不是配置：macOS AppleDouble、.DS_Store 和编辑器
+        # 临时文件可能含非文本内容，不应阻断启动；真实坏配置(非隐藏)仍 loud-fail。
         if not filename.endswith(".md") or not is_config_entry(filename):
             continue
 

@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-# Build + save the ArtifactFlow sandbox image for air-gapped gVisor verification
-# (plan §B). Mirrors scripts/release.sh's buildx → save → sha256 → manifest flow.
+# Build + save the ArtifactFlow sandbox image for air-gapped gVisor verification.
+# Mirrors scripts/release.sh's buildx → save → sha256 → manifest flow.
 #
 # Usage:
 #   ./scripts/build-sandbox-image.sh [VERSION]
@@ -127,7 +127,7 @@ Tools:
 
 Python deps: artifactflow-sandbox-${VERSION}-${ARCH_TAG}.wheels.lock (${WHEEL_COUNT} pkgs)
 
-Role: tier-1 baked sandbox environment for gVisor (runsc) verification (plan §B).
+Role: tier-1 baked sandbox environment for gVisor (runsc) verification.
 Decoupled from the backend requirements.lock — this is the sandbox runtime, not the app.
 
 Deploy on the intranet test node (zero network):

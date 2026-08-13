@@ -1,10 +1,10 @@
 """
-SandboxReaper — lease-anchored 孤儿沙盒回收(C 阶段二级兜底)
+SandboxReaper — lease-anchored 孤儿沙盒二级回收
 
 正常路径下,每条退出(成功/超时/协作取消/外部取消)都经 TaskScope
 的真 finally → SandboxSession.close() 拆容器 + 删 scratch。reaper 兜的是 finally
 **不执行**的那条:worker 被 SIGKILL / OOM 杀,容器归 daemon(DooD)不随 worker 死,
-孤儿继续烧 CPU(2026-05-14 同型失效)。
+孤儿会继续消耗宿主资源。
 
 **lease 是唯一 liveness 真相源** —— 它恰在"turn 合法地在活 worker 上跑"期间被持续
 续租,正是容器/scratch 应当存在的充要条件。reaper 不猜固定余量、零误杀:
@@ -12,7 +12,7 @@ SandboxReaper — lease-anchored 孤儿沙盒回收(C 阶段二级兜底)
   孤儿 = 资源侧枚举(① daemon 上带本命名空间 label 的容器 ② scratch 根的直属
          {conv}__{msg} 目录)− `list_active_executions` 的活跃 (conv, msg) 集。
 
-两条纪律(均来自 plan 锁定 + 前序 review 外推):
+两条回收纪律:
   - **对账粒度 per-turn**:活跃谓词是 `active.get(conv) == msg`,不是"conv 有没有活跃
     turn"。否则同会话紧接的新 turn 持活 lease,会让上一 turn 漏拆的孤儿被误判有主、
     永不回收。msg id 全局唯一,(conv,msg) 配对判定最稳。
@@ -131,7 +131,7 @@ class SandboxReaper:
         """停机最后一扫(main lifespan 在 supervisor shutdown 之后、close 之前调)。
 
         兜住 shutdown 期间 SandboxSession.close() 超时/失败漏下的孤儿 —— 单副本停机后
-        不会再有 reaper 收尾,这些孤儿会一直跑到下次启动(P2)。先停周期 task 免与本扫
+        不会再有 reaper 收尾,这些孤儿会一直跑到下次启动。先停周期 task 免与本扫
         并发,docker client 留到随后的 stop() 关。
 
         **只对本进程(WORKER_ID)自己的资源无 grace**:supervisor 已 shutdown = 我的 turn

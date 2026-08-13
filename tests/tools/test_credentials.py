@@ -109,7 +109,7 @@ async def test_resolve_no_unit_short_circuits_without_db(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_resolve_unit_without_rows_returns_empty_without_cipher(monkeypatch):
-    # 该 unit 无凭证行 → {} 且**不构造 cipher**(无凭证 unit 不触主密钥)
+    # resolver 路径无凭证行 → {} 且不调用 cipher factory；启动期 key 校验是独立契约。
     def _boom():
         raise AssertionError("cipher must not be constructed when there are no rows")
 

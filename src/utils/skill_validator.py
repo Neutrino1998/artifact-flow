@@ -218,13 +218,13 @@ def validate_skill_zip(blob: bytes, *, where: str) -> ValidationResult:
 
     # ---- 正文检查 ----
     if not body.strip():
-        # 空正文 = 按钮激活会「授能力、永不注正文」而 read_skill 报错(07-02 联审立项):写侧拒。
+        # 空正文会让激活只授能力却不注正文，而 read_skill 随后报错，因此写侧拒绝。
         _add(Finding(
             "md.body_empty", "error",
             "SKILL.md body is empty (nothing to inject on activation)",
         ))
     # fence / 链接是**启发式**内容规则(markdown 无严格文法),修到再准也有误报长尾,
-    # 且硬门无 force 逃生口 → 一律 warning 不拦(用户拍板 2026-07-03);
+    # 且硬门无 force 逃生口 → 一律 warning 不拦；
     # 结构性规则(空正文/穿越/上限)才是 error。
     prose_lines, unclosed = _split_fences(body)
     if unclosed:

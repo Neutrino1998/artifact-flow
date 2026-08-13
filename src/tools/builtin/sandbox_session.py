@@ -1,5 +1,5 @@
 """
-SandboxSession — per-turn 沙盒容器生命周期(C 阶段)
+SandboxSession — per-turn 沙盒容器生命周期
 
 一个 turn 一个 session 对象壳:在 conversation_turn_factory 创建(同 ArtifactService,
 构造注入沙盒工具),**容器 lazy 于首个沙盒工具调用** —— 多数 turn 不开沙盒,
@@ -12,7 +12,7 @@ config,绝不可被模型生成内容污染 —— backend 持 docker.sock 等�
 
 per-command 超时 = 容器内 `timeout --signal=KILL` 包 argv:exec API 收 argv
 数组,cmd 整体是一个 argv 元素,无宿主侧 shell、无引号问题,且是**真杀进程**。
-tool 侧的 asyncio 超时只是弃等(进程不死,2026-05-14 同型),残留进程由 turn 末
+tool 侧的 asyncio 超时只是弃等(进程不死),残留进程由 turn 末
 拆容器兜底。
 """
 
@@ -140,7 +140,7 @@ class SandboxSession:
     执行(见 core/execution/engine.py),故无并发起容器问题,不加锁。
 
     close() 幂等,且每步独立 best-effort(容器 → scratch → client):任一步失败
-    记日志继续,残留由 lease-anchored reaper(C-reap)兜底。
+    记日志继续,残留由 lease-anchored reaper 兜底。
     """
 
     def __init__(
@@ -190,7 +190,7 @@ class SandboxSession:
     def sticky_failure(self) -> Optional[str]:
         """本 turn 已记录的沙盒不可用原因(创建失败 / 准入拒绝 / 超额杀 /
         rollover 失败或次数用尽),None = 无。供不触发 ensure_container 的工具(persist)在
-        其前置检查里复述配额失败,与 bash/mount 的 sticky 行为一致(P3)。"""
+        其前置检查里复述配额失败,与 bash/mount 的 sticky 行为一致。"""
         return self._sticky_failure
 
     @property
@@ -401,8 +401,8 @@ class SandboxSession:
 
     def _prepare_scratch_dir(self) -> None:
         # 容器内 uid 1000(sandbox)要可写,backend 进程 uid 不定 → 0o777。
-        # makedirs 的 mode 被 umask 掩掉,必须显式 chmod。真实 Linux 上的属主/
-        # 权限策略是 D 阶段验收项(本机 Docker Desktop 感知不到 uid 错配)。
+        # makedirs 的 mode 被 umask 掩掉，必须显式 chmod。属主和权限策略须在真实
+        # Linux 上验收，因为本机 Docker Desktop 感知不到 uid 错配。
         # tmp/home 预建:HOME 重定向指向它,部分工具不自建 HOME 目录。
         for d in (
             self._scratch_dir,

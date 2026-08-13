@@ -257,9 +257,8 @@ class ContextManager:
         parts: List[str] = []
 
         # 可用工具目录（渐进式披露）—— per-tool 描述放在尾部 reminder 而非 system
-        # prompt 缓存前缀,**是有意的**(两轮 review 都把它当成本/缺陷抓过,故记于此):
-        #   catalog 的「成员」会变。C 阶段 skill 能 enable 被 agent disable、本不渲染的
-        #   工具 → 可调集随 active skill 变化。若把 catalog 放缓存前缀,skill 一 toggle →
+        # prompt 缓存前缀，**是有意的**：active skill 会改变 catalog 成员，例如重新启用
+        #   被 agent 禁用、原本不渲染的工具。若把 catalog 放缓存前缀,skill 一 toggle →
         #   前缀变 → 整条历史 APC 缓存失效重写(长对话尤其疼)。放尾部把这份易变性隔离在
         #   本来就不缓存的末条消息,toggle 零额外代价(同 time/artifacts 的处置)。
         #   反面好处:reminder 持久化进 agent_start → admin 重建按原样重放,还原的是**那

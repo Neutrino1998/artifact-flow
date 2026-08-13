@@ -129,8 +129,8 @@ class Settings(BaseSettings):
     GREP_MAX_SCAN_MATCHES: int = 200_000            # finditer 原始命中迭代上界,**per 工具调用**(session 模式跨 artifact
                                                     # 累计共享,不是每个 artifact 重置 —— 否则 200 个密集单行 artifact 累计
                                                     # 40M 迭代、~86s 同步 wedge）。max_count 只数"去重后的
-                                                    # 行",单行海量命中时永远到不了它 → finditer 被抽干(同步 CPU wedge,
-                                                    # 2026-05-14 同源失败模式的另一个轴)。mirror update_artifact 的
+                                                    # 行",单行海量命中时永远到不了它 → finditer 被抽干(同步 CPU wedge)。
+                                                    # mirror update_artifact 的
                                                     # MAX_UNIQUE_CENTERS:cap 真正烧 CPU 的量。实测 200K 原始命中 ≈380ms
                                                     # < watchdog 500ms(20M 单行从 ~35s 收到 ≈380ms);legit 密集文档
                                                     # (如 1000 行×100 列 CSV grep "," ≈100K)仍放行。session 循环另在每
@@ -200,7 +200,7 @@ class Settings(BaseSettings):
     MAX_UPLOAD_SIZE: int = 200 * 1024 * 1024  # 200MB
     # 文本转换路径(DocConverter._convert_text)的独立、更低字节闸。文本是唯一无自身
     # 成本 envelope 的转换路径:charset 检测 + str(best) + split() 会**物化整份解码
-    # 内容 + 词列表**,内存放大远超输入字节,且跑在 event loop 上(2026-05-14 wedge 同类)。
+    # 内容 + 词列表**,内存放大远超输入字节,且跑在 event loop 上。
     # docx/pdf 与图片均存原 blob，不预解析或物化文本；只有裸
     # 文本会随 200MB 上传上限线性放大 → 给它保留旧的 20MB envelope。字节上界是首要护栏
     # (to_thread 只缓解 loop 阻塞,解不了内存)。隐藏常量,operator 可调。
@@ -237,7 +237,7 @@ class Settings(BaseSettings):
     SKILL_MD_MAX_BYTES: int = 5 * 1024 * 1024           # SKILL.md 成员实际读取硬帽(bomb-in-member)
     SKILL_MD_LEGIBILITY_WARN_CHARS: int = 20_000        # 正文 legibility 警告阈值(不拦)
 
-    # 沙盒（C 阶段;隐藏常量,operator 经 env 可调,模型不可见）。
+    # 沙盒（隐藏常量，operator 经 env 可调，模型不可见）。
     # DooD:镜像 / 挂载 / runtime 全部固定在代码侧 —— 容器创建参数绝不可被模型
     # 生成内容污染(backend 持 docker.sock = host root,这是硬安全边界)。
     # 本地源码运行默认 :latest；release 构建会把 runtime-input 内容 tag 作为
@@ -246,12 +246,12 @@ class Settings(BaseSettings):
     SANDBOX_RUNTIME: str = ""        # Docker runtime;"" = daemon 默认(本机 dev=runc),prod="runsc"(gVisor)
     # 宿主侧 scratch 工作区根目录。DooD 下 bind-mount 源路径在 **daemon 那台机**解析:
     # backend 容器化部署时必须把同一宿主路径以**相同路径**挂进 backend 容器(经典
-    # DooD 同路径要求)。多套部署共用一个 daemon 时各自配不同根目录 —— reaper(C-reap)
+    # DooD 同路径要求)。多套部署共用一个 daemon 时各自配不同根目录 —— reaper
     # 以本根目录为第二枚举源,共用根目录会互删对方的 scratch。
     SANDBOX_SCRATCH_ROOT: str = "/tmp/artifactflow-sandbox"
     SANDBOX_COMMAND_TIMEOUT: int = 300  # 秒,单条 bash 命令上限。容器内 `timeout --signal=KILL` 强杀
                                         # (真杀进程);tool 侧另有 +grace 的 asyncio 弃等护栏,只负责
-                                        # 提前返回(进程不死,2026-05-14 同型),残留交由 turn 末拆容器兜底。
+                                        # 提前返回(进程不死),残留交由 turn 末拆容器兜底。
                                         # 曾兼任"最坏 cancel 延迟上界"(=120);cancel-interrupt 落地后
                                         # (engine 在工具 await 期轮询 cancel → task.cancel 在飞调用,
                                         # core/cancellation.py)该职责剥离,本值只剩 runaway 上界一职,放宽到 300。
@@ -264,15 +264,15 @@ class Settings(BaseSettings):
                                              # 截断显式标记。超过工具内联上限的捕获结果由引擎落 artifact。
     SANDBOX_STATUS_MAX_ENTRIES: int = 20     # 动态状态注入的工作区第一层清单条数帽:工作区是模型可写的树,
                                              # 不设帽=prompt 注水放大器;超出部分显式 "(+N more)" 标记
-    # 磁盘配额(2026-06-10 C′ 方向:loop 池子=硬墙、以下=软配额与准入;host-prep 见 D 段)。
-    # prod 把 SANDBOX_SCRATCH_ROOT 挂成定容 loop 文件系统,race 窗口写穿只伤池子不伤宿主。
+    # 磁盘配额：prod 把 SANDBOX_SCRATCH_ROOT 挂成定容 loop 文件系统形成宿主硬墙；
+    # 以下是软配额与准入，race 窗口写穿只伤池子不伤宿主。
     SANDBOX_WORKSPACE_QUOTA_MB: int = 2048   # per-turn scratch 软配额:watchdog du 超额 → 杀容器 + sticky 失败
     SANDBOX_WATCHDOG_INTERVAL_SEC: int = 5   # watchdog 巡检周期。探针①:50k 小文件 os.walk ~150ms(线程内),无感
     SANDBOX_POOL_MIN_FREE_MB: int = 1024     # 起容器准入水位:scratch 根所在 fs 剩余低于此拒绝新沙盒(statvfs,O(1))
     SANDBOX_PERSIST_MAX_TEXT_BYTES: int = 20 * 1024 * 1024  # persist 文本判定上限:超此即使可解码也按 blob 存
                                                             # (对齐 MAX_TEXT_CONVERT_BYTES 的量级;blob 上限
                                                             # 复用 ARTIFACT_BLOB_MAX_BYTES,写入侧守门)
-    # lease-anchored reaper(C-reap):进程死亡(SIGKILL/OOM,_wrapped finally 不执行)
+    # lease-anchored reaper：进程死亡(SIGKILL/OOM,_wrapped finally 不执行)
     # 的二级兜底。资源侧双源枚举(daemon label 容器 + scratch 根目录)− list_active_executions
     # 活跃集 = 孤儿 → 删。最坏烧 CPU 时长 = lease TTL 剩余 + 本间隔(有界,~分钟级)。
     SANDBOX_REAP_ENABLED: bool = True        # 无沙盒部署(无 docker / 不授 bash)置 False,免空轮询刷日志
@@ -364,7 +364,7 @@ class Settings(BaseSettings):
     JWT_EXPIRY_DAYS: int = 7
 
     # 密码策略（等保 9.1.4.1 身份鉴别;隐藏常量,operator 可调,不暴露 API/工具参数）。
-    # 强度档(2026-05-25 定标):等保四级基线 —— ≥8 位、须含字母+数字+符号三类全、
+    # 强度档：等保四级基线 —— ≥8 位、须含字母+数字+符号三类全、
     # 拒弱口令/键盘序列黑名单。周期改密(降等保三级):全部用户 180 天到期 + 不重用前 1 次。
     PASSWORD_MIN_LENGTH: int = 8              # 静态口令长度下限(等保「8 位以上」)
     PASSWORD_REQUIRE_LETTER: bool = True      # 须含字母(大小写均算)

@@ -382,8 +382,8 @@ async def execute_loop(
     # committed in the chat router. They go through the SAME create path as model
     # artifacts (source=user_upload) → each emits ARTIFACT_CREATED (the only way a
     # cold-start client sees an upload before flush_all) → all flush together at
-    # turn end. This is the unified single lifecycle (see artifact-layer plan
-    # decision 1 / stage C). _normalize + dedup happen inside create_from_upload.
+    # turn end. This keeps uploads and model-created artifacts on one lifecycle.
+    # _normalize + dedup happen inside create_from_upload.
     if artifact_service is not None and state.get("uploaded_files"):
         stage_session = state["session_id"]
         staged_ids: List[str] = []

@@ -70,7 +70,7 @@ _sampler: Optional[RuntimeSampler] = None
 _loop_lag_sink: Optional[JsonlSink] = None
 _metrics_sink: Optional[JsonlSink] = None
 
-# lease-anchored 沙盒孤儿回收器(C-reap);生命周期跨 lifespan
+# lease-anchored 沙盒孤儿回收器；生命周期跨 lifespan
 _sandbox_reaper = None  # type: ignore[var-annotated]
 
 

@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 
 # litellm 的 __init__ 会在 import 时联网拉远程 model-cost-map;气隙部署里这个
 # HTTP 请求会卡在 getaddrinfo 直到连接超时,而 import 是同步跑在事件循环线程上的
-# → 冻住整个 loop(2026-05-14 监控验证时由 deadman dump 定位)。强制用 litellm
+# → 冻住整个 loop。强制用 litellm
 # 自带的本地价目表。必须在下面 import litellm 之前设;setdefault 让显式 env 覆盖优先。
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
@@ -225,8 +225,7 @@ def _resolve_model_params(
     采样参数(temperature/max_tokens/top_p/...) 仅当 yaml 显式配置时才传给 litellm;
     没配置就不传 → provider/模型用各自合理默认(OpenAI 1.0、DeepSeek 1.0、vLLM 用
     max_model_len 作为 max_tokens 上界等)。这一层不再强加"温和默认值",避免
-    defaults.max_tokens=4096 这类 cap 偷偷咬掉 reasoning 模型的输出(2026-05-28
-    在 intranet 部署上发现 deepseek-v4-flash thinking 输出被精确切在 4096)。
+    defaults.max_tokens=4096 这类 cap 偷偷咬掉 reasoning 模型的输出。
     上层有 EXECUTION_TIMEOUT + compaction 兜底,不需要这一层再加一道。
 
     Args:

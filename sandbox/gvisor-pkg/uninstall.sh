@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Remove runsc + containerd-shim and de-register the runsc runtime from
-# daemon.json. Run as root. "验完即撤出" — the B-phase withdrawal step.
+# daemon.json. Run as root. This restores the host after verification.
 # Does NOT reload docker — caller runs `systemctl reload docker` afterward.
 
 DEST=/usr/local/bin

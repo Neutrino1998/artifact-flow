@@ -1,8 +1,7 @@
 """沙盒工作区的 host 侧文件系统访问 —— **唯一入口,纪律集中于此**。
 
-为什么单独成模块(2026-06-10,五轮 review 后的架构收口):mount / persist /
-watchdog(将来还有 C-reap)都要从 host 侧访问一个**不可信容器可并发修改**的
-bind mount。两条纪律之前手写在每个调用点:
+为什么单独成模块：mount / persist / watchdog / reaper 都要从 host 侧访问一个
+**不可信容器可并发修改**的 bind mount。两条纪律必须由同一入口保证:
 
   1. **fd 钉住** —— 绝不按名字跨"检查→使用"间隙重解析路径。单次
      `open(abs, O_NOFOLLOW)` 只保护最终组件(内核逐组件解析,中间目录是 symlink
@@ -13,9 +12,9 @@ bind mount。两条纪律之前手写在每个调用点:
      枚举唯一良性错误 `ENOENT`(条目已被 rm,本不占空间),其余一切 OSError 都当
      "测不准"处理。
 
-手写在每处的代价 = 每轮 review 只修一个点、漏掉兄弟点(路径 TOCTOU → 目录 TOCTOU
-→ depth fail-open → EMFILE fail-open,五轮同根)。收成一个模块 = 纪律写一次、测
-一次,新调用点想漏都漏不了。**业务代码不得再手写 os.walk/os.open/os.path 访问
+若每处手写，安全规则会在兄弟调用点分叉，留下路径 TOCTOU、目录 TOCTOU、depth
+fail-open 或 EMFILE fail-open。收成一个模块 = 纪律写一次、测一次，新调用点无法
+绕过。**业务代码不得再手写 os.walk/os.open/os.path 访问
 工作区 —— 一律走这里。**
 
 (Linux 5.6+ 的 `openat2(RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS)` 可一发解决逐级
@@ -189,7 +188,7 @@ def read_file(workspace_dir: str, rel: str, max_bytes: int) -> bytes:
 def list_dir(root: str, max_entries: Optional[int] = None) -> List[Tuple[str, bool, float]]:
     """fd 钉住列 root 的**直属条目**(只一层,绝不递归)→ [(name, is_dir, mtime)]。
 
-    C-reap 的 scratch 第二枚举源。开 `O_DIRECTORY|O_NOFOLLOW` + `scandir(fd)`,
+    reaper 的 scratch 第二枚举源。开 `O_DIRECTORY|O_NOFOLLOW` + `scandir(fd)`,
     每条目 `entry.stat(follow_symlinks=False)` —— 与 measure_usage 同纪律,但**刻意
     不下探**:reaper 只需根目录直属的 `{conv}__{msg}` 目录名做 label 反解差集,
     按名字递归进子目录会重蹈 watchdog 的目录 TOCTOU(活跃容器能把子目录换成池外链)。

@@ -30,7 +30,7 @@ Pillow>=10.4.0
 # 可观测性 sampler：进程 RSS / CPU% / FD / disk usage
 psutil>=5.9.0
 
-# 沙盒（C 阶段）：Docker daemon HTTP API 的 asyncio 原生客户端。
+# 沙盒：Docker daemon HTTP API 的 asyncio 原生客户端。
 # 选它因容器生灭要 await、直接挂引擎的 asyncio.Task.cancel() 取消/超时/lease 栈；
 # docker CLI / 同步 docker-py 与之对不上。调用全部收口在 SandboxSession seam。
 aiodocker>=0.24.0
@@ -90,7 +90,7 @@ aiofiles>=23.2.0
 # 异步 HTTP 客户端（LLM / HTTP tool / MCP client 运行时使用）
 httpx>=0.26.0
 
-# MCP client（F 阶段）：只启用 streamable HTTP 传输；stdio 明确 non-goal。
+# MCP client：只启用 streamable HTTP 传输；stdio 明确 non-goal。
 mcp>=1.28.1,<2
 
 # MCP JSON Schema 参数校验（SDK 传递依赖也会带；这里作为直接消费依赖声明）。

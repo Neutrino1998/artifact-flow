@@ -6,7 +6,7 @@ Grep across artifact content with ripgrep-faithful semantics.
 - pattern 默认 **RE2 regex**（ripgrep / Rust-regex 同族：线性时间、无回溯 → 结构性免疫
   ReDoS）；`fixed_strings=true` 走 `re2.escape` 切 literal。换 RE2 是这个工具的本意
   —— 它自称 "ripgrep 语义"，而 ripgrep 底层正是不回溯、无 backref 的自动机引擎；旧的
-  Python `re` 才是会被 `(a+)+$` 卡死事件循环的那个（2026-05-14 事故同源失败模式）。
+  Python `re` 才会被 `(a+)+$` 这类表达式卡死事件循环。
 - 资源护栏（line-oriented best-effort 搜索：定死**输入/输出 envelope**，envelope 内
   全物化才安全，超出即截断 + surface；不为对抗性巨输入逐 pass 补 cap）：
   - **输入** `GREP_CONTENT_MAX_CHARS`（2MB）—— 值由"`_scan_content` 的 pre-scan
@@ -88,9 +88,9 @@ def _scan_content(
       若需"找被空行分隔的段落",改用内容侧锚点(例:markdown 的 `^# `、小说的
       `^第.*章`、Python 的 `^class `),都是非零宽 pattern,正常工作。
     - max_count 限制 **行级命中** 数（去重后）；context 行不计入
-    - **raw-match 迭代上界**（算法上界，Finding 1）:`max_count` 只数去重后的**行**，
+    - **raw-match 迭代上界**：`max_count` 只数去重后的**行**，
       单行海量命中（如 `"a"*20M` 配 `a`）会全 collapse 到一行 → `max_count` 的 break
-      永不触发 → `finditer` 被抽干（纯同步 CPU 钉死 GIL，2026-05-14 wedge 的另一个轴）。
+      永不触发 → `finditer` 被抽干（纯同步 CPU 钉死 GIL）。
       这里 cap 真正烧 CPU 的量——迭代到的**原始**命中数（非去重行数）。mirror
       update_artifact 的 `MAX_UNIQUE_CENTERS`。提前触顶即 break，置 `stats["scan_capped"]=True`。
       上界来源:`max_scan` 显式传入（session 模式传**剩余**预算，使 raw 预算跨 artifact
@@ -386,8 +386,8 @@ class GrepArtifactTool(BaseTool):
         for art in artifacts:
             # 每个 artifact 间让出事件循环:① 不 wedge(整个 session 扫描原本是一坨无
             # await 的同步 CPU,健康探针/其他 session 全饿死);② 恢复**外部可取消性** ——
-            # task.cancel() 能在此 await 落点生效,正是 2026-05-14 lease-fencing 96 分钟
-            # 打不动的那个缺失落点。配合下面 per-call 累计预算,把"跨 artifact 连续 wedge"
+            # task.cancel() 能在此 await 落点生效。配合下面 per-call 累计预算，把
+            # "跨 artifact 连续 wedge"
             # 拆成"每 artifact ≤~一个有界小块、之间可取消"。
             await asyncio.sleep(0)
 
@@ -436,7 +436,7 @@ class GrepArtifactTool(BaseTool):
                 break
 
         if not grouped:
-            # Finding 3a:部分搜索时绝不发确定性 No matches —— 未搜的内容里可能有命中
+            # 部分搜索时绝不发确定性 No matches：未搜的内容里可能有命中。
             if partial:
                 return ToolResult(
                     success=True,

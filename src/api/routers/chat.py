@@ -307,9 +307,9 @@ async def cancel_execution(
     #
     # 为什么 QUEUED 不允许取消：排队是 worker 本地的 in-memory semaphore 等待，Redis
     # 看不到「谁在排队、在哪个 worker」。让 Redis 中介的 cancel 去够 worker 本地状态，
-    # 就得把 cancel flag 跨「Redis 观察不到的等待」续命 —— 反复制造 cancel 语义撕裂
-    # （HA review r4 round-1/2 同形状反复的根因）。排队轮无害、瞬态、很快起跑，起跑后
-    # 即可取消。故 QUEUED 返回 409（显式 best-effort 契约），且**不**置任何 flag。
+    # 就得把 cancel flag 跨「Redis 观察不到的等待」续命，制造 cancel 语义撕裂。
+    # 排队轮无害、瞬态、很快起跑，起跑后即可取消。故 QUEUED 返回 409（显式
+    # best-effort 契约），且**不**置任何 flag。
     try:
         active_msg_id = await execution_service.cancel(conv_id, current_user.user_id)
     except ConversationResourceNotFoundError:

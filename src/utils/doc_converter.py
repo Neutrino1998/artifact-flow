@@ -1,7 +1,7 @@
 """
 Document converter for file import.
 
-路由(上传翻转后,2026-06-11):**文本白名单(EXTENSION_MIME_MAP)→ content,
+路由：**文本白名单(EXTENSION_MIME_MAP)→ content,
 png/jpeg → 识图 blob,其余一律 → blob**。路由纯声明式(按扩展名三分),
 charset 启发式不参与路由判定 —— 改后缀 / 损坏 / 不认识的字节照收进 blob,
 模型 mount 进沙盒后自己检视、诊断、转换(remediation 提示归 skill 系统);

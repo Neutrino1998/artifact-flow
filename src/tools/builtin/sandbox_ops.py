@@ -1,8 +1,8 @@
 """
-沙盒工具(模型面)— C 阶段
+沙盒工具（模型面）
 
-三个分立动词(bash / mount / persist)共享一个 per-turn SandboxSession
-(拍定 2026-06-03:分立参数面更小、对小模型更可读;共享 session 是实现层事实)。
+三个分立动词(bash / mount / persist)共享一个 per-turn SandboxSession。
+分立参数面更小、对小模型更可读；共享 session 是实现层事实。
 lazy 创建 key 在「首个沙盒工具调用」—— mount 也会起容器(模型可能先 mount 再 bash)。
 
 工厂 create_sandbox_tools 由 conversation_turn_factory 按请求调用(同
@@ -420,7 +420,7 @@ class PersistFileTool(BaseTool):
 
         # sticky 优先于 "nothing to persist":超额杀 / 容器中途死后 _container 已置
         # None(started=False),若先撞 not-started 会把配额失败吞成"没用过沙盒",
-        # 与 bash/mount 的 sticky 复述不一致(P3)。配额杀的契约 = 本 turn 沙盒不可用,
+        # 与 bash/mount 的 sticky 复述不一致。配额杀的契约 = 本 turn 沙盒不可用,
         # 不开"抢救残留产物"通道(超额现场文件完整性不可信、等于给超额留后门)。
         sticky = self._session.sticky_failure
         if sticky is not None:
