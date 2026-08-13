@@ -4,7 +4,7 @@ import {
   formatAdminInputPreview,
   isAdminMessageOffActiveBranch,
 } from './adminLiveEvents';
-import type { AdminConversationEventsResponse } from './api';
+import type { AdminConversationEventsResponse } from '@/lib/api';
 
 function snapshot(): AdminConversationEventsResponse {
   return {

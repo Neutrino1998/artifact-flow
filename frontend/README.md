@@ -7,6 +7,7 @@ npm install     # 安装依赖
 npm run dev     # 启动开发服务器 → http://localhost:3000
 npm run build   # 生产构建
 npm run lint    # Lint 检查
+npm run typecheck # TypeScript 全量检查（包含测试文件）
 ```
 
 后端 API 需要同时运行（默认 `http://localhost:8000`），在项目根目录执行 `python run_server.py`。
