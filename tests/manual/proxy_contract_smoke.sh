@@ -31,7 +31,7 @@
 # Contract checked (mirror of deploy/caddy/common.caddy):
 #   1. Swagger 404                          5. maintenance gate → 503 for /, /api, SSE
 #   2. /health ungated AND routed to backend   6. maintenance assets + note reachable mid-window
-#   3. routing (api & health→8000, /→3000)  7. upload: 211MiB→semantic JSON 413, 200MiB→backend 200
+#   3. routing (api & health→8000, /→3000)  7. upload: 211MiB→correlated JSON/log 413, 200MiB→backend 200
 #   4. X-Real-IP injected + anti-spoof       8. SSE buffering off (incremental flush)
 #   9. HTTPS + both HTTP 308 entries strip technology-identifying headers
 
@@ -287,6 +287,7 @@ assert_upload_cap() {
     echo "  ⊘ upload-cap: 跳过 (SMOKE_SKIP_UPLOAD)"; return
   fi
   local big code resp port body_file headers_file detail content_type
+  local request_id header_request_id edge_logs_before edge_logs_after edge_log_line
   # Negative: 211MiB (> the 210MiB cap) → proxy 413s before the body reaches
   # backend, with a product-owned JSON explanation rather than an empty/proxy-
   # identifying response. Sparse file → ~0 disk; curl streams the zeros over
@@ -294,12 +295,18 @@ assert_upload_cap() {
   big="$(mktemp)"
   body_file="$(mktemp)"
   headers_file="$(mktemp)"
+  # All earlier routing/health requests are ordinary successes. The unbound
+  # edge_errors logger must stay silent until its 413 route explicitly selects it.
+  edge_logs_before="$(docker logs "$PROXY_CTR" 2>&1 | grep -c '"logger":"http.log.access.edge_errors"' || true)"
   dd if=/dev/null of="$big" bs=1 count=0 seek=$((211*1024*1024)) 2>/dev/null
   code="$(curl -k -s -m 30 --noproxy '*' -H "Host: test.local" -H "Expect:" \
             -D "$headers_file" -o "$body_file" -w "%{http_code}" \
             -H "Content-Type: application/octet-stream" \
-            --data-binary @"$big" "$BASE/api/upload")"
+            -H "Authorization: Bearer proxy-smoke-secret" \
+            --data-binary @"$big" "$BASE/api/upload?proxy_smoke_secret=must-not-log")"
   detail="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8")).get("detail", ""))' "$body_file" 2>/dev/null)"
+  request_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8")).get("request_id", ""))' "$body_file" 2>/dev/null)"
+  header_request_id="$(grep -i '^x-request-id:' "$headers_file" | tail -1 | sed 's/^[^:]*:[[:space:]]*//;s/\r$//')"
   content_type="$(grep -i '^content-type:' "$headers_file" | tail -1 | sed 's/^[^:]*:[[:space:]]*//;s/\r$//')"
   [[ "$code" == "413" ]] \
     && ok "upload-cap: 211MiB(超限) → 413" \
@@ -307,6 +314,9 @@ assert_upload_cap() {
   [[ "$detail" == "单次上传内容过大：所有文件合计不得超过 200MB。请减少文件数量或文件大小后重试。" ]] \
     && ok "upload-cap: 413 返回带 200MB 上限的用户可读 detail" \
     || no "upload-cap: 413 detail 缺失或不正确，实得 '$detail'"
+  [[ "$request_id" == edge-* && "$header_request_id" == "$request_id" ]] \
+    && ok "upload-cap: 413 JSON/响应头返回同一 edge request_id" \
+    || no "upload-cap: 413 关联 ID 缺失或不一致，body='$request_id' header='$header_request_id'"
   [[ "$content_type" == application/json* ]] \
     && ok "upload-cap: 413 声明 application/json" \
     || no "upload-cap: 413 Content-Type 应为 application/json，实得 '$content_type'"
@@ -314,6 +324,31 @@ assert_upload_cap() {
     no "upload-cap: 413 暴露了 X-Powered-By/Via/Server"
   else
     ok "upload-cap: 413 未暴露技术标识头"
+  fi
+  edge_log_line="$(docker logs "$PROXY_CTR" 2>&1 \
+    | grep '"logger":"http.log.access.edge_errors"' \
+    | tail -1)"
+  edge_logs_after="$(docker logs "$PROXY_CTR" 2>&1 | grep -c '"logger":"http.log.access.edge_errors"' || true)"
+  if [[ "$edge_logs_after" -eq $((edge_logs_before + 1)) ]] \
+      && printf '%s' "$edge_log_line" | python3 -c '
+import json, sys
+row = json.load(sys.stdin)
+assert row.get("event") == "edge_request_rejected"
+assert row.get("request_id") == sys.argv[1]
+assert row.get("status") == 413
+assert row.get("method") == "POST"
+assert row.get("path") == "/api/upload"
+assert "request" not in row
+assert "resp_headers" not in row
+' "$request_id" 2>/dev/null; then
+    ok "upload-cap: 仅 413 写入同 ID 的最小结构化边缘日志"
+  else
+    no "upload-cap: 413 边缘日志缺失、不唯一或字段越界(before=$edge_logs_before after=$edge_logs_after line='$edge_log_line')"
+  fi
+  if [[ "$edge_log_line" == *proxy-smoke-secret* || "$edge_log_line" == *proxy_smoke_secret* ]]; then
+    no "upload-cap: 413 边缘日志泄露了请求头或查询参数"
+  else
+    ok "upload-cap: 413 边缘日志未记录请求头/查询参数"
   fi
   rm -f "$big" "$body_file" "$headers_file"
   # Positive: a max legit batch (200MiB = the authoritative total-bytes cap; note

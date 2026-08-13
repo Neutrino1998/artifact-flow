@@ -90,6 +90,22 @@
 (af_site) {
 	import strip_technology_headers
 
+	# Edge failures happen before FastAPI can mint its request_id or write an ops
+	# log. This logger is deliberately NOT attached to the site hostname: only an
+	# error route that selects it with log_name emits an access record. Keep the
+	# record minimal; method/path are appended explicitly below, while the raw
+	# request object (IP, query, headers) and response headers are discarded.
+	log edge_errors {
+		no_hostname
+		output stderr
+		format filter {
+			request delete
+			resp_headers delete
+			user_id delete
+			wrap json
+		}
+	}
+
 	# Batched upload ceiling — the AUTHORITATIVE total-bytes cap. POST /api/v1/chat
 	# sends ALL attachments in ONE multipart request, so the body is the SUM of the
 	# batch. Three INDEPENDENT axes: per-file ≤200MB (MAX_UPLOAD_SIZE, app 422),
@@ -110,12 +126,24 @@
 
 	# request_body rejects before FastAPI can attach its normal JSON detail or
 	# request id. Keep the edge response product-owned and actionable without
-	# exposing proxy identity. The user-facing allowance is 200MB of files; the
-	# extra 10MiB above is transport headroom, not additional file quota.
+	# exposing proxy identity. Caddy's per-error id is namespaced as edge-* and
+	# joined across the response and the one selective access-log record. The
+	# user-facing allowance is 200MB of files; the extra 10MiB above is transport
+	# headroom, not additional file quota.
 	handle_errors 413 {
 		import strip_technology_headers
+		# Caddy 2.10 has no early log_append evaluation. Resolve the ephemeral
+		# error placeholder into a request variable while this context is active;
+		# the access logger can still read that variable after the route unwinds.
+		vars edge_request_id edge-{err.id}
+		log_name edge_errors
+		log_append event edge_request_rejected
+		log_append request_id {vars.edge_request_id}
+		log_append method {http.request.method}
+		log_append path {http.request.uri.path}
 		header Content-Type application/json
-		respond `{"detail":"单次上传内容过大：所有文件合计不得超过 200MB。请减少文件数量或文件大小后重试。"}` 413
+		header X-Request-ID {vars.edge_request_id}
+		respond `{"detail":"单次上传内容过大：所有文件合计不得超过 200MB。请减少文件数量或文件大小后重试。","request_id":"{vars.edge_request_id}"}` 413
 	}
 
 	# Maintenance flag: present iff `afctl maintenance/apply` has enabled it. Stat'd
