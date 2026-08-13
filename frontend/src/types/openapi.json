@@ -1520,7 +1520,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ArtifactListResponse"
+                  "$ref": "#/components/schemas/AdminArtifactListResponse"
                 }
               }
             }
@@ -4253,6 +4253,112 @@
         "title": "ActiveStreamResponse",
         "description": "GET /api/v1/chat/{conv_id}/active-stream response"
       },
+      "AdminArtifactListResponse": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/AdminArtifactSummary"
+            },
+            "type": "array",
+            "title": "Artifacts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "artifacts"
+        ],
+        "title": "AdminArtifactListResponse"
+      },
+      "AdminArtifactSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Artifact ID"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type",
+            "description": "Content type (MIME type, e.g. text/markdown, text/x-python)"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "description": "Artifact title"
+          },
+          "current_version": {
+            "type": "integer",
+            "title": "Current Version",
+            "description": "Current version number"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source",
+            "description": "Source (agent, user_upload)"
+          },
+          "original_filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Filename",
+            "description": "For source=user_upload artifacts: the filename the user uploaded. From metadata['original_filename']."
+          },
+          "has_blob": {
+            "type": "boolean",
+            "title": "Has Blob",
+            "description": "True for blob-backed artifacts (images / rich-format uploads): no text content; raw bytes via GET \u2026/raw.",
+            "default": false
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Creation time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Last update time"
+          },
+          "content_accessible": {
+            "type": "boolean",
+            "title": "Content Accessible"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "content_type",
+          "title",
+          "current_version",
+          "source",
+          "original_filename",
+          "has_blob",
+          "created_at",
+          "updated_at",
+          "content_accessible"
+        ],
+        "title": "AdminArtifactSummary",
+        "description": "Artifact metadata plus the backend-authoritative admin read capability."
+      },
       "AdminConversationEventsResponse": {
         "properties": {
           "conversation_id": {
@@ -4718,7 +4824,7 @@
             "anyOf": [
               {
                 "items": {
-                  "$ref": "#/components/schemas/UploadedFileRef"
+                  "$ref": "#/components/schemas/AdminUploadedFileRef"
                 },
                 "type": "array"
               },
@@ -4947,6 +5053,38 @@
         "type": "object",
         "title": "AdminSkillUpdateRequest",
         "description": "PATCH /api/v1/admin/skills/{skill_id} request body."
+      },
+      "AdminUploadedFileRef": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename"
+          },
+          "content_accessible": {
+            "type": "boolean",
+            "title": "Content Accessible",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "filename",
+          "content_accessible"
+        ],
+        "title": "AdminUploadedFileRef",
+        "description": "Admin-visible attachment metadata after the active privacy projection."
       },
       "AgentListResponse": {
         "properties": {

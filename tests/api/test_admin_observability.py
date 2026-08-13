@@ -6,6 +6,7 @@ import pytest
 from httpx import AsyncClient
 
 from api.dependencies import get_runtime_store, get_stream_transport
+from config import config
 from db.database import DatabaseManager
 from db.models import User
 from repositories.conversation_repo import ConversationRepository
@@ -47,6 +48,66 @@ async def _make_active(app, conv_id: str, message_id: str, owner_id: str):
 
 
 class TestAdminConversationActivity:
+    async def test_privacy_mode_redacts_owner_and_upload_references(
+        self,
+        monkeypatch,
+        admin_client: AsyncClient,
+        test_user: User,
+        observed_conversation: tuple[str, str],
+    ):
+        monkeypatch.setattr(config, "ADMIN_PRIVACY_MODE", True)
+        conv_id, _ = observed_conversation
+
+        listing = await admin_client.get("/api/v1/admin/conversations")
+        assert listing.status_code == 200
+        summary = next(
+            item for item in listing.json()["conversations"] if item["id"] == conv_id
+        )
+        assert summary["user_id"] is None
+        assert summary["user_display_name"] == "匿名用户"
+
+        detail = await admin_client.get(f"/api/v1/admin/conversations/{conv_id}/events")
+        assert detail.status_code == 200
+        body = detail.json()
+        assert body["user_id"] is None
+        assert body["user_display_name"] == "匿名用户"
+        assert body["messages"][0]["uploaded_files"] == [{
+            "id": None,
+            "filename": "上传文件 1",
+            "content_accessible": False,
+        }]
+        assert "Brief.docx" not in detail.text
+        assert test_user.id not in detail.text
+
+    async def test_privacy_mode_disables_owner_filter(
+        self,
+        monkeypatch,
+        admin_client: AsyncClient,
+        test_user: User,
+    ):
+        monkeypatch.setattr(config, "ADMIN_PRIVACY_MODE", True)
+        response = await admin_client.get(
+            "/api/v1/admin/conversations",
+            params={"user_id": test_user.id},
+        )
+        assert response.status_code == 400
+
+    async def test_privacy_mode_disables_prompt_reconstruction(
+        self,
+        monkeypatch,
+        admin_client: AsyncClient,
+        observed_conversation: tuple[str, str],
+    ):
+        monkeypatch.setattr(config, "ADMIN_PRIVACY_MODE", True)
+        conv_id, message_id = observed_conversation
+
+        response = await admin_client.get(
+            f"/api/v1/admin/conversations/{conv_id}/messages/{message_id}/reconstruct",
+            params={"agent_start_event_id": "evt-anchor"},
+        )
+
+        assert response.status_code == 404
+
     async def test_list_and_detail_expose_active_message_id(
         self,
         app,
@@ -72,7 +133,11 @@ class TestAdminConversationActivity:
             assert detail.json()["is_active"] is True
             assert detail.json()["active_message_id"] == message_id
             assert detail.json()["messages"][0]["uploaded_files"] == [
-                {"id": "brief.docx", "filename": "Brief.docx"},
+                {
+                    "id": "brief.docx",
+                    "filename": "Brief.docx",
+                    "content_accessible": True,
+                },
             ]
         finally:
             await transport.close_stream(message_id)
@@ -128,6 +193,54 @@ class TestAdminConversationActivity:
             assert "admin-only future context" in response.text
             assert "event: tool_start" in response.text
             assert "event: complete" in response.text
+        finally:
+            await transport.close_stream(message_id)
+            await store.release_lease(conv_id, message_id)
+
+    async def test_privacy_mode_redacts_upload_names_in_admin_stream(
+        self,
+        monkeypatch,
+        app,
+        admin_client: AsyncClient,
+        test_user: User,
+        observed_conversation: tuple[str, str],
+    ):
+        monkeypatch.setattr(config, "ADMIN_PRIVACY_MODE", True)
+        conv_id, message_id = observed_conversation
+        store, transport = await _make_active(app, conv_id, message_id, test_user.id)
+        await transport.push_event(message_id, {
+            "type": "metadata",
+            "timestamp": "2026-07-13T00:00:00",
+            "data": {
+                "conversation_id": conv_id,
+                "message_id": message_id,
+                "uploaded_files": [{"filename": "Payroll-Alice.xlsx"}],
+            },
+        })
+        await transport.push_event(message_id, {
+            "type": "artifact_created",
+            "timestamp": "2026-07-13T00:00:01",
+            "data": {
+                "id": "payroll-alice",
+                "title": "Payroll-Alice.xlsx",
+                "source": "user_upload",
+                "original_filename": "Payroll-Alice.xlsx",
+            },
+        })
+        await transport.push_event(message_id, {
+            "type": "complete",
+            "timestamp": "2026-07-13T00:00:02",
+            "data": {"success": True, "message_id": message_id},
+        })
+        try:
+            response = await admin_client.get(
+                f"/api/v1/admin/conversations/{conv_id}/stream"
+            )
+            assert response.status_code == 200
+            assert "Payroll-Alice.xlsx" not in response.text
+            assert "payroll-alice" not in response.text
+            assert "上传文件 1" in response.text
+            assert "__redacted_upload__" in response.text
         finally:
             await transport.close_stream(message_id)
             await store.release_lease(conv_id, message_id)

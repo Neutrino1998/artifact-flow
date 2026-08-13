@@ -12,6 +12,7 @@ import type {
   MessageFeedbackRequest,
   MessageFeedbackResponse,
   ArtifactListResponse,
+  ArtifactSummary,
   ArtifactDetail,
   VersionDetail,
   LoginRequest,
@@ -667,7 +668,11 @@ export interface AdminMessageGroup {
   events: AdminEventItem[];
   execution_metrics: Record<string, unknown> | null;
   feedback?: MessageFeedbackResponse | null;
-  uploaded_files: { id?: string; filename: string }[] | null;
+  uploaded_files: {
+    id?: string | null;
+    filename: string;
+    content_accessible?: boolean;
+  }[] | null;
 }
 
 export interface AdminPromptReconstructResponse {
@@ -692,6 +697,15 @@ export interface AdminConversationEventsResponse {
   created_at: string;
   updated_at: string;
   messages: AdminMessageGroup[];
+}
+
+export type AdminArtifactSummary = ArtifactSummary & {
+  content_accessible: boolean;
+};
+
+export interface AdminArtifactListResponse {
+  session_id: string;
+  artifacts: AdminArtifactSummary[];
 }
 
 export function listAdminConversations(
@@ -793,7 +807,7 @@ export function getAdminPromptReconstruct(
 }
 
 export function listAdminConversationArtifacts(convId: string) {
-  return request<ArtifactListResponse>(
+  return request<AdminArtifactListResponse>(
     `/api/v1/admin/conversations/${convId}/artifacts`
   );
 }

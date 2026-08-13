@@ -104,4 +104,27 @@ describe('AdminArtifactInspector', () => {
     expect(container.querySelector('h3')?.textContent).toBe('会话文件');
     expect(container.textContent).not.toContain('Artifact ID');
   });
+
+  it('does not offer previews or downloads for protected user uploads', async () => {
+    apiMocks.listAdminConversationArtifacts.mockResolvedValue({
+      session_id: 'conv-1',
+      artifacts: [{
+        ...summary,
+        id: '__redacted_upload_1__',
+        title: '上传文件 1',
+        source: 'user_upload',
+        original_filename: null,
+        content_accessible: false,
+      }],
+    });
+
+    await act(async () => {
+      root.render(<AdminArtifactInspector conversationId="conv-1" refreshTick={0} />);
+    });
+
+    expect(container.textContent).toContain('1 个用户上传文件受隐私保护');
+    expect(container.textContent).toContain('没有可查看的会话文件');
+    expect(container.querySelector('button[aria-label="下载文件"]')).toBeNull();
+    expect(apiMocks.getAdminConversationArtifact).not.toHaveBeenCalled();
+  });
 });

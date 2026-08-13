@@ -183,6 +183,11 @@ class Settings(BaseSettings):
     OBS_ADMIN_EVENT_DETAIL_MAX_CHARS: int = Field(default=20_000, ge=1_000)
     OBS_ADMIN_EVENT_MAX_TASKS: int = Field(default=50, ge=1, le=500)
 
+    # Admin 会话监控的部署级隐私边界。开启后，后端去除会话与反馈中的账户关联
+    # 字段、脱敏上传文件名，并拒绝 admin 读取源自用户上传的 artifact 内容。
+    # 普通对话/模型/工具文本不做内容扫描，以保留故障排查能力。
+    ADMIN_PRIVACY_MODE: bool = False
+
     # Redis（空 = InMemory fallback，非空 = Redis）
     REDIS_URL: str = ""
     REDIS_CLUSTER: bool = False           # 生产 Cluster 模式

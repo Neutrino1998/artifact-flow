@@ -475,6 +475,10 @@ class ArtifactService:
         stage_metadata = dict(metadata or {})
         if original_filename is not None:
             stage_metadata["original_filename"] = original_filename  # 下载文件名
+        if source == "user_upload":
+            # source 表示最后一次写入者，后续 agent/sandbox 改写会变化；这个 metadata
+            # 标记保留不可变来源，供管理端隐私策略持续保护原上传及其历史版本。
+            stage_metadata["user_upload_origin"] = True
         # 「是否二进制」由 Artifact.has_blob 列承载(repo 建行时按 blob 在场写死),
         # 不再往 metadata 塞 blob_content_type —— content_type 已是原件 MIME。
 
@@ -1097,6 +1101,9 @@ class ArtifactService:
                         "version": art.current_version,
                         "source": art.source,
                         "original_filename": (art.metadata_ or {}).get("original_filename"),
+                        "user_upload_origin": bool(
+                            (art.metadata_ or {}).get("user_upload_origin")
+                        ),
                         "has_blob": art.has_blob,
                         "created_at": art.created_at.isoformat(),
                         "updated_at": art.updated_at.isoformat(),
@@ -1130,6 +1137,9 @@ class ArtifactService:
             "version": memory.current_version,
             "source": memory.source,
             "original_filename": (memory.metadata or {}).get("original_filename"),
+            "user_upload_origin": bool(
+                (memory.metadata or {}).get("user_upload_origin")
+            ),
             "has_blob": memory.has_blob,
             "created_at": memory.created_at.isoformat(),
             "updated_at": memory.updated_at.isoformat(),

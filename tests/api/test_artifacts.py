@@ -10,6 +10,7 @@ from typing import Tuple
 import pytest
 from httpx import AsyncClient
 
+from config import config
 from db.models import User
 from db.database import DatabaseManager
 from repositories.conversation_repo import ConversationRepository
@@ -390,3 +391,103 @@ class TestHasBlobField:
         assert resp.content == b"PK\x03\x04" + b"\x00" * 16
         assert resp.headers["cache-control"] == "no-cache"
         assert resp.headers["content-disposition"].startswith("attachment;")
+
+    async def test_admin_privacy_mode_hides_and_blocks_user_upload(
+        self,
+        monkeypatch,
+        admin_client: AsyncClient,
+        seed_blob_artifact: Tuple[str, str],
+    ):
+        monkeypatch.setattr(config, "ADMIN_PRIVACY_MODE", True)
+        session_id, artifact_id = seed_blob_artifact
+
+        listing = await admin_client.get(
+            f"/api/v1/admin/conversations/{session_id}/artifacts"
+        )
+        assert listing.status_code == 200
+        (item,) = listing.json()["artifacts"]
+        assert item["id"] == "__redacted_upload_1__"
+        assert item["title"] == "上传文件 1"
+        assert item["original_filename"] is None
+        assert item["content_accessible"] is False
+        assert artifact_id not in listing.text
+        assert "spec.docx" not in listing.text
+
+        detail = await admin_client.get(
+            f"/api/v1/admin/conversations/{session_id}/artifacts/{artifact_id}"
+        )
+        raw = await admin_client.get(
+            f"/api/v1/admin/conversations/{session_id}/artifacts/{artifact_id}/raw"
+        )
+        version = await admin_client.get(
+            f"/api/v1/admin/conversations/{session_id}/artifacts/{artifact_id}/versions/1"
+        )
+        assert detail.status_code == 404
+        assert raw.status_code == 404
+        assert version.status_code == 404
+
+    async def test_admin_privacy_mode_keeps_generated_artifacts_accessible(
+        self,
+        monkeypatch,
+        admin_client: AsyncClient,
+        seed_artifacts: Tuple[str, str],
+    ):
+        monkeypatch.setattr(config, "ADMIN_PRIVACY_MODE", True)
+        session_id, artifact_id = seed_artifacts
+
+        listing = await admin_client.get(
+            f"/api/v1/admin/conversations/{session_id}/artifacts"
+        )
+        assert listing.status_code == 200
+        (item,) = listing.json()["artifacts"]
+        assert item["id"] == artifact_id
+        assert item["content_accessible"] is True
+
+        detail = await admin_client.get(
+            f"/api/v1/admin/conversations/{session_id}/artifacts/{artifact_id}"
+        )
+        assert detail.status_code == 200
+        assert detail.json()["content"] == "# Version 2"
+
+    async def test_admin_privacy_mode_keeps_rewritten_upload_protected(
+        self,
+        monkeypatch,
+        admin_client: AsyncClient,
+        db_manager: DatabaseManager,
+        test_user: User,
+    ):
+        monkeypatch.setattr(config, "ADMIN_PRIVACY_MODE", True)
+        async with db_manager.session() as session:
+            conversation_repo = ConversationRepository(session)
+            artifact_repo = ArtifactRepository(session)
+            conv_id = f"conv-{uuid.uuid4().hex}"
+            artifact_id = "private-notes.txt"
+            await conversation_repo.create_conversation(
+                conv_id,
+                title="Rewritten upload",
+                user_id=test_user.id,
+            )
+            await artifact_repo.create_artifact(
+                session_id=conv_id,
+                artifact_id=artifact_id,
+                content_type="text/plain",
+                title="private-notes",
+                content="rewritten by the agent",
+                metadata={
+                    "original_filename": "Private Notes.txt",
+                    "user_upload_origin": True,
+                },
+                source="agent",
+            )
+
+        listing = await admin_client.get(
+            f"/api/v1/admin/conversations/{conv_id}/artifacts"
+        )
+        detail = await admin_client.get(
+            f"/api/v1/admin/conversations/{conv_id}/artifacts/{artifact_id}"
+        )
+
+        assert listing.status_code == 200
+        assert listing.json()["artifacts"][0]["content_accessible"] is False
+        assert "Private Notes.txt" not in listing.text
+        assert detail.status_code == 404

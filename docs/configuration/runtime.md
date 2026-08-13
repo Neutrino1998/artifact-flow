@@ -74,6 +74,7 @@ ready_timeout_seconds = 120
 | `ARTIFACTFLOW_MAX_CONCURRENT_TASKS` | `32` | 按模型、DB 和主机容量限制并发 |
 | `ARTIFACTFLOW_MAX_UPLOAD_SIZE` | `200 MiB` | 单文件上传上限；代理另有批量总量上限 |
 | `ARTIFACTFLOW_ARTIFACT_USER_QUOTA_BYTES` | `2 GiB` | 每用户二进制 Artifact 配额；`0` 表示不限 |
+| `ARTIFACTFLOW_ADMIN_PRIVACY_MODE` | `false` | 开启后，会话监控不返回账户关联字段和上传文件原名，并禁止管理员读取用户上传 Artifact 的内容 |
 | `ARTIFACTFLOW_SKILL_USER_MAX_PRIVATE_COUNT` | `3` | `-1` 不限，`0` 禁止个人导入 |
 | `ARTIFACTFLOW_CORS_ORIGINS` | 本地前端 | 直接跨域访问 API 时设置明确 origin 列表 |
 | `ARTIFACTFLOW_DB_COMMAND_TIMEOUT` | `30` 秒 | PostgreSQL 单语句上限；设 `0` 禁用 |
@@ -81,6 +82,8 @@ ready_timeout_seconds = 120
 `src/config.py` 还有算法护栏和内部实现常量。它们即使能被环境变量覆盖，也不等于常规部署契约；没有具体容量或故障证据时不要照单调大。
 
 `ARTIFACTFLOW_MAX_CONCURRENT_TASKS` 对每个 Backend 进程内唯一的 TaskSupervisor capacity gate 生效。超过容量的 Conversation turn 保持 QUEUED：它继续持有并续租 Conversation lease，但尚未标记为可交互 RUNNING，因此 inject/cancel 会按现有 409 契约拒绝。多 Backend 副本必须使用 Redis，让 lease、interactive、interrupt、cancel 与 SSE 状态跨进程共享；进程内 TaskSupervisor 只保留本进程 task 引用，不承担崩溃恢复。
+
+`ARTIFACTFLOW_ADMIN_PRIVACY_MODE=true` 是部署级的 Admin 会话监控边界：会话和反馈接口把属主显示为“匿名用户”、拒绝按 `user_id` 筛选、把附件名称显示为通用名称，并使源自用户上传的 Artifact 内容、版本和 raw/blob 接口返回 404。上传来源记录在 Artifact metadata 中，后续被 Agent 或沙盒改写也不会解除限制；Prompt 重建可能包含当时的上传 inventory 预览，因此同样关闭。会话正文、模型输出、工具事件和错误诊断不会做自由文本扫描，因此它降低的是账户直接关联和原始上传文件读取风险，不承诺内容层面的完全匿名。
 
 `ARTIFACTFLOW_EXECUTION_TIMEOUT` 只包住 `AgentRuntime` 的引擎 loop。触发后 Runtime 返回 timeout stop reason，再由 Conversation turn 的统一结束路径写入 `timed_out` terminal、事件和展示 response；Artifact flush、事件写入等 post-processing 刻意位于该 deadline 之外。持久化查询由 `ARTIFACTFLOW_DB_COMMAND_TIMEOUT` 分别约束，因此不要把 execution timeout 当成包含所有 DB cleanup 的 HTTP 请求总时限。
 

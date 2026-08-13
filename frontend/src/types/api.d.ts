@@ -1405,6 +1405,69 @@ export interface components {
              */
             stream_url: string | null;
         };
+        /** AdminArtifactListResponse */
+        AdminArtifactListResponse: {
+            /** Session Id */
+            session_id: string;
+            /** Artifacts */
+            artifacts: components["schemas"]["AdminArtifactSummary"][];
+        };
+        /**
+         * AdminArtifactSummary
+         * @description Artifact metadata plus the backend-authoritative admin read capability.
+         */
+        AdminArtifactSummary: {
+            /**
+             * Id
+             * @description Artifact ID
+             */
+            id: string;
+            /**
+             * Content Type
+             * @description Content type (MIME type, e.g. text/markdown, text/x-python)
+             */
+            content_type: string;
+            /**
+             * Title
+             * @description Artifact title
+             */
+            title: string;
+            /**
+             * Current Version
+             * @description Current version number
+             */
+            current_version: number;
+            /**
+             * Source
+             * @description Source (agent, user_upload)
+             */
+            source: string | null;
+            /**
+             * Original Filename
+             * @description For source=user_upload artifacts: the filename the user uploaded. From metadata['original_filename'].
+             */
+            original_filename: string | null;
+            /**
+             * Has Blob
+             * @description True for blob-backed artifacts (images / rich-format uploads): no text content; raw bytes via GET …/raw.
+             * @default false
+             */
+            has_blob: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             * @description Creation time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             * @description Last update time
+             */
+            updated_at: string;
+            /** Content Accessible */
+            content_accessible: boolean;
+        };
         /**
          * AdminConversationEventsResponse
          * @description GET /api/v1/admin/conversations/{conv_id}/events response
@@ -1582,7 +1645,7 @@ export interface components {
              * Uploaded Files
              * @description Files attached to this turn, from Message.metadata_['uploaded_files']. Display-only and best-effort until the terminal DB refresh.
              */
-            uploaded_files: components["schemas"]["UploadedFileRef"][] | null;
+            uploaded_files: components["schemas"]["AdminUploadedFileRef"][] | null;
         };
         /**
          * AdminPromptReconstructResponse
@@ -1697,6 +1760,21 @@ export interface components {
              * @description New default L1 enabled state for users without an override.
              */
             default_enabled?: boolean | null;
+        };
+        /**
+         * AdminUploadedFileRef
+         * @description Admin-visible attachment metadata after the active privacy projection.
+         */
+        AdminUploadedFileRef: {
+            /** Id */
+            id: string | null;
+            /** Filename */
+            filename: string;
+            /**
+             * Content Accessible
+             * @default true
+             */
+            content_accessible: boolean;
         };
         /** AgentListResponse */
         AgentListResponse: {
@@ -4493,7 +4571,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ArtifactListResponse"];
+                    "application/json": components["schemas"]["AdminArtifactListResponse"];
                 };
             };
             /** @description Validation Error */

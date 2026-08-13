@@ -18,7 +18,8 @@ import {
 } from '@/lib/download';
 import { BUTTON_SECONDARY, SELECT_COMPACT } from '@/lib/styles';
 import { parseUtcIso } from '@/lib/time';
-import type { ArtifactDetail, ArtifactSummary, VersionDetail } from '@/types';
+import type { AdminArtifactSummary } from '@/lib/api';
+import type { ArtifactDetail, VersionDetail } from '@/types';
 
 function formatDateTime(value: string): string {
   try {
@@ -71,7 +72,7 @@ export default function AdminArtifactInspector({
   conversationId: string;
   refreshTick: number;
 }) {
-  const [list, setList] = useState<ArtifactSummary[] | null>(null);
+  const [list, setList] = useState<AdminArtifactSummary[] | null>(null);
   const [listLoading, setListLoading] = useState(false);
   const [listError, setListError] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -82,6 +83,13 @@ export default function AdminArtifactInspector({
   const [versionContent, setVersionContent] = useState<VersionDetail | null>(null);
   const [versionLoading, setVersionLoading] = useState(false);
   const [downloadLoading, setDownloadLoading] = useState(false);
+
+  const protectedUploadCount = list?.filter(
+    (artifact) => artifact.content_accessible === false,
+  ).length ?? 0;
+  const accessibleArtifacts = list?.filter(
+    (artifact) => artifact.content_accessible !== false,
+  ) ?? [];
 
   useEffect(() => {
     setList(null);
@@ -224,13 +232,22 @@ export default function AdminArtifactInspector({
 
   if (selectedId == null) {
     return (
-      <div className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0 flex flex-col">
+        {protectedUploadCount > 0 ? (
+          <div className="mx-3 mt-3 shrink-0 rounded-lg bg-panel-accent px-3 py-2 text-xs text-text-secondary dark:bg-surface-dark dark:text-text-secondary-dark">
+            {protectedUploadCount} 个用户上传文件受隐私保护，管理员不能预览或下载。
+          </div>
+        ) : null}
         <ArtifactTree
-          artifacts={list ?? []}
+          artifacts={accessibleArtifacts}
           loading={listLoading || list == null}
           onSelect={setSelectedId}
           heading="会话文件"
-          emptyMessage={listError ? '文件列表加载失败' : '该会话暂无文件'}
+          emptyMessage={listError
+            ? '文件列表加载失败'
+            : protectedUploadCount > 0
+              ? '没有可查看的会话文件'
+              : '该会话暂无文件'}
           showTypeLabel={false}
           showMetadataTooltip={false}
           idPrefix="admin-artifact-source"

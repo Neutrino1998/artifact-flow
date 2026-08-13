@@ -8,7 +8,8 @@ from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 from pydantic import BaseModel, Field
 
-from api.schemas.chat import MessageFeedbackResponse, UploadedFileRef
+from api.schemas.chat import MessageFeedbackResponse
+from api.schemas.artifact import ArtifactSummary
 
 
 class AdminConversationSummary(BaseModel):
@@ -59,6 +60,25 @@ class AdminEventItem(BaseModel):
     created_at: datetime
 
 
+class AdminUploadedFileRef(BaseModel):
+    """Admin-visible attachment metadata after the active privacy projection."""
+
+    id: Optional[str] = None
+    filename: str
+    content_accessible: bool = True
+
+
+class AdminArtifactSummary(ArtifactSummary):
+    """Artifact metadata plus the backend-authoritative admin read capability."""
+
+    content_accessible: bool
+
+
+class AdminArtifactListResponse(BaseModel):
+    session_id: str
+    artifacts: List[AdminArtifactSummary]
+
+
 class AdminMessageGroup(BaseModel):
     """Events grouped by message"""
     message_id: str
@@ -69,7 +89,7 @@ class AdminMessageGroup(BaseModel):
     events: List[AdminEventItem]
     execution_metrics: Optional[Dict[str, Any]] = None
     feedback: Optional[MessageFeedbackResponse] = None
-    uploaded_files: Optional[List[UploadedFileRef]] = Field(
+    uploaded_files: Optional[List[AdminUploadedFileRef]] = Field(
         None,
         description=(
             "Files attached to this turn, from Message.metadata_['uploaded_files']. "

@@ -6,7 +6,7 @@ from typing import AsyncGenerator, Literal, Optional
 from starlette.responses import StreamingResponse
 
 from config import config
-from api.event_projection import project_event_for_user
+from api.event_projection import project_event_for_admin, project_event_for_user
 from api.services.stream_transport import StreamNotFoundError, StreamTransport
 from api.utils.sse import format_sse_comment, format_sse_event
 from utils.logger import get_logger, get_request_id
@@ -47,6 +47,8 @@ def build_stream_response(
                     continue
                 if event_view == "user":
                     event = project_event_for_user(event)
+                elif event_view == "admin":
+                    event = project_event_for_admin(event)
                 stream_entry_id = event.pop("_stream_id", None)
                 yield format_sse_event(
                     event, event=event.get("type"), id=stream_entry_id

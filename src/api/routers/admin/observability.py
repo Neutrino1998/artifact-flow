@@ -18,6 +18,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from starlette.responses import StreamingResponse
 
+from api.admin_privacy import (
+    admin_artifact_content_accessible,
+    project_admin_artifact_summary,
+    project_admin_owner,
+    project_admin_uploaded_files,
+)
 from api.artifact_raw_response import RAW_ARTIFACT_RESPONSES, build_artifact_blob_response
 from api.dependencies import (
     get_artifact_service,
@@ -26,27 +32,29 @@ from api.dependencies import (
     get_stream_transport,
     require_admin,
 )
+from api.event_projection import project_event_data_for_admin
+from api.schemas.admin import (
+    AdminArtifactListResponse,
+    AdminArtifactSummary,
+    AdminConversationEventsResponse,
+    AdminConversationListResponse,
+    AdminConversationSummary,
+    AdminEventItem,
+    AdminFeedbackItem,
+    AdminFeedbackListResponse,
+    AdminMessageGroup,
+    AdminPromptReconstructResponse,
+)
+from api.schemas.artifact import (
+    ArtifactResponse,
+    VersionDetailResponse,
+    VersionSummary,
+)
 from api.services.auth import TokenPayload
 from api.services.runtime_status_reader import RuntimeStatusReader
 from api.services.stream_transport import StreamTransport
 from api.services.stream_response import SSE_OPENAPI_RESPONSES, build_stream_response
-from api.schemas.admin import (
-    AdminConversationSummary,
-    AdminConversationListResponse,
-    AdminFeedbackItem,
-    AdminFeedbackListResponse,
-    AdminEventItem,
-    AdminMessageGroup,
-    AdminConversationEventsResponse,
-    AdminPromptReconstructResponse,
-)
-from api.schemas.artifact import (
-    ArtifactListResponse,
-    ArtifactResponse,
-    ArtifactSummary,
-    VersionDetailResponse,
-    VersionSummary,
-)
+from config import config
 from core.management.conversation_manager import ConversationManager
 from tools.builtin.artifact_service import ArtifactService
 from utils.logger import get_logger
@@ -54,6 +62,24 @@ from utils.logger import get_logger
 logger = get_logger("ArtifactFlow")
 
 router = APIRouter()
+
+
+async def _require_admin_artifact_content_access(
+    artifact_service: ArtifactService,
+    conv_id: str,
+    artifact_id: str,
+) -> None:
+    """Return 404 when the active policy hides a user-owned upload's content."""
+    if not config.ADMIN_PRIVACY_MODE:
+        return
+    artifact = await artifact_service.get_artifact(conv_id, artifact_id)
+    if artifact is not None and not admin_artifact_content_accessible(
+        artifact.source,
+        user_upload_origin=bool(
+            (artifact.metadata or {}).get("user_upload_origin")
+        ),
+    ):
+        raise HTTPException(status_code=404, detail="Artifact not found")
 
 
 @router.get("/feedback", response_model=AdminFeedbackListResponse)
@@ -72,18 +98,23 @@ async def list_admin_feedback(
         limit=limit,
         offset=offset,
     )
-    items = [
-        AdminFeedbackItem(
-            conversation_id=conv.id,
-            conversation_title=conv.title,
-            user_id=conv.user_id,
-            user_display_name=user_names.get(conv.user_id) if conv.user_id else None,
-            message_id=message.id,
-            user_input=message.user_input,
-            feedback=feedback,
+    items = []
+    for feedback, message, conv in rows:
+        owner_user_id, owner_display_name = project_admin_owner(
+            conv.user_id,
+            user_names.get(conv.user_id) if conv.user_id else None,
         )
-        for feedback, message, conv in rows
-    ]
+        items.append(
+            AdminFeedbackItem(
+                conversation_id=conv.id,
+                conversation_title=conv.title,
+                user_id=owner_user_id,
+                user_display_name=owner_display_name,
+                message_id=message.id,
+                user_input=message.user_input,
+                feedback=feedback,
+            )
+        )
     return AdminFeedbackListResponse(
         feedback=items,
         total=total,
@@ -102,6 +133,15 @@ async def list_admin_conversations(
     runtime_status: RuntimeStatusReader = Depends(get_runtime_status_reader),
 ):
     """List all conversations (admin view) with active execution status."""
+    if config.ADMIN_PRIVACY_MODE and user_id is not None:
+        logger.warning(
+            "Admin conversation owner filter rejected because privacy mode is enabled"
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="Owner filtering is unavailable while admin privacy mode is enabled",
+        )
+
     active_executions = await runtime_status.list_active_executions()
 
     conversations, total, user_names = await conversation_manager.list_admin_conversations(
@@ -111,20 +151,25 @@ async def list_admin_conversations(
         user_id=user_id,
     )
 
-    items = [
-        AdminConversationSummary(
-            id=conv.id,
-            title=conv.title,
-            user_id=conv.user_id,
-            user_display_name=user_names.get(conv.user_id) if conv.user_id else None,
-            message_count=len(conv.messages) if conv.messages else 0,
-            is_active=conv.id in active_executions,
-            active_message_id=active_executions.get(conv.id),
-            created_at=conv.created_at,
-            updated_at=conv.updated_at,
+    items = []
+    for conv in conversations:
+        owner_user_id, owner_display_name = project_admin_owner(
+            conv.user_id,
+            user_names.get(conv.user_id) if conv.user_id else None,
         )
-        for conv in conversations
-    ]
+        items.append(
+            AdminConversationSummary(
+                id=conv.id,
+                title=conv.title,
+                user_id=owner_user_id,
+                user_display_name=owner_display_name,
+                message_count=len(conv.messages) if conv.messages else 0,
+                is_active=conv.id in active_executions,
+                active_message_id=active_executions.get(conv.id),
+                created_at=conv.created_at,
+                updated_at=conv.updated_at,
+            )
+        )
 
     return AdminConversationListResponse(
         conversations=items,
@@ -176,21 +221,25 @@ async def get_admin_conversation_events(
                     event_id=e.event_id,
                     event_type=e.event_type,
                     agent_name=e.agent_name,
-                    data=e.data,
+                    data=project_event_data_for_admin(e.event_type, e.data),
                     created_at=e.created_at,
                 )
                 for e in msg_events
             ],
             execution_metrics=execution_metrics,
             feedback=msg.feedback,
-            uploaded_files=meta.get("uploaded_files"),
+            uploaded_files=project_admin_uploaded_files(meta.get("uploaded_files")),
         ))
 
+    owner_user_id, projected_owner_display_name = project_admin_owner(
+        conv.user_id,
+        owner_display_name,
+    )
     return AdminConversationEventsResponse(
         conversation_id=conv_id,
         title=conv.title,
-        user_id=conv.user_id,
-        user_display_name=owner_display_name,
+        user_id=owner_user_id,
+        user_display_name=projected_owner_display_name,
         active_branch=conv.active_branch,
         is_active=active_message_id is not None,
         active_message_id=active_message_id,
@@ -252,6 +301,11 @@ async def reconstruct_admin_prompt(
     不重新生成动态内容，也不声称还原未持久化的 native tools schema —— 详见
     ConversationManager.reconstruct_prompt。
     """
+    if config.ADMIN_PRIVACY_MODE:
+        # Persisted reminders may contain upload inventory previews and original
+        # artifact ids. Prompt reconstruction is therefore a content-read path,
+        # not merely execution metadata, under the privacy boundary.
+        raise HTTPException(status_code=404, detail="Prompt snapshot not found")
     result = await conversation_manager.reconstruct_prompt(
         conv_id, message_id, agent_start_event_id
     )
@@ -276,7 +330,7 @@ async def reconstruct_admin_prompt(
 
 @router.get(
     "/conversations/{conv_id}/artifacts",
-    response_model=ArtifactListResponse,
+    response_model=AdminArtifactListResponse,
 )
 async def list_admin_conversation_artifacts(
     conv_id: str,
@@ -294,23 +348,33 @@ async def list_admin_conversation_artifacts(
         session_id=conv_id,
         include_content=False,
     )
-    return ArtifactListResponse(
-        session_id=conv_id,
-        artifacts=[
-            ArtifactSummary(
-                id=art["id"],
-                content_type=art["content_type"],
-                title=art["title"],
-                current_version=art["version"],
-                source=art.get("source"),
-                original_filename=art.get("original_filename"),
-                has_blob=bool(art.get("has_blob")),
-                created_at=datetime.fromisoformat(art["created_at"]),
-                updated_at=datetime.fromisoformat(art["updated_at"]),
+    projected_artifacts = []
+    redacted_index = 0
+    for art in artifacts:
+        if not admin_artifact_content_accessible(
+            art.get("source"),
+            user_upload_origin=bool(art.get("user_upload_origin")),
+        ):
+            redacted_index += 1
+        projected = project_admin_artifact_summary(
+            art,
+            redacted_index=redacted_index,
+        )
+        projected_artifacts.append(
+            AdminArtifactSummary(
+                id=projected["id"],
+                content_type=projected["content_type"],
+                title=projected["title"],
+                current_version=projected["version"],
+                source=projected.get("source"),
+                original_filename=projected.get("original_filename"),
+                has_blob=bool(projected.get("has_blob")),
+                content_accessible=bool(projected["content_accessible"]),
+                created_at=datetime.fromisoformat(projected["created_at"]),
+                updated_at=datetime.fromisoformat(projected["updated_at"]),
             )
-            for art in artifacts
-        ],
-    )
+        )
+    return AdminArtifactListResponse(session_id=conv_id, artifacts=projected_artifacts)
 
 
 @router.get(
@@ -324,6 +388,9 @@ async def get_admin_conversation_artifact(
     artifact_service: ArtifactService = Depends(get_artifact_service),
 ):
     """Get current artifact content + version list (DB-only)."""
+    await _require_admin_artifact_content_access(
+        artifact_service, conv_id, artifact_id
+    )
     result = await artifact_service.read_artifact(
         session_id=conv_id,
         artifact_id=artifact_id,
@@ -372,6 +439,9 @@ async def get_admin_conversation_artifact_raw(
     artifact_service: ArtifactService = Depends(get_artifact_service),
 ):
     """Serve raw blob bytes for an artifact in any conversation (admin-only)."""
+    await _require_admin_artifact_content_access(
+        artifact_service, conv_id, artifact_id
+    )
     blob = await artifact_service.get_blob(conv_id, artifact_id)
     if blob is None:
         raise HTTPException(
@@ -393,6 +463,9 @@ async def get_admin_conversation_artifact_version(
     artifact_service: ArtifactService = Depends(get_artifact_service),
 ):
     """Get a specific historical version's content (DB-only)."""
+    await _require_admin_artifact_content_access(
+        artifact_service, conv_id, artifact_id
+    )
     ver = await artifact_service.get_version(conv_id, artifact_id, version)
     if ver is None:
         raise HTTPException(
