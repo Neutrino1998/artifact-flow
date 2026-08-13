@@ -3,8 +3,8 @@
 # contract. Runs the real caddy container against a stub upstream
 # (proxy_stub.py) and asserts the behaviours that must survive any edit to
 # deploy/caddy/common.caddy: routing ownership, Swagger block, X-Real-IP
-# overwrite, upload cap, SSE flush, maintenance gate. Run it after touching
-# the caddy configs.
+# overwrite, upload cap + product error, SSE flush, maintenance gate. Run it
+# after touching the caddy configs.
 #
 # History: born as the nginx⇆Caddy equivalence gate for the Mode 3 migration
 # (one battery, two targets). nginx retired 2026-07 (commit d489c0e) — the
@@ -31,7 +31,7 @@
 # Contract checked (mirror of deploy/caddy/common.caddy):
 #   1. Swagger 404                          5. maintenance gate → 503 for /, /api, SSE
 #   2. /health ungated AND routed to backend   6. maintenance assets + note reachable mid-window
-#   3. routing (api & health→8000, /→3000)  7. upload: 211MiB→413, 200MiB legit→backend 200
+#   3. routing (api & health→8000, /→3000)  7. upload: 211MiB→semantic JSON 413, 200MiB→backend 200
 #   4. X-Real-IP injected + anti-spoof       8. SSE buffering off (incremental flush)
 #   9. HTTPS + both HTTP 308 entries strip technology-identifying headers
 
@@ -286,18 +286,36 @@ assert_upload_cap() {
   if [[ -n "${SMOKE_SKIP_UPLOAD:-}" ]]; then
     echo "  ⊘ upload-cap: 跳过 (SMOKE_SKIP_UPLOAD)"; return
   fi
-  local big code resp port
+  local big code resp port body_file headers_file detail content_type
   # Negative: 211MiB (> the 210MiB cap) → proxy 413s before the body reaches
-  # backend. Sparse file → ~0 disk; curl streams the zeros over loopback.
+  # backend, with a product-owned JSON explanation rather than an empty/proxy-
+  # identifying response. Sparse file → ~0 disk; curl streams the zeros over
+  # loopback.
   big="$(mktemp)"
+  body_file="$(mktemp)"
+  headers_file="$(mktemp)"
   dd if=/dev/null of="$big" bs=1 count=0 seek=$((211*1024*1024)) 2>/dev/null
-  code="$(curl -k -s -m 30 --noproxy '*' -H "Host: test.local" -o /dev/null -w "%{http_code}" \
+  code="$(curl -k -s -m 30 --noproxy '*' -H "Host: test.local" -H "Expect:" \
+            -D "$headers_file" -o "$body_file" -w "%{http_code}" \
             -H "Content-Type: application/octet-stream" \
             --data-binary @"$big" "$BASE/api/upload")"
-  rm -f "$big"
+  detail="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8")).get("detail", ""))' "$body_file" 2>/dev/null)"
+  content_type="$(grep -i '^content-type:' "$headers_file" | tail -1 | sed 's/^[^:]*:[[:space:]]*//;s/\r$//')"
   [[ "$code" == "413" ]] \
     && ok "upload-cap: 211MiB(超限) → 413" \
     || no "upload-cap: 211MiB 应 413，实得 '$code'"
+  [[ "$detail" == "单次上传内容过大：所有文件合计不得超过 200MB。请减少文件数量或文件大小后重试。" ]] \
+    && ok "upload-cap: 413 返回带 200MB 上限的用户可读 detail" \
+    || no "upload-cap: 413 detail 缺失或不正确，实得 '$detail'"
+  [[ "$content_type" == application/json* ]] \
+    && ok "upload-cap: 413 声明 application/json" \
+    || no "upload-cap: 413 Content-Type 应为 application/json，实得 '$content_type'"
+  if grep -Eiq '^(x-powered-by|via|server)[[:space:]]*:' "$headers_file"; then
+    no "upload-cap: 413 暴露了 X-Powered-By/Via/Server"
+  else
+    ok "upload-cap: 413 未暴露技术标识头"
+  fi
+  rm -f "$big" "$body_file" "$headers_file"
   # Positive: a max legit batch (200MiB = the authoritative total-bytes cap; note
   # this is now LESS than per-file×count = 200MB×30, by design) must pass the proxy
   # and REACH backend. Guards against the cap being silently lowered below the

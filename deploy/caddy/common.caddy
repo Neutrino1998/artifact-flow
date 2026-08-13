@@ -74,9 +74,10 @@
 }
 
 # Public responses must not advertise implementation products. Import this at
-# every public response boundary, including plain-HTTP redirect sites. Keep it
-# outside reverse_proxy header_down rules: Caddy can add Via after upstream
-# processing and Server while producing local responses such as redirects.
+# every public response boundary, including plain-HTTP redirect sites and error
+# routes (error handling is a separate handler chain, so the site's import does
+# not cover it). Keep it outside reverse_proxy header_down rules: Caddy can add
+# Via after upstream processing and Server while producing local responses.
 (strip_technology_headers) {
 	header {
 		-X-Powered-By
@@ -105,6 +106,16 @@
 	# 200MiB batch from 10 MiB to ~285 KB.
 	request_body {
 		max_size 210MiB
+	}
+
+	# request_body rejects before FastAPI can attach its normal JSON detail or
+	# request id. Keep the edge response product-owned and actionable without
+	# exposing proxy identity. The user-facing allowance is 200MB of files; the
+	# extra 10MiB above is transport headroom, not additional file quota.
+	handle_errors 413 {
+		import strip_technology_headers
+		header Content-Type application/json
+		respond `{"detail":"单次上传内容过大：所有文件合计不得超过 200MB。请减少文件数量或文件大小后重试。"}` 413
 	}
 
 	# Maintenance flag: present iff `afctl maintenance/apply` has enabled it. Stat'd
