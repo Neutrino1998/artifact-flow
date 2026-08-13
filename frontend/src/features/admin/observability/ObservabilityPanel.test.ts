@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import type { AdminMessageGroup } from '@/lib/api';
-import { aggregateStats, formatLlmTokenUsage, serializeEventToText } from './ObservabilityPanel';
+import { serializeEventToText } from './EventDetailPanel';
+import { aggregateStats, formatLlmTokenUsage } from './eventDiagnostics';
 
 describe('aggregateStats', () => {
   test('sums reported cached input while preserving explicit zero reports', () => {
