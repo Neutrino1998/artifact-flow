@@ -280,7 +280,10 @@ class _StubArtifactService:
     async def get_artifact(self, session_id, artifact_id):
         if artifact_id == "notes.md":
             return SimpleNamespace(
-                content="hello sandbox\n", content_type="text/markdown", metadata={}
+                content="hello sandbox\n",
+                content_type="text/markdown",
+                metadata={},
+                has_blob=False,
             )
         return None
 
