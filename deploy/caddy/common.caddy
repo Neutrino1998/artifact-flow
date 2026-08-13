@@ -90,11 +90,19 @@
 (af_site) {
 	import strip_technology_headers
 
+	# Defining any access logger enables access logging for the whole server. Bind
+	# ordinary traffic to an explicit discard sink so it cannot fall through to
+	# Caddy's default http.log.access logger (which includes IP, URI/query, and
+	# headers). Error routes may override this per request with log_name below.
+	log discard_access {
+		output discard
+	}
+
 	# Edge failures happen before FastAPI can mint its request_id or write an ops
-	# log. This logger is deliberately NOT attached to the site hostname: only an
-	# error route that selects it with log_name emits an access record. Keep the
-	# record minimal; method/path are appended explicitly below, while the raw
-	# request object (IP, query, headers) and response headers are discarded.
+	# log. This logger is not the site's default: only an error route that selects
+	# it with log_name emits a record. Keep that record minimal; method/path are
+	# appended explicitly below, while the raw request object (IP, query, headers)
+	# and response headers are discarded.
 	log edge_errors {
 		no_hostname
 		output stderr
