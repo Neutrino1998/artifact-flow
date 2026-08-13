@@ -27,7 +27,8 @@ FORBIDDEN_PATTERNS = (
         "PR label",
         re.compile(
             r"(?i:\bPR\s*#?\s*\d+[a-z]?\b)|"
-            r"\bPR-(?:\d+[a-z]?|[a-z][a-z0-9]*(?:-[a-z0-9]+)+)\b",
+            r"\bPR-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*\b|"
+            r"(?i:\bpr-[a-z0-9]+(?:-[a-z0-9]+)+\b)",
         ),
     ),
     (
@@ -45,6 +46,7 @@ FORBIDDEN_PATTERNS = (
             r"\breview(?:er)?\s*(?:#|r)\s*\d+\b|"
             r"\breview(?:er)?\s+(?:P[0-3]|N\d+)\b|"
             r"\breview(?:er)?\s+round\s+\d+\b|"
+            r"\bP[0-3]\b[^\n]{0,40}\breviewer(?:['’]s)?\s+findings?\b|"
             r"(?:\d+|[一二两三四五六七八九十]+)\s*轮\s*review\b",
             re.IGNORECASE,
         ),
@@ -52,10 +54,10 @@ FORBIDDEN_PATTERNS = (
     (
         "roadmap phase",
         re.compile(
-            r"(?i:\b(?:phase|stage))\s+[A-F]\b|"
-            r"(?<![A-Za-z])[A-F]-phase\b|"
-            r"(?<![A-Za-z])[A-F]-\d+\b|"
-            r"(?<![A-Za-z])[A-F][′']?\s*阶段",
+            r"(?i:\b(?:phase|stage)\s+[A-G](?:-\d+)?\b)|"
+            r"(?<![A-Za-z])[A-G]-phase\b|"
+            r"(?<![A-Za-z])[A-G]-\d+\b|"
+            r"(?<![A-Za-z])[A-G][′']?\s*阶段",
         ),
     ),
 )
@@ -115,8 +117,11 @@ def _matches_forbidden_pattern(text: str) -> bool:
 def test_annotation_guard_patterns_stay_narrow():
     forbidden_examples = (
         "PR5a",
+        "PR-B",
+        "PR-C",
         "PR-obs-lite",
         "PR-tz-unify",
+        "pr-obs-lite",
         "decision 11",
         "决策 10",
         "Finding 1",
@@ -125,12 +130,15 @@ def test_annotation_guard_patterns_stay_narrow():
         "reviewer P2",
         "reviewer round 4",
         "reviewer N4",
+        "P2 in the reviewer's findings",
         "两轮 review",
         "plan §B",
         "docs/_archive/design.md",
         "B-5",
         "C 阶段",
         "Phase C",
+        "phase c",
+        "Phase G-1",
         "B-phase",
     )
     allowed_examples = (
@@ -141,6 +149,9 @@ def test_annotation_guard_patterns_stay_narrow():
         "peer-reviewed source",
         "2026-05-14",
         "H-264",
+        "pr-4",
+        "pr-px",
+        "P2 severity",
     )
 
     assert all(_matches_forbidden_pattern(text) for text in forbidden_examples)
