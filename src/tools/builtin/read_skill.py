@@ -136,6 +136,8 @@ class MountSkillTool(BaseTool):
     `python -m zipfile -e` → zip bomb 只炸本轮沙盒(合原则 2)。剥壳前缀 runtime 重算。
     """
 
+    wants_context = True
+
     def __init__(
         self,
         session: SandboxSession,
@@ -172,10 +174,30 @@ class MountSkillTool(BaseTool):
             "additionalProperties": False,
         }
 
-    async def execute(self, **params) -> ToolResult:
+    async def execute(
+        self,
+        _context: Optional[ToolExecutionContext] = None,
+        **params,
+    ) -> ToolResult:
         slug = (params.get("slug") or "").strip()
         if not slug:
             return ToolResult(success=False, error="mount_skill requires a 'slug'.")
+        if _context is None:
+            logger.error("mount_skill requires engine execution context but none was injected")
+            return ToolResult(
+                success=False,
+                error="mount_skill requires engine execution context but none was injected.",
+            )
+        try:
+            self._session.require_fresh_invocation(
+                _context.model_invocation_epoch
+            )
+        except SandboxError as e:
+            return ToolResult(
+                success=False,
+                error=str(e),
+                metadata=e.diagnostics,
+            )
         # 可见性闸(404 不漏,同 read_skill)。visible 里拿 SkillInfo 顺带取 compatibility。
         info = self._skillset.visible.get(slug)
         if info is None:
@@ -236,7 +258,11 @@ class MountSkillTool(BaseTool):
                 success=False, error=f"Failed to stage skill '{slug}' into the sandbox."
             )
 
-        result = await self._extract(slug, prefix)
+        result = await self._extract(
+            slug,
+            prefix,
+            model_invocation_epoch=_context.model_invocation_epoch,
+        )
         if isinstance(result, ToolResult):   # 失败已成型
             return result
 
@@ -247,7 +273,13 @@ class MountSkillTool(BaseTool):
             metadata={"path": target, "slug": slug},
         )
 
-    async def _extract(self, slug: str, prefix: str):
+    async def _extract(
+        self,
+        slug: str,
+        prefix: str,
+        *,
+        model_invocation_epoch: int,
+    ):
         """沙盒内解压 + 按剥壳前缀就位 + 列顶层;成功返回 listing 文本,失败返回 ToolResult。
 
         单条 `set -e` 命令:解压静默、失败即 abort(stdout=报错、exit≠0);成功时哨兵
@@ -273,7 +305,10 @@ class MountSkillTool(BaseTool):
             f"ls -1Ap {shlex.quote(target)}"
         )
         try:
-            exec_result = await self._session.exec(command)
+            exec_result = await self._session.exec(
+                command,
+                model_invocation_epoch=model_invocation_epoch,
+            )
         except SandboxError as e:
             return ToolResult(
                 success=False,

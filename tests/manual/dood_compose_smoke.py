@@ -40,7 +40,9 @@ async def main() -> int:
         check("create sandbox container via mounted docker.sock", session.started)
 
         # 2. 容器内执行 + 输出回传
-        r = await session.exec("echo dood-ok && id -u")
+        r = await session.exec(
+            "echo dood-ok && id -u", model_invocation_epoch=1
+        )
         check(
             "exec inside sandbox",
             r.exit_code == 0 and "dood-ok" in r.output,
@@ -50,7 +52,10 @@ async def main() -> int:
 
         # 3. 路径同一律:容器写 /workspace,backend 侧 scratch 目录读得到
         token = uuid.uuid4().hex
-        r = await session.exec(f"echo {token} > /workspace/probe.txt")
+        r = await session.exec(
+            f"echo {token} > /workspace/probe.txt",
+            model_invocation_epoch=1,
+        )
         host_path = os.path.join(session.workspace_dir, "probe.txt")
         content = ""
         if os.path.exists(host_path):

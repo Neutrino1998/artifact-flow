@@ -22,7 +22,7 @@
   9. 停机新鲜孤儿    grace 内(age << grace)的本进程孤儿:周期扫 skip,但 final_sweep
                      按 worker-id 绕 grace 收(闭合单副本 Redis 刚建即漏缺口)
  10. 容器死亡恢复    generation 1 写文件后外部 SIGKILL → 当前命令失败但自动换成
-                     generation 2 空现场；旧文件消失、后续显式命令可继续、原命令不重放
+                     generation 2 空现场；旧 epoch 被拒，下一模型 invocation 可继续
 
 每条跑完断言:daemon 上无该 turn label 的容器 + scratch 目录已删(双零残留)。
 顺带自验 aiodocker exec multiplexed stream 的 demux(stdout/stderr 分流)。
@@ -50,6 +50,7 @@ from tools.builtin.sandbox_session import (  # noqa: E402
     LABEL_MESSAGE,
     SandboxCommandError,
     SandboxSession,
+    SandboxStaleInvocationError,
     SandboxUnavailableError,
 )
 from tools.builtin.sandbox_ops import MountArtifactTool, PersistFileTool  # noqa: E402
@@ -58,6 +59,10 @@ from core.execution.task_supervisor import TaskSupervisor  # noqa: E402
 
 PASS, FAIL = "\033[32mPASS\033[0m", "\033[31mFAIL\033[0m"
 results: list[tuple[str, bool, str]] = []
+
+
+def _tool_context(epoch=1):
+    return SimpleNamespace(model_invocation_epoch=epoch)
 
 
 def _ids():
@@ -104,14 +109,17 @@ async def case_1_normal():
     conv, msg = _ids()
     session = SandboxSession(conv, msg)
     try:
-        result = await session.exec("echo to-stdout; echo to-stderr >&2; pwd")
+        result = await session.exec(
+            "echo to-stdout; echo to-stderr >&2; pwd",
+            model_invocation_epoch=1,
+        )
         print(f"  exit={result.exit_code} dur={result.duration:.1f}s output={result.output!r}")
         assert result.exit_code == 0, f"exit {result.exit_code}"
         assert "to-stdout" in result.output and "to-stderr" in result.output, "demux 丢流"
         assert "/workspace" in result.output, "workdir 不是 /workspace"
         # workspace 跨调用持久
-        await session.exec("echo data > f.txt")
-        second = await session.exec("cat f.txt")
+        await session.exec("echo data > f.txt", model_invocation_epoch=1)
+        second = await session.exec("cat f.txt", model_invocation_epoch=1)
         assert "data" in second.output, "workspace 未跨调用持久"
     finally:
         await session.close()
@@ -125,7 +133,9 @@ async def case_2_while_true():
     conv, msg = _ids()
     session = SandboxSession(conv, msg)
     try:
-        result = await session.exec("while true; do :; done")
+        result = await session.exec(
+            "while true; do :; done", model_invocation_epoch=1
+        )
         print(f"  exit={result.exit_code} dur={result.duration:.1f}s")
         assert result.exit_code == 137, f"期望 137(SIGKILL),得到 {result.exit_code}"
         assert result.duration < 10, f"杀晚了: {result.duration:.1f}s"
@@ -142,7 +152,7 @@ async def case_3_cancel_mid_exec():
 
     async def run():
         try:
-            await session.exec("sleep 60")
+            await session.exec("sleep 60", model_invocation_epoch=1)
         finally:
             await session.close()
 
@@ -160,7 +170,7 @@ async def case_4_cancel_mid_start():
 
     async def run():
         try:
-            await session.exec("echo hi")
+            await session.exec("echo hi", model_invocation_epoch=1)
         finally:
             await session.close()
 
@@ -203,7 +213,9 @@ async def case_5_supervisor_integrated():
     conv, msg = _ids()
     session = SandboxSession(conv, msg)
     async def good_turn():
-        result = await session.exec("echo supervisor-path")
+        result = await session.exec(
+            "echo supervisor-path", model_invocation_epoch=1
+        )
         assert "supervisor-path" in result.output
 
     task = await _submit_scoped(supervisor, store, conv, msg, session, good_turn)
@@ -214,7 +226,7 @@ async def case_5_supervisor_integrated():
     conv, msg = _ids()
     session = SandboxSession(conv, msg)
     async def long_turn():
-        await session.exec("sleep 60")
+        await session.exec("sleep 60", model_invocation_epoch=1)
 
     task = await _submit_scoped(supervisor, store, conv, msg, session, long_turn)
     await asyncio.sleep(3)
@@ -236,7 +248,8 @@ async def case_6_over_quota():
         # 50MB > 10MB 配额;写完 sleep 等 watchdog 巡到 → 杀容器 → exec 被归因
         try:
             result = await session.exec(
-                "dd if=/dev/zero of=fill.bin bs=1M count=50 2>/dev/null; sleep 30"
+                "dd if=/dev/zero of=fill.bin bs=1M count=50 2>/dev/null; sleep 30",
+                model_invocation_epoch=1,
             )
             print(f"  意外:exec 正常返回 exit={result.exit_code}(应被配额杀归因)")
             assert False, "超额 exec 未被归因为配额失败"
@@ -245,7 +258,7 @@ async def case_6_over_quota():
             assert "quota" in str(e)
         # sticky:后续沙盒调用立即复述,不再起容器
         try:
-            await session.exec("echo hi")
+            await session.exec("echo hi", model_invocation_epoch=1)
             assert False, "sticky 未生效"
         except SandboxUnavailableError as e:
             assert "quota" in str(e)
@@ -285,22 +298,29 @@ async def case_7_stage_roundtrip():
     session = SandboxSession(conv, msg)
     service = _StubArtifactService()
     try:
-        mount_result = await MountArtifactTool(session, service)(artifact_id="notes.md")
+        mount_result = await MountArtifactTool(session, service)(
+            _context=_tool_context(), artifact_id="notes.md"
+        )
         assert mount_result.success, mount_result.error
         print(f"  {mount_result.data}")
 
         # 容器内读 mount 进来的文件、写 /tmp(入池)、产出新文件
         r = await session.exec(
-            "tr a-z A-Z < notes.md > out.txt && echo tmp-ok > /tmp/scratch-check && cat out.txt"
+            "tr a-z A-Z < notes.md > out.txt && echo tmp-ok > /tmp/scratch-check && cat out.txt",
+            model_invocation_epoch=1,
         )
         assert r.exit_code == 0, f"exit {r.exit_code}: {r.output}"
         assert "HELLO SANDBOX" in r.output, r.output
         # rootfs 只读生效
-        ro = await session.exec("touch /usr/local/x 2>&1; echo rc=$?")
+        ro = await session.exec(
+            "touch /usr/local/x 2>&1; echo rc=$?", model_invocation_epoch=1
+        )
         assert "rc=1" in ro.output and "Read-only" in ro.output, ro.output
         print("  容器内改写 ✓,rootfs 只读 ✓,/tmp 可写(入池)✓")
 
-        persist_result = await PersistFileTool(session, service)(path="out.txt")
+        persist_result = await PersistFileTool(session, service)(
+            _context=_tool_context(), path="out.txt"
+        )
         assert persist_result.success, persist_result.error
         call = service.create_calls[0]
         assert call["content"] == "HELLO SANDBOX\n"
@@ -319,7 +339,9 @@ async def case_8_reaper_collects_orphan():
     conv, msg = _ids()
     session = SandboxSession(conv, msg)
     await session.ensure_container()
-    await session.exec("echo orphan > f.txt")  # 容器在跑、scratch 落地
+    await session.exec(
+        "echo orphan > f.txt", model_invocation_epoch=1
+    )  # 容器在跑、scratch 落地
     # SIGKILL 下 TaskScope finally 不执行 = close() 不跑。这里只取消 watchdog task
     # 免 pending-task 警告(它不删容器),容器+目录留作孤儿;不碰 close。
     if session._watchdog_task is not None:
@@ -334,7 +356,7 @@ async def case_8_reaper_collects_orphan():
     live_done = asyncio.Event()
 
     async def live_turn():
-        await live.exec("echo alive > f.txt")
+        await live.exec("echo alive > f.txt", model_invocation_epoch=1)
         await live_done.wait()  # 卡住,持 lease 不放,直到 reaper 扫完
 
     live_task = await _submit_scoped(
@@ -382,7 +404,9 @@ async def case_9_final_sweep_fresh_orphan():
     conv, msg = _ids()
     session = SandboxSession(conv, msg)
     await session.ensure_container()
-    await session.exec("echo fresh-orphan > f.txt")  # 刚建,age << grace
+    await session.exec(
+        "echo fresh-orphan > f.txt", model_invocation_epoch=1
+    )  # 刚建,age << grace
     if session._watchdog_task is not None:
         session._watchdog_task.cancel()
         await asyncio.gather(session._watchdog_task, return_exceptions=True)
@@ -416,13 +440,17 @@ async def case_10_empty_generation_recovery():
     conv, msg = _ids()
     session = SandboxSession(conv, msg)
     try:
-        await session.exec("echo old-generation > old.txt")
+        await session.exec(
+            "echo old-generation > old.txt", model_invocation_epoch=1
+        )
         old_path = os.path.join(session.workspace_dir, "old.txt")
         assert os.path.exists(old_path)
 
         # 模拟 OOM / runtime 外力杀：命令在飞时从 Docker 控制面杀容器。不要用容器内
         # `kill 1`，PID namespace 的 init 语义会让它在部分 runtime 下不形成稳定触发。
-        failing = asyncio.create_task(session.exec("sleep 30"))
+        failing = asyncio.create_task(
+            session.exec("sleep 30", model_invocation_epoch=1)
+        )
         await asyncio.sleep(1)
         await session._container.kill(signal="SIGKILL")
         try:
@@ -437,9 +465,21 @@ async def case_10_empty_generation_recovery():
 
         assert session.generation == 2
         assert not os.path.exists(old_path), "旧 generation 文件未被清空"
-        resumed = await session.exec("echo replacement-ok")
+        stale_path = os.path.join(session.workspace_dir, "stale.txt")
+        try:
+            await session.exec(
+                "echo stale-should-not-run > stale.txt",
+                model_invocation_epoch=1,
+            )
+            assert False, "同一模型 invocation 的兄弟调用不应落到 generation 2"
+        except SandboxStaleInvocationError:
+            pass
+        assert not os.path.exists(stale_path), "旧 epoch 调用污染了 generation 2"
+        resumed = await session.exec(
+            "echo replacement-ok", model_invocation_epoch=2
+        )
         assert resumed.exit_code == 0 and "replacement-ok" in resumed.output
-        print("  旧 /workspace 已清空 ✓, 后续显式命令可继续 ✓")
+        print("  旧 /workspace 已清空 ✓, 旧 epoch 被拒 ✓, 下一 invocation 可继续 ✓")
     finally:
         await session.close()
     await assert_no_residue("容器死亡后空现场恢复", session)

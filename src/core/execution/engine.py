@@ -281,7 +281,8 @@ async def execute_loop(
         emit: 事件推送回调（推 SSE）
         sandbox_session: SandboxSession 实例（duck-typed:status_snapshot），仅用于
             动态上下文的 <sandbox_status> 快照——生命周期/拆除归 conversation_turn_factory
-            + TaskScope cleanup，引擎不管理它
+            + TaskScope cleanup，引擎不管理它。沙盒工具的 freshness 由通用
+            ToolExecutionContext.model_invocation_epoch 传递，引擎不解释 sandbox generation
         user_id: 当前认证用户 ID，仅传给 LLM adapter 派生 provider cache salt；
             不写入 prompt / event
         entry_agent: 顶层 Agent 名称；subagent 仍按 call_subagent 原地递归执行。
@@ -298,6 +299,10 @@ async def execute_loop(
     )
 
     message_id = state["message_id"]
+    # 一次成功或失败的 provider invocation 都占一个 turn-local epoch。同一响应的
+    # sibling native calls 共用该值；递归 subagent 使用同一计数器，故父调用恢复后
+    # 继续执行时仍携带自己的旧 epoch。它只是一项调用期事实，不持久化进业务 state。
+    model_invocation_epoch = 0
 
     async def _is_cancelled() -> bool:
         """零参谓词：协作式 cancel flag（预绑定 message_id）——所有消费点的唯一入口。
@@ -1060,6 +1065,7 @@ async def execute_loop(
     async def _execute_prepared_tool_call(
         prepared: _PreparedToolCall,
         agent_name: str,
+        invocation_epoch: int,
     ) -> Optional[_ExecutedToolCall]:
         """Execute one authorized call; None means the whole turn terminated."""
         if prepared.tool_name == "call_subagent":
@@ -1146,6 +1152,7 @@ async def execute_loop(
                     agent_name=agent_name,
                     effective_toolset=effective_toolsets[agent_name],
                     tools=tools,
+                    model_invocation_epoch=invocation_epoch,
                     disclosed_tools=set(
                         state.get("agent_progressive_state", {})
                         .get(agent_name, {})
@@ -1254,6 +1261,7 @@ async def execute_loop(
         agent_name: str,
         invocation_tool_names: set[str],
         unexposed_tool_reasons: Dict[str, str],
+        invocation_epoch: int,
     ) -> None:
         """Strictly serial prepare → authorize → execute → finalize pipeline."""
         for tool_call in tool_calls:
@@ -1267,7 +1275,9 @@ async def execute_loop(
                 continue
             if not await _authorize_tool_call(prepared, agent_name):
                 continue
-            executed = await _execute_prepared_tool_call(prepared, agent_name)
+            executed = await _execute_prepared_tool_call(
+                prepared, agent_name, invocation_epoch
+            )
             if executed is None:
                 break
             await _finalize_tool_call(prepared, executed, agent_name)
@@ -1295,6 +1305,8 @@ async def execute_loop(
             该 agent 的最终文本；None = turn 已终止（cancel / error，stop_reason
             已由故障点按 record-not-emit 设好），调用方据此逐层退栈。
         """
+        nonlocal model_invocation_epoch
+
         if agent_name not in agents:
             logger.error(f"Agent '{agent_name}' not found")
             state["response"] = f"Agent '{agent_name}' is unavailable."
@@ -1319,6 +1331,8 @@ async def execute_loop(
                 return None
 
             messages, reminder, native_tools, compaction_threshold = await _build_context(agent_name)
+            model_invocation_epoch += 1
+            invocation_epoch = model_invocation_epoch
             exposed_tool_names = [
                 schema["function"]["name"] for schema in native_tools
             ]
@@ -1498,6 +1512,7 @@ async def execute_loop(
                 agent_name,
                 invocation_names,
                 unexposed_tool_reasons,
+                invocation_epoch,
             )
 
         return None  # while 因 stop_reason（cancel / 递归内 error）退出

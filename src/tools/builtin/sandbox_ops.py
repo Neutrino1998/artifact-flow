@@ -19,7 +19,7 @@ import os
 from typing import List, Optional, Tuple
 
 from config import config
-from tools.base import BaseTool, ToolPermission, ToolResult
+from tools.base import BaseTool, ToolExecutionContext, ToolPermission, ToolResult
 from tools.builtin import sandbox_fs
 from tools.builtin.artifact_service import ArtifactService
 from tools.builtin.sandbox_session import (
@@ -46,6 +46,8 @@ class BashTool(BaseTool):
       显式截断标记);>max_result_size_chars 的捕获结果由引擎溢出转 artifact
       idiom 接手,引擎零改动。
     """
+
+    wants_context = True
 
     def __init__(self, session: SandboxSession):
         # 能力清单按镜像现状列全(python 科学栈+文档栈/LibreOffice/pandoc/ripgrep/zip/unrar-free/git)。版本号刻意
@@ -89,12 +91,25 @@ class BashTool(BaseTool):
             "additionalProperties": False,
         }
 
-    async def execute(self, command: str) -> ToolResult:
+    async def execute(
+        self,
+        command: str,
+        _context: Optional[ToolExecutionContext] = None,
+    ) -> ToolResult:
         if not command.strip():
             return ToolResult(success=False, error="Parameter 'command' must not be empty.")
+        if _context is None:
+            logger.error("bash requires engine execution context but none was injected")
+            return ToolResult(
+                success=False,
+                error="bash requires engine execution context but none was injected.",
+            )
 
         try:
-            result = await self._session.exec(command)
+            result = await self._session.exec(
+                command,
+                model_invocation_epoch=_context.model_invocation_epoch,
+            )
         except SandboxError as e:
             # session 侧记 ops 原始错误；有界证据走 metadata 留给 admin，
             # 不拼进模型面错误文案。
@@ -138,6 +153,8 @@ class MountArtifactTool(BaseTool):
       inventory/read_artifact(C-wire),场景 how-to 归 skill。
     """
 
+    wants_context = True
+
     def __init__(self, session: SandboxSession, service: ArtifactService):
         super().__init__(
             name="mount",
@@ -167,10 +184,26 @@ class MountArtifactTool(BaseTool):
             "additionalProperties": False,
         }
 
-    async def execute(self, artifact_id: str) -> ToolResult:
+    async def execute(
+        self,
+        artifact_id: str,
+        _context: Optional[ToolExecutionContext] = None,
+    ) -> ToolResult:
         artifact_id = artifact_id.strip()
         if not artifact_id:
             return ToolResult(success=False, error="Parameter 'artifact_id' must not be empty.")
+        if _context is None:
+            logger.error("mount requires engine execution context but none was injected")
+            return ToolResult(
+                success=False,
+                error="mount requires engine execution context but none was injected.",
+            )
+        try:
+            self._session.require_fresh_invocation(
+                _context.model_invocation_epoch
+            )
+        except SandboxError as e:
+            return ToolResult(success=False, error=str(e), metadata=e.diagnostics)
 
         # 保留名:`.skills` 是 mount_skill 的技能挂载根,一个同名 artifact 落成顶层
         # 文件会与它打架(id 模式允许字面 `.skills`)。loud-fail 让模型换个 id。
@@ -255,6 +288,8 @@ class PersistFileTool(BaseTool):
     - 文本/二进制二分:可严格 UTF-8 解码且 ≤ SANDBOX_PERSIST_MAX_TEXT_BYTES
       → 文本 artifact;否则 blob(MIME 按扩展名猜,兜底 octet-stream)。
     """
+
+    wants_context = True
 
     def __init__(self, session: SandboxSession, service: ArtifactService):
         super().__init__(
@@ -356,11 +391,28 @@ class PersistFileTool(BaseTool):
         mime = guess_blob_mime(filename)
         return None, mime
 
-    async def execute(self, path: str, artifact_id: str = "") -> ToolResult:
+    async def execute(
+        self,
+        path: str,
+        artifact_id: str = "",
+        _context: Optional[ToolExecutionContext] = None,
+    ) -> ToolResult:
         raw_path = path.strip()
         if not raw_path:
             return ToolResult(success=False, error="Parameter 'path' must not be empty.")
         target_id = artifact_id.strip()
+        if _context is None:
+            logger.error("persist requires engine execution context but none was injected")
+            return ToolResult(
+                success=False,
+                error="persist requires engine execution context but none was injected.",
+            )
+        try:
+            self._session.require_fresh_invocation(
+                _context.model_invocation_epoch
+            )
+        except SandboxError as e:
+            return ToolResult(success=False, error=str(e), metadata=e.diagnostics)
 
         session_id = self._service.current_session_id
         if not session_id:

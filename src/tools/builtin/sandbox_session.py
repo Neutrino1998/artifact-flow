@@ -116,6 +116,10 @@ class SandboxCommandError(SandboxError):
     """当前命令失败，但 session 可能已换成一个可继续使用的空沙盒。"""
 
 
+class SandboxStaleInvocationError(SandboxError):
+    """调用生成于最近一次空现场恢复之前，未在新 generation 上执行。"""
+
+
 class SandboxExecTimeoutError(SandboxCommandError):
     """asyncio 弃等护栏触发(exec 通道无响应,超出容器内 timeout + grace)。"""
 
@@ -170,6 +174,10 @@ class SandboxSession:
         # bool 闸比可调计数更贴合产品契约，也让无限重启循环不可表达。
         self._generation = 1
         self._recovery_attempted = False
+        # generation rollover 会把最低有效 epoch 推到故障模型调用的下一次。
+        # 同一 provider response 的 sibling calls 仍带旧 epoch，因而只能 loud-fail；
+        # 跨 lead/subagent 的全 turn 单调序保证旧父调用返回后也无法误用新现场。
+        self._minimum_valid_invocation_epoch = 1
         # 成功 rollover 后保留到 turn 结束，供每次动态状态注入持续纠正模型：
         # 当前目录是空的新现场，历史中的 mount / skill / 中间文件均已失效。
         self._last_recovery: Optional[dict] = None
@@ -194,6 +202,58 @@ class SandboxSession:
     def generation(self) -> int:
         """当前沙盒代次；首次容器为 1，一次性空现场恢复成功后为 2。"""
         return self._generation
+
+    @property
+    def minimum_valid_invocation_epoch(self) -> int:
+        """当前 generation 接受的最早 model invocation epoch。"""
+        return self._minimum_valid_invocation_epoch
+
+    def require_fresh_invocation(self, model_invocation_epoch: int) -> None:
+        """拒绝基于 rollover 前模型上下文生成的沙盒调用。
+
+        epoch 由引擎的 ``ToolExecutionContext`` 注入，turn 内跨 agent 单调递增；
+        SandboxSession 只解释 freshness，不感知 tool batch / agent 递归。sticky
+        优先，因为配额杀或 recovery 失败比 stale sibling 是更权威的不可用事实。
+        """
+        if self._sticky_failure is not None:
+            raise self._sticky_error()
+        if (
+            not isinstance(model_invocation_epoch, int)
+            or isinstance(model_invocation_epoch, bool)
+            or model_invocation_epoch < 1
+        ):
+            logger.error(
+                "Sandbox received invalid model invocation epoch %r for %s",
+                model_invocation_epoch,
+                self.message_id,
+            )
+            raise SandboxUnavailableError(
+                "Sandbox invocation context is invalid; this sandbox call was not executed."
+            )
+        if model_invocation_epoch >= self._minimum_valid_invocation_epoch:
+            return
+
+        diagnostics = {
+            "sandbox_invocation": {
+                "stale": True,
+                "invocation_epoch": model_invocation_epoch,
+                "minimum_valid_epoch": self._minimum_valid_invocation_epoch,
+                "generation": self._generation,
+            }
+        }
+        logger.warning(
+            "Skipped stale sandbox invocation for %s: epoch=%s, minimum=%s, generation=%s",
+            self.message_id,
+            model_invocation_epoch,
+            self._minimum_valid_invocation_epoch,
+            self._generation,
+        )
+        raise SandboxStaleInvocationError(
+            "This sandbox call was generated before the sandbox was restarted and was "
+            "not executed. Replan using the fresh empty sandbox and retry only the "
+            "operations that are still needed.",
+            diagnostics=diagnostics,
+        )
 
     @staticmethod
     def _container_id(container: Any) -> str:
@@ -618,6 +678,7 @@ class SandboxSession:
         container: Any,
         failure_kind: str,
         diagnostics: dict,
+        model_invocation_epoch: int,
     ) -> SandboxError:
         """把已启动后损坏的容器 rollover 成一个全新空 generation。
 
@@ -741,6 +802,7 @@ class SandboxSession:
             "failure_kind": failure_kind,
         }
         self._last_recovery = recovery
+        self._minimum_valid_invocation_epoch = model_invocation_epoch + 1
         merged = self._diagnostics_with_recovery(
             diagnostics,
             succeeded=True,
@@ -940,12 +1002,21 @@ class SandboxSession:
     # exec
     # ------------------------------------------------------------------
 
-    async def exec(self, command: str) -> SandboxExecResult:
+    async def exec(
+        self,
+        command: str,
+        *,
+        model_invocation_epoch: int,
+    ) -> SandboxExecResult:
         """在容器内跑一条 bash 命令(lazy 起容器)。
 
         argv = ["timeout", "--signal=KILL", N, "bash", "-c", command]:
         command 整体是一个 argv 元素,无 shell 引号问题;到点 KILL 真杀。
+
+        ``model_invocation_epoch`` 必须由调用者显式提供；生产沙盒工具取自
+        ToolExecutionContext，低层手工探针/单测也必须声明它模拟的调用边界。
         """
+        self.require_fresh_invocation(model_invocation_epoch)
         await self.ensure_container()
         # 局部引用:watchdog 超额杀会把 self._container 置 None(与本协程并发)
         container = self._container
@@ -991,6 +1062,7 @@ class SandboxSession:
                 container=container,
                 failure_kind="exec_channel_timeout",
                 diagnostics=diagnostics,
+                model_invocation_epoch=model_invocation_epoch,
             )
             raise error from e
         except DockerError as e:
@@ -1032,6 +1104,7 @@ class SandboxSession:
                 container=container,
                 failure_kind=failure_kind,
                 diagnostics=diagnostics,
+                model_invocation_epoch=model_invocation_epoch,
             )
             raise error from e
 
@@ -1069,6 +1142,7 @@ class SandboxSession:
                 container=container,
                 failure_kind=failure_kind,
                 diagnostics=diagnostics,
+                model_invocation_epoch=model_invocation_epoch,
             )
             raise error
 

@@ -43,6 +43,9 @@ class FakeStageSession:
     def sticky_diagnostics(self):
         return {}
 
+    def require_fresh_invocation(self, model_invocation_epoch):
+        assert model_invocation_epoch >= 1
+
     async def ensure_container(self):
         if self._fail_ensure is not None:
             raise self._fail_ensure
@@ -110,6 +113,10 @@ def session(tmp_path):
     return FakeStageSession(tmp_path)
 
 
+def _context(epoch=1):
+    return SimpleNamespace(model_invocation_epoch=epoch)
+
+
 # ============================================================
 # mount
 # ============================================================
@@ -127,7 +134,9 @@ class TestMountTool:
 
     async def test_mount_text_artifact_writes_utf8(self, session, service):
         service.add_text("notes.md", "# 标题\nbody")
-        result = await MountArtifactTool(session, service)(artifact_id="notes.md")
+        result = await MountArtifactTool(session, service)(
+            _context=_context(), artifact_id="notes.md"
+        )
         assert result.success
         path = os.path.join(session.workspace_dir, "notes.md")
         with open(path, encoding="utf-8") as f:
@@ -138,7 +147,9 @@ class TestMountTool:
     async def test_mount_blob_artifact_writes_original_bytes(self, session, service):
         payload = b"PK\x03\x04binary"
         service.add_blob("report.docx", payload, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-        result = await MountArtifactTool(session, service)(artifact_id="report.docx")
+        result = await MountArtifactTool(session, service)(
+            _context=_context(), artifact_id="report.docx"
+        )
         assert result.success
         with open(os.path.join(session.workspace_dir, "report.docx"), "rb") as f:
             assert f.read() == payload
@@ -148,11 +159,15 @@ class TestMountTool:
         """lazy key = 首个沙盒工具调用,mount 也要起容器(可能先 mount 再 bash)。"""
         service.add_text("a.txt", "x")
         assert not session.started
-        await MountArtifactTool(session, service)(artifact_id="a.txt")
+        await MountArtifactTool(session, service)(
+            _context=_context(), artifact_id="a.txt"
+        )
         assert session.started
 
     async def test_mount_unknown_artifact_fails(self, session, service):
-        result = await MountArtifactTool(session, service)(artifact_id="nope")
+        result = await MountArtifactTool(session, service)(
+            _context=_context(), artifact_id="nope"
+        )
         assert not result.success
         assert "not found" in result.error
 
@@ -161,20 +176,26 @@ class TestMountTool:
             tmp_path, fail_ensure=SandboxUnavailableError("quota exhausted")
         )
         service.add_text("a.txt", "x")
-        result = await MountArtifactTool(session, service)(artifact_id="a.txt")
+        result = await MountArtifactTool(session, service)(
+            _context=_context(), artifact_id="a.txt"
+        )
         assert not result.success
         assert "quota" in result.error
 
     async def test_mount_dotdot_id_rejected(self, session, service):
         """id 模式允许 ".." —— 圈地必须把它挡在 workspace 外。"""
         service.add_text("..", "evil")
-        result = await MountArtifactTool(session, service)(artifact_id="..")
+        result = await MountArtifactTool(session, service)(
+            _context=_context(), artifact_id=".."
+        )
         assert not result.success
 
     async def test_mount_dot_skills_reserved(self, session, service):
         """`.skills` 是 mount_skill 的技能挂载根(id 模式允许字面 `.skills`)→ 保留、拒挂。"""
         service.add_text(".skills", "collide")
-        result = await MountArtifactTool(session, service)(artifact_id=".skills")
+        result = await MountArtifactTool(session, service)(
+            _context=_context(), artifact_id=".skills"
+        )
         assert not result.success
         assert "reserved" in result.error.lower()
 
@@ -186,7 +207,9 @@ class TestMountTool:
         os.symlink(str(outside), os.path.join(session.workspace_dir, "a.txt"))
 
         service.add_text("a.txt", "mounted content")
-        result = await MountArtifactTool(session, service)(artifact_id="a.txt")
+        result = await MountArtifactTool(session, service)(
+            _context=_context(), artifact_id="a.txt"
+        )
         assert result.success
         assert outside.read_text() == "untouched"  # 池外文件未被改写
         with open(os.path.join(session.workspace_dir, "a.txt")) as f:
@@ -198,7 +221,9 @@ class TestMountTool:
         old = os.umask(0o077)
         try:
             service.add_text("notes.md", "x")
-            result = await MountArtifactTool(session, service)(artifact_id="notes.md")
+            result = await MountArtifactTool(session, service)(
+                _context=_context(), artifact_id="notes.md"
+            )
             assert result.success
             mode = os.stat(os.path.join(session.workspace_dir, "notes.md")).st_mode & 0o777
             assert mode == 0o666
@@ -233,7 +258,9 @@ class TestPersistTool:
     async def test_persist_text_file(self, session, service):
         await session.ensure_container()
         _write_ws(session, "summary.md", "# done\n".encode())
-        result = await PersistFileTool(session, service)(path="summary.md")
+        result = await PersistFileTool(session, service)(
+            _context=_context(), path="summary.md"
+        )
         assert result.success
         call = service.create_calls[0]
         assert call["content"] == "# done\n"
@@ -246,7 +273,9 @@ class TestPersistTool:
         await session.ensure_container()
         payload = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
         _write_ws(session, "out/plot.png", payload)
-        result = await PersistFileTool(session, service)(path="out/plot.png")
+        result = await PersistFileTool(session, service)(
+            _context=_context(), path="out/plot.png"
+        )
         assert result.success
         call = service.create_calls[0]
         assert call["blob"] == payload
@@ -261,7 +290,9 @@ class TestPersistTool:
         await session.ensure_container()
         payload = b"PK\x03\x04\xff\xfe" + b"\x00" * 16
         _write_ws(session, "report.docx", payload)
-        result = await PersistFileTool(session, service)(path="report.docx")
+        result = await PersistFileTool(session, service)(
+            _context=_context(), path="report.docx"
+        )
         assert result.success
         call = service.create_calls[0]
         assert call["blob"] == payload
@@ -276,7 +307,7 @@ class TestPersistTool:
         service.add_text("notes.md", "old")
         _write_ws(session, "notes.md", "new body".encode())
         result = await PersistFileTool(session, service)(
-            path="notes.md", artifact_id="notes.md"
+            _context=_context(), path="notes.md", artifact_id="notes.md"
         )
         assert result.success
         assert service.create_calls == []
@@ -293,7 +324,7 @@ class TestPersistTool:
         service.add_blob("pkg.zip", b"PK old", "application/zip")
         _write_ws(session, "pkg.zip", payload)
         result = await PersistFileTool(session, service)(
-            path="pkg.zip", artifact_id="pkg.zip"
+            _context=_context(), path="pkg.zip", artifact_id="pkg.zip"
         )
         assert result.success
         call = service.replace_calls[0]
@@ -307,7 +338,7 @@ class TestPersistTool:
         await session.ensure_container()
         _write_ws(session, "gallery.html", b"<html>x</html>")
         result = await PersistFileTool(session, service)(
-            path="gallery.html", artifact_id="style_gallery"
+            _context=_context(), path="gallery.html", artifact_id="style_gallery"
         )
         assert result.success
         assert service.replace_calls == []
@@ -321,17 +352,23 @@ class TestPersistTool:
     async def test_persist_absolute_workspace_path_accepted(self, session, service):
         await session.ensure_container()
         _write_ws(session, "a.txt", b"hi")
-        result = await PersistFileTool(session, service)(path="/workspace/a.txt")
+        result = await PersistFileTool(session, service)(
+            _context=_context(), path="/workspace/a.txt"
+        )
         assert result.success
 
     async def test_persist_outside_absolute_path_rejected(self, session, service):
         await session.ensure_container()
-        result = await PersistFileTool(session, service)(path="/etc/passwd")
+        result = await PersistFileTool(session, service)(
+            _context=_context(), path="/etc/passwd"
+        )
         assert not result.success
 
     async def test_persist_dotdot_escape_rejected(self, session, service):
         await session.ensure_container()
-        result = await PersistFileTool(session, service)(path="../tmp/secret")
+        result = await PersistFileTool(session, service)(
+            _context=_context(), path="../tmp/secret"
+        )
         assert not result.success
         assert "escape" in result.error
 
@@ -341,7 +378,9 @@ class TestPersistTool:
         secret = tmp_path / "host-secret"
         secret.write_text("leak me")
         os.symlink(str(secret), os.path.join(session.workspace_dir, "innocent.txt"))
-        result = await PersistFileTool(session, service)(path="innocent.txt")
+        result = await PersistFileTool(session, service)(
+            _context=_context(), path="innocent.txt"
+        )
         assert not result.success
 
     async def test_persist_parent_dir_symlink_rejected(self, session, service, tmp_path):
@@ -352,7 +391,9 @@ class TestPersistTool:
         outside.mkdir()
         (outside / "file.txt").write_text("host secret")
         os.symlink(str(outside), os.path.join(session.workspace_dir, "d"))
-        result = await PersistFileTool(session, service)(path="d/file.txt")
+        result = await PersistFileTool(session, service)(
+            _context=_context(), path="d/file.txt"
+        )
         assert not result.success
         assert "escape" in result.error
 
@@ -360,7 +401,9 @@ class TestPersistTool:
         """真实子目录(非链)下的文件正常 persist —— 逐级 openat 不误伤合法深路径。"""
         await session.ensure_container()
         _write_ws(session, "out/report.md", b"# ok\n")
-        result = await PersistFileTool(session, service)(path="out/report.md")
+        result = await PersistFileTool(session, service)(
+            _context=_context(), path="out/report.md"
+        )
         assert result.success
         assert service.create_calls[0]["content"] == "# ok\n"
 
@@ -372,21 +415,27 @@ class TestPersistTool:
             sticky="Sandbox workspace exceeded the 2048MB disk quota and was terminated.",
         )
         # started=False(从未 ensure),但 sticky 已置
-        result = await PersistFileTool(session, service)(path="out.txt")
+        result = await PersistFileTool(session, service)(
+            _context=_context(), path="out.txt"
+        )
         assert not result.success
         assert "quota" in result.error
         assert "nothing to persist" not in result.error
 
     async def test_persist_missing_file(self, session, service):
         await session.ensure_container()
-        result = await PersistFileTool(session, service)(path="nope.txt")
+        result = await PersistFileTool(session, service)(
+            _context=_context(), path="nope.txt"
+        )
         assert not result.success
         assert "not found" in result.error
 
     async def test_persist_directory_suggests_archiving(self, session, service):
         await session.ensure_container()
         os.makedirs(os.path.join(session.workspace_dir, "outdir"))
-        result = await PersistFileTool(session, service)(path="outdir")
+        result = await PersistFileTool(session, service)(
+            _context=_context(), path="outdir"
+        )
         assert not result.success
         assert "zip" in result.error
 
@@ -397,7 +446,9 @@ class TestPersistTool:
         await session.ensure_container()
         _write_ws(session, "big.bin", b"x" * 100)
         with caplog.at_level(logging.WARNING, logger="ArtifactFlow"):
-            result = await PersistFileTool(session, service)(path="big.bin")
+            result = await PersistFileTool(session, service)(
+                _context=_context(), path="big.bin"
+            )
         assert not result.success
         assert "too large" in result.error
         assert any(
@@ -415,16 +466,22 @@ class TestPersistTool:
         monkeypatch.setattr(config, "SANDBOX_PERSIST_MAX_TEXT_BYTES", 8)
         await session.ensure_container()
         _write_ws(session, "huge.csv", b"a,b,c\n" * 10)
-        result = await PersistFileTool(session, service)(path="huge.csv")
+        result = await PersistFileTool(session, service)(
+            _context=_context(), path="huge.csv"
+        )
         assert result.success
         assert service.create_calls[0]["blob"] is not None
 
     async def test_persist_before_sandbox_used(self, session, service):
-        result = await PersistFileTool(session, service)(path="a.txt")
+        result = await PersistFileTool(session, service)(
+            _context=_context(), path="a.txt"
+        )
         assert not result.success
         assert "nothing to persist" in result.error
 
     async def test_blank_path_rejected(self, session, service):
         await session.ensure_container()
-        result = await PersistFileTool(session, service)(path="  ")
+        result = await PersistFileTool(session, service)(
+            _context=_context(), path="  "
+        )
         assert not result.success

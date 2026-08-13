@@ -174,6 +174,44 @@ class _FailingTool(BaseTool):
         return await self.execute(**params)
 
 
+class _EpochGatedTool(BaseTool):
+    """模拟 sandbox freshness：恢复后只接受更晚的模型 invocation。"""
+
+    wants_context = True
+
+    def __init__(self, name: str = "sandbox_probe"):
+        super().__init__(name=name, description="Epoch-gated sandbox probe")
+        self.minimum_valid_epoch = 1
+        self.calls: list[tuple[str, int]] = []
+        self.effects: list[str] = []
+
+    def get_input_schema(self):
+        return {
+            "type": "object",
+            "properties": {"action": {"type": "string"}},
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    async def execute(self, _context=None, **params) -> ToolResult:
+        epoch = _context.model_invocation_epoch
+        action = params["action"]
+        self.calls.append((action, epoch))
+        if epoch < self.minimum_valid_epoch:
+            return ToolResult(
+                success=False,
+                error="stale sandbox invocation was not executed",
+            )
+        if action == "recover":
+            self.minimum_valid_epoch = epoch + 1
+            return ToolResult(
+                success=False,
+                error="sandbox recovered with an empty generation",
+            )
+        self.effects.append(action)
+        return ToolResult(success=True, data=f"ran {action}")
+
+
 class _RecordingArtifactService:
     """Small engine collaborator that records tool-result artifact content."""
 
@@ -540,6 +578,49 @@ class TestToolExecution:
         assert len(starts) == 1
         assert len(completes) == 1
         assert completes[0]["data"]["success"] is True
+
+    async def test_model_invocation_epoch_is_shared_by_siblings_and_advances_on_replan(
+        self,
+    ):
+        """恢复 sibling 全带旧 epoch 而 loud-fail；下一次模型响应才可产生副作用。"""
+        agent = _FakeAgentConfig(tools={"sandbox_probe": "auto"})
+        probe = _EpochGatedTool()
+        first_response = (
+            _native_tool_call("sandbox_probe", action="recover")
+            + _native_tool_call("sandbox_probe", action="generate-stale")
+            + _native_tool_call("sandbox_probe", action="persist-stale")
+        )
+        second_response = (
+            _native_tool_call("sandbox_probe", action="regenerate")
+            + _native_tool_call("sandbox_probe", action="persist-fresh")
+        )
+        rounds = [
+            _tool_call_chunks(first_response),
+            _tool_call_chunks(second_response),
+            _simple_llm_chunks("done"),
+        ]
+
+        result, emitted, _ = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": agent},
+            tools={"sandbox_probe": probe},
+        )
+
+        assert result["stop_reason"] is StopReason.COMPLETE
+        assert probe.calls == [
+            ("recover", 1),
+            ("generate-stale", 1),
+            ("persist-stale", 1),
+            ("regenerate", 2),
+            ("persist-fresh", 2),
+        ]
+        assert probe.effects == ["regenerate", "persist-fresh"]
+        completes = [
+            event["data"]["success"]
+            for event in _events_of_type(emitted, "tool_complete")
+            if event["data"].get("tool") == "sandbox_probe"
+        ]
+        assert completes == [False, False, False, True, True]
 
     async def test_image_result_uses_call_id_cache_and_event_keeps_reference_only(self):
         agent = _FakeAgentConfig(tools={"read_artifact": "auto"})
@@ -2246,6 +2327,50 @@ class TestMixedSerialDelegation:
             if e.event_type == StreamEventType.SUBAGENT_INSTRUCTION.value
         ]
         assert [e.agent_name for e in instr] == ["sub_a", "sub_b"]
+
+    async def test_model_invocation_epoch_orders_parent_and_nested_subagent_calls(self):
+        """子 agent 恢复后重规划可用；返回父级时父响应的旧 sibling 仍被拒。"""
+        lead = _FakeAgentConfig(
+            tools={"call_subagent": "auto", "sandbox_probe": "auto"}
+        )
+        sub = _FakeAgentConfig(
+            name="sub", tools={"sandbox_probe": "auto"}
+        )
+        probe = _EpochGatedTool()
+        lead_response = (
+            _native_tool_call(
+                "call_subagent", agent_name="sub", instruction="recover and continue"
+            )
+            + _native_tool_call("sandbox_probe", action="parent-stale")
+        )
+        rounds = [
+            _tool_call_chunks(lead_response),              # lead epoch 1
+            _tool_call_chunks(                             # sub epoch 2: recovery
+                _native_tool_call("sandbox_probe", action="recover")
+            ),
+            _tool_call_chunks(                             # sub epoch 3: replan
+                _native_tool_call("sandbox_probe", action="sub-fresh")
+            ),
+            _simple_llm_chunks("sub done"),               # sub epoch 4
+            _simple_llm_chunks("lead done"),              # lead epoch 5
+        ]
+
+        result, _, _ = await _run_engine(
+            _make_fake_stream_sequence(rounds),
+            agents={"lead_agent": lead, "sub": sub},
+            tools={
+                "call_subagent": self._real_call_subagent(["sub"]),
+                "sandbox_probe": probe,
+            },
+        )
+
+        assert result["stop_reason"] is StopReason.COMPLETE
+        assert probe.calls == [
+            ("recover", 2),
+            ("sub-fresh", 3),
+            ("parent-stale", 1),
+        ]
+        assert probe.effects == ["sub-fresh"]
 
     async def test_cancel_during_subagent_skips_remaining_tools(self):
         """cancel 落在子 agent 的 LLM 流期间:call_subagent 留 orphan TOOL_START

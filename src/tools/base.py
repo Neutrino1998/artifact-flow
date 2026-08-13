@@ -81,6 +81,10 @@ class ToolExecutionContext:
     agent_name: str
     effective_toolset: Any        # core.capabilities.effective_toolset.EffectiveToolset(鸭子类型,避免 tools→core)
     tools: Dict[str, "BaseTool"]  # 本 turn 合并后的全量工具对象(name -> BaseTool)
+    # 同一 provider response 里的全部 native calls 共用一个 epoch；turn 内跨
+    # lead/subagent 单调递增。工具可用它拒绝基于过期环境认知生成的调用，值本身
+    # 不进模型参数，也不承载任何权限或秘密。
+    model_invocation_epoch: int
     disclosed_tools: Set[str] = field(default_factory=set)
 
 

@@ -1044,6 +1044,16 @@ class TestSandboxStatus:
                           sandbox_status=status)[-1]["content"]
         assert "Workspace (/workspace) is empty." in reminder
 
+    def test_mount_skill_only_agent_also_receives_sandbox_status(self):
+        agent = _FakeAgentConfig(tools={"mount_skill": "auto"})
+        reminder = _build(
+            agent,
+            state=self._state(),
+            tools={},
+            sandbox_status={"state": "not_started"},
+        )[-1]["content"]
+        assert '<sandbox_status state="not_started">' in reminder
+
     def test_recovered_generation_restates_destructive_workspace_reset(self):
         agent = _FakeAgentConfig(tools={"bash": "auto"})
         status = {

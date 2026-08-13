@@ -22,6 +22,7 @@ from core.execution.event_history import build_event_history, last_llm_usage
 from utils.image import VISION_VIEWABLE_MIMES
 from models.llm import model_replays_reasoning, model_supports_vision
 from tools.artifact_envelope import make_preview_slice, render_artifact_slice
+from tools.base import MOUNT_SKILL_NAME
 from utils.logger import get_logger
 
 logger = get_logger("ArtifactFlow")
@@ -312,7 +313,9 @@ class ContextManager:
         # 的 mount/bash 记录对模型是"文件还在"的伪证，工具描述里的 per-turn ephemeral
         # 静态规则压不过它；只有"现在时态"的工作区事实能纠偏（与 artifact 清单同理:
         # 状态用动态注入，能力进工具描述，契约进 inventory 标注，how-to 归 skill）。
-        has_sandbox_tools = effective_toolset.has_any(("bash", "mount", "persist"))
+        has_sandbox_tools = effective_toolset.has_any(
+            ("bash", "mount", "persist", MOUNT_SKILL_NAME)
+        )
         if has_sandbox_tools and sandbox_status is not None:
             parts.append(cls._build_sandbox_status(sandbox_status))
 
