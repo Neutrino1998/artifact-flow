@@ -150,6 +150,12 @@ function EventDetail({
           {nativeToolCalls(d).length > 0 ? (
             <DetailBlock label="Tool Calls" content={formatNativeToolCalls(nativeToolCalls(d))} />
           ) : null}
+          <ReconstructSection
+            mode="call"
+            conversationId={conversationId}
+            messageId={messageId}
+            event={event}
+          />
         </div>
       ) : null}
 
@@ -176,7 +182,12 @@ function EventDetail({
           {d?.reminder != null ? (
             <DetailBlock label="Reminder（动态，并入末条消息）" content={d.reminder as string} />
           ) : null}
-          <PromptReconstructSection conversationId={conversationId} messageId={messageId} event={event} />
+          <ReconstructSection
+            mode="prompt"
+            conversationId={conversationId}
+            messageId={messageId}
+            event={event}
+          />
         </>
       ) : null}
 
@@ -200,17 +211,21 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function PromptReconstructSection({
+function ReconstructSection({
+  mode,
   conversationId,
   messageId,
   event,
 }: {
+  mode: 'prompt' | 'call';
   conversationId: string | null;
   messageId: string | null;
   event: AdminEventItem;
 }) {
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<api.AdminPromptReconstructResponse | null>(null);
+  const [result, setResult] = useState<
+    api.AdminPromptReconstructResponse | api.AdminLlmCallReconstructResponse | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
 
   const eventId = event.event_id;
@@ -220,26 +235,37 @@ function PromptReconstructSection({
     if (conversationId == null || messageId == null || eventId == null) return;
     setLoading(true);
     setError(null);
-    api.getAdminPromptReconstruct(conversationId, messageId, eventId)
+    const request = mode === 'call'
+      ? api.getAdminLlmCallReconstruct(conversationId, messageId, eventId)
+      : api.getAdminPromptReconstruct(conversationId, messageId, eventId);
+    request
       .then(setResult)
       .catch((err) => setError(err instanceof Error ? err.message : '重建失败'))
       .finally(() => setLoading(false));
-  }, [conversationId, messageId, eventId]);
+  }, [conversationId, messageId, eventId, mode]);
 
   const handleDownload = useCallback(() => {
     if (!result) return;
+    const response = 'response' in result ? result.response : undefined;
     const blob = new Blob([JSON.stringify({
       model: result.model,
       exposed_tool_names: result.exposed_tool_names,
       messages: result.messages,
+      ...(response == null ? {} : { response }),
     }, null, 2)], { type: 'application/json;charset=utf-8' });
-    triggerBlobDownload(`model-messages-${messageId ?? 'msg'}-${eventId ?? 'evt'}.json`, blob);
-  }, [result, messageId, eventId]);
+    const prefix = mode === 'call' ? 'model-call' : 'model-messages';
+    triggerBlobDownload(`${prefix}-${messageId ?? 'msg'}-${eventId ?? 'evt'}.json`, blob);
+  }, [result, messageId, eventId, mode]);
+
+  const reconstructingCall = mode === 'call';
+  const response = result != null && 'response' in result ? result.response : null;
 
   return (
     <div className="space-y-2 border-t border-border dark:border-border-dark pt-3">
       <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-        重建此发 OpenAI-compatible messages 和实际暴露的工具名（不包含 tools schema 或 provider chat template 后的 token 序列）
+        {reconstructingCall
+          ? '重建此次模型调用的输入 messages 和已持久化响应（不包含 tools schema 或 provider chat template 后的 token 序列）'
+          : '重建此发 OpenAI-compatible messages 和实际暴露的工具名（不包含 tools schema 或 provider chat template 后的 token 序列）'}
       </div>
       <div className="flex items-center gap-2 flex-wrap">
         <button
@@ -247,7 +273,7 @@ function PromptReconstructSection({
           disabled={!canReconstruct || loading}
           className="px-2 py-1 rounded-md text-xs bg-accent/10 text-accent hover:bg-accent/20 disabled:opacity-50 transition-colors"
         >
-          {loading ? '重建中…' : '重建 Messages'}
+          {loading ? '重建中…' : reconstructingCall ? '重建完整调用' : '重建 Messages'}
         </button>
         {result ? <button onClick={handleDownload} className="text-xs text-accent">下载 JSON</button> : null}
       </div>
@@ -273,6 +299,9 @@ function PromptReconstructSection({
             value={result.exposed_tool_names == null ? '未采集（旧事件）' : result.exposed_tool_names.join(', ') || '（无）'}
           />
           <DetailBlock label="重建 Messages" content={JSON.stringify(result.messages, null, 2)} />
+          {response != null ? (
+            <DetailBlock label="模型 Response" content={JSON.stringify(response, null, 2)} />
+          ) : null}
         </div>
       ) : null}
     </div>

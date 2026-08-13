@@ -136,6 +136,56 @@ class TestAdminConversationActivity:
         assert response.status_code == 200
         assert response.json()["messages"][-1]["content"] == "diagnostic prompt snapshot"
 
+    async def test_privacy_mode_keeps_full_llm_call_reconstruction(
+        self,
+        monkeypatch,
+        admin_client: AsyncClient,
+        observed_conversation: tuple[str, str],
+    ):
+        monkeypatch.setattr(config, "ADMIN_PRIVACY_MODE", True)
+        conv_id, message_id = observed_conversation
+
+        async def reconstruct_llm_call(
+            _self,
+            requested_conv_id,
+            requested_message_id,
+            event_id,
+        ):
+            return {
+                "conversation_id": requested_conv_id,
+                "message_id": requested_message_id,
+                "agent_start_event_id": "evt-start",
+                "llm_complete_event_id": event_id,
+                "agent_name": "lead_agent",
+                "model": "test-model",
+                "exposed_tool_names": [],
+                "has_reminder": True,
+                "messages": [
+                    {"role": "system", "content": "system"},
+                    {"role": "user", "content": "question"},
+                ],
+                "response": {
+                    "content": "final answer",
+                    "reasoning_content": "diagnostic reasoning",
+                    "tool_calls": [],
+                },
+            }
+
+        monkeypatch.setattr(
+            ConversationManager,
+            "reconstruct_llm_call",
+            reconstruct_llm_call,
+        )
+
+        response = await admin_client.get(
+            f"/api/v1/admin/conversations/{conv_id}/messages/{message_id}/reconstruct-call",
+            params={"llm_complete_event_id": "evt-llm"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["llm_complete_event_id"] == "evt-llm"
+        assert response.json()["response"]["content"] == "final answer"
+
     async def test_list_and_detail_expose_active_message_id(
         self,
         app,

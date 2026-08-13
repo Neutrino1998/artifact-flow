@@ -1490,6 +1490,73 @@
         }
       }
     },
+    "/api/v1/admin/conversations/{conv_id}/messages/{message_id}/reconstruct-call": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Reconstruct Admin Llm Call",
+        "description": "Reconstruct an actual LLM request and attach its persisted response.",
+        "operationId": "reconstruct_admin_llm_call_api_v1_admin_conversations__conv_id__messages__message_id__reconstruct_call_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conv_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conv Id"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Message Id"
+            }
+          },
+          {
+            "name": "llm_complete_event_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 96,
+              "title": "Llm Complete Event Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminLlmCallReconstructResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/conversations/{conv_id}/artifacts": {
       "get": {
         "tags": [
@@ -4753,6 +4820,96 @@
         ],
         "title": "AdminInstanceEventsResponse",
         "description": "GET /api/v1/admin/instances/{instance_id}/events response."
+      },
+      "AdminLlmCallReconstructResponse": {
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "title": "Conversation Id"
+          },
+          "message_id": {
+            "type": "string",
+            "title": "Message Id"
+          },
+          "agent_start_event_id": {
+            "type": "string",
+            "title": "Agent Start Event Id"
+          },
+          "agent_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Name"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "exposed_tool_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exposed Tool Names",
+            "description": "Exact native function names exposed to the anchored LLM invocation. None means the legacy event predates collection; an empty list means no tools were exposed. Full tool schemas are not persisted."
+          },
+          "has_reminder": {
+            "type": "boolean",
+            "title": "Has Reminder",
+            "default": false
+          },
+          "messages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Messages"
+          },
+          "llm_complete_event_id": {
+            "type": "string",
+            "title": "Llm Complete Event Id"
+          },
+          "response": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Response"
+          }
+        },
+        "type": "object",
+        "required": [
+          "conversation_id",
+          "message_id",
+          "agent_start_event_id",
+          "agent_name",
+          "model",
+          "exposed_tool_names",
+          "has_reminder",
+          "messages",
+          "llm_complete_event_id",
+          "response"
+        ],
+        "title": "AdminLlmCallReconstructResponse",
+        "description": "One persisted LLM request and its normalized response event payload."
       },
       "AdminMessageGroup": {
         "properties": {

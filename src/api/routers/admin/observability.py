@@ -42,6 +42,7 @@ from api.schemas.admin import (
     AdminEventItem,
     AdminFeedbackItem,
     AdminFeedbackListResponse,
+    AdminLlmCallReconstructResponse,
     AdminMessageGroup,
     AdminPromptReconstructResponse,
 )
@@ -298,6 +299,32 @@ async def reconstruct_admin_prompt(
             detail="Conversation, message, or agent_start event not found on this branch path",
         )
     return AdminPromptReconstructResponse(**result)
+
+
+@router.get(
+    "/conversations/{conv_id}/messages/{message_id}/reconstruct-call",
+    response_model=AdminLlmCallReconstructResponse,
+)
+async def reconstruct_admin_llm_call(
+    conv_id: str,
+    message_id: str,
+    llm_complete_event_id: str = Query(..., max_length=96),
+    _admin: TokenPayload = Depends(require_admin),
+    conversation_manager: ConversationManager = Depends(get_conversation_manager),
+):
+    """Reconstruct an actual LLM request and attach its persisted response."""
+    result = await conversation_manager.reconstruct_llm_call(
+        conv_id, message_id, llm_complete_event_id
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Conversation, message, llm_complete event, or paired "
+                "agent_start event not found on this branch path"
+            ),
+        )
+    return AdminLlmCallReconstructResponse(**result)
 
 
 # ============================================================

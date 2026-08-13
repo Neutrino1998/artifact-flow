@@ -516,6 +516,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/conversations/{conv_id}/messages/{message_id}/reconstruct-call": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reconstruct Admin Llm Call
+         * @description Reconstruct an actual LLM request and attach its persisted response.
+         */
+        get: operations["reconstruct_admin_llm_call_api_v1_admin_conversations__conv_id__messages__message_id__reconstruct_call_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/conversations/{conv_id}/artifacts": {
         parameters: {
             query?: never;
@@ -1614,6 +1634,42 @@ export interface components {
             /** Sources */
             sources: {
                 [key: string]: components["schemas"]["InstanceEventSourceStatus"];
+            };
+        };
+        /**
+         * AdminLlmCallReconstructResponse
+         * @description One persisted LLM request and its normalized response event payload.
+         */
+        AdminLlmCallReconstructResponse: {
+            /** Conversation Id */
+            conversation_id: string;
+            /** Message Id */
+            message_id: string;
+            /** Agent Start Event Id */
+            agent_start_event_id: string;
+            /** Agent Name */
+            agent_name: string | null;
+            /** Model */
+            model: string | null;
+            /**
+             * Exposed Tool Names
+             * @description Exact native function names exposed to the anchored LLM invocation. None means the legacy event predates collection; an empty list means no tools were exposed. Full tool schemas are not persisted.
+             */
+            exposed_tool_names: string[] | null;
+            /**
+             * Has Reminder
+             * @default false
+             */
+            has_reminder: boolean;
+            /** Messages */
+            messages: {
+                [key: string]: unknown;
+            }[];
+            /** Llm Complete Event Id */
+            llm_complete_event_id: string;
+            /** Response */
+            response: {
+                [key: string]: unknown;
             };
         };
         /**
@@ -4541,6 +4597,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminPromptReconstructResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reconstruct_admin_llm_call_api_v1_admin_conversations__conv_id__messages__message_id__reconstruct_call_get: {
+        parameters: {
+            query: {
+                llm_complete_event_id: string;
+            };
+            header?: never;
+            path: {
+                conv_id: string;
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminLlmCallReconstructResponse"];
                 };
             };
             /** @description Validation Error */

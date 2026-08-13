@@ -652,7 +652,7 @@ export interface AdminFeedbackListResponse {
 
 export interface AdminEventItem {
   id: number;
-  event_id: string | null; // 业务事件 id；agent_start 用它当 prompt 重建锚
+  event_id: string | null; // 业务事件 id；用作 prompt / LLM call 重建锚
   event_type: string;
   agent_name: string | null;
   data: Record<string, unknown> | null;
@@ -684,6 +684,11 @@ export interface AdminPromptReconstructResponse {
   exposed_tool_names: string[] | null;
   has_reminder: boolean;
   messages: Record<string, unknown>[];
+}
+
+export interface AdminLlmCallReconstructResponse extends AdminPromptReconstructResponse {
+  llm_complete_event_id: string;
+  response: Record<string, unknown>;
 }
 
 export interface AdminConversationEventsResponse {
@@ -803,6 +808,17 @@ export function getAdminPromptReconstruct(
   const params = new URLSearchParams({ agent_start_event_id: agentStartEventId });
   return request<AdminPromptReconstructResponse>(
     `/api/v1/admin/conversations/${convId}/messages/${messageId}/reconstruct?${params}`
+  );
+}
+
+export function getAdminLlmCallReconstruct(
+  convId: string,
+  messageId: string,
+  llmCompleteEventId: string,
+) {
+  const params = new URLSearchParams({ llm_complete_event_id: llmCompleteEventId });
+  return request<AdminLlmCallReconstructResponse>(
+    `/api/v1/admin/conversations/${convId}/messages/${messageId}/reconstruct-call?${params}`
   );
 }
 

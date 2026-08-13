@@ -607,8 +607,6 @@ class ConversationManager:
         Returns:
             重建结果 dict；conv / message / 锚事件任一在该 path 上找不到时返回 None。
         """
-        from core.execution.event_history import build_event_history
-        from core.execution.context_manager import ContextManager
         from core.execution.events import StreamEventType
 
         events = await self.load_event_history_async(conv_id, to_message_id=message_id)
@@ -623,6 +621,27 @@ class ConversationManager:
         )
         if anchor_idx is None:
             return None
+
+        return self._reconstruct_prompt_from_events(
+            events,
+            anchor_idx=anchor_idx,
+            conv_id=conv_id,
+            message_id=message_id,
+            agent_start_event_id=agent_start_event_id,
+        )
+
+    @staticmethod
+    def _reconstruct_prompt_from_events(
+        events: List[Any],
+        *,
+        anchor_idx: int,
+        conv_id: str,
+        message_id: str,
+        agent_start_event_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Pure reconstruction leaf shared by prompt and full-call inspection."""
+        from core.execution.event_history import build_event_history
+        from core.execution.context_manager import ContextManager
 
         anchor = events[anchor_idx]
         data = anchor.data or {}
@@ -642,7 +661,7 @@ class ConversationManager:
             # 锚前无本 agent 历史 = 数据异常（正常下至少有 user_input / subagent_instruction）。
             # 取证场景、admin 会上报，记一笔便于排查。
             logger.warning(
-                f"reconstruct_prompt: empty history before anchor "
+                f"reconstruct_messages: empty history before anchor "
                 f"(conv={conv_id} msg={message_id} event={agent_start_event_id})"
             )
             return None
@@ -658,6 +677,69 @@ class ConversationManager:
             "exposed_tool_names": data.get("exposed_tool_names"),
             "has_reminder": reminder is not None,
             "messages": messages,
+        }
+
+    async def reconstruct_llm_call(
+        self,
+        conv_id: str,
+        message_id: str,
+        llm_complete_event_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Reconstruct one actual LLM request plus its persisted response.
+
+        ``llm_complete`` is the provider-call boundary.  Its nearest preceding
+        ``agent_start`` for the same agent owns the exact request metadata; the
+        response remains separate from ``messages`` because it was not part of
+        that request.
+        """
+        from core.execution.events import StreamEventType
+
+        events = await self.load_event_history_async(conv_id, to_message_id=message_id)
+        if not events:
+            return None
+
+        complete_idx = next(
+            (
+                i
+                for i, event in enumerate(events)
+                if event.event_type == StreamEventType.LLM_COMPLETE.value
+                and event.event_id == llm_complete_event_id
+            ),
+            None,
+        )
+        if complete_idx is None:
+            return None
+
+        complete = events[complete_idx]
+        agent_name = complete.agent_name
+        if agent_name is None:
+            return None
+        start_idx = next(
+            (
+                i
+                for i in range(complete_idx - 1, -1, -1)
+                if events[i].event_type == StreamEventType.AGENT_START.value
+                and events[i].agent_name == agent_name
+            ),
+            None,
+        )
+        if start_idx is None or events[start_idx].event_id is None:
+            return None
+
+        prompt = self._reconstruct_prompt_from_events(
+            events,
+            anchor_idx=start_idx,
+            conv_id=conv_id,
+            message_id=message_id,
+            agent_start_event_id=events[start_idx].event_id,
+        )
+        if prompt is None:
+            return None
+
+        return {
+            **prompt,
+            "llm_complete_event_id": llm_complete_event_id,
+            "response": dict(complete.data or {}),
         }
 
     async def delete_conversation(self, conversation_id: str) -> bool:

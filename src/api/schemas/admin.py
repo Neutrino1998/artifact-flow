@@ -53,7 +53,7 @@ class AdminFeedbackListResponse(BaseModel):
 class AdminEventItem(BaseModel):
     """Single event in admin event timeline"""
     id: int
-    event_id: Optional[str] = None  # 业务事件 id；agent_start 用它当 prompt 重建锚
+    event_id: Optional[str] = None  # 业务事件 id；用作 prompt / LLM call 重建锚
     event_type: str
     agent_name: Optional[str] = None
     data: Optional[Dict[str, Any]] = None
@@ -120,6 +120,13 @@ class AdminPromptReconstructResponse(BaseModel):
     )
     has_reminder: bool = False
     messages: List[Dict[str, Any]]
+
+
+class AdminLlmCallReconstructResponse(AdminPromptReconstructResponse):
+    """One persisted LLM request and its normalized response event payload."""
+
+    llm_complete_event_id: str
+    response: Dict[str, Any]
 
 
 class AdminConversationEventsResponse(BaseModel):
