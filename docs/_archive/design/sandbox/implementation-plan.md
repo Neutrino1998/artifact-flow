@@ -3,11 +3,11 @@
 > 状态:规划完成,实现未启动
 > 起草:2026-05-21 · 最后更新:2026-05-21
 > 前序产物:
-> - `sandbox-gvisor-evaluation-2026-05.md`(本目录)—— gVisor 选型 + Kylin 兼容性诊断(已完成)
-> - `tool-result-artifact-mount.md`(本目录)—— 工具结果溢出转 artifact 的先例(`source` 字段 / 构造函数注入 `ArtifactManager`)
+> - [`gvisor-evaluation-2026-05.md`](gvisor-evaluation-2026-05.md) —— gVisor 选型 + Kylin 兼容性诊断(已完成)
+> - [`../artifact/tool-result-artifact-mount.md`](../artifact/tool-result-artifact-mount.md) —— 工具结果溢出转 artifact 的先例(`source` 字段 / 构造函数注入 `ArtifactManager`)
 > - 离线包 `dist/sandbox-gvisor-20260512.tar.gz`(未入 git)
 > 底座依赖:
-> - `artifact-layer-redesign-plan.md`(本目录)—— artifact 层重构(live 上事件轨 / 单一生命周期 / 删 `ArtifactManager`)。**本重构先于本 plan C 阶段落地**;沙盒回写/挂载建在新四层(`ArtifactService`/`WorkingSet`/`Repository`)上,A 阶段二进制存储复用其「binary 只发元数据事件」的溢出口。详见该 plan「与沙盒 plan 的衔接」节。
+> - [`../artifact/artifact-layer-redesign-plan.md`](../artifact/artifact-layer-redesign-plan.md) —— artifact 层重构(live 上事件轨 / 单一生命周期 / 删 `ArtifactManager`)。**本重构先于本 plan C 阶段落地**;沙盒回写/挂载建在新四层(`ArtifactService`/`WorkingSet`/`Repository`)上,A 阶段二进制存储复用其「binary 只发元数据事件」的溢出口。详见该 plan「与沙盒 plan 的衔接」节。
 
 ## 本文档定位
 
@@ -296,7 +296,7 @@
 - 2026-05-21 确立原则 6「artifact 只承载文件源、转换全归沙盒」;Word 导出=沙盒能力(现有 md→Word 过渡保留、成熟后下线);无沙盒部署连富格式"读"都没有。
 - 2026-05-21 分支策略:全程 `feat/sandbox`,成熟后整体 merge 回 main、不增量合(撤销"A 可先合 main")。
 - 2026-05-28 新增「能力边界」节:定位多用户 agent 编排平台,显式排除持续 dev loop,只覆盖单 turn 闭环任务(遇此类诉求先质疑场景)。
-- 2026-06-02 新增底座依赖 `artifact-layer-redesign-plan.md`(发现 `ArtifactManager` 与多 worker 错配)。约束:重构先于 C 阶段、A 的二进制存储建在新四层、二进制走「元数据事件+REST 取字节」。本 plan 方向不变,仅换底座。
+- 2026-06-02 新增底座依赖 [`../artifact/artifact-layer-redesign-plan.md`](../artifact/artifact-layer-redesign-plan.md)(发现 `ArtifactManager` 与多 worker 错配)。约束:重构先于 C 阶段、A 的二进制存储建在新四层、二进制走「元数据事件+REST 取字节」。本 plan 方向不变,仅换底座。
 - 2026-06-02 挂载改显式(原则 4):沙盒=显式 stage 进出的 scratch 工作区,非 artifact store 自动镜像;persist=普通 artifact 写;保留内存态。关闭"挂哪些 artifact"待决项。
 - 2026-06-03 容器生命周期(C 阶段):生=lazy(首个沙盒工具调用);灭=跟 lease 同层(执行器 `_wrapped` 真 `finally`,非 post-processing);进程死亡靠 lease-anchored reap(lease=唯一 liveness 真相源,对账须 per-turn 粒度)。固定上限降为可选最后兜底。
 - 2026-06-03 沙盒工具面:分立三工具(`bash`/`mount`/`persist`)+ 共享 per-turn `SandboxSession`(分立胜出因参数面更小、合「Minimize tool parameter surface」);lazy 创建 key=首个沙盒工具调用。
@@ -345,4 +345,3 @@
 - 2026-06-12 **cancel-interrupt slice 完成**:新原语 `core/cancellation.run_cancellable`(await 跑子 task + 按 `CANCEL_CHECK_INTERVAL` 轮询协作 flag,命中 `task.cancel()` in-flight;外部 cancel 转发子 task 后原样 re-raise,两路不混)。接入两处盲窗:engine 工具 await(被打断 → 配对 `TOOL_COMPLETE` success=False,turn CANCELLED)+ compaction LLM 调用(此前默认配置下最坏盲窗 300s;被打断 → 配对 success=False summary 占位,CANCELLED 非 ERROR)。permission 等待本就即时(request_cancel 直接 resolve interrupt),无需动。审计:artifact 工具 mutation 均为「await 读→同步改→await 发 SSE」形状,无半套状态;非新工具契约(EXECUTION_TIMEOUT 本就 mid-await cancel)。**同刀放宽**:`SANDBOX_COMMAND_TIMEOUT` 120→300(剥离 cancel 延迟职责后只剩 runaway 一职)、HttpTool 默认 timeout 30→60(per-MD 可放心设大,API 工具生态不再推高 cancel 延迟)。机制文档落 execution-lifecycle.md「协作式 cancel 的消费点」;测试 +13(原语 7 + engine 2 + compaction 2 + 既有全量回归 1276 过)。
 - 2026-06-13 **cancel-interrupt review 修两枚(均收)**:① 收尾窗口吞外部 cancel——`run_cancellable` 等子 task 收尾的 `await task` 处,外部 cancel(fencing/引擎超时)与子 task 取消回报同为 `CancelledError` 不可区分,旧码无条件吞 → fenced task 以 CooperativeCancelled 继续跑 post-processing(静默第二写者)/ TIMED_OUT 记成 CANCELLED;修 = `current_task().cancelling()>0` 判别、外部让位 + 遗弃子 task 挂 done-callback 消费收尾异常。② 探针异常伪装消费点故障——`check_cancelled` 抛异常(Redis 瞬断)落在哪个消费点就穿哪件戏服(杀无辜工具记成工具失败 / 流式记成 "LLM call failed" / loop 顶 ERROR 整 turn,后两者为存量同型);修 = engine `_is_cancelled` 谓词 fail-open(失败=未取消+warning,下一拍重试),全部四个消费点统一走谓词;依据 = 探针纯 UX、store 长断的 fail-closed 本就在 heartbeat/lease 层(连续失败→外部 task.cancel)。原语保持严格透传,策略归调用方。测试 +4。
 <!-- 新日志按日期顺序追加到此行上方 -->
-

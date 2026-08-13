@@ -3,7 +3,7 @@
 > 状态:规划完成,未开工
 > 起草:2026-07-03
 > 前序产物:
-> - `skill-system-implementation-plan.md`(本目录)Phase B 乙2 —— release/serve 拆分(reconcile 单次部署门禁 + PG advisory lock)+ nginx 变量 `proxy_pass` 已合 main;其「真机 `--scale` 验证」挂账由本 plan Phase B 承接。
+> - [`../skill-system/implementation-plan.md`](../skill-system/implementation-plan.md) Phase B 乙2 —— release/serve 拆分(reconcile 单次部署门禁 + PG advisory lock)+ nginx 变量 `proxy_pass` 已合 main;其「真机 `--scale` 验证」挂账由本 plan Phase B 承接。
 > - `deploy/MULTI-REPLICA.md` —— 单机多副本 runbook + 验证清单(= 本 plan Phase B 的执行脚本)。
 > 现状基线(2026-07-02 评估,起草前做):**执行正确性一侧多副本条件已齐** —— reconcile 单次(release job)、控制面状态全外置(Redis lease/cancel/interrupt Pub/Sub + SSE Redis Stream `last_event_id` 任意副本续读)、文件/blob 进 DB(无本地文件粘性;唯一粘性 = turn producer 绑接单副本,合理契约)、sandbox reaper 有 InMemory 拒启守卫。**缺口全在运维/可观测一侧**:日志与观测 jsonl 无实例维度(`RequestContextFilter` 只注入 request_id/conv_id/message_id 三元组);观测 jsonl 单进程假设、多副本共享卷上 rotate 互相覆盖(`jsonl_sink.py` 自注);`/admin/runtime` 的 sampler 快照/在途 turn 数是进程本地(LB 随机路由 → 读数跳变、漏看其余副本);unhealthy 不自动重启(compose `restart: unless-stopped` 不认 healthcheck,wedge 副本挂着不死还继续被轮询);多机编排零实现(仅 `release.sh` 尾部的手工 scp/ssh 配方)。
 

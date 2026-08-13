@@ -3,7 +3,7 @@
 > 状态:**已实现(单 PR,在 main 上;待多 worker 真机回归)**
 > 起草:2026-06-02 · 最后更新:2026-06-02
 > 前序产物:
-> - `sandbox-implementation-plan.md`(本目录)—— 沙盒 plan;其原则 1「持久态归 TDSQL / 易失态归 Redis+worker」与本重构同源,本重构是沙盒回写/挂载的底座。
+> - [`../sandbox/implementation-plan.md`](../sandbox/implementation-plan.md) —— 沙盒 plan;其原则 1「持久态归 TDSQL / 易失态归 Redis+worker」与本重构同源,本重构是沙盒回写/挂载的底座。
 
 ## 本文档定位
 
@@ -102,7 +102,7 @@
 
 ## 与沙盒 plan 的衔接
 
-见 `sandbox-implementation-plan.md`(本目录)。本重构把「artifact live 态」摆正到事件轨 + DB 投影后,该 plan 的回写(决策 3 回写二分)/ 挂载(原则 4 显式 stage 工作区)就有了干净底座:沙盒回写产物 = 一次 `create`/`rewrite` 进同一个 WorkingSet、走同一条事件轨、随同一个 turn flush,无需为沙盒另造持久化路径。两条约束传给沙盒 plan:
+见 [`../sandbox/implementation-plan.md`](../sandbox/implementation-plan.md)。本重构把「artifact live 态」摆正到事件轨 + DB 投影后,该 plan 的回写(决策 3 回写二分)/ 挂载(原则 4 显式 stage 工作区)就有了干净底座:沙盒回写产物 = 一次 `create`/`rewrite` 进同一个 WorkingSet、走同一条事件轨、随同一个 turn flush,无需为沙盒另造持久化路径。两条约束传给沙盒 plan:
 
 - **排序**:本重构先于沙盒 **C 阶段**(引擎集成)落地;沙盒 **A 阶段二进制存储建在新四层上**(`ArtifactService`/`WorkingSet`/`Repository`),不是已删除的 `ArtifactManager`。
 - **二进制走元数据事件**:docx 上传、zip 回写这类 binary **不可塞进 SSE 整文事件**,复用本 plan 的溢出口——只发**元数据事件**(id/文件名/大小/类型),前端 download chip + 按需 REST 取字节 + `COMPLETE` 后 DB 对齐。沙盒 A 的二进制存储**复用此机制,不另造**。

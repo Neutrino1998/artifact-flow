@@ -1,6 +1,6 @@
 # Phase B 开工设计 —— 工具渐进式披露(tool-set DB 模型 + reconciler + EffectiveToolset + search_tools)
 
-> 状态:开工设计;主 plan = `skill-system-implementation-plan.md` Phase B(本文件是它「到时再敲定」的落实)
+> 状态:开工设计;主 plan = [`implementation-plan.md`](implementation-plan.md) Phase B(本文件是它「到时再敲定」的落实)
 > 起草:2026-06-25
 > 已定方向(2026-06-25 与用户敲定):
 > 1. **交付 = 4 片增量合 main**(B-1→B-2→B-3→B-4,各自独立可测、纯加法/行为保持);

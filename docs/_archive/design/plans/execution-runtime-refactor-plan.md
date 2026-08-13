@@ -5,7 +5,7 @@
 > 关联文档：
 > - `docs/how-it-works.md` —— 当前 Agent turn、SSE、持久化与运行时的产品级说明；本计划完成后同步更新。
 > - `docs/configuration/runtime.md` —— 当前 Redis、执行并发和 timeout 的运维契约；本计划不改变现有配置语义。
-> - `docs/_archive/design/skill-system-implementation-plan.md` —— 当前 Skill 导入、validator 与 bundle 生命周期；安全扫描产品闭环后续在其基础上另立计划。
+> - [`../skill-system/implementation-plan.md`](../skill-system/implementation-plan.md) —— 当前 Skill 导入、validator 与 bundle 生命周期；安全扫描产品闭环后续在其基础上另立计划。
 
 ## 本文档定位
 

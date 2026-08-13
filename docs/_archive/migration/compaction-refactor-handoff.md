@@ -155,7 +155,7 @@ Also worth a sanity pass:
 ## Not stale / out of scope
 
 - `docs/_archive/*` — historical docs, leave alone.
-- `docs/_archive/frontend-testing-setup-todo.md` (landed in `73a2e03`)
+- `docs/_archive/frontend-testing-setup-todo.md` (landed in `73a2e03`;测试基础设施完成后已删除)
   — also an archive-note, keep.
 
 ## Commit range

@@ -3,8 +3,8 @@
 > 本文档聚焦于**页面布局、组件层级、交互行为**的设计描述。
 >
 > - 视觉风格规范（色彩、排版、间距、组件样式）详见 [`DESIGN_SYSTEM.md`](./DESIGN_SYSTEM.md)
-> - API 接口和数据结构详见 [`docs/api.md`](../../api.md)
-> - SSE 事件协议和 StreamManager 详见 [`docs/streaming.md`](../../streaming.md)
+> - 原 `docs/api.md` 已退役；当前 API 数据结构以 [`frontend/src/types/openapi.json`](../../../../frontend/src/types/openapi.json) 为准
+> - 原 `docs/streaming.md` 已退役；当前 SSE 事件类型以 [`src/core/execution/events.py`](../../../../src/core/execution/events.py) 为准
 
 ---
 
@@ -194,7 +194,7 @@
 
 流式输出进行中时，消息区底部展示实时执行状态。各 SSE 事件类型对应的 UI 行为：
 
-> SSE 事件类型定义和数据格式详见 [`streaming.md`](../../streaming.md)
+> 当前 SSE 事件类型定义见 [`src/core/execution/events.py`](../../../../src/core/execution/events.py)。
 
 #### Agent 执行指示器
 
@@ -288,7 +288,7 @@
 
 依赖后端 `ConversationDetailResponse.messages` 的 `parent_id` / `children` 字段构建消息树。
 
-> 数据结构详见 [`api.md`](../../api.md) 中 `GET /api/v1/chat/{id}` 的响应格式
+> 当前数据结构以 [`frontend/src/types/openapi.json`](../../../../frontend/src/types/openapi.json) 中生成的响应 Schema 为准。
 
 #### Edit 触发分支
 
@@ -488,7 +488,7 @@ Artifact 面板在以下时机自动打开：
 
 当 SSE 流收到 `permission_request` 事件后，随后会收到 `complete(interrupted=true)` 事件（SSE 连接关闭）。此时弹出模态对话框：
 
-> 权限中断和恢复的完整流程详见 [`streaming.md`](../../streaming.md)
+> 当前权限中断和恢复事件以 [`src/core/execution/events.py`](../../../../src/core/execution/events.py) 为准。
 
 ```
 ┌──────────────────────────────────────────┐
@@ -530,7 +530,7 @@ Artifact 面板在以下时机自动打开：
 | `streamStore` | 流式执行状态、当前 agent、工具调用列表、权限请求 | `isStreaming`, `streamContent`, `reasoningContent`, `toolCalls` |
 | `uiStore` | 面板折叠状态、视图模式、面板宽度 | `sidebarCollapsed`, `artifactPanelVisible`, `artifactViewMode` |
 
-> Store 的具体字段定义和 action 签名不在本文档范围。数据结构以 [`api.md`](../../api.md) 中的 Response Schema 为准，SSE 事件格式以 [`streaming.md`](../../streaming.md) 为准。
+> Store 的具体字段定义和 action 签名不在本文档范围。当前数据结构以 [`frontend/src/types/openapi.json`](../../../../frontend/src/types/openapi.json) 中的 Response Schema 为准，SSE 事件格式以 [`src/core/execution/events.py`](../../../../src/core/execution/events.py) 为准。
 
 ---
 

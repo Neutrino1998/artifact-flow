@@ -36,7 +36,7 @@
 
 ## Phase 5 & 6: 持久化改造 (Redis + 数据库) ✅ DONE
 
-> **已迁移至独立计划**: 详见 [persistence-refactor-plan.md](./persistence-refactor-plan.md)。
+> **已迁移至独立计划**: 详见 [persistence-refactor-plan.md](../../migration/persistence-refactor-plan.md)。
 >
 > 原 P5/P6 的内容在 LangGraph 移除、Pi-style engine 重写后已大幅过时（checkpointer 不再存在、TaskManager 拆为 ExecutionRunner + RuntimeStore、StreamManager 重命名为 StreamTransport Protocol）。独立计划重新整理了三个 Phase：
 >

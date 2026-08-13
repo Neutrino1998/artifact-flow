@@ -6,7 +6,7 @@
 >
 > 最后更新：2026-07-31
 >
-> 相关文档：`docs/architecture/tools.md`、`docs/architecture/engine.md`、`docs/architecture/execution-lifecycle.md`、`docs/_archive/design/skill-system-implementation-plan.md`
+> 相关文档：`docs/architecture/tools.md`、`docs/architecture/engine.md`、`docs/architecture/execution-lifecycle.md`、[`../skill-system/implementation-plan.md`](../skill-system/implementation-plan.md)
 
 ## 本文档定位
 
@@ -346,8 +346,8 @@ ContextManager 不再修改最后一条历史消息。每次 LLM 请求都在完
 - 迁移脚本能在停机数据库上稳定枚举全部 leaf、标记 active branch，且 checkpoint/report 能发现遗漏、未完成任务和摘要失败；checkpoint 的 task identity 能区分同一 active lead 的 semantic/mechanical 候选。
 
 阶段 0 的实现、运行命令、快照规模与模型观察见
-[`native-tool-call-stage0-runbook.md`](native-tool-call-stage0-runbook.md)，完整脱敏 provider
-报告见 [`native-tool-call-provider-probe-report.json`](native-tool-call-provider-probe-report.json)。
+[`stage0-runbook.md`](stage0-runbook.md)，完整脱敏 provider
+报告见 [`provider-probe-report.json`](provider-probe-report.json)。
 五个 DashScope 候选均通过 wire-protocol gate；Qwen 的可选函数名遵循和视觉内容准确率
 被明确保留为模型行为观察项，不与流式组装、history replay 或 image carrier 接受性混为一谈。
 

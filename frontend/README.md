@@ -37,12 +37,12 @@ src/
 
 | 文档 | 内容 |
 |------|------|
-| [UI 布局与交互](../docs/_archive/frontend/03_frontend_design.md) | 三栏布局、消息气泡、SSE 流式渲染、对话树分支、权限弹窗（设计阶段参考） |
-| [视觉风格规范](../docs/_archive/frontend/DESIGN_SYSTEM.md) | 参考 Claude App 视觉风格：简约、人文、温暖的色调与留白（设计阶段参考） |
-| [API 接口](../docs/api.md) | REST 端点、请求/响应 Schema、错误码 |
-| [SSE 事件协议](../docs/streaming.md) | 事件类型、数据格式、连接生命周期 |
+| [UI 布局与交互](../docs/_archive/design/legacy/03_frontend_design.md) | 三栏布局、消息气泡、SSE 流式渲染、对话树分支、权限弹窗（历史设计参考） |
+| [视觉风格规范](../docs/_archive/design/legacy/DESIGN_SYSTEM.md) | 参考 Claude App 视觉风格：简约、人文、温暖的色调与留白（历史设计参考） |
+| [OpenAPI Schema](src/types/openapi.json) | 当前 REST 请求、响应和错误结构的生成源 |
+| [SSE 事件定义](../src/core/execution/events.py) | 当前事件类型及后端数据结构 |
 
-> **Note**: UI 布局与视觉风格文档位于 `docs/_archive/` 归档目录，为设计阶段的参考文档，实际实现可能有所调整。API 和 SSE 文档为当前维护的规范文档。
+> **Note**: UI 布局与视觉风格文档位于 `docs/_archive/`，只作为历史设计参考；当前 API 和 SSE 契约分别以生成的 OpenAPI Schema 与后端事件定义为准。
 
 建议阅读顺序：先看 UI 布局与交互文档了解整体页面结构，再按需查阅 API 和 SSE 文档。
 
@@ -76,7 +76,7 @@ type Conversation = components['schemas']['ConversationDetailResponse']
 
 `tailwind.config.js` 必须设置 `darkMode: 'class'`（非默认的 `media`），以支持用户手动切换。从第一个组件开始就写 `dark:` 变体，漏掉的组件会在深色模式下露出白块。
 
-色板与 Light/Dark 对照值见 [DESIGN_SYSTEM.md](../docs/_archive/frontend/DESIGN_SYSTEM.md)（设计阶段参考，实际色值以 `tailwind.config.ts` 为准）。
+色板与 Light/Dark 对照值见 [DESIGN_SYSTEM.md](../docs/_archive/design/legacy/DESIGN_SYSTEM.md)（历史设计参考，实际色值以 `tailwind.config.ts` 为准）。
 
 ### SSE 事件类型
 

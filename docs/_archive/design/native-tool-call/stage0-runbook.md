@@ -52,7 +52,7 @@ python -m tests.manual.native_tool_call_probe --models all \
 - 产生了 tool-call delta 却不能按 index/id 组装、JSON 无法解码或后续历史被拒绝，属于协议失败。
 
 2026-07-29 的完整脱敏报告见
-[`native-tool-call-provider-probe-report.json`](native-tool-call-provider-probe-report.json)。
+[`provider-probe-report.json`](provider-probe-report.json)。
 运行环境为 Python 3.11.15、LiteLLM 1.86.0，lockfile 和 probe 源码哈希均写入报告；
 五个候选模型的硬协议 gate 全部通过：
 

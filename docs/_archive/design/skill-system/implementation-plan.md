@@ -3,8 +3,8 @@
 > 状态:规划完成;A 合 main,B 进行中(B-1/B-2/B-3 + B-4 后端[含 reviewer 两轮收口 + 乙2 部署门禁] + B-4 前端 + B-5[退役 turn-long session] + B-6[依赖 CVE]已合 main;B 收尾验收 dev-Mac docker 部分已过,剩真机 nginx LB + 跨副本执行续接)
 > 起草:2026-06-16 · 最后更新:2026-06-30
 > 前序产物:
-> - `sandbox-implementation-plan.md`(本目录)—— 沙盒主线(A/B/C/D 全完成);本 plan 的执行底座,skill 脚本/asset 全部跑在沙盒里。原则 7「依赖三层离线投递」直接被本 plan 的依赖模型继承。
-> - `tool-result-artifact-mount.md`(本目录)—— 工具结果溢出转 artifact 的先例(`source` 字段 / 自动命名兜底),本 plan A 阶段是它的「具名一等通道」升级。
+> - [`../sandbox/implementation-plan.md`](../sandbox/implementation-plan.md) —— 沙盒主线(A/B/C/D 全完成);本 plan 的执行底座,skill 脚本/asset 全部跑在沙盒里。原则 7「依赖三层离线投递」直接被本 plan 的依赖模型继承。
+> - [`../artifact/tool-result-artifact-mount.md`](../artifact/tool-result-artifact-mount.md) —— 工具结果溢出转 artifact 的先例(`source` 字段 / 自动命名兜底),本 plan A 阶段是它的「具名一等通道」升级。
 > 调研基线(2026-06-16,本 plan 起草前做):
 > - **参考实现** `../custom-claude-code/build-output`(本仓库同级,非项目内):确证 ① Skill 与工具披露是**两套独立机制**(`SkillTool` 零引用 deferral);② 工具披露 = deferred-tools + `ToolSearch`(按名注入 system-reminder,`select:`/关键词加载,`tool_reference` 块由 API 端展开);③ MCP 工具一律 deferred、`mcp__server__tool` 命名,走同一 `ToolSearch`;④ 统一 registry = 归一化到一个 `Tool` 形 + 合并函数,provider 区别仅留 `isMcp`/`source` flag。
 > - **开放标准** agentskills.io 已多厂商(Cursor/Gemini/Codex/Copilot):`SKILL.md` 文件夹=单元,frontmatter **恰 6 字段**(`name`/`description`/`license`/`compatibility`/`metadata`/`allowed-tools`),`version` 归 `metadata`,绝大多数真实 skill 只用 `name`+`description`(触发逻辑塞进 description)。
@@ -21,7 +21,7 @@
 
 ## 进度
 
-- **当前**:**A / B / C / D 四阶段全落地合 main。** B 全部子片(B-1 存储→B-2 引擎切快照→B-3 deferred+`search_tools`→B-4 后端凭证加密+CRUD 与前端工具 unit 管理页→B-5 退役 turn-long session→B-6 CVE→收尾验收)+ 两轮 reviewer + 乙2 部署门禁均已合(落地见 Phase B「进展」+ `skill-system-phase-b-design.md`);**唯一挂账 = 真机验收**(真 nginx LB 入口[caddy 要 ACME] + 跨副本执行续接[A 发起 / B 经共享 Redis resolve interrupt],dev-Mac `--scale` 已实证轮询/门禁/撞名,留内网真机)。C = C-1/C-2/C-3 + reviewer 两轮 + UX 打磨 + E2E 实测(见 Phase C「进展」)。D = D-1/D-2/D-3 全落地(bundle 物化 → `mount_skill` 沙盒解压 + 依赖透出 → docx 闭环 E2E 通过;见 Phase D「进展」)。架构主分叉已**全部收口** —— 披露归工具层 / 可见性两正交字段 / 依赖三层离线 / 导入硬软双门 / read+mount 零新机制 / external 工具·tool-set·mcp·agent 全 DB 物化(通用 reconciler)/ 部门授权两张 FK 表 / 工具权限两正交轴(等级 + 成员)—— **逐条见「已锁定的决策」+「数据模型总览」,此处不复述**。
+- **当前**:**A / B / C / D 四阶段全落地合 main。** B 全部子片(B-1 存储→B-2 引擎切快照→B-3 deferred+`search_tools`→B-4 后端凭证加密+CRUD 与前端工具 unit 管理页→B-5 退役 turn-long session→B-6 CVE→收尾验收)+ 两轮 reviewer + 乙2 部署门禁均已合(落地见 Phase B「进展」+ `phase-b-design.md`);**唯一挂账 = 真机验收**(真 nginx LB 入口[caddy 要 ACME] + 跨副本执行续接[A 发起 / B 经共享 Redis resolve interrupt],dev-Mac `--scale` 已实证轮询/门禁/撞名,留内网真机)。C = C-1/C-2/C-3 + reviewer 两轮 + UX 打磨 + E2E 实测(见 Phase C「进展」)。D = D-1/D-2/D-3 全落地(bundle 物化 → `mount_skill` 沙盒解压 + 依赖透出 → docx 闭环 E2E 通过;见 Phase D「进展」)。架构主分叉已**全部收口** —— 披露归工具层 / 可见性两正交字段 / 依赖三层离线 / 导入硬软双门 / read+mount 零新机制 / external 工具·tool-set·mcp·agent 全 DB 物化(通用 reconciler)/ 部门授权两张 FK 表 / 工具权限两正交轴(等级 + 成员)—— **逐条见「已锁定的决策」+「数据模型总览」,此处不复述**。
 - **E 亦已落地(2026-07-03)**:E-1 validator 硬门 → E-2 双通道导入/导出/删除 + 共池配额 + 前端(含技能搜索/过滤)→ E-4 预装集六 skill(全部原创;五 zip + html-artifact-design 散文)+ 镜像文档栈扩容 + vision_agent;E-3 verify agent 用户定向删除、改向会话期 checker skill(见 Phase E「进展」+ changelog 07-02/07-03)。
 - **当前 = G-0 已落地且目标测试通过**:G 已收口 v0 语义与切片,并接入 runtime dept unit 过滤地基(见 Phase G「进展」)。**B 残留延后**(非阻塞、归 F):#7-full 抽共享 builder(seeds↔manager)/ #11 `list_units` 冷路径 N+1 / #8 `provider!=http` 成员 advertise-but-build。
 - **分支策略(已定:走 main)**:与沙盒 plan 不同 —— 沙盒走 `feat/sandbox` 不增量合 main 是因为有「半迁移态(md→Word 过渡)漏到生产」的风险。本 plan **无此类破坏性中间态**,A/B/C 是纯加法引擎/存储特性,故**逐阶段直接合 main、再按既有策略 overlay intranet**(遵 `feedback-branch-strategy`),不开长命特性分支。
@@ -165,7 +165,7 @@ user_skill ─user_id─> user ;  ─skill_slug─> skill              (真 FK,�
 
 ### A — 工具结果→富格式 artifact(引擎前置,沙盒数据入境的受信通路)
 
-**做什么**:让 backend 工具(受信/有网/有凭证,如 HTTP 工具 GET 回 CSV)能把结果存成**具名、带 content_type、可二进制**的 artifact —— 成为 `create_from_upload` 的**第三调用方**(前两个:用户上传走 engine staging、沙盒 `persist`)。首个消费者 = `web_fetch` 文件旁路(见下)。这是「backend 工具 → artifact → mount → 沙盒 → persist」受信数据脊柱的入境第一环,补 `tool-result-artifact-mount.md` 先例的「只能溢出兜底(>50k、固定 text/plain、不能具名)」缺口。
+**做什么**:让 backend 工具(受信/有网/有凭证,如 HTTP 工具 GET 回 CSV)能把结果存成**具名、带 content_type、可二进制**的 artifact —— 成为 `create_from_upload` 的**第三调用方**(前两个:用户上传走 engine staging、沙盒 `persist`)。首个消费者 = `web_fetch` 文件旁路(见下)。这是「backend 工具 → artifact → mount → 沙盒 → persist」受信数据脊柱的入境第一环,补 [`../artifact/tool-result-artifact-mount.md`](../artifact/tool-result-artifact-mount.md) 先例的「只能溢出兜底(>50k、固定 text/plain、不能具名)」缺口。
 
 **包含**:
 - **声明式而非命令式**:`ToolResult` 加可选 `artifact: Optional[ArtifactSpec]`(`title`/建议 id、`content_type`、文本或 blob)。工具**声明**「把我的 data 存成这个 artifact」,**不**持 `ArtifactService` 句柄(守三层模型:通用工具保持哑,只有内建 artifact/sandbox 工具——它们本就是 manager 层——直接碰 service)。
@@ -189,7 +189,7 @@ user_skill ─user_id─> user ;  ─skill_slug─> skill              (真 FK,�
 
 **包含**:
 - **tool-set DB 模型 + 命名空间**:
-  - external 工具/tool-set 本轮**从 config 迁入 DB + 前端 CRUD**(原则 5/决策 10:`config/tools/` 种子 = 不可变 seeded,UI 新建 = dynamic,无论来源都是 DB 行)。存储 = 「一平台多 endpoint + set 级描述/索引行 + `visibility` 列」。**凭证统一加密落库**(独立 `tool_credential` 表,unit 级,B-4 落地;细化见 `skill-system-phase-b-design.md` B-4「凭证模型」):resolve 一条路 = 读库解密、lazy 到 execute;dynamic = UI 直接配 key,seeded = reconciler seed 时按 `{{TOOL_SECRET_X}}` 从 env 取值加密落库(MD 仍只放引用、secret 间接层保留)。主密钥在 env、单把、不做轮转。**红线**:这是受信 backend 工具的 operator/工具级凭证,不碰沙盒(永不拿凭证)与 per-user 身份透传(B1/B2,仍 defer)两根轴。
+  - external 工具/tool-set 本轮**从 config 迁入 DB + 前端 CRUD**(原则 5/决策 10:`config/tools/` 种子 = 不可变 seeded,UI 新建 = dynamic,无论来源都是 DB 行)。存储 = 「一平台多 endpoint + set 级描述/索引行 + `visibility` 列」。**凭证统一加密落库**(独立 `tool_credential` 表,unit 级,B-4 落地;细化见 `phase-b-design.md` B-4「凭证模型」):resolve 一条路 = 读库解密、lazy 到 execute;dynamic = UI 直接配 key,seeded = reconciler seed 时按 `{{TOOL_SECRET_X}}` 从 env 取值加密落库(MD 仍只放引用、secret 间接层保留)。主密钥在 env、单把、不做轮转。**红线**:这是受信 backend 工具的 operator/工具级凭证,不碰沙盒(永不拿凭证)与 per-user 身份透传(B1/B2,仍 defer)两根轴。
   - **成员命名 `<setname>__<tool>`**(MCP 同型 `<server>__<tool>` 不带 `mcp__`),loader 据 set 名自动加前缀(作者写裸名)。**unit 名禁 `__`** → `<unit>__` 前缀唯一、`<unit>__*` 通配无歧义、扁平 builtin 可区分;tool 段可含 `__`(MCP spec 合法名,解析按已知 unit 前缀剥离,见决策 11)。静态作者成员名建议单 `_`(operator 简化、非强制)。
   - **为何命名空间**:① 关键 = 让 unit 粒度授权按前缀 `<setname>__*` 整组工作(与 MCP `<server>__*` 同构);② 跨 set 同名 endpoint 不撞;③ 模型可读。**用 `__` 不用 `:`**:参数是 XML 标签、`_repair_tool_name_as_tag` 会把名当标签,冒号撞 XML namespace。
   - **unit 名全局唯一、启动期撞名 loud-fail**:扩现有 `build_tool_map`(`base.py:279`)认 tool-set/MCP unit 名(非现成机制);顺带由 reconciler loud-fail 关掉 `load_all_agents` 同名静默覆盖。这也是未来 openapi→tool-set 生成脚本的落点。
@@ -210,7 +210,7 @@ user_skill ─user_id─> user ;  ─skill_slug─> skill              (真 FK,�
 
 **到时再敲定**:tool-set DB schema + `config/tools/` 种子加载细节;**两个语义已定**:① **压缩对工具发现** —— 无工具感知压缩,归 **compact_agent 提示词保留 `search_tools` 发现**(同现保留 artifact IDs/tool 交互);summary 留意识/续作、**全 schema 不入**,需重调靠常驻索引行重 search_tools(loud-fail 自纠)。② **`always_allow` 的 key = 规范全名 `<unit>__<tool>`**(builtin 裸名):同名跨 unit 独立、同工具跨 skill 共享。
 
-**进展**:开工细化 + 逐片落地小结见同目录 `skill-system-phase-b-design.md`(B-1 write-only 物化 → B-2 接进引擎 + decision-11 重写,各片「进展」小节为准)。
+**进展**:开工细化 + 逐片落地小结见同目录 [`phase-b-design.md`](phase-b-design.md)(B-1 write-only 物化 → B-2 接进引擎 + decision-11 重写,各片「进展」小节为准)。
 
 - **2026-06-25 B-1 落地(合 main,纯加法、引擎零行为变化)**:DB 注册表 4 表 `tool_units`/`tool_members`/`agents`/`agent_units`(natural-key PK、m2m 真 FK + `ON DELETE CASCADE`、权限两正交轴 —— 等级唯一来源=工具定义,成员态归绑定),无存量数据**就地写进 squash `0001`**(沿用 A 的 `has_blob` 姿态、不加 `0002`)。通用 `config→DB reconciler`(`src/reconcile/`)= **目录即工具集**(扁平 `*.md`=singleton unit;`<set>/` 目录 + `_set.md`=toolset)、内容哈希幂等 upsert、prune、clear-on-visibility 钩子(dept 规则表未建→空跑);**命名不变量单点强制**:unit 名禁 `__` / member 段允许 `__`(剥前缀解析、不 split)/ unit·full_name ∈ `builtin∪reserved∪external` 全局唯一(撞名 loud-fail)。snapshot 读侧从 DB 行重建 `HttpTool`+agent 元数据(ORM 不外逃);入口 = 独立脚本 `scripts/reconcile_config.py`(dev 手动 / prod `entrypoint.sh` leader 槽调用,**follower 也跑一遍幂等 reconcile 自证 config**、堵 follower 带空注册表启动)。引擎仍走 in-memory `load_all_agents`/`_load_tools`,DB 物化暂不消费(B-2 flip)。测试 `tests/reconcile` 15 passed,db/tools/agents/repos/core/api 全过。详细收口决策见该 design doc + git history。
 
