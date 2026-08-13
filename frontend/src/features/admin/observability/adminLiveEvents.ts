@@ -1,4 +1,8 @@
-import type { AdminConversationEventsResponse, AdminEventItem, AdminMessageGroup } from './api';
+import type {
+  AdminConversationEventsResponse,
+  AdminEventItem,
+  AdminMessageGroup,
+} from '@/lib/api';
 import type { SSEEvent } from '@/types/events';
 
 // These events have dedicated live consumers or are too high-frequency for the

@@ -9,14 +9,9 @@ import { connectSSE } from '@/lib/sse';
 import { StreamEventType } from '@/types/events';
 import type { SSEEvent, LLMCompleteData, ToolCallProgressData, ArtifactCreatedData, ArtifactUpdatedData } from '@/types/events';
 import * as api from '@/lib/api';
-import { refreshArtifactList } from '@/lib/refreshArtifactList';
-import { bumpArtifactFetchGen } from '@/lib/artifactFetchGen';
-import { bumpArtifactDetailGen, getArtifactDetailGen } from '@/lib/artifactDetailGen';
-import { getNavGen } from '@/lib/navGen';
-import { reconcileTerminalArtifact } from '@/lib/reconcileTerminalArtifact';
-import { isTerminalRefreshOwner } from '@/lib/terminalRefreshOwnership';
 import { notifyTaskTerminal } from '@/lib/taskNotifications';
 import { useAuthStore } from '@/stores/authStore';
+import { useTerminalReconciliation } from './useTerminalReconciliation';
 
 const ARTIFACT_TOOLS = new Set([
   'create_artifact',
@@ -70,169 +65,16 @@ export function useSSE() {
   const setQueuedInfo = useStreamStore((s) => s.setQueuedInfo);
 
   // Conversation store actions
-  const setCurrent = useConversationStore((s) => s.setCurrent);
-  const setConversations = useConversationStore((s) => s.setConversations);
-  const clearConversationActiveIfMatch = useConversationStore((s) => s.clearConversationActiveIfMatch);
-  const applyTerminalMessageSnapshot = useConversationStore((s) => s.applyTerminalMessageSnapshot);
-
   // Artifact store
   const setArtifactSessionId = useArtifactStore((s) => s.setSessionId);
-  const reconcileArtifactsFromDb = useArtifactStore((s) => s.reconcileArtifactsFromDb);
-  const removeArtifactMissingFromDb = useArtifactStore((s) => s.removeArtifactMissingFromDb);
-  const refreshArtifactCurrent = useArtifactStore((s) => s.refreshCurrent);
-  const finishArtifactLiveTurn = useArtifactStore((s) => s.finishLiveTurn);
   const applyArtifactCreated = useArtifactStore((s) => s.applyArtifactCreated);
   const applyArtifactUpdated = useArtifactStore((s) => s.applyArtifactUpdated);
 
   // UI store
   const autoOpenArtifactPanel = useUIStore((s) => s.autoOpenArtifactPanel);
 
-  const snapshotTerminalMessage = useCallback(
-    (conversationId: string, messageId: string | null, response: string | undefined, metrics: unknown) => {
-      if (!messageId || !response) return;
-      const streamState = useStreamStore.getState();
-      applyTerminalMessageSnapshot({
-        conversationId,
-        messageId,
-        parentId: streamState.streamParentId ?? null,
-        userInput: streamState.pendingUserMessage ?? '',
-        response,
-        executionMetrics: (metrics && typeof metrics === 'object')
-          ? metrics as Record<string, unknown>
-          : null,
-        uploadedFiles: streamState.pendingUserFiles?.map((filename) => ({ filename })) ?? null,
-        activatedSkills: streamState.pendingUserSkills,
-      });
-    },
-    [applyTerminalMessageSnapshot],
-  );
-
-  const refreshAfterComplete = useCallback(
-    async (conversationId: string, terminalMessageId: string | null) => {
-      // Capture nav-gen BEFORE the await. Both startNewChat() and
-      // switchConversation() bump this synchronously on entry, so any
-      // navigation event during our await leaves myNavGen != getNavGen().
-      // This is the only reliable "user navigated away" signal because
-      // current?.id is null in three indistinguishable scenarios:
-      //   - first-message new conv (legit, should populate)
-      //   - startNewChat (user explicitly left, MUST NOT populate)
-      //   - switchConversation handoff (user picked another conv, MUST NOT
-      //     populate — would briefly revive abandoned conv before the new
-      //     setCurrent overwrites)
-      const myNavGen = getNavGen();
-      // A delayed duplicate terminal from an older turn must not even claim
-      // the artifact-detail generation or clear a newer turn's spinner.
-      if (!isTerminalRefreshOwner(myNavGen, terminalMessageId)) {
-        if (terminalMessageId) {
-          clearConversationActiveIfMatch(conversationId, terminalMessageId);
-        }
-        return;
-      }
-      // A terminal DB reconciliation supersedes any detail request that began
-      // while the turn was live. A later user selection bumps the same counter
-      // again and therefore wins over this background refresh.
-      const myArtifactDetailGen = bumpArtifactDetailGen();
-      const ownsTerminalRefresh = () =>
-        isTerminalRefreshOwner(myNavGen, terminalMessageId);
-      const ownsArtifactRefresh = () =>
-        ownsTerminalRefresh() && myArtifactDetailGen === getArtifactDetailGen();
-      // Stream just ended — invalidate every in-flight auto-open fetch
-      // unconditionally. Cases this catches that the per-revert bump did
-      // not: the FIRST auto-open from this stream hasn't resolved yet, so
-      // store.current is still null and the auto-selected branch below
-      // wouldn't fire. Without this bump, the late callback would
-      // resurrect the panel after stream end. Costs nothing if there are
-      // no fetches outstanding.
-      bumpArtifactFetchGen();
-      // End the optimistic live window synchronously, before any await. This
-      // clears pending markers/content/previews and returns an agent-auto-opened
-      // artifact to the list. If a new turn starts while DB reads are pending,
-      // its live events now build on a clean state and the old reads are dropped
-      // by ownsTerminalRefresh below.
-      finishArtifactLiveTurn();
-      // Artifact reconciliation is independent of conversation/sidebar reads:
-      // a failure in those secondary refreshes must not leave an unpersisted
-      // live artifact copyable or downloadable after terminal.
-      const artifactSession = useArtifactStore.getState().sessionId;
-      if (artifactSession === conversationId) {
-        refreshArtifactList(
-          conversationId,
-          reconcileArtifactsFromDb,
-          setArtifactSessionId,
-          () => useArtifactStore.getState().sessionId,
-          ownsTerminalRefresh,
-        );
-
-        const { current: curArtifact } = useArtifactStore.getState();
-        if (curArtifact && ownsArtifactRefresh()) {
-          // User actively picked this artifact. The live stream is best
-          // effort; this tri-state DB reconciliation commits present/missing
-          // results and preserves state when availability is unknown.
-          void reconcileTerminalArtifact({
-            sessionId: conversationId,
-            artifactId: curArtifact.id,
-            isOwner: ownsTerminalRefresh,
-            commitPresent: (artifact, diffBaseContent) => {
-              if (ownsArtifactRefresh()) {
-                refreshArtifactCurrent(artifact, diffBaseContent);
-              }
-            },
-            // Missing is collection truth, so a later user detail selection
-            // must not invalidate it; only terminal ownership may do so.
-            commitMissing: (artifactId) => {
-              if (ownsTerminalRefresh()) {
-                removeArtifactMissingFromDb(artifactId);
-              }
-            },
-          });
-        }
-      }
-      // Compare-and-clear the sidebar dot for *this* terminal's message_id
-      // only. If the user already kicked off a new turn on the same conv,
-      // its sendMessage() has set active_message_id to the new id, and this
-      // call is a no-op — the new turn's mark survives untouched.
-      if (terminalMessageId) {
-        clearConversationActiveIfMatch(conversationId, terminalMessageId);
-      }
-      try {
-        const [detail, list] = await Promise.all([
-          api.getConversation(conversationId, { force: true }),
-          api.listConversations(20, 0),
-        ]);
-        // List refresh restores the server-authoritative view of
-        // active_message_id (covers cross-tab / cross-device updates that
-        // this tab never saw). This replace is unconditional — if the user
-        // started a new turn on this same conv while the list GET was in
-        // flight, and the snapshot was captured before that new turn took
-        // the lease, the just-written optimistic active_message_id can be
-        // briefly wiped here. The sidebar's running-indicator is a best-
-        // effort UX hint (see conversationStore top-of-file note); the
-        // next refresh restores truth from the server lease store.
-        setConversations(list.conversations, list.total, list.has_more);
-        // Belt-and-suspenders CAS after the refresh: the list snapshot may
-        // have been captured before the lease release landed on the server
-        // (lease is released by TaskScope cleanup AFTER push_event),
-        // so the server view can still report THIS terminal's message_id
-        // as active right after we got the terminal SSE locally. CAS only
-        // fixes that one direction (ghost dot for an already-finished turn).
-        // The inverse race (stale null-snapshot wiping a new turn) is the
-        // best-effort window noted above — intentionally not closed.
-        if (terminalMessageId) {
-          clearConversationActiveIfMatch(conversationId, terminalMessageId);
-        }
-
-        // Everything below mutates state that belongs to "the conversation
-        // the user is on". A nav-gen change means they aren't on this conv
-        // anymore — drop the whole detail/artifact write path.
-        if (!ownsTerminalRefresh()) return;
-
-        setCurrent(detail);
-      } catch (err) {
-        console.error('Failed to refresh after complete:', err);
-      }
-    },
-    [setCurrent, setConversations, clearConversationActiveIfMatch, finishArtifactLiveTurn, refreshArtifactCurrent, reconcileArtifactsFromDb, removeArtifactMissingFromDb, setArtifactSessionId]
-  );
+  const { snapshotTerminalMessage, refreshAfterComplete } =
+    useTerminalReconciliation();
 
   const handleEvent = useCallback(
     (event: SSEEvent, conversationId: string) => {

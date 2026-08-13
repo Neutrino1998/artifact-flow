@@ -16,9 +16,9 @@ import ToolUnitEditor, {
   draftToRequest,
   unitResponseToDraft,
   type UnitDraft,
-} from '@/components/forms/ToolUnitEditor';
+} from './ToolUnitEditor';
 import { SELECT_CHEVRON } from '@/components/ui/SelectChevron';
-import { SourceBadge } from '@/components/forms/ToolUnitBadges';
+import { SourceBadge } from './ToolUnitBadges';
 import { SwitchTrack } from '@/components/ui/SwitchTrack';
 import type {
   AgentSummaryResponse,

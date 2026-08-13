@@ -11,7 +11,7 @@ import type {
   DepartmentUnitAccessItem,
 } from '@/types';
 import { useUIStore } from '@/stores/uiStore';
-import DepartmentTreeView from '@/components/chat/DepartmentTreeView';
+import DepartmentTreeView from './DepartmentTreeView';
 import { PillBadge } from '@/components/ui/PillBadge';
 import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
 import { SwitchTrack } from '@/components/ui/SwitchTrack';

@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { useChat } from '@/hooks/useChat';
-import { useComposerSend } from '@/hooks/useComposerSend';
+import { useChat } from '@/features/chat/runtime/useChat';
+import { useComposerSend } from '@/features/chat/runtime/useComposerSend';
 import { useStreamStore } from '@/stores/streamStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useConversationStore } from '@/stores/conversationStore';

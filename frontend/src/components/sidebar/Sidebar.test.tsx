@@ -9,13 +9,13 @@ const chatMocks = vi.hoisted(() => ({
   startNewChat: vi.fn(),
 }));
 
-vi.mock('@/hooks/useChat', () => ({
+vi.mock('@/features/chat/runtime/useChat', () => ({
   useChat: () => ({ startNewChat: chatMocks.startNewChat }),
 }));
 
 vi.mock('./ConversationList', () => ({ default: () => <div>Conversation list</div> }));
-vi.mock('./AdminConversationList', () => ({ default: () => null }));
-vi.mock('./NotificationConfigList', () => ({ default: () => null }));
+vi.mock('@/features/admin/observability/AdminConversationList', () => ({ default: () => null }));
+vi.mock('@/features/admin/notifications/NotificationConfigList', () => ({ default: () => null }));
 vi.mock('./NotificationCenter', () => ({ default: () => null }));
 vi.mock('./UserMenu', () => ({ default: () => null }));
 vi.mock('@/components/BrandingFooter', () => ({ default: () => null }));

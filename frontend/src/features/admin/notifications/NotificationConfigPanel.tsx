@@ -6,7 +6,7 @@ import { ApiError } from '@/lib/api';
 import type { SiteNotification } from '@/types';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 import { useUIStore } from '@/stores/uiStore';
-import { useNotificationConfigStore, type NotificationPreviewMode } from '@/stores/notificationConfigStore';
+import { useNotificationConfigStore, type NotificationPreviewMode } from './notificationConfigStore';
 import DangerConfirmModal, { DangerConfirmTarget } from '@/components/layout/DangerConfirmModal';
 import MarkdownBlock from '@/components/markdown/MarkdownBlock';
 import { SegmentedTabs, type SegmentedTabOption } from '@/components/ui/SegmentedTabs';

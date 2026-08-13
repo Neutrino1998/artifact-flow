@@ -9,7 +9,7 @@ import ToolUnitEditor, {
   draftToRequest,
   emptyUnitDraft,
   type UnitDraft,
-} from '@/components/forms/ToolUnitEditor';
+} from './ToolUnitEditor';
 
 export default function CreateToolUnitForm() {
   const setRightView = useUIStore((s) => s.setToolUnitRightView);

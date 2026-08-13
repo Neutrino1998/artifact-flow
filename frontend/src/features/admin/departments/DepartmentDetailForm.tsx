@@ -13,7 +13,7 @@ import {
 import type { DepartmentResponse } from '@/types';
 import DangerConfirmModal, { DangerConfirmTarget } from '@/components/layout/DangerConfirmModal';
 import PanelShell from '@/components/layout/PanelShell';
-import DepartmentCascader from '@/components/forms/DepartmentCascader';
+import DepartmentCascader from './DepartmentCascader';
 
 interface DepartmentDetailFormProps {
   deptId: string;

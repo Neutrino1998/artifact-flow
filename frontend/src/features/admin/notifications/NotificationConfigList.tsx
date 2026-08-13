@@ -1,6 +1,6 @@
 'use client';
 
-import { useNotificationConfigStore } from '@/stores/notificationConfigStore';
+import { useNotificationConfigStore } from './notificationConfigStore';
 import { MENU_ROW_HOVER } from '@/lib/styles';
 
 export default function NotificationConfigList({

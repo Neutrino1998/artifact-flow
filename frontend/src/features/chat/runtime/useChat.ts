@@ -6,7 +6,7 @@ import { useStreamStore } from '@/stores/streamStore';
 import { useArtifactStore } from '@/stores/artifactStore';
 import { useStagedFilesStore } from '@/stores/stagedFilesStore';
 import { useUIStore } from '@/stores/uiStore';
-import { useSSE } from '@/hooks/useSSE';
+import { useSSE } from './useSSE';
 import type { ActivatedSkillRef, ChatRequest } from '@/types';
 import * as api from '@/lib/api';
 import type { UploadEvent } from '@/lib/api';

@@ -3,7 +3,7 @@
 import { useEffect, useCallback } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useUIStore } from '@/stores/uiStore';
-import { useChat } from '@/hooks/useChat';
+import { useChat } from '@/features/chat/runtime/useChat';
 import { listConversations } from '@/lib/api';
 import { MENU_ROW_HOVER } from '@/lib/styles';
 import ConversationItem from './ConversationItem';

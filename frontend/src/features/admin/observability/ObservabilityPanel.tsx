@@ -20,8 +20,8 @@ import {
   triggerObjectUrlDownload,
 } from '@/lib/download';
 import ArtifactPreviewContent from '@/components/artifact/ArtifactPreviewContent';
-import PanelSearchBar from './PanelSearchBar';
-import Pagination from './Pagination';
+import PanelSearchBar from '@/components/ui/PanelSearchBar';
+import Pagination from '@/components/ui/Pagination';
 import type {
   AdminConversationSummary,
   AdminFeedbackItem,
@@ -40,7 +40,7 @@ import {
   appendAdminLiveEvent,
   formatAdminInputPreview,
   isAdminMessageOffActiveBranch,
-} from '@/lib/adminLiveEvents';
+} from './adminLiveEvents';
 
 const DEFAULT_PAGE_SIZE = 20;
 

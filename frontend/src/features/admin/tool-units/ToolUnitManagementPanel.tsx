@@ -7,11 +7,11 @@ import { triggerBlobDownload } from '@/lib/download';
 import type { ToolUnitResponse } from '@/types';
 import { useUIStore } from '@/stores/uiStore';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
-import { SourceBadge } from '@/components/forms/ToolUnitBadges';
+import { SourceBadge } from './ToolUnitBadges';
 import { PillBadge } from '@/components/ui/PillBadge';
 import { StatusNotice } from '@/components/ui/StatusNotice';
 import DangerConfirmModal, { DangerConfirmTarget } from '@/components/layout/DangerConfirmModal';
-import PanelSearchBar from './PanelSearchBar';
+import PanelSearchBar from '@/components/ui/PanelSearchBar';
 
 export default function ToolUnitManagementPanel() {
   const [units, setUnits] = useState<ToolUnitResponse[]>([]);

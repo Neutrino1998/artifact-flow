@@ -5,9 +5,9 @@ import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import type { DepartmentTreeNode } from '@/types';
 import { useUIStore } from '@/stores/uiStore';
-import DepartmentTreeView from '@/components/chat/DepartmentTreeView';
-import DepartmentDetailForm from '@/components/forms/DepartmentDetailForm';
-import CreateDepartmentForm from '@/components/forms/CreateDepartmentForm';
+import DepartmentTreeView from './DepartmentTreeView';
+import DepartmentDetailForm from './DepartmentDetailForm';
+import CreateDepartmentForm from './CreateDepartmentForm';
 import PanelShell from '@/components/layout/PanelShell';
 
 type InnerView =

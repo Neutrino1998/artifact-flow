@@ -22,9 +22,9 @@ import { SwitchTrack } from '@/components/ui/SwitchTrack';
 import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
 import { StatusNotice } from '@/components/ui/StatusNotice';
 import DangerConfirmModal, { DangerConfirmTarget } from '@/components/layout/DangerConfirmModal';
-import PanelSearchBar from './PanelSearchBar';
+import PanelSearchBar from '@/components/ui/PanelSearchBar';
 import SkillDisplayName from './SkillDisplayName';
-import { resolvePrivateSkillAllowance } from '@/lib/privateSkillLimit';
+import { resolvePrivateSkillAllowance } from './privateSkillLimit';
 import type {
   AdminSkillItem,
   AdminSkillUpdateRequest,

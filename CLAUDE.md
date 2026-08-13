@@ -6,7 +6,7 @@ ArtifactFlow is a multi-agent system for **private-deployment AI services** (see
 
 The public Wiki intentionally stays focused on product behavior, configuration, and operations. Implementation-specific invariants that cannot be recovered safely from one file live here beside pointers to their source modules and tests.
 
-Source layout: `src/core/execution/` is the runtime kernel, `src/core/management/` contains application use cases, `src/core/capabilities/` resolves effective skills/tools, and `src/core/security/` holds shared security-domain logic. Public HTTP adapters live in `src/api/routers/`; admin-only adapters are grouped under `src/api/routers/admin/`.
+Source layout: `src/core/execution/` is the runtime kernel, `src/core/management/` contains application use cases, `src/core/capabilities/` resolves effective skills/tools, and `src/core/security/` holds shared security-domain logic. Public HTTP adapters live in `src/api/routers/`; admin-only adapters are grouped under `src/api/routers/admin/`. The frontend groups independently loaded/administered functionality under `frontend/src/features/`; cross-feature presentation primitives belong in `frontend/src/components/ui/`.
 
 ## Essential Commands
 
@@ -64,10 +64,11 @@ Non-obvious design choices you won't infer from reading one file.
 
 - **Engine error path records, it doesn't emit**: On an unrecoverable error the engine sets `state["error"]=True` + records `state["error_detail"]` (error/agent/request_id) and breaks — it does **not** emit an ERROR event. The single ERROR terminal is built post-flush by `decide_terminal`, so there's no double-emit. The two transport-layer ERRORs (events-persist failure, post-processing exception) bypass `decide_terminal` entirely.
 
-- **Three-layer responsibility model**:
-  - **Repository** (`src/repositories/`): pure data access — returns ORM objects, no formatting/business logic. ORM objects must not escape their loading session.
-  - **Manager** (`src/core/management/`, `src/tools/builtin/artifact_service.py`): use-case orchestration — ownership checks, formatting, write-back, serialization. Routers must not bypass Manager to hit Repo directly.
-  - **Router** (`src/api/routers/`): transport only — auth, parsing, HTTP mapping. No business logic, no Repo imports.
+- **Application boundaries follow dependency direction and orchestration ownership**:
+  - **Backend HTTP:** `Router → Manager → Repository → DB`. Routers own transport concerns (auth, parsing, HTTP mapping), Managers own use-case decisions and call ordering, and Repositories own persistence. Routers must not import Repositories; Repositories return ORM objects without formatting/business logic, and ORM objects must not escape their loading session.
+  - **Other backend entry paths:** execution, tools, and background jobs need not imitate the HTTP CRUD layers, but each workflow must still have one orchestration owner and must not depend on API adapters.
+  - **Frontend:** `App shell → Feature → Shared`. The shell composes screens and modes; a feature owns its components, hooks, state coordination, and API bindings; shared UI/API/utilities must not import feature code. Do not let unrelated features accumulate in generic directories such as `chat`, `forms`, or `lib`; when touching an existing hotspot, move code toward its owning feature where that makes the boundary clearer.
+  - A single local operation may remain direct and simple. When correctness depends on multiple calls, navigation freshness, SSE lifecycle, or coordinated state writes, one use-case owner must control the sequence: a Manager on the backend, or a feature-level coordinator on the frontend. Transport clients only transport; components render state or trigger actions.
 
 - **Artifact write-back, four layers** (`src/tools/builtin/artifact_service.py` + `src/tools/builtin/artifact_working_set.py`): `ArtifactService` orchestrates + emits events and owns an exclusive `ArtifactWorkingSet` (pure state), over `ArtifactRepository` + pure-algorithm modules (old `ArtifactManager` god-object deleted). During a turn, create/update/rewrite only touch the WorkingSet + emit **SSE-only** `ARTIFACT_CREATED`/`ARTIFACT_UPDATED` events; `flush_all()` persists once in post-processing → `ArtifactVersion` numbers are **sparse** (intra-turn edits fold into one record). Non-obvious: (1) **REST reads are pure DB** — the old `_active_managers` overlay was deleted because it silently failed across workers (a REST hit on a non-executing worker can't see the executing worker's memory); turn-live content reaches the frontend *only* via the `ARTIFACT_*` events (not persisted — artifacts have their own durable home). (2) **Uploads are unified into write-back** (staged in-engine via `create_from_upload`, not immediate-commit); staging failure rolls back the staged uploads and loud-aborts the turn.
 

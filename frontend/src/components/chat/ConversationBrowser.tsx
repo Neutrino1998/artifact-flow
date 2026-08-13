@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef, } from 'react';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useUIStore } from '@/stores/uiStore';
-import { useChat } from '@/hooks/useChat';
+import { useChat } from '@/features/chat/runtime/useChat';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
 import { listConversations, deleteConversation, bulkDeleteConversations } from '@/lib/api';
 import { parseUtcIso } from '@/lib/time';
@@ -12,10 +12,10 @@ import type { ConversationSummary } from '@/types';
 import { BUTTON_DANGER, MENU_ROW_HOVER } from '@/lib/styles';
 import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
 import ConversationActionsMenu from '@/components/sidebar/ConversationActionsMenu';
-import Checkbox from '@/components/forms/Checkbox';
+import Checkbox from '@/components/ui/Checkbox';
 import { StatusNotice } from '@/components/ui/StatusNotice';
-import PanelSearchBar from './PanelSearchBar';
-import Pagination from './Pagination';
+import PanelSearchBar from '@/components/ui/PanelSearchBar';
+import Pagination from '@/components/ui/Pagination';
 
 const DEFAULT_PAGE_SIZE = 20;
 

@@ -11,7 +11,7 @@ import {
   LABEL_CLASS,
 } from '@/lib/styles';
 import { SELECT_CHEVRON } from '@/components/ui/SelectChevron';
-import DepartmentCascader from '@/components/forms/DepartmentCascader';
+import DepartmentCascader from '@/features/admin/departments/DepartmentCascader';
 import PanelShell from '@/components/layout/PanelShell';
 import {
   PASSWORD_POLICY_HINT,

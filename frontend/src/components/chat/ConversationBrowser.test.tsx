@@ -18,7 +18,7 @@ vi.mock('@/lib/api', () => ({
   bulkDeleteConversations: apiMocks.bulkDeleteConversations,
 }));
 
-vi.mock('@/hooks/useChat', () => ({
+vi.mock('@/features/chat/runtime/useChat', () => ({
   useChat: () => ({ switchConversation: vi.fn() }),
 }));
 

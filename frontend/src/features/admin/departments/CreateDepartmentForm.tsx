@@ -9,7 +9,7 @@ import {
   INPUT_ON_PANEL,
   LABEL_CLASS,
 } from '@/lib/styles';
-import DepartmentCascader from '@/components/forms/DepartmentCascader';
+import DepartmentCascader from './DepartmentCascader';
 import PanelShell from '@/components/layout/PanelShell';
 
 interface CreateDepartmentFormProps {

@@ -1,12 +1,10 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import ThreeColumnLayout from '@/components/layout/ThreeColumnLayout';
 import Sidebar from '@/components/sidebar/Sidebar';
 import ChatPanel from '@/components/chat/ChatPanel';
 import ArtifactPanel from '@/components/artifact/ArtifactPanel';
-import UserManagementDetailPanel from '@/components/chat/UserManagementDetailPanel';
-import ToolUnitDetailPanel from '@/components/chat/ToolUnitDetailPanel';
-import SkillPreviewPanel from '@/components/chat/SkillPreviewPanel';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import AuthGuard from '@/components/AuthGuard';
 import { useStreamStore } from '@/stores/streamStore';
@@ -15,6 +13,27 @@ import { useAuthStore } from '@/stores/authStore';
 import { useMediaQuery, BREAKPOINTS } from '@/hooks/useMediaQuery';
 import PermissionModal from '@/components/layout/PermissionModal';
 import { artifactVisibilityOverride } from '@/lib/panelMode';
+
+function DetailPanelLoading() {
+  return (
+    <div className="h-full flex items-center justify-center text-sm text-text-tertiary dark:text-text-tertiary-dark">
+      加载详情中...
+    </div>
+  );
+}
+
+const UserManagementDetailPanel = dynamic(
+  () => import('@/features/admin/users/UserManagementDetailPanel'),
+  { loading: DetailPanelLoading },
+);
+const ToolUnitDetailPanel = dynamic(
+  () => import('@/features/admin/tool-units/ToolUnitDetailPanel'),
+  { loading: DetailPanelLoading },
+);
+const SkillPreviewPanel = dynamic(
+  () => import('@/features/skills/SkillPreviewPanel'),
+  { loading: DetailPanelLoading },
+);
 
 export default function Home() {
   const permissionRequest = useStreamStore((s) => s.permissionRequest);

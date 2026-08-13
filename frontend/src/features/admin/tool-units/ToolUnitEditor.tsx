@@ -2,8 +2,8 @@
 
 import { INPUT_ON_PANEL, LABEL_CLASS } from '@/lib/styles';
 import { SELECT_CHEVRON } from '@/components/ui/SelectChevron';
-import Checkbox from '@/components/forms/Checkbox';
-import InputSchemaEditor from '@/components/forms/InputSchemaEditor';
+import Checkbox from '@/components/ui/Checkbox';
+import InputSchemaEditor from './InputSchemaEditor';
 import type { CreateToolUnitRequest, ToolUnitResponse } from '@/types';
 
 // ---------------------------------------------------------------------------

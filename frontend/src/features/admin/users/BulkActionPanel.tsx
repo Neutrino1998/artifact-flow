@@ -5,7 +5,7 @@ import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useUIStore } from '@/stores/uiStore';
 import { BUTTON_DANGER_OUTLINE, BUTTON_PRIMARY, BUTTON_SECONDARY } from '@/lib/styles';
-import DepartmentCascader from '@/components/forms/DepartmentCascader';
+import DepartmentCascader from '@/features/admin/departments/DepartmentCascader';
 import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
 import { StatusNotice } from '@/components/ui/StatusNotice';
 import type { BulkActionResponse, BulkImpactResponse } from '@/types';

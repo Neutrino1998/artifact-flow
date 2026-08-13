@@ -3,10 +3,10 @@
 import { useState, useCallback } from 'react';
 import { useUIStore, type UserMgmtRightView } from '@/stores/uiStore';
 import { useAuthStore } from '@/stores/authStore';
-import { useChat } from '@/hooks/useChat';
+import { useChat } from '@/features/chat/runtime/useChat';
 import ConversationList from './ConversationList';
-import AdminConversationList from './AdminConversationList';
-import NotificationConfigList from './NotificationConfigList';
+import AdminConversationList from '@/features/admin/observability/AdminConversationList';
+import NotificationConfigList from '@/features/admin/notifications/NotificationConfigList';
 import UserMenu from './UserMenu';
 import NotificationCenter from './NotificationCenter';
 import BrandingFooter from '@/components/BrandingFooter';

@@ -7,11 +7,11 @@ import type { UserResponse, DepartmentTreeNode } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useLatestOnly } from '@/hooks/useLatestOnly';
-import Checkbox from '@/components/forms/Checkbox';
+import Checkbox from '@/components/ui/Checkbox';
 import { PillBadge } from '@/components/ui/PillBadge';
 import { StatusNotice } from '@/components/ui/StatusNotice';
-import PanelSearchBar from './PanelSearchBar';
-import Pagination from './Pagination';
+import PanelSearchBar from '@/components/ui/PanelSearchBar';
+import Pagination from '@/components/ui/Pagination';
 
 interface DeptNode {
   name: string;

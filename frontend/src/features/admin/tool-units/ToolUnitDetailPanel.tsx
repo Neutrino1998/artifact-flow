@@ -1,9 +1,9 @@
 'use client';
 
 import { useUIStore } from '@/stores/uiStore';
-import CreateToolUnitForm from '@/components/forms/CreateToolUnitForm';
-import ImportToolUnitForm from '@/components/forms/ImportToolUnitForm';
-import ToolUnitDetailForm from '@/components/forms/ToolUnitDetailForm';
+import CreateToolUnitForm from './CreateToolUnitForm';
+import ImportToolUnitForm from './ImportToolUnitForm';
+import ToolUnitDetailForm from './ToolUnitDetailForm';
 
 export default function ToolUnitDetailPanel() {
   const view = useUIStore((s) => s.toolUnitRightView);

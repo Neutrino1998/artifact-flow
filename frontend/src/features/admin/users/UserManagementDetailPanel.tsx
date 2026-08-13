@@ -1,11 +1,11 @@
 'use client';
 
 import { useUIStore } from '@/stores/uiStore';
-import UserDetailForm from '@/components/forms/UserDetailForm';
-import CreateUserForm from '@/components/forms/CreateUserForm';
-import BulkImportForm from '@/components/forms/BulkImportForm';
-import BulkActionPanel from '@/components/forms/BulkActionPanel';
-import DepartmentManagerPanel from '@/components/chat/DepartmentManagerPanel';
+import UserDetailForm from './UserDetailForm';
+import CreateUserForm from './CreateUserForm';
+import BulkImportForm from './BulkImportForm';
+import BulkActionPanel from './BulkActionPanel';
+import DepartmentManagerPanel from '@/features/admin/departments/DepartmentManagerPanel';
 
 export default function UserManagementDetailPanel() {
   const view = useUIStore((s) => s.userManagementRightView);

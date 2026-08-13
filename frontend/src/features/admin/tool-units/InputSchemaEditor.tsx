@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { INPUT_ON_PANEL, LABEL_CLASS } from '@/lib/styles';
 import { SELECT_CHEVRON } from '@/components/ui/SelectChevron';
 import { SegmentedTabs } from '@/components/ui/SegmentedTabs';
-import Checkbox from '@/components/forms/Checkbox';
+import Checkbox from '@/components/ui/Checkbox';
 import {
   addSimpleParameter,
   defaultValueForType,
@@ -25,7 +25,7 @@ import {
   type SimpleArrayItemType,
   type SimpleParameterType,
   type SimpleSchemaParameter,
-} from '@/lib/inputSchemaForm';
+} from './inputSchemaForm';
 
 // ---------------------------------------------------------------------------
 // 输入参数：JSON Schema 是唯一权威状态；表单只是可无损往返的基础子集投影。
