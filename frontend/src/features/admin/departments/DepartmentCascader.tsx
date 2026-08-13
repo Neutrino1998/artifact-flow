@@ -18,7 +18,7 @@ interface DepartmentCascaderProps {
   /** 显示 "+ 新建当前级" 选项（admin 创建用户/部门管理时用） */
   allowCreate?: boolean;
   disabled?: boolean;
-  /** 触发外部刷新（PR4 部门管理 panel 在新建/搬家后需要 cascader 同步树） */
+  /** 触发外部刷新（部门管理 panel 在新建/搬家后需要 cascader 同步树） */
   refreshKey?: number;
 }
 

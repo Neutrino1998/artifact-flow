@@ -85,7 +85,7 @@ interface UIState {
   // Skill preview is independent from ArtifactStore: skill guidance is not a
   // conversation artifact and has no artifact versions/session semantics.
   skillRightView: SkillRightView;
-  // PR5a: 中间面板的选择模式 + 选中集；与 RightView 协调（进入选择模式
+  // 中间面板的选择模式 + 选中集；与 RightView 协调（进入选择模式
   // 自动切到 'bulk-action'，退出回 'empty'）
   selectionMode: boolean;
   userManagementSelection: string[];

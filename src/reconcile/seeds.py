@@ -545,9 +545,9 @@ def parse_agent_seeds(
             if state not in ("enabled", "disabled"):
                 raise SeedError(
                     f"agent '{config.name}' tool '{tool_name}' has invalid member "
-                    f"state '{raw_state}' — must be 'enabled' or 'disabled' "
-                    f"(decision 11: bindings carry membership only; tool level is "
-                    f"sole-sourced from the tool definition, not the agent MD)"
+                    f"state '{raw_state}' — must be 'enabled' or 'disabled'; "
+                    f"agent bindings carry membership only, while tool level is "
+                    f"sole-sourced from the tool definition"
                 )
             if tool_name in BUILTIN_TOOL_NAMES:
                 builtin_tools[tool_name] = state

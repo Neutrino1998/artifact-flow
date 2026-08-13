@@ -231,7 +231,7 @@ class ConversationRepository(BaseRepository[Conversation]):
         """
         统计一批用户共拥有的对话数（一次 IN 查询）。
 
-        用于 PR5a 批量硬删用户前的 impact 提示。空 list → 0。
+        用于批量硬删用户前的 impact 提示。空 list → 0。
         """
         if not user_ids:
             return 0

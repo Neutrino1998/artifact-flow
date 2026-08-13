@@ -861,7 +861,7 @@ export function getUserImpact(userId: string) {
   return request<UserImpactResponse>(`/api/v1/admin/users/${userId}/impact`);
 }
 
-// PR5a — Bulk user actions
+// Bulk user actions
 export function bulkUserAction(body: BulkActionRequest) {
   return request<BulkActionResponse>('/api/v1/admin/users/bulk-action', {
     method: 'POST',
@@ -876,7 +876,7 @@ export function getUsersBulkImpact(ids: string[]) {
 }
 
 /**
- * 批量导入用户（CSV）— PR3。
+ * 批量导入用户（CSV）。
  *
  * 错误：
  * - 400 + dict detail（`{message, duplicate_rows}`）→ 文件内 username 重复，

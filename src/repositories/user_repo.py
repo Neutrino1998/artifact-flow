@@ -167,7 +167,7 @@ class UserRepository(BaseRepository[User]):
         FK CASCADE 会连带删掉该用户的所有 conversation / messages /
         events / artifacts。如果用户有正在跑的 engine，被级联删除的
         conversation 行会被 ConversationTurnHandler post-processing 的 exists() 检查
-        兜住（PR2a），不会撞 FK。
+        兜住，不会撞 FK。
 
         Returns:
             True — 删除成功；False — 用户不存在
