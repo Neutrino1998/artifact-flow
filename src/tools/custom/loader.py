@@ -103,7 +103,7 @@ def _build_http_tool(frontmatter: dict, body: str) -> HttpTool:
         source=f"custom tool '{name}' input_schema",
     )
 
-    # SSRF-02 load-time 闸门：endpoint / headers 里的 {{VAR}} 必须用白名单前缀，
+    # load-time secret 闸门：endpoint / headers 里的 {{VAR}} 必须用白名单前缀，
     # 否则整个工具拒绝加载（不把任意 env 变量暴露给自定义工具的注入面）。
     assert_secret_refs_allowed(frontmatter.get("endpoint", ""))
     assert_secret_refs_allowed(frontmatter.get("headers", {}))

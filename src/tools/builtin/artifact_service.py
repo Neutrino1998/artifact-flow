@@ -11,7 +11,7 @@ overlay 跨 worker 读不到执行 worker 的内存态)。现在:
 - **执行轮**:控制器持有一个 Service,WorkingSet 随 turn 填充;引擎在 loop 起点
   ``bind_emit`` 注入事件回调,create/update/rewrite/上传 stage 经此发 ``ARTIFACT_*``。
 - **REST 请求**:``get_artifact_service`` 每请求新建一个 Service,WorkingSet 恒空、
-  无 emit → 读取自然落到纯 DB(turn 中故意落后于 live,由前端事件流补,见 plan 决策 6)。
+  无 emit → 读取自然落到纯 DB；turn 中故意落后于 live，由前端事件流补齐。
 """
 
 import math  # noqa: F401  (保留:历史上 ReadArtifactTool 用过,避免无意义 churn——实际由 artifact_ops 持有)
@@ -95,7 +95,7 @@ class ArtifactService:
     """Artifact 用例编排:dedup / 版本计算 / 调纯算法 / 上传 stage / tool-result
     持久化 / flush(WorkingSet→Repo)/ 发事件。无 artifact 领域状态(那在 WorkingSet)。
 
-    用法(两种,B-5):
+    两种用法:
         # 引擎/turn 路径 —— 持 db_manager,DB 读/写各开短 retrying session 读完即关
         # (不骑 turn-long session),WorkingSet 留在本实例做 turn-live 缓存:
         service = ArtifactService(db_manager=db_manager)
@@ -111,7 +111,7 @@ class ArtifactService:
     ):
         # repository = 请求级 bound session(REST/测试);db_manager = 短 session 工厂
         # (引擎/turn 路径)。turn-path DB 触碰一律经 _run_with_repo:有 db_manager → fresh
-        # retrying session 读完即关(B-5);否则回落 bound repo(REST 请求级 / 测试)。
+        # retrying session 读完即关；否则回落 bound repo(REST 请求级 / 测试)。
         self.repository = repository
         self._db_manager = db_manager
         self._ws = working_set or ArtifactWorkingSet()
@@ -119,8 +119,8 @@ class ArtifactService:
         self._emit = None
         # 本 turn 已发过「整文 live 事件」(故前端已有 base)的 artifact id 集合。
         # update 只有在 id 已在此集合时才发 span delta,否则发整文——保证前端**永不**
-        # 收到无 base 可应用的 delta,从而无需中途查 DB 取 base(守原则 1:中途不查 DB
-        # 求 live 态)。bind_emit(真回调)时按 turn 重置。
+        # 收到无 base 可应用的 delta，从而无需为 live state 在 turn 中途查询 DB。
+        # bind_emit(真回调)时按 turn 重置。
         self._emitted_base: set = set()
 
     # ========================================
@@ -212,7 +212,7 @@ class ArtifactService:
         return self.repository
 
     async def _run_with_repo(self, fn):
-        """单次 DB 触碰的会话边界(B-5)。有 db_manager → fresh retrying session,fn 在其
+        """单次 DB 触碰的会话边界。有 db_manager → fresh retrying session,fn 在其
         内拿一个临时 ArtifactRepository、读完即关;否则回落 bound repo(REST 请求级 / 测试)。
 
         闸:fn **必须在回调内完成读 + 序列化**(返回纯 dict / 标量 / bool),不得把 ORM 行
@@ -283,7 +283,7 @@ class ArtifactService:
         try:
             await self.ensure_session_exists(session_id)
 
-            # 检查缓存和 DB 中是否已存在(DB 查经短 session,B-5;只判存在性,不读行属性)
+            # 检查缓存和 DB 中是否已存在（DB 查经短 session，只判存在性，不读行属性）
             if self._ws.peek(session_id, artifact_id) is not None:
                 return False, f"Artifact '{artifact_id}' already exists in session"
 
@@ -358,7 +358,7 @@ class ArtifactService:
         # 工具结果）或 loud-abort 本轮（上传 staging）。
         if config.ARTIFACT_USER_QUOTA_BYTES > 0:
             # 一趟查询：子查询内联把 session_id 解析成属主再聚合(属主跨全部会话已落字节)。
-            # 无主会话 → 返回 0,仍由下方数值判定兜单个超大 blob。短 session 读(B-5),返回标量。
+            # 无主会话 → 返回 0,仍由下方数值判定兜单个超大 blob。短 session 读取后仅返回标量。
             committed = await self._run_with_repo(
                 lambda repo: repo.get_user_blob_bytes_for_session(session_id)
             )
@@ -439,7 +439,7 @@ class ArtifactService:
                 return False, admission_error, None
 
         # Dedup:同时对 WorkingSet(本轮已 stage / 缓存)与 DB(往轮已落库)去重,
-        # 追加后缀直到唯一。整个冲突扫描在**一条**短 session 内走完(B-5 #4)——不再每探一次
+        # 追加后缀直到唯一。整个冲突扫描在**一条**短 session 内走完——不再每探一次
         # 各开一条 session(K 个同名冲突 → K+1 次借还)。WorkingSet.peek 是内存、放回调内无妨;
         # 只判存在性(is not None),不读行属性,故 ORM 行不外逃。
         async def _dedup(repo) -> str:
@@ -692,7 +692,7 @@ class ArtifactService:
         if cached is not None:
             return cached
 
-        # cache-miss → 短 session 读 DB(B-5)。在回调内就地建 ArtifactMemory(纯 dataclass)
+        # cache-miss → 短 session 读 DB。在回调内就地建 ArtifactMemory(纯 dataclass)
         # 再返回,ORM 行不出 session;回填 WorkingSet 后即 turn-live 缓存(故只 miss 时读 DB)。
         async def _load(repo) -> Optional[ArtifactMemory]:
             db_artifact = await repo.get_artifact(session_id, artifact_id)
@@ -739,7 +739,7 @@ class ArtifactService:
             # 显式 version 命中当前版本 = 同上当前视图,复用同一序列化点。
             return self._serialize_memory(memory, include_content=True)
 
-        # 不是当前版本 → 走 DB 取历史版本快照(短 session,B-5;返回纯文本)。
+        # 不是当前版本 → 走 DB 短 session 取历史版本快照并返回纯文本。
         # 这是**旧版本快照**,与「当前 artifact 视图」(_serialize_memory)是不同形状,故意不并:
         #   - updated_at=None —— 旧版本无独立更新时间(不存 per-version 时间戳);套当前版本的会误导
         #   - 不带 has_blob —— blob artifact 单版无历史(覆盖回写也不产版本行),走到这必是文本(has_blob 恒 False)
@@ -785,7 +785,7 @@ class ArtifactService:
         if staged is not None:
             data, size = staged, len(staged)
         else:
-            # 短 session 读字节(B-5):工具路径(sandbox/artifact 投递)也走此法,不再骑
+            # 短 session 读字节：工具路径(sandbox/artifact 投递)也走此法,不再骑
             # turn-long session。在回调内取列(data/size_bytes),不漏 ORM 行到 session 外。
             async def _load_blob(repo):
                 row = await repo.get_blob(session_id, artifact_id)
@@ -813,7 +813,7 @@ class ArtifactService:
         """blob 类 artifact(图片/docx/pdf 等)无文本表示,文本编辑工具一律拒。
 
         否则 update/rewrite 会在二进制 artifact 上长出一份文本 content —— 与 blob
-        形成"哪份权威"的双轨(C-0 刚删掉的状态借编辑工具还魂)。改二进制 = 走沙盒
+        形成“哪份权威”的双轨。改二进制 = 走沙盒
         (mount → 编辑 → persist 覆盖回写)或产新 artifact,字节永远只有 blob 一份。
         """
         if memory.has_blob:
@@ -1072,7 +1072,7 @@ class ArtifactService:
         合并 DB 结果与 WorkingSet 里的 dirty/new artifact,使引擎 context 装配看到
         同轮改动。REST 侧 WorkingSet 恒空,故等价纯 DB 列表。
 
-        DB 读 + 序列化全在短 session 回调内完成(B-5):`art.*` 在 session 内即 序列化成
+        DB 读 + 序列化全在短 session 回调内完成：`art.*` 在 session 内即序列化成
         纯 dict,ORM 行不出回调;WorkingSet 合并是内存操作,放回调内一并完成无妨。
         """
         async def _build(repo) -> List[Dict[str, Any]]:

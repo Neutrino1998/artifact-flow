@@ -1,9 +1,8 @@
 """Regression tests for the project-wide naive-UTC time convention.
 
-Background: incident 2026-05-14 PR-tz-unify. Pre-PR, hot-path callsites
-used `datetime.now()` (local naive) while DB `server_default=func.now()`
-gave UTC naive on SQLite — mixed convention drifted obs queries by the
-deployment TZ offset (8h on Shanghai). After PR, all Python-side writes
+Background: hot-path callsites once used `datetime.now()` (local naive) while DB
+`server_default=func.now()` gave UTC naive on SQLite. The mixed convention drifted
+observability queries by the deployment TZ offset (8h on Shanghai). All Python-side writes now
 go through `utils.time.utc_now()`.
 
 These tests defend against a revert of either:
@@ -33,7 +32,7 @@ def test_utc_now_returns_naive_datetime():
 def test_utc_now_matches_utc_wall_clock():
     """The naive value must equal current UTC, NOT local time. On a
     non-UTC machine these differ by the TZ offset — the very bug
-    PR-tz-unify fixed."""
+    the UTC unification fixed."""
     before = datetime.now(timezone.utc).replace(tzinfo=None)
     now = utc_now()
     after = datetime.now(timezone.utc).replace(tzinfo=None)

@@ -181,7 +181,7 @@ export function useSSE() {
             // Backfill reasoning when the provider only delivers it on the
             // final event (no llm_chunk reasoning_content stream). Without
             // this, live shows blank reasoning while replay can — same gap
-            // as P2 in the reviewer's findings.
+            // during cancellation cleanup.
             ...(d.reasoning_content ? { reasoningContent: d.reasoning_content } : {}),
             ...(d.token_usage ? { tokenUsage: d.token_usage } : {}),
             ...(d.model ? { model: d.model } : {}),

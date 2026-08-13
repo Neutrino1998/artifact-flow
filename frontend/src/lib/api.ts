@@ -223,7 +223,7 @@ export function getStorageUsage() {
   return request<StorageUsageResponse>('/api/v1/chat/storage');
 }
 
-// Skills (C-3) — user-side list + personal enable/disable. Returns ALL visible
+// Skills — user-side list + personal enable/disable. Returns ALL visible
 // skills (including disabled ones — the management page needs them to re-enable);
 // the composer picker filters to `enabled` client-side.
 export function getSkills() {
@@ -245,7 +245,7 @@ export function setSkillEnabled(skillId: string, enabled: boolean) {
 }
 
 /**
- * 导入 skill zip（E-2）。marketplace=true 走 admin 共享通道（可指定
+ * 导入 skill zip。marketplace=true 走 admin 共享通道（可指定
  * public/department 与默认开关）；否则私有导入（仅自己可见、立即启用）。
  *
  * 错误（detail 由 SkillManager 结构化产出）：
@@ -728,7 +728,7 @@ export function getAdminConversationStreamUrl(convId: string) {
   return `/api/v1/admin/conversations/${encodeURIComponent(convId)}/stream`;
 }
 
-// ── Fleet instances (Phase C) ──
+// ── Fleet instances ──
 // The backend endpoint returns a dynamic dict (no response_model), so the shape
 // is hand-declared here rather than generated. One entry per live heartbeat.
 export interface InstanceHeartbeat {
@@ -1023,7 +1023,7 @@ export function updateSiteNotifications(body: UpdateSiteNotificationsRequest) {
   });
 }
 
-// Tool Registry (Admin) — B-4 工具 unit 管理。
+// Tool Registry (Admin) — 工具 unit 管理。
 // 单名段用 encodeURIComponent：unit/placeholder 名虽受后端字符约束，但走 URL path
 // 仍统一编码，避免任何含特殊字符的值（如占位符）破坏路径。
 export function listToolUnits() {

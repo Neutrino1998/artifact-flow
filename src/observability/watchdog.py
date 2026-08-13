@@ -6,7 +6,7 @@ loop_lag 分布。
 
 失效面(必须明确写下):
 - 本组件跑在 Python `threading.Thread` 里,持 / 等 GIL。如果某个 C 扩展持有 GIL
-  不释放(本次事故 fuzzysearch),所有 Python 线程一起 `futex_wait`,本线程也
+  不释放，所有 Python 线程一起 `futex_wait`,本线程也
   会**与事件循环一起睡死**,产不出数据。
 - **该场景必须由 deadman.DeadmanSwitch 兜底**(C 线程 dump,不要 GIL)。两者
   互补,目的不同,都留。
@@ -79,7 +79,7 @@ class LoopLagWatchdog:
         # snapshot(对外暴露给 sampler / /admin/runtime;原子赋值,无锁)
         self._snapshot: dict = {"p50_ms": 0, "p99_ms": 0, "max_1m_ms": 0, "samples": 0}
 
-        # 最近一次 wedge/超阈事件摘要(供 Phase C 心跳读):watchdog 线程写、loop
+        # 最近一次 wedge/超阈事件摘要（供心跳读）：watchdog 线程写、loop
         # 线程读,dict 整体赋值原子、无锁(同 _snapshot)。None = 本进程从未抓到过。
         self._last_wedge: Optional[dict] = None
 
@@ -112,7 +112,7 @@ class LoopLagWatchdog:
         return dict(self._snapshot)
 
     def last_wedge(self) -> Optional[dict]:
-        """供 Phase C 心跳读取最近一次 wedge/超阈事件摘要;从未抓到过返回 None。
+        """供心跳读取最近一次 wedge/超阈事件摘要；从未抓到过返回 None。
 
         栈明细仍只落 loop-lag.jsonl(取证用),这里只带实例卡片快速定位要用的
         轻摘要 {ts, lag_ms, wedged, location?, active_message_ids}。

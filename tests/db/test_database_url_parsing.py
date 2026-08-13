@@ -331,7 +331,7 @@ class TestFailoverProbeKwargs:
 # Session TZ injection: defense-in-depth beyond compose -c timezone=UTC.
 # Cloud PG (RDS) / DATABASE_URLS failover targets aren't covered by compose
 # flags — _apply_session_tz_kwargs forces UTC at connect time regardless of
-# server config. (Incident 2026-05-14 PR-tz-unify reviewer round 1.)
+# server config; connection setup must enforce UTC independently.
 # ============================================================
 
 
@@ -638,7 +638,7 @@ class TestSessionTzInjection:
 # stripped from the URL handed to SQLAlchemy so the dialect cannot re-emit
 # them as conflicting top-level kwargs. Without this, every new query key
 # we care about would need another round-3-style patch.
-# (Incident 2026-05-14 PR-tz-unify reviewer round 4.)
+# These translation keys must be removed before SQLAlchemy sees the URL.
 # ============================================================
 
 

@@ -43,7 +43,7 @@ class TestLogin:
     async def test_unknown_username_still_runs_bcrypt(
         self, anon_client: AsyncClient, monkeypatch
     ):
-        """ACC-05: 用户不存在也对固定假 hash 跑一次 verify_password(等时防枚举)。
+        """用户不存在也对固定假 hash 跑一次 verify_password（等时防枚举）。
 
         不做脆弱的墙钟断言 —— 用 spy 直接验证「verify_password 被调用一次,
         且 hash 参数 = DUMMY_PASSWORD_HASH」即证明两分支都过 bcrypt。
@@ -414,7 +414,7 @@ class TestChangeMyPassword:
 
 
 class TestLongPasswordBcrypt:
-    """ACC-04: >72 字节口令不应 500（bcrypt 5.0 会抛 ValueError;我们截到 72 字节
+    """>72 字节口令不应 500（bcrypt 5.0 会抛 ValueError；我们截到 72 字节
     + 全局 handler 兜底）。多字节口令在 72 字节边界被切断不影响 bcrypt。"""
 
     async def test_create_and_login_with_long_multibyte_password(

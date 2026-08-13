@@ -238,7 +238,7 @@ export default function Sidebar({
   // Tool-unit management is the same master-detail shape as user-mgmt.
   const inToolUnitMgmt = activeMode === 'toolUnit' && isAdmin;
   const inDepartmentAccess = activeMode === 'departmentAccess' && isAdmin;
-  // Fleet instances (Phase C) — center takeover, admin-only, like observability
+  // Fleet instances — center takeover, admin-only, like observability
   // but without the conversation search/refresh actions.
   const inInstances = activeMode === 'instances' && isAdmin;
   const inNotificationConfig = activeMode === 'notificationConfig' && isAdmin;

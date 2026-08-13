@@ -1,7 +1,7 @@
 """Skill bundle zip helpers —— 定位 bundle 里唯一的 SKILL.md 成员。
 
-D-1 seed 解析(`reconcile/seeds`)与 D-2 mount(`tools/builtin/read_skill`
-的 MountSkillTool)都要在一个 bundle zip 里找到那唯一的 SKILL.md:seed 侧读它的
+seed 解析(`reconcile/seeds`)与 MountSkillTool(`tools/builtin/read_skill`)都要在
+一个 bundle zip 里找到那唯一的 SKILL.md：seed 侧读它的
 frontmatter,mount 侧据它的父目录算**剥壳前缀**(解到 `/workspace/.skills/<slug>/`
 时把 wrapper 目录去掉)。一个定位器 = 两处不漂移(否则 mount 可能剥错前缀)。
 

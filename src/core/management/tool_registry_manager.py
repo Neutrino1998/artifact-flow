@@ -203,7 +203,7 @@ class ToolRegistryManager:
         self._require_dynamic(u, "edit")
         # kind 不可变:它决定 full_name 形状(singleton==unit 名 vs set=<unit>__<member>)。
         # 改 kind → replace_members 会静默重命名可调工具名,挂在旧 full_name 上的 always_allow
-        # / 未来 per-tool 规则全悬空(reviewer #14)。要变 = 删了重建。
+        # / 未来 per-tool 规则全悬空。要变 = 删了重建。
         if spec.get("kind") != u.kind:
             raise ImmutableFieldError(
                 f"cannot change kind of unit '{name}' ('{u.kind}' → '{spec.get('kind')}') — "
@@ -213,8 +213,8 @@ class ToolRegistryManager:
         await self._validate_names(name, members, exclude_unit=name)
 
         u.description = spec.get("description", "") or ""
-        # 决策 10:visibility 变更先清 dept 规则(唯一实现 = repo.clear_dept_rules,
-        # 语义见其 docstring)。G 前 department_unit_rules 恒空,no-op。
+        # visibility 决定部门规则的方向，变更时先清旧规则；唯一实现及完整语义在
+        # repo.clear_dept_rules 的 docstring。无部门规则时该操作是 no-op。
         new_visibility = self._check_visibility(spec.get("visibility", "public"))
         if u.visibility != new_visibility:
             await self._registry.clear_dept_rules(name)
@@ -227,8 +227,8 @@ class ToolRegistryManager:
         u.provider = provider
         u.provider_config = provider_config
         await self._registry.replace_members(name, members)
-        # 新定义不再引用的 dynamic 凭证 → prune(与 reconciler 对 seeded 的 prune 对称,
-        # 否则失引用密文残留、GET 仍显示 configured,误导 + secret 卫生 cruft,reviewer #9)
+        # 新定义不再引用的 dynamic 凭证需要 prune，与 reconciler 对 seeded 的处理对称；
+        # 否则失引用密文残留、GET 仍显示 configured，造成误导和 secret 卫生 cruft。
         await self._creds.prune_unreferenced(name, self._referenced_placeholders(u, members))
         await self._commit("update unit")
         # _require_unit 已 selectin-load 旧 members;replace_members 走 bulk delete/add,
@@ -304,7 +304,7 @@ class ToolRegistryManager:
         if not value:
             raise InvalidUnitError("credential value must be non-empty")
         # 占位符必须被某成员的 endpoint/headers 引用 —— 否则是配不上的孤儿密文(GET 会显示
-        # configured 却无对应 {{NAME}},误导 + secret cruft,reviewer #9)。
+        # configured 却无对应 {{NAME}}，造成误导和 secret cruft。
         if placeholder not in self._referenced_placeholders(u, u.members):
             raise InvalidUnitError(
                 f"placeholder '{placeholder}' is not referenced by any endpoint/header in "
@@ -317,7 +317,7 @@ class ToolRegistryManager:
 
     async def delete_credential(self, unit_name: str, placeholder: str) -> None:
         u = await self._require_unit(unit_name)
-        # seeded 凭证归 reconciler 拥有,UI 删了下次 reconcile 又种回 → 禁(对称 set,reviewer #2)
+        # seeded 凭证归 reconciler 拥有，UI 删除后下次 reconcile 又会种回，因此禁止。
         self._require_dynamic(u, "delete credentials for")
         deleted = await self._creds.delete_placeholder(unit_name, placeholder)
         if not deleted:
@@ -479,7 +479,7 @@ class ToolRegistryManager:
                 )
         endpoint = rm.get("endpoint", "") or ""
         headers = rm.get("headers", {}) or {}
-        # SSRF-02 前缀闸:与 seeds/loader 同口径,{{VAR}} 必须白名单前缀(reviewer #15)。
+        # secret 前缀闸：与 seeds/loader 同口径，{{VAR}} 必须使用白名单前缀。
         # 否则 dynamic 路径能把凭证存到 {{JWT_SECRET}} 这类误导名下,且将来若为 dynamic
         # 重引入 env 解析即成外泄面。失败转 400(不漏 500)。
         try:
@@ -569,7 +569,7 @@ class ToolRegistryManager:
 async def test_saved_mcp_unit_connection(name: str, db_manager, mcp_manager) -> dict:
     """Test a saved MCP server unit without holding a request DB session.
 
-    F-3 的连通性测试只针对已保存配置:先用短 session 物化 provider_config,关库后
+    连通性测试只针对已保存配置：先用短 session 物化 provider_config，关库后
     再打外部 MCP endpoint。凭证解析也走 CredentialResolver 的短 session。
     """
 

@@ -6,7 +6,7 @@ import { triggerObjectUrlDownload } from '@/lib/download';
 import { BUTTON_PRIMARY } from '@/lib/styles';
 import { useArtifactStore } from '@/stores/artifactStore';
 
-/** Render a non-image blob-backed artifact (docx / pdf upload — C-0 blob-only:
+/** Render a non-image blob-backed artifact (docx / pdf upload — blob-only:
  *  rich formats have no text representation; reading/converting them is a
  *  sandbox capability). The panel shows a file card with a raw download.
  *

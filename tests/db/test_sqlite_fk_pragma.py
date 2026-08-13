@@ -1,4 +1,4 @@
-"""SQLite per-connection FK pragma 回归(E-2 reviewer #1)。
+"""SQLite per-connection FK pragma 回归测试。
 
 `PRAGMA foreign_keys` 是 per-connection 的:老实现只在 init 连接上设,文件库多连接
 池的其余连接 FK=OFF → DB 级 ondelete=CASCADE 静默不生效(Core DELETE 留孤儿

@@ -255,7 +255,7 @@ async def execute_loop(
     state: Dict[str, Any],
     agents: Dict[str, Any],  # {name: AgentSnapshot}
     tools: Dict[str, Any],   # {name: BaseTool}
-    effective_toolsets: Dict[str, EffectiveToolset],  # {agent_name: 可调集+等级}(决策 11 单一解析点)
+    effective_toolsets: Dict[str, EffectiveToolset],  # {agent_name: 可调集+等级}，单一解析点
     hooks: RuntimeHooks,
     artifact_service: Optional[Any] = None,
     emit: Optional[EmitFn] = None,
@@ -272,7 +272,7 @@ async def execute_loop(
         agents: {name: AgentSnapshot} 字典（DB 快照重建）
         tools: {name: BaseTool} 字典（全局 builtin + DB external + 请求级工具已合并）
         effective_toolsets: {agent_name: EffectiveToolset} —— 每 agent 解析后的可调
-            工具集 + 等级（决策 11 单一解析点），引擎按 current agent 索引，替代旧
+            工具集 + 等级的单一解析结果，引擎按 current agent 索引，替代旧
             的 `AgentConfig.tools` 直读
 
         hooks: RuntimeHooks（check_cancelled / wait_for_interrupt / drain_messages）
@@ -892,8 +892,7 @@ async def execute_loop(
 
         其余 ``return result``(工具本身已失败 / 结果没超阈值 / ``inf`` 关闭落盘)**不是
         fail-open**,而是「本就无需落盘、结果即数据」。溢出落盘失败**绝不**退回超长原文
-        —— 落盘机制本就为护上下文,退回正是把要防的伤害塞回去(对齐 CLAUDE.md
-        「overflow fails loudly」)。
+        —— 落盘机制本就为保护上下文，失败后退回超长原文会重新引入同一风险。
         """
         if not result.success:
             return result  # 工具自身失败 —— 原样透传

@@ -1,13 +1,13 @@
 """EffectiveToolset —— agent 的「可调工具集 + 等级」唯一解析点。
 
 把原本散落在 4 处(context_manager 渲染/条件段、engine 执行闸/等级检查)对
-`AgentConfig.tools` 的直读收成一个解析点(决策 11)。输入只两样静态来源:
+`AgentConfig.tools` 的直读收成一个解析点。输入只两样静态来源:
   ① agent 宇宙 = `builtin_tools`(声明的 builtin) ∪ `agent_units`(external 单元)
      —— 每项带 enabled/disabled,absent 即不在宇宙;
   ② tool-set 展开 —— 一个 enabled 的 unit 展开成它全部成员 `full_name`。
 输出扁平 `{full_name: ToolPermission}`。
 
-**等级唯一来源是工具定义**(决策 11):builtin = `BaseTool.permission`,external =
+**等级唯一来源是工具定义**：builtin = `BaseTool.permission`,external =
 `tool_member.permission`(已在快照重建进 `HttpTool.permission`)。绑定表只存成员态
 (enabled/disabled),不存等级 —— 故这里的 level 一律从工具对象本身取。
 
@@ -78,14 +78,14 @@ class EffectiveToolset:
 
     成员判定与等级查询的单一入口;读点只问它「在不在」「什么等级」。
 
-    `deferred_units`:本 agent 宇宙里 `defer=True` 的 unit(B-3 渐进式披露)——
+    `deferred_units`:本 agent 宇宙里 `defer=True`、按需披露的 unit——
     它们的成员仍在 `permissions`(可调),但 `<available_tool_units>` 只渲索引行、完整
     schema 由 `search_tools` 按需补。defer 分组在 resolver 一处算好,context_manager
     只消费 effective_toolset(不再碰 snapshot),维持单一解析点。
     """
     permissions: Dict[str, ToolPermission]
     deferred_units: Dict[str, DeferredUnit] = field(default_factory=dict)
-    # 预烤的 skill 能力授予(决策 11/changelog 06-30):`{slug: SkillGrant}` —— 每个 skill
+    # 预烤的 skill 能力授予：`{slug: SkillGrant}` —— 每个 skill
     # 若激活会「翻开」哪些(= 该 skill 的 allowed-tools ∩ 本 agent 的 disabled 池,等级取自
     # 工具定义)+ 随之注册哪些 external unit。激活只 merge 配置里显式 disabled 的成员，
     # 不连带注入其它 builtin。
@@ -146,7 +146,7 @@ class EffectiveToolset:
 def unit_visible_by_department(
     unit: UnitInfo, dept_matched_units: Optional[Set[str]]
 ) -> bool:
-    """该 unit 对当前用户部门是否可见(G-0)。
+    """该 unit 对当前用户部门是否可见。
 
     `department_unit_rule` 没有 effect 列:命中集合只表示「该部门是例外成员」,
     方向完全由 unit.visibility 派生:
@@ -175,11 +175,11 @@ def resolve_effective_toolset(
     sandbox),等级从其中的工具对象取。宇宙里声明了但 `tools` 缺席的项跳过(与旧
     `if name in tools` 行为一致 —— 如某 unit 成员的 HttpTool 未能重建)。
 
-    `skill_snapshot`(C-2):据此预烤 `skill_grants` —— 每个 skill 的 allowed-tools 解析
+    `skill_snapshot`:据此预烤 `skill_grants` —— 每个 skill 的 allowed-tools 解析
     到 unit、与本 agent 的 **disabled 池**取交集(skill 只能翻 disabled、不引入 absent、
-    不碰等级,决策 11)。激活在引擎按 slug merge,不再回 snapshot。
+    不碰等级）。激活在引擎按 slug merge,不再回 snapshot。
 
-    `dept_matched_units`(G-0):当前用户部门祖先链命中的 unit 规则集合。dept 收窄在
+    `dept_matched_units`:当前用户部门祖先链命中的 unit 规则集合。dept 收窄在
     skill enable 之前应用,因此 skill 不能重新打开 dept-denied unit。
     """
     permissions: Dict[str, ToolPermission] = {}
@@ -310,8 +310,8 @@ def resolve_all(
 ) -> Dict[str, EffectiveToolset]:
     """一次性解析快照里全部 agent 的可调工具集,供引擎按 agent_name 直接索引。
 
-    `skill_snapshot`(C-2)透传给每 agent 的解析,预烤其 skill_grants(激活在引擎)。
-    `dept_matched_units`(G-0)同样透传,先收窄 unit 宇宙再烤 skill grants。"""
+    `skill_snapshot`透传给每 agent 的解析,预烤其 skill_grants(激活在引擎)。
+    `dept_matched_units`同样透传,先收窄 unit 宇宙再烤 skill grants。"""
     return {
         name: resolve_effective_toolset(
             agent, snapshot, tools, skill_snapshot, dept_matched_units

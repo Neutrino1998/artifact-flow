@@ -171,7 +171,7 @@ class _FakeArtifactService:
 class TestUploadStagingAbort:
     """A failed upload staging must abort the turn loudly AND atomically, then
     fall through to the unified tail (unbind + finalize_metrics) — never early
-    return past cleanup (reviewer P2)."""
+    return past cleanup."""
 
     @pytest.mark.parametrize("raise_exc", [True, False])
     async def test_staging_failure_aborts_atomically_and_finalizes(self, raise_exc):

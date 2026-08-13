@@ -1,7 +1,7 @@
 """
 Grep across artifact content with ripgrep-faithful semantics.
 
-设计要点（详见 plan/CLAUDE.md "Minimize tool parameter surface"）:
+设计要点:
 - 单 / session 范围由 `id` 是否传入区分（对应 `rg pattern path` vs `rg pattern`）
 - pattern 默认 **RE2 regex**（ripgrep / Rust-regex 同族：线性时间、无回溯 → 结构性免疫
   ReDoS）；`fixed_strings=true` 走 `re2.escape` 切 literal。换 RE2 是这个工具的本意
@@ -11,12 +11,12 @@ Grep across artifact content with ripgrep-faithful semantics.
   全物化才安全，超出即截断 + surface；不为对抗性巨输入逐 pass 补 cap）：
   - **输入** `GREP_CONTENT_MAX_CHARS`（2MB）—— 值由"`_scan_content` 的 pre-scan
     物化（splitlines×2 + line_starts，成本 O(行数)）保持有界"反推，**非** artifact
-    最大尺寸；20MB 会 ~1GB（reviewer P1）。`GREP_SESSION_SCAN_BUDGET_CHARS` 限 session
+    最大尺寸；20MB 会放大到约 1GB。`GREP_SESSION_SCAN_BUDGET_CHARS` 限 session
     总扫描功。
   - **迭代** `GREP_MAX_SCAN_MATCHES`（raw-match 迭代上界，防"单行海量命中把 finditer
     抽干"，mirror update_artifact 的 `MAX_UNIQUE_CENTERS`）。
   - **输出** `GREP_MAX_LINE_CHARS`（ripgrep `--max-columns` 式单行封顶，防"单条巨行
-    命中→整行塞进结果"，reviewer P2）。
+    命中→整行塞进结果”）。
   全部是 **CPU/扫描护栏**，不是内存护栏。RE2 线性故**无需墙钟 timeout**（回溯型才需，
   见 update_artifact）。session **峰值内存 ≈ 全 session content（有意 best-effort）**：
   内存由"载入多少"决定（list eager-load + cache 累积），不是扫描护栏能管的；真 bound
@@ -94,7 +94,7 @@ def _scan_content(
       这里 cap 真正烧 CPU 的量——迭代到的**原始**命中数（非去重行数）。mirror
       update_artifact 的 `MAX_UNIQUE_CENTERS`。提前触顶即 break，置 `stats["scan_capped"]=True`。
       上界来源:`max_scan` 显式传入（session 模式传**剩余**预算，使 raw 预算跨 artifact
-      累计共享 —— 否则每个 artifact 重置会累积无界 wedge，reviewer round 4）；不传则用
+      累计共享 —— 否则每个 artifact 重置会累积无界 wedge）；不传则用
       `config.GREP_MAX_SCAN_MATCHES`（单 artifact 模式 = 整 budget）。
 
     返回 [(line_no_1indexed, line_text, is_match), ...]:
@@ -136,8 +136,8 @@ def _scan_content(
         raw_seen += 1
         # 零宽匹配整体 drop。从源码启发式判 anchor 意图(`^$` 找空行 vs `\A`
         # 只是起始锚)做不到无 false positive —— 引擎没暴露 AST,任何 string-level
-        # 判断都有边界。换 "全 drop" 换简单 + 可证明:跨 reviewer 任何反例,零宽
-        # 就是零宽,不报。失去的能力(`^$` 找空行)agent 在 ArtifactFlow 里没有真实
+        # 判断都有边界。整体 drop 更简单且可证明：零宽就是零宽，不进入结果。
+        # 失去的能力(`^$` 找空行)agent 在 ArtifactFlow 里没有真实
         # 用法,可用内容侧锚点替代。
         # 附带好处:RE2 的 finditer 会在行边界**重复**返回零宽 anchor 命中
         # (实测 `(?m)^` 对 "foo\nbar\n" 给 [(0,0),(4,4),(4,4),(8,8),(8,8)]),
@@ -311,7 +311,7 @@ class GrepArtifactTool(BaseTool):
                 error=f"Pattern too long (>{config.GREP_MAX_PATTERN_CHARS} chars). Simplify it.",
             )
 
-        # context 负数无意义 clamp 到 0；上界 clamp 防超大窗口铺满全文（GREP-03）
+        # context 负数无意义，clamp 到 0；上界防超大窗口铺满全文。
         context_lines = max(0, min(context_lines, config.GREP_MAX_CONTEXT))
         # max_count <= 0 等价于"不要任何结果"；视作 0 命中，给个明确信号
         if max_count <= 0:
@@ -369,7 +369,7 @@ class GrepArtifactTool(BaseTool):
         # 一次性载入(include_content=True)。**峰值内存 ≈ 全 session content,有意 best-effort**:
         # 内存由"载入多少"决定(repo.list_artifacts 是 select(Artifact),content 列 eager-load;
         # 且 get_artifact 会 cache),不是下面的 scan 护栏能管的 —— 那些限的是"扫多少"(CPU)。
-        # 真 bound 内存需 repo 列投影 + 绕 cache,对内存从未爆过的 🟡 不划算(详见 GREP-02)。
+        # 真正限制内存需 repo 列投影 + 绕 cache；当前明确接受这一 best-effort 边界。
         artifacts = await self._service.list_artifacts(
             session_id=session_id, include_content=True
         )

@@ -242,8 +242,8 @@ class TestEnvironment:
         self.db_manager = DatabaseManager("sqlite+aiosqlite:///:memory:")
         await self.db_manager.initialize()
 
-        # 2. config → DB 物化(镜像 prod 的 reconcile;harness 跑 B-2 真路径 = 引擎
-        #    从 DB 快照消费,而非进程级 load_all_agents/load_custom_tools)
+        # 2. config → DB 物化，镜像 prod 的 reconcile；harness 从 DB 快照走引擎真实
+        #    路径，而非进程级 load_all_agents/load_custom_tools。
         root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         async with self.db_manager.session() as session:
             await reconcile_config_to_db(

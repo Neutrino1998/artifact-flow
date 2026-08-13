@@ -6,8 +6,8 @@
 刻意**不持有** DB session、**不持有**进程级注册表、**不发**事件——它就是一个
 turn 级的可变状态袋。控制器(执行轮)与 REST(请求级)各自独占一个实例,**绝不
 共享**:跨实例共享内存态正是旧 ``_active_managers`` 在多 worker 下静默失效的根因
-(见 docs/_archive/design/artifact-layer-redesign-plan.md 背景节)。REST 侧实例的
-WorkingSet 始终为空,故其 Service 读取自然落到纯 DB。
+——请求命中的 worker 未必是执行 turn 的 worker。REST 侧实例的 WorkingSet 始终
+为空,故其 Service 读取自然落到纯 DB。
 """
 
 from dataclasses import dataclass

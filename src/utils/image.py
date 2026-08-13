@@ -3,7 +3,7 @@
 与 ``doc_converter`` 的上传校验分开 —— 那是**入站**(存原件),这是**出站**(把图注入
 LLM 上下文前的副本)。原始 blob 永不被改,这里只产生一个降采样的注入副本。
 
-CPU 纪律(CLAUDE.md / 2026-05-14 事故):Pillow 是 C 扩展、resize 会解码,**务必由
+CPU 纪律：Pillow 是 C 扩展，resize 会解码，**务必由
 调用方放 executor**;解压炸弹闸不靠 Pillow 默认 ``MAX_IMAGE_PIXELS``(89–178M 段只 warn
 不抛),而是在 **解码前** 用 ``img.size`` 显式校验 ``w*h ≤ VISION_IMAGE_MAX_PIXELS`` →
 超限抛 ``ValueError``,调用方 try 捕获转 loud-fail。这是上传校验(_probe_image)之外的

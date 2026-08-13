@@ -1,4 +1,4 @@
-"""search_tools 纯渲染函数单测(B-3 渐进式披露)。
+"""search_tools 渐进式披露的纯渲染函数单测。
 
 覆盖:select: 精确选 / 关键词搜 / 过滤到可调集 / 排除 search_tools 自身 /
 无匹配的引导文案 / unknown 名提示 / 空 query loud-fail。

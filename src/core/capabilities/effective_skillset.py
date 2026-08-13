@@ -1,5 +1,6 @@
-"""EffectiveSkillSet —— skill 侧单点可见性 resolver(对应工具的 EffectiveToolset,
-并列非合并,决策 1/10 + changelog 06-23)。
+"""EffectiveSkillSet —— skill 侧单点可见性 resolver。
+
+它与工具侧 EffectiveToolset 并列而不合并：两者的可见性和能力语义不同。
 
 两轴:
   - **visible**(正确性,决定能否 read/mount;miss → 404):
@@ -11,7 +12,7 @@
     用户关掉的 skill 仍 visible(可 read_skill / `/skill` 显式 opt-in),只是不进 L1。
 
 **全 agent 可见、无 agent 维度**(效果按各 agent 宇宙 + 部门双重收窄,在 EffectiveToolset
-做,决策 11)。与 EffectiveToolset 只共用部门祖先链 helper(department_resolver),不共其余。
+做。与 EffectiveToolset 只共用部门祖先链 helper(department_resolver),不共其余。
 """
 
 from dataclasses import dataclass, field

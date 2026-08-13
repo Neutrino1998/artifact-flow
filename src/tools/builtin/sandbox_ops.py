@@ -51,8 +51,8 @@ class BashTool(BaseTool):
 
     def __init__(self, session: SandboxSession):
         # 能力清单按镜像现状列全(python 科学栈+文档栈/LibreOffice/pandoc/ripgrep/zip/unrar-free/git)。版本号刻意
-        # 不写 —— 会与镜像漂移,且非模型决策所需(CLAUDE.md:一次性事实进描述、
-        # 克制噪声)。场景 how-to 留 skill 系统。git 仅本地仓库操作(无网下
+        # 不写 —— 会与镜像漂移，且非模型决策所需；一次性事实进描述即可。
+        # 场景 how-to 留 skill 系统。git 仅本地仓库操作(无网下
         # clone/fetch 死属 by design,描述里无网已声明,不重复)。
         super().__init__(
             name="bash",
@@ -142,12 +142,12 @@ class BashTool(BaseTool):
 
 
 class MountArtifactTool(BaseTool):
-    """把一个 artifact 物化进沙盒工作区(显式 stage-in,原则 4)。
+    """把一个 artifact 显式物化进沙盒工作区（stage-in）。
 
     - 文本 artifact:WorkingSet overlay 的当前内容(本轮 dirty/new 必须可 mount,
       直读 DB 是空的)按 UTF-8 写盘;blob artifact:原始字节(本轮 staged 上传
       经 get_blob 读 ArtifactMemory.blob,其余走 DB)。格式判别 = 有无 blob。
-    - on-disk 名 = artifact id(决策 2:id 已是 fs-safe 句柄);重复 mount 同一
+    - on-disk 名 = artifact id（已是 fs-safe 句柄）；重复 mount 同一
       id = 刷新副本(覆写)。
     - 返回纯事实(容器内路径/字节/MIME);"binary 须 mount" 的契约文案归
       inventory/read_artifact(C-wire),场景 how-to 归 skill。
@@ -274,7 +274,7 @@ class MountArtifactTool(BaseTool):
 
 
 class PersistFileTool(BaseTool):
-    """把工作区文件回写成 artifact(显式 stage-out,原则 4)。
+    """把工作区文件显式回写成 artifact（stage-out）。
 
     - 默认按文件名产新 artifact(同名 `_N` dedup);给 `artifact_id` 走 **upsert**:
       目标不存在则以该 id 新建(模型给产出物起语义 id,供 `artifact://<id>` 引用),
@@ -545,7 +545,7 @@ class PersistFileTool(BaseTool):
                 source="sandbox",
             )
         else:
-            # C-0 blob-only 约定:无文本表示,content="",content_type=真实 MIME
+            # blob-only 约定：无文本表示，content=""，content_type=真实 MIME
             # (XOR 下 blob 的 content_type 即其 MIME,内核据此派生 metadata 标记)
             success, message, info = await self._service.create_from_upload(
                 session_id=session_id,

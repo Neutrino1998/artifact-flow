@@ -552,9 +552,8 @@ async def bulk_delete_conversations(
     （src/db/models.py），删 conversation 不会因子行残留而失败，session 状态
     不会被某一行污染到影响后续行。
 
-    其他异常（OperationalError 等基础设施级故障）冒泡为 5xx loud failure —
-    此时第 1 条就会失败、循环本就进不下去；与 CLAUDE.md "不为不会发生的场景
-    加防御代码" 一致，故不做广泛 except。
+    其他异常（OperationalError 等基础设施级故障）冒泡为 5xx loud failure；
+    此时第 1 条就会失败、循环本就进不下去，故不做无法触发的广泛 except。
     """
     try:
         result = await execution_service.bulk_delete(

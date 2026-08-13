@@ -1,4 +1,4 @@
-"""MCP tool adapter tests(F-2M)."""
+"""MCP tool adapter tests."""
 
 import asyncio
 import base64

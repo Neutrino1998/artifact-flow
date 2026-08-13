@@ -113,7 +113,7 @@ class TestExternalCancel:
         """外部 cancel 落在「协作取消已触发、正在 await 子 task 收尾」的窗口 →
         透出的必须是 CancelledError（外部语义优先），不能被收尾段吞掉后改写成
         CooperativeCancelled —— 否则 fenced task 会以协作路径继续跑 post-processing
-        （静默第二写者）/ TIMED_OUT 被记成 CANCELLED。reviewer F1 回归。"""
+        （静默第二写者）/ TIMED_OUT 被记成 CANCELLED。"""
         cleanup_entered = asyncio.Event()
         release_cleanup = asyncio.Event()
 

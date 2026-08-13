@@ -55,7 +55,7 @@ async def list_artifacts(
     try:
         # 纯 DB 读(请求级 Service,自带空 WorkingSet)。删 _active_managers overlay 后,
         # turn 中的 live 态由前端订阅 ARTIFACT_* 事件流 reduce,不再靠 REST 轮询
-        # 跨进程读执行 worker 的内存——后者在多 worker 下静默失效(见重构 plan 决策 1)。
+        # 不跨进程读执行 worker 的内存；那在多 worker 下会静默失效。
         artifacts = await artifact_service.list_artifacts(
             session_id=session_id,
             include_content=False
@@ -136,7 +136,7 @@ async def get_artifact(
     await _verify_session_ownership(session_id, current_user, conversation_manager)
 
     # 纯 DB 读(无 overlay)。turn 中的 live 内容由前端事件流 reduce;此端点返回
-    # 已 flush 的 DB 权威态,turn 中故意落后于 live(见重构 plan 决策 6)。
+    # 已 flush 的 DB 权威态，turn 中故意落后于事件流里的 live 状态。
     result = await artifact_service.read_artifact(
         session_id=session_id,
         artifact_id=artifact_id

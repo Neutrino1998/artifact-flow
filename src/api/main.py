@@ -341,7 +341,7 @@ def create_app() -> FastAPI:
         expose_headers=["X-Request-ID", "X-Instance-ID"],
     )
 
-    # 全局 ValueError → 400(防御纵深;ACC-04)。业务校验失败大多在 Pydantic
+    # 全局 ValueError → 400（防御纵深）。业务校验失败大多在 Pydantic
     # schema(返回 422)或路由内显式 HTTPException 处理掉;此 handler 兜住漏到
     # handler 顶层的意外 ValueError(如 bcrypt >72 字节、密码策略在非 schema
     # 路径抛错),映射成 400 而非 500。HTTPException 不受影响(走 Starlette 默认)。

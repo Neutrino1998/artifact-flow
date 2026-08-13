@@ -1,4 +1,4 @@
-"""用户侧 skill 管理 REST(C-3 列举/正文预览/toggle + E-2 导入/导出/删除)。
+"""用户侧 skill 管理 REST：列举/正文预览/toggle + 导入/导出/删除。
 
 作用域 = 用户自己的 skill(个人偏好 + 私有导入;守 feedback-admin-scope-user-mgmt)。
 可见性走 SkillManager 的 EffectiveSkillSet 单点闸,不可见 skill → 404(不泄露存在性)。

@@ -279,7 +279,7 @@ class TestPersistTool:
         assert result.success
         call = service.create_calls[0]
         assert call["blob"] == payload
-        assert call["content"] == ""          # C-0 blob-only 约定
+        assert call["content"] == ""          # blob-only 约定
         # XOR:不再单传 blob_content_type,content_type 即原件 MIME
         assert call["content_type"] == "image/png"
         assert call["source"] == "sandbox"

@@ -20,7 +20,7 @@ set -euo pipefail
 #
 # Air-gap contract: everything is fetched on THIS (networked) build host and
 # baked into the saved tar. The intranet test node does `docker load` and runs
-# under --runtime=runsc --network=none with ZERO network (plan 原则 7).
+# under --runtime=runsc --network=none with ZERO network.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CTX="$ROOT"

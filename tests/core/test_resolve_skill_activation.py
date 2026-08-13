@@ -1,4 +1,4 @@
-"""resolve_skill_activation — 用户按钮激活 slug 解析(C-3 reviewer round-2)。
+"""resolve_skill_activation — 用户按钮激活 slug 解析。
 
 两件正交的事:注入集(请求内去重、**不**按 parent 去重 → 重勾重注入)+ sticky 名单
 (parent ∪ 注入 去重)。可见性 gate 在此;空 body gate 另在取正文时(需 DB,不在此)。

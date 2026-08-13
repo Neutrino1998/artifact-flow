@@ -5,10 +5,11 @@
 
 导入是 `source="dynamic"` 的**第一个写入者**:user 私有(audience="private",owner=本人、
 default_enabled=True 即刻进自己 L1)与 admin 共享(audience="marketplace",public、owner=null、
-default_enabled=True 默认进全员 L1、个人可关闭)双通道同走 import_zip —— 零漂移。硬门 = E-1 validator
-(与 seed 同一道门);「能不能跑」归会话期 checker skill(E-4),导入无 verify/force 交互。
+default_enabled=True 默认进全员 L1、个人可关闭)双通道同走 import_zip —— 零漂移。
+导入与 seed 共用确定性 validator；运行兼容性由会话期 checker skill 判断，导入不提供
+verify/force 交互。
 
-seeded skill 归 config 只读(删除/覆盖一律 400 指回 config);dept 授权 UI 归 G。
+seeded skill 归 config 只读(删除/覆盖一律 400 指回 config)；部门授权由独立管理用例负责。
 Repository 持有写入和 commit，Manager 只编排用例。
 """
 
@@ -88,7 +89,7 @@ class SkillInternalError(SkillManagerError):
 
 
 class SkillValidationError(SkillManagerError):
-    """硬门拒收(E-1 validator error 级 / slug 派生失败 / 单 zip 超限)。findings 结构化
+    """硬门拒收 validator error、slug 派生失败和单 zip 超限。findings 结构化
     透出给 router → 422 detail,前端逐条渲染。"""
     status_code = 422
 
@@ -316,7 +317,7 @@ class SkillManager:
         )
 
     # ------------------------------------------------------------------
-    # E-2:导入 / 导出 / 删除
+    # 导入 / 导出 / 删除
     # ------------------------------------------------------------------
 
     async def import_zip(
@@ -334,7 +335,7 @@ class SkillManager:
 
         管线:单 zip 字节上限(仅 private —— 信任分层,同 SKILL_BUNDLE_MAX_BYTES 注释)
         → 数量闸的配置关闭态(仅 private)→ 字节配额闸(仅 private)
-        → E-1 硬门 → slug 派生+校验 → allowed-tools 存在性 warn
+        → validator 硬门 → slug 派生+校验 → allowed-tools 存在性 warn
         → 个人数量锁+计数(仅 private,临近插入)→ 撞名闸
         → 建行 commit。全部拒收路径 logger.warning 落原因(req-id ↔ 拒因,否则 grep
         只见一条 4xx)。
@@ -431,8 +432,8 @@ class SkillManager:
             ))
 
         # allowed-tools 存在性:与 seed / runtime 同一个 resolver + 同一个 inventory
-        # loader(ToolRegistryRepository,B-4 撞名闸同款),解析不到 = warn 不拦
-        # (unit 后续可挂 / 可建,决策 11)
+        # loader(ToolRegistryRepository，与工具撞名闸共用 inventory)，解析不到只 warn，
+        # 允许 unit 后续挂载或创建。
         allowed_tools = normalize_allowed_tools(
             parsed.frontmatter.get("allowed-tools"), where
         )
@@ -483,8 +484,8 @@ class SkillManager:
             )
             raise SkillConflictError(slug)
 
-        # 单一派生源:行字段与响应序列化都从这一个 SkillInfo 出,POST 响应与后续
-        # GET/list_for_user 不可能各算各的(reviewer:两处派生必漂移)。
+        # 单一派生源：行字段与响应序列化都从这一个 SkillInfo 出，避免 POST 响应与后续
+        # GET/list_for_user 分别派生而发生漂移。
         frontmatter = parsed.frontmatter
         meta = {k: v for k, v in frontmatter.items() if k not in _SKILL_CONSUMED_FM_KEYS} or None
         row_id = str(uuid.uuid4())

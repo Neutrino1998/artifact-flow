@@ -57,7 +57,7 @@ class RuntimeSampler:
         await sampler.stop()
     """
 
-    # 高水位告警阈值(对齐 fix plan §注入点 #3):RSS / FD 用 80% ulimit,redis 自配
+    # 高水位告警阈值：RSS / FD 用 80% ulimit，Redis 使用自身配置。
     _RSS_WARN_RATIO = 0.80
     _FD_WARN_RATIO = 0.80
     _REDIS_USED_WARN_RATIO = 0.80
@@ -85,7 +85,7 @@ class RuntimeSampler:
         self._long_task_age_sec = long_task_age_sec
         self._interval = interval_sec
         self._mem_limit = mem_limit_bytes  # None = 用 ulimit fallback
-        # Phase C 心跳:每 tick 把快照子集多写一份到 Redis。None = 不写(未配置)。
+        # 每 tick 把快照子集多写一份到 Redis 心跳。None = 不写(未配置)。
         self._heartbeat = heartbeat
 
         self._proc = psutil.Process(os.getpid())

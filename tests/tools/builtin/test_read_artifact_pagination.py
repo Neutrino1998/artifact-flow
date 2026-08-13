@@ -229,7 +229,7 @@ class TestReadArtifactPagination:
 
 
 # ============================================================
-# blob-only artifact(docx/pdf 上传,C-0)→ 契约文案,非空 content
+# blob-only artifact（docx/pdf 上传）→ 契约文案，非空 content
 # ============================================================
 
 _DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"

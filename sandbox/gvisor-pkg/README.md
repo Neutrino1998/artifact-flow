@@ -33,6 +33,6 @@ sudo ./uninstall.sh && sudo systemctl reload docker
 ```
 
 **Tier 0 is a gate, not a formality.** If `unshare -U` fails, the node's kernel
-denies `CLONE_NEWUSER` and gVisor cannot run there — `smoke-test.sh` stops and
-points at the eval doc §5.3 evidence pack for ops/vendor. See
-`docs/_archive/design/sandbox-gvisor-evaluation-2026-05.md`.
+denies `CLONE_NEWUSER` and gVisor cannot run there. `smoke-test.sh` stops; record
+its output together with `uname -a`, `getconf PAGE_SIZE`, `runsc --version`, and
+the relevant kernel log before escalating to ops/vendor.

@@ -78,7 +78,7 @@ interface UIState {
   // 列表刷新版本号 — 右面板表单（创建/编辑/删除）成功后 bump，
   // UserManagementPanel 订阅版本号触发 refetch，避免 prop 钻透
   userMgmtListVersion: number;
-  // 工具 unit 管理（B-4）— 与 user-mgmt 同构的 master-detail：中间面板列表 +
+  // 工具 unit 管理 — 与 user-mgmt 同构的 master-detail：中间面板列表 +
   // 右面板详情/创建。listVersion 由挂载/凭证/CRUD 成功后 bump 触发列表刷新。
   toolUnitRightView: ToolUnitRightView;
   toolUnitListVersion: number;
@@ -157,7 +157,7 @@ interface UIState {
 }
 
 // 初始**数据**态(不含 actions)。单独导出 → 测试可 setState(INITIAL_UI_STATE) 整体复位,
-// 不再手抄字段清单(漏抄会让状态泄漏到下个用例 —— reviewer #7)。新增字段只改这一处。
+// 不再手抄字段清单；漏抄会让状态泄漏到下个用例。新增字段只改这一处。
 type UIData = Omit<UIState,
   | 'toggleSidebar' | 'setSidebarCollapsed' | 'toggleArtifactPanel' | 'setArtifactPanelVisible' | 'autoOpenArtifactPanel'
   | 'setActiveMode' | 'setUserManagementRightView' | 'bumpUserMgmtListVersion'

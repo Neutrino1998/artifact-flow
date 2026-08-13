@@ -1,4 +1,4 @@
-"""Phase C 心跳注册表 + 判色 + ERROR 计数 + marker 代报的单元测试。"""
+"""心跳注册表 + 判色 + ERROR 计数 + marker 代报的单元测试。"""
 
 from __future__ import annotations
 

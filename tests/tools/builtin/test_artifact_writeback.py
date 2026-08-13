@@ -717,7 +717,7 @@ class TestWriteBackInventory:
     ):
         """flush_all 后下一 turn 读 DB 应得到稳定顺序(可复现,不受 PYTHONHASHSEED 影响)。
 
-        Regression(reviewer P2 part 2): `_dirty` was a `set()` so flush iterated
+        Regression: `_dirty` was a `set()` so flush iterated
         in hash order — INSERTs happened in hash order and `created_at` reflected
         flush sequence. Fixed by making `_dirty` insertion-ordered AND adding
         `Artifact.id` tiebreaker in repo.list_artifacts() (since func.now() on
@@ -847,7 +847,7 @@ class TestWriteBackFlushFailure:
 
 
 # ============================================================
-# blob 类 artifact = 不可变单版(C-0):文本编辑工具一律拒
+# blob 类 artifact = 不可变单版：文本编辑工具一律拒绝
 # ============================================================
 
 _DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -904,8 +904,8 @@ class TestBinaryArtifactImmutable:
 
 class TestUploadQuota:
     """per-user blob 配额在写入侧 chokepoint(create_from_upload)守门 —— 覆盖上传 +
-    沙盒 persist,计入「DB 已落 + 本轮已 stage 未 flush」的 blob。这是 reviewer P1
-    的回归:沙盒 persist 此前完全绕过配额。"""
+    沙盒 persist，计入“DB 已落 + 本轮已 stage 未 flush”的 blob。这里防止沙盒
+    persist 再次绕过配额。"""
 
     async def test_blob_under_quota_succeeds(
         self, artifact_service: ArtifactService, session_id: str, monkeypatch
@@ -1126,7 +1126,7 @@ class TestReplaceFromUpload:
     async def test_replace_two_committed_blobs_same_turn_credits_both(
         self, artifact_service: ArtifactService, session_id: str, monkeypatch
     ):
-        """净占用投影回归(reviewer #2):credit 覆盖本轮**全部** replace-staged,
+        """净占用投影回归：credit 覆盖本轮**全部** replace-staged，
         不止当前目标。DB A=600,B=600,配额 1500;A→500 再 B→500(真实终态
         1000)——只按单目标 credit 时 B 的准入算 1200+500-600+500=1600 误拒。"""
         monkeypatch.setattr(config, "ARTIFACT_USER_QUOTA_BYTES", 1500)
@@ -1261,7 +1261,7 @@ class TestReplaceFromUpload:
 
 
 class TestShortSessionPath:
-    """B-5:引擎路径的 ArtifactService 持 db_manager(repository=None)—— DB 读/写各开短
+    """引擎路径的 ArtifactService 持 db_manager(repository=None)，DB 读/写各开短
     retrying session(不绑 turn-long session),WorkingSet 留实例做 turn-live 缓存。
 
     bound-repo 路径(上面所有用例)覆盖不到这条:它构造 ArtifactService(repo)。这里专测

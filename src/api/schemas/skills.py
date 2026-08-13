@@ -89,7 +89,7 @@ class SkillToggleRequest(BaseModel):
 
 
 class FindingItem(BaseModel):
-    """一条 validator finding(E-1 硬门产出;rule id 稳定,前端按 severity 渲染)。"""
+    """一条 validator finding；rule id 稳定，前端按 severity 渲染。"""
     rule: str = Field(..., description="Stable rule id, e.g. 'zip.invalid' / 'md.body_empty'.")
     severity: str = Field(..., description="'error' (rejected) or 'warning' (surfaced only).")
     message: str = Field(..., description="Human-readable explanation.")

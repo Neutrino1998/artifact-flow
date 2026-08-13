@@ -389,7 +389,7 @@ class ConversationRepository(BaseRepository[Conversation]):
 
         # Bulk UPDATE: conversation 自身无属性变化，onupdate 不会触发，
         # 需显式用 DB 时间更新 updated_at。commit 后同 session 已持有的
-        # Conversation 实例会被 expire，不要直接访问其属性（见 CLAUDE.md 规范）
+        # Conversation 实例会被 expire，提交后不要直接访问其属性。
         await self._session.execute(
             update(Conversation)
             .where(Conversation.id == message.conversation_id)

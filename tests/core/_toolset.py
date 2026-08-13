@@ -3,7 +3,7 @@
 生产侧 EffectiveToolset 由 DB 快照解析(core.capabilities.effective_toolset.resolve_all)。引擎/
 上下文构建单测仍用轻量 fake agent 配置(`.tools` = {name: level} dict);本桥按生产
 契约镜像出 EffectiveToolset —— 成员来自 agent 声明的工具,等级在工具对象存在时取自
-工具对象(决策 11:等级唯一来源是工具定义),否则回退 legacy 字面量(无工具对象的
+工具对象（等级唯一来源是工具定义），否则回退 legacy 字面量(无工具对象的
 纯成员判定用例)。
 """
 

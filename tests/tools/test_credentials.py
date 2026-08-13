@@ -1,4 +1,4 @@
-"""工具凭证加密 + 运行期解析单测(B-4;B-5 lazy),纯单元、不碰 DB(用 fake repo/db)。"""
+"""工具凭证加密 + 运行期懒解析单测，纯单元、不碰 DB（用 fake repo/db）。"""
 
 from types import SimpleNamespace
 
@@ -47,7 +47,7 @@ def test_cipher_cross_key_cannot_decrypt():
 
 
 # --------------------------------------------------------------------------
-# CredentialResolver(B-5:execute 期 lazy、按 unit 解密、短 retrying session)
+# CredentialResolver：execute 期按 unit 懒解密，使用短 retrying session
 # --------------------------------------------------------------------------
 
 

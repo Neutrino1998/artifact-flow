@@ -96,7 +96,7 @@ class ToolRegistryRepository(BaseRepository[ToolUnit]):
             self._session.add(m)
 
     async def clear_dept_rules(self, unit_name: str) -> None:
-        """删该 unit 的 dept 规则 —— 决策 10 clear-on-visibility 的**唯一实现**。
+        """删该 unit 的 dept 规则 —— clear-on-visibility 的**唯一实现**。
 
         规则行的 grant/deny 方向派生自资源 visibility,行熬过 visibility 变更 / unit
         删除重建 = 方向静默反转(反授权)。三条路径同调:Manager update_unit(UI 改

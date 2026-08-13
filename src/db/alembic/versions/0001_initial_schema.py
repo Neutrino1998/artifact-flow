@@ -230,7 +230,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('agent_name', 'unit_name'),
     )
 
-    # tool_credentials(B-4):external 工具 unit 级可逆加密凭证。FK→tool_units CASCADE
+    # tool_credentials：external 工具 unit 级可逆加密凭证。FK→tool_units CASCADE
     # (删 unit 连带删密文)。故意无 ToolUnit→credentials relationship,密文不进快照/catalog。
     op.create_table('tool_credentials',
         sa.Column('unit_name', sa.String(length=64), nullable=False),
@@ -244,7 +244,7 @@ def upgrade() -> None:
     )
 
     # ------------------------------------------------------------------
-    # Skill 系统(Phase C-1)。就地写进 squash 0001(全新建库假设,无 0002)。建表序:
+    # Skill 系统。就地写进 squash 0001（全新建库假设，无 0002）。建表序:
     # skills(被 user_skills/department_skill_rules 引用,FK→users/departments 已建)→
     # user_skills / department_skill_rules / department_unit_rules(refs 已建表)。
     # 语义见 models.py 同名类。bundle = LargeBinary(MySQL LONGBLOB tier hint;PG/SQLite 忽略)。

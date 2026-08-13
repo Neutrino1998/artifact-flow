@@ -195,7 +195,7 @@ async def init_globals() -> None:
         _stream_transport,
     )
 
-    # 3.5 登录频控器（ACC-01）。Redis(多 worker 共享)或 InMemory(单机)。
+    # 登录频控器：Redis(多 worker 共享)或 InMemory(单机)。
     if _redis_client is not None:
         from api.services.login_rate_limiter import RedisLoginRateLimiter
         _login_rate_limiter = RedisLoginRateLimiter(
@@ -242,7 +242,7 @@ def _load_tools() -> Dict[str, BaseTool]:
         CallSubagentTool(valid_agents=valid_agents),
         WebSearchTool(),
         WebFetchTool(),
-        # 渐进式披露检索器(B-3):进程级注册、无 per-turn 状态；只有显式配置
+        # 渐进式披露检索器：进程级注册、无 per-turn 状态；只有显式配置
         # search_tools 的 agent 才会获得它。未配置时 deferred unit 回退为完整 schema。
         SearchToolsTool(),
     ]
@@ -378,8 +378,8 @@ async def get_artifact_service(
     """每个请求获得独立的 ArtifactService(自带空 WorkingSet)。
 
     请求级实例 WorkingSet 恒空、不 bind_emit → 读写自然落到纯 DB。这正是删掉
-    旧 _active_managers overlay 后的目标态:REST 读 DB 权威态,turn 中 live 由
-    事件流补(见 artifact-layer-redesign-plan 决策 1/6)。
+    旧 _active_managers overlay 后的目标态：REST 读 DB 权威态，turn 中 live 由
+    事件流补齐。
     """
     repo = ArtifactRepository(session)
     return ArtifactService(repo)
@@ -396,7 +396,7 @@ async def get_conversation_manager(
 async def get_tool_registry_manager(
     session: AsyncSession = Depends(get_db_session),
 ):
-    """每个请求获得独立的 ToolRegistryManager(external 工具 CRUD;B-4)。"""
+    """每个请求获得独立的 ToolRegistryManager（external 工具 CRUD）。"""
     from core.management.tool_registry_manager import ToolRegistryManager
     return ToolRegistryManager(session)
 
@@ -404,7 +404,7 @@ async def get_tool_registry_manager(
 async def get_skill_manager(
     session: AsyncSession = Depends(get_db_session),
 ):
-    """每个请求获得独立的 SkillManager(用户侧 skill 列举 + 个人 toggle;C-3)。"""
+    """每个请求获得独立的 SkillManager（用户侧 skill 列举 + 个人 toggle）。"""
     from core.management.skill_manager import SkillManager
     return SkillManager(session)
 
@@ -412,7 +412,7 @@ async def get_skill_manager(
 async def get_department_access_manager(
     session: AsyncSession = Depends(get_db_session),
 ):
-    """每个请求获得独立的 DepartmentAccessManager(dept 授权规则;G-1)。"""
+    """每个请求获得独立的 DepartmentAccessManager（dept 授权规则）。"""
     from core.management.department_access_manager import DepartmentAccessManager
     return DepartmentAccessManager(session)
 

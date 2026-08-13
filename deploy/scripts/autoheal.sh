@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # autoheal — 重启 unhealthy 的舰队容器,并留可审计的重启痕迹。
 #
-# Phase C 决策 5 的自愈闭环最后一环:wedge → Caddy 被动摘出轮询(秒级)→ 心跳过期
+# 自愈闭环最后一环：wedge → Caddy 被动摘出轮询(秒级)→ 心跳过期
 # 面板变红(≤TTL)→ 本脚本 `docker restart`(≤timer 间隔)→ 恢复进轮询。deadman 的
 # faulthandler 栈仍走 docker logs 供事后定因;本脚本只负责「把卡住的拉起来」。
 #

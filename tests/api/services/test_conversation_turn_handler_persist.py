@@ -96,7 +96,7 @@ class TestPersistEvents:
         captured = {}
 
         async def fake_with_retry(fn):
-            # fn = lambda cm, er: er.batch_create(db_events)  (B-5 reviewer #3: 砍掉 am)
+            # fn = lambda cm, er: er.batch_create(db_events)；artifact manager 不参与事件持久化。
             er = MagicMock()
 
             async def capture_batch(events):

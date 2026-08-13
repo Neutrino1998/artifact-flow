@@ -44,7 +44,7 @@ def resolve_skill_activation(
     visible: Any,  # 支持 `slug in visible` 的容器(EffectiveSkillSet.visible dict)
     parent_active_skills: List[str],
 ) -> Tuple[List[str], List[str]]:
-    """用户按钮激活的 slug 解析(纯函数,C-3)—— 两件正交的事:
+    """用户按钮激活的 slug 解析（纯函数）—— 两件正交的事:
 
       - **to_inject** = 勾选的可见 skill,**只请求内去重**(不按 parent 去重)。重勾一个往轮
         已激活的 skill = 重新注入正文(对齐 agent 自调 read_skill 每次都返回正文,补"正文被
@@ -70,7 +70,7 @@ class ConversationTurnHandler:
         self,
         agents: Dict[str, Any],           # {name: AgentSnapshot}
         tools: Dict[str, BaseTool],        # {name: BaseTool}
-        effective_toolsets: Dict[str, Any],  # {agent_name: EffectiveToolset}(决策 11 单一解析点)
+        effective_toolsets: Dict[str, Any],  # {agent_name: EffectiveToolset}，工具能力单一解析点
         hooks: RuntimeHooks,
         artifact_service: Optional[ArtifactService] = None,
         conversation_manager: Optional[ConversationManager] = None,
@@ -79,7 +79,7 @@ class ConversationTurnHandler:
         db_manager: Optional[Any] = None,
         sandbox_session: Optional[Any] = None,  # duck-typed: status_snapshot(动态上下文快照用,
                                                 # 生命周期归 conversation_turn_factory + TaskScope cleanup)
-        effective_skillset: Optional[Any] = None,  # EffectiveSkillSet(C-2;None = 无 skill)
+        effective_skillset: Optional[Any] = None,  # None = 无 skill 能力
         user_id: Optional[str] = None,  # 当前认证用户；仅供 LLM cache salt 派生
         entry_agent: str = "lead_agent",
     ):
@@ -202,8 +202,8 @@ class ConversationTurnHandler:
             )
 
         # ========== 准备工作 ==========
-        # setup 期对话读写也走 _with_db_retry(B-5):每调一次开短 retrying session,不再
-        # 骑 conversation_turn_factory 预开的 turn-long session(那条已退役)。
+        # setup 期对话读写也走 _with_db_retry：每次调用各开短 retrying session，
+        # 不跨 LLM / authorization 等待持有连接。
         try:
             await self._with_db_retry(
                 lambda cm, er: cm.require_owned(conversation_id, self.user_id)
@@ -273,7 +273,7 @@ class ConversationTurnHandler:
                         "disclosed_tools": list(value.get("disclosed_tools", [])),
                     }
 
-        # 用户点按钮激活(C-3):activate_skills 经 EffectiveSkillSet.visible 校验(可见=正确性,
+        # 用户点按钮激活：activate_skills 经 EffectiveSkillSet.visible 校验(可见=正确性,
         # 不要求 enabled —— 显式激活自己关掉的可见 skill 是合法 opt-in;不可见的静默丢弃,不 404
         # 避免泄露存在性)。拆成两件正交的事(对齐 agent 自调 read_skill:正文每次都返回、名单/
         # 能力幂等去重):
@@ -293,7 +293,7 @@ class ConversationTurnHandler:
 
         # 能力轴 sticky 跨 turn:在已算好的字典上 merge 预烤 skill_grants(全 agent),与 mid-turn
         # read_skill 同入口。activate_skill 幂等,对全量 active_skills(parent∪注入)跑一遍即可。
-        # 工具能力跨 turn 持有 ≠ L3 mount 跨 turn(沙盒 per-turn 销毁,原则 8 护栏)。
+        # 工具能力可跨 turn 持有；L3 mount 不行，因为沙盒按 turn 销毁。
         for agent_name, progressive in agent_progressive_state.items():
             ets = self.effective_toolsets.get(agent_name)
             if ets is None:
@@ -316,7 +316,7 @@ class ConversationTurnHandler:
                 slug, message_id, sorted(granted) or "(none)",
             )
 
-        # 注入集正文:短 session 取 skill_md(B-5),用与 read_skill 相同的 renderer 按
+        # 注入集正文：短 session 取 skill_md，用与 read_skill 相同的 renderer 按
         # lead 激活后的实际 sandbox 能力补齐 bundle 提醒，再供 engine 注入 USER_INPUT。
         # 空正文 skip(不注入 None);查不到=脏 slug,
         # 静默略过。重勾已激活 → 完整指导重注入(对齐 agent read_skill)。

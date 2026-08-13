@@ -1,4 +1,4 @@
-"""utils.skill_zip 单测:定位唯一 SKILL.md + 剥壳前缀(D-1 seed / D-2 mount 共用)。"""
+"""utils.skill_zip 单测：seed 与 mount 共用唯一 SKILL.md 定位和剥壳前缀。"""
 
 import pytest
 

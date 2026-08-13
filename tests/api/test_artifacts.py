@@ -236,7 +236,7 @@ class TestUploadSizeGuard:
 
 
 # ============================================================
-# has_blob:二进制 artifact 在用户路由与 admin 路由都要标对(C-0)
+# has_blob：二进制 artifact 在用户路由与 admin 路由都要标对。
 # ============================================================
 
 _DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"

@@ -26,7 +26,7 @@ if unshare -U /bin/true 2>/dev/null; then
 else
   no "unshare -U → this node is BLOCKED for gVisor"
   echo "     STOP: clone(CLONE_NEWUSER) is denied here. Do not deploy sandbox on this node."
-  echo "     Hand the evidence pack (eval doc §5.3) to ops/vendor. Exiting."
+  echo "     Capture this output, uname -a, PAGE_SIZE, runsc version, and kernel logs for ops/vendor."
   exit 1
 fi
 

@@ -1,4 +1,4 @@
-"""SkillManager 用户侧列举 + 个人 toggle(C-3,DB)。
+"""SkillManager 用户侧列举 + 个人 toggle（DB）。
 
 覆盖:list 只列可见 + 有效启用态(覆盖后)、toggle 写 user_skill、不可见 → 404、
 default 与覆盖态区分(is_overridden)。可见性口径复用 EffectiveSkillSet(单点闸)。

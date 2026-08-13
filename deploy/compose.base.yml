@@ -105,7 +105,7 @@ services:
       # use that bundle through an explicit SSLContext.
       - ${AF_RUNTIME_DEPLOY_DIR:-.}/trust/ca-certificates:/usr/local/share/ca-certificates/artifactflow:ro
       - /etc/localtime:/etc/localtime:ro
-      # autoheal marker (Phase C):宿主 autoheal.sh 追加重启痕迹,backend 只读挂载
+      # autoheal marker：宿主 autoheal.sh 追加重启痕迹，backend 只读挂载，
       # 读本机 instance_id 匹配的最近一条,经心跳 last_autoheal 在面板代报。
       - ${AF_RUNTIME_DEPLOY_DIR:-.}/autoheal:/app/autoheal:ro
     env_file:
@@ -184,8 +184,8 @@ services:
     # workers, alembic, and debug headroom. shared_buffers raised from 128MB
     # default to fit the larger connection count.
     # timezone=UTC: session TZ must match Python utils.time.utc_now() so
-    # server_default=func.now() / onupdate=func.now() write UTC naive (incident
-    # 2026-05-14 PR-tz-unify). /etc/localtime mount below only affects PG log
+    # server_default=func.now() / onupdate=func.now() write UTC naive. /etc/localtime
+    # mount below only affects PG log
     # timestamp rendering, not session timezone — keep for docker-logs readability.
     command: postgres -c max_connections=200 -c shared_buffers=256MB -c timezone=UTC
     volumes:

@@ -48,7 +48,7 @@ export type ResolveDepartmentRequest = S['ResolveDepartmentRequest'];
 export type ResolveDepartmentResponse = S['ResolveDepartmentResponse'];
 
 // ============================================================
-// Tool Registry Types (Admin) — B-4 工具 unit 管理
+// Tool Registry Types (Admin) — 工具 unit 管理
 // ============================================================
 
 export type ToolMemberSpec = S['ToolMemberSpec'];
@@ -68,7 +68,7 @@ export type AgentSummaryResponse = S['AgentSummaryResponse'];
 export type AgentListResponse = S['AgentListResponse'];
 
 // ============================================================
-// Skill Types — 列举/正文预览/toggle (C-3) + 导入/导出/删除 (E-2)
+// Skill Types — 列举/正文预览/toggle + 导入/导出/删除
 // ============================================================
 
 export type SkillItem = S['SkillItem'];

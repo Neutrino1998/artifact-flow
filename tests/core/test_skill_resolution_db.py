@@ -1,4 +1,4 @@
-"""部门祖先链 + SkillRepository + EffectiveSkillSet 端到端(DB,C-2,决策 10)。
+"""部门祖先链 + SkillRepository + EffectiveSkillSet 端到端 DB 测试。
 
 覆盖:祖先链(父覆盖子树)、dept 派生方向(public→deny / department→grant)、user 覆盖。
 """
@@ -66,7 +66,7 @@ async def test_department_skill_granted_via_ancestor_rule(db_session):
     await _tree(db_session)
     db_session.add(_skill("dept-skill", visibility="department"))
     await db_session.flush()
-    # 规则挂在祖先 mid → 覆盖子树 leaf 用户(决策 10 父覆盖)
+    # 规则挂在祖先 mid → 覆盖子树 leaf 用户。
     db_session.add(DepartmentSkillRule(department_id="mid", skill_id="dept-skill"))
     await db_session.flush()
 
@@ -110,7 +110,7 @@ async def test_department_unit_match_via_ancestor_rule(db_session, db_manager):
     await _tree(db_session)
     db_session.add(ToolUnit(name="reports", kind="tool", description="d"))
     await db_session.flush()
-    # 规则挂在祖先 root → 覆盖 leaf 用户所在子树(G-0)。
+    # 规则挂在祖先 root → 覆盖 leaf 用户所在子树。
     db_session.add(DepartmentUnitRule(department_id="root", unit_name="reports"))
     await db_session.flush()
 

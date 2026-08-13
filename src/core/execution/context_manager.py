@@ -44,7 +44,7 @@ class ContextManager:
         agent_name: str,
         agents: Dict[str, Any],  # {name: AgentSnapshot}
         tools: Dict[str, Any],   # {name: BaseTool}
-        effective_toolset: EffectiveToolset,  # 当前 agent 解析后的可调集 + 等级(决策 11)
+        effective_toolset: EffectiveToolset,  # 当前 agent 解析后的可调集 + 等级
         compaction_threshold: int,
         artifacts_inventory: Optional[List[Dict]] = None,
         model: Optional[str] = None,
@@ -256,7 +256,7 @@ class ContextManager:
         """
         parts: List[str] = []
 
-        # 可用工具目录(B-3 渐进式披露)—— per-tool 描述放在尾部 reminder 而非 system
+        # 可用工具目录（渐进式披露）—— per-tool 描述放在尾部 reminder 而非 system
         # prompt 缓存前缀,**是有意的**(两轮 review 都把它当成本/缺陷抓过,故记于此):
         #   catalog 的「成员」会变。C 阶段 skill 能 enable 被 agent disable、本不渲染的
         #   工具 → 可调集随 active skill 变化。若把 catalog 放缓存前缀,skill 一 toggle →
@@ -272,7 +272,7 @@ class ContextManager:
         if available_tools:
             parts.append(available_tools)
 
-        # 可用 skill 列表(L1,C-2)—— 调用方已按 read_skill 成员关系过滤；未配置该
+        # 可用 skill 列表(L1)—— 调用方已按 read_skill 成员关系过滤；未配置该
         # builtin 的 agent 不应看到一个要求它调用不可用工具的目录。与 catalog 同处
         # 尾部 reminder 而非 system 前缀:
         # active skill / user toggle 改的是注入集,放前缀会 toggle 一次打掉整条历史 APC
@@ -282,7 +282,7 @@ class ContextManager:
             parts.append(available_skills_block)
 
         # 系统时间 —— 刻意用本地时间（datetime.now，非 utc_now）：注入提示词的是
-        # 用户本地时间，属 UX，是全局 naive-UTC 约定的既定例外（见 CLAUDE.md）。
+        # 用户本地时间属 UX，是 persistence 一律 naive UTC 的既定例外。
         current_time = datetime.now().strftime("%Y/%m/%d %H:%M:%S %a")
         parts.append(f'<system_time>Current time: {current_time}</system_time>')
 

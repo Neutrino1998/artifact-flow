@@ -57,13 +57,10 @@ async def create_turn_handler(
     The handler belongs to a background task whose
     lifetime exceeds the HTTP request, so it can't ride the request-scoped session.
 
-    B-5: rather than pre-open ONE turn-long session for the whole background task (held
-    idle-in-transaction while awaiting LLM / authorization, and the turn's only DB read
-    with no fresh-session retry), the handler holds the db_manager and opens a SHORT
-    retrying session per DB touch — artifact (ArtifactService.db_manager) / conversation
-    + event (handler._with_db_retry) / credential (resolver.with_retry). Only the
-    one-shot registry snapshot is read here (also on a short session); everything else is
-    lazy inside the handler's ``run`` method.
+    The background task never holds a DB session across LLM or authorization waits.
+    Instead, the handler holds db_manager and opens a short retrying session per DB touch:
+    artifact access, conversation/event persistence, and lazy credential reads. The
+    registry snapshot is also read in a short session; everything else is loaded lazily.
 
     The Conversation execution service supplies the TaskScope and RuntimeStore;
     direct callers should use that service rather than assemble this factory.
@@ -96,7 +93,7 @@ async def create_turn_handler(
     task_scope.add_cleanup("sandbox session", sandbox_session.close)
 
     # ArtifactService 持 db_manager(不绑一条 turn-long session):turn 期每次 DB 读/写各开
-    # 短 retrying session 读完即关(B-5),WorkingSet 留实例做 turn-live 缓存。
+    # 短 retrying session 读完即关，WorkingSet 留实例做 turn-live 缓存。
     artifact_service = ArtifactService(db_manager=db_manager)
 
     # per-turn scope snapshot:agent/tool registry + skill snapshot + user dept rule matches.
@@ -138,8 +135,8 @@ async def create_turn_handler(
     )
 
     # MCP discovery 是外部 HTTP,必须在 DB snapshot session 关闭后执行;否则慢/
-    # 不可达 server 会 pin DB 连接直到 timeout,违背 B-5 短 session 纪律。G-0 先按
-    # 当前用户部门 visibility 过滤 server unit:dept-denied MCP server 不联系。
+    # 不可达 server 会阻塞到 timeout，因此 discovery 必须在 DB snapshot session 关闭后执行。
+    # 先按当前用户部门 visibility 过滤 server unit：dept-denied MCP server 不联系。
     allowed_mcp_units = {
         unit.name
         for unit in snapshot.units.values()
@@ -176,7 +173,7 @@ async def create_turn_handler(
     # active_skills 名单仍 sticky(= 用户意图),能力每轮按可见性重算 → visible=correctness /
     # enabled=UX 的切分落到工具授予轴(admin 撤后又授,下轮 slug 仍在、能力自动回来)。
     visible_skill_snapshot = dict(effective_skillset.visible)
-    # 决策 11 单一解析点:把每 agent 的宇宙(builtin ∪ units)解析成扁平
+    # 单一解析点：把每 agent 的宇宙(builtin ∪ units)解析成扁平
     # {full_name: 等级};等级从工具对象取(绑定不存等级)。引擎/上下文构建全程读这个。
     # Builtin 成员关系只来自 agent 配置。all_tools 中请求级 read_skill/mount_skill
     # 对象的存在只能收窄配置，不能替 agent 扩权；search_tools 同样必须显式配置。
@@ -194,7 +191,7 @@ async def create_turn_handler(
     async def _on_engine_exit(conv_id: str, msg_id: str) -> None:
         await store.clear_engine_interactive(conv_id, msg_id)
 
-    # conversation_manager / message_event_repo 不在此绑 session(B-5):handler 经
+    # conversation_manager / message_event_repo 不在此绑 session：handler 经
     # _with_db_retry 每调一次开短 session。db_manager 模式与 bound-repository 模式在
     # Handler 构造时互斥且完整，生产装配不会静默退化成无持久化执行。
     yield ConversationTurnHandler(

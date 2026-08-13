@@ -1,4 +1,4 @@
-"""HttpTool 运行期凭证注入(B-4;B-5 lazy):resolver 按 unit 解密路径 + env 回落 + 缺凭证。"""
+"""HttpTool 运行期凭证注入：resolver 按 unit 懒解密 + env 回落 + 缺凭证。"""
 
 import os
 import ssl
@@ -50,7 +50,7 @@ def _fake_client(monkeypatch):
 
 class _FakeResolver:
     """模拟 CredentialResolver:resolve(unit) → 预置的 {placeholder: 明文}。
-    execute 期 await 它(B-5 lazy),不碰真 DB。"""
+    execute 期 await 它，不碰真 DB。"""
 
     def __init__(self, values):
         self._values = values

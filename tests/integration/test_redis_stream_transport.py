@@ -341,7 +341,7 @@ class TestOrphanKeyFix:
         # best-effort contract: TTL is set and bounded by execution_timeout
         # (60 in fixture) — never the -1 "no expiry" sentinel a missed EXPIRE
         # would leave behind. (Precise alignment with meta_key's remaining TTL is
-        # deferred to PR-C's lifecycle rework — not asserted here.)
+        # outside this test's best-effort TTL contract and therefore not asserted here.)
         assert 0 < ttl <= 60
 
         # A subsequent (non-first) push must NOT refresh the TTL — pushing events

@@ -229,7 +229,7 @@ class TestCase2b_ShortCJKSpaceDiff:
 
 
 # ============================================================
-# Index mapping correctness (reviewer regression cases)
+# Index mapping correctness regression cases
 # ============================================================
 
 class TestIndexMapCorrectness:

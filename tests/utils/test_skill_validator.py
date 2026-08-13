@@ -1,4 +1,4 @@
-"""utils.skill_validator 单测:E-1 硬门槛 —— 每条 rule 一正一反 + slug 派生 + 上限边界。
+"""utils.skill_validator 硬门槛单测 —— 每条 rule 一正一反 + slug 派生 + 上限边界。
 
 zip 全部内存构造(zipfile.ZipFile(BytesIO, "w"));上限规则经 monkeypatch config 常量
 压小值测边界(== 上限过、上限+1 拒)。

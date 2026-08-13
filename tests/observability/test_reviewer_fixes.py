@@ -1,5 +1,5 @@
 """
-Regression tests for the four reviewer findings on PR-obs-lite:
+Regression tests for four observability boundary conditions:
   - tasks_long_running counts actual long-running tasks
   - mem_limit resolution via env override + cgroup v2 + cgroup v1
   - sampler RSS high-water WARN actually fires when mem_limit is wired

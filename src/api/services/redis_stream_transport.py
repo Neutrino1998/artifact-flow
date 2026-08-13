@@ -145,8 +145,8 @@ class RedisStreamTransport:
         # 检测，省去单独的 exists 预查，并消除 XADD 与 EXPIRE 之间的孤儿窗口。
         # stream/meta 两个 key 共享 stream_id hash tag，Cluster 下是同 slot 操作。
         # best-effort 契约：stream key 必带 TTL（= EXECUTION_TIMEOUT + STREAM_TTL_GRACE，
-        # 覆盖 post-processing）；与 meta_key 剩余 TTL 的精确对齐留给 PR-C（届时
-        # create_stream / TTL bump 移到 RUNNING，时钟起点统一）。
+        # 覆盖 post-processing）。stream 与 meta_key 的 TTL 不保证精确对齐；若以后需要
+        # 强一致，应把 create_stream / TTL bump 移到 RUNNING，统一时钟起点。
         entry_id = await self._script_xadd_with_ttl(
             keys=[stream_key, meta_key],
             args=[event_type, event_json, self._stream_ttl, snapshot_field],

@@ -5,8 +5,8 @@
 有长跑任务、loop_lag 在抬升但还能调度。这类 "走慢了但还回得来" 状态下用它看
 实时水位。
 
-**不是硬 wedge 第一入口** — 本身就是 FastAPI 协程端点,事件循环卡死它跟
-/health/live 一样无响应(本次 2026-05-14 事故已证)。硬 wedge 的第一入口是
+**不是硬 wedge 第一入口** — 本身就是 FastAPI 协程端点；事件循环卡死时它与
+/health/live 一样无响应。硬 wedge 的第一入口是
 DeadmanSwitch 的 stderr dump + docker healthcheck 状态 + `kill -USR1 <pid>`
 手动 dump,全在 Python 解释器之外。
 """
@@ -172,7 +172,7 @@ async def list_instances(
     _admin: TokenPayload = Depends(require_admin),
 ):
     """
-    舰队实例面板数据源(Phase C 决策 4)。
+    舰队实例面板数据源。
 
     多副本(Redis):scan `{prefix:instance:*}` + pipelined GET fan-out(镜像
     RedisRuntimeStore.list_active_executions,Cluster-safe —— 无跨 slot 多 key 操作),
@@ -238,8 +238,8 @@ async def list_instances(
                 payload["status"] = _status_from_reasons(payload["status_reasons"])
                 instances.append(payload)
     except Exception as e:
-        # scan/pipeline 失败是**已处理的降级**(返空表 200,非 5xx),按 CLAUDE.md 日志
-        # 规矩属 expected/handled → warning 且不带栈(栈无 useful 信息)。面板 10s 轮询,
+        # scan/pipeline 失败是**已处理的降级**(返空表 200,非 5xx)，属 expected/handled，
+        # 因此用 warning 且不带栈(栈无 useful 信息)。面板 10s 轮询,
         # 带 exc_info 会让一次 Redis 抖动每 10s 每个管理员刷一坨栈。
         logger.warning(f"Failed to scan instance heartbeats for /admin/instances: {e}")
 

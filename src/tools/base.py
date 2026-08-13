@@ -72,7 +72,7 @@ class ToolExecutionContext:
 
     **只装非密的描述性事实**(谁在调、本 turn 有哪些工具、调用方 agent 的可调视图)——
     判别器:进得来的东西必须「描述性、非密、可安全 log、可安全给沙盒」。
-    **secret(凭证 / OAuth)永不走这条**:它走 B-4 的独立 credential resolver(懒解、
+    **secret(凭证 / OAuth)永不走这条**：它走独立 credential resolver（懒解、
     只解被调工具、对沙盒不发放),否则会同时撞穿沙盒红线 + 日志泄露面 + lazy 纪律。
 
     `effective_toolset` 故意宽松类型(``Any``)—— 它的实体是 `core.capabilities.effective_toolset.
@@ -210,13 +210,13 @@ SEARCH_TOOLS_NAME = "search_tools"
 
 # 进程级 builtin 工具(代码定义、for-everyone、不入 DB 注册表)。与 RESERVED(请求级
 # artifact/sandbox 工具)合起来 = 全部 builtin 名,reconciler 据此把 agent MD `tools:`
-# 条目分流 builtin vs external unit(决策 11);builtin 等级 = 工具定义、不进 agent_units。
+# 条目分流 builtin vs external unit；builtin 等级来自工具定义，不进 agent_units。
 GLOBAL_BUILTIN_TOOL_NAMES = {"web_search", "web_fetch", "call_subagent", SEARCH_TOOLS_NAME}
 BUILTIN_TOOL_NAMES = RESERVED_TOOL_NAMES | GLOBAL_BUILTIN_TOOL_NAMES
 
 
 def is_builtin_name(name: str) -> bool:
-    """external 名是否撞 builtin/reserved(决策 11 的 full_name 全局唯一不变量)。
+    """external 名是否撞 builtin/reserved，守住 full_name 全局唯一不变量。
 
     单一谓词,写侧种子校验(reconcile)与读侧快照兜底(snapshot)共用 —— 不变量的
     规则只此一处,两侧覆盖不会发散(否则一侧加了新 reserved 形态、另一侧忘加,撞名
@@ -230,10 +230,10 @@ def resolve_allowed_tool_entry(
     known_unit_names: "set",
     known_full_names: Dict[str, str],
 ) -> Optional[str]:
-    """把一条 `allowed-tools` 条目解析到它归属的 **unit**(决策 11 line 235,纯 exact-match)。
+    """把一条 `allowed-tools` 条目按 exact-match 解析到它归属的 **unit**。
 
     skill 的 `allowed-tools` 与 dept/agent 一律 unit 粒度。import(校验存在性)与
-    runtime(C-2 建 skill_grants)**共用此一个函数**,避免两侧解析口径漂移(reviewer P2)。
+    runtime 构建 skill_grants 时**共用此一个函数**，避免两侧解析口径漂移。
 
     解析序(exact-match,无模糊):
       ① builtin/reserved 名 → 该 builtin(= singleton unit,标准 allowed-tools 逐名原样工作);

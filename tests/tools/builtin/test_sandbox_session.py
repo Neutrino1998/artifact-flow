@@ -836,7 +836,7 @@ class TestStatusSnapshot:
         assert snap["truncated"] is True
 
     def test_snapshot_scan_is_bounded_not_full_materialize(self, session, monkeypatch):
-        # reviewer P2 回归:顶层条目数模型可控,快照必须有界扫(cap+1 即停),
+        # 顶层条目数模型可控，快照必须有界扫描（cap+1 即停）。
         # 不得全量物化整个目录 —— 断言传给 list_dir 的 max_entries
         from tools.builtin import sandbox_session as ss_mod
 

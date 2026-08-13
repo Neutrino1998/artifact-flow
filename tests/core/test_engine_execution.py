@@ -1362,7 +1362,7 @@ class TestCancellation:
 
 
 class TestCancelProbeFailure:
-    """check_cancelled 探针故障（Redis 瞬断）的 fail-open 语义（reviewer F2 回归）：
+    """check_cancelled 探针故障（Redis 瞬断）的 fail-open 语义：
     探针异常绝不伪装成它所落的消费点的故障 —— 工具不被杀、流式不记 "LLM call
     failed"、loop 顶不 ERROR 整个 turn。持续故障的 fail-closed 兜底在
     heartbeat/lease 层（ConversationLeaseHandle 失效 → 外部 task.cancel），不在探针。"""
@@ -2046,7 +2046,7 @@ class TestInEngineCompaction:
 
 
 # ============================================================
-# TestSkillActivation (C-2: per-agent skill state + skill_grants merge)
+# TestSkillActivation：per-agent skill state + skill_grants merge
 # ============================================================
 
 
@@ -2163,7 +2163,7 @@ class TestSkillActivation:
         assert "granted_tool" not in eff
 
     async def test_button_activation_injects_body_into_user_input(self):
-        """C-3:用户按钮激活 → turn handler 传 activated_skill_bodies → engine 注入 USER_INPUT
+        """用户按钮激活 → turn handler 传 activated_skill_bodies → engine 注入 USER_INPUT
         正文(仅 LLM 可见,同 force_compact/上传路径),让模型即刻看到 skill 指令。"""
         from core.capabilities.effective_toolset import EffectiveToolset
         from core.capabilities.skill_guidance import render_skill_guidance

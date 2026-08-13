@@ -265,8 +265,7 @@ export interface paths {
          *     不会被某一行污染到影响后续行。
          *
          *     其他异常（OperationalError 等基础设施级故障）冒泡为 5xx loud failure —
-         *     此时第 1 条就会失败、循环本就进不下去；与 CLAUDE.md "不为不会发生的场景
-         *     加防御代码" 一致，故不做广泛 except。
+         *     此时第 1 条就会失败、循环本就进不下去，故不做无法触发的广泛 except。
          */
         post: operations["bulk_delete_conversations_api_v1_chat_bulk_delete_post"];
         delete?: never;
@@ -862,7 +861,7 @@ export interface paths {
         };
         /**
          * List Instances
-         * @description 舰队实例面板数据源(Phase C 决策 4)。
+         * @description 舰队实例面板数据源。
          *
          *     多副本(Redis):scan `{prefix:instance:*}` + pipelined GET fan-out(镜像
          *     RedisRuntimeStore.list_active_executions,Cluster-safe —— 无跨 slot 多 key 操作),
@@ -2718,7 +2717,7 @@ export interface components {
         };
         /**
          * FindingItem
-         * @description 一条 validator finding(E-1 硬门产出;rule id 稳定,前端按 severity 渲染)。
+         * @description 一条 validator finding；rule id 稳定，前端按 severity 渲染。
          */
         FindingItem: {
             /**

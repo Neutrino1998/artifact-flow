@@ -86,7 +86,7 @@ export function skillRowBorderClass(skill: SkillItem): string {
     : 'border-border dark:border-border-dark';
 }
 
-// 用户侧技能管理(C-3 列举/toggle + E-2 导入/导出/删除)。中间面板接管(同
+// 用户侧技能管理：列举/toggle + 导入/导出/删除。中间面板接管(同
 // ConversationBrowser),点击条目时按需在右栏预览正文。个人开关写 user_skill 覆盖,控 `enabled`
 // (进不进模型 L1 索引 + 对话内激活选择器),不碰 `visible`(系统定)。
 // 导入:user 私有(仅自己可见、立即启用)/ admin 可选共享(public/department、默认开关);

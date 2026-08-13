@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-# HOST-side network policy probe (plan §B / 原则 7). Verifies the two ends of the
+# HOST-side network policy probe. Verifies the two ends of the
 # spectrum that are mechanically testable on an air-gapped node, and documents
 # the allowlist middle ground (which is a host firewall rule, not a docker flag).
 #
@@ -11,7 +11,7 @@ set -uo pipefail
 # Because the intranet has no public internet, "public blocked" can't be told
 # apart from "no internet at all" — so we test reachability of an INTERNAL host
 # you name, under none (must be BLOCKED) vs bridge (must be OPEN). The default
-# PRODUCTION policy is --network=none (原则 7); allowlist is the retained fallback.
+# PRODUCTION policy is --network=none; allowlist is the retained fallback.
 #
 # Env:
 #   IMAGE       default artifactflow-sandbox:latest
@@ -76,7 +76,7 @@ cat <<'NOTE'
   NOTE: the allowlist middle ground (egress to ONLY the deps mirror) is a HOST
   firewall rule scoping bridge egress to mirror-ip:443 — not a docker flag.
   Test it after pointing a rule at the operator's chosen mirror. Default
-  production policy is --network=none (原则 7); allowlist is the kept fallback.
+  production policy is --network=none; allowlist is the kept fallback.
 NOTE
 
 echo "network: $pass passed, $fail failed, $skip skipped"

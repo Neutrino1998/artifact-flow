@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     # 隐藏旋钮，不进入模型参数，也不暴露给 agent。
     COMPACTION_RESERVE_TOKENS: int = Field(default=20_000, gt=0)
     # 上一轮 input+output / 阈值 ≥ 此比例时，向 agent 注入 <context_usage> 预警(临近 compaction
-    # → 提示把要据此动作的状态落 artifact)。隐藏实现旋钮，模型不可见(见 CLAUDE.md 工具参数面最小化)。
+    # → 提示把要据此动作的状态落 artifact)。这是隐藏实现旋钮，不暴露给模型。
     CONTEXT_USAGE_WARN_RATIO: float = 0.8
     COMPACTION_TIMEOUT: int = 300            # 秒, 单次 compact LLM 调用超时（thinking 模型压缩 ~100k token 输入需较长 TTFT+生成时间，120s 偏紧）
     INVENTORY_PREVIEW_LENGTH: int = 200     # artifact 清单内容预览截断长度
@@ -113,23 +113,22 @@ class Settings(BaseSettings):
     # events 表的 TIMED_OUT 终态事件,不靠这个串区分。
     TIMED_OUT_RESPONSE: str = "*Task timed out*"
     SESSION_GREP_MAX_TOTAL: int = 200       # grep_artifact session 模式总命中上限（隐藏，不暴露给模型）
-    # grep_artifact 资源护栏（隐藏常量，模型不可见）。设计原则:grep 是 line-oriented 的
-    # best-effort 搜索 —— 把**输入/输出 envelope** 一次性定死,envelope 内全物化才安全,
-    # 超出即截断 + surface "search incomplete"。不为对抗性巨输入逐 pass 补 cap（详见
-    # docs/_archive/reviews/sec-review-findings.md「Reviewer 复审收口」第 3 轮）。
+    # grep_artifact 资源护栏（隐藏常量，模型不可见）。grep 是 line-oriented 的
+    # best-effort 搜索：固定输入/输出 envelope，超出即截断并标记 "search incomplete"；
+    # 不为对抗性巨输入逐 pass 叠加额外 cap。
     # 注意全部是 **CPU/扫描护栏**,不是内存护栏:session 峰值内存由"载入多少"决定（list
     # 查询 eager-load `Artifact.content` + cache 累积）,那是**有意接受的 best-effort**
-    # （真 bound 需 repo 列投影 + 绕 cache,对内存从未爆过的 🟡 不划算,见 GREP-02）。
+    # （真 bound 需 repo 列投影 + 绕 cache；当前接受峰值内存约等于全部 session content）。
     GREP_CONTENT_MAX_CHARS: int = 2_000_000         # 单 artifact 扫描字符上限。**值由"pre-scan 物化保持有界"反推,
                                                     # 非"artifact 最大能多大"**:_scan_content 先对整篇 splitlines×2 +
                                                     # 建 line_starts,成本 O(行数)。2MB 最坏(全 "x\n",100万行)≈102MB /
-                                                    # 520ms,有界;20MB 会 ~1GB(reviewer P1)。超即截断扫描量 + surface
+                                                    # 520ms,有界;20MB 会 ~1GB。超即截断扫描量 + surface
     GREP_MAX_LINE_CHARS: int = 1000                 # 单行进结果的字符上限（ripgrep --max-columns 式）。挡"单条巨行
-                                                    # 命中→整行塞进 ToolResult"（reviewer P2:5M 行→5M body）。超即截断 + 标记
+                                                    # 命中→整行塞进 ToolResult"。超即截断 + 标记
     GREP_SESSION_SCAN_BUDGET_CHARS: int = 16_000_000  # session 单次调用聚合扫描字符预算（很多中等 artifact 时限总扫描功 + splitlines）
     GREP_MAX_SCAN_MATCHES: int = 200_000            # finditer 原始命中迭代上界,**per 工具调用**(session 模式跨 artifact
                                                     # 累计共享,不是每个 artifact 重置 —— 否则 200 个密集单行 artifact 累计
-                                                    # 40M 迭代、~86s 同步 wedge,reviewer round 4)。max_count 只数"去重后的
+                                                    # 40M 迭代、~86s 同步 wedge）。max_count 只数"去重后的
                                                     # 行",单行海量命中时永远到不了它 → finditer 被抽干(同步 CPU wedge,
                                                     # 2026-05-14 同源失败模式的另一个轴)。mirror update_artifact 的
                                                     # MAX_UNIQUE_CENTERS:cap 真正烧 CPU 的量。实测 200K 原始命中 ≈380ms
@@ -140,8 +139,7 @@ class Settings(BaseSettings):
     GREP_MAX_CONTEXT: int = 100                     # context 行数上界（防超大窗口铺满全文）
     GREP_MAX_COUNT: int = 1000                      # max_count 上界（去重后行级命中数）
 
-    # update_artifact Layer 2 fuzzy match（v6 锚定 + RapidFuzz 校验；详见
-    # docs/_archive/ops/incident-2026-05-14-fix-plan.md PR-1 spec）。
+    # update_artifact Layer 2 fuzzy match（v6 锚定 + RapidFuzz 校验）。
     # 所有常量隐藏，模型不可见，仅供算法实现使用。
     ANCHOR_SHINGLE_LEN: int = 6                # shingle 切分长度（最终生效值受鸽巢约束）
     ANCHOR_MIN_USABLE_LEN: int = 3             # 鸽巢推完的 L 低于此值则当场 bail
@@ -170,7 +168,7 @@ class Settings(BaseSettings):
                                                # 打开作为 "持久卷未挂载" 的兜底,代价是污染主应用日志流 / docker logs)
                                                # env 覆盖:`ARTIFACTFLOW_OBS_STDOUT_MIRROR=true`(env_prefix 强制带前缀)
 
-    # 舰队心跳注册表(Phase C):sampler 每 tick 把快照子集写 `{prefix:instance:<id>}`,
+    # 舰队心跳注册表：sampler 每 tick 把快照子集写 `{prefix:instance:<id>}`,
     # 管理端 /admin/instances scan 出全舰队。双时间轴红/黄:key TTL 放长,颜色由
     # payload 内 `ts` 新鲜度在读侧判(详见 observability/heartbeat.py 文档)。
     OBS_HEARTBEAT_TTL_SEC: int = 300           # 心跳 key TTL;> STALE 数倍,给 wedge 实例留「在册显红」窗口
@@ -203,7 +201,7 @@ class Settings(BaseSettings):
     # 文本转换路径(DocConverter._convert_text)的独立、更低字节闸。文本是唯一无自身
     # 成本 envelope 的转换路径:charset 检测 + str(best) + split() 会**物化整份解码
     # 内容 + 词列表**,内存放大远超输入字节,且跑在 event loop 上(2026-05-14 wedge 同类)。
-    # docx/pdf 存原 blob 不解析(C-0 起 blob-only)、图片存原 blob 不物化文本,只有裸
+    # docx/pdf 与图片均存原 blob，不预解析或物化文本；只有裸
     # 文本会随 200MB 上传上限线性放大 → 给它保留旧的 20MB envelope。字节上界是首要护栏
     # (to_thread 只缓解 loop 阻塞,解不了内存)。隐藏常量,operator 可调。
     MAX_TEXT_CONVERT_BYTES: int = 20 * 1024 * 1024  # 20MB
@@ -220,7 +218,7 @@ class Settings(BaseSettings):
     # 软上限:跨会话并发可略微超额,挡量级非字节级。0 = 不限(禁用)。operator 经 env 可调。
     ARTIFACT_USER_QUOTA_BYTES: int = 2 * 1024 * 1024 * 1024  # 2GB
 
-    # Skill 导入硬门槛(Phase E,utils/skill_validator;隐藏常量,operator 经 env 可调)。
+    # Skill 导入硬门槛（utils/skill_validator；隐藏常量，operator 经 env 可调）。
     # 宿主侧只读 namelist + SKILL.md 一个成员,全包解压归沙盒 —— 这组上限是 bomb 预拒,
     # 沙盒 watchdog 仍是真兜底。单 zip 字节上限刻意 ≤ 代理层 request_body max_size,
     # 别声明一个过不了边缘的数(deploy/caddy)。
@@ -228,11 +226,11 @@ class Settings(BaseSettings):
     # 实时 COUNT,不在 User 上存同步计数器；-1 = 不限，0 = 关闭个人导入，正数 = 上限。
     # admin shared skill(owner=NULL)不计数。ge=-1 让非法负数在 Settings 构造期 loud-fail。
     SKILL_USER_MAX_PRIVATE_COUNT: int = Field(default=3, ge=-1)
-    # bundle 字节仍计入 ARTIFACT_USER_QUOTA_BYTES 共用池(原则 7③;记账在
+    # bundle 字节仍计入 ARTIFACT_USER_QUOTA_BYTES 共用池；记账在
     # ConversationManager.get_user_upload_bytes,413 闸与存储条同口径)。
     SKILL_BUNDLE_MAX_BYTES: int = 200 * 1024 * 1024     # 单个 skill zip 上限,对齐 MAX_UPLOAD_SIZE
                                                         # 的「单文件 200MB」口径(边缘 210MiB 放得下)。
-                                                        # 执行点 = E-2 导入端点(非 validator:按信任
+                                                        # 执行点 = 导入端点(非 validator：按信任
                                                         # 分层,seed/admin 无闸,wheels bundle 合法可超)
     SKILL_ZIP_MAX_MEMBERS: int = 2000                   # zip 文件成员数上限
     SKILL_ZIP_MAX_UNCOMPRESSED_BYTES: int = 500 * 1024 * 1024  # 声明解压总量上限
@@ -313,7 +311,7 @@ class Settings(BaseSettings):
     CUSTOM_TOOL_SECRET_PREFIX: str = "TOOL_SECRET_"  # 自定义工具 {{VAR}} 只能解析此前缀的环境变量；
                                                      # 把签名密钥 / DB 密码挡在自定义工具可触及范围外
 
-    # 工具凭证主密钥(B-4)。external 工具凭证可逆加密落库(tool_credentials),此密钥
+    # 工具凭证主密钥。external 工具凭证可逆加密落库(tool_credentials),此密钥
     # 加密/解密用 —— 单把、不轮转、与 JWT_SECRET 同信任模型(DB dump 无此密钥=废密文)。
     # 生成:python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     # **强制**:validate_config 缺它即 fail-to-start(同 JWT_SECRET)。无凭证部署也须设——
@@ -378,7 +376,7 @@ class Settings(BaseSettings):
                                               # 故调高 PASSWORD_HISTORY_COUNT(≤RETAIN+1)即生效、无需再迁移。
                                               # 这是 history-count 解耦 retain 的关键:列存得比当前查得多。
 
-    # 登录频控(ACC-01;隐藏常量)。per-username + per-IP 各自单键计数,Cluster 安全
+    # 登录频控（隐藏常量）。per-username + per-IP 各自单键计数，Cluster 安全
     # (绝不跨键 multi-key)。失败累计超阈 → 429 锁定至窗口过期。
     LOGIN_MAX_FAILURES: int = 5               # 窗口内最大失败次数,达到即拒
     LOGIN_FAILURE_WINDOW_SEC: int = 900       # 失败计数滑窗 / 锁定时长(秒),15 分钟
@@ -435,7 +433,7 @@ def validate_config() -> None:
         CredentialCipher(config.CREDENTIAL_KEY)
     except CredentialKeyError as e:
         raise RuntimeError(str(e)) from e
-    # CORS footgun guard (DEP-01): with credentials enabled, Starlette reflects
+    # CORS footgun guard: with credentials enabled, Starlette reflects
     # the request Origin whenever CORS_ORIGINS contains "*", which silently turns
     # an env misconfig (ARTIFACTFLOW_CORS_ORIGINS='["*"]') into "any site may read
     # authenticated responses". The default config is a concrete allowlist (safe);

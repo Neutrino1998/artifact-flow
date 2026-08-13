@@ -1,5 +1,5 @@
 """
-PR-3 — handler persist-on-external-cancel tests.
+Handler persist-on-external-cancel tests.
 
 Bug ④ (2026-05-14 incident): when the outer execution task is cancelled
 externally (lease fencing / shutdown), `CancelledError` is `BaseException` and
@@ -845,7 +845,7 @@ class TestPersistOnExternalCancel:
 
     async def test_response_update_race_does_not_double_write(self):
         """
-        Cancel-mid-await race (reviewer P2): cancel lands during
+        Cancel-mid-await race: cancel lands during
         `await update_response_async(...)` — AFTER the DB may have committed
         but BEFORE the success path can set a "wrote it" flag. asyncio
         cancellation cannot unsend bytes that already left the machine, so
@@ -1296,7 +1296,7 @@ class TestPersistOnExternalCancel:
 
 
 # ============================================================
-# PR-B — execution timeout → TIMED_OUT terminal (single authority)
+# Execution timeout → TIMED_OUT terminal (single authority)
 # ============================================================
 
 

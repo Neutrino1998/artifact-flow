@@ -40,11 +40,11 @@ from utils.validators import is_config_entry
 logger = get_logger("ArtifactFlow")
 
 _VALID_PERMISSIONS = {"auto", "confirm"}
-_VALID_VISIBILITY = {"public", "department"}  # unit 无 private(决策 1)
-_VALID_SKILL_VISIBILITY = {"private", "public", "department"}  # skill 独有 private(决策 1)
+_VALID_VISIBILITY = {"public", "department"}  # unit 无 private
+_VALID_SKILL_VISIBILITY = {"private", "public", "department"}  # skill 独有 private
 _ZIP_FIXED_DATE = (1980, 1, 1, 0, 0, 0)
 _ZIP_FIXED_MODE = 0o644
-# skill frontmatter 里系统单独消费的 key(其余 → meta JSON 杂项列,决策 3)
+# skill frontmatter 里系统单独消费的 key；其余进入 meta JSON 杂项列
 _SKILL_CONSUMED_FM_KEYS = {
     "name", "description", "allowed-tools", "compatibility", "visibility", "default_enabled",
 }
@@ -63,7 +63,7 @@ class SeedError(ValueError):
 class MemberSeed:
     member_name: str          # 作者裸名
     full_name: str            # 注册/可调名:set=<unit>__<member>;singleton==unit_name
-    permission: str           # auto | confirm —— 等级唯一来源(决策 11)
+    permission: str           # auto | confirm —— 等级唯一来源
     definition: Dict          # http 配置(endpoint/method/headers/input_schema/...)+ description
 
 
@@ -126,7 +126,7 @@ def _content_hash(payload) -> str:
 
 
 def _split_frontmatter(path: str) -> Tuple[dict, str]:
-    """读 MD 文件 → (frontmatter dict, body)。方言在 utils.frontmatter(E-1 抽出,
+    """读 MD 文件 → (frontmatter dict, body)。方言统一由 utils.frontmatter 解析，
     validator/seed 共用一套解析);此处只把 FrontmatterError 转 SeedError。"""
     with open(path, "r", encoding="utf-8") as f:
         content = f.read()
@@ -152,7 +152,7 @@ def _validate_unit_name(name: str, source: str) -> None:
     if not name:
         raise SeedError(f"{source}: tool unit missing 'name'")
     if "__" in name:
-        # `<unit>__<tool>` 前缀分隔保留 → unit 名禁含 `__`(决策 11)
+        # `<unit>__<tool>` 依赖此前缀分隔，因此 unit 名禁含 `__`
         raise SeedError(f"{source}: unit name '{name}' must not contain '__'")
 
 
@@ -183,7 +183,7 @@ def _build_http_member(frontmatter: dict, body: str, *, unit_name: str,
     member_name = frontmatter.get("name")
     if not member_name:
         raise SeedError(f"{source}: tool/endpoint missing 'name'")
-    # member 段允许 `__`(MCP 合法名 `^[a-zA-Z0-9_-]{1,64}$`,决策 11):full_name
+    # member 段允许 `__`（MCP 合法名 `^[a-zA-Z0-9_-]{1,64}$`）：full_name
     # 解析靠剥已知 unit 前缀、绝不 split `__`,故 `github__foo__bar` 合法。仅 unit
     # 名禁 `__`(前缀分隔保留),那个检查在 _validate_unit_name。
 
@@ -214,7 +214,7 @@ def _build_http_member(frontmatter: dict, body: str, *, unit_name: str,
     except InputSchemaError as e:
         raise SeedError(f"{source}: {e}") from e
 
-    # SSRF-02 load-time 闸门:endpoint/headers 的 {{VAR}} 必须白名单前缀
+    # load-time secret 闸门：endpoint/headers 的 {{VAR}} 必须使用白名单前缀。
     assert_secret_refs_allowed(frontmatter.get("endpoint", ""))
     assert_secret_refs_allowed(frontmatter.get("headers", {}) or {})
     try:
@@ -247,8 +247,8 @@ def _build_http_member(frontmatter: dict, body: str, *, unit_name: str,
         raise SeedError(f"{source}: {e}") from e
 
     # method/timeout 归一化与 dynamic CRUD(tool_registry_manager._build_definition)同口径:
-    # 同一工具经 MD vs API 落库的 definition 必须一致,否则 seed_hash / GET 展示漂移
-    # (reviewer #7;运行期虽被 HttpTool.__init__ 的 .upper() 兜住,存储形态仍应统一)。
+    # 同一工具经 MD vs API 落库的 definition 必须一致，否则 seed_hash / GET 展示漂移；
+    # 运行期虽会再次规范化 method，存储形态仍应统一。
     definition = {
         "description": description,
         "endpoint": frontmatter.get("endpoint", ""),
@@ -313,8 +313,8 @@ def parse_tool_seeds(tools_dir: str) -> List[ToolUnitSeed]:
 def parse_mcp_seeds(mcp_dir: str) -> List[ToolUnitSeed]:
     """解析 config/mcp/*.md → ToolUnitSeed(kind=mcp,provider=mcp)。
 
-    F-1 只物化 server unit,不调用 `tools/list`,也不写 tool_members。运行期成员由 F-2M
-    的 MCP client 填入 snapshot/registry。
+    此处只物化 server unit，不调用 `tools/list`，也不写 tool_members。运行期由
+    MCP client 发现成员并填入 snapshot/registry。
     """
     seeds: List[ToolUnitSeed] = []
     if not os.path.isdir(mcp_dir):
@@ -508,13 +508,13 @@ def parse_agent_seeds(
     """
     解析 config/agents/ → AgentSeed 列表。
 
-    把 agent MD `tools:` 条目按 BUILTIN_TOOL_NAMES 分流(决策 11):
+    把 agent MD `tools:` 条目按 BUILTIN_TOOL_NAMES 分流:
       - builtin 名 → builtin_tools
       - 已注册 unit 名 / `<unit>__<tool>` full_name → agent_units(整 unit)
       - 其余 → loud-fail(未知工具)
 
-    MD 值 = 成员态 `enabled` | `disabled`(决策 11:绑定只声明成员态,**不含等级**
-    —— 等级唯一来源是工具定义)。旧字面量 `auto`/`confirm`(等级)在此 loud-fail,
+    MD 值 = 成员态 `enabled` | `disabled`（绑定只声明成员态，**不含等级**；
+    等级唯一来源是工具定义）。旧字面量 `auto`/`confirm`(等级)在此 loud-fail,
     逼迫显式迁移,避免「写了个等级却被静默忽略」的假配置。
 
     known_unit_names / known_full_names 来自已 reconcile 的 DB(seeded+dynamic),
@@ -554,7 +554,7 @@ def parse_agent_seeds(
             elif tool_name in known_unit_names:
                 unit_states[tool_name] = state
             elif tool_name in known_full_names:
-                # 引用 set 成员全名 → 归属整 unit(整 unit grant,决策 11)
+                # 引用 set 成员全名 → 归属整 unit（授权粒度是 unit）
                 unit_states[known_full_names[tool_name]] = state
             else:
                 raise SeedError(
@@ -587,7 +587,7 @@ def parse_agent_seeds(
 
 
 # --------------------------------------------------------------------------
-# skills(Phase C)
+# skills
 # --------------------------------------------------------------------------
 
 
@@ -597,19 +597,19 @@ def parse_skill_seeds(
     known_unit_names: set,
     known_full_names: Dict[str, str],
 ) -> List["SkillSeed"]:
-    """解析 config/skills/ → SkillSeed 列表。两种形态(D-1):
+    """解析 config/skills/ → SkillSeed 列表。支持两种形态:
 
     - **prose skill = `config/skills/<slug>/` 目录**,仅一个 SKILL.md → 入库时也
       存一个只含 SKILL.md 的 deterministic zip,`has_extra_files=False`。
       目录里出现 SKILL.md 以外的真实文件(references/scripts)→ **loud-fail 指向 zip**
       (防"以为打了 bundle、附属文件却被静默丢")。
     - **bundle skill = `config/skills/<slug>.zip`**,slug = 文件名去 `.zip`。存**原始 zip
-      字节**(决策 3 无损),`seed_hash=sha256(字节)`;从 zip 里定位唯一 SKILL.md 解 frontmatter。
+      字节**，`seed_hash=sha256(字节)`；从 zip 里定位唯一 SKILL.md 解 frontmatter。
 
     zip 形态对齐社区/Anthropic 分发(claude.ai/API 上传即 zip),我方是"服务端 ingest"场景
     (读进 DB、沙盒经 mount 消费),故不像本地 agent 用 config 目录当运行时。
 
-    `allowed-tools` import 期对全局 ceiling 校验存在性,解析不到 → warn 不 fail(决策 11 line 237)。
+    `allowed-tools` import 期对全局 ceiling 校验存在性，解析不到 → warn 不 fail。
     """
     seeds: List[SkillSeed] = []
     if not os.path.isdir(skills_dir):
@@ -627,8 +627,8 @@ def parse_skill_seeds(
             slug = entry[: -len(".zip")]
         else:
             continue  # 其它顶层散文件(非目录、非 .zip)忽略
-        # 结构化 pre-parse 撞名:`foo/` 与 `foo.zip` 同 slug → 否则 reconciler 两次 add
-        # 同 PK 炸不透明 IntegrityError / 已种库 last-writer-wins 永久 churn(reviewer)。
+        # 结构化 pre-parse 撞名：`foo/` 与 `foo.zip` 同 slug。否则 reconciler 两次 add
+        # 会撞同一 PK，或让已种库发生 last-writer-wins 的永久 churn。
         if slug in seen:
             raise SeedError(
                 f"skill slug '{slug}' from '{entry}' collides with '{seen[slug]}'; "
@@ -680,7 +680,7 @@ def _skill_seed_from_md(
     allowed_tools = _normalize_allowed_tools(frontmatter.get("allowed-tools"), where)
     for entry in allowed_tools:
         if resolve_allowed_tool_entry(entry, known_unit_names, known_full_names) is None:
-            # 决策 11 line 237:校验存在性,解析不到 = warn 不 fail(unit 后续可挂 / 可建)
+            # 校验存在性；解析不到只 warn，不阻止 unit 后续挂载或创建。
             logger.warning(
                 "skill %r: allowed-tools entry %r resolves to no known tool unit "
                 "(builtin / external unit / <unit>__<tool>) — kept as-is, resolved at runtime",
@@ -741,7 +741,7 @@ def _parse_skill_zip(
     known_unit_names: set,
     known_full_names: Dict[str, str],
 ) -> "SkillSeed":
-    """bundle skill(`<slug>.zip`)。存原始字节;结构/内容校验整体走 E-1 硬门槛
+    """bundle skill(`<slug>.zip`)。存原始字节；结构/内容统一走硬门槛 validator
     validator(`utils.skill_validator`,seed 与用户导入同一道门、永不漂移):error
     findings → SeedError(seed 受信边界 loud-fail,operator 改 config);warning →
     log 不拦(operator 自负)。mount 侧据此可信「结构必对」、零校验。"""

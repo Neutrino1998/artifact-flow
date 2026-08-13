@@ -1,22 +1,22 @@
-"""skill 工具(L2 read_skill + L3 mount_skill,Phase C-2 / D-2)。
+"""skill 工具：L2 read_skill + L3 mount_skill。
 
 **read_skill(L2)** 镜像 read_artifact 的**工具契约**(句柄进 / 内容出、`AUTO`)。
 正文超出通用工具内联阈值时由引擎完整落 artifact；只有最终分页读取器
 read_artifact 需要 ``max_result_size_chars=inf``。可见性**不照抄 owner-only**
-—— skill 多 department 轴,走 EffectiveSkillSet(否则 dept skill 注入挡得住、read
-挡不住,changelog 06-23)。激活语义(决策 11/原则 8):read_skill 既返回正文,又声明式
+—— skill 有独立的 department 可见性轴，统一走 EffectiveSkillSet，避免注入路径和读取
+路径的权限口径不同。read_skill 既返回正文，又声明式
 回填 `metadata.activated_skill` —— 引擎据此把 slug 进 `active_skills` + 在已算好的
 EffectiveToolset 上 merge 预烤 skill_grants(纯字典、本回合即生效)。工具保持哑、不持
 引擎态；只读取 per-call ToolExecutionContext，为 bundle 指引判断激活后的实际能力
 (对齐 ToolResult.artifact)。
 
-**mount_skill(L3,D-2)** 与 read_skill↔read_artifact 同理拆开 —— 身份空间不同
+**mount_skill(L3)** 与 read_skill↔read_artifact 同理拆开 —— 身份空间不同
 (user-scoped slug vs session-scoped artifact id)、行为不同(zip 树解压 vs 单文件写),
 `mount` 的单 `artifact_id` 参保持不摊(Minimize-parameter-surface)。同一可见性闸,
 取 bundle 字节 → 有界拷进容器 /tmp → **在沙盒内**工具驱动 `python -m zipfile -e` 解到
-`/workspace/.skills/<slug>/`(解压这个有风险动作圈进 `--network=none`+quota 的沙盒、
-zip bomb 只炸本轮,合原则 2)→ 返回路径 / 顶层清单 / 依赖提示。剥壳前缀(SKILL.md 父目录)
-runtime 重算(utils.skill_zip,同 D-1 定位器,不持久化)。
+`/workspace/.skills/<slug>/`（把有风险的解压圈进 `--network=none` + quota 的沙盒，
+zip bomb 只影响本轮）→ 返回路径 / 顶层清单 / 依赖提示。剥壳前缀(SKILL.md 父目录)
+由 utils.skill_zip 的共享定位器在 runtime 重算，不持久化。
 """
 
 import asyncio
@@ -128,12 +128,12 @@ class ReadSkillTool(BaseTool):
 
 
 class MountSkillTool(BaseTool):
-    """把一个 skill 的 bundle 解进沙盒 `/workspace/.skills/<slug>/`(L3,D-2)。
+    """把一个 skill 的 bundle 解进沙盒 `/workspace/.skills/<slug>/`（L3）。
 
     可见性闸同 read_skill(EffectiveSkillSet、404 不漏);无附属文件的单 SKILL.md 技能
     不需要 mount。解压走**沙盒内工具驱动**:后端只做有界字节拷贝(bundle→
     容器 /tmp、无解压放大),`session.exec` 在 `--network=none`+quota 容器里
-    `python -m zipfile -e` → zip bomb 只炸本轮沙盒(合原则 2)。剥壳前缀 runtime 重算。
+    `python -m zipfile -e` → zip bomb 只影响本轮沙盒。剥壳前缀在 runtime 重算。
     """
 
     wants_context = True
@@ -350,7 +350,7 @@ class MountSkillTool(BaseTool):
         if info.compatibility:
             lines.append(f"Declared compatibility: {info.compatibility}")
         # 依赖提示作「例如」—— asset 不假设是 pip 包(可能是 xsd/模板/数据/字体/node),
-        # 清单 + SKILL.md 驱动用法,pip 只点破气隙坑这一例(原则 8)。
+        # 清单 + SKILL.md 驱动用法；pip 只点破气隙依赖这一例，避免堆叠场景提示。
         lines.append(
             "Read SKILL.md for how to use it. The sandbox has no network — if a script "
             "needs a Python package, install it offline, for example from a bundled "

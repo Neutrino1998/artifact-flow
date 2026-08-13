@@ -59,7 +59,7 @@ class TestKnownBinaryToBlob:
 
     async def test_renamed_ole2_doc_as_docx_accepted(self):
         """改后缀的旧版 .doc(OLE2 magic)→ 照收 blob,不再 magic 拒。
-        模型 mount 进沙盒后 pandoc 报错、自己诊断(翻转决策 2026-06-11)。"""
+        模型 mount 进沙盒后由 pandoc 报错并自行诊断。"""
         converter = DocConverter()
         ole2 = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 64
         result = await converter.convert(ole2, "report.docx")

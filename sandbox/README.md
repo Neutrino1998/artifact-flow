@@ -1,9 +1,9 @@
-# Sandbox — gVisor functional verification kit (plan §B)
+# Sandbox — gVisor functional verification kit
 
 Everything needed to verify gVisor (`runsc`) on a healthy Kylin node in **one
-intranet trip**, then withdraw. Background + decisions:
-`docs/_archive/design/sandbox-implementation-plan.md` (§B + 原则 7) and
-`docs/_archive/design/sandbox-gvisor-evaluation-2026-05.md`.
+intranet trip**, then withdraw. Production uses `--runtime=runsc --network=none`;
+the probes below verify syscall compatibility, offline dependency delivery,
+bind mounts, document tooling, and the no-network boundary on each target arch.
 
 ```
 sandbox/
@@ -16,11 +16,11 @@ sandbox/
 ├── docker-pkg/             offline Docker Engine + compose (static) for a BARE node (see its README)
 ├── kernel-4k-pkg/          offline 4K-page kernel swap for Kylin arm (gVisor needs 4K pages; see its README)
 ├── gvisor-pkg/             runsc install/smoke/uninstall + fetch-and-package.sh (see its README)
-└── verify/                 the §B probes + run-all.sh orchestrator
+└── verify/                 verification probes + run-all.sh orchestrator
 scripts/build-sandbox-image.sh   build + docker-save the image tar (mirrors release.sh)
 ```
 
-## What §B verifies (plan)
+## What the kit verifies
 
 | Probe | Where | Checks |
 |---|---|---|
@@ -67,7 +67,7 @@ and licenses enter the delivered sandbox image.
 Local rehearsal off-Kylin: build native arch + run with `RUNTIME=runc` (validates
 everything except gVisor-specific syscall behavior; on macOS, virtiofs also maps
 bind-mount ownership to the accessing uid, so the bindmount git/uid checks can't
-discriminate there — Linux only). **The §B ENOSYS result is per-arch — it does
+discriminate there — Linux only). **The ENOSYS result is per-arch — it does
 NOT transfer x86↔arm; each arch must run `run-all.sh` itself.**
 
 ## Run on the intranet node

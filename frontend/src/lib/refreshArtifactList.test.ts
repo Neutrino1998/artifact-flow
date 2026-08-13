@@ -89,7 +89,7 @@ describe('refreshArtifactList', () => {
     expect(setArtifacts).toHaveBeenCalledWith([art('a')]);
   });
 
-  test('reviewer scenario: reset() mid-flight drops the stale response', async () => {
+  test('reset() mid-flight drops the stale response', async () => {
     // The bug: switchConversation / newConversation calls resetArtifacts(),
     // setting store sessionId to null. An old in-flight request must not
     // setArtifacts() after reset, even when no follow-up refresh fires.

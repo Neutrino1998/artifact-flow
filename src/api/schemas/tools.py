@@ -1,5 +1,5 @@
 """
-External 工具注册表管理 Pydantic schemas(B-4 admin CRUD)。
+External 工具注册表管理 Pydantic schemas。
 
 请求模型用 *Request 后缀(export_openapi 据此把非 Request 模型字段标 required);
 响应模型字段对前端 = 始终在场。凭证写-only:请求收明文 value,响应永不回明文

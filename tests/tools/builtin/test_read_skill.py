@@ -1,4 +1,4 @@
-"""skill 工具单测(C-2 read_skill / D-2 mount_skill,L2/L3)。
+"""skill 工具 L2 read_skill / L3 mount_skill 单测。
 
 read_skill 覆盖:可见 slug → 正文 + 条件化 mount 提示 + activated_skill metadata;
 不可见 → 404 风格;无正文 → 错误;空 slug → 错误;契约镜像 read_artifact。

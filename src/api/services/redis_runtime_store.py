@@ -433,9 +433,8 @@ class RedisRuntimeStore:
         fan out per-key GETs through a non-transactional pipeline: redis-py
         routes each GET to its owning node (Cluster splits by node;
         standalone/Sentinel send them back-to-back), so the same code is
-        correct on every deployment form. (mget_nonatomic is rejected: it is
-        a RedisCluster-only method and would AttributeError on a standalone
-        client — see CLAUDE.md "Redis Cluster-safety".)
+        correct on every deployment form. ``mget_nonatomic`` is rejected because
+        it is RedisCluster-only and would raise AttributeError on standalone Redis.
 
         Two-step (scan, then GET batch) is good enough at our scale — the lease
         set is bounded by MAX_CONCURRENT_TASKS so the batch is tiny. A lease

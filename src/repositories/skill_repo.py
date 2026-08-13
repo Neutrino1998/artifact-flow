@@ -1,4 +1,4 @@
-"""Skill 数据访问(纯读 C-2 + 导入/删除写 E-2)。
+"""Skill 数据访问：可见性读取 + 导入/删除写入。
 
 三层职责模型的 Repository 层:只取数、不做业务/格式化,ORM 不外逃(返回标量 /
 plain dict / set)。可见性解析(EffectiveSkillSet)、CRUD 编排在上层 Manager。
@@ -54,7 +54,7 @@ class SkillRepository:
         ).scalar_one_or_none()
 
     async def get_user_bundle_bytes(self, user_id: str) -> int:
-        """该用户私有 skill bundle 的总字节(导入配额记账,E-2)。与 artifact blob 共用
+        """该用户私有 skill bundle 的总字节（导入配额记账）。与 artifact blob 共用
         一个池(config.ARTIFACT_USER_QUOTA_BYTES),聚合口径在 ConversationManager.
         get_user_upload_bytes —— 此处只出 skill 一侧的加数。"""
         return int((

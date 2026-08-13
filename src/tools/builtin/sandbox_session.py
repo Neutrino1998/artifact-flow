@@ -38,11 +38,11 @@ logger = get_logger("ArtifactFlow")
 WORKSPACE_MOUNT = "/workspace"
 
 # skill bundle 的 mount 根(mount_skill 把 bundle 解到 {WORKSPACE_MOUNT}/{SKILLS_SUBDIR}/<slug>/)。
-# 保留名:MountArtifactTool 拒绝会撞它的 artifact id(id 模式 `[\w\-.]{1,64}` 允许字面
-# `.skills`,不挡则 mount 一个叫 `.skills` 的 artifact 会与技能挂载目录打架,D-2)。
+# 保留名：artifact id 的格式允许字面 `.skills`，MountArtifactTool 必须拒绝该名称，
+# 否则会与技能挂载目录冲突。
 SKILLS_SUBDIR = ".skills"
 
-# 容器/scratch 目录的归属标识。reaper(C-reap)按 SANDBOX_LABEL 枚举 daemon 上
+# 容器/scratch 目录的归属标识。reaper 按 SANDBOX_LABEL 枚举 daemon 上
 # 的活容器,再按 conv/msg label 与 list_active_executions 做 per-turn 差集;
 # namespace label 隔离共用同一 daemon 的多套部署(各自的 reaper 只认本命名空间)。
 SANDBOX_LABEL = "artifactflow.sandbox"
@@ -365,7 +365,7 @@ class SandboxSession:
                 # scratch → 统一受 loop 池子硬墙 + watchdog 软配额管辖。
                 f"{self.tmp_dir}:/tmp:rw",
             ],
-            "NetworkMode": "none",                # 原则 7:默认全禁网
+            "NetworkMode": "none",                # 默认全禁网
             "ReadonlyRootfs": True,
             "Memory": mem_bytes,
             "MemorySwap": mem_bytes,              # 同值 = 禁 swap

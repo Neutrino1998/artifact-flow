@@ -4,8 +4,8 @@ import { formatMessageDateTime, parseUtcIso } from './time';
 /**
  * Regression tests for the naive-ISO → UTC parsing helper.
  *
- * Background: incident 2026-05-14 PR-tz-unify. Backend `utils.time.utc_now()`
- * writes naive UTC strings (no `Z`, no offset). `new Date(<naive>)` parses
+ * Backend `utils.time.utc_now()` writes naive UTC strings (no `Z`, no offset).
+ * `new Date(<naive>)` parses
  * those as **local** time, double-converting on the way to `toLocaleString()`
  * and showing values off by the browser's TZ offset. `parseUtcIso` is the
  * single-point fix that anchors naive strings as UTC.

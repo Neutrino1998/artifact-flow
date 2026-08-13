@@ -1,4 +1,4 @@
-"""skill_grants 预烤 + activate_skill 单测(C-2,决策 11)。
+"""skill_grants 预烤 + activate_skill 单测。
 
 覆盖:skill 只翻 agent disabled 池(enabled no-op / absent 翻不开)、builtin singleton 与
 external unit 两路、等级取自工具对象、resolve_all 透传、activate_skill 合并 + 幂等。
@@ -96,7 +96,7 @@ def test_grant_flips_disabled_external_unit_all_members():
 
 
 def test_full_name_entry_resolves_to_unit():
-    # allowed-tools 写成员全名 → 归属整 unit(整 unit 翻开,决策 11)
+    # allowed-tools 写成员全名 → 归属并翻开整 unit。
     unit = _unit("github", ["github__list", "github__create"])
     agent = _agent(units={"github": "disabled"})
     tools = {"github__list": _Tool("github__list", ToolPermission.AUTO),

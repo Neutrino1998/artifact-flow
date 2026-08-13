@@ -534,7 +534,7 @@ class _FakeAgentConfig:
 def _patch_snapshot(fake_agents):
     """Patch the per-turn registry snapshot the flipped conversation_turn_factory loads.
 
-    Post-B-2 `create_turn_handler` no longer reads `deps._agents`/`get_agents()` —
+    `create_turn_handler` no longer reads `deps._agents`/`get_agents()` —
     it builds agents + external tools from registry snapshot loaders (DB).
     These E2E tests mock only the LLM and don't reconcile config into the test DB,
     so we synthesize a snapshot from the fake agent configs instead. builtin_tools

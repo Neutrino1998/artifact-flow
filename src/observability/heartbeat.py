@@ -1,5 +1,5 @@
 """
-HeartbeatWriter — 舰队心跳注册表(Phase C 决策 4)
+HeartbeatWriter — 舰队心跳注册表。
 
 不是新的常驻循环:RuntimeSampler 每 OBS_SAMPLE_INTERVAL_SEC 已经产出我们要的整份
 运行时快照,心跳只是在每次采样末尾把其中一份子集**多写一份到 Redis**,让管理端
@@ -18,7 +18,7 @@ Sentinel / Cluster 三种形态同一份代码都正确。
 心跳写循环是 asyncio task,loop 卡死 → 不再写 → `ts` 停更但 key 还在 TTL 窗口内
 → 面板「红」(wedge 在册可见),给 autoheal 留重启窗口;key 真过期(>TTL)才从
 列表消失(死透且已收殓)。若 TTL 只有 ~90s,wedge 实例的 key 直接过期消失,面板
-根本没机会显红 —— 与 Phase B 那三个 LB bug 同性质的构造性修正。
+根本没机会显红，因此 TTL 必须长于红色判定窗口。
 
 observer 不能拖累 observee:写失败一律吞(debug 一行),绝不冒泡回 sampler tick。
 """
@@ -90,7 +90,7 @@ class HeartbeatWriter:
         try:
             # marker 是文件 IO —— 丢线程池,别在 sampler await 的热路径上同步读盘:
             # 若 :ro 挂载指向慢/卡的 FS,同步读会把 event loop 卡住,心跳写手自己
-            # 变成它要观测的 wedge(2026-05-14 事故的同一类坑)。
+            # 变成它要观测的 wedge。
             last_autoheal = await asyncio.to_thread(self._read_autoheal_marker)
             payload = self._build_payload(snapshot, last_autoheal)
             key = self.instance_key(self._prefix, INSTANCE_ID)

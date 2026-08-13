@@ -23,7 +23,7 @@ import { useConfigStore } from '@/stores/configStore';
 //   explicit scope contract that replaced an earlier "claim + restore-on-failure"
 //   reconcile whose every manifestation (restore with no File snapshot after a
 //   leave dropped the bytes; a shared new-chat key letting one failed send's
-//   content restore into another) was its own reviewer round. Clearing by OWNER
+//   content restore into another) is a distinct failure mode. Clearing by OWNER
 //   key keeps the one property worth keeping: navigating away mid-send can't
 //   resurface the outgoing content (it already left the draft) or touch another
 //   conversation, and two sends are independent.

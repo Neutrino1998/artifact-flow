@@ -1,4 +1,4 @@
-"""skill 管理 REST:C-3 列举/toggle + E-2 导入/导出/删除(user/admin 双通道)。"""
+"""skill 管理 REST：列举/toggle + 导入/导出/删除(user/admin 双通道)。"""
 
 import io
 import uuid

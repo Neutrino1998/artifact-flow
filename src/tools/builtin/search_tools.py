@@ -1,5 +1,5 @@
 """
-search_tools —— 渐进式披露的「按需补全描述」工具(B-3)。
+search_tools —— 渐进式披露的“按需补全描述”工具。
 
 deferred tool unit 在 `<available_tool_units>` 里只出索引行(成员 full_name,无 param
 schema)。模型要调用前先用 `search_tools` 把完整 schema 取回来 —— 结果作 tool_result
@@ -85,7 +85,7 @@ def search_tools_result(
 ) -> ToolResult:
     """渲染当前 agent 可调集里匹配工具的完整 doc(纯函数,execute / 测试共用)。
 
-    过滤口径(reviewer P1):只在 **EffectiveToolset 可调集 ∩ tools** 内检索 —— 含
+    过滤口径：只在 **EffectiveToolset 可调集 ∩ tools** 内检索 —— 含
     enabled-but-deferred,排 disabled / absent / 未授;search_tools 自身不入结果。
     输出有界:匹配数封顶 `SEARCH_TOOLS_MAX_RESULTS`,超出只渲前 N + 列其余名(防把整集
     schema 灌爆下一次 call —— 压缩不兜底 tool-result overflow,工具自负输出大小)。

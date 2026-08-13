@@ -1,4 +1,4 @@
-"""config→DB reconciler + snapshot 重建测试(Phase B-1)。"""
+"""config→DB reconciler + snapshot 重建测试。"""
 
 import textwrap
 
@@ -569,7 +569,7 @@ async def test_unit_name_with_double_underscore_fails(db_session, cfg):
 
 
 async def test_member_name_with_double_underscore_allowed(db_session, cfg):
-    # 决策 11:member 段可含 `__`(MCP 合法名);仅 unit 名禁 `__`
+    # member 段可含 `__`（MCP 合法名）；仅 unit 名禁 `__`。
     tools, _ = cfg
     _write(tools / "github" / "_set.md", """
         ---
@@ -612,7 +612,7 @@ async def test_agent_unknown_tool_fails(db_session, cfg):
 
 
 async def test_agent_legacy_level_literal_fails(db_session, cfg):
-    # 决策 11:绑定声明成员态,不含等级。旧 auto/confirm 字面量必须 loud-fail,
+    # 绑定只声明成员态，不含等级。旧 auto/confirm 字面量必须 loud-fail，
     # 逼显式迁移到 enabled/disabled,避免「写了等级却被静默忽略」的假配置。
     _, agents = cfg
     _write(agents / "lead_agent.md", _agent_md(tools_block="  web_search: auto"))

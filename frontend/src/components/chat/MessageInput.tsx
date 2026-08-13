@@ -51,7 +51,7 @@ export default function MessageInput() {
   // Armed by the "compact" toggle; rides the next send as force_compact and is
   // cleared on a successful send. A compact-only send (no text) is allowed.
   const [forceCompact, setForceCompact] = useState(false);
-  // Skill activation picker (C-3). `activeSkills` = slugs armed for the next send
+  // Skill activation picker. `activeSkills` = slugs armed for the next send
   // (rides as activate_skills, cleared on success). The picker lists only ENABLED
   // skills (a skill disabled in the management page is hidden here — enabled
   // governs both the model's L1 index and this picker). Loaded lazily on first open.

@@ -1,8 +1,8 @@
 """
 DeadmanSwitch — `faulthandler` 硬 wedge 兜底
 
-定位:**硬 wedge** 兜底。专门覆盖 watchdog 失效的场景:CPython GIL 被 C 扩展持
-续持有,所有 Python 线程一起 `futex_wait`(本次 2026-05-14 事故同款)。
+定位:**硬 wedge** 兜底。专门覆盖 watchdog 失效的场景：CPython GIL 被 C 扩展持续
+持有，所有 Python 线程一起 `futex_wait`。
 
 原理:
 - `faulthandler.dump_traceback_later(timeout)` 用 CPython 自己起的**纯 C 线程**
@@ -14,8 +14,8 @@ DeadmanSwitch — `faulthandler` 硬 wedge 兜底
   - loop wedge(同步 CPU / C 扩展持 GIL / 死锁均可) → heartbeat 跑不到 →
     C 线程到点 dump → docker logs backend 拉得到
 
-cadence:每 `timeout / 2` reset 一次,留 50% 余量。默认 10s timeout → 每 5s reset。
-明显大于正常工具最长耗时 + 单次 LLM 调用,小于事故 96 分钟若干个数量级。
+cadence:每 `timeout / 2` reset 一次，留 50% 余量。默认 10s timeout → 每 5s reset，
+明显大于正常工具最长耗时 + 单次 LLM 调用。
 
 faulthandler.enable() 必须在 main.py lifespan 最早期调用(在 deadman 启动前)
 — 这个组件假定 enable 已生效。

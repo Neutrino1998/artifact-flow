@@ -27,7 +27,7 @@ python-multipart>=0.0.31  # 文件上传支持
 # 图片处理：上传校验（按内容探测 png/jpeg + 解压炸弹闸）+ 识图 read 路径降采样
 Pillow>=10.4.0
 
-# 可观测性（PR-obs-lite sampler：进程 RSS / CPU% / FD / disk usage）
+# 可观测性 sampler：进程 RSS / CPU% / FD / disk usage
 psutil>=5.9.0
 
 # 沙盒（C 阶段）：Docker daemon HTTP API 的 asyncio 原生客户端。
@@ -104,5 +104,5 @@ jsonschema>=4.0.0
 PyJWT>=2.8.0
 # 密码哈希
 bcrypt>=4.1.0
-# 工具凭证可逆加密（B-4 tool_credential：Fernet = AES-128-CBC + HMAC，单主密钥、不轮转）
+# 工具凭证可逆加密（Fernet = AES-128-CBC + HMAC，单主密钥、不轮转）
 cryptography>=42.0.0

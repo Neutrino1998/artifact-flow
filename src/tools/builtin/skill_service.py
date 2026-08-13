@@ -1,4 +1,4 @@
-"""SkillService —— skill 正文取数(B-5 短 session lazy 读)。
+"""SkillService —— skill 正文按需取数。
 
 read_skill 工具的协作者:持 db_manager(非绑一条 turn-long session),execute 期按 skill_id
 开一条短 retrying session 取 skill_md 读完即关(同 ArtifactService / CredentialResolver)。

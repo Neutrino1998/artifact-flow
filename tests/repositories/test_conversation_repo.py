@@ -461,7 +461,7 @@ class TestBranchPath:
 
 class TestRetryIdempotency:
     """ConversationManager 的 setup 写被 turn handler 的 retry 边界包裹;with_retry 在瞬断后
-    从头重跑 fn → 这些写必须幂等(同 id 第二遍不得抛)。锁定 reviewer #1/#2 的修复。"""
+    从头重跑 fn → 这些写必须幂等（同 id 第二遍不得抛）。"""
 
     async def test_append_message_idempotent_on_retry(
         self, conversation_repo: ConversationRepository, test_user: User

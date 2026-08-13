@@ -48,7 +48,7 @@ from utils.logger import get_logger
 
 # 凭证占位符路径参数上限 = ToolCredential.placeholder_name 列宽。在边界挡超长值,
 # 否则 >128 字符落到 asyncpg 触发 StringDataRightTruncation(DataError)→ 漏出 500;
-# 在此校验直接 422(reviewer #10)。
+# 在此校验并直接返回 422，避免数据库列宽错误漏成 500。
 _PLACEHOLDER_MAX = 128
 
 router = APIRouter()

@@ -1,7 +1,6 @@
 """
-Observability — 轻量观测层（PR-obs-lite）
+Observability — 轻量观测层。
 
-详细设计见 docs/_archive/ops/incident-2026-05-14-fix-plan.md → PR-obs-lite。
 不动 DB schema、不上 Prometheus；业务侧观测复用 MessageEvent，运行时/系统侧观测落 jsonl。
 
 组件:
@@ -9,8 +8,8 @@ Observability — 轻量观测层（PR-obs-lite）
 - watchdog.LoopLagWatchdog        Python 线程,call_soon_threadsafe 测 loop 调度延迟(软退化观测)
 - deadman.DeadmanSwitch           faulthandler.dump_traceback_later 周期 reset(硬 wedge 兜底)
 - sampler.RuntimeSampler          asyncio task,周期采样 loop_lag / RSS / DB pool / Redis / FD
-- heartbeat.HeartbeatWriter       Phase C:sampler 快照子集多写一份到 Redis(舰队注册表)
-- error_counter.ErrorCounterHandler  Phase C:进程内 ERROR 计数,喂心跳「黄色」信号
+- heartbeat.HeartbeatWriter       sampler 快照子集多写一份到 Redis(舰队注册表)
+- error_counter.ErrorCounterHandler  进程内 ERROR 计数,喂心跳「黄色」信号
 """
 
 from observability.jsonl_sink import JsonlSink

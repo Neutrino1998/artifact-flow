@@ -37,7 +37,7 @@ export default function ConversationList({
   const selectConversation = useCallback(
     async (id: string) => {
       // 回普通聊天:一句关掉任何接管面板(含工具管理 —— 旧的逐个 set*Visible(false)
-      // 漏了新面板正是 reviewer #1)。activeMode 单一真相源后,新增面板零改动自动覆盖。
+      // 手抄面板清单容易漏项；activeMode 单一真相源后，新增面板无需额外改动。
       setActiveMode('none');
       onNavigate();
       await switchConversation(id);

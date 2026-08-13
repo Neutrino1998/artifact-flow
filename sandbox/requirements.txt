@@ -1,8 +1,8 @@
-# Sandbox runtime deps — tier-1 baked scientific stack (plan §B "验什么" / 原则 7).
+# Sandbox runtime deps — tier-1 baked scientific stack.
 #
 # DECOUPLED from the backend's requirements.txt / requirements.lock on purpose:
 # the sandbox is its own runtime, not the app. Do NOT fold these into the app
-# lockfile (DEP-02 governs the backend image only).
+# lockfile（backend image 的锁文件规则不适用于独立 sandbox runtime）。
 #
 # All pins have manylinux2014 cp311 wheels (self-contained: Pillow bundles
 # libjpeg/zlib, matplotlib bundles freetype), so the image builds with no
@@ -20,7 +20,7 @@ openpyxl==3.1.5
 pypdf==4.3.1
 RapidFuzz==3.14.5     # text-edit / Office skill 的有界模糊定位(C-ext,与后端同版)
 
-# 文档 skill 层(Phase E-4 预装集):docx/pptx/pdf 的读写栈,全部离线 wheel。
+# 文档 skill 层：docx/pptx/pdf 的读写栈，全部使用离线 wheel。
 # 取舍纪律:不为单一功能引依赖 —— defusedxml 不进(脚本跑在沙盒内,沙盒即隔离
 # 边界,标准库 ElementTree 够用);markitdown 不进(python-pptx 自己能抽文本);
 # LibreOffice 走 apt,由 /usr/local/bin/artifactflow-office 统一封装,不额外引入

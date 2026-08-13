@@ -376,7 +376,7 @@ export default function UserMenu({
               </button>
             )}
 
-            {/* Admin: fleet instances (Phase C) */}
+            {/* Admin: fleet instances */}
             {isAdmin && (
               <button
                 onClick={handleInstances}

@@ -1,7 +1,7 @@
 """时间工具:全链路 naive UTC 约定。
 
-事故 2026-05-14 排查中 reviewer 在 Shanghai 部署测 observability_report
-发现 8h 偏差:`datetime.now()` 写本地朴素,`server_default=func.now()`
+Shanghai 等非 UTC 部署曾出现 8h 偏差：`datetime.now()` 写本地朴素时间，
+`server_default=func.now()`
 在 SQLite/PG 上是 UTC naive,两者混用 → 时间窗查询错位。
 
 约定:Python 侧任何会进入 DB 列、API 响应、序列化事件 payload 的
@@ -24,7 +24,7 @@ def utc_now() -> datetime:
     """返回当前 UTC 时间的 naive datetime(tzinfo=None)。
 
     naive 而非 aware 的原因:与项目当前 schema (`DateTime` 不带 timezone)
-    对齐,SQLite 也无原生 tz 支持。aware UTC 留给未来跨 TZ 部署诉求出
-    现时再做(direction 2,见 incident-2026-05-14-fix-plan PR-tz-unify)。
+    对齐，SQLite 也无原生 tz 支持。若未来迁移 aware UTC，需要连同 schema 和
+    所有序列化边界一起设计，不能在此函数局部切换。
     """
     return datetime.now(timezone.utc).replace(tzinfo=None)

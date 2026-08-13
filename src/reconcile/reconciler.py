@@ -90,7 +90,7 @@ async def reconcile_config_to_db(
     await _reconcile_credentials(session, tool_seeds)
 
     # agent 分流 + skill allowed-tools 校验都需「已注册 unit」全集(seeded 刚写 + 已存在
-    # dynamic)。inventory loader 与 B-4 撞名闸 / E-2 导入校验共用 ToolRegistryRepository
+    # dynamic)。inventory loader、工具撞名闸和 skill 导入校验共用 ToolRegistryRepository
     # 同两个方法 —— seed 期与 UI 导入期对「已知工具」的口径永不漂移。
     registry = ToolRegistryRepository(session)
     known_unit_names = await registry.existing_unit_names()
@@ -117,7 +117,7 @@ async def reconcile_config_to_db(
 
     logger.info(report.summary())
     if report.pruned:
-        # 改名/删配置会丢规则(决策 10:人工重授)→ loud-log,不静默归零
+        # 改名/删配置会丢规则并需要人工重授，因此 loud-log，不静默归零。
         logger.warning("reconcile pruned (rules dropped, re-grant manually): %s",
                        ", ".join(report.pruned))
     return report
@@ -156,7 +156,7 @@ async def _reconcile_tool_units(
             report.skipped.append(label)
             continue
 
-        # UPDATE:visibility 变更先清 dept 规则(决策 10),再覆盖定义列 + 重建成员
+        # UPDATE：visibility 变更先清 dept 规则，再覆盖定义列 + 重建成员。
         if row.visibility != seed.visibility:
             await _clear_dept_rules_for_unit(session, seed.name)
         _apply_unit_cols(row, seed)
@@ -218,7 +218,7 @@ async def _prune_unit(session: AsyncSession, name: str) -> None:
 
 
 async def _clear_dept_rules_for_unit(session: AsyncSession, name: str) -> None:
-    """决策 10 clear-on-visibility 的薄转发 —— 唯一实现(含语义说明)在
+    """clear-on-visibility 的薄转发 —— 唯一实现（含语义说明）在
     `ToolRegistryRepository.clear_dept_rules`,config 改 visibility / prune 两处经此调。"""
     await ToolRegistryRepository(session).clear_dept_rules(name)
 
@@ -283,7 +283,7 @@ async def _reconcile_credentials(
                 if row is not None:
                     # env 当前缺该值,但定义**仍引用**此占位符 → 保留旧密文,不删。
                     # env-absent 是模糊信号(副本 .env 漏挂 / secret 注入有先后 / 多副本
-                    # env skew),删 = 在模糊信号上销毁机群共享的持久状态(reviewer #3)。
+                    # env skew)，删 = 在模糊信号上销毁机群共享的持久状态。
                     # 撤销凭证走显式路径:删 config 定义里的 {{...}} 引用(上面 not-in-wanted
                     # 的 prune 分支),而非从 env 删变量。
                     logger.warning("reconcile: env value for %s currently absent — keeping the "
@@ -307,14 +307,14 @@ async def _reconcile_credentials(
                         continue  # 未变,skip
                 except Exception:
                     # 密文坏 / 主密钥换过 → 重新加密覆盖。非显然、ops 相关(错配主密钥会把
-                    # 所有 seeded 行在坏 key 下重写)→ 先 WARN 再覆盖(reviewer #5),不静默。
+                    # 所有 seeded 行在坏 key 下重写)→ 先 WARN 再覆盖，不静默。
                     logger.warning("reconcile: re-encrypting seeded credential %s/%s — prior "
                                    "ciphertext failed to decrypt (master key rotation or "
                                    "corruption)", unit, name)
                 row.encrypted_value = cipher.encrypt(env_val)
                 row.source = "seeded"
             else:
-                # blind add 安全 by-construction(reviewer #6):existing 已含本 unit 的全部
+                # blind add 安全 by-construction：existing 已含本 unit 的全部
                 # seeded 行,故 row is None ⇒ 该 (unit, placeholder) 无 seeded 行。也不可能撞
                 # dynamic 行——unit 是 seeded XOR dynamic 且不可翻转(reconcile 撞 dynamic 即
                 # loud-fail),seeded unit 永不持 dynamic 凭证。故 PK 不可能冲突。
@@ -421,7 +421,7 @@ def _new_agent_unit(agent_name: str, u) -> AgentUnit:
 
 
 # --------------------------------------------------------------------------
-# skills(Phase C:同 tool/agent 的幂等 upsert + prune + clear-on-visibility)
+# skills：同 tool/agent 的幂等 upsert + prune + clear-on-visibility
 # --------------------------------------------------------------------------
 
 
@@ -457,7 +457,7 @@ async def _reconcile_skills(
             report.skipped.append(label)
             continue
 
-        # UPDATE:visibility 变更先清 dept 规则(决策 10,留 user_skill),再覆盖列
+        # UPDATE：visibility 变更先清 dept 规则（保留 user_skill），再覆盖列。
         if row.visibility != seed.visibility:
             await _clear_dept_rules_for_skill(session, row.id)
         _apply_skill_cols(row, seed)
@@ -505,7 +505,7 @@ def _apply_skill_cols(row: Skill, seed: SkillSeed) -> None:
 
 
 async def _prune_skill(session: AsyncSession, skill_id: str) -> None:
-    # 显式删子行(dialect-safe);改名/删 config 丢规则(决策 10:人工重授,上面 loud-log)
+    # 显式删子行(dialect-safe)；改名/删 config 丢规则，需人工重授（上面已 loud-log）。
     await session.execute(delete(UserSkill).where(UserSkill.skill_id == skill_id))
     await session.execute(
         delete(DepartmentSkillRule).where(DepartmentSkillRule.skill_id == skill_id)
@@ -514,7 +514,7 @@ async def _prune_skill(session: AsyncSession, skill_id: str) -> None:
 
 
 async def _clear_dept_rules_for_skill(session: AsyncSession, skill_id: str) -> None:
-    """改 visibility 清该 skill 的 dept 规则(决策 10 第二条路径,与 unit 侧同语义)。
+    """改 visibility 时清该 skill 的 dept 规则，与 unit 侧同语义。
 
     定向删 department_skill_rule(留 user_skill —— 个人开关与部门可见性正交)。
     """

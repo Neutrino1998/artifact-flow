@@ -1,10 +1,10 @@
-"""预装 skill 集(E-4)回归 —— 三道闸:
+"""预装 skill 集回归 —— 三道闸:
 
 1. **防漂移**:config/skills/<slug>.zip 必须与从 config/skills-src/<slug>/
    重建的结果**内容等价**(manifest:成员路径/时间戳/属性/解压字节)。改了
    skills-src 忘跑 `python scripts/build_skill_zips.py` 时在这里响。
    不比压缩字节 —— DEFLATE 输出依赖 zlib 实现(zlib-ng 机器会假失败)。
-2. **过自家硬门**:每个预装 zip 过 E-1 validator 必须零 error 零 warning
+2. **过自家硬门**：每个预装 zip 过 validator 必须零 error 零 warning
    (预装集是"真语料验证",warning 也不许 —— 用户导入才允许 warning 放行)。
 3. **seed 解析干净**:parse_skill_seeds 吃下 config/skills/ 全量不抛 SeedError,
    且预装 slug 都在、public + default_enabled(用户开箱即在 L1),单文件 skill 也有
