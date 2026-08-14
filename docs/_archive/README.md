@@ -7,6 +7,7 @@
 - [`design/implementation-plan-template.md`](design/implementation-plan-template.md)：跨 session、分阶段实施计划的模板。
 - [`design/plans/`](design/plans/)：只有一份主文档的实施计划。
 - [`design/artifact/`](design/artifact/)：Artifact 生命周期与工具结果挂载设计。
+- [`design/execution-target/`](design/execution-target/)：Execution Target、Workspace 与 Client 执行形态的产品假设和研究路线。
 - [`design/native-tool-call/`](design/native-tool-call/)：Native tool call 迁移计划、cutover runbook 和探针报告。
 - [`design/sandbox/`](design/sandbox/)：沙盒实施计划与运行时选型评估。
 - [`design/skill-system/`](design/skill-system/)：Skill 系统主计划及阶段细化设计。
