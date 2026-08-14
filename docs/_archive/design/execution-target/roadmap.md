@@ -10,11 +10,15 @@
 
 ## 1. 摘要
 
-ArtifactFlow 当前是服务端 Agent runtime 加每轮临时沙盒的 Web 系统。面向 coding agent 场景，我们希望未来既能继续使用服务端安全沙盒，也保留连接用户电脑、远程开发机或企业 Runner 的可能性，同时避免维护两套 Agent runtime、会话历史、Skill、MCP 和工具配置。
+ArtifactFlow 当前是服务端 Agent runtime 加每轮临时沙盒的 Web 系统。它面向模型和数据必须留在企业安全域、模型凭据不能分发给个人、身份和执行过程需要集中治理的内网环境。未来的 Client 不是另一套由个人配置的 coding agent，而是由企业统一管理的 **Managed Execution Agent（企业受管执行端）**。
+
+Managed Execution Agent 不持有独立的 Agent/LLM runtime 或个人模型 Key。服务端继续集中管理 Agent、模型入口、Skill、Tool/MCP、会话、策略和审计；执行端只把明确授权的 workspace、Shell、Git/LSP、终端或本地 stdio MCP 等能力接入同一运行时。控制和治理集中，具体执行可以靠近代码、凭据和工作环境，数据仍留在企业安全域内。
+
+本文主要参考 coding agent，不是因为 ArtifactFlow 要转型为个人开发工具，而是 coding 场景对文件一致性、Shell、Git、长任务、权限和恢复提出了较完整的执行要求。目标是让受管执行端最终具备 **coding-agent-grade execution capabilities**。
 
 本文记录的路线假设是：
 
-> 让 Agent 面向一组稳定的 workspace 能力工作，而不直接依赖某一种沙盒实现；Agent/LLM runtime 仍可由服务端管理，具体执行位置则由 Execution Target 决定。
+> 在服务端集中管理 Agent runtime 和企业控制面，让 Agent 面向一组稳定的 workspace 能力工作；具体执行位置由 Execution Target 决定，并可由企业受管执行端提供 coding-agent-grade 的本地能力。
 
 现在不急于实现 Client，也不先设计完整的远程协议。第一步是在现有 Server Sandbox 上形成最小的 Execution Target 边界，并提供结构化的 `read/edit/create/list/search` 文件能力，用真实任务同时验证：
 
@@ -22,11 +26,13 @@ ArtifactFlow 当前是服务端 Agent runtime 加每轮临时沙盒的 Web 系�
 - 结构化文件工具是否比 Bash-only 更可靠、更容易展示和授权；
 - Agent 能否在 Harness/Prompt 帮助下稳定理解 Workspace File 与 Artifact 的区别；
 - `mount/persist` 作为显式边界是否足够清楚、可恢复，并能防止陈旧副本覆盖；
-- 这些证据是否足以支持后续投入 Client Workspace Target。
+- 这些技术证据是否足以支持后续构建第二个真实 provider；目标环境是否确实需要把本地 workspace 接入集中 runtime，则需要另行验证。
 
-只有这些问题得到正面证据后，才进入 Client 原型、断线恢复、本地权限与工作区模式等后置方向。
+只有上述技术假设和目标环境前提都得到正面证据后，才进入 Managed Execution Agent 原型、断线恢复、本地权限与工作区模式等后置方向。
 
 ## 2. 背景：真正要决定的不是“要不要一个桌面端”
+
+目标环境中，模型由企业私有化部署或通过统一网关提供，模型凭据不下发给个人；员工使用管理员提供的 Agent、Skill 和 Tool 配置，身份、权限、调用记录和安全策略由服务端统一管理。pi、OpenCode 等个人本地 runtime 可以作为能力参考，但不是这里假设的部署方式。
 
 coding agent 需要读取和修改项目、执行 Shell、调用 Git/LSP，并可能使用用户本地的凭据和 stdio MCP。纯本地产品通常把 Agent runtime、文件系统、Shell、模型调用编排和 UI 都放在用户电脑上；这天然接近本地 workspace，但企业会面对配置、审计、权限、Skill/MCP 分发和多端访问分散的问题。
 
@@ -38,14 +44,16 @@ ArtifactFlow 的已有优势则集中在服务端：
 - Tool permission、Human-in-the-loop（HITL）中断和审计可以形成统一策略；
 - 服务端沙盒已有明确的隔离、资源限制和无网络边界。
 
+企业统一认证、部门/角色授权、模型凭据隔离、集中配置发布和执行审计都属于服务端治理边界。Managed Execution Agent 是该边界下的执行节点，而不是绕开它的独立应用；它不要求用户接触模型 Key 或逐机配置模型、Skill 和策略。
+
 因此当前更值得验证的产品形态不是立即复制一个全本地 Agent，而是：
 
 ```text
-服务端：Agent runtime、会话、subagent、prompt/harness、artifact、memory、策略与审计
+服务端：身份与访问、Agent runtime、模型入口、会话、subagent、prompt/harness、artifact、memory、策略与审计
 
 执行位置：
   - 当前：Server Sandbox
-  - 未来候选：Client Workspace、远程容器、企业开发机或 Runner
+  - 未来候选：Managed Execution Agent、远程容器、企业开发机或 Runner
 ```
 
 完整 Agent runtime 放到 Client 仍然是一个可能分支，但应由“服务端不能看到代码”“必须离线运行”或类似产品要求驱动，而不是仅因为 Shell 位于本地就默认复制整套 runtime。
@@ -79,14 +87,27 @@ ExecutionTarget
 
 这些名称只是讨论用语，不是本文承诺的类名或公开接口。
 
-### 3.2 目标架构假设
+### 3.2 Managed Execution Agent
+
+Managed Execution Agent 是企业受管的 endpoint component，也是未来 Client Workspace Target 的承载者。这里的 “Agent” 指执行代理，不是另一套自主 LLM runtime。暂定工作假设是：
+
+- 由企业 IT 或平台团队统一分发、签名校验、注册、升级和吊销，而不是由员工自由安装；
+- 不向用户分发模型 Key，不独立选择 Agent、模型、Skill 或企业策略；
+- 只暴露用户和管理员共同允许的 workspace 与 capability，并在本地再次强制路径和操作权限；
+- 与服务端建立可认证、可审计的出站连接，运行中的任务绑定明确 target；
+- 能力上限参考现代 coding agent 的本地执行面，包括 filesystem、Shell/process、Git、LSP、terminal 和 local stdio MCP，但按验证结果分阶段开放；
+- 所有模型编排、权限决定、调用历史和交付物仍进入 ArtifactFlow 的集中治理链路。
+
+因此它与 Server Sandbox、企业 Runner 是同一 Execution Target 模型下的不同安全姿态，不是 ArtifactFlow 的第二套产品和第二份会话权威。
+
+### 3.3 目标架构假设
 
 ```mermaid
 flowchart LR
     AR["Server Agent Runtime<br/>agents · events · compaction · skills · policy"]
     ET["Execution Target"]
     SS["Server Sandbox Target<br/>workspace + shell"]
-    CW["Future Client Workspace Target<br/>workspace + local shell"]
+    CW["Future Managed Execution Agent<br/>Client workspace + local capabilities"]
     AS["Artifact Store<br/>durable, versioned, user-facing"]
 
     AR --> ET
@@ -96,9 +117,11 @@ flowchart LR
     ET -- "persist: snapshot out" --> AS
 ```
 
-这里没有“服务端 workspace 与 Client workspace 双向同步”。对于 Client Target，Client workspace 是工作文件的唯一权威；Artifact Store 是 Artifact 的唯一权威，二者只通过 `mount/persist` 显式交换快照。
+这里没有“服务端 workspace 与 Client workspace 双向同步”。对于 Managed Execution Agent，Client workspace 是工作文件的唯一权威；Artifact Store 是 Artifact 的唯一权威，二者只通过 `mount/persist` 显式交换快照。集中的是 runtime、策略和可观测性，不要求把整个工作目录复制到服务端。
 
 ## 4. 外部系统给出的参考
+
+下列项目主要作为执行能力与 harness 设计参考，而不是进程布局或产品形态模板。coding agent 把 filesystem、Shell、Git、上下文管理、权限和恢复放在同一个高强度场景中，适合检验 Managed Execution Agent 的能力边界；ArtifactFlow 仍保留私有部署、集中治理和一套服务端 runtime 的前提。
 
 ### 4.1 DeepAgents：广泛的 Backend 抽象
 
@@ -154,15 +177,15 @@ pi 的 RPC mode 通过 stdin/stdout JSONL 把本地 coding agent 嵌入 IDE 或�
 | Sub-agents | 已有 context-isolated、nested-serial subagent 和确定事件顺序。通用 subagent 不需要强制结构化结果；只有下游机器流程确实要解析字段时才值得增加特定 schema | target 内 subagent 共享文件状态，但各自上下文和文件观察依据仍隔离 |
 | Filesystem | 已有安全的沙盒文件访问和 `mount/persist`，缺少模型可见的结构化 workspace 文件语义和 provider seam | 第一阶段主验证对象 |
 | Context management | MessageEvent、per-agent compaction、Artifact 和超大工具结果落盘已有较强基础 | Workspace 不能被当作另一种 memory/offload store；进行中 target 状态要进入 compaction 语义 |
-| Shell access | 当前服务端沙盒的隔离与恢复语义明确 | Client 本地 Shell 的权限、断线和副作用风险尚未验证 |
+| Shell access | 当前服务端沙盒的隔离与恢复语义明确 | Managed Execution Agent 上的本地 Shell 权限、断线和副作用风险尚未验证 |
 | Persistent memory | 尚未形成正式能力，计划独立增加 | 与 Execution Target 正交，不应为了 filesystem 把 memory 伪装成 workspace 路径 |
-| Human-in-the-loop | 已有 CONFIRM interrupt 基础 | Client 上要扩展为本地能力审批、命令/diff 展示和审计 |
+| Human-in-the-loop | 已有 CONFIRM interrupt 基础 | 受管执行端上要扩展为本地能力审批、命令/diff 展示和审计 |
 | Skills | 已有服务端配置、按需加载与 sandbox mount | 原则上继续由服务端管理，必要内容显式下发到 target |
-| Tools / MCP | Tool schema、permission 和执行事件已有统一契约；MCP 仍是未来 provider 路径 | 远程 MCP 可留服务端，本地 stdio MCP 是未来 Client 可选 capability |
+| Tools / MCP | Tool schema、permission 和执行事件已有统一契约；MCP 仍是未来 provider 路径 | 远程 MCP 可留服务端，本地 stdio MCP 是未来受管执行端的可选 capability |
 
 这张表的判断是“哪些能力需要沿用、补齐或保持正交”，不是为了与 DeepAgents 做功能数量对齐。
 
-## 5. 路线选择：先做纵向切片，不先做完整 Client 抽象
+## 5. 路线选择：先做纵向切片，不先做完整远程抽象
 
 第一步在概念上确立 Execution Target，但在代码上只需要一个具体的 Server Sandbox Target，以及足以承载结构化文件工具的 WorkspaceFileSystem seam：
 
@@ -176,7 +199,7 @@ ServerSandboxTarget
 
 现有 SandboxSession、容器生命周期和安全文件访问可以继续使用。重要的是新增文件工具和 `mount/persist` 最终都通过同一个 filesystem capability 观察同一个 workspace，而不是提前实现远程 transport、target registry 或一个覆盖未来所有能力的抽象层。
 
-当第二个真实 provider——Client Workspace Target——开始出现时，再根据两边的实际差异提炼窄 Protocol。若第一阶段发现 concrete aggregate 已经足够，也不要求仅为“架构完整”增加 Python Protocol。
+当第二个真实 provider——由 Managed Execution Agent 提供的 Client Workspace Target，或企业 Runner——开始出现时，再根据两边的实际差异提炼窄 Protocol。若第一阶段发现 concrete aggregate 已经足够，也不要求仅为“架构完整”增加 Python Protocol。
 
 ## 6. 双资源模型：Workspace File 不是 Artifact
 
@@ -313,14 +336,14 @@ Bash 继续存在。结构化工具处理高频、范围明确、适合展示和
 
 ### 9.3 判断信号
 
-支持继续进入 Client 原型的信号：
+支持继续进入 Managed Execution Agent 原型的技术信号：
 
 - Agent 在典型与模糊表达中都能稳定区分 File 与 Artifact；
 - 结构化 edit/create 明显减少误修改，且错误能通过重新读取自我修复；
 - 文件工具、Bash、mount/persist 确实共享同一 workspace，没有双状态同步；
 - bounded read/search 和结构化 diff 对上下文、UI 或权限至少有一项可见收益；
 - 上层 Agent/tool 不再需要知道 Docker host path 等沙盒细节；
-- 新 seam 没有迫使当前实现引入大量只服务未来 Client 的状态。
+- 新 seam 没有迫使当前实现引入大量只服务未来受管执行端的状态。
 
 需要调整而不是直接扩张的信号：
 
@@ -334,23 +357,23 @@ Bash 继续存在。结构化工具处理高频、范围明确、适合展示和
 - 经过 schema、错误提示和 prompt 调整后，Agent 仍持续混淆 Workspace 与 Artifact；
 - 结构化工具增加大量 round/token，却没有可靠性、权限或 UI 收益；
 - 为适配唯一的 Server Sandbox 就需要实现远程状态机、同步或复杂 capability matrix；
-- Client 的目标用户实际要求完全离线/代码不可离机，使“服务端 runtime + Client target”的前提不成立。
+- 目标环境实际要求完全离线或服务端不能看到任何源码片段，使“服务端 runtime + 受管执行端”的前提不成立。
 
 ## 10. 第一阶段明确验证不了什么
 
 Server Sandbox 纵向切片只能验证 workspace 语义、Agent 交互和本地 provider seam，不能证明以下问题已经解决：
 
-- Client 断线、重连、休眠和版本升级；
+- Managed Execution Agent 的断线、重连、休眠和版本升级；
 - 网络 RTT 对高频文件调用的影响；
-- Server 与 Client 之间的身份认证和设备绑定；
+- Server 与受管执行端之间的身份认证和设备绑定；
 - IDE、用户、formatter 与 Agent 的真实跨进程并发；
 - macOS、Linux、Windows/WSL 的路径、Shell 和权限差异；
 - 本地 Shell 无沙盒时的安全边界和用户接受度；
-- 企业是否愿意部署 Client、如何集中分发和吊销能力；
+- 受管执行端如何集中分发、升级、注册和吊销；
 - Direct Workspace 与 Agent Worktree 哪种默认体验更合适；
 - 远程调用产生副作用后的 exactly-once/unknown-outcome 处理。
 
-因此第一阶段的成功只允许得出“值得构建 Client 原型”，不能直接得出“Client 架构已验证”或“可以生产部署”。
+因此第一阶段的成功只允许得出“已有技术基础构建 Managed Execution Agent 原型”，不能直接得出“远程执行架构已验证”或“可以生产部署”。
 
 ## 11. 验证成立后的后置方向
 
@@ -358,20 +381,23 @@ Server Sandbox 纵向切片只能验证 workspace 语义、Agent 交互和本地
 
 ### 11.1 根据两个 provider 提炼正式契约
 
-当 Server Sandbox 与 Client Workspace 两个实现都出现后，再确认最窄的 filesystem、shell、lifecycle 与 security posture contract，明确哪些能力必选、哪些可选。避免把 LSP、Terminal、MCP、snapshot 等未来能力提前塞进统一接口。
+当 Server Sandbox 与 Managed Execution Agent / Client Workspace 两个实现都出现后，再确认最窄的 filesystem、shell、lifecycle 与 security posture contract，明确哪些能力必选、哪些可选。避免把 LSP、Terminal、MCP、snapshot 等未来能力提前塞进统一接口。
 
-### 11.2 Client Workspace Target 原型
+### 11.2 Managed Execution Agent / Client Workspace Target 原型
 
-优先验证“服务端 Agent runtime + Client execution target”：
+优先验证“服务端 Agent runtime + Managed Execution Agent”：
 
-- Client 主动建立出站连接，不要求企业网络向用户电脑开放入站端口；
+- 受管执行端由企业统一分发和注册，不持有模型 Key 或独立 Agent 配置；
+- 受管执行端主动建立出站连接，不要求企业网络向用户电脑开放入站端口；
 - 服务端调度结构化文件和 Shell 调用；
-- Client 只暴露用户明确选择的 workspace 与允许的能力；
+- 受管执行端只暴露用户与管理员共同允许的 workspace 与能力，并在本地执行最终路径和权限检查；
 - Shell、文件工具、LSP 和终端在同一 target 中观察相同文件状态；
 - Artifact 继续由服务端管理，通过 mount/persist 传输明确文件快照；
 - 一个运行中的任务绑定一个明确 target，不静默切换执行位置。
 
-### 11.3 先解决执行 checkpoint，再谈生产 Client
+原型可以从 filesystem 与 Shell 的窄切片开始，但这不是最终能力上限。Managed Execution Agent 的参照面仍是完整 coding agent execution surface：能在同一 workspace 中组合文件编辑、进程、Git、LSP、终端和必要的本地 MCP；是否以及何时开放每项能力由后续验证决定。
+
+### 11.3 先解决执行 checkpoint，再谈生产受管执行端
 
 远程副作用不能依赖普通网络重试。建议状态方向为：
 
@@ -388,7 +414,7 @@ Server Sandbox 纵向切片只能验证 workspace 语义、Agent 交互和本地
 
 ### 11.4 本地权限与 HITL
 
-服务端沙盒里的 Bash 可以因强隔离而自动运行，用户电脑上的无沙盒 Shell 则不能把 `cwd` 当安全边界。Client 需要：
+服务端沙盒里的 Bash 可以因强隔离而自动运行，用户电脑上的无沙盒 Shell 则不能把 `cwd` 当安全边界。Managed Execution Agent 需要：
 
 - 按 capability 和操作风险分类的策略；
 - 只读、范围明确的 Workspace 工具可获得较低摩擦；
@@ -396,11 +422,11 @@ Server Sandbox 纵向切片只能验证 workspace 语义、Agent 交互和本地
 - 确认界面显示真实命令、target、cwd、文件 diff 和调用来源；
 - 审批、编辑或拒绝后，服务端事件和审计记录保持一致。
 
-结构化文件工具的一个明确产品价值，就是让“读一个文件、搜索代码”不必全部退化成高风险 Bash 审批。
+结构化文件工具的一个明确收益，就是让“读一个文件、搜索代码”不必全部退化成高风险 Bash 审批。
 
 ### 11.5 Direct Workspace 与 Agent Worktree
 
-Client coding 场景可能需要两种产品模式：
+Managed Execution Agent 的 coding 场景可能需要两种 workspace 模式：
 
 - Direct Workspace：直接修改用户当前 checkout；不承诺自动回滚，依赖 diff、版本防护、HITL 和用户自己的 Git。
 - Agent Worktree：后台任务使用 agent-owned worktree/branch；用户当前 dirty/untracked 状态留在原 workspace，checkpoint 可在独占 worktree 中通过 commit/hidden ref 实现。
@@ -409,7 +435,7 @@ Client coding 场景可能需要两种产品模式：
 
 ### 11.6 本地能力扩展
 
-在 Client target 稳定后，再按产品价值增加 Git 凭据、LSP、交互终端和本地 stdio MCP。Skill、远程 MCP、企业工具和策略仍可由服务端集中配置；只有必须接触本地环境的执行部分落到 Client。
+在受管执行端的 filesystem 与 Shell 基线稳定后，再按验证结果增加 Git 凭据、LSP、交互终端和本地 stdio MCP，逐步接近 coding-agent-grade execution surface。Skill、远程 MCP、企业工具和策略仍可由服务端集中配置；只有必须接触本地环境的执行部分落到受管执行端。
 
 ### 11.7 Memory 与 PTC/Code Mode
 
@@ -433,7 +459,7 @@ Persistent memory 是 Agent runtime 的跨会话能力，与 workspace provider 
 
 ## 13. 开放问题
 
-- 企业真正需要集中管理哪些内容：Agent/Skill、MCP、模型网关、权限、审计、Client 版本，还是完整执行过程？
+- 首版集中治理边界应覆盖哪些内容：Agent/Skill、MCP、模型入口、权限、审计、受管执行端版本，还是完整执行过程？
 - Client workspace 的默认模式应是 Direct 还是 Agent Worktree？是否应由任务类型决定？
 - 服务端是否允许看到源码片段和 tool result？如果不允许，是否意味着某些客户必须使用全本地 runtime？
 - Artifact 覆盖应该默认禁止、要求来源版本，还是进入 HITL？
