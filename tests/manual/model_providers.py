@@ -1,12 +1,12 @@
 """
-LiteLLM Provider 兼容性测试
+OpenAI-compatible Provider 兼容性测试
 
 测试模型的流式输出、Token usage、Reasoning content。
 
 运行方式：
-    python -m tests.manual.litellm_providers                    # 测试所有模型
-    python -m tests.manual.litellm_providers qwen3.5-plus       # 测试指定模型
-    python -m tests.manual.litellm_providers deepseek-chat qwen3.5-flash-no-thinking
+    python -m tests.manual.model_providers                    # 测试所有模型
+    python -m tests.manual.model_providers qwen3.7-plus       # 测试指定模型
+    python -m tests.manual.model_providers deepseek-chat qwen3.7-plus-no-thinking
 """
 
 import asyncio
@@ -140,7 +140,7 @@ async def main():
         models = all_models
 
     print(f"\n{'=' * 60}")
-    print(f"  LiteLLM Provider Compatibility Test")
+    print(f"  OpenAI-compatible Provider Test")
     print(f"  Testing: {len(models)}/{len(all_models)} models")
     print(f"{'=' * 60}")
 

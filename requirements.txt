@@ -2,11 +2,9 @@
 # 核心依赖
 # ========================================
 
-# LiteLLM - 统一 LLM 接口
-# 支持 OpenAI/DeepSeek/Qwen/Ollama/vLLM 等 100+ 提供商
-# !=1.82.7/!=1.82.8：TeamPCP 供应链投毒版本（见 commit 5ab1348），升级时不可移除排除项；
-# <2.0.0：防止 pip-compile --upgrade 时失控跨大版本
-litellm>=1.82.4,<2.0.0,!=1.82.7,!=1.82.8
+# OpenAI SDK - 直连 OpenAI-compatible Chat Completions 接口
+# <3.0.0：防止 pip-compile --upgrade 时失控跨大版本
+openai>=2.38.0,<3.0.0
 
 # ========================================
 # 工具依赖
@@ -17,7 +15,7 @@ python-dotenv>=1.0.0
 
 # 网络抓取
 beautifulsoup4>=4.11.0  # HTML解析器：Jina Reader API fallback
-aiohttp>=3.14.0  # 异步HTTP客户端（3.14.0 修 CVE-2026-34993 / CVE-2026-47265）
+aiohttp>=3.14.3  # 异步 HTTP 客户端；不得回退到已知 DoS 漏洞版本
 
 # 文档转换
 charset-normalizer>=3.0.0  # 文本编码检测
@@ -25,7 +23,7 @@ charset-normalizer>=3.0.0  # 文本编码检测
 python-multipart>=0.0.31  # 文件上传支持
 
 # 图片处理：上传校验（按内容探测 png/jpeg + 解压炸弹闸）+ 识图 read 路径降采样
-Pillow>=10.4.0
+Pillow>=12.3.0  # 不得回退到已知图片解码漏洞版本
 
 # 可观测性 sampler：进程 RSS / CPU% / FD / disk usage
 psutil>=5.9.0
@@ -105,4 +103,4 @@ PyJWT>=2.8.0
 # 密码哈希
 bcrypt>=4.1.0
 # 工具凭证可逆加密（Fernet = AES-128-CBC + HMAC，单主密钥、不轮转）
-cryptography>=42.0.0
+cryptography>=50.0.0

@@ -294,7 +294,6 @@ async def execute_loop(
         astream_with_retry,
         format_messages_for_debug,
         get_compaction_threshold,
-        get_litellm_model_id,
         model_replays_reasoning,
     )
 
@@ -543,7 +542,6 @@ async def execute_loop(
             effective_toolset=effective_toolsets[agent_name],
             compaction_threshold=compaction_threshold,
             artifacts_inventory=artifacts_inventory,
-            model=get_litellm_model_id(agents[agent_name].model),
             sandbox_status=sandbox_status,
             available_skills=available_skills,
         )
@@ -687,7 +685,7 @@ async def execute_loop(
         llm_end_time = utc_now()
         llm_duration_ms = int((llm_end_time - llm_start_time).total_seconds() * 1000)
 
-        # Map LiteLLM keys (prompt_tokens/completion_tokens) to unified keys (input_tokens/output_tokens)
+        # Map provider keys (prompt_tokens/completion_tokens) to engine keys.
         normalized_usage = {
             "input_tokens": token_usage.get("prompt_tokens", 0),
             "output_tokens": token_usage.get("completion_tokens", 0),

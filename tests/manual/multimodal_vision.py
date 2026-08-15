@@ -1,10 +1,10 @@
 """
-多模态识图验证 — litellm 透传 content-blocks 是否走通
+多模态识图验证 — OpenAI-compatible 透传 content-blocks 是否走通
 
 地基 A 的最底层确认:LLM 调用层不用改一行就能吃图片。content 从字符串
 扩成块列表(text + image_url)纯粹是调用方的事,astream_with_retry 原样
-透传给 acompletion。这个脚本验证:
-  1. litellm 接受 OpenAI content-blocks 格式(list of {type,...})
+透传给 provider。这个脚本验证:
+  1. provider 接受 OpenAI content-blocks 格式(list of {type,...})
   2. image_url 走 base64 data URI(私有部署/识图回写的真实形态,图来自
      artifact 二进制而非公网,不能用远程 URL)
   3. astream_with_retry 的流式 + usage 路径对多模态消息无碍
@@ -20,7 +20,7 @@
                 能按顺序区分
 
 注:multiturn/multiimage 直叫 astream_with_retry,绕过真实引擎的
-MessageEvent→history 复原链路 —— 验证的是 litellm 透传层,不是复原层。
+MessageEvent→history 复原链路 —— 验证的是 provider 透传层,不是复原层。
 
 运行方式:
     python -m tests.manual.multimodal_vision                  # single,自画 "42"

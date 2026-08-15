@@ -47,7 +47,6 @@ class ContextManager:
         effective_toolset: EffectiveToolset,  # 当前 agent 解析后的可调集 + 等级
         compaction_threshold: int,
         artifacts_inventory: Optional[List[Dict]] = None,
-        model: Optional[str] = None,
         sandbox_status: Optional[Dict] = None,
         available_skills: Optional[List[Dict]] = None,  # L1 候选；仅 read_skill 可调时注入
     ) -> tuple[List[Dict[str, Any]], str]:

@@ -1,14 +1,17 @@
 """
 _resolve_model_params — 模型名解析的 loud-fail 边界回归
 
-裸名 typo(不在 yaml、无 base_url)必须 loud-fail,别静默当原始 litellm id 去调
-(behavior-different)。但两条故意支持的直传路径不能被误伤:provider 前缀格式、
-以及 base_url 自部署直传(裸 model + base_url)。后者曾被新加的 guard 打断。
+裸名 typo(不在 yaml、无 base_url)必须 loud-fail,别静默当原始 provider
+model ID 去调(behavior-different)。base_url 自部署直传(裸 model +
+base_url)是故意支持的路径。
 """
+
+import json
 
 import pytest
 import httpx
 from types import SimpleNamespace
+from openai import AsyncOpenAI
 
 from models.llm import (
     _resolve_model_params,
@@ -205,6 +208,47 @@ def test_explicit_api_key_overrides_model_api_key_env(monkeypatch):
     assert params["api_key"] == "explicit-secret"
 
 
+def test_base_url_env_overrides_yaml_default(monkeypatch):
+    monkeypatch.setenv("PRIVATE_MODEL_BASE", "https://token-plan.example/v1")
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "private-model": {
+                    "model": "provider-model",
+                    "base_url": "https://standard.example/v1",
+                    "base_url_env": "PRIVATE_MODEL_BASE",
+                }
+            }
+        },
+    )
+
+    params = _resolve_model_params("private-model")
+
+    assert params["base_url"] == "https://token-plan.example/v1"
+
+
+def test_missing_base_url_env_uses_yaml_default(monkeypatch):
+    monkeypatch.delenv("PRIVATE_MODEL_BASE", raising=False)
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "private-model": {
+                    "model": "provider-model",
+                    "base_url": "https://standard.example/v1",
+                    "base_url_env": "PRIVATE_MODEL_BASE",
+                }
+            }
+        },
+    )
+
+    assert (
+        _resolve_model_params("private-model")["base_url"]
+        == "https://standard.example/v1"
+    )
+
+
 def test_model_api_key_env_missing_loud_fails(monkeypatch):
     monkeypatch.delenv("PRIVATE_MODEL_API_KEY", raising=False)
     monkeypatch.setattr(
@@ -226,8 +270,10 @@ def test_model_api_key_env_missing_loud_fails(monkeypatch):
         _resolve_model_params("private-model")
 
 
-def test_provider_prefixed_passthrough():
-    assert _resolve_model_params("deepseek/deepseek-chat")["model"] == "deepseek/deepseek-chat"
+def test_provider_prefixed_id_without_endpoint_loud_fails():
+    """Provider prefixes were LiteLLM routing metadata, not wire model IDs."""
+    with pytest.raises(ValueError, match="no base_url"):
+        _resolve_model_params("deepseek/deepseek-chat")
 
 
 def test_bare_unknown_name_loud_fails():
@@ -236,16 +282,15 @@ def test_bare_unknown_name_loud_fails():
 
 
 def test_bare_model_with_base_url_passes_through():
-    """自部署直传:base_url 给定时裸 model 合法,自动加 openai/ 前缀。"""
+    """自部署直传:base_url 给定时裸 model 合法且不改写。"""
     params = _resolve_model_params("my-model", base_url="http://localhost:8000/v1")
-    assert params["model"] == "openai/my-model"
+    assert params["model"] == "my-model"
     assert params["base_url"] == "http://localhost:8000/v1"
 
 
-def test_bare_model_with_base_url_no_double_prefix():
-    """已带已知前缀的 model + base_url 不重复加 openai/。"""
-    params = _resolve_model_params("ollama/llama3", base_url="http://localhost:11434/v1")
-    assert params["model"] == "ollama/llama3"
+def test_model_with_slash_and_base_url_is_still_verbatim():
+    params = _resolve_model_params("org/model", base_url="http://localhost:11434/v1")
+    assert params["model"] == "org/model"
 
 
 # ============================================================
@@ -286,7 +331,7 @@ def test_replay_reasoning_defaults_true_for_compatibility(monkeypatch):
     assert model_replays_reasoning("default-replay") is True
 
 
-def test_replay_reasoning_false_is_app_metadata_not_litellm_param(monkeypatch):
+def test_replay_reasoning_false_is_app_metadata_not_provider_param(monkeypatch):
     monkeypatch.setattr(
         "models.llm._config",
         {
@@ -331,16 +376,12 @@ def test_debug_formatter_still_handles_plain_string():
 
 
 # ============================================================
-# astream_with_retry:仅瞬态错误重试,确定性错误立即 loud-fail
+# astream_with_retry:仅流开始前的瞬态错误重试
 # ============================================================
 
-from litellm.exceptions import (
-    BadRequestError,
-    ContextWindowExceededError,
-    RateLimitError,
-)
+from openai import BadRequestError, RateLimitError
 
-from models.llm import LLMContextOverflowError, astream_with_retry
+from models.llm import LLMContextOverflowError, LLMProtocolError, astream_with_retry
 
 
 async def _drain(gen):
@@ -356,6 +397,19 @@ async def _usage_only_response():
         ),
         choices=[],
     )
+
+
+def _openai_error(error_type, status: int, body: dict, message: str):
+    request = httpx.Request("POST", "https://provider.example/v1/chat/completions")
+    response = httpx.Response(status, request=request)
+    return error_type(message, response=response, body=body)
+
+
+def _install_create(monkeypatch, create):
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+    )
+    monkeypatch.setattr("models.llm._get_client", lambda *_args: client)
 
 
 async def test_model_cache_salt_is_hmaced_and_sent_via_extra_body(monkeypatch):
@@ -375,11 +429,11 @@ async def test_model_cache_salt_is_hmaced_and_sent_via_extra_body(monkeypatch):
     )
     request_bodies = []
 
-    async def fake_acompletion(**kwargs):
+    async def fake_create(**kwargs):
         request_bodies.append(kwargs)
         return _usage_only_response()
 
-    monkeypatch.setattr("models.llm.acompletion", fake_acompletion)
+    _install_create(monkeypatch, fake_create)
     for user_id in ("user-a", "user-a", "user-b"):
         await _drain(astream_with_retry(
             [{"role": "user", "content": "same prompt"}],
@@ -398,18 +452,114 @@ async def test_model_cache_salt_is_hmaced_and_sent_via_extra_body(monkeypatch):
     )
 
 
+async def test_direct_sdk_preserves_messages_and_provider_body(monkeypatch):
+    """Exercise real SDK serialization, including non-standard reasoning replay."""
+    captured = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        events = [
+            {
+                "id": "chatcmpl-test",
+                "object": "chat.completion.chunk",
+                "created": 1,
+                "model": "provider-model",
+                "choices": [{
+                    "index": 0,
+                    "delta": {"reasoning_content": "why", "content": "done"},
+                    "finish_reason": "stop",
+                }],
+            },
+            {
+                "id": "chatcmpl-test",
+                "object": "chat.completion.chunk",
+                "created": 1,
+                "model": "provider-model",
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 3,
+                    "completion_tokens": 2,
+                    "total_tokens": 5,
+                },
+            },
+        ]
+        body = "".join(
+            f"data: {json.dumps(event)}\n\n" for event in events
+        ) + "data: [DONE]\n\n"
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=body.encode(),
+        )
+
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = AsyncOpenAI(
+        api_key="test-key",
+        base_url="https://provider.example/v1",
+        http_client=http_client,
+        max_retries=0,
+    )
+    seen_client_args = []
+
+    def fake_get_client(base_url, api_key):
+        seen_client_args.append((base_url, api_key))
+        return client
+
+    monkeypatch.setattr("models.llm._get_client", fake_get_client)
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "defaults": {},
+            "models": {
+                "provider": {
+                    "model": "provider-model",
+                    "base_url": "https://provider.example/v1",
+                    "api_key": "secret",
+                    "params": {
+                        "temperature": 0.6,
+                        "extra_body": {"top_k": 20},
+                    },
+                }
+            },
+        },
+    )
+    messages = [{
+        "role": "assistant",
+        "content": "previous",
+        "reasoning_content": "prior reasoning",
+    }, {
+        "role": "user",
+        "content": "continue",
+    }]
+    try:
+        chunks = await _drain(astream_with_retry(messages, model="provider"))
+    finally:
+        await client.close()
+
+    assert seen_client_args == [("https://provider.example/v1", "secret")]
+    assert captured["model"] == "provider-model"
+    assert captured["messages"] == messages
+    assert captured["stream"] is True
+    assert captured["stream_options"] == {"include_usage": True}
+    assert captured["temperature"] == 0.6
+    assert captured["top_k"] == 20
+    assert chunks[-1]["reasoning_content"] == "why"
+    assert chunks[-1]["token_usage"]["total_tokens"] == 5
+
+
 async def test_unconfigured_model_does_not_send_cache_salt(monkeypatch):
     monkeypatch.setattr("models.llm._config", {"models": {}})
     captured = {}
 
-    async def fake_acompletion(**kwargs):
+    async def fake_create(**kwargs):
         captured.update(kwargs)
         return _usage_only_response()
 
-    monkeypatch.setattr("models.llm.acompletion", fake_acompletion)
+    _install_create(monkeypatch, fake_create)
     await _drain(astream_with_retry(
         [{"role": "user", "content": "x"}],
-        model="openai/fake",
+        model="fake",
+        base_url="https://provider.example/v1",
         user_id="user-a",
     ))
 
@@ -459,14 +609,19 @@ async def test_invalid_cache_salt_field_loud_fails(monkeypatch, field):
 
 
 async def test_bad_request_fails_fast_no_retry(monkeypatch):
-    """BadRequest(400,如图块发给文本模型)是确定性失败 → 不重试,acompletion 只调一次。"""
+    """BadRequest(400,如图块发给文本模型)是确定性失败。"""
     calls = {"n": 0}
 
-    async def fake_acompletion(**kwargs):
+    async def fake_create(**kwargs):
         calls["n"] += 1
-        raise BadRequestError(message="bad image block", model="m", llm_provider="p")
+        raise _openai_error(
+            BadRequestError,
+            400,
+            {"error": {"code": "invalid_request"}},
+            "bad image block",
+        )
 
-    monkeypatch.setattr("models.llm.acompletion", fake_acompletion)
+    _install_create(monkeypatch, fake_create)
     with pytest.raises(BadRequestError):
         await _drain(astream_with_retry([{"role": "user", "content": "x"}],
                                         model="gpt-4o-mini", max_retries=3, retry_delay=0))
@@ -477,15 +632,16 @@ async def test_context_window_error_maps_to_engine_recovery_signal(monkeypatch):
     """Typed overflow is not retried in the adapter; the engine owns one compact+retry."""
     calls = {"n": 0}
 
-    async def fake_acompletion(**kwargs):
+    async def fake_create(**kwargs):
         calls["n"] += 1
-        raise ContextWindowExceededError(
-            message="maximum context length exceeded",
-            model="m",
-            llm_provider="p",
+        raise _openai_error(
+            BadRequestError,
+            400,
+            {"error": {"code": "context_length_exceeded"}},
+            "maximum context length exceeded",
         )
 
-    monkeypatch.setattr("models.llm.acompletion", fake_acompletion)
+    _install_create(monkeypatch, fake_create)
     with pytest.raises(LLMContextOverflowError):
         await _drain(astream_with_retry(
             [{"role": "user", "content": "x"}],
@@ -500,12 +656,74 @@ async def test_rate_limit_is_retried(monkeypatch):
     """RateLimitError(429)是瞬态 → 重试到 max_retries 次。"""
     calls = {"n": 0}
 
-    async def fake_acompletion(**kwargs):
+    async def fake_create(**kwargs):
         calls["n"] += 1
-        raise RateLimitError(message="slow down", llm_provider="p", model="m")
+        raise _openai_error(
+            RateLimitError,
+            429,
+            {"error": {"code": "rate_limit"}},
+            "slow down",
+        )
 
-    monkeypatch.setattr("models.llm.acompletion", fake_acompletion)
+    _install_create(monkeypatch, fake_create)
     with pytest.raises(RateLimitError):
         await _drain(astream_with_retry([{"role": "user", "content": "x"}],
                                         model="gpt-4o-mini", max_retries=3, retry_delay=0))
     assert calls["n"] == 3  # 重试满 3 次才抛
+
+
+async def test_partial_stream_is_never_retried(monkeypatch):
+    calls = {"n": 0}
+
+    async def partial_response():
+        yield SimpleNamespace(
+            usage=None,
+            choices=[SimpleNamespace(
+                finish_reason=None,
+                delta=SimpleNamespace(
+                    content="partial", reasoning_content=None, tool_calls=[]
+                ),
+            )],
+        )
+        raise _openai_error(
+            RateLimitError,
+            429,
+            {"error": {"code": "rate_limit"}},
+            "midstream",
+        )
+
+    async def fake_create(**kwargs):
+        calls["n"] += 1
+        return partial_response()
+
+    _install_create(monkeypatch, fake_create)
+    with pytest.raises(RateLimitError):
+        await _drain(astream_with_retry(
+            [{"role": "user", "content": "x"}],
+            model="gpt-4o-mini",
+            max_retries=3,
+            retry_delay=0,
+        ))
+    assert calls["n"] == 1
+
+
+async def test_success_without_provider_usage_fails_loud(monkeypatch):
+    async def no_usage_response():
+        yield SimpleNamespace(
+            usage=None,
+            choices=[SimpleNamespace(
+                finish_reason="stop",
+                delta=SimpleNamespace(
+                    content="done", reasoning_content=None, tool_calls=[]
+                ),
+            )],
+        )
+
+    async def fake_create(**kwargs):
+        return no_usage_response()
+
+    _install_create(monkeypatch, fake_create)
+    with pytest.raises(LLMProtocolError, match="completed without usage"):
+        await _drain(astream_with_retry(
+            [{"role": "user", "content": "x"}], model="gpt-4o-mini"
+        ))

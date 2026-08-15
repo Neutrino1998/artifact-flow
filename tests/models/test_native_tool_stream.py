@@ -172,11 +172,16 @@ async def test_llm_adapter_sends_schemas_and_emits_only_accepted_wire_calls(monk
             ),
         )
 
-    async def fake_acompletion(**kwargs):
+    async def fake_create(**kwargs):
         captured.update(kwargs)
         return response()
 
-    monkeypatch.setattr("models.llm.acompletion", fake_acompletion)
+    client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=fake_create)
+        )
+    )
+    monkeypatch.setattr("models.llm._get_client", lambda *_args: client)
     schemas = [{
         "type": "function",
         "function": {
@@ -189,7 +194,7 @@ async def test_llm_adapter_sends_schemas_and_emits_only_accepted_wire_calls(monk
     chunks = [
         item async for item in astream_with_retry(
             [{"role": "user", "content": "x"}],
-            model="openai/fake",
+            model="gpt-4o-mini",
             tools=schemas,
         )
     ]

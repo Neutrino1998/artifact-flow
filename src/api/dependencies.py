@@ -266,12 +266,17 @@ async def close_globals() -> None:
         await _conversation_execution_service.shutdown()
         logger.info("Conversation execution service shut down")
 
-    # 2. 关闭 Redis 连接
+    # 2. runtime 已 drain，此时才能关闭 provider HTTP 连接池。
+    from models.llm import close_llm_clients
+    await close_llm_clients()
+    logger.info("LLM provider connections closed")
+
+    # 3. 关闭 Redis 连接
     if _redis_client:
         await _redis_client.aclose()
         logger.info("Redis connection closed")
 
-    # 3. 关闭数据库管理器
+    # 4. 关闭数据库管理器
     if _db_manager:
         await _db_manager.close()
         logger.info("Database manager closed")

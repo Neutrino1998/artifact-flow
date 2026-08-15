@@ -189,7 +189,7 @@ def _checkpoint_error(exc: BaseException) -> str:
 def _is_expected_task_failure(exc: Exception) -> bool:
     if isinstance(exc, (RuntimeError, TimeoutError)):
         return True
-    # LiteLLM maps provider/network/status failures onto OpenAI's typed error
+    # The OpenAI SDK maps provider/network/status failures onto typed error
     # hierarchy. Import it only on a failure path so the dormant CLI stays light.
     from openai import OpenAIError
 

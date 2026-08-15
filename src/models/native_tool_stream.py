@@ -20,7 +20,7 @@ def _get(value: Any, key: str, default: Any = None) -> Any:
 
 
 def _append_delta(current: str, fragment: Any) -> str:
-    """Append one LiteLLM/OpenAI stream delta without inspecting its content."""
+    """Append one OpenAI-compatible stream delta without inspecting its content."""
     if fragment is None:
         return current
     return current + str(fragment)

@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     PERMISSION_TIMEOUT: int = 300  # 秒，单次 permission 等待超时
     CANCEL_CHECK_INTERVAL: float = 0.5  # 秒，LLM 流式输出期间轮询 cancel 的最小间隔（避免每 chunk 一次 Redis GET）
 
-    # LLM provider HTTP 超时分层。LiteLLM 的单一 float timeout 会同时放大
+    # LLM provider HTTP 超时分层。单一 float timeout 会同时放大
     # connect/read/write/pool：为容纳私有 reasoning 模型的长 TTFT 而给 read 600s
     # 时，错 IP 也会跟着等 600s。在这里构造 httpx.Timeout 把网络建连与
     # 模型等待拆开；models.yaml 里显式的 params.timeout 仍只覆盖 read。
