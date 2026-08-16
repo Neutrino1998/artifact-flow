@@ -11,10 +11,14 @@ import json
 import pytest
 import httpx
 from types import SimpleNamespace
-from openai import AsyncOpenAI
+from openai import APIStatusError, AsyncOpenAI
 
 from models.llm import (
+    _SDK_MAX_RETRIES,
+    _get_client,
+    _is_context_overflow,
     _resolve_model_params,
+    close_llm_clients,
     format_messages_for_debug,
     get_compaction_threshold,
     get_model_context_window,
@@ -218,6 +222,7 @@ def test_base_url_env_overrides_yaml_default(monkeypatch):
                     "model": "provider-model",
                     "base_url": "https://standard.example/v1",
                     "base_url_env": "PRIVATE_MODEL_BASE",
+                    "api_key": "endpoint-key",
                 }
             }
         },
@@ -238,6 +243,7 @@ def test_missing_base_url_env_uses_yaml_default(monkeypatch):
                     "model": "provider-model",
                     "base_url": "https://standard.example/v1",
                     "base_url_env": "PRIVATE_MODEL_BASE",
+                    "api_key": "endpoint-key",
                 }
             }
         },
@@ -283,14 +289,55 @@ def test_bare_unknown_name_loud_fails():
 
 def test_bare_model_with_base_url_passes_through():
     """自部署直传:base_url 给定时裸 model 合法且不改写。"""
-    params = _resolve_model_params("my-model", base_url="http://localhost:8000/v1")
+    params = _resolve_model_params(
+        "my-model",
+        base_url="http://localhost:8000/v1",
+        api_key="local-no-auth",
+    )
     assert params["model"] == "my-model"
     assert params["base_url"] == "http://localhost:8000/v1"
+    assert params["api_key"] == "local-no-auth"
 
 
 def test_model_with_slash_and_base_url_is_still_verbatim():
-    params = _resolve_model_params("org/model", base_url="http://localhost:11434/v1")
+    params = _resolve_model_params(
+        "org/model",
+        base_url="http://localhost:11434/v1",
+        api_key="ollama",
+    )
     assert params["model"] == "org/model"
+
+
+def test_custom_endpoint_config_requires_explicit_endpoint_key(monkeypatch):
+    monkeypatch.setattr(
+        "models.llm._config",
+        {
+            "models": {
+                "unsafe-private": {
+                    "model": "private-model",
+                    "context_window": 32768,
+                    "base_url": "https://private.example/v1",
+                }
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="custom endpoint requires explicit"):
+        validate_model_config()
+
+
+def test_custom_endpoint_does_not_inherit_global_openai_key(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-leave-this-process")
+    monkeypatch.setattr("models.llm._config", {"models": {}})
+
+    with pytest.raises(ValueError, match="requires an explicit api_key"):
+        _resolve_model_params(
+            "private-model",
+            base_url="https://private.example/v1",
+        )
+
+    with pytest.raises(ValueError, match="requires an explicit api_key"):
+        _get_client("https://private.example/v1", None)
 
 
 # ============================================================
@@ -376,7 +423,7 @@ def test_debug_formatter_still_handles_plain_string():
 
 
 # ============================================================
-# astream_with_retry:仅流开始前的瞬态错误重试
+# astream_with_retry:SDK 统一负责流建立前的瞬态错误重试
 # ============================================================
 
 from openai import BadRequestError, RateLimitError
@@ -410,6 +457,94 @@ def _install_create(monkeypatch, create):
         chat=SimpleNamespace(completions=SimpleNamespace(create=create))
     )
     monkeypatch.setattr("models.llm._get_client", lambda *_args: client)
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "context_length_exceeded",
+        "context_window_exceeded",
+        "context_length_error",
+        "model_context_window_exceeded",
+    ],
+)
+def test_structured_context_overflow_codes(code):
+    error = _openai_error(
+        BadRequestError,
+        400,
+        {"error": {"code": code, "message": "provider rejected request"}},
+        "provider rejected request",
+    )
+
+    assert _is_context_overflow(error) is True
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Your input exceeds the context window of this model",
+        "Requested token count exceeds the model's maximum context length of 131072 tokens.",
+        "Input length (265330) exceeds model's maximum context length (262144).",
+        "Input length 131393 exceeds the maximum allowed input length of 131040 tokens.",
+        "The input (516368 tokens) is longer than the model's context length (262144 tokens).",
+        "The input token count (1196265) exceeds the maximum number of tokens allowed (1048575)",
+        "This model's maximum prompt length is 131072 but the request contains 537812 tokens",
+        "Please reduce the length of the messages or completion",
+        "the request exceeds the available context size, try increasing it",
+        "tokens to keep from the initial prompt is greater than the context length",
+        "invalid params, context window exceeds limit",
+        "Your request exceeded model token limit: 131072 (requested: 140000)",
+        "Prompt contains 140000 tokens and is too large for model with 131072 maximum context length",
+        "Prompt has 256468 tokens, but the configured context size is 256000 tokens",
+        "prompt too long; exceeded max context length by 100918 tokens",
+    ],
+)
+def test_common_openai_compatible_overflow_signatures(message):
+    error = _openai_error(
+        BadRequestError,
+        400,
+        {"error": {"code": "invalid_request", "message": message}},
+        message,
+    )
+
+    assert _is_context_overflow(error) is True
+
+
+@pytest.mark.parametrize("code", ["InvalidParameter", "invalid_parameter_error"])
+def test_dashscope_overflow_requires_code_and_stable_message(code):
+    message = "Range of input length should be [1, 129024]"
+    error = _openai_error(
+        BadRequestError,
+        400,
+        {"error": {"code": code, "message": message}},
+        message,
+    )
+
+    assert _is_context_overflow(error) is True
+
+
+@pytest.mark.parametrize(
+    ("code", "message"),
+    [
+        ("InvalidParameter", "The temperature parameter must be between 0 and 2"),
+        ("invalid_request", "Range of input length should be [1, 129024]"),
+        ("rate_limit", "Too many tokens, rate limit exceeded; please retry"),
+        (
+            "rate_limit",
+            "Rate limit: requested token count exceeds the model's maximum context length of 131072 tokens",
+        ),
+        ("invalid_request", "The image dimensions exceed the maximum allowed size"),
+    ],
+)
+def test_non_overflow_bad_requests_are_not_misclassified(code, message):
+    error = _openai_error(
+        BadRequestError,
+        400,
+        {"error": {"code": code, "message": message}},
+        message,
+    )
+
+    assert _is_context_overflow(error) is False
 
 
 async def test_model_cache_salt_is_hmaced_and_sent_via_extra_body(monkeypatch):
@@ -560,6 +695,7 @@ async def test_unconfigured_model_does_not_send_cache_salt(monkeypatch):
         [{"role": "user", "content": "x"}],
         model="fake",
         base_url="https://provider.example/v1",
+        api_key="test-key",
         user_id="user-a",
     ))
 
@@ -623,8 +759,10 @@ async def test_bad_request_fails_fast_no_retry(monkeypatch):
 
     _install_create(monkeypatch, fake_create)
     with pytest.raises(BadRequestError):
-        await _drain(astream_with_retry([{"role": "user", "content": "x"}],
-                                        model="gpt-4o-mini", max_retries=3, retry_delay=0))
+        await _drain(astream_with_retry(
+            [{"role": "user", "content": "x"}],
+            model="gpt-4o-mini",
+        ))
     assert calls["n"] == 1  # 立即抛,无重试
 
 
@@ -646,30 +784,71 @@ async def test_context_window_error_maps_to_engine_recovery_signal(monkeypatch):
         await _drain(astream_with_retry(
             [{"role": "user", "content": "x"}],
             model="gpt-4o-mini",
-            max_retries=3,
-            retry_delay=0,
         ))
     assert calls["n"] == 1
 
 
-async def test_rate_limit_is_retried(monkeypatch):
-    """RateLimitError(429)是瞬态 → 重试到 max_retries 次。"""
+@pytest.mark.parametrize("status_code", [408, 409])
+async def test_sdk_retries_transient_http_status(monkeypatch, status_code):
+    """SDK 覆盖适配器曾漏掉的 408，并保留官方 409 语义。"""
     calls = {"n": 0}
+    monkeypatch.setenv("OPENAI_API_KEY", "global-key-must-not-be-forwarded")
 
-    async def fake_create(**kwargs):
+    async def handler(request: httpx.Request) -> httpx.Response:
         calls["n"] += 1
-        raise _openai_error(
-            RateLimitError,
-            429,
-            {"error": {"code": "rate_limit"}},
-            "slow down",
+        assert request.headers["authorization"] == "Bearer endpoint-key"
+        return httpx.Response(
+            status_code,
+            request=request,
+            headers={"retry-after-ms": "1"},
+            json={
+                "error": {
+                    "message": "retry this request",
+                    "type": "transient_error",
+                    "code": "transient_error",
+                }
+            },
         )
 
-    _install_create(monkeypatch, fake_create)
-    with pytest.raises(RateLimitError):
-        await _drain(astream_with_retry([{"role": "user", "content": "x"}],
-                                        model="gpt-4o-mini", max_retries=3, retry_delay=0))
-    assert calls["n"] == 3  # 重试满 3 次才抛
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    real_client_class = AsyncOpenAI
+
+    def client_factory(**kwargs):
+        return real_client_class(http_client=http_client, **kwargs)
+
+    monkeypatch.setattr("models.llm.AsyncOpenAI", client_factory)
+    monkeypatch.setattr("models.llm._clients", {})
+    try:
+        with pytest.raises(APIStatusError):
+            await _drain(astream_with_retry(
+                [{"role": "user", "content": "x"}],
+                model="private-model",
+                base_url="https://provider.example/v1",
+                api_key="endpoint-key",
+            ))
+    finally:
+        await close_llm_clients()
+
+    assert calls["n"] == _SDK_MAX_RETRIES + 1
+
+
+def test_native_probe_empty_dashscope_base_uses_default(monkeypatch):
+    from tests.manual import native_tool_call_probe as probe
+
+    captured = {}
+    client = object()
+
+    def client_factory(**kwargs):
+        captured.update(kwargs)
+        return client
+
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "probe-key")
+    monkeypatch.setenv("DASHSCOPE_API_BASE", "")
+    monkeypatch.setattr(probe, "_client", None)
+    monkeypatch.setattr(probe, "AsyncOpenAI", client_factory)
+
+    assert probe._get_client() is client
+    assert captured["base_url"] == probe._DEFAULT_DASHSCOPE_BASE_URL
 
 
 async def test_partial_stream_is_never_retried(monkeypatch):
@@ -701,8 +880,6 @@ async def test_partial_stream_is_never_retried(monkeypatch):
         await _drain(astream_with_retry(
             [{"role": "user", "content": "x"}],
             model="gpt-4o-mini",
-            max_retries=3,
-            retry_delay=0,
         ))
     assert calls["n"] == 1
 

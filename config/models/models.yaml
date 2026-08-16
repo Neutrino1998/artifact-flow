@@ -108,5 +108,6 @@ models:
   #   model: my-model
   #   context_window: 32768  # 必填；填写兼容端点实际限制
   #   base_url: http://10.0.0.1:8080/v1
+  #   api_key: local-no-auth  # 无鉴权端点也要显式填非敏感占位值，禁止继承 OPENAI_API_KEY
   #   params:
   #     temperature: 0.5

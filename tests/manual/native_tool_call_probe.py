@@ -96,7 +96,7 @@ def _get_client() -> AsyncOpenAI:
     if _client is None:
         _client = AsyncOpenAI(
             api_key=os.environ["DASHSCOPE_API_KEY"],
-            base_url=os.getenv("DASHSCOPE_API_BASE", _DEFAULT_DASHSCOPE_BASE_URL),
+            base_url=os.getenv("DASHSCOPE_API_BASE") or _DEFAULT_DASHSCOPE_BASE_URL,
             max_retries=0,
         )
     return _client
