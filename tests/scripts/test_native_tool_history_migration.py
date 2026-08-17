@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import sqlite3
 import sys
 from argparse import Namespace
@@ -488,10 +489,14 @@ def test_bounded_transcript_keeps_first_and_latest_complete_turns():
 
 
 @pytest.mark.asyncio
-async def test_semantic_summary_uses_complete_final_after_stream_retry(monkeypatch):
+async def test_semantic_summary_uses_complete_final_and_real_llm_signature(monkeypatch):
+    from models.llm import astream_with_retry
+
     seen_kwargs = {}
+    stream_signature = inspect.signature(astream_with_retry)
 
     async def fake_stream(*args, **kwargs):
+        stream_signature.bind(*args, **kwargs)
         seen_kwargs.update(kwargs)
         yield {"type": "content", "content": "partial-attempt\n"}
         yield {
@@ -505,7 +510,6 @@ async def test_semantic_summary_uses_complete_final_after_stream_retry(monkeypat
     result = await _generate_semantic(
         [{"role": "user", "content": "summarize"}],
         model="compact",
-        max_retries=2,
         cache_salt_subject="native-history-migration:conv-1",
     )
 
@@ -537,7 +541,6 @@ async def test_generate_skip_semantic_builds_mechanical_fallbacks(
         skip_semantic=True,
         semantic_model=None,
         concurrency=2,
-        max_retries=1,
         mechanical_max_chars=5_000,
         mechanical_recent_turns=8,
         mechanical_field_max_chars=500,
