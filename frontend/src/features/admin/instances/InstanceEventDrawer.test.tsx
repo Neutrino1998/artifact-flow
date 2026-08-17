@@ -163,7 +163,8 @@ describe('InstanceEventDrawer', () => {
     expect(container.textContent).toContain('复制当前列表');
     expect(copyButtons[0].parentElement?.classList).toContain('items-center');
     expect(copyButtons[0].parentElement?.querySelector('time')?.classList).toContain('leading-5');
-    expect(copyButtons[0].classList).toContain('h-5', 'w-5');
+    expect(copyButtons[0].classList).toContain('h-5');
+    expect(copyButtons[0].classList).toContain('w-5');
 
     await act(async () => {
       copyButtons[1].click();
