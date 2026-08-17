@@ -2,7 +2,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { InstanceHeartbeat } from '@/lib/api';
-import InstanceEventDrawer from './InstanceEventDrawer';
+import InstanceEventDrawer, { serializeInstanceEvents } from './InstanceEventDrawer';
 
 const apiMocks = vi.hoisted(() => ({
   getAdminInstanceEvents: vi.fn(),
@@ -135,6 +135,49 @@ describe('InstanceEventDrawer', () => {
     const close = container.querySelector<HTMLButtonElement>('[aria-label="关闭实例事件详情"]');
     await act(async () => close?.click());
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  test('copies one event independently from the filtered event list', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+
+    await act(async () => {
+      root.render(
+        <InstanceEventDrawer
+          instance={instance}
+          initialFilter="all"
+          onClose={vi.fn()}
+          onOpenConversation={vi.fn()}
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const copyButtons = container.querySelectorAll<HTMLButtonElement>('[aria-label="复制该事件诊断"]');
+    expect(copyButtons).toHaveLength(2);
+    expect(container.textContent).toContain('复制当前列表');
+    expect(copyButtons[0].parentElement?.classList).toContain('items-center');
+    expect(copyButtons[0].parentElement?.querySelector('time')?.classList).toContain('leading-5');
+    expect(copyButtons[0].classList).toContain('h-5', 'w-5');
+
+    await act(async () => {
+      copyButtons[1].click();
+      await Promise.resolve();
+    });
+
+    const copiedEvent = apiMocks.getAdminInstanceEvents.mock.results[0].value;
+    const response = await copiedEvent;
+    expect(writeText).toHaveBeenCalledOnce();
+    expect(writeText).toHaveBeenCalledWith(serializeInstanceEvents('backend-1', [response.events[1]]));
+    expect(writeText.mock.calls[0][0]).toContain('Event loop did not respond');
+    expect(writeText.mock.calls[0][0]).not.toContain('LLM call failed');
+    expect(copyButtons[1].title).toBe('已复制');
+    expect(copyButtons[0].title).toBe('复制该事件诊断');
   });
 
   test('ignores metrics truncation while retaining Watchdog truncation warnings', async () => {

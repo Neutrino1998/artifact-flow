@@ -14,6 +14,7 @@ import type {
 } from '@/lib/api';
 import { parseUtcIso } from '@/lib/time';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
+import { CopyIcon } from '@/components/ui/CopyIcon';
 import { PillBadge } from '@/components/ui/PillBadge';
 
 export type InstanceEventFilter = InstanceEventKind;
@@ -192,14 +193,17 @@ function StackGroups({ event }: { event: InstanceDiagnosticEvent }) {
 }
 
 function EventCard({
+  instanceId,
   event,
   metricsScanTruncated,
   onOpenConversation,
 }: {
+  instanceId: string;
   event: InstanceDiagnosticEvent;
   metricsScanTruncated: boolean;
   onOpenConversation: (conversationId: string) => void;
 }) {
+  const { copied, copy } = useCopyFeedback();
   const isWedge = event.type === 'wedge';
   const metricsMayBeIncomplete = (
     metricsScanTruncated
@@ -208,14 +212,23 @@ function EventCard({
   );
   return (
     <article className="rounded-xl border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-3 shadow-float">
-      <div className="flex items-start gap-2">
+      <div className="flex items-center gap-2">
         <PillBadge tone={event.severity === 'error' ? 'error' : 'warning'} size="regular">
           {TYPE_LABEL[event.type]}
         </PillBadge>
         <PillBadge tone="neutral" size="regular">{SOURCE_LABEL[event.source]}</PillBadge>
-        <time className="ml-auto shrink-0 text-[11px] text-text-tertiary dark:text-text-tertiary-dark">
+        <time className="ml-auto shrink-0 text-[11px] leading-5 text-text-tertiary dark:text-text-tertiary-dark">
           {formatTime(event.ts)}
         </time>
+        <button
+          type="button"
+          onClick={() => void copy(serializeInstanceEvents(instanceId, [event]))}
+          aria-label="复制该事件诊断"
+          title={copied ? '已复制' : '复制该事件诊断'}
+          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-text-tertiary dark:text-text-tertiary-dark hover:bg-bg dark:hover:bg-bg-dark hover:text-text-primary dark:hover:text-text-primary-dark"
+        >
+          <CopyIcon copied={copied} size={13} />
+        </button>
       </div>
 
       <div className="mt-2 break-words text-sm font-medium text-text-primary dark:text-text-primary-dark">
@@ -369,10 +382,12 @@ export default function InstanceEventDrawer({
             </div>
           </div>
           <button
+            type="button"
             onClick={handleCopy}
+            title="复制当前筛选结果中的全部事件"
             className="ml-auto rounded-md px-2 py-1 text-xs text-text-secondary dark:text-text-secondary-dark hover:bg-surface dark:hover:bg-surface-dark"
           >
-            {copied ? '已复制' : '复制诊断'}
+            {copied ? '已复制' : '复制当前列表'}
           </button>
           <button
             onClick={() => setReloadToken((value) => value + 1)}
@@ -434,6 +449,7 @@ export default function InstanceEventDrawer({
             {visibleEvents.map((event) => (
               <EventCard
                 key={event.id}
+                instanceId={instance.instance_id}
                 event={event}
                 metricsScanTruncated={Boolean(data?.sources.metrics?.truncated)}
                 onOpenConversation={onOpenConversation}
