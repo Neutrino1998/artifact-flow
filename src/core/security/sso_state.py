@@ -10,18 +10,41 @@ from dataclasses import dataclass
 from typing import Callable, Protocol
 
 
-_LUA_CONSUME = """
-local value = redis.call('GET', KEYS[1])
-if not value or value ~= ARGV[1] then
+_LUA_ISSUE = """
+local now = redis.call('TIME')
+local now_ms = (tonumber(now[1]) * 1000) + math.floor(tonumber(now[2]) / 1000)
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now_ms)
+if redis.call('ZCARD', KEYS[1]) >= tonumber(ARGV[2]) then
+  return -1
+end
+local added = redis.call('ZADD', KEYS[1], 'NX', now_ms + tonumber(ARGV[3]), ARGV[1])
+if added == 0 then
   return 0
 end
-redis.call('DEL', KEYS[1])
+local key_ttl = redis.call('PTTL', KEYS[1])
+if key_ttl < tonumber(ARGV[3]) then
+  redis.call('PEXPIRE', KEYS[1], tonumber(ARGV[3]))
+end
 return 1
+"""
+
+_LUA_CONSUME = """
+local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
+if not score then
+  return 0
+end
+local now = redis.call('TIME')
+local now_ms = (tonumber(now[1]) * 1000) + math.floor(tonumber(now[2]) / 1000)
+if tonumber(score) <= now_ms then
+  redis.call('ZREM', KEYS[1], ARGV[1])
+  return 0
+end
+return redis.call('ZREM', KEYS[1], ARGV[1])
 """
 
 
 class SsoStateCapacityError(RuntimeError):
-    """The bounded in-memory state store cannot admit another handshake."""
+    """The bounded state store cannot admit another handshake."""
 
 
 @dataclass(frozen=True)
@@ -95,31 +118,47 @@ class InMemorySsoStateStore:
 
 
 class RedisSsoStateStore:
-    """Multi-worker implementation; consume is one-key atomic compare-and-delete.
+    """Multi-worker implementation with one bounded sorted-set substrate.
 
-    Every operation touches exactly one state key, so it is Redis Cluster safe
-    without a shared hash tag or a cross-slot multi-key command.
+    Issue and consume each touch one shared key, so capacity, expiry, and
+    one-time removal remain atomic and Redis Cluster safe without a counter that
+    could drift from separately expiring state keys.
     """
 
-    def __init__(self, redis, *, key_prefix: str = ""):
+    def __init__(self, redis, *, max_pending: int = 10_000, key_prefix: str = ""):
+        if max_pending <= 0:
+            raise ValueError("max_pending must be positive")
         self._redis = redis
+        self._max_pending = max_pending
         self._prefix = key_prefix
+        self._issue_script = redis.register_script(_LUA_ISSUE)
         self._consume_script = redis.register_script(_LUA_CONSUME)
 
-    def _key(self, state: str) -> str:
-        base = f"sso:state:{_digest(state)}"
+    def _key(self) -> str:
+        base = "sso:state:pending"
         return f"{self._prefix}:{base}" if self._prefix else base
+
+    @staticmethod
+    def _member(state: str, browser_binding: str) -> str:
+        return f"{_digest(state)}:{_digest(browser_binding)}"
 
     async def issue(self, ttl_seconds: int) -> IssuedSsoState:
         if ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be positive")
         state = secrets.token_urlsafe(32)
         binding = secrets.token_urlsafe(32)
-        admitted = await self._redis.set(
-            self._key(state), _digest(binding), ex=ttl_seconds, nx=True
+        admitted = await self._issue_script(
+            keys=[self._key()],
+            args=[
+                self._member(state, binding),
+                self._max_pending,
+                ttl_seconds * 1000,
+            ],
         )
-        if not admitted:
-            # A 256-bit collision is not a recoverable capacity condition.
+        if int(admitted) == -1:
+            raise SsoStateCapacityError("Too many pending SSO handshakes")
+        if int(admitted) != 1:
+            # A joint 512-bit state/binding collision is not a capacity signal.
             raise RuntimeError("Could not allocate unique SSO state")
         return IssuedSsoState(state, binding, ttl_seconds)
 
@@ -127,6 +166,6 @@ class RedisSsoStateStore:
         if not state or not browser_binding:
             return False
         result = await self._consume_script(
-            keys=[self._key(state)], args=[_digest(browser_binding)]
+            keys=[self._key()], args=[self._member(state, browser_binding)]
         )
         return bool(result)

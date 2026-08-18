@@ -13,6 +13,7 @@ from api.dependencies import (
     get_login_rate_limiter,
     get_remote_auth_manager,
     get_remote_bearer_config,
+    get_sso_start_rate_limiter,
     get_user_account_manager,
 )
 from api.schemas.auth import (
@@ -27,6 +28,7 @@ from api.schemas.auth import (
     UserInfo,
 )
 from api.services.auth import TokenPayload, create_access_token
+from api.services.sso_rate_limiter import SsoStartRateLimitError
 from core.management.user_account_manager import (
     CurrentPasswordIncorrectError,
     InactiveUserError,
@@ -130,10 +132,40 @@ async def get_auth_config(
 
 @router.post("/sso/start", response_model=SsoStartResponse)
 async def start_sso(
+    http_request: Request,
     response: Response,
     manager: RemoteAuthManager = Depends(get_remote_auth_manager),
+    rate_limiter=Depends(get_sso_start_rate_limiter),
 ):
     response.headers["Cache-Control"] = "no-store"
+    if not manager.is_enabled():
+        raise HTTPException(
+            status_code=404, detail="Enterprise authentication is unavailable"
+        )
+
+    try:
+        await rate_limiter.admit(_client_ip(http_request))
+    except SsoStartRateLimitError as exc:
+        headers = {"Retry-After": str(exc.retry_after)}
+        if exc.scope == "ip":
+            raise HTTPException(
+                status_code=429,
+                detail="Too many enterprise authentication attempts",
+                headers=headers,
+            ) from exc
+        logger.warning("SSO start global admission exhausted")
+        raise HTTPException(
+            status_code=503,
+            detail="Enterprise authentication is temporarily unavailable",
+            headers=headers,
+        ) from exc
+    except Exception:
+        logger.exception("SSO start admission check failed")
+        raise HTTPException(
+            status_code=503,
+            detail="Enterprise authentication is temporarily unavailable",
+        ) from None
+
     try:
         authorization_url, issued = await manager.start()
     except RemoteAuthDisabledError as exc:

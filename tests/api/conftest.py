@@ -35,6 +35,7 @@ from api.dependencies import (
     get_runtime_store,
     get_task_supervisor,
     get_login_rate_limiter,
+    get_sso_start_rate_limiter,
 )
 from api.services.auth import create_access_token
 from api.services.stream_transport import InMemoryStreamTransport
@@ -45,6 +46,7 @@ from api.services.runtime_store import InMemoryRuntimeStore
 from core.execution.task_supervisor import TaskSupervisor
 from core.security.remote_bearer_config import RemoteBearerConfig
 from api.services.login_rate_limiter import InMemoryLoginRateLimiter
+from api.services.sso_rate_limiter import InMemorySsoStartRateLimiter
 from config import config
 from db.database import DatabaseManager
 from db.models import User
@@ -81,15 +83,22 @@ async def app(db_manager: DatabaseManager):
         max_failures=config.LOGIN_MAX_FAILURES,
         window_sec=config.LOGIN_FAILURE_WINDOW_SEC,
     )
+    sso_start_rate_limiter = InMemorySsoStartRateLimiter(
+        per_ip_limit=config.SSO_START_IP_MAX_REQUESTS,
+        global_limit=config.SSO_START_GLOBAL_MAX_REQUESTS,
+        window_seconds=config.SSO_START_RATE_WINDOW_SEC,
+    )
 
     # Set module-level global so get_db_session()'s direct call works
     old_db_manager = deps._db_manager
     old_remote_config = deps._remote_bearer_config
     old_sso_state_store = deps._sso_state_store
+    old_sso_start_rate_limiter = deps._sso_start_rate_limiter
     old_remote_userinfo_client = deps._remote_userinfo_client
     deps._db_manager = db_manager
     deps._remote_bearer_config = RemoteBearerConfig()
     deps._sso_state_store = None
+    deps._sso_start_rate_limiter = sso_start_rate_limiter
     deps._remote_userinfo_client = None
 
     application.dependency_overrides[get_db_manager] = lambda: db_manager
@@ -99,6 +108,9 @@ async def app(db_manager: DatabaseManager):
     application.dependency_overrides[get_runtime_store] = lambda: runtime_store
     application.dependency_overrides[get_task_supervisor] = lambda: task_supervisor
     application.dependency_overrides[get_login_rate_limiter] = lambda: login_rate_limiter
+    application.dependency_overrides[get_sso_start_rate_limiter] = (
+        lambda: sso_start_rate_limiter
+    )
 
     yield application
 
@@ -106,6 +118,7 @@ async def app(db_manager: DatabaseManager):
     deps._db_manager = old_db_manager
     deps._remote_bearer_config = old_remote_config
     deps._sso_state_store = old_sso_state_store
+    deps._sso_start_rate_limiter = old_sso_start_rate_limiter
     deps._remote_userinfo_client = old_remote_userinfo_client
     await execution_service.shutdown()
 

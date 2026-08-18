@@ -54,6 +54,10 @@ userinfo:
 另一个身份系统时使用新值。用户身份由 `(provider.id, subject)` 唯一定位，不按可重复
 的展示 username 合并或认领本地密码用户。
 
+YAML 只描述这一身份系统的协议语义：地址、回跳参数、字段映射、HTTP/TLS 确认、超时、
+部门分隔符和 state 有效期。匿名 start 限速、待处理 state 容量和 userinfo 连接池属于
+部署容量，统一使用 `ARTIFACTFLOW_SSO_*` 环境变量；不要把它们复制进 Provider 文件。
+
 字段路径只支持对象上的点路径，不支持数组、JMESPath、脚本或表达式。`subject` 必须是
 稳定且不会回收的字符串或整数；`username` 必须满足 ArtifactFlow 的用户名规则；
 `enabled` 必须是 JSON boolean。
@@ -79,3 +83,6 @@ ArtifactFlow 中禁用该用户；后续 SSO 不会自动重新启用。远端�
 和 callback 需要读取的 token 参数名，不返回 userinfo 地址或字段映射。SSO start 会签发
 短期 state，并用 HttpOnly Cookie 绑定当前浏览器；exchange 对 state 原子消费一次。配置
 Redis 时 state 跨 Backend 共享；未配置 Redis 时仅使用适合单进程开发的 InMemory 实现。
+start 在签发 state 前执行 per-IP 和全局固定窗口准入；Redis state 使用一个有硬容量的
+有序集合，容量判断、过期清理和一次性消费均为单 key 原子操作。每个 Backend 的
+userinfo HTTP 连接池也有独立上限，避免匿名请求占满无界出站连接。

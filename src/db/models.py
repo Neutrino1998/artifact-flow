@@ -37,6 +37,7 @@ from sqlalchemy.orm import (
     mapped_column,
     relationship,
 )
+from sqlalchemy.dialects import mysql
 
 # 二进制列的类型长度 hint（见 ArtifactBlob.data）：仅用于在 MySQL 上把列推到
 # LONGBLOB 这一 tier，PG/SQLite 忽略长度。app 侧 config.ARTIFACT_BLOB_MAX_BYTES
@@ -44,6 +45,19 @@ from sqlalchemy.orm import (
 # 只是稳定的 schema hint(LONGBLOB 物理可达 4GB,M 只选 tier 不限长),不随 app cap
 # 每次调整而改 migration 口径。
 _BLOB_TYPE_TIER_HINT = 100 * 1024 * 1024
+
+
+def _auth_identity_string(length: int):
+    """Keep authentication natural keys byte-exact on MySQL/TDSQL."""
+
+    return String(length).with_variant(
+        mysql.VARCHAR(
+            length=length,
+            charset="utf8mb4",
+            collation="utf8mb4_bin",
+        ),
+        "mysql",
+    )
 
 
 class Base(DeclarativeBase):
@@ -95,8 +109,12 @@ class User(Base):
     # Every authentication source identifies its subject in one namespace:
     # local_password uses username; remote providers use the stable upstream id.
     # username remains a non-unique display/search field for remote identities.
-    auth_provider: Mapped[str] = mapped_column(String(64), nullable=False)
-    auth_subject: Mapped[str] = mapped_column(String(256), nullable=False)
+    auth_provider: Mapped[str] = mapped_column(
+        _auth_identity_string(64), nullable=False
+    )
+    auth_subject: Mapped[str] = mapped_column(
+        _auth_identity_string(256), nullable=False
+    )
     username: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
     hashed_password: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     display_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)

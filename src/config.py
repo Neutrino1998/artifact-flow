@@ -387,6 +387,14 @@ class Settings(BaseSettings):
     LOGIN_MAX_FAILURES: int = 5               # 窗口内最大失败次数,达到即拒
     LOGIN_FAILURE_WINDOW_SEC: int = 900       # 失败计数滑窗 / 锁定时长(秒),15 分钟
 
+    # 匿名 SSO 资源准入（部署容量，不属于 Provider 协议配置）。start 在共享全局
+    # 和 per-IP 固定窗口内签发一次性 state；userinfo 连接池另行限制每实例并发。
+    SSO_START_IP_MAX_REQUESTS: int = Field(default=60, ge=1)
+    SSO_START_GLOBAL_MAX_REQUESTS: int = Field(default=120, ge=1)
+    SSO_START_RATE_WINDOW_SEC: int = Field(default=60, ge=1)
+    SSO_STATE_MAX_PENDING: int = Field(default=1000, ge=1)
+    SSO_USERINFO_MAX_CONNECTIONS: int = Field(default=10, ge=1)
+
     @property
     def effective_database_url(self) -> str:
         """统一的有效数据库 URL — 所有消费者（应用、Alembic、脚本）都应使用此属性。

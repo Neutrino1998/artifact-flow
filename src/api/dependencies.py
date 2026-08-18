@@ -63,6 +63,7 @@ _conversation_execution_service: Optional["ConversationExecutionService"] = None
 _runtime_status_reader: Optional["RuntimeStatusReader"] = None
 _redis_client: Optional[Any] = None               # redis.asyncio.Redis (optional)
 _login_rate_limiter: Optional[Any] = None         # Redis / InMemory LoginRateLimiter
+_sso_start_rate_limiter: Optional[Any] = None      # Redis / InMemory anonymous admission
 _mcp_client_manager: Optional[Any] = None         # tools.custom.mcp_client.McpClientManager
 _remote_bearer_config: Optional[Any] = None        # startup-loaded immutable YAML
 _sso_state_store: Optional[Any] = None             # Redis / InMemory one-time state
@@ -84,7 +85,7 @@ async def init_globals() -> None:
     global _db_manager, _stream_transport, _runtime_store, _task_supervisor
     global _conversation_execution_service, _runtime_status_reader
     global _redis_client, _agents, _tools
-    global _login_rate_limiter, _mcp_client_manager
+    global _login_rate_limiter, _sso_start_rate_limiter, _mcp_client_manager
     global _remote_bearer_config, _sso_state_store, _remote_userinfo_client
 
     # 0. 确保 data 目录存在
@@ -180,18 +181,25 @@ async def init_globals() -> None:
 
     # SSO state is shared through the same Redis substrate when available.  It
     # is control state, not a disposable cache; the Redis implementation uses
-    # an expiring single key and atomic compare-and-delete consumption.
+    # one bounded sorted set for atomic expiry cleanup, capacity, and consume.
     if _remote_bearer_config.enabled:
         from core.security.remote_bearer_userinfo import RemoteBearerUserInfoClient
         from core.security.sso_state import InMemorySsoStateStore, RedisSsoStateStore
 
         if _redis_client is not None:
             _sso_state_store = RedisSsoStateStore(
-                _redis_client, key_prefix=config.REDIS_KEY_PREFIX
+                _redis_client,
+                max_pending=config.SSO_STATE_MAX_PENDING,
+                key_prefix=config.REDIS_KEY_PREFIX,
             )
         else:
-            _sso_state_store = InMemorySsoStateStore()
-        _remote_userinfo_client = RemoteBearerUserInfoClient(_remote_bearer_config)
+            _sso_state_store = InMemorySsoStateStore(
+                max_pending=config.SSO_STATE_MAX_PENDING
+            )
+        _remote_userinfo_client = RemoteBearerUserInfoClient(
+            _remote_bearer_config,
+            max_connections=config.SSO_USERINFO_MAX_CONNECTIONS,
+        )
         logger.info(
             "Remote bearer provider enabled: %s (state=%s)",
             _remote_bearer_config.provider.id,
@@ -244,6 +252,30 @@ async def init_globals() -> None:
         )
         logger.info("Login rate limiter: InMemory")
 
+    # SSO start counts every anonymous admission rather than authentication
+    # failures. Redis makes the global window shared across Backend replicas;
+    # the in-memory form is for the existing single-process development mode.
+    if _redis_client is not None:
+        from api.services.sso_rate_limiter import RedisSsoStartRateLimiter
+
+        _sso_start_rate_limiter = RedisSsoStartRateLimiter(
+            _redis_client,
+            per_ip_limit=config.SSO_START_IP_MAX_REQUESTS,
+            global_limit=config.SSO_START_GLOBAL_MAX_REQUESTS,
+            window_seconds=config.SSO_START_RATE_WINDOW_SEC,
+            key_prefix=config.REDIS_KEY_PREFIX,
+        )
+        logger.info("SSO start rate limiter: Redis")
+    else:
+        from api.services.sso_rate_limiter import InMemorySsoStartRateLimiter
+
+        _sso_start_rate_limiter = InMemorySsoStartRateLimiter(
+            per_ip_limit=config.SSO_START_IP_MAX_REQUESTS,
+            global_limit=config.SSO_START_GLOBAL_MAX_REQUESTS,
+            window_seconds=config.SSO_START_RATE_WINDOW_SEC,
+        )
+        logger.info("SSO start rate limiter: InMemory")
+
     # 4. 加载全局工具
     _tools = _load_tools()
     logger.info(f"Loaded {len(_tools)} global tools")
@@ -289,7 +321,7 @@ async def close_globals() -> None:
     """
     global _db_manager, _stream_transport, _runtime_store, _task_supervisor
     global _conversation_execution_service, _runtime_status_reader
-    global _redis_client, _login_rate_limiter
+    global _redis_client, _login_rate_limiter, _sso_start_rate_limiter
     global _mcp_client_manager
     global _remote_bearer_config, _sso_state_store, _remote_userinfo_client
 
@@ -325,6 +357,7 @@ async def close_globals() -> None:
     _db_manager = None
     _stream_transport = None
     _login_rate_limiter = None
+    _sso_start_rate_limiter = None
     _mcp_client_manager = None
     _remote_bearer_config = None
     _sso_state_store = None
@@ -382,6 +415,15 @@ def get_login_rate_limiter() -> Any:
     if _login_rate_limiter is None:
         raise RuntimeError("LoginRateLimiter not initialized. Call init_globals() first.")
     return _login_rate_limiter
+
+
+def get_sso_start_rate_limiter() -> Any:
+    """Return anonymous SSO start admission shared by all request handlers."""
+    if _sso_start_rate_limiter is None:
+        raise RuntimeError(
+            "SsoStartRateLimiter not initialized. Call init_globals() first."
+        )
+    return _sso_start_rate_limiter
 
 
 def get_remote_bearer_config():

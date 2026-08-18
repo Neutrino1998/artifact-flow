@@ -24,7 +24,11 @@ from core.security.remote_bearer_userinfo import (
     RemoteBearerUserInfoClient,
     normalize_remote_userinfo,
 )
-from core.security.sso_state import InMemorySsoStateStore, RedisSsoStateStore
+from core.security.sso_state import (
+    InMemorySsoStateStore,
+    RedisSsoStateStore,
+    SsoStateCapacityError,
+)
 from db.models import User
 from repositories.department_repo import DepartmentRepository
 from repositories.user_repo import UserRepository
@@ -93,6 +97,34 @@ def test_enabled_http_urls_require_explicit_acknowledgement():
 def test_enabled_provider_requires_every_contract_section():
     with pytest.raises(ValueError, match="requires provider, login, and userinfo"):
         RemoteBearerConfig.model_validate({"version": 1, "enabled": True})
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://exa mple.com/info",
+        "https://-invalid.example/info",
+        "https://identity.example/%ZZ",
+    ],
+)
+def test_enabled_provider_rejects_malformed_urls_at_startup(url):
+    raw = _enabled_config().model_dump()
+    raw["userinfo"]["url"] = url
+    with pytest.raises(ValueError):
+        RemoteBearerConfig.model_validate(raw)
+
+
+def test_enabled_provider_rejects_state_parameter_as_upstream_token_name():
+    raw = _enabled_config().model_dump()
+    raw["login"]["token_param"] = "af_sso_state"
+    with pytest.raises(ValueError, match="reserved name"):
+        RemoteBearerConfig.model_validate(raw)
+
+
+def test_enabled_provider_accepts_valid_idna_hostname():
+    raw = _enabled_config().model_dump()
+    raw["userinfo"]["url"] = "https://例子.测试/info"
+    assert RemoteBearerConfig.model_validate(raw).enabled is True
 
 
 def test_loader_rejects_expression_like_field_path(tmp_path):
@@ -180,46 +212,79 @@ async def test_inmemory_state_expires():
     assert await store.consume(issued.state, issued.browser_binding) is False
 
 
+async def test_inmemory_state_enforces_hard_pending_capacity():
+    store = InMemorySsoStateStore(max_pending=1, clock=lambda: 100.0)
+    await store.issue(60)
+
+    with pytest.raises(SsoStateCapacityError):
+        await store.issue(60)
+
+
 class _FakeStateRedis:
     def __init__(self):
-        self.records: dict[str, str] = {}
-
-    async def set(self, key, value, *, ex, nx):
-        assert ex > 0 and nx is True
-        if key in self.records:
-            return False
-        self.records[key] = value
-        return True
+        self.records: dict[str, set[str]] = {}
+        self._script_count = 0
 
     def register_script(self, _script):
-        async def consume(*, keys, args):
+        self._script_count += 1
+        script_index = self._script_count
+
+        async def run(*, keys, args):
+            assert len(keys) == 1
             key = keys[0]
-            if self.records.get(key) != args[0]:
+            records = self.records.setdefault(key, set())
+            member = args[0]
+            if script_index == 1:
+                assert int(args[2]) > 0
+                if len(records) >= int(args[1]):
+                    return -1
+                if member in records:
+                    return 0
+                records.add(member)
+                return 1
+            if member not in records:
                 return 0
-            self.records.pop(key)
+            records.remove(member)
             return 1
 
-        return consume
+        return run
 
 
 async def test_redis_state_is_single_key_bound_and_one_time():
     redis = _FakeStateRedis()
-    store = RedisSsoStateStore(redis, key_prefix="tenant")
+    store = RedisSsoStateStore(redis, max_pending=2, key_prefix="tenant")
     issued = await store.issue(60)
     key = next(iter(redis.records))
     assert issued.state not in key
-    assert key.startswith("tenant:sso:state:")
+    assert key == "tenant:sso:state:pending"
 
     assert await store.consume(issued.state, "wrong") is False
     assert await store.consume(issued.state, issued.browser_binding) is True
     assert await store.consume(issued.state, issued.browser_binding) is False
 
 
+async def test_redis_state_enforces_hard_pending_capacity():
+    redis = _FakeStateRedis()
+    store = RedisSsoStateStore(redis, max_pending=1)
+    await store.issue(60)
+
+    with pytest.raises(SsoStateCapacityError):
+        await store.issue(60)
+
+
 async def _mock_userinfo_client(handler) -> RemoteBearerUserInfoClient:
-    client = RemoteBearerUserInfoClient(_enabled_config())
+    client = RemoteBearerUserInfoClient(_enabled_config(), max_connections=2)
     await client._client.aclose()
     client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     return client
+
+
+async def test_userinfo_client_applies_explicit_connection_bound():
+    client = RemoteBearerUserInfoClient(_enabled_config(), max_connections=7)
+    try:
+        assert client._client._transport._pool._max_connections == 7
+    finally:
+        await client.close()
 
 
 async def test_userinfo_client_sends_bearer_without_following_redirects():

@@ -7,11 +7,13 @@ dot-separated object paths and configuration changes take effect on restart.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import parse_qsl, urlsplit
 
+import httpx
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -27,10 +29,61 @@ DEFAULT_REMOTE_BEARER_CONFIG_PATH = (
 _PROVIDER_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 _FIELD_PATH_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
 _QUERY_PARAM_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$")
+_DNS_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+_INVALID_PERCENT_RE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 
 
 class RemoteBearerConfigError(ValueError):
     """The provider YAML is present but invalid."""
+
+
+def _validate_http_url(name: str, value: str, *, allow_insecure_http: bool) -> None:
+    """Validate the fixed outbound/browser URL using the runtime HTTP parser."""
+
+    if any(
+        char.isspace() or ord(char) < 0x20 or ord(char) == 0x7F
+        for char in value
+    ):
+        raise ValueError(f"{name} must not contain whitespace or control characters")
+    if _INVALID_PERCENT_RE.search(value):
+        raise ValueError(f"{name} contains an invalid percent escape")
+    try:
+        parsed = httpx.URL(value)
+        stdlib_parsed = urlsplit(value)
+        # Force both parsers to validate the port while configuration is loading.
+        parsed.port
+        stdlib_parsed.port
+    except (httpx.InvalidURL, ValueError) as exc:
+        raise ValueError(f"{name} is not a valid URL") from exc
+
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.host
+        or stdlib_parsed.username is not None
+        or stdlib_parsed.password is not None
+        or stdlib_parsed.fragment
+    ):
+        raise ValueError(
+            f"{name} must be an absolute HTTP/HTTPS URL without credentials or fragment"
+        )
+
+    host = parsed.host
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        ascii_host = parsed.raw_host.decode("ascii").removesuffix(".")
+        labels = ascii_host.split(".")
+        if (
+            not ascii_host
+            or len(ascii_host) > 253
+            or any(not _DNS_LABEL_RE.fullmatch(label) for label in labels)
+        ):
+            raise ValueError(f"{name} contains an invalid hostname") from None
+
+    if parsed.scheme == "http" and not allow_insecure_http:
+        raise ValueError(
+            f"{name} uses HTTP; set userinfo.allow_insecure_http=true explicitly"
+        )
 
 
 class _StrictModel(BaseModel):
@@ -126,25 +179,14 @@ class RemoteBearerConfig(_StrictModel):
             "userinfo.url": self.userinfo.url,
         }
         for name, value in urls.items():
-            parsed = urlsplit(value)
-            try:
-                parsed.port
-            except ValueError as exc:
-                raise ValueError(f"{name} contains an invalid port") from exc
-            if (
-                parsed.scheme not in {"http", "https"}
-                or not parsed.hostname
-                or parsed.username is not None
-                or parsed.password is not None
-                or parsed.fragment
-            ):
-                raise ValueError(
-                    f"{name} must be an absolute HTTP/HTTPS URL without credentials or fragment"
-                )
-            if parsed.scheme == "http" and not self.userinfo.allow_insecure_http:
-                raise ValueError(
-                    f"{name} uses HTTP; set userinfo.allow_insecure_http=true explicitly"
-                )
+            _validate_http_url(
+                name,
+                value,
+                allow_insecure_http=self.userinfo.allow_insecure_http,
+            )
+
+        if self.login.token_param == "af_sso_state":
+            raise ValueError("login.token_param cannot use reserved name af_sso_state")
 
         login_query = urlsplit(self.login.url).query
         login_names = {name for name, _ in parse_qsl(login_query, keep_blank_values=True)}

@@ -130,6 +130,7 @@
 - **规范化 userinfo**：将上游 JSON 转换为固定内部 DTO：provider、subject、username、display name、enabled、department path、leaf name；原始 roles/jobs/dataScopes 不进入用户授权模型。
 - **exchange/JIT provisioning**：校验上游 token → 读取 userinfo → 校验账号和部门形状 → 有完整路径时复用 `DepartmentManager.resolve_path()`、明确无部门时使用 NULL → 按 `(auth_provider, auth_subject)` 查找或并发安全地创建带全新内部 ID 的用户 → 更新允许同步的资料 → 签发 8 小时内部 JWT；不得按展示 username 查找、认领或更新远程主体。
 - **公开认证握手**：提供未登录页面所需的最小公开配置，以及 start/state/exchange 端点；不向前端暴露内部 userinfo 地址或字段映射。
+- **匿名资源准入**：start 在 state 签发前执行 per-IP 429 和 Redis 共享全局 503 准入；Redis/InMemory state 均有硬容量，userinfo 每 Backend 使用独立有界连接池。容量项属于 ENV 部署配置，不进入 Provider YAML。
 - **密码入口隔离**：本地密码登录只查询 local-password 用户；若只有同名 SSO 用户则执行等时假哈希并返回普通 401，若同时存在同名本地用户则只认证该本地用户。`get_current_user`、REST 和 SSE 不增加上游分支。
 - **一次性 schema 切换**：`auth_provider`、`auth_subject`、统一身份唯一约束、SSO-only 密码约束及所有身份查询在同一版本完整落地；不设计过渡态、双写或新旧应用混跑能力。
 
@@ -141,6 +142,7 @@
 **开工合同（已敲定）**：
 
 - `users.auth_provider`、`users.auth_subject` 均非空，唯一约束仅 `UNIQUE(auth_provider, auth_subject)`；存量用户回填 `("local_password", username)`。local-password 必须有 hash 且 `auth_subject=username`；remote-provider 必须无 hash、无改密闸状态。
+- MySQL/TDSQL 的两个认证自然键列显式使用 `utf8mb4_bin`，唯一约束和身份查询不得继承大小写不敏感的数据库默认排序规则。
 - 所有单主体身份查询统一走 `(auth_provider, auth_subject)`；管理员列表/搜索仍按非唯一 username 展示多个同名用户。
 - Provider 使用独立 YAML，字段路径采用仅对象逐级取值的点路径；不复用 HttpTool 的 DB reconcile，不支持数组、JMESPath、脚本或表达式。
 - 明确无部门是合法、最小权限状态；不完整或矛盾的部门数据才是 Provider 合同错误。
@@ -158,7 +160,7 @@
 
 **进展**：
 
-- 已完成：`0008` 一次性身份迁移、统一 `(auth_provider, auth_subject)` 查询、SSO-only 密码约束、8 小时 JWT、启动期 YAML client、Redis/InMemory 一次性 state、匿名配置/start/exchange、JIT 部门/用户同步和 `control/auth/` 部署挂载均已落地。
+- 已完成：`0008` 一次性身份迁移、统一且 MySQL 大小写敏感的 `(auth_provider, auth_subject)` 查询、SSO-only 密码约束、8 小时 JWT、启动期严格 YAML client、Redis/InMemory 有界一次性 state、匿名配置/start/exchange 准入、JIT 部门/用户同步和 `control/auth/` 部署挂载均已落地。
 - 自动化覆盖同名跨来源隔离、同 Provider 同 username 不同 subject、并发首登、明确无部门清权、上游错误脱敏、SSO 改密隔离及 SQLite 迁移往返；全量无外部依赖后端回归、前端类型/测试和 Go 测试通过。
 
 ### B — `main`：登录入口与浏览器闭环
@@ -259,3 +261,4 @@
 - 2026-08-18 **会话时长调整**：本地密码与 SSO 登录统一签发 8 小时 ArtifactFlow JWT；上游 token 仍只用于当次 exchange，不保存或用于后台续期。
 - 2026-08-18 **A 阶段开工合同**：本地与远程身份统一为 `(auth_provider, auth_subject)`，只保留一条身份唯一约束；Provider 改用启动期直读 YAML，HTTP/HTTPS 均支持且 HTTP 需显式确认；state 采用 Redis/InMemory 一次性存储并绑定浏览器；明确无部门允许以 `department_id=NULL` 登录，后续无部门会清除旧归属。
 - 2026-08-18 **A 阶段完成**：后端 exchange、身份/密码结构约束、配置与部署挂载、OpenAPI/前端类型以及自动化回归全部落地；真实登录页和 callback 地址栏清理仍严格留给 B。
+- 2026-08-18 **A 阶段资源与身份收口**：Provider YAML 仅保留连接/映射协议，ENV 承担 per-IP/全局 start 准入、state 容量和每实例 userinfo 并发；Redis state 改为单个有界 ZSET。MySQL 身份列使用 `utf8mb4_bin`，URL 通过运行时 HTTP parser 加严格 hostname 校验，`af_sso_state` 固定为保留参数名。

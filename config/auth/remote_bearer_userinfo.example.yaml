@@ -1,3 +1,5 @@
+# This file describes provider protocol semantics only. Anonymous admission,
+# pending-state capacity, and userinfo pool limits use ARTIFACTFLOW_SSO_* env.
 version: 1
 enabled: true
 

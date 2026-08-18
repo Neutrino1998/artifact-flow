@@ -75,15 +75,18 @@ class RemoteAuthManager:
             and urlsplit(self._config.login.callback_url).scheme == "https"
         )
 
+    def is_enabled(self) -> bool:
+        return bool(
+            self._config.enabled
+            and self._config.provider is not None
+            and self._config.login is not None
+            and self._config.userinfo is not None
+            and self._state_store is not None
+            and self._userinfo is not None
+        )
+
     def _require_enabled(self) -> None:
-        if (
-            not self._config.enabled
-            or self._config.provider is None
-            or self._config.login is None
-            or self._config.userinfo is None
-            or self._state_store is None
-            or self._userinfo is None
-        ):
+        if not self.is_enabled():
             raise RemoteAuthDisabledError("Enterprise authentication is unavailable")
 
     async def start(self) -> tuple[str, IssuedSsoState]:

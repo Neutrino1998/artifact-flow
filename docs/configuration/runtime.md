@@ -73,6 +73,11 @@ ready_timeout_seconds = 120
 | `ARTIFACTFLOW_EXECUTION_TIMEOUT` | `3600` 秒 | Agent 引擎 loop 的 deadline；含权限等待，不含结束后的持久化 |
 | `ARTIFACTFLOW_PERMISSION_TIMEOUT` | `300` 秒 | 等待一次用户确认的时间 |
 | `ARTIFACTFLOW_MAX_CONCURRENT_TASKS` | `32` | 按模型、DB 和主机容量限制并发 |
+| `ARTIFACTFLOW_SSO_START_IP_MAX_REQUESTS` | `60` | 单一客户端 IP 在 SSO start 窗口内的准入上限 |
+| `ARTIFACTFLOW_SSO_START_GLOBAL_MAX_REQUESTS` | `120` | 所有 Backend 通过 Redis 共享的 SSO start 窗口上限 |
+| `ARTIFACTFLOW_SSO_START_RATE_WINDOW_SEC` | `60` 秒 | SSO start 固定窗口长度 |
+| `ARTIFACTFLOW_SSO_STATE_MAX_PENDING` | `1000` | 一次性 SSO state 的硬容量上限 |
+| `ARTIFACTFLOW_SSO_USERINFO_MAX_CONNECTIONS` | `10` | 每个 Backend 的 userinfo 出站连接上限 |
 | `ARTIFACTFLOW_MAX_UPLOAD_SIZE` | `200 MiB` | 单文件上传上限；代理另有批量总量上限 |
 | `ARTIFACTFLOW_ARTIFACT_USER_QUOTA_BYTES` | `2 GiB` | 每用户二进制 Artifact 配额；`0` 表示不限 |
 | `ARTIFACTFLOW_ADMIN_PRIVACY_MODE` | `false` | 开启后，会话监控不返回账户关联字段和上传文件原名，并禁止管理员读取任何 Artifact 的内容 |
@@ -83,6 +88,11 @@ ready_timeout_seconds = 120
 `src/config.py` 还有算法护栏和内部实现常量。它们即使能被环境变量覆盖，也不等于常规部署契约；没有具体容量或故障证据时不要照单调大。
 
 `ARTIFACTFLOW_MAX_CONCURRENT_TASKS` 对每个 Backend 进程内唯一的 TaskSupervisor capacity gate 生效。超过容量的 Conversation turn 保持 QUEUED：它继续持有并续租 Conversation lease，但尚未标记为可交互 RUNNING，因此 inject/cancel 会按现有 409 契约拒绝。多 Backend 副本必须使用 Redis，让 lease、interactive、interrupt、cancel 与 SSE 状态跨进程共享；进程内 TaskSupervisor 只保留本进程 task 引用，不承担崩溃恢复。
+
+SSO 的五个容量项属于部署资源边界，不写入认证 Provider YAML。per-IP 超限返回 429；
+Redis 共享的全局窗口或 state 容量耗尽返回 503。userinfo 连接数是每个 Backend 的
+独立上限，因此部署总出站并发约为该值乘以 Backend 副本数；它不复用 Conversation
+TaskSupervisor 的信号量，登录和 Agent 执行不会互相占用准入名额。
 
 `ARTIFACTFLOW_ADMIN_PRIVACY_MODE=true` 是部署级的 Admin 会话监控边界：会话和反馈接口把属主显示为“匿名用户”、拒绝按 `user_id` 筛选、把附件名称显示为通用名称。Admin Artifact 列表只返回受保护的通用条目，任何来源的 Artifact 内容、版本和 raw/blob 接口都返回 404；`artifact_created` 和 `artifact_updated` live 事件也不向 Admin SSE 转发。Prompt 重建作为排障能力保持开放；它和会话正文、模型输出、工具事件一样可能包含附件的名称、片段，甚至完整内容，不做自由文本扫描。因此该模式降低的是账户直接关联和文件接口的直接读取风险，不承诺内容层面的完全匿名。
 

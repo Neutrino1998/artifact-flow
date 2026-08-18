@@ -7,7 +7,12 @@ from urllib.parse import parse_qs, urlsplit
 
 from httpx import AsyncClient
 
-from api.dependencies import get_remote_auth_manager, get_remote_bearer_config
+from api.dependencies import (
+    get_remote_auth_manager,
+    get_remote_bearer_config,
+    get_sso_start_rate_limiter,
+)
+from api.services.sso_rate_limiter import InMemorySsoStartRateLimiter
 from core.management.department_manager import DepartmentManager
 from core.management.remote_auth_manager import RemoteAuthManager
 from core.security.remote_bearer_config import RemoteBearerConfig
@@ -145,6 +150,68 @@ async def test_enabled_config_start_exchange_and_replay_rejection(
     )
     assert admin_reset.status_code == 400
     assert "unavailable" in admin_reset.json()["detail"].lower()
+
+
+async def test_start_maps_per_ip_and_global_admission_failures(
+    app,
+    anon_client: AsyncClient,
+    db_session,
+):
+    provider = _config()
+    manager = RemoteAuthManager(
+        provider,
+        InMemorySsoStateStore(),
+        _Client(),
+        UserRepository(db_session),
+        DepartmentManager(DepartmentRepository(db_session)),
+    )
+    app.dependency_overrides[get_remote_auth_manager] = lambda: manager
+
+    per_ip = InMemorySsoStartRateLimiter(
+        per_ip_limit=1, global_limit=10, window_seconds=60
+    )
+    app.dependency_overrides[get_sso_start_rate_limiter] = lambda: per_ip
+    assert (await anon_client.post("/api/v1/auth/sso/start")).status_code == 200
+    rejected = await anon_client.post("/api/v1/auth/sso/start")
+    assert rejected.status_code == 429
+    assert rejected.headers["retry-after"]
+
+    global_limit = InMemorySsoStartRateLimiter(
+        per_ip_limit=10, global_limit=1, window_seconds=60
+    )
+    app.dependency_overrides[get_sso_start_rate_limiter] = lambda: global_limit
+    first = await anon_client.post(
+        "/api/v1/auth/sso/start", headers={"X-Real-IP": "10.0.0.1"}
+    )
+    assert first.status_code == 200
+    rejected = await anon_client.post(
+        "/api/v1/auth/sso/start", headers={"X-Real-IP": "10.0.0.2"}
+    )
+    assert rejected.status_code == 503
+    assert rejected.headers["retry-after"]
+
+
+async def test_start_maps_state_capacity_to_service_unavailable(
+    app,
+    anon_client: AsyncClient,
+    db_session,
+):
+    provider = _config()
+    manager = RemoteAuthManager(
+        provider,
+        InMemorySsoStateStore(max_pending=1),
+        _Client(),
+        UserRepository(db_session),
+        DepartmentManager(DepartmentRepository(db_session)),
+    )
+    app.dependency_overrides[get_remote_auth_manager] = lambda: manager
+
+    assert (await anon_client.post("/api/v1/auth/sso/start")).status_code == 200
+    rejected = await anon_client.post("/api/v1/auth/sso/start")
+    assert rejected.status_code == 503
+    assert rejected.json()["detail"] == (
+        "Enterprise authentication is temporarily unavailable"
+    )
 
 
 async def test_invalid_exchange_shape_does_not_echo_token(

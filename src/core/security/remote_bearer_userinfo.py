@@ -160,9 +160,11 @@ def normalize_remote_userinfo(
 class RemoteBearerUserInfoClient:
     """One fixed-origin bearer GET client; redirects and environment auth are off."""
 
-    def __init__(self, provider_config: RemoteBearerConfig):
+    def __init__(self, provider_config: RemoteBearerConfig, *, max_connections: int):
         if not provider_config.enabled or provider_config.userinfo is None:
             raise ValueError("Cannot create userinfo client for a disabled provider")
+        if max_connections <= 0:
+            raise ValueError("max_connections must be positive")
         self._config = provider_config
         info = provider_config.userinfo
         self._client = httpx.AsyncClient(
@@ -175,6 +177,10 @@ class RemoteBearerUserInfoClient:
             follow_redirects=False,
             verify=create_outbound_ssl_context(),
             trust_env=False,
+            limits=httpx.Limits(
+                max_connections=max_connections,
+                max_keepalive_connections=max_connections,
+            ),
         )
 
     async def close(self) -> None:

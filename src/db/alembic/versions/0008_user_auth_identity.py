@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import mysql
 
 
 revision: str = "0008"
@@ -17,19 +18,30 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _auth_identity_string(length: int):
+    return sa.String(length=length).with_variant(
+        mysql.VARCHAR(
+            length=length,
+            charset="utf8mb4",
+            collation="utf8mb4_bin",
+        ),
+        "mysql",
+    )
+
+
 def upgrade() -> None:
     op.add_column(
         "users",
         sa.Column(
             "auth_provider",
-            sa.String(length=64),
+            _auth_identity_string(64),
             nullable=False,
             server_default="local_password",
         ),
     )
     op.add_column(
         "users",
-        sa.Column("auth_subject", sa.String(length=256), nullable=True),
+        sa.Column("auth_subject", _auth_identity_string(256), nullable=True),
     )
     op.execute(
         sa.text(
@@ -41,12 +53,14 @@ def upgrade() -> None:
     with op.batch_alter_table("users") as batch:
         batch.alter_column(
             "auth_provider",
-            existing_type=sa.String(length=64),
+            existing_type=_auth_identity_string(64),
+            type_=_auth_identity_string(64),
             server_default=None,
         )
         batch.alter_column(
             "auth_subject",
-            existing_type=sa.String(length=256),
+            existing_type=_auth_identity_string(256),
+            type_=_auth_identity_string(256),
             nullable=False,
         )
         batch.alter_column(
