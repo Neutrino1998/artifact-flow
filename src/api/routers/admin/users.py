@@ -159,6 +159,7 @@ async def update_user(
                 user_id,
                 actor_user_id=current_user.user_id,
                 display_name=request.display_name,
+                display_name_supplied="display_name" in request.model_fields_set,
                 password=request.password,
                 role=request.role,
                 is_active=request.is_active,

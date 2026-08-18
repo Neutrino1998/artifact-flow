@@ -27,6 +27,7 @@ class TestLogin:
         assert body["user"]["username"] == "testuser"
         assert body["user"]["auth_provider"] == "local_password"
         assert body["user"]["can_change_password"] is True
+        assert body["user"]["can_edit_profile"] is True
         assert body["expires_in"] == 8 * 60 * 60
 
     async def test_same_username_remote_identity_does_not_shadow_local_login(
@@ -123,6 +124,7 @@ class TestMe:
         body = resp.json()
         assert body["username"] == "testuser"
         assert body["role"] == "user"
+        assert body["can_edit_profile"] is True
 
 
 class TestPublicAuthConfig:
@@ -175,6 +177,7 @@ class TestAdminCRUD:
         body = resp.json()
         assert body["role"] == "user"
         assert body["is_active"] is True
+        assert body["can_edit_profile"] is True
 
     async def test_create_user_duplicate_username(
         self, admin_client: AsyncClient, test_user: User

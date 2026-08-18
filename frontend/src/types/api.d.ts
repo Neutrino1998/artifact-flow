@@ -2122,7 +2122,7 @@ export interface components {
             id: string;
             /**
              * Reason
-             * @description Failure reason: 'forbidden_self' | 'not_found' | 'internal_error'
+             * @description Failure reason: 'forbidden_self' | 'not_found' | 'profile_managed_by_provider' | 'internal_error'
              */
             reason: string;
         };
@@ -3721,6 +3721,11 @@ export interface components {
              */
             can_change_password: boolean;
             /**
+             * Can Edit Profile
+             * @description Whether provider-managed profile fields such as display name and department accept local edits
+             */
+            can_edit_profile: boolean;
+            /**
              * Must Change Password
              * @description True 时前端须强制弹出改密框,且除改密/登出外的请求会被后端 403 (首次登录 / 管理员重置 / 口令到期)。改密成功后清除。
              * @default false
@@ -3761,6 +3766,8 @@ export interface components {
             auth_provider: string;
             /** Can Change Password */
             can_change_password: boolean;
+            /** Can Edit Profile */
+            can_edit_profile: boolean;
             /** Department Id */
             department_id: string | null;
             /**

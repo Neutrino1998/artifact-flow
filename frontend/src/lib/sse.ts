@@ -39,7 +39,7 @@ export function connectSSE(
   fetchWithMaintenanceRedirect(url, { headers, signal })
     .then(async (res) => {
       if (res.status === 401) {
-        useAuthStore.getState().logout();
+        useAuthStore.getState().logout('session_expired');
         const err = new Error('Session expired') as Error & { status?: number };
         err.status = 401;
         handlers.onError?.(err);

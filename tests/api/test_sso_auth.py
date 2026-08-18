@@ -126,6 +126,7 @@ async def test_enabled_config_start_exchange_and_replay_rejection(
     assert body["expires_in"] == 8 * 60 * 60
     assert body["user"]["auth_provider"] == "enterprise_sso"
     assert body["user"]["can_change_password"] is False
+    assert body["user"]["can_edit_profile"] is False
     assert secret not in exchange.text
     assert upstream.tokens == [secret]
 
@@ -144,12 +145,48 @@ async def test_enabled_config_start_exchange_and_replay_rejection(
     )
     assert password_change.status_code == 403
 
+    profile_change = await anon_client.patch(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {remote_token}"},
+        json={"display_name": "Locally Overridden"},
+    )
+    assert profile_change.status_code == 403
+    assert "managed by the authentication provider" in profile_change.json()[
+        "detail"
+    ]
+    null_profile_change = await anon_client.patch(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {remote_token}"},
+        json={"display_name": None},
+    )
+    assert null_profile_change.status_code == 403
+
     admin_reset = await admin_client.put(
         f"/api/v1/admin/users/{body['user']['id']}",
         json={"password": "AdminReset1!pass"},
     )
     assert admin_reset.status_code == 400
     assert "unavailable" in admin_reset.json()["detail"].lower()
+
+    forbidden_profile_update = await admin_client.put(
+        f"/api/v1/admin/users/{body['user']['id']}",
+        json={"display_name": "Admin Override", "role": "admin"},
+    )
+    assert forbidden_profile_update.status_code == 400
+    unchanged = await admin_client.get(
+        f"/api/v1/admin/users/{body['user']['id']}"
+    )
+    assert unchanged.status_code == 200
+    assert unchanged.json()["display_name"] == "Remote User"
+    assert unchanged.json()["role"] == "user"
+    assert unchanged.json()["can_edit_profile"] is False
+
+    local_authorization_update = await admin_client.put(
+        f"/api/v1/admin/users/{body['user']['id']}",
+        json={"role": "admin"},
+    )
+    assert local_authorization_update.status_code == 200
+    assert local_authorization_update.json()["role"] == "admin"
 
 
 async def test_start_maps_per_ip_and_global_admission_failures(

@@ -1,6 +1,6 @@
 # 企业统一认证（Remote Bearer UserInfo）接入 —— 实施计划
 
-> 状态：A 阶段已完成，B 阶段待开始
+> 状态：A、B 阶段已完成，C 阶段待开始
 > 起草：2026-07-28 · 最后更新：2026-08-18
 > 关联资料：
 > - `temp/统一认证/AI应用接入统一身份认证指引.doc` —— 上游登录回跳和用户信息接口说明。
@@ -15,12 +15,12 @@
 
 ## 进度
 
-**当前**：生产统一认证门户和 `/auth/info` 已通过独立探针验证；用户、启用状态、末级部门和从根到末级的名称路径均可取得。A 阶段的默认关闭通用后端能力已完成实现和回归，下一步是 B 的浏览器闭环。
+**当前**：生产统一认证门户和 `/auth/info` 已通过独立探针验证；用户、启用状态、末级部门和从根到末级的名称路径均可取得。A、B 阶段的通用后端能力和浏览器闭环已完成实现与回归，下一步是 C 的内网生产配置和受控切换。
 
 | 阶段 | 内容 | 依赖 | 状态 |
 |---|---|---|---|
 | A | `main`：通用远程 Bearer 用户信息交换与本地身份落库 | 无 | 已完成 |
-| B | `main`：统一认证登录入口、回调页和双入口 UX 闭环 | A | 未开始 |
+| B | `main`：统一认证登录入口、回调页和双入口 UX 闭环 | A | 已完成 |
 | C | `intranet`：生产配置、真实账号验收和受控切换 | A、B 已合入 `main` | 未开始 |
 
 依赖关系：
@@ -173,8 +173,9 @@
 
 - Provider 启用时显示“企业统一认证”入口；本地用户名/密码保留为独立入口，供本地应急管理员使用。
 - start 使用配置的 return 参数跳到企业门户；短期 state 与浏览器绑定，callback 只接受匹配且未过期的流程。
-- callback 从 URL 读取 `authorization_key` 后立即通过 `history.replaceState` 清理 token，再调用同源 exchange；只把返回的 ArtifactFlow JWT 和 UserInfo 写入现有 authStore。
-- UserInfo 暴露认证来源和“是否支持改密”的能力，SSO-only 用户界面不显示改密入口；管理员界面在用户名旁明确展示来源和内部 ID，以区分跨来源同名用户，并且不能给 SSO 用户重置本地密码。
+- callback 文档请求先由 middleware 内部 rewrite 到无 query 的回调壳，阻止 Next App Router 把上游 token 序列化进 RSC/DOM；浏览器地址仍保留原参数，组件在第一次 JavaScript 调用栈中抓取后立即通过 `history.replaceState` 清理完整 query，再读取公开配置指定的 token 参数并调用 exchange。callback 文档使用 `Referrer-Policy: no-referrer`，只把返回的 ArtifactFlow JWT 和 UserInfo 写入现有 authStore。
+- UserInfo/UserResponse 暴露认证来源、`can_change_password` 和 `can_edit_profile`。remote-provider 的 username、display name 和 department 是 Provider 管理的身份/组织事实，本地自助与管理员 API 均不得修改；本地 role、`is_active` 仍是 ArtifactFlow 授权决策并可由管理员修改。SSO 用户界面不显示改名/改密入口，管理员详情将 Provider 管理字段设为只读、不能重置密码，批量设置部门逐用户拒绝 SSO 主体。
+- 管理员界面在用户名旁明确展示来源和内部 ID，以区分跨来源同名用户。SSO 用户仍可删除，但界面明确提示上游账号仍启用时下次登录会以同一 Provider subject 重新创建新的本地主体；禁用是阻止登录且保留数据的常规操作。
 - exchange 失败、state 失效或 JWT 到期时给出可理解提示并允许重新发起 SSO，不在页面中展示上游原始错误。
 - 重新生成 OpenAPI 前端类型，REST 和 SSE 继续复用当前 Authorization header 逻辑。
 
@@ -182,19 +183,29 @@
 
 - 静默续期、refresh token、将上游 token 缓存在浏览器。
 - 内网真实门户联调。
+- Provider 管理字段的本地 override/合并规则；一期直接拒绝本地修改，避免产生下次登录被静默覆盖的临时状态。
 
 **验收项**：
 
 - 浏览器 stub E2E 覆盖：首次登录、再次登录、用户取消/失败、state 缺失/过期、callback 刷新以及本地管理员登录。
 - 浏览器 stub E2E 覆盖同一 username 的本地与 SSO 用户：密码入口进入本地内部 ID，SSO 入口进入远程内部 ID，两者会话和用户态互不串用。
 - 地址栏在 exchange 网络请求发出前已移除 token；localStorage、cookie、控制台、前端错误和下载内容均无上游 token。
+- SSO 用户自助改名、管理员改显示名/部门/密码均被后端拒绝，前端也不提供这些入口；管理员仍可修改 role、启用状态和执行带明确重建提示的删除。混合更新请求整体拒绝，不产生部分写入。
 - SSO 登录成功后，现有会话列表、发消息、SSE、resume 和退出登录无需专有分支即可工作。
 - Provider 关闭时 SSO UI 不出现，现有密码登录页面和测试保持不变。
 - 前端单测、类型检查、构建以及后端目标测试全部通过。
 
+**开工合同（已敲定）**：
+
+- 登录页在 Provider 启用时以 SSO 为主要入口，本地账号表单以独立分隔区始终可见；Provider 关闭或公开配置暂时加载失败时，不阻断本地应急登录。
+- Profile 字段所有权一次性锁定：remote-provider 管 username/display name/department；ArtifactFlow 管 role/`is_active`。不增加本地 override 状态或下次登录 merge 规则。
+- 自动化分三层：Pytest 使用真实 Manager/Repository 和合成 userinfo 验证身份与写入约束；Vitest 验证组件与 callback 调用顺序；Playwright 使用真实浏览器和测试专用假门户/userinfo 验证导航、cookie、地址栏、Referer 和浏览器存储。生产返回只用于校准不含个人信息的合成 fixture，不成为自动测试依赖。
+
 **进展**：
 
-- 尚未开始。
+- 已完成双入口登录页、一次性 callback/exchange、JWT 到期提示、公开类型生成以及 SSO 资料/密码能力在自助与管理员界面的只读态。
+- 后端强制 Provider 字段所有权并保持 role/启用状态可管理；批量部门变更逐用户拒绝 SSO，删除确认明确重新创建语义。
+- Vitest 覆盖 callback 顺序、错误脱敏和管理界面能力；Playwright 通过动态端口和测试假门户覆盖重复登录、同名本地/远程身份、取消、过期、刷新及 token 不进入持久化、DOM、console、下载或 Referer。
 
 ### C — `intranet`：生产配置与受控切换
 
@@ -262,3 +273,4 @@
 - 2026-08-18 **A 阶段开工合同**：本地与远程身份统一为 `(auth_provider, auth_subject)`，只保留一条身份唯一约束；Provider 改用启动期直读 YAML，HTTP/HTTPS 均支持且 HTTP 需显式确认；state 采用 Redis/InMemory 一次性存储并绑定浏览器；明确无部门允许以 `department_id=NULL` 登录，后续无部门会清除旧归属。
 - 2026-08-18 **A 阶段完成**：后端 exchange、身份/密码结构约束、配置与部署挂载、OpenAPI/前端类型以及自动化回归全部落地；真实登录页和 callback 地址栏清理仍严格留给 B。
 - 2026-08-18 **A 阶段资源与身份收口**：Provider YAML 仅保留连接/映射协议，ENV 承担 per-IP/全局 start 准入、state 容量和每实例 userinfo 并发；Redis state 改为单个有界 ZSET。MySQL 身份列使用 `utf8mb4_bin`，URL 通过运行时 HTTP parser 加严格 hostname 校验，`af_sso_state` 固定为保留参数名。
+- 2026-08-18 **B 阶段完成**：登录页双入口、callback/exchange、SSO 用户自助与管理员只读边界、项目级 Vitest/Playwright 回归全部落地。浏览器测试发现 Next App Router 会在 client effect 前把 callback query 序列化进 RSC；最终通过 middleware queryless 内部 rewrite 和两次 middleware 均保持 `no-referrer`，使该坏状态不可进入 HTML/DOM 或后续 Referer。

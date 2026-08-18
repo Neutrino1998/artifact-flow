@@ -110,6 +110,13 @@ class UserInfo(BaseModel):
     can_change_password: bool = Field(
         ..., description="Whether this identity supports local password changes"
     )
+    can_edit_profile: bool = Field(
+        ...,
+        description=(
+            "Whether provider-managed profile fields such as display name and "
+            "department accept local edits"
+        ),
+    )
     must_change_password: bool = Field(
         False,
         description=(
@@ -163,6 +170,7 @@ class UserResponse(BaseModel):
     is_active: bool
     auth_provider: str
     can_change_password: bool
+    can_edit_profile: bool
     department_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -249,7 +257,11 @@ class BulkActionFailedItem(BaseModel):
     """单条 bulk-action 失败项。"""
     id: str = Field(..., description="User ID that failed")
     reason: str = Field(
-        ..., description="Failure reason: 'forbidden_self' | 'not_found' | 'internal_error'"
+        ...,
+        description=(
+            "Failure reason: 'forbidden_self' | 'not_found' | "
+            "'profile_managed_by_provider' | 'internal_error'"
+        ),
     )
 
 

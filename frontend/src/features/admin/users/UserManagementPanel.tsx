@@ -12,6 +12,7 @@ import { PillBadge } from '@/components/ui/PillBadge';
 import { StatusNotice } from '@/components/ui/StatusNotice';
 import PanelSearchBar from '@/components/ui/PanelSearchBar';
 import Pagination from '@/components/ui/Pagination';
+import { authProviderLabel } from './authIdentity';
 
 interface DeptNode {
   name: string;
@@ -351,6 +352,7 @@ function UserRow({
         </div>
         <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark truncate">
           @{user.username}
+          <span className="ml-2">{authProviderLabel(user.auth_provider)}</span>
           {deptLabel && <span className="ml-2">{deptLabel}</span>}
           <span className="ml-2 opacity-60">{user.id}</span>
         </div>

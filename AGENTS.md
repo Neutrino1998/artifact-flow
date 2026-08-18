@@ -115,6 +115,7 @@ Use `--upgrade` or `--upgrade-package X` only when intentionally refreshing pins
 
 ## Testing and Documentation
 
+- Frontend logic/component tests use project-local Vitest; browser security and navigation contracts use project-local Playwright via `frontend` npm scripts.
 - **Pytest is parallel-safe by default.** Use `tmp_path`, unique entity IDs/Redis namespaces, and dynamic ports; never rely on collection order or shared mutable host state. `external` means a provisioned service, not serial execution. Use `serial` only for a demonstrated, unisolatable conflict and add the test to the serial CI lane. The routine lane is `pytest -n 4 -m "not external and not serial"`.
 - **Manual test filenames must not start with `test_`.** Scripts in `tests/manual/` require external services and must not be auto-collected.
 - **Active docs are self-contained.** In `docs/` outside `docs/_archive/`, include durable rationale directly rather than pointing to PRs, fix plans, or archived documents as the only explanation.

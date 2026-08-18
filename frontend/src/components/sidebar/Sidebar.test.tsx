@@ -70,6 +70,7 @@ describe('Sidebar drawer presentation', () => {
         role: 'admin',
         auth_provider: 'local_password',
         can_change_password: true,
+        can_edit_profile: true,
         must_change_password: false,
         department_path: null,
       },

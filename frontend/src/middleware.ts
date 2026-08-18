@@ -9,6 +9,11 @@ import { API_URL } from '@/lib/apiBase';
  * See src/lib/csp.ts for why CSP lives here rather than in nginx.
  */
 export function middleware(request: NextRequest): NextResponse {
+  const isPublicSsoCallback = request.nextUrl.pathname === '/auth/sso/callback';
+  // Rewrites re-enter middleware with the internal pathname. Both passes must
+  // retain the sensitive-document referrer policy.
+  const isSsoCallbackDocument = isPublicSsoCallback
+    || request.nextUrl.pathname === '/auth/sso/callback-shell';
   const nonce = btoa(crypto.randomUUID());
   const csp = buildContentSecurityPolicy({
     nonce,
@@ -23,9 +28,24 @@ export function middleware(request: NextRequest): NextResponse {
   requestHeaders.set('x-nonce', nonce);
   requestHeaders.set('content-security-policy', csp);
 
-  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  // App Router serializes the requested URL (including search params) into its
+  // inline RSC payload before client effects can clear location.search. Serve
+  // the callback through a queryless internal route so the browser keeps the
+  // provider parameters in window.location for the first JS call stack, while
+  // Next never receives values it could copy into HTML/DOM.
+  const response = isPublicSsoCallback
+    ? (() => {
+        const callbackShell = request.nextUrl.clone();
+        callbackShell.pathname = '/auth/sso/callback-shell';
+        callbackShell.search = '';
+        return NextResponse.rewrite(callbackShell, { request: { headers: requestHeaders } });
+      })()
+    : NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set('content-security-policy', csp);
-  for (const [key, value] of Object.entries(buildSecurityHeaders())) {
+  const securityHeaders = buildSecurityHeaders({
+    sensitiveCallback: isSsoCallbackDocument,
+  });
+  for (const [key, value] of Object.entries(securityHeaders)) {
     response.headers.set(key, value);
   }
   return response;

@@ -17,6 +17,9 @@ import type {
   VersionDetail,
   LoginRequest,
   LoginResponse,
+  AuthPublicConfigResponse,
+  SsoStartResponse,
+  SsoExchangeRequest,
   CreateUserRequest,
   UpdateUserRequest,
   ChangePasswordRequest,
@@ -163,7 +166,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
   });
   if (res.status === 401) {
-    useAuthStore.getState().logout();
+    useAuthStore.getState().logout('session_expired');
     throw new ApiError(401, 'Session expired');
   }
   if (!res.ok) {
@@ -196,6 +199,65 @@ export function login(body: LoginRequest) {
   return fetchWithMaintenanceRedirect(`${BASE_URL}/api/v1/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(async (res) => {
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      const requestId = res.headers.get('X-Request-ID') ?? undefined;
+      throw new ApiError(
+        res.status,
+        formatApiError(res.status, text, res.status >= 500 ? requestId : undefined),
+        undefined,
+        requestId,
+      );
+    }
+    return res.json() as Promise<LoginResponse>;
+  });
+}
+
+export function getAuthConfig() {
+  return fetchWithMaintenanceRedirect(`${BASE_URL}/api/v1/auth/config`, {
+    headers: { Accept: 'application/json' },
+  }).then(async (res) => {
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      const requestId = res.headers.get('X-Request-ID') ?? undefined;
+      throw new ApiError(
+        res.status,
+        formatApiError(res.status, text, res.status >= 500 ? requestId : undefined),
+        undefined,
+        requestId,
+      );
+    }
+    return res.json() as Promise<AuthPublicConfigResponse>;
+  });
+}
+
+export function startSso() {
+  return fetchWithMaintenanceRedirect(`${BASE_URL}/api/v1/auth/sso/start`, {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+    credentials: 'include',
+  }).then(async (res) => {
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      const requestId = res.headers.get('X-Request-ID') ?? undefined;
+      throw new ApiError(
+        res.status,
+        formatApiError(res.status, text, res.status >= 500 ? requestId : undefined),
+        undefined,
+        requestId,
+      );
+    }
+    return res.json() as Promise<SsoStartResponse>;
+  });
+}
+
+export function exchangeSso(body: SsoExchangeRequest) {
+  return fetchWithMaintenanceRedirect(`${BASE_URL}/api/v1/auth/sso/exchange`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    credentials: 'include',
     body: JSON.stringify(body),
   }).then(async (res) => {
     if (!res.ok) {
@@ -280,7 +342,7 @@ export async function importSkill(
     body: formData,
   });
   if (res.status === 401) {
-    useAuthStore.getState().logout();
+    useAuthStore.getState().logout('session_expired');
     throw new ApiError(401, 'Session expired');
   }
   if (!res.ok) {
@@ -306,7 +368,7 @@ export async function downloadSkillBundle(
     { headers: authHeaders() },
   );
   if (res.status === 401) {
-    useAuthStore.getState().logout();
+    useAuthStore.getState().logout('session_expired');
     throw new ApiError(401, 'Session expired');
   }
   if (!res.ok) {
@@ -443,7 +505,7 @@ export async function sendMessage(
 
     xhr.onload = () => {
       if (xhr.status === 401) {
-        useAuthStore.getState().logout();
+        useAuthStore.getState().logout('session_expired');
         reject(new ApiError(401, 'Session expired'));
         return;
       }
@@ -560,7 +622,7 @@ async function fetchRawBlob(path: string): Promise<Blob> {
   const res = await fetchWithMaintenanceRedirect(`${BASE_URL}${path}`, { headers: authHeaders() });
 
   if (res.status === 401) {
-    useAuthStore.getState().logout();
+    useAuthStore.getState().logout('session_expired');
     throw new ApiError(401, 'Session expired');
   }
   if (!res.ok) {
@@ -925,7 +987,7 @@ export async function bulkImportUsers(file: File): Promise<BulkImportResponse> {
   });
 
   if (res.status === 401) {
-    useAuthStore.getState().logout();
+    useAuthStore.getState().logout('session_expired');
     throw new ApiError(401, 'Session expired');
   }
 
@@ -1094,7 +1156,7 @@ export async function importToolUnitSeed(file: File): Promise<ToolUnitImportResp
     body: formData,
   });
   if (res.status === 401) {
-    useAuthStore.getState().logout();
+    useAuthStore.getState().logout('session_expired');
     throw new ApiError(401, 'Session expired');
   }
   if (!res.ok) {
@@ -1114,7 +1176,7 @@ export async function downloadToolUnitSeedBundle(name: string): Promise<Blob> {
     { headers: authHeaders() },
   );
   if (res.status === 401) {
-    useAuthStore.getState().logout();
+    useAuthStore.getState().logout('session_expired');
     throw new ApiError(401, 'Session expired');
   }
   if (!res.ok) {

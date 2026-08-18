@@ -22,6 +22,7 @@ import {
   PASSWORD_POLICY_HINT,
   validatePasswordStrength,
 } from '@/lib/passwordPolicy';
+import { authProviderLabel } from './authIdentity';
 
 interface UserDetailFormProps {
   userId: string;
@@ -102,14 +103,15 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
   // policyError 仅作即时提示;真正的强度/不重用由后端权威校验,被拒显示后端原因。
   const passwordChanged = newPassword.length > 0;
   const policyError = passwordChanged ? validatePasswordStrength(newPassword) : null;
+  const profileManaged = user !== null && !user.can_edit_profile;
 
   const dirty =
     user !== null &&
     (
-      (displayName.trim() || null) !== (user.display_name ?? null) ||
+      (!profileManaged && (displayName.trim() || null) !== (user.display_name ?? null)) ||
       role !== user.role ||
       isActive !== user.is_active ||
-      departmentId !== (user.department_id ?? null) ||
+      (!profileManaged && departmentId !== (user.department_id ?? null)) ||
       passwordChanged
     );
 
@@ -120,13 +122,15 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
     try {
       const patch: Record<string, unknown> = {};
       const trimmedDisplay = displayName.trim() || null;
-      if (trimmedDisplay !== (user.display_name ?? null)) {
+      if (!profileManaged && trimmedDisplay !== (user.display_name ?? null)) {
         patch.display_name = trimmedDisplay;
       }
       if (role !== user.role) patch.role = role;
       if (isActive !== user.is_active) patch.is_active = isActive;
-      if (departmentId !== (user.department_id ?? null)) patch.department_id = departmentId;
-      if (passwordChanged) patch.password = newPassword;
+      if (!profileManaged && departmentId !== (user.department_id ?? null)) {
+        patch.department_id = departmentId;
+      }
+      if (user.can_change_password && passwordChanged) patch.password = newPassword;
 
       const updated = await api.updateUser(user.id, patch);
       setUser(updated);
@@ -199,7 +203,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
               {user.display_name || user.username}
             </div>
             <div className="text-xs font-mono text-text-tertiary dark:text-text-tertiary-dark truncate">
-              @{user.username}
+              @{user.username} · {authProviderLabel(user.auth_provider)}
             </div>
           </div>
           <button
@@ -217,7 +221,9 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
       footer={
         isSelf ? (
           <p className="flex-1 text-center text-sm text-text-secondary dark:text-text-secondary-dark">
-            查看自己的信息为只读。修改密码请使用左下角用户菜单。
+            {user.can_change_password
+              ? '查看自己的信息为只读。修改密码请使用左下角用户菜单。'
+              : '查看自己的信息为只读；资料由企业认证维护。'}
           </p>
         ) : (
           <>
@@ -254,7 +260,19 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
               {parseUtcIso(user.created_at).toLocaleString()}
             </div>
           </div>
+          <div>
+            <div className="text-text-tertiary dark:text-text-tertiary-dark">认证来源</div>
+            <div className="text-text-secondary dark:text-text-secondary-dark">
+              {authProviderLabel(user.auth_provider)}
+            </div>
+          </div>
         </div>
+
+        {profileManaged && (
+          <div className="rounded-lg bg-accent/5 px-3 py-2 text-xs text-text-secondary dark:bg-accent/10 dark:text-text-secondary-dark">
+            显示名和部门由企业认证维护，会在每次登录时同步；角色和启用状态仍由 ArtifactFlow 管理。
+          </div>
+        )}
 
         {/* Editable fields */}
         <div>
@@ -266,7 +284,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             placeholder={user.username}
-            disabled={saving || isSelf}
+            disabled={saving || isSelf || profileManaged}
             className={INPUT_ON_PANEL}
           />
         </div>
@@ -312,13 +330,13 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
             value={departmentId}
             onChange={setDepartmentId}
             allowCreate
-            disabled={saving}
+            disabled={saving || isSelf || profileManaged}
             refreshKey={listVersion}
           />
         </div>
 
         {/* Reset password — 自己看自己时整段隐藏（走 /me/password） */}
-        {!isSelf && (
+        {!isSelf && user.can_change_password && (
           <div>
             <label className={LABEL_CLASS}>
               重置密码
@@ -360,6 +378,9 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
           title="删除用户"
           message={
             `将级联删除该用户的 ${deleteImpact ?? 0} 条会话及相关消息、事件、artifact。\n` +
+            (!user.can_edit_profile
+              ? `如果上游账号仍启用，该用户下次 SSO 登录时会以新的内部 ID 重新创建。\n`
+              : '') +
             `操作不可恢复。`
           }
           confirmLabel="确认删除"
@@ -368,7 +389,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
         >
           <DangerConfirmTarget
             name={user.display_name || user.username}
-            description={`@${user.username} · ${user.role}`}
+            description={`@${user.username} · ${authProviderLabel(user.auth_provider)} · ${user.role}`}
           />
         </DangerConfirmModal>
       )}

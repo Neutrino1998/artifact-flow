@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "generate-types": "openapi-typescript src/types/openapi.json -o src/types/api.d.ts",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "test:e2e": "node e2e/run-playwright.mjs",
+    "test:e2e:ui": "node e2e/run-playwright.mjs --ui"
   },
   "dependencies": {
     "@tabler/icons-react": "^3.46.0",
@@ -31,6 +33,7 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/container-queries": "^0.1.1",
     "@tailwindcss/typography": "^0.5.15",
     "@types/diff": "^7.0.2",

@@ -173,6 +173,7 @@ class RemoteAuthManager:
                 "must_change_password": False,
                 "auth_provider": provider_id,
                 "can_change_password": False,
+                "can_edit_profile": False,
                 "department_path": list(identity.department_path)
                 if identity.department_path is not None
                 else None,

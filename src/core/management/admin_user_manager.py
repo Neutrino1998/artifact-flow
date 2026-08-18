@@ -10,6 +10,7 @@ from config import config
 from core.security.identity import (
     LOCAL_AUTH_PROVIDER,
     can_change_password,
+    can_edit_profile,
     local_auth_subject,
 )
 from core.management.conversation_manager import ConversationManager
@@ -83,6 +84,7 @@ class AdminUserManager:
             "is_active": user.is_active,
             "auth_provider": user.auth_provider,
             "can_change_password": can_change_password(user.auth_provider),
+            "can_edit_profile": can_edit_profile(user.auth_provider),
             "department_id": user.department_id,
             "created_at": user.created_at,
             "updated_at": user.updated_at,
@@ -227,6 +229,14 @@ class AdminUserManager:
             elif action == "enable":
                 user.is_active = True
             elif action == "set_department":
+                if not can_edit_profile(user.auth_provider):
+                    failed.append(
+                        {
+                            "id": user_id,
+                            "reason": "profile_managed_by_provider",
+                        }
+                    )
+                    continue
                 user.department_id = target_department_id
             else:
                 failed.append({"id": user_id, "reason": "internal_error"})
@@ -451,6 +461,7 @@ class AdminUserManager:
         *,
         actor_user_id: str,
         display_name: Optional[str],
+        display_name_supplied: bool,
         password: Optional[str],
         role: Optional[str],
         is_active: Optional[bool],
@@ -461,11 +472,17 @@ class AdminUserManager:
         if user is None:
             raise AdminUserNotFoundError("User not found")
         is_self = user_id == actor_user_id
+        if not can_edit_profile(user.auth_provider) and (
+            display_name_supplied or department_supplied
+        ):
+            raise AdminUserInvalidError(
+                "Profile is managed by the authentication provider"
+            )
         if password is not None and not can_change_password(user.auth_provider):
             raise AdminUserInvalidError(
                 "Password login is unavailable for this account"
             )
-        if display_name is not None:
+        if display_name_supplied:
             user.display_name = display_name or None
         if password is not None:
             if is_self:

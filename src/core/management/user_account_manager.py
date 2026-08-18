@@ -11,6 +11,7 @@ from core.security import passwords
 from core.security.identity import (
     LOCAL_AUTH_PROVIDER,
     can_change_password,
+    can_edit_profile,
     local_auth_subject,
 )
 from repositories.department_repo import DepartmentRepository
@@ -51,6 +52,10 @@ class PasswordUnavailableError(UserAccountError):
     pass
 
 
+class ProfileUnavailableError(UserAccountError):
+    pass
+
+
 class UserAccountManager:
     def __init__(
         self,
@@ -75,6 +80,7 @@ class UserAccountManager:
             "must_change_password": user.must_change_password,
             "auth_provider": user.auth_provider,
             "can_change_password": can_change_password(user.auth_provider),
+            "can_edit_profile": can_edit_profile(user.auth_provider),
             "department_path": await self._department_path(user.department_id),
         }
 
@@ -141,12 +147,22 @@ class UserAccountManager:
             "Password changed: %s (pwd_v=%s)", user.username, user.password_version
         )
 
-    async def update_profile(self, user_id: str, *, display_name: str | None) -> dict:
+    async def update_profile(
+        self,
+        user_id: str,
+        *,
+        display_name: str | None,
+        display_name_supplied: bool,
+    ) -> dict:
         user = await self._users.get_by_id(user_id)
         if user is None:
             raise UserAccountNotFoundError("User not found")
+        if display_name_supplied and not can_edit_profile(user.auth_provider):
+            raise ProfileUnavailableError(
+                "Profile is managed by the authentication provider"
+            )
         if display_name is not None:
             user.display_name = display_name.strip() or None
-        await self._users.save_user(user)
-        logger.info("Profile updated: %s", user.username)
+            await self._users.save_user(user)
+            logger.info("Profile updated: %s", user.username)
         return await self._profile(user)

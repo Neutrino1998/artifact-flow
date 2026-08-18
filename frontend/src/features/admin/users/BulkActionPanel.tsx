@@ -9,6 +9,7 @@ import DepartmentCascader from '@/features/admin/departments/DepartmentCascader'
 import DangerConfirmModal from '@/components/layout/DangerConfirmModal';
 import { StatusNotice } from '@/components/ui/StatusNotice';
 import type { BulkActionResponse, BulkImpactResponse } from '@/types';
+import { bulkFailureLabel } from './authIdentity';
 
 type ActionMode = 'idle' | 'set-department' | 'confirm-delete';
 
@@ -157,7 +158,7 @@ export default function BulkActionPanel() {
                 {lastResult.failed.map((f) => (
                   <li key={f.id}>
                     <span className="opacity-60">{f.id}</span>
-                    <span className="ml-2 text-status-error">{f.reason}</span>
+                    <span className="ml-2 text-status-error">{bulkFailureLabel(f.reason)}</span>
                   </li>
                 ))}
               </ul>
@@ -189,7 +190,7 @@ export default function BulkActionPanel() {
               className={`${BUTTON_SECONDARY} w-full rounded-lg px-4 py-2.5 text-left`}
             >
               <div className="font-medium">改部门</div>
-              <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">将选中用户分配到同一部门（或清空）</div>
+              <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark">将选中用户分配到同一部门；SSO 用户会被跳过</div>
             </button>
             <button
               onClick={handleStartDelete}
@@ -239,8 +240,8 @@ export default function BulkActionPanel() {
             impactLoading
               ? '正在加载影响数据…'
               : impact
-                ? `将删除 ${selection.length} 个用户、共 ${impact.conversation_count} 条会话。\n关联的消息、事件、artifacts 也会被级联删除。\n操作不可恢复。`
-                : `将删除 ${selection.length} 个用户及其所有会话。\n操作不可恢复。`
+                ? `将删除 ${selection.length} 个用户、共 ${impact.conversation_count} 条会话。\n关联的消息、事件、artifacts 也会被级联删除。\n如果其中包含上游仍启用的 SSO 用户，下次登录会以新的内部 ID 重新创建。\n操作不可恢复。`
+                : `将删除 ${selection.length} 个用户及其所有会话。\nSSO 用户可能在下次登录时重新创建。\n操作不可恢复。`
           }
           confirmLabel="确认删除"
           confirmDisabled={impactLoading}

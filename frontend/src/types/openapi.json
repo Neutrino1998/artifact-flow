@@ -5761,7 +5761,7 @@
           "reason": {
             "type": "string",
             "title": "Reason",
-            "description": "Failure reason: 'forbidden_self' | 'not_found' | 'internal_error'"
+            "description": "Failure reason: 'forbidden_self' | 'not_found' | 'profile_managed_by_provider' | 'internal_error'"
           }
         },
         "type": "object",
@@ -8931,6 +8931,11 @@
             "title": "Can Change Password",
             "description": "Whether this identity supports local password changes"
           },
+          "can_edit_profile": {
+            "type": "boolean",
+            "title": "Can Edit Profile",
+            "description": "Whether provider-managed profile fields such as display name and department accept local edits"
+          },
           "must_change_password": {
             "type": "boolean",
             "title": "Must Change Password",
@@ -8961,6 +8966,7 @@
           "role",
           "auth_provider",
           "can_change_password",
+          "can_edit_profile",
           "must_change_password",
           "department_path"
         ],
@@ -9026,6 +9032,10 @@
             "type": "boolean",
             "title": "Can Change Password"
           },
+          "can_edit_profile": {
+            "type": "boolean",
+            "title": "Can Edit Profile"
+          },
           "department_id": {
             "anyOf": [
               {
@@ -9057,6 +9067,7 @@
           "is_active",
           "auth_provider",
           "can_change_password",
+          "can_edit_profile",
           "department_id",
           "created_at",
           "updated_at"

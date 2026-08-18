@@ -36,17 +36,21 @@ async def _seed_user(
     role: str = "user",
     is_active: bool = True,
     department_id: str | None = None,
+    auth_provider: str = "local_password",
 ) -> User:
     username = f"u-{uuid.uuid4().hex[:8]}"
+    is_local = auth_provider == "local_password"
     user = User(
         id=f"user-{uuid.uuid4().hex}",
-        auth_provider="local_password",
-        auth_subject=username,
+        auth_provider=auth_provider,
+        auth_subject=username if is_local else f"subject-{uuid.uuid4().hex}",
         username=username,
-        hashed_password=hash_password("pw1234"),
+        hashed_password=hash_password("pw1234") if is_local else None,
         role=role,
         is_active=is_active,
         department_id=department_id,
+        must_change_password=False,
+        password_changed_at=None,
     )
     async with db_manager.session() as s:
         repo = UserRepository(s)
@@ -241,6 +245,38 @@ class TestSetDepartment:
         assert resp.status_code == 200
         row = await _get_user(db_manager, u.id)
         assert row is not None and row.department_id is None
+
+    async def test_set_department_rejects_provider_managed_users_per_row(
+        self, admin_client: AsyncClient, db_manager: DatabaseManager
+    ):
+        old_dept = await _seed_department(db_manager, "原部门")
+        new_dept = await _seed_department(db_manager, "新部门")
+        local = await _seed_user(db_manager, department_id=None)
+        remote = await _seed_user(
+            db_manager,
+            department_id=old_dept.id,
+            auth_provider="enterprise_sso",
+        )
+
+        resp = await admin_client.post(
+            "/api/v1/admin/users/bulk-action",
+            json={
+                "ids": [local.id, remote.id],
+                "action": "set_department",
+                "payload": {"department_id": new_dept.id},
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "succeeded": [local.id],
+            "failed": [
+                {"id": remote.id, "reason": "profile_managed_by_provider"}
+            ],
+        }
+        local_row = await _get_user(db_manager, local.id)
+        remote_row = await _get_user(db_manager, remote.id)
+        assert local_row is not None and local_row.department_id == new_dept.id
+        assert remote_row is not None and remote_row.department_id == old_dept.id
 
     async def test_set_department_invalid_id_rejects_batch(
         self, admin_client: AsyncClient, db_manager: DatabaseManager

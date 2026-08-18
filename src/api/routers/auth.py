@@ -35,6 +35,7 @@ from core.management.user_account_manager import (
     InvalidCredentialsError,
     PasswordReusedError,
     PasswordUnavailableError,
+    ProfileUnavailableError,
     UserAccountError,
     UserAccountManager,
     UserAccountNotFoundError,
@@ -102,7 +103,7 @@ def _login_retry_detail(seconds: int) -> str:
 def _map_account_error(exc: UserAccountError) -> HTTPException:
     if isinstance(exc, UserAccountNotFoundError):
         return HTTPException(status_code=404, detail=exc.detail)
-    if isinstance(exc, PasswordUnavailableError):
+    if isinstance(exc, (PasswordUnavailableError, ProfileUnavailableError)):
         return HTTPException(status_code=403, detail=exc.detail)
     if isinstance(exc, (CurrentPasswordIncorrectError, PasswordReusedError)):
         return HTTPException(status_code=400, detail=exc.detail)
@@ -377,7 +378,9 @@ async def update_my_profile(
     try:
         return UserInfo(
             **await manager.update_profile(
-                current_user.user_id, display_name=request.display_name
+                current_user.user_id,
+                display_name=request.display_name,
+                display_name_supplied="display_name" in request.model_fields_set,
             )
         )
     except UserAccountError as exc:

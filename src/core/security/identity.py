@@ -10,3 +10,8 @@ def local_auth_subject(username: str) -> str:
 
 def can_change_password(auth_provider: str) -> bool:
     return auth_provider == LOCAL_AUTH_PROVIDER
+
+
+def can_edit_profile(auth_provider: str) -> bool:
+    """Whether provider-managed display and department facts accept local edits."""
+    return auth_provider == LOCAL_AUTH_PROVIDER

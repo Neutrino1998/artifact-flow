@@ -1,4 +1,4 @@
-import type { components } from './api';
+import type { components, operations } from './api';
 type S = components['schemas'];
 
 // ============================================================
@@ -8,6 +8,9 @@ type S = components['schemas'];
 export type LoginRequest = S['LoginRequest'];
 export type UserInfo = S['UserInfo'];
 export type LoginResponse = S['LoginResponse'];
+export type AuthPublicConfigResponse = S['AuthPublicConfigResponse'];
+export type SsoStartResponse = S['SsoStartResponse'];
+export type SsoExchangeRequest = operations['exchange_sso_api_v1_auth_sso_exchange_post']['requestBody']['content']['application/json'];
 
 // ============================================================
 // User Management Types (Admin)
