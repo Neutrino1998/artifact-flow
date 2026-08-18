@@ -10,6 +10,7 @@ validation + capacity + impact aggregation. Engine fail-soft on active execution
 is covered by tests/api/services/test_conversation_turn_handler_delete.py (PR2a layer).
 """
 
+import logging
 import uuid
 from typing import List
 
@@ -247,7 +248,7 @@ class TestSetDepartment:
         assert row is not None and row.department_id is None
 
     async def test_set_department_rejects_provider_managed_users_per_row(
-        self, admin_client: AsyncClient, db_manager: DatabaseManager
+        self, admin_client: AsyncClient, db_manager: DatabaseManager, caplog
     ):
         old_dept = await _seed_department(db_manager, "原部门")
         new_dept = await _seed_department(db_manager, "新部门")
@@ -258,14 +259,15 @@ class TestSetDepartment:
             auth_provider="enterprise_sso",
         )
 
-        resp = await admin_client.post(
-            "/api/v1/admin/users/bulk-action",
-            json={
-                "ids": [local.id, remote.id],
-                "action": "set_department",
-                "payload": {"department_id": new_dept.id},
-            },
-        )
+        with caplog.at_level(logging.WARNING, logger="ArtifactFlow"):
+            resp = await admin_client.post(
+                "/api/v1/admin/users/bulk-action",
+                json={
+                    "ids": [local.id, remote.id],
+                    "action": "set_department",
+                    "payload": {"department_id": new_dept.id},
+                },
+            )
         assert resp.status_code == 200
         assert resp.json() == {
             "succeeded": [local.id],
@@ -277,6 +279,19 @@ class TestSetDepartment:
         remote_row = await _get_user(db_manager, remote.id)
         assert local_row is not None and local_row.department_id == new_dept.id
         assert remote_row is not None and remote_row.department_id == old_dept.id
+        assert "Bulk department update skipped provider-managed users" in caplog.text
+        assert "rejected_count=1" in caplog.text
+        assert "providers=enterprise_sso" in caplog.text
+        assert new_dept.id not in caplog.text
+        warning_record = next(
+            record
+            for record in caplog.records
+            if (
+                "Bulk department update skipped provider-managed users"
+                in record.getMessage()
+            )
+        )
+        assert warning_record.request_id.startswith("req-")
 
     async def test_set_department_invalid_id_rejects_batch(
         self, admin_client: AsyncClient, db_manager: DatabaseManager

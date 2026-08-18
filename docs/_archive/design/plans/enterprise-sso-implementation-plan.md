@@ -173,7 +173,7 @@
 
 - Provider 启用时显示“企业统一认证”入口；本地用户名/密码保留为独立入口，供本地应急管理员使用。
 - start 使用配置的 return 参数跳到企业门户；短期 state 与浏览器绑定，callback 只接受匹配且未过期的流程。
-- callback 文档请求先由 middleware 内部 rewrite 到无 query 的回调壳，阻止 Next App Router 把上游 token 序列化进 RSC/DOM；浏览器地址仍保留原参数，组件在第一次 JavaScript 调用栈中抓取后立即通过 `history.replaceState` 清理完整 query，再读取公开配置指定的 token 参数并调用 exchange。callback 文档使用 `Referrer-Policy: no-referrer`，只把返回的 ArtifactFlow JWT 和 UserInfo 写入现有 authStore。
+- callback 文档请求先由 middleware 内部 rewrite 到无 query 的回调壳，阻止 Next App Router 把上游 token 序列化进 RSC/DOM；浏览器地址仍保留原参数，组件在第一次 JavaScript 调用栈中抓取后立即通过 `history.replaceState` 清理完整 query，再读取公开配置指定的 token 参数并调用 exchange。callback 文档使用 `Referrer-Policy: no-referrer`；成功写入 ArtifactFlow JWT/UserInfo 后用全页面 replace 进入首页，失败仅以一次性的允许列表错误类别和可选 request ID 跨文档传递，再全页面 replace 到无 query callback，确保原始导航条目随旧 Document 一起销毁。
 - UserInfo/UserResponse 暴露认证来源、`can_change_password` 和 `can_edit_profile`。remote-provider 的 username、display name 和 department 是 Provider 管理的身份/组织事实，本地自助与管理员 API 均不得修改；本地 role、`is_active` 仍是 ArtifactFlow 授权决策并可由管理员修改。SSO 用户界面不显示改名/改密入口，管理员详情将 Provider 管理字段设为只读、不能重置密码，批量设置部门逐用户拒绝 SSO 主体。
 - 管理员界面在用户名旁明确展示来源和内部 ID，以区分跨来源同名用户。SSO 用户仍可删除，但界面明确提示上游账号仍启用时下次登录会以同一 Provider subject 重新创建新的本地主体；禁用是阻止登录且保留数据的常规操作。
 - exchange 失败、state 失效或 JWT 到期时给出可理解提示并允许重新发起 SSO，不在页面中展示上游原始错误。
@@ -205,7 +205,7 @@
 
 - 已完成双入口登录页、一次性 callback/exchange、JWT 到期提示、公开类型生成以及 SSO 资料/密码能力在自助与管理员界面的只读态。
 - 后端强制 Provider 字段所有权并保持 role/启用状态可管理；批量部门变更逐用户拒绝 SSO，删除确认明确重新创建语义。
-- Vitest 覆盖 callback 顺序、错误脱敏和管理界面能力；Playwright 通过动态端口和测试假门户覆盖重复登录、同名本地/远程身份、取消、过期、刷新及 token 不进入持久化、DOM、console、下载或 Referer。
+- Vitest 覆盖 callback 顺序、错误脱敏和管理界面能力；Playwright 通过动态端口和测试假门户覆盖重复登录、同名本地/远程身份、取消、过期、刷新及 token 不进入持久化、DOM、console、下载、Referer、sessionStorage 或当前 Document 的 Performance Timeline。
 
 ### C — `intranet`：生产配置与受控切换
 
@@ -273,4 +273,4 @@
 - 2026-08-18 **A 阶段开工合同**：本地与远程身份统一为 `(auth_provider, auth_subject)`，只保留一条身份唯一约束；Provider 改用启动期直读 YAML，HTTP/HTTPS 均支持且 HTTP 需显式确认；state 采用 Redis/InMemory 一次性存储并绑定浏览器；明确无部门允许以 `department_id=NULL` 登录，后续无部门会清除旧归属。
 - 2026-08-18 **A 阶段完成**：后端 exchange、身份/密码结构约束、配置与部署挂载、OpenAPI/前端类型以及自动化回归全部落地；真实登录页和 callback 地址栏清理仍严格留给 B。
 - 2026-08-18 **A 阶段资源与身份收口**：Provider YAML 仅保留连接/映射协议，ENV 承担 per-IP/全局 start 准入、state 容量和每实例 userinfo 并发；Redis state 改为单个有界 ZSET。MySQL 身份列使用 `utf8mb4_bin`，URL 通过运行时 HTTP parser 加严格 hostname 校验，`af_sso_state` 固定为保留参数名。
-- 2026-08-18 **B 阶段完成**：登录页双入口、callback/exchange、SSO 用户自助与管理员只读边界、项目级 Vitest/Playwright 回归全部落地。浏览器测试发现 Next App Router 会在 client effect 前把 callback query 序列化进 RSC；最终通过 middleware queryless 内部 rewrite 和两次 middleware 均保持 `no-referrer`，使该坏状态不可进入 HTML/DOM 或后续 Referer。
+- 2026-08-18 **B 阶段完成**：登录页双入口、callback/exchange、SSO 用户自助与管理员只读边界、项目级 Vitest/Playwright 回归全部落地。浏览器测试发现 Next App Router 会在 client effect 前把 callback query 序列化进 RSC，且 client-side route replace 不销毁 Performance Navigation 条目；最终通过 middleware queryless 内部 rewrite、两次 middleware 均保持 `no-referrer` 以及 exchange 后全页面 replace，使上游凭据不留在 HTML/DOM、后续 Referer 或当前 Document Performance Timeline。

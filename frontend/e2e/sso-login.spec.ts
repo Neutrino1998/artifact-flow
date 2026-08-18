@@ -36,6 +36,16 @@ function json(route: Route, body: unknown, headers: Record<string, string> = {})
   });
 }
 
+async function browserResidue(page: Page) {
+  return page.evaluate(() => ({
+    performanceNames: performance.getEntries().map((entry) => entry.name),
+    sessionStorageValues: Array.from(
+      { length: sessionStorage.length },
+      (_, index) => sessionStorage.getItem(sessionStorage.key(index) ?? '') ?? '',
+    ),
+  }));
+}
+
 async function installAuthRoutes(page: Page, options: { cancel?: boolean; expired?: boolean } = {}) {
   const observedMeAuthorizations: string[] = [];
   await page.route('**/api/v1/auth/config', (route) => json(route, {
@@ -141,6 +151,10 @@ test('creates then reuses the same remote identity without persisting or leaking
   expect(consoleMessages.join('\n')).not.toContain(upstreamToken);
   expect(requestReferrers.join('\n')).not.toContain(upstreamToken);
   expect(downloads).toEqual([]);
+  const residue = await browserResidue(page);
+  expect(residue.performanceNames.join('\n')).not.toContain(upstreamToken);
+  expect(residue.performanceNames.join('\n')).not.toContain('browser-state');
+  expect(residue.sessionStorageValues.join('\n')).not.toContain(upstreamToken);
   await expect.poll(() => observed.observedMeAuthorizations).toContain('Bearer artifactflow-internal-jwt');
 
   // A later login for the same provider subject reuses the same ArtifactFlow
@@ -174,6 +188,8 @@ test('shows a restart action for provider cancellation without exposing callback
   await expect(page.getByText('企业登录未完成，可能已取消。请重新发起登录。')).toBeVisible();
   await expect(page.getByRole('button', { name: '重新发起企业统一认证' })).toBeVisible();
   await expect(page.locator('body')).not.toContainText('browser-state');
+  const residue = await browserResidue(page);
+  expect(residue.performanceNames.join('\n')).not.toContain('browser-state');
 });
 
 test('fails a queryless callback refresh safely', async ({ page }) => {
@@ -192,4 +208,9 @@ test('turns an expired exchange into a sanitized restart prompt', async ({ page 
   await expect(page.getByText('本次企业登录已失效或未完成，请重新发起登录。')).toBeVisible();
   await expect(page.locator('body')).not.toContainText('raw provider diagnostics');
   await expect(page.getByRole('button', { name: '重新发起企业统一认证' })).toBeVisible();
+  const residue = await browserResidue(page);
+  expect(residue.performanceNames.join('\n')).not.toContain(upstreamToken);
+  expect(residue.performanceNames.join('\n')).not.toContain('browser-state');
+  expect(residue.sessionStorageValues.join('\n')).not.toContain(upstreamToken);
+  expect(residue.sessionStorageValues.join('\n')).not.toContain('raw provider diagnostics');
 });

@@ -1,19 +1,29 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { exchangeSso, getAuthConfig, startSso } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
 import { APP_NAME } from '@/lib/branding';
 import {
   captureAndClearCallbackQuery,
   getSingleCallbackValue,
-  ssoCallbackErrorMessage,
+  rememberSsoCallbackFailure,
+  ssoCallbackFailureFromError,
+  ssoCallbackFailureMessage,
   ssoStartErrorMessage,
+  takeSsoCallbackFailure,
+  type SsoCallbackFailure,
 } from './ssoFlow';
 
-export default function SsoCallbackScreen() {
-  const router = useRouter();
+const replaceCurrentDocument = (url: string) => window.location.replace(url);
+
+interface SsoCallbackScreenProps {
+  replaceDocument?: (url: string) => void;
+}
+
+export default function SsoCallbackScreen({
+  replaceDocument = replaceCurrentDocument,
+}: SsoCallbackScreenProps) {
   const authLogin = useAuthStore((s) => s.login);
   const startedRef = useRef(false);
   const activeRef = useRef(false);
@@ -29,11 +39,23 @@ export default function SsoCallbackScreen() {
         (cleanPath) => window.history.replaceState(window.history.state, '', cleanPath),
       );
 
+      const finishFailure = (failure: SsoCallbackFailure) => {
+        rememberSsoCallbackFailure(window.sessionStorage, failure);
+        replaceDocument('/auth/sso/callback');
+      };
+
       void (async () => {
+        const carriedFailure = takeSsoCallbackFailure(window.sessionStorage);
+        if (params.size === 0 && carriedFailure) {
+          if (activeRef.current) setError(ssoCallbackFailureMessage(carriedFailure));
+          return;
+        }
+
         const state = getSingleCallbackValue(params, 'af_sso_state');
         if (!state) {
           if (activeRef.current) {
-            setError('本次企业登录信息缺失或已失效，请重新发起登录。');
+            if (params.size > 0) finishFailure({ code: 'missing' });
+            else setError(ssoCallbackFailureMessage({ code: 'missing' }));
           }
           return;
         }
@@ -42,28 +64,26 @@ export default function SsoCallbackScreen() {
           const config = await getAuthConfig();
           const tokenParam = config.sso.enabled ? config.sso.token_param : null;
           if (!tokenParam) {
-            if (activeRef.current) setError('企业统一认证当前未启用。');
+            if (activeRef.current) finishFailure({ code: 'disabled' });
             return;
           }
           const upstreamToken = getSingleCallbackValue(params, tokenParam);
           if (!upstreamToken) {
-            if (activeRef.current) {
-              setError('企业登录未完成，可能已取消。请重新发起登录。');
-            }
+            if (activeRef.current) finishFailure({ code: 'cancelled' });
             return;
           }
           const result = await exchangeSso({ state, upstream_token: upstreamToken });
           if (!activeRef.current) return;
           authLogin(result.access_token, result.user);
-          router.replace('/');
+          replaceDocument('/');
         } catch (err) {
-          if (activeRef.current) setError(ssoCallbackErrorMessage(err));
+          if (activeRef.current) finishFailure(ssoCallbackFailureFromError(err));
         }
       })();
     }
 
     return () => { activeRef.current = false; };
-  }, [authLogin, router]);
+  }, [authLogin, replaceDocument]);
 
   async function handleRetry() {
     setRetrying(true);

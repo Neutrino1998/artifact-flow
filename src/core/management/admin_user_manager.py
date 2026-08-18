@@ -205,6 +205,8 @@ class AdminUserManager:
 
         succeeded: list[str] = []
         failed: list[dict] = []
+        provider_managed_rejection_count = 0
+        provider_managed_rejection_providers: set[str] = set()
         seen: set[str] = set()
         for user_id in user_ids:
             if user_id in seen:
@@ -230,6 +232,8 @@ class AdminUserManager:
                 user.is_active = True
             elif action == "set_department":
                 if not can_edit_profile(user.auth_provider):
+                    provider_managed_rejection_count += 1
+                    provider_managed_rejection_providers.add(user.auth_provider)
                     failed.append(
                         {
                             "id": user_id,
@@ -254,6 +258,14 @@ class AdminUserManager:
                 continue
             succeeded.append(user_id)
 
+        if provider_managed_rejection_count:
+            logger.warning(
+                "Bulk department update skipped provider-managed users: "
+                "actor_user_id=%s rejected_count=%d providers=%s",
+                actor_user_id,
+                provider_managed_rejection_count,
+                ",".join(sorted(provider_managed_rejection_providers)),
+            )
         logger.info(
             "Bulk action %r done: succeeded=%d failed=%d",
             action,
@@ -475,6 +487,13 @@ class AdminUserManager:
         if not can_edit_profile(user.auth_provider) and (
             display_name_supplied or department_supplied
         ):
+            logger.warning(
+                "Admin provider-managed profile update rejected: "
+                "actor_user_id=%s target_user_id=%s provider=%s",
+                actor_user_id,
+                user.id,
+                user.auth_provider,
+            )
             raise AdminUserInvalidError(
                 "Profile is managed by the authentication provider"
             )

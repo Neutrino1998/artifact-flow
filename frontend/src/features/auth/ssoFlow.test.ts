@@ -3,7 +3,10 @@ import { ApiError } from '@/lib/api';
 import {
   captureAndClearCallbackQuery,
   getSingleCallbackValue,
+  rememberSsoCallbackFailure,
+  SSO_CALLBACK_FAILURE_KEY,
   ssoCallbackErrorMessage,
+  takeSsoCallbackFailure,
 } from './ssoFlow';
 
 describe('SSO callback primitives', () => {
@@ -37,5 +40,20 @@ describe('SSO callback primitives', () => {
     const message = ssoCallbackErrorMessage(error);
     expect(message).toContain('req-safe');
     expect(message).not.toContain('raw upstream');
+  });
+
+  it('carries only a validated, read-once failure classification across documents', () => {
+    window.sessionStorage.clear();
+    rememberSsoCallbackFailure(window.sessionStorage, {
+      code: 'unavailable',
+      requestId: 'req-safe',
+    });
+    const raw = window.sessionStorage.getItem(SSO_CALLBACK_FAILURE_KEY);
+    expect(raw).toBe('{"code":"unavailable","requestId":"req-safe"}');
+    expect(takeSsoCallbackFailure(window.sessionStorage)).toEqual({
+      code: 'unavailable',
+      requestId: 'req-safe',
+    });
+    expect(window.sessionStorage.getItem(SSO_CALLBACK_FAILURE_KEY)).toBeNull();
   });
 });

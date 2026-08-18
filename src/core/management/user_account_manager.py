@@ -158,6 +158,11 @@ class UserAccountManager:
         if user is None:
             raise UserAccountNotFoundError("User not found")
         if display_name_supplied and not can_edit_profile(user.auth_provider):
+            logger.warning(
+                "Provider-managed profile update rejected: user_id=%s provider=%s",
+                user.id,
+                user.auth_provider,
+            )
             raise ProfileUnavailableError(
                 "Profile is managed by the authentication provider"
             )

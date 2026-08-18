@@ -88,6 +88,7 @@ async def test_enabled_config_start_exchange_and_replay_rejection(
     anon_client: AsyncClient,
     admin_client: AsyncClient,
     db_session,
+    caplog,
 ):
     provider = _config()
     upstream = _Client()
@@ -145,15 +146,27 @@ async def test_enabled_config_start_exchange_and_replay_rejection(
     )
     assert password_change.status_code == 403
 
-    profile_change = await anon_client.patch(
-        "/api/v1/auth/me",
-        headers={"Authorization": f"Bearer {remote_token}"},
-        json={"display_name": "Locally Overridden"},
-    )
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="ArtifactFlow"):
+        profile_change = await anon_client.patch(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {remote_token}"},
+            json={"display_name": "Locally Overridden"},
+        )
     assert profile_change.status_code == 403
     assert "managed by the authentication provider" in profile_change.json()[
         "detail"
     ]
+    assert "Provider-managed profile update rejected" in caplog.text
+    assert f"user_id={body['user']['id']}" in caplog.text
+    assert "provider=enterprise_sso" in caplog.text
+    assert "Locally Overridden" not in caplog.text
+    profile_record = next(
+        record
+        for record in caplog.records
+        if "Provider-managed profile update rejected" in record.getMessage()
+    )
+    assert profile_record.request_id.startswith("req-")
     null_profile_change = await anon_client.patch(
         "/api/v1/auth/me",
         headers={"Authorization": f"Bearer {remote_token}"},
@@ -168,11 +181,26 @@ async def test_enabled_config_start_exchange_and_replay_rejection(
     assert admin_reset.status_code == 400
     assert "unavailable" in admin_reset.json()["detail"].lower()
 
-    forbidden_profile_update = await admin_client.put(
-        f"/api/v1/admin/users/{body['user']['id']}",
-        json={"display_name": "Admin Override", "role": "admin"},
-    )
+    admin_profile = await admin_client.get("/api/v1/auth/me")
+    assert admin_profile.status_code == 200
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="ArtifactFlow"):
+        forbidden_profile_update = await admin_client.put(
+            f"/api/v1/admin/users/{body['user']['id']}",
+            json={"display_name": "Admin Override", "role": "admin"},
+        )
     assert forbidden_profile_update.status_code == 400
+    assert "Admin provider-managed profile update rejected" in caplog.text
+    assert f"actor_user_id={admin_profile.json()['id']}" in caplog.text
+    assert f"target_user_id={body['user']['id']}" in caplog.text
+    assert "provider=enterprise_sso" in caplog.text
+    assert "Admin Override" not in caplog.text
+    admin_record = next(
+        record
+        for record in caplog.records
+        if "Admin provider-managed profile update rejected" in record.getMessage()
+    )
+    assert admin_record.request_id.startswith("req-")
     unchanged = await admin_client.get(
         f"/api/v1/admin/users/{body['user']['id']}"
     )
