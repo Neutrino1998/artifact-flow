@@ -25,6 +25,33 @@ class TestLogin:
         assert "access_token" in body
         assert body["token_type"] == "bearer"
         assert body["user"]["username"] == "testuser"
+        assert body["user"]["auth_provider"] == "local_password"
+        assert body["user"]["can_change_password"] is True
+        assert body["expires_in"] == 8 * 60 * 60
+
+    async def test_same_username_remote_identity_does_not_shadow_local_login(
+        self, anon_client: AsyncClient, test_user: User, user_repo: UserRepository
+    ):
+        remote = User(
+            id=f"user-{uuid.uuid4().hex}",
+            auth_provider="enterprise_sso",
+            auth_subject="upstream-123",
+            username=test_user.username,
+            hashed_password=None,
+            role="user",
+            is_active=True,
+            must_change_password=False,
+            password_changed_at=None,
+        )
+        await user_repo.add(remote)
+
+        resp = await anon_client.post(
+            "/api/v1/auth/login",
+            json={"username": test_user.username, "password": "testpass"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["user"]["id"] == test_user.id
+        assert resp.json()["user"]["auth_provider"] == "local_password"
 
     async def test_login_wrong_password(self, anon_client: AsyncClient, test_user: User):
         resp = await anon_client.post(
@@ -96,6 +123,30 @@ class TestMe:
         body = resp.json()
         assert body["username"] == "testuser"
         assert body["role"] == "user"
+
+
+class TestPublicAuthConfig:
+    async def test_disabled_provider_is_anonymous_and_minimal(
+        self, anon_client: AsyncClient
+    ):
+        resp = await anon_client.get("/api/v1/auth/config")
+        assert resp.status_code == 200
+        assert resp.headers["cache-control"] == "no-store"
+        assert resp.json() == {
+            "password_login_enabled": True,
+            "sso": {
+                "enabled": False,
+                "provider_id": None,
+                "display_name": None,
+                "token_param": None,
+            },
+        }
+
+    async def test_disabled_provider_start_is_not_available(
+        self, anon_client: AsyncClient
+    ):
+        resp = await anon_client.post("/api/v1/auth/sso/start")
+        assert resp.status_code == 404
 
     async def test_get_me_unauthenticated(self, anon_client: AsyncClient):
         resp = await anon_client.get("/api/v1/auth/me")

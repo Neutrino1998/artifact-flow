@@ -233,6 +233,11 @@ async def fetch_users(
         updated_expr = "u.updated_at" if "updated_at" in user_cols else "NULL::timestamp"
 
         where: list[str] = []
+        # The archive/import format represents password identities only.  Newer
+        # source databases may also contain SSO-only users with no password;
+        # never silently turn those into local accounts during migration.
+        if "auth_provider" in user_cols:
+            where.append("u.auth_provider = 'local_password'")
         if not include_inactive and "is_active" in user_cols:
             where.append("u.is_active IS TRUE")
         if not include_admins and "role" in user_cols:
@@ -562,7 +567,8 @@ async def copy_users_to_target_db(
                 password_changed_at = None if reset_password_age else user.password_changed_at
                 must_change_password = False if reset_password_age else user.must_change_password
                 existing_id = await conn.fetchval(
-                    f"SELECT id FROM {schema_sql}.users WHERE username = $1",
+                    f"SELECT id FROM {schema_sql}.users "
+                    "WHERE auth_provider = 'local_password' AND auth_subject = $1",
                     user.username,
                 )
                 if existing_id:
@@ -634,6 +640,8 @@ async def copy_users_to_target_db(
                     f"""
                     INSERT INTO {schema_sql}.users (
                         id,
+                        auth_provider,
+                        auth_subject,
                         username,
                         hashed_password,
                         display_name,
@@ -648,7 +656,7 @@ async def copy_users_to_target_db(
                         updated_at
                     )
                     VALUES (
-                        $1, $2, $3, $4, $5, $6, $7, $8,
+                        $1, 'local_password', $2, $2, $3, $4, $5, $6, $7, $8,
                         COALESCE($9::timestamp, now() AT TIME ZONE 'UTC'),
                         $10::json,
                         $11,

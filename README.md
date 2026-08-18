@@ -57,6 +57,7 @@ docker compose exec backend python scripts/create_admin.py admin
 | Model | `config/models/models.yaml` |
 | Agent | `config/agents/*.md` |
 | HTTP Tool / Toolset | `config/tools/` |
+| 企业认证 | `config/auth/remote_bearer_userinfo.yaml`（生产由 `control/auth/` 覆盖） |
 | MCP Server | `config/mcp/*.md` |
 | Skill | `config/skills/` |
 | 现场配置 | 生产目标机的 `control/site.toml`、`control/.env`、`control/site/` |

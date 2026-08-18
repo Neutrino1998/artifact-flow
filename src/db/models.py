@@ -92,8 +92,13 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    username: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
-    hashed_password: Mapped[str] = mapped_column(String(256), nullable=False)
+    # Every authentication source identifies its subject in one namespace:
+    # local_password uses username; remote providers use the stable upstream id.
+    # username remains a non-unique display/search field for remote identities.
+    auth_provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    auth_subject: Mapped[str] = mapped_column(String(256), nullable=False)
+    username: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    hashed_password: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     display_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="user")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -161,7 +166,30 @@ class User(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<User(id={self.id}, username={self.username}, role={self.role})>"
+        return (
+            f"<User(id={self.id}, provider={self.auth_provider}, "
+            f"username={self.username}, role={self.role})>"
+        )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "auth_provider", "auth_subject", name="uq_users_auth_identity"
+        ),
+        CheckConstraint(
+            "length(auth_provider) > 0 AND length(auth_subject) > 0",
+            name="ck_users_auth_identity_nonempty",
+        ),
+        CheckConstraint(
+            "(auth_provider = 'local_password' "
+            "AND auth_subject = username "
+            "AND hashed_password IS NOT NULL) "
+            "OR (auth_provider <> 'local_password' "
+            "AND hashed_password IS NULL "
+            "AND must_change_password = false "
+            "AND password_changed_at IS NULL)",
+            name="ck_users_auth_credentials",
+        ),
+    )
 
 
 class Department(Base):

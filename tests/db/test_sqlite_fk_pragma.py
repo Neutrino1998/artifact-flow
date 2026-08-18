@@ -34,9 +34,11 @@ async def test_core_delete_cascades_on_fresh_pool_connection(file_db):
     await file_db._engine.dispose()
 
     user_id = str(uuid.uuid4())
+    username = f"fk-{user_id[:8]}"
     async with file_db.session() as session:
         session.add(User(
-            id=user_id, username=f"fk-{user_id[:8]}",
+            id=user_id, auth_provider="local_password", auth_subject=username,
+            username=username,
             hashed_password=hash_password("x-pass-123"), role="user", is_active=True,
         ))
         await session.flush()  # User 先落,Skill.owner FK 才有目标(无 ORM 关系,UoW 不排序)

@@ -4,6 +4,60 @@
  */
 
 export interface paths {
+    "/api/v1/auth/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Auth Config
+         * @description Anonymous, read-only capabilities for the login page.
+         */
+        get: operations["get_auth_config_api_v1_auth_config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sso/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Sso */
+        post: operations["start_sso_api_v1_auth_sso_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sso/exchange": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Exchange Sso */
+        post: operations["exchange_sso_api_v1_auth_sso_exchange_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -2003,6 +2057,18 @@ export interface components {
              */
             updated_at: string;
         };
+        /**
+         * AuthPublicConfigResponse
+         * @description Anonymous login-page capabilities; contains no internal endpoint mapping.
+         */
+        AuthPublicConfigResponse: {
+            /**
+             * Password Login Enabled
+             * @default true
+             */
+            password_login_enabled: boolean;
+            sso: components["schemas"]["SsoPublicProviderConfig"];
+        };
         /** Body_admin_import_skill_api_v1_admin_skills_import_post */
         Body_admin_import_skill_api_v1_admin_skills_import_post: {
             /** File */
@@ -3345,6 +3411,24 @@ export interface components {
              */
             enabled: boolean;
         };
+        /** SsoPublicProviderConfig */
+        SsoPublicProviderConfig: {
+            /** Enabled */
+            enabled: boolean;
+            /** Provider Id */
+            provider_id: string | null;
+            /** Display Name */
+            display_name: string | null;
+            /** Token Param */
+            token_param: string | null;
+        };
+        /** SsoStartResponse */
+        SsoStartResponse: {
+            /** Authorization Url */
+            authorization_url: string;
+            /** Expires In */
+            expires_in: number;
+        };
         /**
          * StorageUsageResponse
          * @description GET /api/v1/chat/storage response — per-user attachment storage usage.
@@ -3627,6 +3711,16 @@ export interface components {
              */
             role: string;
             /**
+             * Auth Provider
+             * @description Authentication provider id
+             */
+            auth_provider: string;
+            /**
+             * Can Change Password
+             * @description Whether this identity supports local password changes
+             */
+            can_change_password: boolean;
+            /**
              * Must Change Password
              * @description True 时前端须强制弹出改密框,且除改密/登出外的请求会被后端 403 (首次登录 / 管理员重置 / 口令到期)。改密成功后清除。
              * @default false
@@ -3663,6 +3757,10 @@ export interface components {
             role: string;
             /** Is Active */
             is_active: boolean;
+            /** Auth Provider */
+            auth_provider: string;
+            /** Can Change Password */
+            can_change_password: boolean;
             /** Department Id */
             department_id: string | null;
             /**
@@ -3747,6 +3845,73 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_auth_config_api_v1_auth_config_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthPublicConfigResponse"];
+                };
+            };
+        };
+    };
+    start_sso_api_v1_auth_sso_start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoStartResponse"];
+                };
+            };
+        };
+    };
+    exchange_sso_api_v1_auth_sso_exchange_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    state: string;
+                    upstream_token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+        };
+    };
     login_api_v1_auth_login_post: {
         parameters: {
             query?: never;

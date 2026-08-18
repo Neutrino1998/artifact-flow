@@ -148,7 +148,10 @@ async def test_skill_prune_cascades_user_and_dept_rules(db_session, cfg):
     await _run(db_session, cfg)
 
     # 建一个 user + department + 指向 skill 的 user_skill / dept rule
-    db_session.add(User(id="u1", username="u1", hashed_password="x"))
+    db_session.add(User(
+        id="u1", auth_provider="local_password", auth_subject="u1",
+        username="u1", hashed_password="x",
+    ))
     db_session.add(Department(id="d1", name="dept1"))
     await db_session.flush()
     skill = (await db_session.execute(
@@ -183,7 +186,10 @@ async def test_skill_visibility_change_clears_dept_rules_keeps_user(db_session, 
     _write(skills / "s" / "SKILL.md", _skill_md(name="s", visibility="public"))
     await _run(db_session, cfg)
 
-    db_session.add(User(id="u1", username="u1", hashed_password="x"))
+    db_session.add(User(
+        id="u1", auth_provider="local_password", auth_subject="u1",
+        username="u1", hashed_password="x",
+    ))
     db_session.add(Department(id="d1", name="dept1"))
     await db_session.flush()
     skill = (await db_session.execute(

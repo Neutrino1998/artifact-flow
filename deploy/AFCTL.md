@@ -28,6 +28,7 @@ afctl config apply [--id ID] DIR
 │   ├── site.toml
 │   ├── .env
 │   ├── inventory.ini       # 仅实验性 Ansible executor
+│   ├── auth/                # Backend 认证 Provider（目标机本地，只读挂载）
 │   ├── certs/              # Caddy 入站 server.crt/server.key
 │   ├── trust/
 │   │   └── ca-certificates/ # Backend 出站 HTTPS 信任锚（*.crt）
@@ -47,6 +48,10 @@ afctl config apply [--id ID] DIR
 release 目录不会作为可写 bind mount。欢迎提示、品牌等 frontend 静态内容写入
 `control/site/`；在线通知写入共享数据库。实验性多机的 Caddy upstream 写入
 `control/caddy/`，升级和 rollback 都不会覆盖它们。
+
+企业统一认证配置写入 `control/auth/remote_bearer_userinfo.yaml`，由 release 和
+backend 容器只读挂载到 `config/auth/`。目录为空即关闭 SSO；修改文件后执行
+`apply current` 重建所有 Backend，使各副本在启动时读取同一份不可变配置。
 
 内网 HTTPS Tool/MCP 使用的企业根 CA 或自签 leaf 放在
 `control/trust/ca-certificates/*.crt`；该目录可以为空，此时只使用镜像默认公共 CA。

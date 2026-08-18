@@ -1,20 +1,28 @@
 """Authentication and current-user HTTP endpoints."""
 
 import asyncio
+import json
 import math
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import ValidationError
 
 from config import config
 from api.dependencies import (
     get_current_user,
     get_login_rate_limiter,
+    get_remote_auth_manager,
+    get_remote_bearer_config,
     get_user_account_manager,
 )
 from api.schemas.auth import (
+    AuthPublicConfigResponse,
     ChangePasswordRequest,
     LoginRequest,
     LoginResponse,
+    SsoExchangeRequest,
+    SsoPublicProviderConfig,
+    SsoStartResponse,
     UpdateMyProfileRequest,
     UserInfo,
 )
@@ -24,12 +32,55 @@ from core.management.user_account_manager import (
     InactiveUserError,
     InvalidCredentialsError,
     PasswordReusedError,
+    PasswordUnavailableError,
     UserAccountError,
     UserAccountManager,
     UserAccountNotFoundError,
 )
+from core.management.remote_auth_manager import (
+    RemoteAuthDisabledError,
+    RemoteAuthIdentityDisabledError,
+    RemoteAuthManager,
+    RemoteAuthPersistenceError,
+    RemoteAuthStateError,
+)
+from core.security.remote_bearer_userinfo import (
+    RemoteBearerCredentialsRejected,
+    RemoteBearerProtocolError,
+    RemoteBearerUpstreamUnavailable,
+)
+from core.security.sso_state import SsoStateCapacityError
+from utils.logger import get_logger
 
 router = APIRouter()
+logger = get_logger("ArtifactFlow")
+
+_SSO_BINDING_COOKIE = "af_sso_binding"
+_SSO_EXCHANGE_BODY_MAX_BYTES = 20 * 1024
+
+
+async def _parse_sso_exchange(http_request: Request) -> SsoExchangeRequest:
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in http_request.stream():
+        total += len(chunk)
+        if total > _SSO_EXCHANGE_BODY_MAX_BYTES:
+            logger.warning("SSO exchange request body exceeded the fixed size limit")
+            raise HTTPException(status_code=400, detail="Invalid exchange request")
+        chunks.append(chunk)
+    try:
+        payload = json.loads(b"".join(chunks))
+        return SsoExchangeRequest.model_validate(payload)
+    except (
+        json.JSONDecodeError,
+        UnicodeDecodeError,
+        ValidationError,
+        TypeError,
+        RecursionError,
+    ):
+        # Do not log ValidationError: its structured input may contain the bearer.
+        logger.warning("SSO exchange request body had an invalid JSON shape")
+        raise HTTPException(status_code=400, detail="Invalid exchange request") from None
 
 
 def _client_ip(request: Request) -> str:
@@ -49,13 +100,158 @@ def _login_retry_detail(seconds: int) -> str:
 def _map_account_error(exc: UserAccountError) -> HTTPException:
     if isinstance(exc, UserAccountNotFoundError):
         return HTTPException(status_code=404, detail=exc.detail)
-    if isinstance(
-        exc, (CurrentPasswordIncorrectError, PasswordReusedError)
-    ):
+    if isinstance(exc, PasswordUnavailableError):
+        return HTTPException(status_code=403, detail=exc.detail)
+    if isinstance(exc, (CurrentPasswordIncorrectError, PasswordReusedError)):
         return HTTPException(status_code=400, detail=exc.detail)
     if isinstance(exc, (InvalidCredentialsError, InactiveUserError)):
         return HTTPException(status_code=401, detail=exc.detail)
     return HTTPException(status_code=400, detail=exc.detail)
+
+
+@router.get("/config", response_model=AuthPublicConfigResponse)
+async def get_auth_config(
+    response: Response,
+    provider_config=Depends(get_remote_bearer_config),
+):
+    """Anonymous, read-only capabilities for the login page."""
+    response.headers["Cache-Control"] = "no-store"
+    if not provider_config.enabled:
+        sso = SsoPublicProviderConfig(enabled=False)
+    else:
+        sso = SsoPublicProviderConfig(
+            enabled=True,
+            provider_id=provider_config.provider.id,
+            display_name=provider_config.provider.display_name,
+            token_param=provider_config.login.token_param,
+        )
+    return AuthPublicConfigResponse(sso=sso)
+
+
+@router.post("/sso/start", response_model=SsoStartResponse)
+async def start_sso(
+    response: Response,
+    manager: RemoteAuthManager = Depends(get_remote_auth_manager),
+):
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        authorization_url, issued = await manager.start()
+    except RemoteAuthDisabledError as exc:
+        raise HTTPException(status_code=404, detail=exc.detail) from exc
+    except SsoStateCapacityError as exc:
+        logger.error("SSO state store admission failed: capacity exhausted")
+        raise HTTPException(
+            status_code=503, detail="Enterprise authentication is temporarily unavailable"
+        ) from exc
+    except Exception:
+        logger.exception("SSO state issuance failed")
+        raise HTTPException(
+            status_code=500, detail="Enterprise authentication could not be started"
+        ) from None
+
+    secure = manager.callback_uses_https()
+    response.set_cookie(
+        _SSO_BINDING_COOKIE,
+        issued.browser_binding,
+        max_age=issued.expires_in,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        path="/api/v1/auth/sso/exchange",
+    )
+    return SsoStartResponse(
+        authorization_url=authorization_url, expires_in=issued.expires_in
+    )
+
+
+@router.post(
+    "/sso/exchange",
+    response_model=LoginResponse,
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["state", "upstream_token"],
+                        "properties": {
+                            "state": {"type": "string", "minLength": 1, "maxLength": 256},
+                            "upstream_token": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 16384,
+                                "writeOnly": True,
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+async def exchange_sso(
+    http_request: Request,
+    response: Response,
+    manager: RemoteAuthManager = Depends(get_remote_auth_manager),
+):
+    request = await _parse_sso_exchange(http_request)
+    browser_binding = http_request.cookies.get(_SSO_BINDING_COOKIE, "")
+    try:
+        result = await manager.exchange(
+            state=request.state,
+            browser_binding=browser_binding,
+            upstream_token=request.upstream_token,
+        )
+    except RemoteAuthDisabledError as exc:
+        raise HTTPException(status_code=404, detail=exc.detail) from exc
+    except (RemoteAuthStateError, RemoteBearerCredentialsRejected) as exc:
+        raise HTTPException(status_code=401, detail="Enterprise authentication failed") from exc
+    except RemoteAuthIdentityDisabledError as exc:
+        raise HTTPException(status_code=401, detail=exc.detail) from exc
+    except RemoteBearerProtocolError as exc:
+        logger.error("SSO userinfo protocol failure: %s", exc)
+        raise HTTPException(
+            status_code=502, detail="Enterprise identity response was invalid"
+        ) from exc
+    except RemoteBearerUpstreamUnavailable as exc:
+        logger.error("SSO userinfo upstream unavailable: %s", exc)
+        raise HTTPException(
+            status_code=503, detail="Enterprise authentication is temporarily unavailable"
+        ) from exc
+    except RemoteAuthPersistenceError as exc:
+        logger.exception("SSO local identity synchronization failed")
+        raise HTTPException(
+            status_code=500, detail="Enterprise authentication could not be completed"
+        ) from exc
+    except Exception:
+        logger.exception("Unexpected SSO exchange failure")
+        raise HTTPException(
+            status_code=500, detail="Enterprise authentication could not be completed"
+        ) from None
+
+    response.headers["Cache-Control"] = "no-store"
+    response.delete_cookie(
+        _SSO_BINDING_COOKIE,
+        path="/api/v1/auth/sso/exchange",
+        secure=manager.callback_uses_https(),
+        httponly=True,
+        samesite="lax",
+    )
+    profile = result["profile"]
+    token = create_access_token(
+        profile["id"],
+        profile["username"],
+        profile["role"],
+        result["password_version"],
+    )
+    return LoginResponse(
+        access_token=token,
+        token_type="bearer",
+        expires_in=config.JWT_EXPIRY_SECONDS,
+        user=UserInfo(**profile),
+    )
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -108,7 +304,7 @@ async def login(
     return LoginResponse(
         access_token=token,
         token_type="bearer",
-        expires_in=config.JWT_EXPIRY_DAYS * 86400,
+        expires_in=config.JWT_EXPIRY_SECONDS,
         user=UserInfo(**profile),
     )
 

@@ -1,25 +1,25 @@
 # 企业统一认证（Remote Bearer UserInfo）接入 —— 实施计划
 
-> 状态：规划完成，实施未启动
+> 状态：A 阶段已完成，B 阶段待开始
 > 起草：2026-07-28 · 最后更新：2026-08-18
 > 关联资料：
 > - `temp/统一认证/AI应用接入统一身份认证指引.doc` —— 上游登录回跳和用户信息接口说明。
 > - `temp/统一认证/auth-probe/` —— 已完成的生产环境连通性与返回结构探针；探针导出含个人信息，不进入版本库。
-> - `src/utils/department_resolve.py` —— 现有“名称路径 → 本地部门树 → 末级 department_id”实现，本计划直接复用。
+> - `src/core/management/department_manager.py::DepartmentManager.resolve_path()` —— 现有“名称路径 → 本地部门树 → 末级 department_id”实现，本计划直接复用。
 
 ## 本文档定位
 
-这是一份 **plan，不是详细设计**。它负责锁定一期范围、架构边界、实施顺序和验收标准；精确 schema、配置项名称和函数签名在对应阶段开工时确定。
+这是一份 **plan，不是详细设计**。它负责锁定一期范围、架构边界、实施顺序和验收标准；A 阶段开工时已经在本文锁定身份自然键、Provider 配置载体、state 和无部门语义，函数签名由实现保持局部清晰。
 
 已取得的信息足够启动实现。尚需统一认证平台确认的稳定用户 ID、一级/二级直属用户返回形状和正式回调地址，属于上线门禁，不阻塞主干先用 stub 完成通用能力。
 
 ## 进度
 
-**当前**：生产统一认证门户和 `/auth/info` 已通过独立探针验证；用户、启用状态、末级部门和从根到末级的名称路径均可取得。下一步从 A 阶段开始，在 `main` 实现默认关闭的通用后端能力。
+**当前**：生产统一认证门户和 `/auth/info` 已通过独立探针验证；用户、启用状态、末级部门和从根到末级的名称路径均可取得。A 阶段的默认关闭通用后端能力已完成实现和回归，下一步是 B 的浏览器闭环。
 
 | 阶段 | 内容 | 依赖 | 状态 |
 |---|---|---|---|
-| A | `main`：通用远程 Bearer 用户信息交换与本地身份落库 | 无 | 未开始 |
+| A | `main`：通用远程 Bearer 用户信息交换与本地身份落库 | 无 | 已完成 |
 | B | `main`：统一认证登录入口、回调页和双入口 UX 闭环 | A | 未开始 |
 | C | `intranet`：生产配置、真实账号验收和受控切换 | A、B 已合入 `main` | 未开始 |
 
@@ -29,7 +29,7 @@
 - **C 依赖 A、B**：必须先让通用功能完整进入 `main`，再同步到 `intranet` 配置生产地址和字段映射。
 - **关键路径**：A → B → C；A 可按“身份模型/Provider client → exchange/JIT provisioning”两个小 commit 切片。
 
-分支与发布策略：A、B 是通用功能，默认关闭且不改变现有登录行为，逐阶段进入 `main`。之后将 `main` 完整同步到 `intranet`，C 只保留现场部署配置和必要的内网站点文案；若 `intranet` 仍需企业专属 Python 解析代码，应回到 `main` 补通用适配边界。生产地址和运行参数写入目标机 `control/.env`，不提交真实 `.env`。
+分支与发布策略：A、B 是通用功能，默认关闭且不改变现有登录行为（统一 JWT 时长调整除外），逐阶段进入 `main`。之后将 `main` 完整同步到 `intranet`，C 只保留现场部署配置和必要的内网站点文案；若 `intranet` 仍需企业专属 Python 解析代码，应回到 `main` 补通用适配边界。生产 Provider 配置写入目标机 `control/auth/remote_bearer_userinfo.yaml` 并只读挂载，不提交真实现场配置；静态 secret 若未来出现仍留在 `control/.env`，一期配置不含 secret。
 
 ## 目标与范围
 
@@ -39,7 +39,7 @@
 
 - 保留本地用户名/密码入口，同时增加企业统一认证入口；两种入口最终签发同一种 ArtifactFlow JWT。
 - 通过配置描述登录地址、回跳参数、userinfo 地址和最小字段映射，不把本次企业接口写死在业务代码中。
-- SSO 首次登录即时创建独立的 ArtifactFlow 本地用户，后续按稳定外部 subject 找回并更新展示信息和部门归属；ArtifactFlow 内部 `users.id` 继续由本系统生成，上游 subject 单独存储。
+- SSO 首次登录即时创建独立的 ArtifactFlow 本地用户，后续按稳定 Provider subject 找回并更新展示信息和部门归属；ArtifactFlow 内部 `users.id` 继续由本系统生成，认证自然键统一存为 `(auth_provider, auth_subject)`：local-password 的 subject 就是 username，远程 Provider 的 subject 是上游稳定用户 ID。
 - 本地密码与 SSO 是不同认证来源；即使 username 相同也允许作为两个独立用户共存，各自拥有独立的内部 ID、数据、角色、启用状态和部门归属。
 - 使用 `superiorDeptName` 的完整名称路径复用现有部门树解析器，不存储或同步外部部门 ID。
 - ArtifactFlow JWT 统一调整为 8 小时；上游 token 只用于当次 exchange，不进入业务请求、数据库、日志或浏览器持久存储。
@@ -73,36 +73,39 @@
 2. **一个认证来源对应一个本地 `User`，跨来源同名不合并。**
    - 会话、Artifact、角色和部门 FK 都需要本地用户主键，无法只在内存里使用企业身份。
    - ArtifactFlow `users.id` 始终由本系统生成；上游四位 ID 等 provider subject 只作为外部身份属性存储，不能替代内部主键。
-   - 远程 `User` 直接记录 Provider 和稳定 external subject，并以 `(provider, external_subject)` 唯一定位；本地密码用户则属于明确的 local-password 来源。
-   - username 不再全局唯一：local-password 用户仍以 `(provider, username)` 唯一定位密码登录主体；remote-provider 用户的 username 仅供展示和检索，不参与身份定位，也不要求唯一。
+   - 所有 `User` 统一以 `(auth_provider, auth_subject)` 唯一定位：local-password 的 `auth_subject=username`，远程 Provider 的 `auth_subject=上游稳定 subject`。数据库只保留这一条身份唯一约束，不建立 external-subject 映射表或条件 username key。
+   - username 不再全局唯一：local-password 用户由结构性约束保证 `auth_subject=username`；remote-provider 用户的 username 仅供展示和检索，不参与身份定位，也不要求唯一。
    - 同一自然人通过本地密码和 SSO 登录时，默认得到两个内部 ID 和两套独立数据。系统不建立映射表、不自动转移所有权，也不根据同名提供跨账号访问。
 
 3. **双登录入口共用一套 8 小时 ArtifactFlow JWT。**
    - 本地密码和企业 SSO 是两种身份校验入口，不是两套 JWT 验证体系。
-   - 本地密码查询必须限定 local-password 来源；SSO exchange 只能按 `(provider, external_subject)` 查找。两条路径最终都把各自的 ArtifactFlow `users.id` 写入 JWT subject。
+   - 两条入口都调用统一身份查询 `(auth_provider, auth_subject)`：本地密码使用 `("local_password", username)`，SSO exchange 使用 `(配置的 provider id, 上游 subject)`。两条路径最终都把各自的 ArtifactFlow `users.id` 写入 JWT subject。
    - `get_current_user` 仍逐请求读取本地用户的 `is_active`、role 和当前部门；管理员本地禁用立即生效。
    - 上游账号在现有 ArtifactFlow JWT 存续期间被禁用，最长仍可能使用到 8 小时到期；一期接受该窗口，不为此逐请求调用上游。
 
 4. **部门以完整名称路径建树，不使用外部部门 ID。**
    - 本地节点身份仍是内部 `departments.id`，名称路径的逐级自然键是 `(parent_id, name)`，不能仅按全局单个名称匹配。
-   - exchange 严格拆分 `superiorDeptName`，拒绝空层级，并校验路径末级等于 `dept.name`；然后直接调用现有 `resolve_department_path()`。
+   - exchange 严格拆分 `superiorDeptName`，拒绝路径内空层级，并校验路径末级等于 `dept.name`；然后直接调用现有 `DepartmentManager.resolve_path()`。
    - 用户可以直属任意一级；返回路径有几级就绑定最后一级。
+   - 上游明确同时缺少部门路径和末级部门时，允许创建/更新 `department_id=NULL` 的用户；若用户此前有部门，下次登录明确无部门时必须清空归属，避免继续继承旧部门权限。只有路径和末级一有一无、末级不一致等矛盾形状才拒绝。
    - 部门改名/搬家会形成新路径，用户下次登录转到新节点；旧节点、旧授权和清理由管理员处理，这是明确的 best-effort 边界。
 
 5. **企业信息只提供身份和部门事实，不覆盖本地授权决策。**
    - 新 SSO 用户默认 `role=user`，上游 `isAdmin`、roles、jobs、dataScopes 一律忽略。
-   - 成功登录只更新由 `(provider, external_subject)` 找到的 SSO 用户之 username、display name 和 department；不得触碰同名本地用户、自动提升 role，或把被本地管理员禁用的 SSO 用户重新启用。
+   - 成功登录只更新由 `(auth_provider, auth_subject)` 找到的 SSO 用户之 username、display name 和 department；不得触碰同名本地用户、自动提升 role，或把被本地管理员禁用的 SSO 用户重新启用。
    - 同名本地用户和 SSO 用户的 role、`is_active`、部门及用户级授权互不联动；相同完整部门路径可以让两者引用同一个本地部门节点，但不会让两个用户成为同一主体。
    - 上游 `enabled=false` 时拒绝创建或签发新会话；已有内部 JWT 的失效窗口遵循决策 3。
 
 6. **通用性限定在一种清晰协议形状，不实现任意认证脚本平台。**
-   - `main` 支持一个可配置的 `remote_bearer_userinfo` Provider：登录 URL、回跳参数、userinfo URL、超时和必要 JSON 字段路径。
+   - `main` 支持一个可配置的 `remote_bearer_userinfo` Provider：登录 URL、回跳参数、userinfo URL、超时和必要 JSON 字段路径。配置由启动时直接读取的 `config/auth/remote_bearer_userinfo.yaml` 提供；生产用 target-local `control/auth/` 只读覆盖，不经 config→DB reconcile，也不支持热更新。
    - Provider 标识是 ArtifactFlow 为该认证来源配置的固定名称：同一身份系统即使地址变化也继续使用原标识，接入完全不同的身份系统时使用新标识；一期不为此增加改名、版本或同步机制。
    - 字段映射只支持完成规范化 DTO 所需的简单取值和部门路径分隔，不在配置中引入脚本、模板语言或任意表达式。
+   - 登录、callback 和 userinfo URL 支持绝对 HTTP/HTTPS；HTTPS 始终校验证书，HTTP 必须在配置中显式 `allow_insecure_http: true`，不提供关闭 TLS 校验的选项。企业私有 CA 继续复用 `control/trust/ca-certificates/`。
    - OIDC、LDAP、多 Provider 并存等真实需求出现后再新增明确 provider 类型，不把一期适配器提前抽象成万能框架。
 
 7. **回跳 token 按凭证处理，任何错误出口同时满足用户脱敏和运维可诊断。**
    - 登录 start 产生短期、不可猜且绑定浏览器的 state；callback/exchange 校验后立即失效，防止登录 CSRF。
+   - state 是 ArtifactFlow 自己生成并嵌入 `entryPath` callback 的随机握手值，上游只需原样保留回跳 URL。Redis 实现保证多副本共享和原子一次性消费，InMemory 实现服务无 Redis 的单进程开发模式；它不替代或保存上游 bearer token。
    - callback 读取 token 后先清理地址栏，再发同源 POST；不得写 localStorage、cookie、导出文件或日志。
    - 上游 5xx、超时、返回结构错误必须记录 request ID 和脱敏原因；401/403 返回统一登录失败，不记录 bearer 内容。
    - 部署入口必须确认反向代理不记录 callback query string；上游 API 当前为 HTTP，C 阶段须确认链路处于受控网络或取得 HTTPS/mTLS 地址。
@@ -121,40 +124,42 @@
 
 **包含**：
 
-- **认证来源模型**：让每个本地用户明确表达 local-password 或 remote-provider 来源；local-password 行以 `(provider, username)` 唯一，remote-provider 行以 `(provider, external_subject)` 唯一且 username 可重复；不新增身份映射表。
+- **认证来源模型**：让每个本地用户明确记录非空 `auth_provider` 和 `auth_subject`，统一以 `UNIQUE(auth_provider, auth_subject)` 定位主体；local-password 行必须满足 `auth_subject=username`，remote-provider 行的 subject 取上游稳定 ID 且 username 可重复；不新增身份映射表。
 - **SSO-only 凭证边界**：SSO 用户不能走本地密码验证、首次/周期改密闸门或 admin 重置密码；精确列形状和约束在本阶段一次性确定并实现。
-- **Provider 配置与 client**：启用时严格校验登录地址、回跳参数、userinfo 地址、字段映射、超时和 TLS 策略；配置缺失或矛盾则 fail-to-start。
+- **Provider 配置与 client**：启动时直接加载独立 YAML；启用时严格校验登录地址、回跳参数、userinfo 地址、字段映射、超时和 HTTP/TLS 策略；配置缺失或矛盾则 fail-to-start。配置不物化到 DB，修改后重启全部 Backend 生效。
 - **规范化 userinfo**：将上游 JSON 转换为固定内部 DTO：provider、subject、username、display name、enabled、department path、leaf name；原始 roles/jobs/dataScopes 不进入用户授权模型。
-- **exchange/JIT provisioning**：校验上游 token → 读取 userinfo → 校验账号和部门路径 → 复用 `resolve_department_path()` → 按 `(provider, external_subject)` 查找或并发安全地创建带全新内部 ID 的用户 → 更新允许同步的资料 → 签发 8 小时内部 JWT；不得按 username 查找、认领或更新本地密码用户。
+- **exchange/JIT provisioning**：校验上游 token → 读取 userinfo → 校验账号和部门形状 → 有完整路径时复用 `DepartmentManager.resolve_path()`、明确无部门时使用 NULL → 按 `(auth_provider, auth_subject)` 查找或并发安全地创建带全新内部 ID 的用户 → 更新允许同步的资料 → 签发 8 小时内部 JWT；不得按展示 username 查找、认领或更新远程主体。
 - **公开认证握手**：提供未登录页面所需的最小公开配置，以及 start/state/exchange 端点；不向前端暴露内部 userinfo 地址或字段映射。
 - **密码入口隔离**：本地密码登录只查询 local-password 用户；若只有同名 SSO 用户则执行等时假哈希并返回普通 401，若同时存在同名本地用户则只认证该本地用户。`get_current_user`、REST 和 SSE 不增加上游分支。
-- **一次性 schema 切换**：认证来源列、外部 subject、本地 username 条件唯一约束、远程身份唯一约束及所有身份查询调整在同一版本完整落地；不设计过渡态、双写或新旧应用混跑能力。
+- **一次性 schema 切换**：`auth_provider`、`auth_subject`、统一身份唯一约束、SSO-only 密码约束及所有身份查询在同一版本完整落地；不设计过渡态、双写或新旧应用混跑能力。
 
 **不包含**：
 
 - 登录页和真实企业环境配置。
 - 旧用户迁移/关联、跨账号数据共享、部门全量同步、外部角色同步。
 
-**开工前敲定**：
+**开工合同（已敲定）**：
 
-- SSO-only 用户的无密码表示及数据库约束，必须让本地密码登录在结构上无法命中远程用户。
-- 从全局 username 唯一切换到两条条件化自然键的准确 schema：local-password 行唯一 `(provider, username)`，remote-provider 行唯一 `(provider, external_subject)`，远程 username 不唯一。所有以 username 定位单个登录主体的路径（本地登录、创建和批量导入等）必须限定 local-password；管理员列表/搜索允许跨来源返回多个同名用户。
-- 简单 JSON 字段路径配置的准确格式；只覆盖当前实测形状，不引入脚本解释器。
+- `users.auth_provider`、`users.auth_subject` 均非空，唯一约束仅 `UNIQUE(auth_provider, auth_subject)`；存量用户回填 `("local_password", username)`。local-password 必须有 hash 且 `auth_subject=username`；remote-provider 必须无 hash、无改密闸状态。
+- 所有单主体身份查询统一走 `(auth_provider, auth_subject)`；管理员列表/搜索仍按非唯一 username 展示多个同名用户。
+- Provider 使用独立 YAML，字段路径采用仅对象逐级取值的点路径；不复用 HttpTool 的 DB reconcile，不支持数组、JMESPath、脚本或表达式。
+- 明确无部门是合法、最小权限状态；不完整或矛盾的部门数据才是 Provider 合同错误。
 
 **验收项**：
 
 - Provider 关闭时现有本地登录行为保持不变，SSO 入口与新 exchange 不可用；已有 SSO 用户及其数据不被修改，已签发的 ArtifactFlow JWT 仍按 8 小时有效期使用。OpenAPI 允许增加向后兼容的 SSO 端点和响应字段；配置不完整时启动失败并指出缺失项。
 - stub 上游的成功响应能创建/复用同一用户，签发 `expires_in=28800` 的内部 JWT；JWT 可访问现有 REST/SSE 鉴权路径。
-- 同一外部 subject 并发首次登录只产生一个用户；内部 `users.id` 由 ArtifactFlow 生成且不等于上游 subject。
+- 同一 `(auth_provider, auth_subject)` 并发首次登录只产生一个用户；内部 `users.id` 由 ArtifactFlow 生成且不等于上游 subject。
 - local-password 与 remote-provider 的同名用户可同时存在并分别登录，拥有不同内部 ID；同一 remote-provider 下 username 相同但 external subject 不同的用户也可共存。SSO exchange 不按 username 读取、认领或更新任何用户。
-- 一级、二级、三级和同名不同父路径均正确创建/复用；空层级、末级不一致、超长字段和无部门等边界有明确测试。
+- 一级、二级、三级和同名不同父路径均正确创建/复用；明确无部门创建 NULL 归属并清除旧归属；路径内空层级、路径/末级单边缺失、末级不一致和超长字段均拒绝并有测试。
 - 上游 disabled、401/403、超时、5xx、非 JSON、缺字段均返回脱敏错误；所有 5xx 有带 request ID 的 ops 日志，日志和响应均不出现 bearer token。
 - SSO 用户行没有可用的本地密码且不能改/重置密码；存在同名本地用户时，密码入口得到的始终是本地用户身份。本地用户的密码策略、失效机制和管理员能力回归通过。
 - 数据库迁移和新应用作为一个不可拆分版本验收；测试确认不存在仍以未限定 username 定位单个登录主体的路径，并明确禁止新旧应用混跑。
 
 **进展**：
 
-- 尚未开始。
+- 已完成：`0008` 一次性身份迁移、统一 `(auth_provider, auth_subject)` 查询、SSO-only 密码约束、8 小时 JWT、启动期 YAML client、Redis/InMemory 一次性 state、匿名配置/start/exchange、JIT 部门/用户同步和 `control/auth/` 部署挂载均已落地。
+- 自动化覆盖同名跨来源隔离、同 Provider 同 username 不同 subject、并发首登、明确无部门清权、上游错误脱敏、SSO 改密隔离及 SQLite 迁移往返；全量无外部依赖后端回归、前端类型/测试和 Go 测试通过。
 
 ### B — `main`：登录入口与浏览器闭环
 
@@ -198,7 +203,7 @@
 **包含**：
 
 - 按发布纪律确认 `git log intranet..main` 为空且构建时 checkout 为 `intranet`。
-- 在目标机 `control/.env` 配置固定的 Provider 标识、`https://ucs.cncc.cn/dashboard`、生产 `/auth/info` 地址、`entryPath`、`authorization_key` 和各字段路径；真实 `.env` 不进 git。同一统一认证来源以后变更地址时保留该标识，接入不同身份系统时使用新标识。
+- 在目标机 `control/auth/remote_bearer_userinfo.yaml` 配置固定的 Provider 标识、`https://ucs.cncc.cn/dashboard`、生产 `/auth/info` 地址、`entryPath`、`authorization_key` 和各字段路径；真实现场文件不进 git。同一统一认证来源以后变更地址时保留该标识，接入不同身份系统时使用新标识。
 - 在单一维护窗口一次性切换：停止全部旧实例并完成数据库备份，执行 schema 迁移，启动已包含来源限定查询和生产 Provider 配置的新版本，再进行 smoke；不得让旧应用连接迁移后的数据库，也不做分阶段启用。若切换失败则整体恢复该备份，并明确接受丢弃备份之后由本地或 SSO 用户产生的全部写入。
 - 用服务器连通性检查和一级/二级/三级真实账号 smoke 验证 subject、enabled、名称路径、末级校验和重复登录。
 - 保留或新建至少一个仅本地可用的应急管理员；上游 admin 标记不能替代该 bootstrap。
@@ -250,5 +255,7 @@
 - 2026-07-28 **分支策略锁定**：通用能力先进入 `main`，再同步到 `intranet` 通过目标机配置接入生产服务；内网分支不维护第二套认证实现。
 - 2026-08-17 **身份隔离决策**：ArtifactFlow 内部 ID 与上游 subject 分离；local-password 与 remote-provider 允许同 username 但始终是两个独立用户，不自动关联、共享数据或迁移所有权。
 - 2026-08-17 **一次性切换决策**：认证来源 schema、来源限定查询和 Provider 配置在同一维护窗口完整切换；不实现过渡兼容层或新旧应用混跑，失败时应用与数据库整体恢复。
-- 2026-08-17 **身份键边界收口**：仅 local-password username 唯一；remote-provider 只以 `(provider, external_subject)` 唯一且允许 username 重复。Provider 采用固定配置标识，不增加改名或同步机制；关闭 Provider 不修改已有用户和数据。
+- 2026-08-17 **跨来源隔离收口**：local-password 与 remote-provider 不按同名关联；Provider 采用固定配置标识，不增加改名或同步机制；关闭 Provider 不修改已有用户和数据。统一自然键的最终列形状由随后 A 阶段开工合同锁定。
 - 2026-08-18 **会话时长调整**：本地密码与 SSO 登录统一签发 8 小时 ArtifactFlow JWT；上游 token 仍只用于当次 exchange，不保存或用于后台续期。
+- 2026-08-18 **A 阶段开工合同**：本地与远程身份统一为 `(auth_provider, auth_subject)`，只保留一条身份唯一约束；Provider 改用启动期直读 YAML，HTTP/HTTPS 均支持且 HTTP 需显式确认；state 采用 Redis/InMemory 一次性存储并绑定浏览器；明确无部门允许以 `department_id=NULL` 登录，后续无部门会清除旧归属。
+- 2026-08-18 **A 阶段完成**：后端 exchange、身份/密码结构约束、配置与部署挂载、OpenAPI/前端类型以及自动化回归全部落地；真实登录页和 callback 地址栏清理仍严格留给 B。

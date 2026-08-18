@@ -1,0 +1,29 @@
+version: 1
+enabled: true
+
+provider:
+  id: enterprise_sso
+  display_name: 企业统一认证
+  type: remote_bearer_userinfo
+
+login:
+  url: https://sso.example.internal/login
+  callback_url: https://artifactflow.example.internal/auth/sso/callback
+  return_param: entryPath
+  token_param: authorization_key
+  state_ttl_seconds: 300
+
+userinfo:
+  url: https://sso.example.internal/auth/info
+  connect_timeout_seconds: 5
+  read_timeout_seconds: 10
+  # Required when any login/callback/userinfo URL uses plain HTTP.
+  allow_insecure_http: false
+  department_separator: "/"
+  fields:
+    subject: user.id
+    username: user.username
+    display_name: user.name
+    enabled: user.enabled
+    department_path: user.superiorDeptName
+    department_leaf: user.dept.name

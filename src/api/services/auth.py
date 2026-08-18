@@ -55,7 +55,7 @@ def create_access_token(
         "role": role,
         "pwd_v": password_version,
         "iat": now,
-        "exp": now + timedelta(days=config.JWT_EXPIRY_DAYS),
+        "exp": now + timedelta(seconds=config.JWT_EXPIRY_SECONDS),
     }
     return jwt.encode(payload, config.JWT_SECRET, algorithm=config.JWT_ALGORITHM)
 

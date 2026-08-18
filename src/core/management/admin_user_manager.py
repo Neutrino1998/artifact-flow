@@ -7,6 +7,11 @@ from typing import Any, Optional
 from uuid import uuid4
 
 from config import config
+from core.security.identity import (
+    LOCAL_AUTH_PROVIDER,
+    can_change_password,
+    local_auth_subject,
+)
 from core.management.conversation_manager import ConversationManager
 from core.management.department_manager import DepartmentManager
 from core.security.passwords import apply_new_password, hash_password
@@ -76,6 +81,8 @@ class AdminUserManager:
             "display_name": user.display_name,
             "role": user.role,
             "is_active": user.is_active,
+            "auth_provider": user.auth_provider,
+            "can_change_password": can_change_password(user.auth_provider),
             "department_id": user.department_id,
             "created_at": user.created_at,
             "updated_at": user.updated_at,
@@ -99,7 +106,9 @@ class AdminUserManager:
         role: str,
         department_id: Optional[str],
     ) -> dict:
-        if await self._users.get_by_username(username) is not None:
+        if await self._users.get_by_auth_identity(
+            LOCAL_AUTH_PROVIDER, local_auth_subject(username)
+        ) is not None:
             raise AdminUserConflictError(f"Username '{username}' already exists")
         if role not in ("admin", "user"):
             raise AdminUserInvalidError("Role must be 'admin' or 'user'")
@@ -107,6 +116,8 @@ class AdminUserManager:
         password_hash = await asyncio.to_thread(hash_password, password)
         user = User(
             id=f"user-{uuid4().hex}",
+            auth_provider=LOCAL_AUTH_PROVIDER,
+            auth_subject=local_auth_subject(username),
             username=username,
             display_name=display_name,
             role=role,
@@ -297,7 +308,7 @@ class AdminUserManager:
                 }
             )
 
-        existing = await self._users.find_existing_usernames(
+        existing = await self._users.find_existing_local_usernames(
             {row.username for row in parsed.rows if row.username}
         )
         created: list[dict] = []
@@ -374,6 +385,8 @@ class AdminUserManager:
         ):
             user = User(
                 id=f"user-{uuid4().hex}",
+                auth_provider=LOCAL_AUTH_PROVIDER,
+                auth_subject=local_auth_subject(row.username),
                 username=row.username,
                 display_name=row.display_name or None,
                 role="user",
@@ -448,6 +461,10 @@ class AdminUserManager:
         if user is None:
             raise AdminUserNotFoundError("User not found")
         is_self = user_id == actor_user_id
+        if password is not None and not can_change_password(user.auth_provider):
+            raise AdminUserInvalidError(
+                "Password login is unavailable for this account"
+            )
         if display_name is not None:
             user.display_name = display_name or None
         if password is not None:

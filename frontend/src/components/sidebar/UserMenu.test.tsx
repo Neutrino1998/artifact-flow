@@ -35,6 +35,8 @@ describe('UserMenu task notification switch', () => {
         username: 'tester',
         display_name: 'Tester',
         role: 'user',
+        auth_provider: 'local_password',
+        can_change_password: true,
         must_change_password: false,
         department_path: null,
       },

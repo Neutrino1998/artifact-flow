@@ -21,7 +21,10 @@ async def _user(session, uid="u1", dept=None):
     if dept:
         session.add(Department(id=dept, name=dept))
         await session.flush()
-    session.add(User(id=uid, username=uid, hashed_password="x", department_id=dept))
+    session.add(User(
+        id=uid, auth_provider="local_password", auth_subject=uid,
+        username=uid, hashed_password="x", department_id=dept,
+    ))
     await session.flush()
 
 

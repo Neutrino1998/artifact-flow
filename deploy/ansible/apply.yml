@@ -98,6 +98,7 @@
         - "{{ af_install_root }}/control"
         - "{{ af_install_root }}/control/certs"
         - "{{ af_install_root }}/control/trust"
+        - "{{ af_install_root }}/control/auth"
         - "{{ af_install_root }}/control/site"
         - "{{ af_install_root }}/control/caddy"
         - "{{ af_install_root }}/control/maintenance"
@@ -108,6 +109,23 @@
         src: /work/control/.env
         dest: "{{ af_install_root }}/control/.env"
         mode: "0600"
+    - name: Reset target-local authentication configuration
+      ansible.builtin.file:
+        path: "{{ af_install_root }}/control/auth"
+        state: absent
+      when: inventory_hostname in groups['app']
+    - name: Recreate target-local authentication configuration directory
+      ansible.builtin.file:
+        path: "{{ af_install_root }}/control/auth"
+        state: directory
+        mode: "0755"
+      when: inventory_hostname in groups['app']
+    - name: Copy target-local authentication configuration
+      ansible.builtin.copy:
+        src: /work/control/auth/
+        dest: "{{ af_install_root }}/control/auth/"
+        mode: "0644"
+      when: inventory_hostname in groups['app']
     - name: Copy target-local static certificate chain
       ansible.builtin.copy:
         src: /work/control/certs/server.crt

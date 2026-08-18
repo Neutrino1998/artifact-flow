@@ -43,6 +43,7 @@ from api.services.conversation_lease import ConversationLeaseCoordinator
 from api.services.runtime_status_reader import RuntimeStatusReader
 from api.services.runtime_store import InMemoryRuntimeStore
 from core.execution.task_supervisor import TaskSupervisor
+from core.security.remote_bearer_config import RemoteBearerConfig
 from api.services.login_rate_limiter import InMemoryLoginRateLimiter
 from config import config
 from db.database import DatabaseManager
@@ -83,7 +84,13 @@ async def app(db_manager: DatabaseManager):
 
     # Set module-level global so get_db_session()'s direct call works
     old_db_manager = deps._db_manager
+    old_remote_config = deps._remote_bearer_config
+    old_sso_state_store = deps._sso_state_store
+    old_remote_userinfo_client = deps._remote_userinfo_client
     deps._db_manager = db_manager
+    deps._remote_bearer_config = RemoteBearerConfig()
+    deps._sso_state_store = None
+    deps._remote_userinfo_client = None
 
     application.dependency_overrides[get_db_manager] = lambda: db_manager
     application.dependency_overrides[get_stream_transport] = lambda: stream_transport
@@ -97,6 +104,9 @@ async def app(db_manager: DatabaseManager):
 
     application.dependency_overrides.clear()
     deps._db_manager = old_db_manager
+    deps._remote_bearer_config = old_remote_config
+    deps._sso_state_store = old_sso_state_store
+    deps._remote_userinfo_client = old_remote_userinfo_client
     await execution_service.shutdown()
 
 

@@ -44,6 +44,7 @@ nav:
       - Agent: configuration/agents.md
       - Tool 与 MCP: configuration/tools.md
       - Skill: configuration/skills.md
+      - 企业认证: configuration/authentication.md
       - 应用与站点: configuration/runtime.md
   - 部署与运维:
       - 主机准备: operations/host-preparation.md

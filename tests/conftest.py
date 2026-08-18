@@ -173,6 +173,8 @@ async def test_user(
     """A pre-created regular user."""
     user = User(
         id=str(uuid.uuid4()),
+        auth_provider="local_password",
+        auth_subject="testuser",
         username="testuser",
         hashed_password=standard_password_hashes["testpass"],
         role="user",
@@ -189,6 +191,8 @@ async def test_admin(
     """A pre-created admin user."""
     admin = User(
         id=str(uuid.uuid4()),
+        auth_provider="local_password",
+        auth_subject="testadmin",
         username="testadmin",
         hashed_password=standard_password_hashes["adminpass"],
         role="admin",

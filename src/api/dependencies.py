@@ -64,6 +64,9 @@ _runtime_status_reader: Optional["RuntimeStatusReader"] = None
 _redis_client: Optional[Any] = None               # redis.asyncio.Redis (optional)
 _login_rate_limiter: Optional[Any] = None         # Redis / InMemory LoginRateLimiter
 _mcp_client_manager: Optional[Any] = None         # tools.custom.mcp_client.McpClientManager
+_remote_bearer_config: Optional[Any] = None        # startup-loaded immutable YAML
+_sso_state_store: Optional[Any] = None             # Redis / InMemory one-time state
+_remote_userinfo_client: Optional[Any] = None      # fixed-origin HTTP client
 
 # Agent configs + tools（启动时加载一次）
 _agents: Optional[dict] = None                    # {name: AgentConfig}
@@ -82,6 +85,7 @@ async def init_globals() -> None:
     global _conversation_execution_service, _runtime_status_reader
     global _redis_client, _agents, _tools
     global _login_rate_limiter, _mcp_client_manager
+    global _remote_bearer_config, _sso_state_store, _remote_userinfo_client
 
     # 0. 确保 data 目录存在
     data_dir = Path("data")
@@ -96,6 +100,9 @@ async def init_globals() -> None:
     _agents = load_all_agents()
     validate_agent_model_config({name: agent.model for name, agent in _agents.items()})
     logger.info(f"Loaded {len(_agents)} agent configs and validated model capabilities")
+
+    from core.security.remote_bearer_config import load_remote_bearer_config
+    _remote_bearer_config = load_remote_bearer_config()
 
     # 1. 初始化数据库管理器
     db_urls = [u.strip() for u in config.DATABASE_URLS.split(",") if u.strip()] if config.DATABASE_URLS else []
@@ -170,6 +177,30 @@ async def init_globals() -> None:
         )
         _runtime_store = InMemoryRuntimeStore()
         logger.info("InMemory runtime initialized (no REDIS_URL)")
+
+    # SSO state is shared through the same Redis substrate when available.  It
+    # is control state, not a disposable cache; the Redis implementation uses
+    # an expiring single key and atomic compare-and-delete consumption.
+    if _remote_bearer_config.enabled:
+        from core.security.remote_bearer_userinfo import RemoteBearerUserInfoClient
+        from core.security.sso_state import InMemorySsoStateStore, RedisSsoStateStore
+
+        if _redis_client is not None:
+            _sso_state_store = RedisSsoStateStore(
+                _redis_client, key_prefix=config.REDIS_KEY_PREFIX
+            )
+        else:
+            _sso_state_store = InMemorySsoStateStore()
+        _remote_userinfo_client = RemoteBearerUserInfoClient(_remote_bearer_config)
+        logger.info(
+            "Remote bearer provider enabled: %s (state=%s)",
+            _remote_bearer_config.provider.id,
+            "Redis" if _redis_client is not None else "InMemory",
+        )
+    else:
+        _sso_state_store = None
+        _remote_userinfo_client = None
+        logger.info("Remote bearer provider disabled")
 
     from api.services.conversation_execution_service import ConversationExecutionService
     from api.services.conversation_lease import ConversationLeaseCoordinator
@@ -260,6 +291,7 @@ async def close_globals() -> None:
     global _conversation_execution_service, _runtime_status_reader
     global _redis_client, _login_rate_limiter
     global _mcp_client_manager
+    global _remote_bearer_config, _sso_state_store, _remote_userinfo_client
 
     # 1. 先关闭 Conversation runtime（唤醒 interrupt，再等任务）
     if _conversation_execution_service:
@@ -270,6 +302,10 @@ async def close_globals() -> None:
     from models.llm import close_llm_clients
     await close_llm_clients()
     logger.info("LLM provider connections closed")
+
+    if _remote_userinfo_client is not None:
+        await _remote_userinfo_client.close()
+        logger.info("Remote userinfo connection closed")
 
     # 3. 关闭 Redis 连接
     if _redis_client:
@@ -290,6 +326,9 @@ async def close_globals() -> None:
     _stream_transport = None
     _login_rate_limiter = None
     _mcp_client_manager = None
+    _remote_bearer_config = None
+    _sso_state_store = None
+    _remote_userinfo_client = None
 
 
 def get_task_supervisor() -> "TaskSupervisor":
@@ -343,6 +382,13 @@ def get_login_rate_limiter() -> Any:
     if _login_rate_limiter is None:
         raise RuntimeError("LoginRateLimiter not initialized. Call init_globals() first.")
     return _login_rate_limiter
+
+
+def get_remote_bearer_config():
+    """Return the startup-loaded public-safe provider contract source."""
+    if _remote_bearer_config is None:
+        raise RuntimeError("Remote bearer config not initialized. Call init_globals() first.")
+    return _remote_bearer_config
 
 
 def get_agents() -> dict:
@@ -459,6 +505,27 @@ async def get_user_account_manager(
     from repositories.user_repo import UserRepository
 
     return UserAccountManager(UserRepository(session), DepartmentRepository(session))
+
+
+async def get_remote_auth_manager(
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Return the request-scoped remote authentication orchestrator."""
+    from core.management.department_manager import DepartmentManager
+    from core.management.remote_auth_manager import RemoteAuthManager
+    from repositories.department_repo import DepartmentRepository
+    from repositories.user_repo import UserRepository
+
+    if _remote_bearer_config is None:
+        raise RuntimeError("Remote bearer config not initialized. Call init_globals() first.")
+    departments = DepartmentRepository(session)
+    return RemoteAuthManager(
+        _remote_bearer_config,
+        _sso_state_store,
+        _remote_userinfo_client,
+        UserRepository(session),
+        DepartmentManager(departments),
+    )
 
 
 async def get_site_config_manager(

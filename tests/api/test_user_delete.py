@@ -36,9 +36,12 @@ from repositories.user_repo import UserRepository
 @pytest.fixture
 async def second_admin(user_repo: UserRepository) -> User:
     """A second admin so test_admin can delete an admin without hitting self-protection."""
+    username = f"admin2-{uuid.uuid4().hex[:6]}"
     admin = User(
         id=str(uuid.uuid4()),
-        username=f"admin2-{uuid.uuid4().hex[:6]}",
+        auth_provider="local_password",
+        auth_subject=username,
+        username=username,
         hashed_password=hash_password("pass1234"),
         role="admin",
         is_active=True,

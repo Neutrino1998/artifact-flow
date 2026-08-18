@@ -1,0 +1,5 @@
+# Remote bearer userinfo authentication is opt-in. Production deployments
+# replace this file with control/auth/remote_bearer_userinfo.yaml and restart
+# every backend instance after a change.
+version: 1
+enabled: false

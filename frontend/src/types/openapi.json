@@ -6,6 +6,98 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/api/v1/auth/config": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Get Auth Config",
+        "description": "Anonymous, read-only capabilities for the login page.",
+        "operationId": "get_auth_config_api_v1_auth_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthPublicConfigResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/sso/start": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Start Sso",
+        "operationId": "start_sso_api_v1_auth_sso_start_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SsoStartResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/sso/exchange": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Exchange Sso",
+        "operationId": "exchange_sso_api_v1_auth_sso_exchange_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "state": {
+                    "type": "string",
+                    "maxLength": 256,
+                    "minLength": 1
+                  },
+                  "upstream_token": {
+                    "type": "string",
+                    "maxLength": 16384,
+                    "minLength": 1,
+                    "writeOnly": true
+                  }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "state",
+                  "upstream_token"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "tags": [
@@ -5545,6 +5637,25 @@
         "title": "ArtifactSummary",
         "description": "Artifact summary in list response"
       },
+      "AuthPublicConfigResponse": {
+        "properties": {
+          "password_login_enabled": {
+            "type": "boolean",
+            "title": "Password Login Enabled",
+            "default": true
+          },
+          "sso": {
+            "$ref": "#/components/schemas/SsoPublicProviderConfig"
+          }
+        },
+        "type": "object",
+        "required": [
+          "password_login_enabled",
+          "sso"
+        ],
+        "title": "AuthPublicConfigResponse",
+        "description": "Anonymous login-page capabilities; contains no internal endpoint mapping."
+      },
       "Body_admin_import_skill_api_v1_admin_skills_import_post": {
         "properties": {
           "file": {
@@ -8209,6 +8320,73 @@
         "title": "SkillToggleRequest",
         "description": "PUT /api/v1/skills/{skill_id}/enabled request body."
       },
+      "SsoPublicProviderConfig": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "provider_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Id"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "token_param": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Param"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "provider_id",
+          "display_name",
+          "token_param"
+        ],
+        "title": "SsoPublicProviderConfig"
+      },
+      "SsoStartResponse": {
+        "properties": {
+          "authorization_url": {
+            "type": "string",
+            "title": "Authorization Url"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In"
+          }
+        },
+        "type": "object",
+        "required": [
+          "authorization_url",
+          "expires_in"
+        ],
+        "title": "SsoStartResponse"
+      },
       "StorageUsageResponse": {
         "properties": {
           "used_bytes": {
@@ -8743,6 +8921,16 @@
             "title": "Role",
             "description": "Role"
           },
+          "auth_provider": {
+            "type": "string",
+            "title": "Auth Provider",
+            "description": "Authentication provider id"
+          },
+          "can_change_password": {
+            "type": "boolean",
+            "title": "Can Change Password",
+            "description": "Whether this identity supports local password changes"
+          },
           "must_change_password": {
             "type": "boolean",
             "title": "Must Change Password",
@@ -8771,6 +8959,8 @@
           "username",
           "display_name",
           "role",
+          "auth_provider",
+          "can_change_password",
           "must_change_password",
           "department_path"
         ],
@@ -8828,6 +9018,14 @@
             "type": "boolean",
             "title": "Is Active"
           },
+          "auth_provider": {
+            "type": "string",
+            "title": "Auth Provider"
+          },
+          "can_change_password": {
+            "type": "boolean",
+            "title": "Can Change Password"
+          },
           "department_id": {
             "anyOf": [
               {
@@ -8857,6 +9055,8 @@
           "display_name",
           "role",
           "is_active",
+          "auth_provider",
+          "can_change_password",
           "department_id",
           "created_at",
           "updated_at"

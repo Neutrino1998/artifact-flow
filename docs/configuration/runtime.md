@@ -6,6 +6,7 @@
 /opt/artifactflow/control/
 ├── site.toml
 ├── .env
+├── auth/                        # Backend 企业认证 Provider
 ├── certs/                       # Caddy 入站证书/私钥
 ├── trust/
 │   └── ca-certificates/         # Backend 出站 HTTPS 信任锚

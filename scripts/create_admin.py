@@ -29,6 +29,7 @@ async def main(username: str, password: str, no_claim: bool) -> None:
     from db.models import User, Conversation
     from repositories.user_repo import UserRepository
     from api.services.auth import hash_password
+    from core.security.identity import LOCAL_AUTH_PROVIDER, local_auth_subject
     from config import config
     from utils.time import utc_now
 
@@ -44,7 +45,9 @@ async def main(username: str, password: str, no_claim: bool) -> None:
             user_repo = UserRepository(session)
 
             # 检查用户名是否已存在
-            existing = await user_repo.get_by_username(username)
+            existing = await user_repo.get_by_auth_identity(
+                LOCAL_AUTH_PROVIDER, local_auth_subject(username)
+            )
             if existing:
                 user_id = existing.id
                 # 确保是 admin 且已激活
@@ -64,6 +67,8 @@ async def main(username: str, password: str, no_claim: bool) -> None:
                 user_id = f"user-{uuid4().hex}"
                 user = User(
                     id=user_id,
+                    auth_provider=LOCAL_AUTH_PROVIDER,
+                    auth_subject=local_auth_subject(username),
                     username=username,
                     hashed_password=hash_password(password),
                     display_name=None,

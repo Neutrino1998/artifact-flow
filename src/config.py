@@ -366,7 +366,8 @@ class Settings(BaseSettings):
     # JWT 认证配置
     JWT_SECRET: str = ""
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRY_DAYS: int = 7
+    # One internal session contract for local-password and remote identities.
+    JWT_EXPIRY_SECONDS: int = Field(default=8 * 60 * 60, gt=0)
 
     # 密码策略（等保 9.1.4.1 身份鉴别;隐藏常量,operator 可调,不暴露 API/工具参数）。
     # 强度档：等保四级基线 —— ≥8 位、须含字母+数字+符号三类全、
@@ -429,6 +430,11 @@ def validate_config() -> None:
             "the runtime free of missing-key branches. Generate one with: python -c "
             "\"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
         )
+    # The dedicated provider file is immutable runtime configuration.  Validate
+    # it before any external connection is opened so an enabled-but-incomplete
+    # SSO deployment fails at startup rather than on the first login.
+    from core.security.remote_bearer_config import load_remote_bearer_config
+    load_remote_bearer_config()
     # Validate the Fernet key format at startup (non-empty already checked), so the
     # per-turn snapshot decrypt path never carries a key-validity branch: a malformed
     # key fails loudly here at boot, not silently on every turn. Imported lazily to

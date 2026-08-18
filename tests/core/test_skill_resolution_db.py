@@ -32,7 +32,10 @@ async def _tree(session):
     await session.flush()
     session.add(Department(id="leaf", parent_id="mid", name="leaf"))
     await session.flush()
-    session.add(User(id="u1", username="u1", hashed_password="x", department_id="leaf"))
+    session.add(User(
+        id="u1", auth_provider="local_password", auth_subject="u1",
+        username="u1", hashed_password="x", department_id="leaf",
+    ))
     await session.flush()
 
 

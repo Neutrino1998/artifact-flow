@@ -161,7 +161,8 @@ class TestSkillDetail:
 
 async def _add_user(db_session, username: str) -> User:
     user = User(
-        id=str(uuid.uuid4()), username=username,
+        id=str(uuid.uuid4()), auth_provider="local_password",
+        auth_subject=username, username=username,
         hashed_password=hash_password("x-pass-123"), role="user", is_active=True,
     )
     db_session.add(user)

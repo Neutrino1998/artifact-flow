@@ -57,6 +57,8 @@ class TestPasswordExpiry:
         repo = UserRepository(db_session)
         old = User(
             id=f"user-{uuid.uuid4().hex}",
+            auth_provider="local_password",
+            auth_subject="oldpw",
             username="oldpw",
             hashed_password=hash_password("Valid1!aa"),
             role="user",
@@ -79,6 +81,8 @@ class TestPasswordExpiry:
         repo = UserRepository(db_session)
         fresh = User(
             id=f"user-{uuid.uuid4().hex}",
+            auth_provider="local_password",
+            auth_subject="freshpw",
             username="freshpw",
             hashed_password=hash_password("Valid1!aa"),
             role="user",

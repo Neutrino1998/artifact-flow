@@ -8,6 +8,11 @@ from typing import Any
 
 from config import config
 from core.security import passwords
+from core.security.identity import (
+    LOCAL_AUTH_PROVIDER,
+    can_change_password,
+    local_auth_subject,
+)
 from repositories.department_repo import DepartmentRepository
 from repositories.user_repo import UserRepository
 from utils.logger import get_logger
@@ -42,6 +47,10 @@ class PasswordReusedError(UserAccountError):
     pass
 
 
+class PasswordUnavailableError(UserAccountError):
+    pass
+
+
 class UserAccountManager:
     def __init__(
         self,
@@ -64,11 +73,15 @@ class UserAccountManager:
             "display_name": user.display_name,
             "role": user.role,
             "must_change_password": user.must_change_password,
+            "auth_provider": user.auth_provider,
+            "can_change_password": can_change_password(user.auth_provider),
             "department_path": await self._department_path(user.department_id),
         }
 
     async def authenticate(self, username: str, password: str) -> dict:
-        user = await self._users.get_by_username(username)
+        user = await self._users.get_by_auth_identity(
+            LOCAL_AUTH_PROVIDER, local_auth_subject(username)
+        )
         password_hash = (
             user.hashed_password if user is not None else passwords.DUMMY_PASSWORD_HASH
         )
@@ -107,8 +120,12 @@ class UserAccountManager:
         user = await self._users.get_by_id(user_id)
         if user is None:
             raise UserAccountNotFoundError("User not found")
+        if not can_change_password(user.auth_provider):
+            raise PasswordUnavailableError(
+                "Password login is unavailable for this account"
+            )
         if not await asyncio.to_thread(
-            passwords.verify_password, current_password, user.hashed_password
+            passwords.verify_password, current_password, user.hashed_password or ""
         ):
             raise CurrentPasswordIncorrectError("Current password is incorrect")
         if await passwords.passwords_match_any(

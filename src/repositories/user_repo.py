@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import User, Department
+from core.security.identity import LOCAL_AUTH_PROVIDER
 from repositories.base import BaseRepository, DuplicateError
 from utils.department_tree import expand_subtree
 
@@ -23,8 +24,8 @@ class UserRepository(BaseRepository[User]):
         super().__init__(session, User)
 
     async def create_user(self, user: User) -> User:
-        """Create one user and normalize username races."""
-        username = user.username
+        """Create one user and normalize authentication-identity races."""
+        identity = (user.auth_provider, user.auth_subject)
         self._session.add(user)
         try:
             await self._session.flush()
@@ -33,13 +34,13 @@ class UserRepository(BaseRepository[User]):
             return user
         except IntegrityError as exc:
             await self._session.rollback()
-            # ``users`` also has a department FK (and a primary key), so an
-            # IntegrityError is not sufficient evidence of a username race.
+            # ``users`` also has credential checks, a department FK, and a
+            # primary key, so IntegrityError alone is not identity-race proof.
             # Re-read after rollback: under READ COMMITTED this sees the winner
-            # of a concurrent username insert without parsing dialect-specific
+            # of a concurrent identity insert without parsing dialect-specific
             # constraint names.
-            if await self.get_by_username(username) is not None:
-                raise DuplicateError("User", username) from exc
+            if await self.get_by_auth_identity(*identity) is not None:
+                raise DuplicateError("UserIdentity", identity) from exc
             raise UserWriteError() from exc
 
     async def save_user(self, user: User) -> User:
@@ -53,14 +54,19 @@ class UserRepository(BaseRepository[User]):
             await self._session.rollback()
             raise UserWriteError() from exc
 
-    async def get_by_username(self, username: str) -> Optional[User]:
-        """根据用户名查询用户"""
+    async def get_by_auth_identity(
+        self, auth_provider: str, auth_subject: str
+    ) -> Optional[User]:
+        """Resolve exactly one principal in one authentication namespace."""
         result = await self._session.execute(
-            select(User).where(User.username == username)
+            select(User).where(
+                User.auth_provider == auth_provider,
+                User.auth_subject == auth_subject,
+            )
         )
         return result.scalar_one_or_none()
 
-    async def find_existing_usernames(self, usernames: set[str]) -> set[str]:
+    async def find_existing_local_usernames(self, usernames: set[str]) -> set[str]:
         """
         批查已存在的 username 集合 — 给批量导入 preflight 用。
 
@@ -70,7 +76,10 @@ class UserRepository(BaseRepository[User]):
         if not usernames:
             return set()
         result = await self._session.execute(
-            select(User.username).where(User.username.in_(usernames))
+            select(User.username).where(
+                User.auth_provider == LOCAL_AUTH_PROVIDER,
+                User.auth_subject.in_(usernames),
+            )
         )
         return set(result.scalars().all())
 

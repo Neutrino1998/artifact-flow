@@ -231,6 +231,9 @@ func TestSiteInitCreatesOutboundTrustDirectory(t *testing.T) {
 	if !info.IsDir() {
 		t.Fatalf("outbound trust path is not a directory: %s", c.trustAnchorDir())
 	}
+	if info, err := os.Stat(c.authConfigDir()); err != nil || !info.IsDir() {
+		t.Fatalf("authentication config path is not a directory: info=%v err=%v", info, err)
+	}
 }
 
 func TestApplyCreatesMissingOutboundTrustDirectory(t *testing.T) {
@@ -243,6 +246,9 @@ func TestApplyCreatesMissingOutboundTrustDirectory(t *testing.T) {
 	}
 	if info, err := os.Stat(c.trustAnchorDir()); err != nil || !info.IsDir() {
 		t.Fatalf("apply did not create outbound trust directory: info=%v err=%v", info, err)
+	}
+	if info, err := os.Stat(c.authConfigDir()); err != nil || !info.IsDir() {
+		t.Fatalf("apply did not create authentication config directory: info=%v err=%v", info, err)
 	}
 }
 
@@ -670,6 +676,9 @@ func TestPlanApplyIsReadOnly(t *testing.T) {
 	}
 	if _, err := os.Stat(c.trustAnchorDir()); !os.IsNotExist(err) {
 		t.Fatalf("plan created optional outbound trust directory: %v", err)
+	}
+	if _, err := os.Stat(c.authConfigDir()); !os.IsNotExist(err) {
+		t.Fatalf("plan created optional authentication config directory: %v", err)
 	}
 }
 

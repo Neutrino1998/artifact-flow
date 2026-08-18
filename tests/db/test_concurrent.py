@@ -52,9 +52,12 @@ async def _create_test_user(db: DatabaseManager) -> User:
     """Helper: create a user and return it."""
     async with db.session() as session:
         repo = UserRepository(session)
+        username = f"user-{uuid.uuid4().hex[:8]}"
         user = User(
             id=str(uuid.uuid4()),
-            username=f"user-{uuid.uuid4().hex[:8]}",
+            auth_provider="local_password",
+            auth_subject=username,
+            username=username,
             hashed_password=hash_password("pw"),
             role="user",
             is_active=True,

@@ -37,9 +37,12 @@ async def _seed_user(
     is_active: bool = True,
     department_id: str | None = None,
 ) -> User:
+    username = f"u-{uuid.uuid4().hex[:8]}"
     user = User(
         id=f"user-{uuid.uuid4().hex}",
-        username=f"u-{uuid.uuid4().hex[:8]}",
+        auth_provider="local_password",
+        auth_subject=username,
+        username=username,
         hashed_password=hash_password("pw1234"),
         role=role,
         is_active=is_active,
