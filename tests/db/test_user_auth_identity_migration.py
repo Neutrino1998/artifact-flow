@@ -68,7 +68,12 @@ def test_user_identity_migration_round_trip(tmp_path):
         auth_provider_column = next(
             row for row in conn.execute("PRAGMA table_info(users)") if row[1] == "auth_provider"
         )
+        auth_subject_column = next(
+            row for row in conn.execute("PRAGMA table_info(users)") if row[1] == "auth_subject"
+        )
+        assert auth_provider_column[3] == 1
         assert auth_provider_column[4] is None
+        assert auth_subject_column[3] == 1
 
         # Same display username is legal for a different provider subject.
         conn.execute(

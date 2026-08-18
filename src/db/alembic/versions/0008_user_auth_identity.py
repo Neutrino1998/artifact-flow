@@ -55,6 +55,7 @@ def upgrade() -> None:
             "auth_provider",
             existing_type=_auth_identity_string(64),
             type_=_auth_identity_string(64),
+            existing_nullable=False,
             server_default=None,
         )
         batch.alter_column(
