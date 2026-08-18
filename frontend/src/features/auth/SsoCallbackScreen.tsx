@@ -17,6 +17,14 @@ import {
 
 const replaceCurrentDocument = (url: string) => window.location.replace(url);
 
+function getSessionStorage(): Storage | null {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
 interface SsoCallbackScreenProps {
   replaceDocument?: (url: string) => void;
 }
@@ -38,14 +46,20 @@ export default function SsoCallbackScreen({
         window.location.href,
         (cleanPath) => window.history.replaceState(window.history.state, '', cleanPath),
       );
+      const callbackStorage = getSessionStorage();
 
       const finishFailure = (failure: SsoCallbackFailure) => {
-        rememberSsoCallbackFailure(window.sessionStorage, failure);
-        replaceDocument('/auth/sso/callback');
+        try {
+          if (callbackStorage) rememberSsoCallbackFailure(callbackStorage, failure);
+        } finally {
+          replaceDocument('/auth/sso/callback');
+        }
       };
 
       void (async () => {
-        const carriedFailure = takeSsoCallbackFailure(window.sessionStorage);
+        const carriedFailure = callbackStorage
+          ? takeSsoCallbackFailure(callbackStorage)
+          : null;
         if (params.size === 0 && carriedFailure) {
           if (activeRef.current) setError(ssoCallbackFailureMessage(carriedFailure));
           return;

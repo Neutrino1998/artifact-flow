@@ -153,6 +153,83 @@ describe('SsoCallbackScreen', () => {
     expect(carried).not.toContain('raw provider failure');
   });
 
+  it('still exchanges and destroys a failed callback when session storage is blocked', async () => {
+    const upstreamToken = 'upstream-storage-blocked-secret';
+    window.history.replaceState(
+      {},
+      '',
+      `/auth/sso/callback?af_sso_state=state-3&authorization_key=${upstreamToken}`,
+    );
+    mocks.getAuthConfig.mockResolvedValue({
+      password_login_enabled: true,
+      sso: {
+        enabled: true,
+        provider_id: 'enterprise_sso',
+        display_name: '企业统一认证',
+        token_param: 'authorization_key',
+      },
+    });
+    mocks.exchangeSso.mockRejectedValue(new ApiError(401, 'expired'));
+    vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
+      throw new DOMException('Access denied', 'SecurityError');
+    });
+    const replaceDocument = vi.fn();
+
+    await act(async () => {
+      root.render(<SsoCallbackScreen replaceDocument={replaceDocument} />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.exchangeSso).toHaveBeenCalledWith({
+      state: 'state-3',
+      upstream_token: upstreamToken,
+    });
+    expect(replaceDocument).toHaveBeenCalledWith('/auth/sso/callback');
+  });
+
+  it('still completes a successful callback when session storage is blocked', async () => {
+    const upstreamToken = 'upstream-storage-blocked-success';
+    window.history.replaceState(
+      {},
+      '',
+      `/auth/sso/callback?af_sso_state=state-4&authorization_key=${upstreamToken}`,
+    );
+    mocks.getAuthConfig.mockResolvedValue({
+      password_login_enabled: true,
+      sso: {
+        enabled: true,
+        provider_id: 'enterprise_sso',
+        display_name: '企业统一认证',
+        token_param: 'authorization_key',
+      },
+    });
+    mocks.exchangeSso.mockResolvedValue({
+      access_token: 'artifactflow-jwt',
+      token_type: 'bearer',
+      expires_in: 28800,
+      user: remoteUser,
+    });
+    vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
+      throw new DOMException('Access denied', 'SecurityError');
+    });
+    const replaceDocument = vi.fn();
+
+    await act(async () => {
+      root.render(<SsoCallbackScreen replaceDocument={replaceDocument} />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.exchangeSso).toHaveBeenCalledWith({
+      state: 'state-4',
+      upstream_token: upstreamToken,
+    });
+    expect(replaceDocument).toHaveBeenCalledWith('/');
+  });
+
   it('treats a refreshed, queryless callback as an expired flow', async () => {
     window.history.replaceState({}, '', '/auth/sso/callback');
     await act(async () => {
