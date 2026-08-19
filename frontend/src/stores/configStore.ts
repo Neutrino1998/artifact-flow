@@ -2,6 +2,7 @@
 
 import { create } from 'zustand';
 import { getClientConfig } from '@/lib/api';
+import type { PasswordPolicy } from '@/lib/passwordPolicy';
 
 // Backend-owned runtime constants (GET /api/v1/meta). The frontend reads these
 // from the server instead of hardcoding values that would drift from
@@ -20,6 +21,9 @@ interface ConfigState {
   // Optional message-feedback detail limit. null means the client pre-gate is
   // unavailable; the backend remains authoritative.
   messageFeedbackMaxDetailChars: number | null;
+  // Password-shape policy from the backend. null until /meta loads; password
+  // forms then show generic guidance and never reject locally.
+  passwordPolicy: PasswordPolicy | null;
   fetched: boolean;
   fetchConfig: () => Promise<void>;
 }
@@ -30,6 +34,7 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
   maxUploadSize: null,
   maxPrivateSkills: null,
   messageFeedbackMaxDetailChars: null,
+  passwordPolicy: null,
   fetched: false,
   fetchConfig: async () => {
     if (get().fetched) return;
@@ -41,6 +46,13 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
         maxUploadSize: cfg.max_upload_size,
         maxPrivateSkills: cfg.max_private_skills,
         messageFeedbackMaxDetailChars: cfg.message_feedback_max_detail_chars,
+        passwordPolicy: {
+          minLength: cfg.password_policy.min_length,
+          maxBytes: cfg.password_policy.max_bytes,
+          requireLetter: cfg.password_policy.require_letter,
+          requireDigit: cfg.password_policy.require_digit,
+          requireSymbol: cfg.password_policy.require_symbol,
+        },
         fetched: true,
       });
     } catch (err) {

@@ -2374,6 +2374,8 @@ export interface components {
              * @description Maximum optional detail length for one message feedback record.
              */
             message_feedback_max_detail_chars: number;
+            /** @description Current password length and character-class requirements. The frontend uses them only for guidance; backend password validation remains authoritative. */
+            password_policy: components["schemas"]["PasswordPolicyResponse"];
         };
         /**
          * ConversationDetailResponse
@@ -3151,6 +3153,22 @@ export interface components {
              * @description New parent id; null = move to root
              */
             new_parent_id?: string | null;
+        };
+        /**
+         * PasswordPolicyResponse
+         * @description Backend-authoritative password-shape policy used for frontend guidance.
+         */
+        PasswordPolicyResponse: {
+            /** Min Length */
+            min_length: number;
+            /** Max Bytes */
+            max_bytes: number;
+            /** Require Letter */
+            require_letter: boolean;
+            /** Require Digit */
+            require_digit: boolean;
+            /** Require Symbol */
+            require_symbol: boolean;
         };
         /**
          * ResolveDepartmentRequest

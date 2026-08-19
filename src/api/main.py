@@ -343,8 +343,8 @@ def create_app() -> FastAPI:
 
     # 全局 ValueError → 400（防御纵深）。业务校验失败大多在 Pydantic
     # schema(返回 422)或路由内显式 HTTPException 处理掉;此 handler 兜住漏到
-    # handler 顶层的意外 ValueError(如 bcrypt >72 字节、密码策略在非 schema
-    # 路径抛错),映射成 400 而非 500。HTTPException 不受影响(走 Starlette 默认)。
+    # handler 顶层的意外 ValueError(如密码策略在非 schema 路径抛错),映射成
+    # 400 而非 500。HTTPException 不受影响(走 Starlette 默认)。
     @app.exception_handler(ValueError)
     async def _value_error_handler(request, exc: ValueError):  # noqa: ANN001
         logger.warning(f"Unhandled ValueError → 400: {exc}")

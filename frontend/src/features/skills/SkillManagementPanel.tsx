@@ -106,7 +106,6 @@ export default function SkillManagementPanel() {
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === 'admin';
   const maxPrivateSkills = useConfigStore((s) => s.maxPrivateSkills);
-  const fetchConfig = useConfigStore((s) => s.fetchConfig);
   const setActiveMode = useUIStore((s) => s.setActiveMode);
   const skillRightView = useUIStore((s) => s.skillRightView);
   const setSkillRightView = useUIStore((s) => s.setSkillRightView);
@@ -130,10 +129,6 @@ export default function SkillManagementPanel() {
   useEffect(() => {
     fetchSkills();
   }, [fetchSkills]);
-
-  useEffect(() => {
-    fetchConfig();
-  }, [fetchConfig]);
 
   const handleToggle = useCallback(async (skillId: string, next: boolean) => {
     // 乐观更新 + 失败回滚。pending 期禁开关避免连点。

@@ -1,29 +1,51 @@
-"""服务级配置"""
+"""服务级配置。
+
+字段先分为运维配置和代码内部参数；运维配置再分标准、高级两级。``Settings`` 的字段
+在技术上都可由 ``ARTIFACTFLOW_*`` 环境变量覆盖，但只有活跃配置文档明确列出的字段
+属于稳定部署契约；源码分类必须与文档一致。内部实现参数保留在这里，便于集中审阅
+资源和安全护栏。
+"""
 
 from typing import Dict, List
-from pydantic_settings import BaseSettings
+
 from pydantic import ConfigDict, Field
+from pydantic_settings import BaseSettings
+
+
+# 代码内部：HTTP/CSV 的字符数 envelope 保留原有 128 上限；bcrypt 实际只消费
+# 72 个输入字节，因此所有新口令入口必须同时拒绝超过 PASSWORD_MAX_BYTES 的值。
+# 两者都不是运维旋钮。
+PASSWORD_MAX_CHARS = 128
+PASSWORD_MAX_BYTES = 72
 
 
 class Settings(BaseSettings):
     """
     服务级配置
 
-    可通过环境变量覆盖配置项（前缀 ARTIFACTFLOW_）。
+    可通过环境变量覆盖配置项（前缀 ARTIFACTFLOW_）。活跃运行/专题配置文档定义
+    稳定运维契约；未公开的算法护栏和实现常量不作为常规部署调节项。
     """
 
     model_config = ConfigDict(env_prefix="ARTIFACTFLOW_", case_sensitive=False)
 
-    # 服务器配置
+    # 分类标记：
+    # - 运维配置：稳定的部署契约；标准项可独立调整，高级项涉及资源/安全 envelope，
+    #   仅凭证据调整；字段必须在活跃配置文档中明确命名；
+    # - 代码内部：算法、协议和展示实现参数，不作为常规部署旋钮。
+
+    # 标准运维：服务器配置
     DEBUG: bool = False
 
-    # CORS 配置
+    # CORS：origins 属标准运维；credentials 是涉及跨域认证语义的高级运维项；
+    # methods/headers 是代码内部协议默认。
     CORS_ORIGINS: List[str] = ["http://localhost:3000"]  # Next.js 开发服务器
     CORS_ALLOW_CREDENTIALS: bool = True
     CORS_ALLOW_METHODS: List[str] = ["*"]
     CORS_ALLOW_HEADERS: List[str] = ["*"]
 
-    # SSE 配置
+    # 执行：EXECUTION_TIMEOUT/PERMISSION_TIMEOUT 属标准运维；SSE ping、
+    # stream cleanup/TTL 和 cancel check 都是代码内部协调参数。
     SSE_PING_INTERVAL: int = 15  # 秒，保持连接活跃
     EXECUTION_TIMEOUT: int = 3600   # 秒，引擎循环执行上限（含 permission 等待）；超时 → TIMED_OUT 终态
     STREAM_CLEANUP_TTL: int = 60    # 秒，执行结束后 consumer 读取剩余事件的清理窗口
@@ -36,7 +58,7 @@ class Settings(BaseSettings):
     PERMISSION_TIMEOUT: int = 300  # 秒，单次 permission 等待超时
     CANCEL_CHECK_INTERVAL: float = 0.5  # 秒，LLM 流式输出期间轮询 cancel 的最小间隔（避免每 chunk 一次 Redis GET）
 
-    # LLM provider HTTP 超时分层。单一 float timeout 会同时放大
+    # 标准运维：LLM provider HTTP 超时分层。单一 float timeout 会同时放大
     # connect/read/write/pool：为容纳私有 reasoning 模型的长 TTFT 而给 read 600s
     # 时，错 IP 也会跟着等 600s。在这里构造 httpx.Timeout 把网络建连与
     # 模型等待拆开；models.yaml 里显式的 params.timeout 仍只覆盖 read。
@@ -45,14 +67,14 @@ class Settings(BaseSettings):
     LLM_WRITE_TIMEOUT: float = Field(default=60.0, gt=0)
     LLM_POOL_TIMEOUT: float = Field(default=5.0, gt=0)
 
-    # MCP provider_config.timeout 仍是 per-server 的 read / MCP request 上限。
+    # 标准运维：MCP provider_config.timeout 仍是 per-server 的 read / MCP request 上限。
     # 下列全局值只拆出 HTTP 建连/写入/连接池，重点让每轮 tools/list
     # discovery 遇到错 IP 时快速失败，不改长任务 tools/call 的 read 语义。
     MCP_CONNECT_TIMEOUT: float = Field(default=5.0, gt=0)
     MCP_WRITE_TIMEOUT: float = Field(default=60.0, gt=0)
     MCP_POOL_TIMEOUT: float = Field(default=5.0, gt=0)
 
-    # Compaction / Context 配置
+    # Compaction / Context：reserve 属标准运维；timeout 和其余值为代码内部 envelope
     # 每个模型的 context_window 在 config/models/models.yaml 显式声明；引擎以
     # context_window - reserve 作为该模型自己的 compaction 阈值。reserve 是服务级
     # 隐藏旋钮，不进入模型参数，也不暴露给 agent。
@@ -96,7 +118,7 @@ class Settings(BaseSettings):
     # `warnings.warn`(图照常打开)——一张纯色 10000×10000(100M 像素)PNG 可压到十几 KB,
     # 轻松绕过 MAX_UPLOAD_SIZE,落到 read 路径 resize 时才解码,撑爆 CPU/内存。故在**解码前**
     # (Image.open 只读头、拿 size,不解码)显式校验 w*h:上传校验侧拒(loud-fail)、read 侧防御性
-    # 再校验。50M 像素 ≈ 50MP,宽于真实相机/截图,远低于 DoS 量级。隐藏常量,operator 可调。
+    # 再校验。50M 像素 ≈ 50MP,宽于真实相机/截图,远低于 DoS 量级。代码内部安全护栏。
     VISION_IMAGE_MAX_PIXELS: int = 50 * 1000 * 1000
 
     # Cancel-path Message.response placeholders.
@@ -152,7 +174,7 @@ class Settings(BaseSettings):
                                                # 算法侧 m≈400K 后 Step 1-3 Python 开销本身就超 deadline，
                                                # 取 10K 留 ~20× headroom 同时反映 update_artifact 设计意图）
 
-    # Observability 常量(隐藏,不暴露 API)。
+    # 代码内部：Observability 资源、路径和阈值（隐藏,不暴露 API）。
     # jsonl 路径必须在持久卷 /app/data 子目录,容器重启 / autoheal 不丢。
     LOOP_LAG_WARN_MS: int = 500                # watchdog 软退化阈值,超即写一行 loop-lag.jsonl + task 栈
     WATCHDOG_DEADMAN_TIMEOUT_MS: int = 10000   # faulthandler deadman switch 超时(heartbeat 不来即 dump 全栈)
@@ -166,7 +188,6 @@ class Settings(BaseSettings):
                                                # 显式设置等于 docker-compose `mem_limit: 2g` 的镜像(避免重复 source-of-truth)
     OBS_STDOUT_MIRROR: bool = False            # 是否把 obs jsonl 镜像到 stdout(默认 False:主通道是持久卷;
                                                # 打开作为 "持久卷未挂载" 的兜底,代价是污染主应用日志流 / docker logs)
-                                               # env 覆盖:`ARTIFACTFLOW_OBS_STDOUT_MIRROR=true`(env_prefix 强制带前缀)
 
     # 舰队心跳注册表：sampler 每 tick 把快照子集写 `{prefix:instance:<id>}`,
     # 管理端 /admin/instances scan 出全舰队。双时间轴红/黄:key TTL 放长,颜色由
@@ -175,7 +196,7 @@ class Settings(BaseSettings):
     OBS_HEARTBEAT_STALE_SEC: int = 60          # ts 超此值 = 陈旧 → 面板红(wedge/停更);约 2× sample interval
     OBS_ERROR_WINDOW_SEC: int = 300            # last_error 在此窗口内 → 面板黄(近期出过 ERROR)
     OBS_AUTOHEAL_MARKER_PATH: str = ""         # 宿主 autoheal marker(JSONL)容器内只读路径;空=未挂载,面板不显示重启轨迹
-    # 管理员实例事件详情。读取现有轮转日志/JSONL,不新建第二份观测存储；所有读取都在
+    # 代码内部：管理员实例事件响应 envelope。读取现有轮转日志/JSONL,不新建第二份观测存储；所有读取都在
     # to_thread 中执行。扫描字节与响应明细分别封顶,避免一次 UI 点击把 observer 变成
     # observee 的新负载源。limit 是 API 可见分页意图，下面三项是隐藏实现 envelope。
     OBS_ADMIN_EVENT_LIMIT_MAX: int = Field(default=100, ge=1, le=500)
@@ -183,34 +204,37 @@ class Settings(BaseSettings):
     OBS_ADMIN_EVENT_DETAIL_MAX_CHARS: int = Field(default=20_000, ge=1_000)
     OBS_ADMIN_EVENT_MAX_TASKS: int = Field(default=50, ge=1, le=500)
 
-    # Admin 会话监控的部署级隐私边界。开启后，后端去除会话与反馈中的账户关联
+    # 标准运维：Admin 会话监控的部署级隐私边界。开启后，后端去除会话与反馈中的账户关联
     # 字段、脱敏上传文件名，并拒绝 admin 读取任何 artifact 内容。Artifact live
     # 事件不向 admin 转发；对话/模型/工具文本和 Prompt 重建保留，不做自由文本扫描。
     ADMIN_PRIVACY_MODE: bool = False
 
-    # Redis（空 = InMemory fallback，非空 = Redis）
+    # 标准运维：Redis 连接与命名空间（空 URL = InMemory fallback）
     REDIS_URL: str = ""
-    REDIS_CLUSTER: bool = False           # 生产 Cluster 模式
     REDIS_KEY_PREFIX: str = ""             # Redis key 命名空间前缀（共用 Cluster 必须配置）
-    REDIS_MAX_CONNECTIONS: int = 64       # 连接池上限;默认约 2× MAX_CONCURRENT_TASKS
+    # 高级运维：Redis 拓扑与连接池容量。
+    REDIS_CLUSTER: bool = False           # 生产 Cluster 模式
+    REDIS_MAX_CONNECTIONS: int = Field(default=64, ge=1)  # 默认约 2× MAX_CONCURRENT_TASKS
+    # 代码内部：lease 协议 TTL，和心跳、孤儿回收时序共同构成正确性约束。
     LEASE_TTL: int = 90  # 秒，心跳每 TTL/3 续租
 
-    # 并发控制
+    # 标准运维：并发控制
     MAX_CONCURRENT_TASKS: int = 32  # 最大并发引擎执行数
 
-    # 上传限制。单文件字节上限(API 边界 loud 422)。批量**总**字节由代理层
+    # 高级运维：上传与存储 envelope。单文件字节上限(API 边界 loud 422)。批量**总**字节由代理层
     # request_body max_size 独立封顶(约 200MiB 内容 + multipart 开销,见 deploy/caddy):
     # 允许「1 个大文件 or 多个小文件」但控总量——单文件 200MB、数量 30、总量约 200MiB
     # 三轴独立,总量刻意 < 200MB×30。前端经 /api/v1/meta 取此值做 UX 预挡(后端权威)。
     MAX_UPLOAD_SIZE: int = 200 * 1024 * 1024  # 200MB
+    # 代码内部：上传后的转换、存储和解析安全 envelope。
     # 文本转换路径(DocConverter._convert_text)的独立、更低字节闸。文本是唯一无自身
     # 成本 envelope 的转换路径:charset 检测 + str(best) + split() 会**物化整份解码
     # 内容 + 词列表**,内存放大远超输入字节,且跑在 event loop 上。
     # docx/pdf 与图片均存原 blob，不预解析或物化文本；只有裸
     # 文本会随 200MB 上传上限线性放大 → 给它保留旧的 20MB envelope。字节上界是首要护栏
-    # (to_thread 只缓解 loop 阻塞,解不了内存)。隐藏常量,operator 可调。
+    # (to_thread 只缓解 loop 阻塞,解不了内存)。代码内部常量。
     MAX_TEXT_CONVERT_BYTES: int = 20 * 1024 * 1024  # 20MB
-    # per-用户 blob 存储配额(字节)。该用户**所有 blob 字节之和**(ArtifactBlob.size_bytes
+    # 标准运维：per-用户 blob 存储配额(字节)。该用户**所有 blob 字节之和**(ArtifactBlob.size_bytes
     # 跨其全部会话)+ 本次新增若超此值 → 拒。**写入侧守门在 ArtifactService 的共享边界**:
     # 新建(上传 / 沙盒 persist / 工具结果)走 _stage_artifact,覆盖走 replace_from_upload,
     # 两者共用 _blob_admission_error,不逐来源加闸。上传转 413、工具调用转 ToolResult。
@@ -223,14 +247,15 @@ class Settings(BaseSettings):
     # 软上限:跨会话并发可略微超额,挡量级非字节级。0 = 不限(禁用)。operator 经 env 可调。
     ARTIFACT_USER_QUOTA_BYTES: int = 2 * 1024 * 1024 * 1024  # 2GB
 
-    # Skill 导入硬门槛（utils/skill_validator；隐藏常量，operator 经 env 可调）。
-    # 宿主侧只读 namelist + SKILL.md 一个成员,全包解压归沙盒 —— 这组上限是 bomb 预拒,
-    # 沙盒 watchdog 仍是真兜底。单 zip 字节上限刻意 ≤ 代理层 request_body max_size,
-    # 别声明一个过不了边缘的数(deploy/caddy)。
+    # 标准运维：每用户私有 Skill 数量策略。
     # 用户私有 skill 同时受数量与字节两道独立限制。数量按 skills.owner_user_id
     # 实时 COUNT,不在 User 上存同步计数器；-1 = 不限，0 = 关闭个人导入，正数 = 上限。
     # admin shared skill(owner=NULL)不计数。ge=-1 让非法负数在 Settings 构造期 loud-fail。
     SKILL_USER_MAX_PRIVATE_COUNT: int = Field(default=3, ge=-1)
+    # 代码内部：Skill bundle 资源硬门槛（utils/skill_validator）。
+    # 宿主侧只读 namelist + SKILL.md 一个成员,全包解压归沙盒 —— 这组上限是 bomb 预拒,
+    # 沙盒 watchdog 仍是真兜底。单 zip 字节上限刻意 ≤ 代理层 request_body max_size,
+    # 别声明一个过不了边缘的数(deploy/caddy)。
     # bundle 字节仍计入 ARTIFACT_USER_QUOTA_BYTES 共用池；记账在
     # ConversationManager.get_user_upload_bytes,413 闸与存储条同口径)。
     SKILL_BUNDLE_MAX_BYTES: int = 200 * 1024 * 1024     # 单个 skill zip 上限,对齐 MAX_UPLOAD_SIZE
@@ -240,9 +265,10 @@ class Settings(BaseSettings):
     SKILL_ZIP_MAX_MEMBERS: int = 2000                   # zip 文件成员数上限
     SKILL_ZIP_MAX_UNCOMPRESSED_BYTES: int = 500 * 1024 * 1024  # 声明解压总量上限
     SKILL_MD_MAX_BYTES: int = 5 * 1024 * 1024           # SKILL.md 成员实际读取硬帽(bomb-in-member)
-    SKILL_MD_LEGIBILITY_WARN_CHARS: int = 20_000        # 正文 legibility 警告阈值(不拦)
+    SKILL_MD_LEGIBILITY_WARN_CHARS: int = 20_000        # 正文 legibility 内部启发式警告阈值(不拦)
 
-    # 沙盒（隐藏常量，operator 经 env 可调，模型不可见）。
+    # 代码内部/部署派生：沙盒资源与容量项由 site.toml、release 构建和代码护栏共同确定，
+    # 模型不可见；不把底层 ARTIFACTFLOW_* 字段作为独立的 control/.env 契约。
     # DooD:镜像 / 挂载 / runtime 全部固定在代码侧 —— 容器创建参数绝不可被模型
     # 生成内容污染(backend 持 docker.sock = host root,这是硬安全边界)。
     # 本地源码运行默认 :latest；release 构建会把 runtime-input 内容 tag 作为
@@ -290,7 +316,7 @@ class Settings(BaseSettings):
     # (如 Mode-1 轻量部署)要用,操作者在此显式 affirm "我只跑一个进程"。多 worker 一律配 Redis。
     SANDBOX_REAP_ALLOW_LOCAL_STORE: bool = False
 
-    # SSRF / 外联工具防护（隐藏常量，不暴露 API / 工具参数）
+    # 代码内部：SSRF / 外联工具资源防护与 suffix/prefix 协议映射
     WEB_FETCH_MAX_BYTES: int = 20 * 1024 * 1024   # fallback 下载体上限（解压后字节），
                                                   # 超即中断 —— 防 gzip 炸弹 / 大响应 OOM。
                                                   # 出网下载是独立威胁面,与 MAX_UPLOAD_SIZE
@@ -316,7 +342,7 @@ class Settings(BaseSettings):
     CUSTOM_TOOL_SECRET_PREFIX: str = "TOOL_SECRET_"  # 自定义工具 {{VAR}} 只能解析此前缀的环境变量；
                                                      # 把签名密钥 / DB 密码挡在自定义工具可触及范围外
 
-    # 工具凭证主密钥。external 工具凭证可逆加密落库(tool_credentials),此密钥
+    # 标准运维：工具凭证主密钥。external 工具凭证可逆加密落库(tool_credentials),此密钥
     # 加密/解密用 —— 单把、不轮转、与 JWT_SECRET 同信任模型(DB dump 无此密钥=废密文)。
     # 生成:python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     # **强制**:validate_config 缺它即 fail-to-start(同 JWT_SECRET)。无凭证部署也须设——
@@ -325,7 +351,7 @@ class Settings(BaseSettings):
     # 格式错构造即抛。
     CREDENTIAL_KEY: str = ""
 
-    # 输入限制
+    # 代码内部：交互输入和队列 envelope；前后端协议共同依赖这些默认值。
     MAX_MESSAGE_CHARS: int = 20000   # 单条用户输入 / inject 内容字符上限（超即 422）；
                                      # 超大粘贴在前端转为暂存附件而非 inline 消息
     # 单条回复反馈的可选文字说明上限
@@ -338,20 +364,23 @@ class Settings(BaseSettings):
                                      # (约 200MiB 内容 + multipart 开销)独立封顶——数量轴
                                      # 管「几个」,总量轴管「多大」,两轴独立。
 
-    # 批量导入用户（CSV）
+    # 高级运维：批量导入用户（CSV）的请求资源 envelope。
     MAX_BULK_IMPORT_ROWS: int = 1000          # 行数上限，超过整体拒绝（防误传）
     MAX_BULK_IMPORT_BYTES: int = 5 * 1024 * 1024  # 5MB 字节上限（先于行数检查，防恶意大文件）
 
-    # 分页默认值
+    # 代码内部：分页默认值（当前保留兼容，未作为运维契约）
     DEFAULT_PAGE_SIZE: int = 20
     MAX_PAGE_SIZE: int = 100
 
-    # 数据库配置
+    # 标准运维：数据库连接地址
     DATABASE_URL: str = ""
     DATABASE_URLS: str = ""               # 逗号分隔多 PX 地址（优先级高于 DATABASE_URL）
-    DATABASE_POOL_SIZE: int = 10
-    DATABASE_MAX_OVERFLOW: int = 20
-    DATABASE_POOL_TIMEOUT: int = 30
+    # 高级运维：数据库连接池容量与等待上限。
+    # 禁止 QueuePool 的特殊无界值：pool_size=0 或 max_overflow=-1。
+    DATABASE_POOL_SIZE: int = Field(default=10, ge=1)
+    DATABASE_MAX_OVERFLOW: int = Field(default=20, ge=0)
+    DATABASE_POOL_TIMEOUT: int = Field(default=30, ge=0)
+    # 代码内部：连接健康与故障回切策略。
     DATABASE_POOL_RECYCLE: int = 300       # 缩短回收周期，加速故障检测和恢复回切
     # PG per-语句 wall-clock(秒)。后处理不在引擎超时(EXECUTION_TIMEOUT)内 —— per-query
     # 上界是 DB 层职责。仅 PostgreSQL(asyncpg)生效:setdefault 注入 connect_args。取"比最慢
@@ -363,31 +392,38 @@ class Settings(BaseSettings):
     # 机制见 db/database.py._apply_session_tz_kwargs / command-timeout connect args。
     DB_COMMAND_TIMEOUT: float = 30.0
 
-    # JWT 认证配置
+    # 标准运维：JWT Secret 与会话有效期；算法是代码内部协议选择
     JWT_SECRET: str = ""
     JWT_ALGORITHM: str = "HS256"
-    # One internal session contract for local-password and remote identities.
+    # One session contract for local-password and remote identities.
     JWT_EXPIRY_SECONDS: int = Field(default=8 * 60 * 60, gt=0)
 
-    # 密码策略（等保 9.1.4.1 身份鉴别;隐藏常量,operator 可调,不暴露 API/工具参数）。
-    # 强度档：等保四级基线 —— ≥8 位、须含字母+数字+符号三类全、
-    # 拒弱口令/键盘序列黑名单。周期改密(降等保三级):全部用户 180 天到期 + 不重用前 1 次。
-    PASSWORD_MIN_LENGTH: int = 8              # 静态口令长度下限(等保「8 位以上」)
+    # 标准运维：密码形状策略。/meta 向前端提供同一运行时值用于提示，后端校验仍权威。
+    # 强度档：等保四级基线 —— ≥8 位、须含字母+数字+符号三类全；后端另有代码内部的
+    # 弱口令/键盘序列黑名单，不把黑名单细节暴露给前端。
+    PASSWORD_MIN_LENGTH: int = Field(
+        default=8,
+        ge=1,
+        le=PASSWORD_MAX_BYTES,
+    )  # 静态口令长度下限(等保「8 位以上」)
     PASSWORD_REQUIRE_LETTER: bool = True      # 须含字母(大小写均算)
     PASSWORD_REQUIRE_DIGIT: bool = True       # 须含数字
     PASSWORD_REQUIRE_SYMBOL: bool = True      # 须含符号(等保「字母、数字、符号混合」三类全)
+    # 代码内部：周期与历史策略（等保 9.1.4.1 身份鉴别；不暴露给前端）。
+    # 全部用户默认 180 天到期，且新口令不得与当前口令相同。尚未作为稳定运维契约
+    # 暴露；如需开放，先补齐参数间约束和运行文档。
     PASSWORD_EXPIRY_DAYS: int = 180           # 口令到期天数,超期登录即置 must_change_password;0=不强制到期
     PASSWORD_HISTORY_COUNT: int = 1           # 新密码不得与「最近 N 个用过的口令(含当前)」相同;1=仅当前
     PASSWORD_HISTORY_RETAIN: int = 5          # password_history 列保留的历史 hash 数。从 day 1 起维护,
                                               # 故调高 PASSWORD_HISTORY_COUNT(≤RETAIN+1)即生效、无需再迁移。
                                               # 这是 history-count 解耦 retain 的关键:列存得比当前查得多。
 
-    # 登录频控（隐藏常量）。per-username + per-IP 各自单键计数，Cluster 安全
+    # 标准运维：登录频控。per-username + per-IP 各自单键计数，Cluster 安全
     # (绝不跨键 multi-key)。失败累计超阈 → 429 锁定至窗口过期。
-    LOGIN_MAX_FAILURES: int = 5               # 窗口内最大失败次数,达到即拒
-    LOGIN_FAILURE_WINDOW_SEC: int = 900       # 失败计数滑窗 / 锁定时长(秒),15 分钟
+    LOGIN_MAX_FAILURES: int = Field(default=5, ge=1)  # 窗口内最大失败次数,达到即拒
+    LOGIN_FAILURE_WINDOW_SEC: int = Field(default=900, ge=1)  # 失败计数滑窗 / 锁定时长(秒)
 
-    # 匿名 SSO 资源准入（部署容量，不属于 Provider 协议配置）。start 在共享全局
+    # 标准运维：匿名 SSO 资源准入（部署容量，不属于 Provider 协议配置）。start 在共享全局
     # 和 per-IP 固定窗口内签发一次性 state；userinfo 连接池另行限制每实例并发。
     SSO_START_IP_MAX_REQUESTS: int = Field(default=60, ge=1)
     SSO_START_GLOBAL_MAX_REQUESTS: int = Field(default=120, ge=1)

@@ -3,11 +3,13 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/authStore';
+import { useConfigStore } from '@/stores/configStore';
 import * as api from '@/lib/api';
 import ChangePasswordDialog from '@/components/layout/ChangePasswordDialog';
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isHydrated, hydrate, setUser, user } = useAuthStore();
+  const fetchConfig = useConfigStore((s) => s.fetchConfig);
   const router = useRouter();
 
   useEffect(() => {
@@ -31,6 +33,13 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
       .catch(() => { /* 静默：网络/401 已由 request() 兜底 */ });
     return () => { cancelled = true; };
   }, [isHydrated, isAuthenticated, setUser]);
+
+  // Runtime UI constants are fetched for every authenticated session, including
+  // the forced-password screen. GET /meta is read-only and exempt from that gate.
+  useEffect(() => {
+    if (!isHydrated || !isAuthenticated) return;
+    fetchConfig();
+  }, [fetchConfig, isHydrated, isAuthenticated]);
 
   // Show minimal loading state while hydrating or redirecting to login
   // Using null causes a blank flash when logging out before the login page loads

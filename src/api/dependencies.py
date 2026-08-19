@@ -595,10 +595,11 @@ async def get_client_config_manager(
 
 _bearer_scheme = HTTPBearer(auto_error=False)
 
-# must_change_password 闸门豁免:仅这两个 (method, path) 在标志为 True 时仍放行,
-# 让用户能拉到自己的状态(GET /me)并完成改密(POST /me/password)。其余一律 403。
+# must_change_password 闸门豁免：用户可拉取自身状态和只读运行时密码策略，
+# 并完成改密；其余业务接口一律 403。
 _PASSWORD_GATE_EXEMPT: set[tuple[str, str]] = {
     ("GET", "/api/v1/auth/me"),
+    ("GET", "/api/v1/meta"),
     ("POST", "/api/v1/auth/me/password"),
 }
 

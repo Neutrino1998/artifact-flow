@@ -4,6 +4,7 @@ import { useState } from 'react';
 import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useUIStore } from '@/stores/uiStore';
+import { useConfigStore } from '@/stores/configStore';
 import {
   BUTTON_PRIMARY,
   BUTTON_SECONDARY,
@@ -14,7 +15,7 @@ import { SELECT_CHEVRON } from '@/components/ui/SelectChevron';
 import DepartmentCascader from '@/features/admin/departments/DepartmentCascader';
 import PanelShell from '@/components/layout/PanelShell';
 import {
-  PASSWORD_POLICY_HINT,
+  getPasswordPolicyHint,
   validatePasswordStrength,
 } from '@/lib/passwordPolicy';
 
@@ -26,6 +27,7 @@ const ROLE_OPTIONS = [
 export default function CreateUserForm() {
   const setRightView = useUIStore((s) => s.setUserManagementRightView);
   const bumpListVersion = useUIStore((s) => s.bumpUserMgmtListVersion);
+  const passwordPolicy = useConfigStore((s) => s.passwordPolicy);
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -37,7 +39,10 @@ export default function CreateUserForm() {
 
   // 强度不在前端硬阻断(后端策略可调,以免漂移导致误拒)—— 只要求非空,
   // 后端权威校验,被拒时显示后端具体原因。policyError 仅作即时提示。
-  const policyError = password ? validatePasswordStrength(password) : null;
+  const passwordPolicyHint = getPasswordPolicyHint(passwordPolicy);
+  const policyError = password
+    ? validatePasswordStrength(password, passwordPolicy)
+    : null;
   const canSubmit =
     username.trim().length >= 2 &&
     password.length > 0 &&
@@ -142,14 +147,14 @@ export default function CreateUserForm() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             disabled={submitting}
-            placeholder={PASSWORD_POLICY_HINT}
+            placeholder={passwordPolicyHint}
             className={INPUT_ON_PANEL}
           />
           {policyError ? (
             <p className="text-status-error text-xs mt-1">{policyError}</p>
           ) : (
             <p className="text-text-tertiary dark:text-text-tertiary-dark text-xs mt-1">
-              {PASSWORD_POLICY_HINT}；用户首次登录将被要求改密
+              {passwordPolicyHint}；用户首次登录将被要求改密
             </p>
           )}
         </div>

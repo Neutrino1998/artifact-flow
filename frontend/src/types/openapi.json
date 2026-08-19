@@ -6072,7 +6072,6 @@
         "properties": {
           "current_password": {
             "type": "string",
-            "maxLength": 128,
             "minLength": 1,
             "title": "Current Password",
             "description": "Current password"
@@ -6147,6 +6146,10 @@
             "minimum": 1.0,
             "title": "Message Feedback Max Detail Chars",
             "description": "Maximum optional detail length for one message feedback record."
+          },
+          "password_policy": {
+            "$ref": "#/components/schemas/PasswordPolicyResponse",
+            "description": "Current password length and character-class requirements. The frontend uses them only for guidance; backend password validation remains authoritative."
           }
         },
         "type": "object",
@@ -6155,7 +6158,8 @@
           "lead_agent_model",
           "max_upload_size",
           "max_private_skills",
-          "message_feedback_max_detail_chars"
+          "message_feedback_max_detail_chars",
+          "password_policy"
         ],
         "title": "ClientConfigResponse",
         "description": "GET /api/v1/meta response \u2014 runtime constants for the frontend."
@@ -7910,6 +7914,43 @@
         "type": "object",
         "title": "MoveDepartmentRequest",
         "description": "POST /api/v1/departments/{id}/move request body \u2014 \u642c\u5bb6"
+      },
+      "PasswordPolicyResponse": {
+        "properties": {
+          "min_length": {
+            "type": "integer",
+            "maximum": 72.0,
+            "minimum": 1.0,
+            "title": "Min Length"
+          },
+          "max_bytes": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Max Bytes"
+          },
+          "require_letter": {
+            "type": "boolean",
+            "title": "Require Letter"
+          },
+          "require_digit": {
+            "type": "boolean",
+            "title": "Require Digit"
+          },
+          "require_symbol": {
+            "type": "boolean",
+            "title": "Require Symbol"
+          }
+        },
+        "type": "object",
+        "required": [
+          "min_length",
+          "max_bytes",
+          "require_letter",
+          "require_digit",
+          "require_symbol"
+        ],
+        "title": "PasswordPolicyResponse",
+        "description": "Backend-authoritative password-shape policy used for frontend guidance."
       },
       "ResolveDepartmentRequest": {
         "properties": {

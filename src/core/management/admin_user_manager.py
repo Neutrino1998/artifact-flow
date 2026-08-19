@@ -6,7 +6,7 @@ import asyncio
 from typing import Any, Optional
 from uuid import uuid4
 
-from config import config
+from config import PASSWORD_MAX_CHARS, config
 from core.security.identity import (
     LOCAL_AUTH_PROVIDER,
     can_change_password,
@@ -23,7 +23,6 @@ from repositories.user_repo import UserRepository, UserWriteError
 from utils.csv_import import (
     DEPT_NAME_MAX,
     DISPLAY_NAME_MAX,
-    PASSWORD_MAX,
     CsvParseError,
     ParsedRow,
     parse_user_csv,
@@ -297,9 +296,10 @@ class AdminUserManager:
                 f"display_name too long: {len(row.display_name)} chars "
                 f"(max {DISPLAY_NAME_MAX})"
             )
-        if row.password and len(row.password) > PASSWORD_MAX:
+        if row.password and len(row.password) > PASSWORD_MAX_CHARS:
             raise ValueError(
-                f"password too long: {len(row.password)} chars (max {PASSWORD_MAX})"
+                "password too long: "
+                f"{len(row.password)} chars (max {PASSWORD_MAX_CHARS})"
             )
         for index, name in enumerate(
             (row.dept_l1, row.dept_l2, row.dept_l3), start=1

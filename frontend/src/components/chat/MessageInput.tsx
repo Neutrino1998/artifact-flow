@@ -134,10 +134,6 @@ export default function MessageInput() {
   const branchPath = useConversationStore((s) => s.branchPath);
   const compactionThreshold = useConfigStore((s) => s.compactionThreshold);
   const leadAgentModel = useConfigStore((s) => s.leadAgentModel);
-  const fetchConfig = useConfigStore((s) => s.fetchConfig);
-  useEffect(() => {
-    fetchConfig();
-  }, [fetchConfig]);
   const lastNode = branchPath.length > 0 ? branchPath[branchPath.length - 1] : null;
   // Slugs already active on this branch (the tail message's persisted sticky list).
   // The picker marks these "已激活" so re-checking one — which re-injects its full body,
