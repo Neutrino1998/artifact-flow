@@ -470,6 +470,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../configuration/authentication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    企业认证
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../configuration/runtime/" class="md-nav__link">
         
   
@@ -1049,7 +1077,7 @@
 <h2 id="4-安装-runsc">4. 安装 runsc</h2>
 <p>使用组织认可的 gVisor 安装方式，或在联网构建机制作仓库提供的离线包。目标机完成：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>runsc<span class="w"> </span>--version
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>docker<span class="w"> </span>info<span class="w"> </span>--format<span class="w"> </span><span class="s1">&#39;{{json .Runtimes}}&#39;</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>docker<span class="w"> </span>info<span class="w"> </span>--format<span class="w"> </span><span class="s1">'{{json .Runtimes}}'</span>
 </code></pre></div>
 <p>第二条输出必须包含 <code>runsc</code>。随后运行 gVisor 包内的 smoke test；安装、Docker runtime 注册和验证过程见 <a href="https://github.com/Neutrino1998/artifact-flow/blob/main/sandbox/gvisor-pkg/README.md">gVisor offline package</a>。</p>
 <p><code>afctl</code> 只检查 runsc，不会安装它，也不会在缺失时静默降级到 runc。</p>

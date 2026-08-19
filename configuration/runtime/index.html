@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://neutrino1998.github.io/artifact-flow/configuration/runtime/">
       
       
-        <link rel="prev" href="../skills/">
+        <link rel="prev" href="../authentication/">
       
       
         <link rel="next" href="../../operations/host-preparation/">
@@ -469,6 +469,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../authentication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    企业认证
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -907,21 +935,22 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>/opt/artifactflow/control/
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── site.toml
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── .env
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── certs/                       # Caddy 入站证书/私钥
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── trust/
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│   └── ca-certificates/         # Backend 出站 HTTPS 信任锚
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>├── site/
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>├── maintenance/
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>└── autoheal/
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── auth/                        # Backend 企业认证 Provider
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── certs/                       # Caddy 入站证书/私钥
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>├── trust/
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│   └── ca-certificates/         # Backend 出站 HTTPS 信任锚
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>├── site/
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>├── maintenance/
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>└── autoheal/
 </code></pre></div>
 <h2 id="sitetoml"><code>site.toml</code></h2>
 <p><code>site.toml</code> 只声明部署能力，不存 Secret：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">schema</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">executor</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;local&quot;</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">tls</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;static&quot;</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">infra</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;bundled&quot;</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">sandbox_runtime</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;runsc&quot;</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">scratch_root</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;/data/artifactflow/sandbox&quot;</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">executor</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"local"</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">tls</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"static"</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">infra</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"bundled"</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">sandbox_runtime</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"runsc"</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">scratch_root</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"/data/artifactflow/sandbox"</span>
 <a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="n">backend_replicas</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span>
 <a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="n">ready_timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">120</span>
 </code></pre></div>
@@ -1042,6 +1071,31 @@
 <td>按模型、DB 和主机容量限制并发</td>
 </tr>
 <tr>
+<td><code>ARTIFACTFLOW_SSO_START_IP_MAX_REQUESTS</code></td>
+<td style="text-align: right;"><code>60</code></td>
+<td>单一客户端 IP 在 SSO start 窗口内的准入上限</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_SSO_START_GLOBAL_MAX_REQUESTS</code></td>
+<td style="text-align: right;"><code>120</code></td>
+<td>所有 Backend 通过 Redis 共享的 SSO start 窗口上限</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_SSO_START_RATE_WINDOW_SEC</code></td>
+<td style="text-align: right;"><code>60</code> 秒</td>
+<td>SSO start 固定窗口长度</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_SSO_STATE_MAX_PENDING</code></td>
+<td style="text-align: right;"><code>1000</code></td>
+<td>一次性 SSO state 的硬容量上限</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_SSO_USERINFO_MAX_CONNECTIONS</code></td>
+<td style="text-align: right;"><code>10</code></td>
+<td>每个 Backend 的 userinfo 出站连接上限</td>
+</tr>
+<tr>
 <td><code>ARTIFACTFLOW_MAX_UPLOAD_SIZE</code></td>
 <td style="text-align: right;"><code>200 MiB</code></td>
 <td>单文件上传上限；代理另有批量总量上限</td>
@@ -1075,6 +1129,10 @@
 </table>
 <p><code>src/config.py</code> 还有算法护栏和内部实现常量。它们即使能被环境变量覆盖，也不等于常规部署契约；没有具体容量或故障证据时不要照单调大。</p>
 <p><code>ARTIFACTFLOW_MAX_CONCURRENT_TASKS</code> 对每个 Backend 进程内唯一的 TaskSupervisor capacity gate 生效。超过容量的 Conversation turn 保持 QUEUED：它继续持有并续租 Conversation lease，但尚未标记为可交互 RUNNING，因此 inject/cancel 会按现有 409 契约拒绝。多 Backend 副本必须使用 Redis，让 lease、interactive、interrupt、cancel 与 SSE 状态跨进程共享；进程内 TaskSupervisor 只保留本进程 task 引用，不承担崩溃恢复。</p>
+<p>SSO 的五个容量项属于部署资源边界，不写入认证 Provider YAML。per-IP 超限返回 429；
+Redis 共享的全局窗口或 state 容量耗尽返回 503。userinfo 连接数是每个 Backend 的
+独立上限，因此部署总出站并发约为该值乘以 Backend 副本数；它不复用 Conversation
+TaskSupervisor 的信号量，登录和 Agent 执行不会互相占用准入名额。</p>
 <p><code>ARTIFACTFLOW_ADMIN_PRIVACY_MODE=true</code> 是部署级的 Admin 会话监控边界：会话和反馈接口把属主显示为“匿名用户”、拒绝按 <code>user_id</code> 筛选、把附件名称显示为通用名称。Admin Artifact 列表只返回受保护的通用条目，任何来源的 Artifact 内容、版本和 raw/blob 接口都返回 404；<code>artifact_created</code> 和 <code>artifact_updated</code> live 事件也不向 Admin SSE 转发。Prompt 重建作为排障能力保持开放；它和会话正文、模型输出、工具事件一样可能包含附件的名称、片段，甚至完整内容，不做自由文本扫描。因此该模式降低的是账户直接关联和文件接口的直接读取风险，不承诺内容层面的完全匿名。</p>
 <p><code>ARTIFACTFLOW_EXECUTION_TIMEOUT</code> 只包住 <code>AgentRuntime</code> 的引擎 loop。触发后 Runtime 返回 timeout stop reason，再由 Conversation turn 的统一结束路径写入 <code>timed_out</code> terminal、事件和展示 response；Artifact flush、事件写入等 post-processing 刻意位于该 deadline 之外。持久化查询由 <code>ARTIFACTFLOW_DB_COMMAND_TIMEOUT</code> 分别约束，因此不要把 execution timeout 当成包含所有 DB cleanup 的 HTTP 请求总时限。</p>
 <p>Redis 中的 lease、interactive、interrupt、cancel 和 stream 是会过期的 live coordination state，不是执行历史；PostgreSQL 中的 Conversation、MessageEvent、配置注册表和 Artifact 才是 durable state。Admin runtime 页面只读观察这些状态，不会把某一侧反写或同步成另一侧。未配置 Redis 的进程内模式只适合单 Backend，本地进程退出后其 live state 会自然消失。</p>

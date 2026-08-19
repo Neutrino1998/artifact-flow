@@ -470,6 +470,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../configuration/authentication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    企业认证
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../configuration/runtime/" class="md-nav__link">
         
   
@@ -1013,9 +1041,9 @@
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sudo<span class="w"> </span>vi<span class="w"> </span>/opt/artifactflow/control/.env
 </code></pre></div>
 <p>默认 preset 使用：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">executor</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;local&quot;</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">infra</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;bundled&quot;</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">sandbox_runtime</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;runsc&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">executor</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"local"</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">infra</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"bundled"</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">sandbox_runtime</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"runsc"</span>
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">backend_replicas</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span>
 </code></pre></div>
 <p>确认 <code>scratch_root</code> 与 commissioning 时准备的挂载点完全相同。</p>

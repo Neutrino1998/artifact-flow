@@ -468,6 +468,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../configuration/authentication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    企业认证
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../configuration/runtime/" class="md-nav__link">
         
   
@@ -977,8 +1005,8 @@
 </code></pre></div>
 <p>选择明确的 container ID，后续不要用可能随机命中副本的 <code>compose exec backend</code>：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CID</span><span class="o">=</span>&lt;backend-container-id&gt;
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CID</span><span class="s2">&quot;</span><span class="w"> </span>curl<span class="w"> </span>-m<span class="w"> </span><span class="m">3</span><span class="w"> </span>http://127.0.0.1:8000/health/live
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CID</span><span class="s2">&quot;</span><span class="w"> </span>curl<span class="w"> </span>-m<span class="w"> </span><span class="m">5</span><span class="w"> </span>http://127.0.0.1:8000/health/ready
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span><span class="s2">"</span><span class="nv">$CID</span><span class="s2">"</span><span class="w"> </span>curl<span class="w"> </span>-m<span class="w"> </span><span class="m">3</span><span class="w"> </span>http://127.0.0.1:8000/health/live
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span><span class="s2">"</span><span class="nv">$CID</span><span class="s2">"</span><span class="w"> </span>curl<span class="w"> </span>-m<span class="w"> </span><span class="m">5</span><span class="w"> </span>http://127.0.0.1:8000/health/ready
 </code></pre></div>
 <ul>
 <li>live 超时：该副本事件循环无法运行，继续抓进程现场；</li>
@@ -987,26 +1015,26 @@
 </ul>
 <h2 id="backend-卡死重启前取证">Backend 卡死：重启前取证</h2>
 <p>先看资源：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>docker<span class="w"> </span>stats<span class="w"> </span>--no-stream<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CID</span><span class="s2">&quot;</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CID</span><span class="s2">&quot;</span><span class="w"> </span>cat<span class="w"> </span>/proc/1/status<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-5
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>docker<span class="w"> </span>stats<span class="w"> </span>--no-stream<span class="w"> </span><span class="s2">"</span><span class="nv">$CID</span><span class="s2">"</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span><span class="s2">"</span><span class="nv">$CID</span><span class="s2">"</span><span class="w"> </span>cat<span class="w"> </span>/proc/1/status<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-5
 </code></pre></div>
 <p>默认 deadman 会在事件循环长时间无 heartbeat 时把 Python 全线程栈写入 stderr：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>docker<span class="w"> </span>logs<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CID</span><span class="s2">&quot;</span><span class="w"> </span>--tail<span class="w"> </span><span class="m">500</span><span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>docker<span class="w"> </span>logs<span class="w"> </span><span class="s2">"</span><span class="nv">$CID</span><span class="s2">"</span><span class="w"> </span>--tail<span class="w"> </span><span class="m">500</span><span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span>
 </code></pre></div>
 <p>需要主动再抓一次：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nv">PID</span><span class="o">=</span><span class="k">$(</span>docker<span class="w"> </span>inspect<span class="w"> </span>-f<span class="w"> </span><span class="s1">&#39;{{.State.Pid}}&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CID</span><span class="s2">&quot;</span><span class="k">)</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>sudo<span class="w"> </span><span class="nb">kill</span><span class="w"> </span>-USR1<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PID</span><span class="s2">&quot;</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>docker<span class="w"> </span>logs<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CID</span><span class="s2">&quot;</span><span class="w"> </span>--tail<span class="w"> </span><span class="m">500</span><span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nv">PID</span><span class="o">=</span><span class="k">$(</span>docker<span class="w"> </span>inspect<span class="w"> </span>-f<span class="w"> </span><span class="s1">'{{.State.Pid}}'</span><span class="w"> </span><span class="s2">"</span><span class="nv">$CID</span><span class="s2">"</span><span class="k">)</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>sudo<span class="w"> </span><span class="nb">kill</span><span class="w"> </span>-USR1<span class="w"> </span><span class="s2">"</span><span class="nv">$PID</span><span class="s2">"</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>docker<span class="w"> </span>logs<span class="w"> </span><span class="s2">"</span><span class="nv">$CID</span><span class="s2">"</span><span class="w"> </span>--tail<span class="w"> </span><span class="m">500</span><span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span>
 </code></pre></div>
 <p>备用 attach 路径：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CID</span><span class="s2">&quot;</span><span class="w"> </span>py-spy<span class="w"> </span>dump<span class="w"> </span>--pid<span class="w"> </span><span class="m">1</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span><span class="s2">"</span><span class="nv">$CID</span><span class="s2">"</span><span class="w"> </span>py-spy<span class="w"> </span>dump<span class="w"> </span>--pid<span class="w"> </span><span class="m">1</span>
 </code></pre></div>
 <p>如果有软退化记录，同时拷出观测文件：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CID</span><span class="s2">&quot;</span><span class="w"> </span>tail<span class="w"> </span>-50<span class="w"> </span>/app/data/observability/loop-lag.jsonl
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>docker<span class="w"> </span>cp<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CID</span><span class="s2">&quot;</span>:/app/data/observability<span class="w"> </span>./observability-snapshot
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span><span class="s2">"</span><span class="nv">$CID</span><span class="s2">"</span><span class="w"> </span>tail<span class="w"> </span>-50<span class="w"> </span>/app/data/observability/loop-lag.jsonl
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>docker<span class="w"> </span>cp<span class="w"> </span><span class="s2">"</span><span class="nv">$CID</span><span class="s2">"</span>:/app/data/observability<span class="w"> </span>./observability-snapshot
 </code></pre></div>
 <p>取证完成后只重启目标副本：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>docker<span class="w"> </span>restart<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CID</span><span class="s2">&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>docker<span class="w"> </span>restart<span class="w"> </span><span class="s2">"</span><span class="nv">$CID</span><span class="s2">"</span>
 </code></pre></div>
 <p>随后确认该副本 live/ready 恢复，并记录触发请求的 request ID、conversation/message ID、栈、CPU/RSS、当前 Release 和重启时间。</p>
 <p>常见 fingerprint：</p>

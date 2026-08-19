@@ -585,6 +585,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../authentication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    企业认证
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../runtime/" class="md-nav__link">
         
   
@@ -949,7 +977,7 @@
 <tr>
 <td><code>models.&lt;alias&gt;.model</code></td>
 <td>是</td>
-<td>LiteLLM 模型 ID，如 <code>dashscope/qwen3.7-plus</code></td>
+<td>provider 接受的原始模型 ID，如 <code>qwen3.7-plus</code></td>
 </tr>
 <tr>
 <td><code>context_window</code></td>
@@ -960,6 +988,11 @@
 <td><code>base_url</code></td>
 <td>否</td>
 <td>自部署或 OpenAI-compatible endpoint</td>
+</tr>
+<tr>
+<td><code>base_url_env</code></td>
+<td>否</td>
+<td>覆盖 <code>base_url</code> 的环境变量名；适合 Token Plan 等部署端点</td>
 </tr>
 <tr>
 <td><code>api_key</code></td>
@@ -989,7 +1022,7 @@
 <tr>
 <td><code>params</code></td>
 <td>否</td>
-<td>透传给 LiteLLM 的模型参数</td>
+<td>透传到 OpenAI-compatible request body 的模型参数</td>
 </tr>
 <tr>
 <td><code>defaults</code></td>
@@ -999,7 +1032,11 @@
 </tbody>
 </table>
 <p>未配置的采样参数不会由 ArtifactFlow 强行补默认值，而是交给模型供应商。常见参数包括 <code>temperature</code>、<code>top_p</code>、<code>max_tokens</code>、<code>timeout</code>，以及供应商特有的 <code>enable_thinking</code>。</p>
-<p><code>replay_reasoning</code> 是 ArtifactFlow 的历史构建策略，不会作为参数传给 LiteLLM。设为
+<p>运行时固定使用流式 Chat Completions 并发送
+<code>stream_options.include_usage: true</code>。正常完成的调用必须返回 usage；缺失时会作为
+provider 协议错误响亮失败，因为 input/output token 会直接驱动上下文压缩和资源
+监控。ArtifactFlow 不再用本地 tokenizer 猜测兼容端点的 token 用量。</p>
+<p><code>replay_reasoning</code> 是 ArtifactFlow 的历史构建策略，不会作为参数传给 provider。设为
 <code>false</code> 时，推理内容仍会正常流式返回并持久化到事件中，只是不再进入该模型后续调用的
 assistant messages；普通回复文本和原生工具调用结构不受影响。需要 preserved/interleaved
 thinking 的 Agent 模型应保留默认值 <code>true</code>，并另行在 <code>params</code> 中配置供应商要求的
@@ -1017,14 +1054,16 @@ thinking 开关；不接受或不需要历史推理的模型可显式设为 <cod
 <a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">      </span><span class="nt">temperature</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.6</span>
 <a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">      </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">900</span>
 </code></pre></div>
-<p>当 <code>base_url</code> 存在且 <code>model</code> 没有已知 provider 前缀时，运行时按 OpenAI-compatible 模型处理。
+<p><code>model</code> 会原样发送到 endpoint，不使用 <code>openai/</code>、<code>dashscope/</code> 或其他路由前缀。
+Endpoint 优先级是调用方显式参数 &gt; <code>base_url_env</code> 指定的非空环境变量 &gt;
+<code>base_url</code>。因此可以在 YAML 保留标准公网端点，由部署环境切到 Token Plan 或内网网关。
 <code>api_key_env</code> 指向的变量缺失时会直接报错，不会把变量名当作密钥发送。</p>
 <p><code>cache_salt_field</code> 是模型 alias 级开关。配置后，每次普通 Agent、子 Agent 和
 compaction 请求都会在 provider request body 中携带该字段。字段值不是原始用户 ID，
 而是使用服务端 <code>ARTIFACTFLOW_JWT_SECRET</code> 派生的 HMAC-SHA256；同一用户跨请求稳定，
 不同用户不同，日志也只记录启用的字段名。配置了该字段但调用链缺少认证用户时会
 直接失败，避免静默退化为未隔离缓存。轮换 JWT secret 会使旧 prefix cache 自然失效。</p>
-<p>ArtifactFlow 会把 LiteLLM 上报的缓存命中量记录为 <code>cached_input_tokens</code>，并在普通
+<p>ArtifactFlow 会把 provider 上报的缓存命中量记录为 <code>cached_input_tokens</code>，并在普通
 会话和管理员会话监控中用 <code>↻</code> 展示。vLLM 还必须以
 <code>--enable-prompt-tokens-details</code> 启动才会返回该明细；未开启或其他 provider 未上报时，
 界面不显示缓存数字（与明确上报的 <code>0</code> 个命中 token 区分）。
@@ -1033,22 +1072,24 @@ compaction 请求都会在 provider request body 中携带该字段。字段值�
 <p>Ollama：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">models</span><span class="p">:</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">local-llama</span><span class="p">:</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ollama/llama3</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">llama3</span>
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="nt">context_window</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">32768</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="nt">base_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://ollama.internal:11434</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="nt">base_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://ollama.internal:11434/v1</span>
 <a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ollama</span>
 </code></pre></div>
 <h2 id="vision">Vision</h2>
 <p>只有显式设置 <code>vision: true</code> 的 alias 才会收到图片 Artifact：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">models</span><span class="p">:</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">vision-model</span><span class="p">:</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dashscope/qwen3.7-plus</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">qwen3.7-plus</span>
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">    </span><span class="nt">context_window</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000000</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">    </span><span class="nt">vision</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">    </span><span class="nt">base_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://dashscope.aliyuncs.com/compatible-mode/v1</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">    </span><span class="nt">api_key_env</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DASHSCOPE_API_KEY</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">    </span><span class="nt">vision</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 </code></pre></div>
 <p>这是应用能力声明，不是对供应商能力的自动探测。文本模型误设为 <code>true</code> 可能被供应商拒绝；多模态模型漏设则只能收到图片占位说明。</p>
 <h2 id="context-window-与压缩">Context window 与压缩</h2>
-<p>ArtifactFlow 不从 LiteLLM 的公共模型目录猜测上下文窗口，因为私有部署可能用更小的 serving limit。每个 alias 都必须显式配置 <code>context_window</code>，Agent 也必须引用 alias；缺失、非正整数、alias 不存在或窗口不大于 reserve 都会拒绝配置发布。<code>compact_agent</code> 的窗口还必须不小于其他任何 Agent，以排除明显容量不足的配置。Release reconcile 会在接触 DB session 前执行这套校验，Backend 启动时再执行一次作为二次防线。</p>
+<p>ArtifactFlow 不从公共模型目录猜测上下文窗口，因为私有部署可能用更小的 serving limit。每个 alias 都必须显式配置 <code>context_window</code>，Agent 也必须引用 alias；缺失、非正整数、alias 不存在或窗口不大于 reserve 都会拒绝配置发布。<code>compact_agent</code> 的窗口还必须不小于其他任何 Agent，以排除明显容量不足的配置。Release reconcile 会在接触 DB session 前执行这套校验，Backend 启动时再执行一次作为二次防线。</p>
 <p>服务级 <code>ARTIFACTFLOW_COMPACTION_RESERVE_TOKENS</code> 默认为 <code>20000</code>。每个 Agent 的自动压缩阈值为：</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>context_window - ARTIFACTFLOW_COMPACTION_RESERVE_TOKENS
 </code></pre></div>
@@ -1056,14 +1097,14 @@ compaction 请求都会在 provider request body 中携带该字段。字段值�
 <p>模型明确返回 context-window overflow 时，引擎会为当前 Agent 立即压缩并重试该次调用一次；重试仍溢出则以错误结束，不会循环压缩。前端的上下文水位上限使用数据库中实际生效的 <code>lead_agent</code> 模型对应阈值，Subagent 各自按自己的模型阈值运行。</p>
 <h2 id="校验">校验</h2>
 <p>配置文件随进程启动加载。修改后重启 Backend，再从前端发起一个最小对话确认实际连通性。需要逐个真实调用时运行：</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>python<span class="w"> </span>tests/manual/litellm_providers.py
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>python<span class="w"> </span>-m<span class="w"> </span>tests.manual.model_providers
 </code></pre></div>
 <p>该命令会调用外部模型并产生费用，不属于普通单元测试。</p>
 <p>常见问题：</p>
 <ul>
 <li>alias 拼错会直接报 unknown model，不会静默回退；</li>
 <li><code>context_window</code> 应填写 endpoint 的真实限制；vLLM 场景需与 <code>max_model_len</code> 一致；</li>
-<li><code>base_url</code> 取决于 provider：<code>ollama/*</code> 使用服务根地址，LiteLLM 会追加原生 <code>/api/...</code> 路径；<code>openai/*</code> 兼容接口通常包含 <code>/v1</code>；</li>
+<li><code>base_url</code> 必须是 OpenAI-compatible API 根地址；Ollama/vLLM 通常包含 <code>/v1</code>，DashScope 使用 <code>/compatible-mode/v1</code>；</li>
 <li><code>params.timeout</code> 是等待模型响应数据的 read timeout；连接、写入和连接池等待由 <code>ARTIFACTFLOW_LLM_*_TIMEOUT</code> 控制；</li>
 <li>生产配置修改应通过 <a href="../../operations/releases/#配置热修"><code>afctl config</code></a>形成新的完整配置快照。</li>
 </ul>
