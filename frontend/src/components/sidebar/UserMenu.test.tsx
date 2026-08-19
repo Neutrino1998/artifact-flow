@@ -124,7 +124,7 @@ describe('UserMenu task notification switch', () => {
     );
     await act(async () => trigger?.click());
 
-    expect(container.textContent).toContain('显示名和部门由企业认证维护');
+    expect(container.textContent).not.toContain('显示名和部门由企业认证维护');
     expect(container.textContent).not.toContain('修改显示名');
     expect(container.textContent).not.toContain('修改密码');
   });

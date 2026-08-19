@@ -53,7 +53,7 @@ async function installAuthRoutes(page: Page, options: { cancel?: boolean; expire
     sso: {
       enabled: true,
       provider_id: 'company-sso',
-      display_name: '企业统一认证',
+      display_name: '统一认证登录',
       token_param: 'ticket',
     },
   }));
@@ -133,9 +133,9 @@ test('creates then reuses the same remote identity without persisting or leaking
   page.on('download', (download) => downloads.push(download.suggestedFilename()));
 
   await page.goto('/login');
-  await expect(page.getByRole('button', { name: '企业统一认证' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
-  await page.getByRole('button', { name: '企业统一认证' }).click();
+  await expect(page.getByRole('button', { name: '统一认证登录' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '登录', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '统一认证登录' }).click();
 
   await expect(page).toHaveURL(/\/$/);
   await expect.poll(() => page.evaluate(() => localStorage.getItem('af_token'))).toBe(internalToken);
@@ -161,7 +161,7 @@ test('creates then reuses the same remote identity without persisting or leaking
   // identity returned by the fake userinfo/exchange boundary.
   await page.evaluate(() => localStorage.clear());
   await page.goto('/login');
-  await page.getByRole('button', { name: '企业统一认证' }).click();
+  await page.getByRole('button', { name: '统一认证登录' }).click();
   await expect(page).toHaveURL(/\/$/);
   await expect.poll(() => page.evaluate(() => localStorage.getItem('af_user')))
     .toContain('remote-user-id');
@@ -170,9 +170,9 @@ test('creates then reuses the same remote identity without persisting or leaking
 test('same-name local emergency login enters the distinct local identity', async ({ page }) => {
   const observed = await installAuthRoutes(page);
   await page.goto('/login');
-  await page.getByLabel('Username').fill('admin');
-  await page.getByLabel('Password').fill('local-password');
-  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.getByLabel('用户名', { exact: true }).fill('admin');
+  await page.getByLabel('密码', { exact: true }).fill('local-password');
+  await page.getByRole('button', { name: '登录', exact: true }).click();
   await expect(page).toHaveURL(/\/$/);
   await expect.poll(() => page.evaluate(() => localStorage.getItem('af_token'))).toBe('local-internal-jwt');
   await expect.poll(() => page.evaluate(() => localStorage.getItem('af_user')))
@@ -183,7 +183,7 @@ test('same-name local emergency login enters the distinct local identity', async
 test('shows a restart action for provider cancellation without exposing callback details', async ({ page }) => {
   await installAuthRoutes(page, { cancel: true });
   await page.goto('/login');
-  await page.getByRole('button', { name: '企业统一认证' }).click();
+  await page.getByRole('button', { name: '统一认证登录' }).click();
   await expect(page).toHaveURL(/\/auth\/sso\/callback$/);
   await expect(page.getByText('企业登录未完成，可能已取消。请重新发起登录。')).toBeVisible();
   await expect(page.getByRole('button', { name: '重新发起企业统一认证' })).toBeVisible();
@@ -203,7 +203,7 @@ test('fails a queryless callback refresh safely', async ({ page }) => {
 test('turns an expired exchange into a sanitized restart prompt', async ({ page }) => {
   await installAuthRoutes(page, { expired: true });
   await page.goto('/login');
-  await page.getByRole('button', { name: '企业统一认证' }).click();
+  await page.getByRole('button', { name: '统一认证登录' }).click();
   await expect(page).toHaveURL(/\/auth\/sso\/callback$/);
   await expect(page.getByText('本次企业登录已失效或未完成，请重新发起登录。')).toBeVisible();
   await expect(page.locator('body')).not.toContainText('raw provider diagnostics');

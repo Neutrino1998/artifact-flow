@@ -25,7 +25,7 @@ enabled: true
 
 provider:
   id: enterprise_sso
-  display_name: 企业统一认证
+  display_name: 统一认证登录
   type: remote_bearer_userinfo
 
 login:

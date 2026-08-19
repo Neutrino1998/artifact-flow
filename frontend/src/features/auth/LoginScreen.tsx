@@ -52,7 +52,7 @@ export default function LoginScreen({
       authLogin(res.access_token, res.user);
       router.push('/');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+      setError(err instanceof Error ? err.message : '登录失败');
     } finally {
       setLoading(false);
     }
@@ -96,7 +96,7 @@ export default function LoginScreen({
               disabled={ssoLoading}
               className="w-full rounded-lg bg-accent py-2 font-medium text-white hover:bg-accent-hover disabled:opacity-50"
             >
-              {ssoLoading ? '正在跳转...' : (sso.display_name || '企业统一认证')}
+              {ssoLoading ? '正在跳转...' : (sso.display_name || '统一认证登录')}
             </button>
             {ssoError && <p className="mt-2 text-sm text-status-error">{ssoError}</p>}
             <div className="my-5 flex items-center gap-3 text-xs text-text-tertiary dark:text-text-tertiary-dark">
@@ -110,7 +110,7 @@ export default function LoginScreen({
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="username" className="mb-1 block text-text-secondary dark:text-text-secondary-dark">
-              Username
+              用户名
             </label>
             <input
               id="username"
@@ -125,7 +125,7 @@ export default function LoginScreen({
 
           <div>
             <label htmlFor="password" className="mb-1 block text-text-secondary dark:text-text-secondary-dark">
-              Password
+              密码
             </label>
             <div className="relative">
               <input
@@ -155,7 +155,7 @@ export default function LoginScreen({
             disabled={loading}
             className={`${sso ? 'border border-border dark:border-border-dark bg-bg dark:bg-bg-dark text-text-primary dark:text-text-primary-dark hover:bg-panel dark:hover:bg-panel-accent-dark' : 'bg-accent text-white hover:bg-accent-hover'} w-full rounded-lg py-2 font-medium disabled:opacity-50`}
           >
-            {loading ? 'Signing in...' : 'Sign in'}
+            {loading ? '正在登录...' : '登录'}
           </button>
         </form>
       </div>

@@ -47,7 +47,7 @@ describe('LoginScreen SSO discovery', () => {
       sso: {
         enabled: true,
         provider_id: 'enterprise_sso',
-        display_name: '企业统一认证',
+        display_name: '统一认证登录',
         token_param: 'authorization_key',
       },
     });
@@ -62,11 +62,11 @@ describe('LoginScreen SSO discovery', () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).toContain('企业统一认证');
+    expect(container.textContent).toContain('统一认证登录');
     expect(container.textContent).toContain('或使用本地账号');
     expect(container.querySelector('#username')).not.toBeNull();
     const ssoButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent === '企业统一认证',
+      (button) => button.textContent === '统一认证登录',
     );
     await act(async () => {
       ssoButton?.click();
@@ -90,6 +90,6 @@ describe('LoginScreen SSO discovery', () => {
       await Promise.resolve();
     });
     expect(container.textContent).not.toContain('或使用本地账号');
-    expect(container.textContent).toContain('Sign in');
+    expect(container.textContent).toContain('登录');
   });
 });

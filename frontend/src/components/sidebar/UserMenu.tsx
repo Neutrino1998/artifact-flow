@@ -297,7 +297,7 @@ export default function UserMenu({
               </button>
             </div>
 
-            {user.can_edit_profile ? (
+            {user.can_edit_profile && (
               <button
                 onClick={handleEditProfile}
                 className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
@@ -307,10 +307,6 @@ export default function UserMenu({
                 </svg>
                 修改显示名
               </button>
-            ) : (
-              <div className="px-2.5 py-2 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                显示名和部门由企业认证维护
-              </div>
             )}
 
             {user.can_change_password && (

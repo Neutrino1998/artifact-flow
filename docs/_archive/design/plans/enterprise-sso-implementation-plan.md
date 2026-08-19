@@ -56,7 +56,7 @@
 
 **完成后的可观察结果**：
 
-- 用户点击“企业统一认证”，从门户回跳后进入 ArtifactFlow，不再输入一套 ArtifactFlow 密码。
+- 用户点击“统一认证登录”，从门户回跳后进入 ArtifactFlow，不再输入一套 ArtifactFlow 密码。
 - 首次登录创建本地用户和缺失的部门路径；再次登录复用同一外部身份，不产生重复用户或重复同级部门。
 - 已有本地用户与新 SSO 用户 username 相同时仍可分别登录，并得到不同的 ArtifactFlow `user.id`；两者不会共享会话、Artifact、角色、启用状态或用户级配置。
 - 本地应急管理员仍可通过原密码入口登录；SSO-only 用户不能通过本地密码入口或改密接口获得密码登录能力。
@@ -171,7 +171,7 @@
 
 **包含**：
 
-- Provider 启用时显示“企业统一认证”入口；本地用户名/密码保留为独立入口，供本地应急管理员使用。
+- Provider 启用时显示“统一认证登录”入口；本地用户名/密码保留为独立入口，供本地应急管理员使用。
 - start 使用配置的 return 参数跳到企业门户；短期 state 与浏览器绑定，callback 只接受匹配且未过期的流程。
 - callback 文档请求先由 middleware 内部 rewrite 到无 query 的回调壳，阻止 Next App Router 把上游 token 序列化进 RSC/DOM；浏览器地址仍保留原参数，组件在第一次 JavaScript 调用栈中抓取后立即通过 `history.replaceState` 清理完整 query，再读取公开配置指定的 token 参数并调用 exchange。callback 文档使用 `Referrer-Policy: no-referrer`；成功写入 ArtifactFlow JWT/UserInfo 后用全页面 replace 进入首页，失败仅以一次性的允许列表错误类别和可选 request ID 跨文档传递，再全页面 replace 到无 query callback，确保原始导航条目随旧 Document 一起销毁。
 - UserInfo/UserResponse 暴露认证来源、`can_change_password` 和 `can_edit_profile`。remote-provider 的 username、display name 和 department 是 Provider 管理的身份/组织事实，本地自助与管理员 API 均不得修改；本地 role、`is_active` 仍是 ArtifactFlow 授权决策并可由管理员修改。SSO 用户界面不显示改名/改密入口，管理员详情将 Provider 管理字段设为只读、不能重置密码，批量设置部门逐用户拒绝 SSO 主体。
