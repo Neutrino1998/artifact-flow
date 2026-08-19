@@ -2,7 +2,7 @@
 P1#1 回归:Redis stream/meta key 寿命必须 = EXECUTION_TIMEOUT + STREAM_TTL_GRACE,
 不能等于裸引擎 deadline。
 
-PR-B 把终态(含 TIMED_OUT)的产出移到了引擎 deadline 之后的 post-processing。若 key
+终态（含 TIMED_OUT）在引擎 deadline 之后的 post-processing 产出。若 key
 TTL 仍等于 deadline,meta_key 会在终态被 push 之前过期 → push_event 落在已过期 key 上
 → 终态丢失 / SSE 挂住。本测试钉死 TTL 与 deadline 解耦。
 """

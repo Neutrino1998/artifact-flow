@@ -25,6 +25,34 @@ class TestLogin:
         assert "access_token" in body
         assert body["token_type"] == "bearer"
         assert body["user"]["username"] == "testuser"
+        assert body["user"]["auth_provider"] == "local_password"
+        assert body["user"]["can_change_password"] is True
+        assert body["user"]["can_edit_profile"] is True
+        assert body["expires_in"] == 8 * 60 * 60
+
+    async def test_same_username_remote_identity_does_not_shadow_local_login(
+        self, anon_client: AsyncClient, test_user: User, user_repo: UserRepository
+    ):
+        remote = User(
+            id=f"user-{uuid.uuid4().hex}",
+            auth_provider="enterprise_sso",
+            auth_subject="upstream-123",
+            username=test_user.username,
+            hashed_password=None,
+            role="user",
+            is_active=True,
+            must_change_password=False,
+            password_changed_at=None,
+        )
+        await user_repo.add(remote)
+
+        resp = await anon_client.post(
+            "/api/v1/auth/login",
+            json={"username": test_user.username, "password": "testpass"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["user"]["id"] == test_user.id
+        assert resp.json()["user"]["auth_provider"] == "local_password"
 
     async def test_login_wrong_password(self, anon_client: AsyncClient, test_user: User):
         resp = await anon_client.post(
@@ -43,28 +71,28 @@ class TestLogin:
     async def test_unknown_username_still_runs_bcrypt(
         self, anon_client: AsyncClient, monkeypatch
     ):
-        """ACC-05: 用户不存在也对固定假 hash 跑一次 verify_password(等时防枚举)。
+        """用户不存在也对固定假 hash 跑一次 verify_password（等时防枚举）。
 
         不做脆弱的墙钟断言 —— 用 spy 直接验证「verify_password 被调用一次,
         且 hash 参数 = DUMMY_PASSWORD_HASH」即证明两分支都过 bcrypt。
         """
-        import api.routers.auth as auth_router
+        from core.security import passwords
 
         calls: list[str] = []
-        real = auth_router.verify_password
+        real = passwords.verify_password
 
         def _spy(plain: str, hashed: str) -> bool:
             calls.append(hashed)
             return real(plain, hashed)
 
-        monkeypatch.setattr(auth_router, "verify_password", _spy)
+        monkeypatch.setattr(passwords, "verify_password", _spy)
 
         resp = await anon_client.post(
             "/api/v1/auth/login",
             json={"username": "no-such-user-xyz", "password": "whatever1!"},
         )
         assert resp.status_code == 401
-        assert calls == [auth_router.DUMMY_PASSWORD_HASH]
+        assert calls == [passwords.DUMMY_PASSWORD_HASH]
 
     async def test_login_inactive_user(
         self,
@@ -96,6 +124,31 @@ class TestMe:
         body = resp.json()
         assert body["username"] == "testuser"
         assert body["role"] == "user"
+        assert body["can_edit_profile"] is True
+
+
+class TestPublicAuthConfig:
+    async def test_disabled_provider_is_anonymous_and_minimal(
+        self, anon_client: AsyncClient
+    ):
+        resp = await anon_client.get("/api/v1/auth/config")
+        assert resp.status_code == 200
+        assert resp.headers["cache-control"] == "no-store"
+        assert resp.json() == {
+            "password_login_enabled": True,
+            "sso": {
+                "enabled": False,
+                "provider_id": None,
+                "display_name": None,
+                "token_param": None,
+            },
+        }
+
+    async def test_disabled_provider_start_is_not_available(
+        self, anon_client: AsyncClient
+    ):
+        resp = await anon_client.post("/api/v1/auth/sso/start")
+        assert resp.status_code == 404
 
     async def test_get_me_unauthenticated(self, anon_client: AsyncClient):
         resp = await anon_client.get("/api/v1/auth/me")
@@ -124,6 +177,7 @@ class TestAdminCRUD:
         body = resp.json()
         assert body["role"] == "user"
         assert body["is_active"] is True
+        assert body["can_edit_profile"] is True
 
     async def test_create_user_duplicate_username(
         self, admin_client: AsyncClient, test_user: User
@@ -137,6 +191,47 @@ class TestAdminCRUD:
             },
         )
         assert resp.status_code == 409
+
+    async def test_create_user_department_deleted_after_precheck(
+        self, admin_client: AsyncClient, monkeypatch, caplog
+    ):
+        import logging
+
+        from repositories.department_repo import DepartmentRepository
+        from repositories.user_repo import UserRepository, UserWriteError
+
+        department_reads = 0
+
+        async def disappearing_department(self, department_id):
+            nonlocal department_reads
+            department_reads += 1
+            return object() if department_reads == 1 else None
+
+        async def foreign_key_failure(self, user):
+            raise UserWriteError()
+
+        monkeypatch.setattr(
+            DepartmentRepository, "get_by_id", disappearing_department
+        )
+        monkeypatch.setattr(UserRepository, "create_user", foreign_key_failure)
+
+        with caplog.at_level(logging.WARNING, logger="ArtifactFlow"):
+            resp = await admin_client.post(
+                "/api/v1/admin/users",
+                json={
+                    "username": f"dept-race-{uuid.uuid4().hex[:8]}",
+                    "password": "Somepass1234!",
+                    "role": "user",
+                    "department_id": "dept-disappeared",
+                },
+            )
+
+        assert resp.status_code == 400
+        assert (
+            resp.json()["detail"]
+            == "department_id does not reference an existing department"
+        )
+        assert "User write failed" not in caplog.text
 
     async def test_create_user_as_regular_user(self, client: AsyncClient):
         resp = await client.post(
@@ -373,7 +468,7 @@ class TestChangeMyPassword:
 
 
 class TestLongPasswordBcrypt:
-    """ACC-04: >72 字节口令不应 500（bcrypt 5.0 会抛 ValueError;我们截到 72 字节
+    """>72 字节口令不应 500（bcrypt 5.0 会抛 ValueError；我们截到 72 字节
     + 全局 handler 兜底）。多字节口令在 72 字节边界被切断不影响 bcrypt。"""
 
     async def test_create_and_login_with_long_multibyte_password(

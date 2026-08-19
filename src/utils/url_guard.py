@@ -11,7 +11,7 @@ httpx `follow_redirects=False`），这样 `302 → 内网` 也不会被跟。
 **已知残留（best-effort，刻意不修）：** pre-flight 解析与实际 connect 之间存在
 DNS-rebinding TOCTOU（域名 DNS 在两步之间翻转到内网）。关掉它需要连接时校验的
 自定义 resolver，复杂度不划算；高价值目标（云元数据 / 内网）走 IP 字面量或稳定
-DNS 时已被拦，rebinding 属罕见边角，接受。改动史见 docs/_archive/reviews/sec-review-findings.md。
+DNS 时已被拦，rebinding 属罕见边角，接受。
 """
 
 import asyncio
@@ -126,7 +126,7 @@ async def validate_public_url(url: str) -> None:
     if not ips:
         raise SsrfBlockedError(f"DNS resolution returned no records for {host}")
 
-    # 不回显具体 IP(SSRF-06):只说明"解析到非公网"。
+    # 不回显具体 IP：只说明“解析到非公网”。
     for ip_str in ips:
         if ip_is_blocked(ip_str):
             raise SsrfBlockedError(f"Host {host} resolves to a non-public address")

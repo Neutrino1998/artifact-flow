@@ -1,10 +1,10 @@
-"""EffectiveSkillSet 可见性 resolver 单测(C-2,决策 1/10)。
+"""EffectiveSkillSet 可见性 resolver 单测。
 
 覆盖:private(owner)/ public(默认可见、dept 例外=deny)/ department(默认隐、dept 例外
 =grant)三态;enabled = default_enabled + user_skill 覆盖;available_for_l1 过滤 + 顺序。
 """
 
-from core.effective_skillset import resolve_effective_skillset
+from core.capabilities.effective_skillset import resolve_effective_skillset
 from reconcile.snapshot import SkillInfo
 
 

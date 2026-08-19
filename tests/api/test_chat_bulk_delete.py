@@ -10,7 +10,8 @@ Covers POST /api/v1/chat/bulk-delete:
 - Duplicate id within payload → deduped, single deletion
 - Capacity over MAX_BULK_DELETE_IDS → 422 from pydantic max_length
 
-Engine fail-soft on active execution is covered by tests/core/test_controller_skip_on_delete.py
+Engine fail-soft on active execution is covered by
+tests/api/services/test_conversation_turn_handler_delete.py
 (PR2a layer); this file just verifies the bulk endpoint correctly removes the row and
 the response shape is right.
 """

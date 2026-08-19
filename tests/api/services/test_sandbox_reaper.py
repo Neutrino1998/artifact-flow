@@ -243,7 +243,7 @@ class TestIdempotenceAndResilience:
 
     async def test_final_sweep_no_grace_for_own_fresh_resources(self, tmp_path):
         """final_sweep 对**本进程(WORKER_ID)**的新鲜资源绕过 grace —— 闭合单副本
-        Redis 刚建即漏的缺口。runner 已停 = 我的 turn 必已结束 = 孤儿。"""
+        Redis 刚建即漏的缺口。supervisor 已停 = 我的 turn 必已结束 = 孤儿。"""
         c = FakeContainer("fresh", "conv-1", "msg-1", created=time.time())  # worker=WORKER_ID 默认
         _mk_scratch(tmp_path, "conv-1", "msg-1", age_sec=0)  # 名字含 WORKER_ID
         reaper, _ = _mk_reaper(tmp_path, [c], active={}, grace=60)

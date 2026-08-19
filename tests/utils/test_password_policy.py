@@ -1,4 +1,4 @@
-"""Tests for utils.password_policy.validate_password_strength (门类三 ACC-02 + 强度①)。
+"""Tests for utils.password_policy.validate_password_strength.
 
 默认策略（config 默认值）:≥8 位、须含 字母+数字+符号 三类全、+ 弱口令/键盘/序列黑名单。
 """

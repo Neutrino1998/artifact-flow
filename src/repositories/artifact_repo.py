@@ -266,8 +266,8 @@ class ArtifactRepository(BaseRepository[Artifact]):
         # differ from the pre-flush in-memory order. Accepted trade-off:
         # preserving strict creation order across flush would need either an
         # explicit `creation_seq` column (Alembic migration) or app-side
-        # `created_at` assignment (which conflicts with CLAUDE.md's
-        # "server_default for creation" rule).
+        # `created_at` assignment, which would violate the DB-owned creation
+        # timestamp contract.
         query = query.order_by(Artifact.created_at, Artifact.id)
 
         result = await self._session.execute(query)

@@ -12,8 +12,6 @@
  *
  * 历史数据兜底:已经带时区(`Z` / `+08:00` 等)的字符串保持原样;只有
  * 朴素串才补 `Z`。
- *
- * 背景:`docs/_archive/ops/incident-2026-05-14-fix-plan.md` PR-tz-unify。
  */
 
 const HAS_TZ_SUFFIX = /(Z|[+\-]\d{2}:?\d{2})$/;

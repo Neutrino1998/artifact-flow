@@ -11,7 +11,9 @@ Tests for RequestContextMiddleware (request-id 基础设施).
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from unittest.mock import MagicMock
 
+import api.middleware as middleware_module
 from api.middleware import RequestContextMiddleware
 from utils.instance import INSTANCE_ID
 from utils.logger import get_request_id
@@ -68,7 +70,12 @@ async def test_request_id_visible_in_handler_matches_header(mini_client):
     assert res.json()["rid"] == rid  # contextvar 在 handler 内可见且一致
 
 
-async def test_unhandled_exception_returns_sanitized_500_with_request_id(mini_client):
+async def test_unhandled_exception_returns_sanitized_500_with_request_id(
+    mini_client,
+    monkeypatch,
+):
+    ops_log = MagicMock()
+    monkeypatch.setattr(middleware_module.logger, "exception", ops_log)
     res = await mini_client.get("/boom")
     assert res.status_code == 500
     body = res.json()
@@ -80,6 +87,8 @@ async def test_unhandled_exception_returns_sanitized_500_with_request_id(mini_cl
     assert body["request_id"] == res.headers.get("X-Request-ID")
     # 兜底 500 同样带受理实例头
     assert res.headers.get("X-Instance-ID") == INSTANCE_ID
+    ops_log.assert_called_once()
+    assert body["request_id"] in ops_log.call_args.args[0]
 
 
 async def test_request_ids_are_unique_per_request(mini_client):

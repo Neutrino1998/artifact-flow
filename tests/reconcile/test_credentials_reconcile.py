@@ -1,4 +1,4 @@
-"""seeded 凭证 reconcile(env → 加密落库)+ snapshot 执行期解密 round-trip(B-4)。"""
+"""seeded 凭证 reconcile(env → 加密落库)+ snapshot 执行期解密 round-trip。"""
 
 import textwrap
 
@@ -188,7 +188,7 @@ async def test_missing_env_seeds_no_row(db_session, cfg, key, monkeypatch):
 
 async def test_env_gone_keeps_existing_credential(db_session, cfg, key, monkeypatch):
     # env 先有值 → 种密文;随后 env 缺失但定义**仍引用**该占位符 → 保留旧密文(不删)。
-    # reviewer #3:env-absent 是模糊信号(副本 .env 漏挂 / 注入先后),不在其上销毁共享状态。
+    # env-absent 是模糊信号（副本 .env 漏挂 / 注入先后），不在其上销毁共享状态。
     # 撤销只走"删 config 里的 {{...}} 引用"(见 test_removed_placeholder_pruned)。
     monkeypatch.setenv("TOOL_SECRET_RAGFLOW_HOST", "rag.local")
     monkeypatch.setenv("TOOL_SECRET_RAGFLOW_KEY", "k-123")
@@ -219,7 +219,7 @@ async def test_unit_prune_cascades_credentials(db_session, cfg, key, monkeypatch
 
 
 async def test_snapshot_tool_decrypts_credential_at_execute(db_session, db_manager, cfg, key, monkeypatch):
-    """端到端(B-5 lazy):reconcile 种密文 → snapshot 建 HttpTool + resolver(持 db_manager)
+    """端到端 lazy 路径：reconcile 种密文 → snapshot 建 HttpTool + resolver(持 db_manager)
     → execute 期开短 session 解密替换。execute 前把 env 改成假值 —— 断言仍取到 DB 里的真值,
     即证明走的是 lazy DB 解密(短 session)而非 env 回落。"""
     monkeypatch.setenv("TOOL_SECRET_RAGFLOW_HOST", "rag.local")

@@ -1,23 +1,23 @@
-"""Skill zip 硬门槛 validator(Phase E,决策 7)—— 确定性、纯代码、阻塞门。
+"""Skill zip 硬门槛 validator —— 确定性、纯代码、阻塞门。
 
 **每次导入都跑**(user 私有上传 / admin 共享上传 / config seed 经 seeds.py 同门),
-只查 skill 本身良构;「能不能在本系统跑」归软门槛 verify agent(E-3)。两门皆
+只查 skill 本身良构；“能不能在本系统跑”归会话期软门槛 checker skill。两门皆
 best-effort 过滤、非正确性闸 —— 正确性兜底在运行时(沙盒 --network=none +
 pip --no-index 响失败)。
 
 **宿主侧只读 namelist + SKILL.md 一个成员**(有界:SKILL_MD_MAX_BYTES),全包解压仍归
-沙盒(D-2 姿态,zip bomb 只炸本轮沙盒)。zip 的 member 数/声明解压总量上限在此只是
+沙盒（zip bomb 只影响本轮沙盒）。zip 的 member 数/声明解压总量上限在此只是
 bomb 预拒,沙盒 watchdog 仍是真兜底。
 
 产出 = 结构化 Finding 列表(rule id 稳定,供 REST 422 detail 与前端渲染;severity
-error=拒收、warning=透出不拦)。**绝不改写 body**(原则 3:lint 标记 + 人手改)。
+error=拒收、warning=透出不拦)。**绝不改写 body**：lint 只标记，由人手修改。
 
 复用 skill_zip.locate_skill_md / strip_prefix —— validator / seed / mount 三处对
 「哪个是 SKILL.md、剥壳前缀是什么」永远一致。
 
-**zip 字节总大小(SKILL_BUNDLE_MAX_BYTES)刻意不在此查**:那是按信任分层的配额闸
-(原则 7③:user 上传按部署配置限制、admin/seed 无闸 —— seed 侧 wheels bundle 合法可超),
-归 E-2 导入端点执行,塞进共享 validator 会错杀 seed。
+**zip 字节总大小(SKILL_BUNDLE_MAX_BYTES)刻意不在此查**：它是按信任分层的配额闸——
+user 上传按部署配置限制，admin/seed 不受此限，因为 seed 的 wheels bundle 可能合法超限。
+这项检查归导入端点执行；塞进共享 validator 会错杀 seed。
 """
 
 import io
@@ -93,7 +93,7 @@ class ValidationResult:
 
 def slugify_name(raw: str) -> str:
     """frontmatter name → slug 候选(小写、非法字符折 `-`、收敛、截 64)。
-    元数据映射、非 body 改写(原则 3 不碰正文)。"""
+    只映射元数据，不改写 body。"""
     s = re.sub(r"[^a-z0-9_-]+", "-", raw.strip().lower()).strip("-_")
     return s[:64]
 
@@ -218,13 +218,13 @@ def validate_skill_zip(blob: bytes, *, where: str) -> ValidationResult:
 
     # ---- 正文检查 ----
     if not body.strip():
-        # 空正文 = 按钮激活会「授能力、永不注正文」而 read_skill 报错(07-02 联审立项):写侧拒。
+        # 空正文会让激活只授能力却不注正文，而 read_skill 随后报错，因此写侧拒绝。
         _add(Finding(
             "md.body_empty", "error",
             "SKILL.md body is empty (nothing to inject on activation)",
         ))
     # fence / 链接是**启发式**内容规则(markdown 无严格文法),修到再准也有误报长尾,
-    # 且硬门无 force 逃生口 → 一律 warning 不拦(用户拍板 2026-07-03);
+    # 且硬门无 force 逃生口 → 一律 warning 不拦；
     # 结构性规则(空正文/穿越/上限)才是 error。
     prose_lines, unclosed = _split_fences(body)
     if unclosed:
@@ -258,7 +258,7 @@ def validate_skill_zip(blob: bytes, *, where: str) -> ValidationResult:
             f"(e.g. {orphans[:5]}); fine if scripts load them, otherwise dead weight",
         ))
 
-    # ---- frontmatter 字段(决策 9:在场才查、缺失宽容) ----
+    # ---- frontmatter 字段：在场才检查，缺失保持宽容 ----
     _check_frontmatter(frontmatter, prefix, result.findings)
 
     return result

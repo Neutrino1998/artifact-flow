@@ -2,7 +2,7 @@
 """Independent native tool-call protocol probe for candidate providers.
 
 This is deliberately a manual diagnostic, not a second ArtifactFlow LLM
-adapter.  It calls the project-pinned LiteLLM package directly and records a
+adapter. It calls DashScope's OpenAI-compatible endpoint directly and records a
 sanitized structural report that can be turned into codec fixtures later.
 
 Run from the repository root in a Python 3.11 environment built from
@@ -40,18 +40,11 @@ from typing import Any, Iterable, Sequence
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-# LiteLLM otherwise tries to fetch the cost map during import, which is both
-# unnecessary for this probe and unsafe for air-gapped deployments.
-os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
-
 from dotenv import load_dotenv
 
 load_dotenv(ROOT / ".env")
 
-import litellm
-from litellm import acompletion
-
-litellm.suppress_debug_info = True
+from openai import AsyncOpenAI
 
 
 @dataclass(frozen=True)
@@ -65,7 +58,7 @@ class Candidate:
 CANDIDATES: dict[str, Candidate] = {
     "qwen3.7-plus": Candidate(
         alias="qwen3.7-plus",
-        model="dashscope/qwen3.7-plus",
+        model="qwen3.7-plus",
         params={
             "enable_thinking": True,
             "temperature": 0.6,
@@ -76,17 +69,17 @@ CANDIDATES: dict[str, Candidate] = {
     ),
     "deepseek-v4-flash": Candidate(
         alias="deepseek-v4-flash",
-        model="dashscope/deepseek-v4-flash",
+        model="deepseek-v4-flash",
     ),
-    "glm-5.2": Candidate(alias="glm-5.2", model="dashscope/glm-5.2"),
+    "glm-5.2": Candidate(alias="glm-5.2", model="glm-5.2"),
     "kimi-k2.6": Candidate(
         alias="kimi-k2.6",
-        model="dashscope/kimi-k2.6",
+        model="kimi-k2.6",
         vision=True,
     ),
     "MiniMax-M2.5": Candidate(
         alias="MiniMax-M2.5",
-        model="dashscope/MiniMax-M2.5",
+        model="MiniMax-M2.5",
     ),
 }
 
@@ -94,6 +87,19 @@ CANDIDATES: dict[str, Candidate] = {
 _SECRET_RE = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b")
 _DATA_URI_RE = re.compile(r"data:image/[^;,\s]+;base64,[A-Za-z0-9+/=]+")
 _NORMAL_FINISH_REASONS = {None, "stop", "tool_calls", "function_call"}
+_DEFAULT_DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+_client: AsyncOpenAI | None = None
+
+
+def _get_client() -> AsyncOpenAI:
+    global _client
+    if _client is None:
+        _client = AsyncOpenAI(
+            api_key=os.environ["DASHSCOPE_API_KEY"],
+            base_url=os.getenv("DASHSCOPE_API_BASE") or _DEFAULT_DASHSCOPE_BASE_URL,
+            max_retries=0,
+        )
+    return _client
 
 
 def _get(value: Any, key: str, default: Any = None) -> Any:
@@ -131,7 +137,7 @@ def redact_error(value: Any) -> str:
 
 
 def _append_delta(current: str, fragment: Any) -> str:
-    """Append one LiteLLM/OpenAI stream delta without content heuristics."""
+    """Append one OpenAI-compatible stream delta without content heuristics."""
     if fragment is None:
         return current
     return current + str(fragment)
@@ -427,12 +433,13 @@ async def stream_call(
         "stream": True,
         "stream_options": {"include_usage": True},
         "timeout": timeout,
-        **candidate.params,
     }
+    if candidate.params:
+        params["extra_body"] = candidate.params
     if tools:
         params["tools"] = tools
 
-    response = await acompletion(**params)
+    response = await _get_client().chat.completions.create(**params)
     sequence = 0
     try:
         async for chunk in response:
@@ -463,6 +470,13 @@ async def stream_call(
         # buffered deltas from a failed/truncated stream into accepted calls.
         capture.protocol_errors.append(f"stream failed: {redact_error(exc)}")
         return capture
+    finally:
+        await response.close()
+
+    if capture.usage is None:
+        capture.protocol_errors.append(
+            "stream completed without usage despite include_usage=true"
+        )
 
     if assembler.saw_delta:
         if any(reason not in _NORMAL_FINISH_REASONS for reason in capture.finish_reasons):
@@ -633,7 +647,6 @@ async def run_multi_content(candidate: Candidate, timeout: float) -> dict[str, A
                     f"model called undeclared function "
                     f"{call['function']['name']!r}"
                 )
-        observations.extend(_reason_observations(first.tool_calls))
         if len(first.tool_calls) < 2:
             observations.append("model produced tool calls, but not a same-turn multi-call")
         if not first.content:
@@ -854,25 +867,31 @@ def _resolve_candidates(names: Sequence[str]) -> list[Candidate]:
 
 
 async def async_main(args: argparse.Namespace) -> int:
+    global _client
     candidates = _resolve_candidates(args.models)
     if not os.getenv("DASHSCOPE_API_KEY"):
         raise RuntimeError("DASHSCOPE_API_KEY is not configured")
 
     started = datetime.now(timezone.utc)
     results = []
-    for candidate in candidates:
-        results.append(
-            await run_candidate(
-                candidate,
-                timeout=args.timeout,
-                skip_vision=args.skip_vision,
+    try:
+        for candidate in candidates:
+            results.append(
+                await run_candidate(
+                    candidate,
+                    timeout=args.timeout,
+                    skip_vision=args.skip_vision,
+                )
             )
-        )
+    finally:
+        if _client is not None:
+            await _client.close()
+            _client = None
 
     finished = datetime.now(timezone.utc)
     report = {
         "format": "artifactflow-native-tool-call-probe",
-        "version": 1,
+        "version": 2,
         "started_at": started.isoformat(),
         "finished_at": finished.isoformat(),
         "duration_seconds": round((finished - started).total_seconds(), 3),
@@ -883,14 +902,14 @@ async def async_main(args: argparse.Namespace) -> int:
                 (ROOT / "requirements.lock").read_bytes()
             ).hexdigest(),
             "python": platform.python_version(),
-            "litellm": importlib.metadata.version("litellm"),
+            "openai": importlib.metadata.version("openai"),
             "platform": platform.platform(),
         },
         "policy": {
             "full_reasoning_persisted": False,
             "api_keys_persisted": False,
             "image_data_persisted": False,
-            "usage_missing_is_gate_failure": False,
+            "usage_missing_is_gate_failure": True,
             "missing_reason_is_gate_failure": False,
             "optional_multi_shape_absence_is_gate_failure": False,
             "optional_multi_protocol_failure_is_gate_failure": True,

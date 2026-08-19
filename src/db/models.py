@@ -37,6 +37,7 @@ from sqlalchemy.orm import (
     mapped_column,
     relationship,
 )
+from sqlalchemy.dialects import mysql
 
 # 二进制列的类型长度 hint（见 ArtifactBlob.data）：仅用于在 MySQL 上把列推到
 # LONGBLOB 这一 tier，PG/SQLite 忽略长度。app 侧 config.ARTIFACT_BLOB_MAX_BYTES
@@ -44,6 +45,19 @@ from sqlalchemy.orm import (
 # 只是稳定的 schema hint(LONGBLOB 物理可达 4GB,M 只选 tier 不限长),不随 app cap
 # 每次调整而改 migration 口径。
 _BLOB_TYPE_TIER_HINT = 100 * 1024 * 1024
+
+
+def _auth_identity_string(length: int):
+    """Keep authentication natural keys byte-exact on MySQL/TDSQL."""
+
+    return String(length).with_variant(
+        mysql.VARCHAR(
+            length=length,
+            charset="utf8mb4",
+            collation="utf8mb4_bin",
+        ),
+        "mysql",
+    )
 
 
 class Base(DeclarativeBase):
@@ -92,8 +106,17 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    username: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
-    hashed_password: Mapped[str] = mapped_column(String(256), nullable=False)
+    # Every authentication source identifies its subject in one namespace:
+    # local_password uses username; remote providers use the stable upstream id.
+    # username remains a non-unique display/search field for remote identities.
+    auth_provider: Mapped[str] = mapped_column(
+        _auth_identity_string(64), nullable=False
+    )
+    auth_subject: Mapped[str] = mapped_column(
+        _auth_identity_string(256), nullable=False
+    )
+    username: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    hashed_password: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     display_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="user")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -107,7 +130,7 @@ class User(Base):
     # 等保密码策略（门类三）。三者归一在一道闸门 + 一个时间戳 + 一个历史列：
     #   - must_change_password: 建用户/导入/admin 重置/登录超期 → True;
     #     get_current_user 闸门在 True 时除改密/登出外一律 403,改密成功清。
-    #     根治 ACC-03(缺省密码)、承载首次强制改密 + 周期到期强制改密。
+    #     消除缺省密码风险，并承载首次强制改密 + 周期到期强制改密。
     must_change_password: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
@@ -161,7 +184,30 @@ class User(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<User(id={self.id}, username={self.username}, role={self.role})>"
+        return (
+            f"<User(id={self.id}, provider={self.auth_provider}, "
+            f"username={self.username}, role={self.role})>"
+        )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "auth_provider", "auth_subject", name="uq_users_auth_identity"
+        ),
+        CheckConstraint(
+            "length(auth_provider) > 0 AND length(auth_subject) > 0",
+            name="ck_users_auth_identity_nonempty",
+        ),
+        CheckConstraint(
+            "(auth_provider = 'local_password' "
+            "AND auth_subject = username "
+            "AND hashed_password IS NOT NULL) "
+            "OR (auth_provider <> 'local_password' "
+            "AND hashed_password IS NULL "
+            "AND must_change_password = false "
+            "AND password_changed_at IS NULL)",
+            name="ck_users_auth_credentials",
+        ),
+    )
 
 
 class Department(Base):
@@ -771,11 +817,10 @@ class ArtifactBlob(Base):
 # ============================================================================
 # 工具/agent 注册表(config 仅种子,DB 是物化缓存)
 #
-# 设计源:docs/_archive/design/skill-system-phase-b-design.md
 # 核心不变量:
 #   - identity = natural key(unit.name / agent.name 作 PK),所有 m2m 真 FK +
-#     ON DELETE CASCADE → ABA/孤儿由构造消失(决策 10)。
-#   - 权限两正交轴(决策 11):**等级**(auto/confirm)唯一来源 = 工具定义
+#     ON DELETE CASCADE → ABA/孤儿由构造消失。
+#   - 权限两正交轴:**等级**(auto/confirm)唯一来源 = 工具定义
 #     (ToolMember.permission / builtin BaseTool.permission),agent 侧只存
 #     **成员态**(enabled/disabled),不存等级。
 #   - source = seeded(config 种子,reconciler 拥有,UI 不可改)/ dynamic(UI 新建)。
@@ -787,7 +832,7 @@ class ArtifactBlob(Base):
 
 class ToolUnit(Base):
     """
-    External 工具单元 —— 授权 + 生命周期 + 披露的边界(决策 5/10/11)。
+    External 工具单元 —— 授权、生命周期和披露的边界。
 
     kind 三态:tool(singleton,1 个 member,full_name==name)/ toolset(一平台多
     endpoint)/ mcp(member 运行期由 tools/list 灌入)。unit name 全局唯一、
@@ -795,7 +840,7 @@ class ToolUnit(Base):
     """
     __tablename__ = "tool_units"
 
-    # natural key:unit 名作 PK(决策 10)。禁含 `__`(reconciler 校验)。
+    # natural key：unit 名作 PK。禁含 `__`（reconciler 校验）。
     name: Mapped[str] = mapped_column(String(64), primary_key=True)
 
     # tool(singleton) / toolset / mcp
@@ -804,14 +849,14 @@ class ToolUnit(Base):
     # set 级描述(索引行语境;singleton = 工具自身描述)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
-    # 未列出部门的默认姿态(决策 10):public=默认 allow / department=默认 deny。
+    # 未列出部门的默认姿态：public=默认 allow / department=默认 deny。
     # 暂不消费;部门授权(department_unit_rule)接入后消费。private 仅 skill 有,unit 无。
     visibility: Mapped[str] = mapped_column(
         String(16), nullable=False, default="public", server_default="public"
     )
 
-    # 渐进式披露开关:True → <available_tools> 只出索引行,完整 schema 由 search_tools
-    # 按需补。显式开关、不按 token 自动(私有化无 tokenizer,原则 7)。
+    # 渐进式披露开关:True → <available_tool_units> 只出索引行,完整 schema 由 search_tools
+    # 按需补。显式开关，不按 token 自动（私有部署不保证有统一 tokenizer）。
     defer: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
@@ -857,7 +902,7 @@ class ToolMember(Base):
     工具单元下的具体可调工具/endpoint。
 
     full_name = 注册/可调名:toolset → `<unit>__<member>`;singleton → `== unit_name`
-    (无 `__`)。**等级(permission)唯一来源在此**(决策 11),agent/skill/dept 均不改。
+    (无 `__`)。**等级(permission)唯一来源在此**，agent/skill/dept 均不改。
     """
     __tablename__ = "tool_members"
 
@@ -873,7 +918,7 @@ class ToolMember(Base):
     # 注册/可调全名:resolver/registry/always_allow 的 key。全局唯一。
     full_name: Mapped[str] = mapped_column(String(64), nullable=False)
 
-    # 等级:auto | confirm —— 决策 11 的唯一来源
+    # 等级:auto | confirm —— 全局唯一来源
     permission: Mapped[str] = mapped_column(
         String(16), nullable=False, default="confirm"
     )
@@ -907,12 +952,12 @@ class ToolMember(Base):
 
 class Agent(Base):
     """
-    Agent 定义(决策 5:config 仍唯一作者真相,DB 只是 seed-only 物化缓存)。
+    Agent 定义：config 仍是唯一作者真相，DB 只是 seed-only 物化缓存。
 
     物化只为:统一存储 + 撞名检查 + 将来 dept 化(加 department_agent_rule,v0 无消费者)。
     **无 UI-native、无运行时编辑**(运行时可编辑 agent 仍 Non-goal)。
 
-    builtin_tools = 声明的 builtin 工具成员态 {名: enabled|disabled}(决策 11:builtin
+    builtin_tools = 声明的 builtin 工具成员态 {名: enabled|disabled}（builtin
     不进 agent_units m2m,引擎从此列直读)。external 单元在 agent_units。
     """
     __tablename__ = "agents"
@@ -920,15 +965,12 @@ class Agent(Base):
     name: Mapped[str] = mapped_column(String(64), primary_key=True)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     model: Mapped[str] = mapped_column(String(64), nullable=False)
-    max_tool_rounds: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=3, server_default="3"
-    )
     internal: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
     role_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
-    # {builtin名: "enabled"|"disabled"}(决策 11 成员轴,不含等级)
+    # {builtin名: "enabled"|"disabled"}（成员轴，不含等级）
     builtin_tools: Mapped[Optional[Dict[str, str]]] = mapped_column(
         JSON, nullable=True, default=dict
     )
@@ -952,7 +994,7 @@ class Agent(Base):
 
 class AgentUnit(Base):
     """
-    agent ⟷ tool_unit 绑定 = 该 agent 暴露的 external 单元宇宙(决策 11)。
+    agent ⟷ tool_unit 绑定 = 该 agent 暴露的 external 单元宇宙。
 
     成员态 enabled/disabled(absent = 不建行 = 不在宇宙)。source:seeded(agent MD
     经 reconciler 种)/ dynamic(UI 勾选挂载)。两端真 FK + CASCADE。
@@ -970,7 +1012,7 @@ class AgentUnit(Base):
         primary_key=True,
     )
 
-    # enabled | disabled(决策 11 成员轴;skill 在收窄后宇宙内翻 disabled)
+    # enabled | disabled（成员轴；skill 只在收窄后的宇宙内翻 disabled）
     member_state: Mapped[str] = mapped_column(
         String(16), nullable=False, default="enabled", server_default="enabled"
     )
@@ -993,15 +1035,15 @@ class AgentUnit(Base):
 
 class ToolCredential(Base):
     """
-    External 工具单元的可逆加密凭证(B-4,unit 级多行,仿 artifact_blobs 与定义隔离)。
+    External 工具单元的可逆加密凭证（unit 级多行，与定义隔离）。
 
     一 unit 多行,每行一个 `{{placeholder}}` 的 Fernet 密文(复用 secrets.py 的 {{NAME}}
     替换语义,值的来源从 env 换成此表 → 不退化多 secret 能力)。凭证 + base_url 是 **unit
     级**(toolset 共享给所有 member;要 per-endpoint 不同 key = 拆 unit)。
 
     **故意不建 ToolUnit→credentials relationship**:catalog / per-turn 快照都不载入密文。
-    CredentialResolver 在 execute 期按 unit 名开一条短 retrying session lazy 解密(B-5:不
-    骑 turn-long session、execute 期短读),解密明文只作单次调用的局部、用完即弃 —— 不进
+    CredentialResolver 在 execute 期按 unit 名开一条短 retrying session lazy 解密，
+    不跨调用持有 DB session；解密明文只作单次调用的局部、用完即弃 —— 不进
     事件 / catalog,也不驻留整轮(只解被调工具的 unit)。
 
     source:seeded(reconciler 从 env 取值加密落库,UI 不可改)/ dynamic(UI 写明文加密)。
@@ -1036,24 +1078,24 @@ class ToolCredential(Base):
 
 
 # ============================================================================
-# Skill 系统(Phase C)—— skill 定义 + per-user 覆盖 + 部门授权两张 FK 表。
-#   - 真相源 = config(seeded)/ 原始上传 blob(dynamic);DB 是物化缓存(决策 3/5)。
+# Skill 系统 —— skill 定义 + per-user 覆盖 + 部门授权两张 FK 表。
+#   - 真相源 = config(seeded)/ 原始上传 blob(dynamic)；DB 是物化缓存。
 #   - identity = stable id；slug 只在 namespace(shared / owner)内唯一；m2m 全按 id
 #     引用 + DB ON DELETE CASCADE → 同名私人 skill 不碰撞，ABA/孤儿由构造消失。
 #   - 6 标准字段按"系统消费与否"分流:消费列开独立列、其余归 `metadata` JSON;
-#     原始 frontmatter 结构在 bundle blob 里无损保留(决策 3/9)。
+#     原始 frontmatter 结构在 bundle blob 里无损保留。
 # ============================================================================
 
 
 class Skill(Base):
     """
-    Skill 定义(决策 1/3/9)。`id` 是稳定身份；slug 是用户上下文内的短名。
+    Skill 定义。`id` 是稳定身份；slug 是用户上下文内的短名。
 
-    可见性两正交字段(替不透明 scope,决策 1):`visibility`(private 仅 owner /
+    可见性使用两个正交字段（替代不透明 scope）：`visibility`(private 仅 owner /
     public 全员 / department 按 dept rule)+ `default_enabled`(shared skill 默认是否
     进 L1)。per-user 覆盖在 user_skills 稀疏表;部门可见走 department_skill_rules。
 
-    存储五处(决策 3):①消费列(下列)②`metadata` JSON(系统不单独消费的 license/
+    存储五处：①消费列(下列)②`metadata` JSON(系统不单独消费的 license/
     version/未知扩展)③`skill_md` 正文(去 frontmatter,L2 read_skill 直返)④`bundle`
     完整 zip 包(单 SKILL.md 无附属文件时也是只含 SKILL.md 的 zip)⑤`has_extra_files`
     轻量判别是否需要 L3 mount。
@@ -1073,7 +1115,7 @@ class Skill(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
     # private(仅 owner)/ public(全员)/ department(按 department_skill_rules)。
-    # skill 独有 private(unit 无,决策 1);private + builtin 都不进 dept rule 表。
+    # skill 独有 private（unit 无）；private + builtin 都不进 dept rule 表。
     visibility: Mapped[str] = mapped_column(
         String(16), nullable=False, default="public", server_default="public"
     )
@@ -1090,13 +1132,13 @@ class Skill(Base):
     )
 
     # frontmatter `allowed-tools` 原样条目列表(unit 名 / `<unit>__<tool>` 全名 / builtin
-    # 名)。import 期校验存在性、runtime(C-2)经共享 resolver 解析到 unit 建 skill_grants
-    # ——只翻 agent 宇宙内 disabled 的(决策 11)。raw 存储、解析靠共享函数(import+runtime 同一个)。
+    # 名)。import 期校验存在性，runtime 经共享 resolver 解析到 unit 建 skill_grants，
+    # 只翻 agent 宇宙内 disabled 的。raw 存储，import/runtime 共用同一解析函数。
     allowed_tools: Mapped[Optional[list]] = mapped_column(JSON, nullable=True, default=list)
-    # `compatibility` 声明(气隙依赖校验,决策 6;C 存、D/E 消费)
+    # `compatibility` 声明供气隙依赖校验与 mount 提示消费。
     compatibility: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
     # 系统不单独消费的 frontmatter 字段杂项(license/标准 metadata 容器[含 version]/未知扩展)。
-    # 属性名避开 SQLAlchemy 保留的 `metadata`,DB 列名仍为 "metadata"(决策 3)。
+    # 属性名避开 SQLAlchemy 保留的 `metadata`，DB 列名仍为 "metadata"。
     meta: Mapped[Optional[Dict[str, Any]]] = mapped_column("metadata", JSON, nullable=True)
 
     # SKILL.md 正文(frontmatter 已剥离),L2 read_skill 直返
@@ -1142,7 +1184,7 @@ class Skill(Base):
 
 class UserSkill(Base):
     """
-    用户对 skill 的个人开关(稀疏覆盖,决策 1)。
+    用户对 skill 的个人开关（稀疏覆盖）。
 
     无行 = 走 visibility/default_enabled;有行 = 用户显式开/关。关掉默认开启的 shared
     skill = disabled 行(link 与 toggle 同一机制)。两端真 FK + CASCADE。
@@ -1170,7 +1212,7 @@ class UserSkill(Base):
 
 class DepartmentSkillRule(Base):
     """
-    部门 ⟷ skill 授权例外(决策 10)。**无 `effect` 列** —— 一行 = 该部门是默认姿态的
+    部门 ⟷ skill 授权例外。**无 `effect` 列** —— 一行 = 该部门是默认姿态的
     「例外」,方向从 skill 的 `visibility` 派生(public→deny / department→grant)。
 
     一资源多部门 = 多行;祖先链解析时父覆盖整子树(各方向只需 1 行)。改 visibility
@@ -1196,7 +1238,7 @@ class DepartmentSkillRule(Base):
 
 class DepartmentUnitRule(Base):
     """
-    部门 ⟷ tool_unit 授权例外(决策 10)。与 DepartmentSkillRule 同构(无 `effect` 列、
+    部门 ⟷ tool_unit 授权例外。与 DepartmentSkillRule 同构(无 `effect` 列、
     方向派生自 unit `visibility`)。**C 建表但空跑**:resolver 的 dept 收窄输入层 G 才加
     (line 101 分阶段输入);C 接通的只是 reconciler/Manager 改 visibility 时的 clear 钩子。
     tool/toolset/mcp 细分在 `tool_units.kind`,规则表不存类型列(unit-everywhere)。

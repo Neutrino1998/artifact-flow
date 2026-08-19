@@ -11,16 +11,21 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Tuple, List
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from httpx import AsyncClient
 
+from config import config
 from db.models import Skill, User
 from db.database import DatabaseManager
 from repositories.conversation_repo import ConversationRepository
-from api.services.execution_runner import ExecutionRunner
-from api.dependencies import get_execution_runner
+from api.dependencies import (
+    get_runtime_store,
+    get_stream_transport,
+    get_task_supervisor,
+)
+from core.execution.task_supervisor import TaskScope, TaskSupervisor
 import api.dependencies as deps
 
 
@@ -49,12 +54,6 @@ async def _seed_conversation(
     return conv_id, [msg1_id, msg2_id]
 
 
-class _MockStreamTransport:
-    """Minimal mock for StreamTransport — satisfies submit() orchestration."""
-    async def create_stream(self, stream_id, owner_user_id=None, lease_check_key=None, lease_expected_owner=None): pass
-    async def close_stream(self, stream_id): return True
-
-
 async def _simulate_active_task(app, conv_id: str, msg_id: str) -> asyncio.Event:
     """
     Submit a sleeping coroutine to simulate an active (RUNNING) task.
@@ -64,18 +63,29 @@ async def _simulate_active_task(app, conv_id: str, msg_id: str) -> asyncio.Event
     (which gates on interactive) would race the not-yet-scheduled _wrapped.
     Returns a blocker event that can be set to let the task complete.
     """
-    runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+    store = app.dependency_overrides[get_runtime_store]()
+    supervisor: TaskSupervisor = app.dependency_overrides[get_task_supervisor]()
+    assert await store.try_acquire_lease(conv_id, msg_id) is None
 
     blocker = asyncio.Event()
     started = asyncio.Event()
 
-    def sleeping_factory():
+    def sleeping_factory(scope: TaskScope):
+        scope.add_cleanup(
+            "lease", lambda: store.release_lease(conv_id, msg_id)
+        )
+        scope.add_cleanup(
+            "interactive",
+            lambda: store.clear_engine_interactive(conv_id, msg_id),
+        )
+
         async def sleeping():
+            assert await store.mark_engine_interactive(conv_id, msg_id)
             started.set()
             await blocker.wait()
-        return sleeping()
+        return sleeping
 
-    await runner.submit(conv_id, msg_id, sleeping_factory, user_id="test-user", stream_transport=_MockStreamTransport())
+    await supervisor.submit(msg_id, sleeping_factory)
     await started.wait()
     return blocker
 
@@ -99,6 +109,32 @@ async def conv_with_messages(
 
 class TestActiveStream:
 
+    async def test_live_owned_stream_returns_reconnect_handle(
+        self,
+        client: AsyncClient,
+        app,
+        conv_with_messages,
+        test_user: User,
+    ):
+        conv_id, msg_ids = conv_with_messages
+        message_id = msg_ids[0]
+        store = app.dependency_overrides[get_runtime_store]()
+        transport = app.dependency_overrides[get_stream_transport]()
+        assert await store.try_acquire_lease(conv_id, message_id) is None
+        await transport.create_stream(message_id, owner_user_id=test_user.id)
+        try:
+            resp = await client.get(f"/api/v1/chat/{conv_id}/active-stream")
+            assert resp.status_code == 200
+            assert resp.json() == {
+                "active": True,
+                "conversation_id": conv_id,
+                "message_id": message_id,
+                "stream_url": f"/api/v1/stream/{message_id}",
+            }
+        finally:
+            await transport.close_stream(message_id)
+            await store.release_lease(conv_id, message_id)
+
     async def test_no_active_stream_is_empty_state(
         self, client: AsyncClient, conv_with_messages
     ):
@@ -117,8 +153,8 @@ class TestActiveStream:
         self, client: AsyncClient, app, conv_with_messages
     ):
         conv_id, msg_ids = conv_with_messages
-        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
-        assert await runner.store.try_acquire_lease(conv_id, msg_ids[0]) is None
+        store = app.dependency_overrides[get_runtime_store]()
+        assert await store.try_acquire_lease(conv_id, msg_ids[0]) is None
         try:
             resp = await client.get(f"/api/v1/chat/{conv_id}/active-stream")
             assert resp.status_code == 200
@@ -128,7 +164,7 @@ class TestActiveStream:
             assert body["message_id"] is None
             assert body["stream_url"] is None
         finally:
-            await runner.store.release_lease(conv_id, msg_ids[0])
+            await store.release_lease(conv_id, msg_ids[0])
 
 
 # ============================================================
@@ -154,11 +190,36 @@ class TestInject:
         assert "stream" in body["stream_url"]
 
         # Verify the message was actually enqueued in RuntimeStore
-        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
-        drained = await runner.store.drain_messages(msg_ids[0])
+        store = app.dependency_overrides[get_runtime_store]()
+        drained = await store.drain_messages(msg_ids[0])
         assert drained == ["additional input"]
 
         blocker.set()
+
+    async def test_inject_full_queue_returns_transient_429(
+        self, client: AsyncClient, app, conv_with_messages
+    ):
+        conv_id, msg_ids = conv_with_messages
+        message_id = msg_ids[0]
+        blocker = await _simulate_active_task(app, conv_id, message_id)
+        store = app.dependency_overrides[get_runtime_store]()
+
+        try:
+            for i in range(config.MAX_INJECT_QUEUE_SIZE):
+                await store.inject_message(message_id, f"pending-{i}")
+
+            resp = await client.post(
+                f"/api/v1/chat/{conv_id}/inject",
+                json={"content": "one too many"},
+            )
+
+            assert resp.status_code == 429
+            assert "retry shortly" in resp.json()["detail"]
+            assert len(await store.drain_messages(message_id)) == (
+                config.MAX_INJECT_QUEUE_SIZE
+            )
+        finally:
+            blocker.set()
 
     async def test_inject_no_active_execution(
         self, client: AsyncClient, conv_with_messages
@@ -180,9 +241,9 @@ class TestInject:
         into it is rejected until it starts running.
         """
         conv_id, msg_ids = conv_with_messages
-        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        store = app.dependency_overrides[get_runtime_store]()
         # Simulate QUEUED directly: acquire the lease without marking interactive.
-        await runner.store.try_acquire_lease(conv_id, msg_ids[0])
+        await store.try_acquire_lease(conv_id, msg_ids[0])
         try:
             resp = await client.post(
                 f"/api/v1/chat/{conv_id}/inject",
@@ -190,7 +251,7 @@ class TestInject:
             )
             assert resp.status_code == 409
         finally:
-            await runner.store.release_lease(conv_id, msg_ids[0])
+            await store.release_lease(conv_id, msg_ids[0])
 
     async def test_inject_cross_user(
         self, admin_client: AsyncClient, app, conv_with_messages
@@ -229,11 +290,42 @@ class TestSendMessageValidation:
         assert resp.status_code == 422
         assert "user_input must not be blank" in str(resp.json())
 
+    async def test_empty_conversation_id_rejected_without_side_effects(
+        self, client: AsyncClient, app
+    ):
+        """空 ID 不是新会话别名：schema 422，且准入生命周期完全不启动。"""
+        store = app.dependency_overrides[get_runtime_store]()
+        transport = app.dependency_overrides[get_stream_transport]()
+        supervisor: TaskSupervisor = app.dependency_overrides[get_task_supervisor]()
+        before = (await client.get("/api/v1/chat")).json()["total"]
+
+        resp = await client.post(
+            "/api/v1/chat",
+            files={
+                "payload": (
+                    None,
+                    json.dumps({
+                        "user_input": "start",
+                        "conversation_id": "",
+                    }),
+                ),
+            },
+        )
+
+        assert resp.status_code == 422
+        assert "conversation_id" in str(resp.json())
+        assert (await client.get("/api/v1/chat")).json()["total"] == before
+        assert await store.list_active_executions() == {}
+        assert supervisor.active_task_count == 0
+        assert transport.streams == {}
+
     async def test_stale_parent_message_id_rejected_before_submit(
-        self, client: AsyncClient, conv_with_messages
+        self, client: AsyncClient, conv_with_messages, monkeypatch
     ):
         """显式 parent 必须属于当前 conversation，避免写出无 root 的消息树。"""
         conv_id, _ = conv_with_messages
+        ops_warning = MagicMock()
+        monkeypatch.setattr("api.routers.chat.logger.warning", ops_warning)
         resp = await client.post(
             "/api/v1/chat",
             files={
@@ -249,6 +341,10 @@ class TestSendMessageValidation:
         )
         assert resp.status_code == 422
         assert "parent_message_id does not belong" in str(resp.json())
+        ops_warning.assert_called_once()
+        logged = ops_warning.call_args.args[0]
+        assert conv_id in logged
+        assert "msg-does-not-exist" in logged
 
 
 # ============================================================
@@ -270,8 +366,8 @@ class TestCancel:
         assert body["message_id"] == msg_ids[0]
 
         # Verify cancellation was requested
-        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
-        assert await runner.store.is_cancelled(msg_ids[0]) is True
+        store = app.dependency_overrides[get_runtime_store]()
+        assert await store.is_cancelled(msg_ids[0]) is True
 
         blocker.set()
 
@@ -293,17 +389,17 @@ class TestCancel:
         wait (the cross-layer tear that the r4 round-1/2 findings kept exposing).
         """
         conv_id, msg_ids = conv_with_messages
-        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        store = app.dependency_overrides[get_runtime_store]()
         # Simulate QUEUED directly: acquire the lease without marking interactive.
-        await runner.store.try_acquire_lease(conv_id, msg_ids[0])
+        await store.try_acquire_lease(conv_id, msg_ids[0])
         try:
             resp = await client.post(f"/api/v1/chat/{conv_id}/cancel")
             assert resp.status_code == 409
             assert "queued" in resp.json()["detail"].lower()
             # No cancel flag must have been set for a queued turn.
-            assert await runner.store.is_cancelled(msg_ids[0]) is False
+            assert await store.is_cancelled(msg_ids[0]) is False
         finally:
-            await runner.store.release_lease(conv_id, msg_ids[0])
+            await store.release_lease(conv_id, msg_ids[0])
 
     async def test_cancel_cross_user(
         self, admin_client: AsyncClient, app, conv_with_messages
@@ -430,16 +526,15 @@ class _FakeAgentConfig:
     description: str = "test lead"
     tools: dict = field(default_factory=dict)
     model: str = "文本模型"
-    max_tool_rounds: int = 3
     role_prompt: str = "You are a test agent."
     internal: bool = False
 
 
 @contextmanager
 def _patch_snapshot(fake_agents):
-    """Patch the per-turn registry snapshot the flipped controller_factory loads.
+    """Patch the per-turn registry snapshot the flipped conversation_turn_factory loads.
 
-    Post-B-2 `create_controller` no longer reads `deps._agents`/`get_agents()` —
+    `create_turn_handler` no longer reads `deps._agents`/`get_agents()` —
     it builds agents + external tools from registry snapshot loaders (DB).
     These E2E tests mock only the LLM and don't reconcile config into the test DB,
     so we synthesize a snapshot from the fake agent configs instead. builtin_tools
@@ -450,8 +545,8 @@ def _patch_snapshot(fake_agents):
     agents = {
         n: AgentSnapshot(
             name=c.name, description=c.description, model=c.model,
-            max_tool_rounds=c.max_tool_rounds, internal=c.internal,
-            role_prompt=c.role_prompt, builtin_tools={}, units={},
+            internal=c.internal, role_prompt=c.role_prompt,
+            builtin_tools={}, units={},
         )
         for n, c in fake_agents.items()
     }
@@ -506,7 +601,7 @@ class TestChatStreamE2E:
     """
     End-to-end: POST /chat → background execution → GET /stream → SSE events.
 
-    Mock only the LLM; exercises real ExecutionController, ExecutionRunner,
+    Mock only the LLM; exercises real ConversationTurnHandler, TaskSupervisor,
     InMemoryStreamTransport, conversation persistence, and event persistence.
     """
 
@@ -520,7 +615,8 @@ class TestChatStreamE2E:
         a per-turn display snapshot on Message metadata.
         """
         fake_agents = {"lead_agent": _FakeAgentConfig()}
-        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        store = app.dependency_overrides[get_runtime_store]()
+        supervisor: TaskSupervisor = app.dependency_overrides[get_task_supervisor]()
         observed_llm_messages: dict = {}
 
         async with db_manager.session() as session:
@@ -547,14 +643,11 @@ class TestChatStreamE2E:
             async for chunk in _make_fake_llm_stream("Hello from agent")(messages, **kwargs):
                 yield chunk
 
-        # _create_controller() calls get_execution_runner/get_agents/get_tools directly,
-        # so we must set the module-level globals (not just dependency_overrides).
+        # Turn assembly still reads process-level agent/tool registries.
         old_agents = deps._agents
         old_tools = deps._tools
-        old_runner = deps._execution_runner
         deps._agents = fake_agents
         deps._tools = {}
-        deps._execution_runner = runner
 
         try:
             with patch("models.llm.astream_with_retry", fake_llm), \
@@ -578,7 +671,7 @@ class TestChatStreamE2E:
 
                 # Wait for background execution to complete
                 for _ in range(50):
-                    if message_id not in runner._tasks:
+                    if message_id not in supervisor._tasks:
                         break
                     await asyncio.sleep(0.1)
 
@@ -589,12 +682,22 @@ class TestChatStreamE2E:
                 events = _parse_sse_events(sse_resp.text)
                 event_types = [e.get("type") for e in events]
 
-                # Happy path: must have metadata → complete (not error)
+                # Happy path: metadata supplies the early display preview, then
+                # the fully assembled USER_INPUT must be present in the live SSE
+                # timeline before agent execution starts.  The same semantic
+                # event is persisted for replay at turn completion.
                 assert "metadata" in event_types
+                assert "user_input" in event_types
                 assert "complete" in event_types, \
                     f"Expected 'complete' terminal event, got: {event_types}"
                 assert "error" not in event_types, \
                     f"Unexpected error event in happy path: {event_types}"
+                assert event_types.index("metadata") < event_types.index("user_input")
+                assert event_types.index("user_input") < event_types.index("agent_start")
+                live_user_input = next(
+                    event for event in events if event.get("type") == "user_input"
+                )
+                assert live_user_input["data"]["content"].startswith("Hi there")
 
                 # 3. Verify conversation and response were persisted
                 async with db_manager.session() as session:
@@ -639,12 +742,11 @@ class TestChatStreamE2E:
                     assert "complete" in db_event_types
 
                 # 5. Verify lease was cleaned up
-                assert await runner.store.get_leased_message_id(conv_id) is None
-                assert await runner.store.get_interactive_message_id(conv_id) is None
+                assert await store.get_leased_message_id(conv_id) is None
+                assert await store.get_interactive_message_id(conv_id) is None
         finally:
             deps._agents = old_agents
             deps._tools = old_tools
-            deps._execution_runner = old_runner
 
     async def test_chat_with_attachment_creates_artifact_and_attribution(
         self, client: AsyncClient, app, db_manager: DatabaseManager
@@ -656,14 +758,12 @@ class TestChatStreamE2E:
         but NOT surfaced in the prompt (the model identifies a doc by id; the
         human-readable name is already in the artifacts inventory title)."""
         fake_agents = {"lead_agent": _FakeAgentConfig()}
-        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        supervisor: TaskSupervisor = app.dependency_overrides[get_task_supervisor]()
 
         old_agents = deps._agents
         old_tools = deps._tools
-        old_runner = deps._execution_runner
         deps._agents = fake_agents
         deps._tools = {}
-        deps._execution_runner = runner
 
         try:
             with patch("models.llm.astream_with_retry", _make_fake_llm_stream("Done")), \
@@ -684,7 +784,7 @@ class TestChatStreamE2E:
                 message_id = body["message_id"]
 
                 for _ in range(50):
-                    if message_id not in runner._tasks:
+                    if message_id not in supervisor._tasks:
                         break
                     await asyncio.sleep(0.1)
 
@@ -722,4 +822,3 @@ class TestChatStreamE2E:
         finally:
             deps._agents = old_agents
             deps._tools = old_tools
-            deps._execution_runner = old_runner

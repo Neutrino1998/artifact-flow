@@ -1,5 +1,5 @@
 """
-ToolCredential Repository —— external 工具 unit 级加密凭证的纯数据访问(B-4)。
+ToolCredential Repository —— external 工具 unit 级加密凭证的纯数据访问。
 
 只碰行,不解密(密文进出由上层 cipher 处理)。ORM 实例不外逃语义同其它 repo:
 调用方拿到的是行对象,只在 session 内读其列(placeholder_name/encrypted_value/source)。
@@ -19,7 +19,7 @@ class ToolCredentialRepository(BaseRepository[ToolCredential]):
         super().__init__(session, ToolCredential)
 
     async def list_for_unit(self, unit_name: str) -> List[ToolCredential]:
-        """某 unit 的全部凭证行(含密文)。resolver 在 execute 期按 unit 名直查(B-5 lazy)。"""
+        """某 unit 的全部凭证行(含密文)，供 resolver 在 execute 期按 unit 懒读取。"""
         return list((await self._session.execute(
             select(ToolCredential)
             .where(ToolCredential.unit_name == unit_name)

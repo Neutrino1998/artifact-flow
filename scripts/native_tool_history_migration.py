@@ -189,7 +189,7 @@ def _checkpoint_error(exc: BaseException) -> str:
 def _is_expected_task_failure(exc: Exception) -> bool:
     if isinstance(exc, (RuntimeError, TimeoutError)):
         return True
-    # LiteLLM maps provider/network/status failures onto OpenAI's typed error
+    # The OpenAI SDK maps provider/network/status failures onto typed error
     # hierarchy. Import it only on a failure path so the dormant CLI stays light.
     from openai import OpenAIError
 
@@ -200,7 +200,6 @@ async def _generate_semantic(
     messages: list[dict[str, str]],
     *,
     model: str,
-    max_retries: int,
     cache_salt_subject: str,
 ) -> str:
     from models.llm import astream_with_retry
@@ -213,7 +212,6 @@ async def _generate_semantic(
         async for chunk in astream_with_retry(
             messages,
             model=model,
-            max_retries=max_retries,
             user_id=cache_salt_subject,
         ):
             if chunk.get("type") == "final":
@@ -287,7 +285,6 @@ async def _run_generate_task(
             content = await _generate_semantic(
                 messages,
                 model=semantic_model,
-                max_retries=args.max_retries,
                 # The stopped migration has no authenticated request user. Use a
                 # deterministic per-conversation isolation principal instead:
                 # this is stricter than per-user sharing and still produces the
@@ -500,7 +497,6 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--skip-semantic", action="store_true")
     generate.add_argument("--semantic-model")
     generate.add_argument("--concurrency", type=int, default=2)
-    generate.add_argument("--max-retries", type=int, default=3)
     generate.add_argument(
         "--mechanical-max-chars", type=int, default=DEFAULT_MECHANICAL_MAX_CHARS
     )
@@ -548,8 +544,6 @@ def _validate_args(args: argparse.Namespace) -> None:
         return
     if args.concurrency < 1:
         raise ValueError("--concurrency must be at least 1")
-    if args.max_retries < 1:
-        raise ValueError("--max-retries must be at least 1")
     for label, max_chars, recent_turns, field_max_chars in (
         (
             "mechanical",

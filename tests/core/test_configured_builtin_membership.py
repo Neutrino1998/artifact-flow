@@ -5,8 +5,8 @@ read_skill、mount_skill、search_tools 与其它 builtin 采用同一规则：�
 defer 只是 schema 披露优化；没有 search_tools 时回退完整 schema。
 """
 
-from core.context_manager import ContextManager
-from core.effective_toolset import resolve_all, resolve_effective_toolset
+from core.execution.context_manager import ContextManager
+from core.capabilities.effective_toolset import resolve_all, resolve_effective_toolset
 from reconcile.snapshot import AgentSnapshot, RegistrySnapshot, SkillInfo, UnitInfo
 from tools.base import ToolPermission
 
@@ -22,7 +22,6 @@ def _agent(name="lead_agent", builtin_tools=None, units=None):
         name=name,
         description="d",
         model="m",
-        max_tool_rounds=10,
         internal=False,
         role_prompt="",
         builtin_tools=builtin_tools or {},

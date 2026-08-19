@@ -319,7 +319,8 @@ class DatabaseManager:
         (RDS / Aurora / Aliyun RDS) and DATABASE_URLS failover targets have
         server timezone we don't control. Forcing the session GUC at connect
         time guarantees `server_default=func.now()` / `onupdate=func.now()`
-        match Python `utils.time.utc_now`. (Incident 2026-05-14 PR-tz-unify.)
+        match Python `utils.time.utc_now`; cloud-managed and failover nodes may ignore
+        deployment-level timezone settings.
 
         - postgres: `setdefault` inside `server_settings` so DSN-supplied
           keys (application_name etc.) are preserved; user-supplied
@@ -359,6 +360,10 @@ class DatabaseManager:
         # 创建异步引擎
         engine_kwargs = {
             "echo": self.echo,
+            # Keep SQL shape/error codes available while preventing bound
+            # values (password hashes, credential ciphertext, user content)
+            # from appearing in StatementError text or SQL echo logs.
+            "hide_parameters": True,
         }
         # engine_url 默认是 self.database_url;PG 单 URL 路径可能 sanitize 后覆盖
         # (见非 SQLite 分支 difference_update_query),其余 path 不动。
@@ -396,17 +401,16 @@ class DatabaseManager:
             #    再以 top-level kwarg 形式塞给 asyncpg.connect(asyncpg signature
             #    不接受 application_name / sslmode 顶层 kwarg → TypeError)。
             #
-            # 失败模式覆盖(reviewer round 1–4 累积):
-            # - round 1: 云托管 PG / DATABASE_URLS failover 节点的 server timezone
+            # 覆盖以下失败模式:
+            # - 云托管 PG / DATABASE_URLS failover 节点的 server timezone
             #   不在 compose -c timezone=UTC 覆盖范围 → 连接层兜底注入。
-            # - round 2: connect_args 整 dict 覆盖 → 把 DSN 已有 application_name /
+            # - connect_args 整 dict 覆盖 → 把 DSN 已有 application_name /
             #   init_command 先抽出来,setdefault / prepend 合并保留。
-            # - round 3: SQLAlchemy asyncpg dialect 把 url.query 整 dict dump 成
+            # - SQLAlchemy asyncpg dialect 把 url.query 整 dict dump 成
             #   asyncpg.connect 顶层 kwarg → 从 URL 剥掉 _PG_SERVER_SETTINGS 已知 key。
-            # - round 4: 让 DatabaseManager 立为唯一翻译层(本段),sslmode /
+            # - DatabaseManager 是唯一翻译层(本段),sslmode /
             #   command_timeout / ssl_* 等已知 PG 翻译 key、charset / autocommit
-            #   等 MySQL 翻译 key 也走同一路径剥离,把 round 3 的 application_name
-            #   补全到 reviewer 在 round 3 中列出的整张表。
+            #   等 MySQL 翻译 key 也走同一路径剥离，覆盖完整的翻译键表。
             url = make_url(self.database_url)
             backend = url.get_backend_name()
             driver: Optional[str] = None
@@ -425,7 +429,7 @@ class DatabaseManager:
                 # DB 层。setdefault → DSN 显式 ?command_timeout=(必须 >0)优先(parser 已放进
                 # connect_args)。本参数 =0 → 跳过注入(禁用入口)。DSN 给 0 不是禁用 —— asyncpg
                 # 拒绝 ≤0 会启动失败。仅 PostgreSQL(asyncpg);MySQL 无等价钩子。
-                # 与 controller post-processing 的 per-query deadline 契约对齐。
+                # 与 turn-handler post-processing 的 per-query deadline 契约对齐。
                 if driver == "postgres" and self._command_timeout > 0:
                     engine_kwargs["connect_args"].setdefault(
                         "command_timeout", self._command_timeout
@@ -633,7 +637,7 @@ class DatabaseManager:
         **契约:fn 必须幂等** —— 失败时本函数把整个 fn 从头重跑。故 fn 只能是读操作,或满足
         两条的写操作:(1) 幂等键(id)在调 with_retry **之前**定好、跨重试稳定;(2) 写遇到
         「已存在」当成功而非 raise(否则「首次已 commit、确认包/后续步骤瞬断」会让重试撞重抛出
-        非瞬断异常、逃出本重试)。参考幂等写:start_conversation_async / add_message_async
+        非瞬断异常、逃出本重试)。参考幂等写:ConversationManager.create / append_message
         (撞重吞)、batch_create(稳定 event_id)、ArtifactService._flush_one(Duplicate/Integrity
         当已落库)。
         """

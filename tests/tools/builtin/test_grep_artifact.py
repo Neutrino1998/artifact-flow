@@ -197,7 +197,7 @@ class TestPureFunctions:
         assert out == "1:a\n2:b\n3:c"
 
     def test_format_flat_truncates_long_line(self, monkeypatch):
-        """单行超 GREP_MAX_LINE_CHARS → 截断 + 标记总长（reviewer P2，ripgrep --max-columns 式）。"""
+        """单行超 GREP_MAX_LINE_CHARS → 截断 + 标记总长（ripgrep --max-columns 式）。"""
         monkeypatch.setattr(config, "GREP_MAX_LINE_CHARS", 10)
         out = _format_flat([(1, "x" * 100, True)])
         assert out.startswith("1:" + "x" * 10 + " ")
@@ -714,7 +714,7 @@ class TestUnicodeOffsets:
 
 
 # ============================================================
-# 资源护栏（GREP-02 聚合预算 / GREP-03 上界 / 输入封顶）
+# 资源护栏（聚合预算 / 参数上界 / 输入封顶）
 # ============================================================
 
 
@@ -740,7 +740,7 @@ class TestResourceGuards:
         session_id: str,
         monkeypatch: pytest.MonkeyPatch,
     ):
-        """超大 context 被 clamp,不会铺满全文（GREP-03）。"""
+        """超大 context 被 clamp，不会铺满全文。"""
         monkeypatch.setattr(config, "GREP_MAX_CONTEXT", 1)
         content = "a\nb\nc\nX\nd\ne\nf\n"
         aid = await _create_artifact(artifact_service, session_id, content)

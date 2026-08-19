@@ -597,7 +597,7 @@ describe('artifactStore live reduce (ARTIFACT_* events)', () => {
     // Cross-turn `mount → edit → persist artifact_id=…`: the artifact came from a
     // prior turn, so its first event this turn is the blob ARTIFACT_UPDATED. It must
     // synthesize a binary live entry from the event's has_blob/content_type — not an
-    // empty text/markdown view (reviewer #1 regression).
+    // empty text/markdown view regression.
     useArtifactStore.getState().applyArtifactUpdated({
       id: 'pkg.zip', current_version: 1, content: '',
       has_blob: true, blob_size: 2048, content_type: 'application/zip',

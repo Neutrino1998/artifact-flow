@@ -11,6 +11,21 @@ vi.mock('@/components/BrandingFooter', () => ({
   default: () => null,
 }));
 
+vi.mock('@/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/api')>()),
+  getAuthConfig: vi.fn(async () => ({
+    password_login_enabled: true,
+    sso: {
+      enabled: false,
+      provider_id: null,
+      display_name: null,
+      token_param: null,
+    },
+  })),
+  login: vi.fn(),
+  startSso: vi.fn(),
+}));
+
 describe('LoginPage', () => {
   let container: HTMLDivElement;
   let root: Root;

@@ -1,7 +1,7 @@
 """
 RuntimeSampler 单元测试
 
-策略:fake runner/db/redis/watchdog,验证一次 sample_once() 调用产出预期形状,
+策略:fake supervisor/db/redis/watchdog,验证一次 sample_once() 调用产出预期形状,
 不依赖真实 30s 周期或真实组件。
 """
 
@@ -41,7 +41,7 @@ def test_sample_once_writes_expected_fields(tmp_path):
         sampler = RuntimeSampler(
             sink=sink,
             watchdog=_FakeWatchdog({"p50_ms": 3, "p99_ms": 18, "max_1m_ms": 95, "samples": 30}),
-            execution_runner=_FakeRunner(in_flight=2),
+            task_supervisor=_FakeRunner(in_flight=2),
             db_manager=None,
             redis_client=None,
             data_dir=str(tmp_path),
@@ -60,7 +60,7 @@ def test_sample_once_writes_expected_fields(tmp_path):
         assert snapshot["loop_lag_ms"]["p50_ms"] == 3
         assert snapshot["loop_lag_ms"]["p99_ms"] == 18
 
-        # in_flight 来自 runner
+        # in_flight 来自 supervisor
         assert snapshot["in_flight"] == 2
 
         # latest_snapshot 应等于这次的输出
@@ -78,7 +78,7 @@ def test_sample_once_appends_to_jsonl(tmp_path):
         sampler = RuntimeSampler(
             sink=sink,
             watchdog=None,
-            execution_runner=_FakeRunner(in_flight=0),
+            task_supervisor=_FakeRunner(in_flight=0),
             data_dir=str(tmp_path),
         )
         await sampler.sample_once()
@@ -101,7 +101,7 @@ def test_no_watchdog_means_empty_loop_lag(tmp_path):
     async def runner():
         sink = JsonlSink(tmp_path / "metrics.jsonl", max_mb=1, backups=1, mirror_stdout=False)
         sampler = RuntimeSampler(
-            sink=sink, watchdog=None, execution_runner=None, data_dir=str(tmp_path)
+            sink=sink, watchdog=None, task_supervisor=None, data_dir=str(tmp_path)
         )
         snapshot = await sampler.sample_once()
         sink.close()
@@ -119,7 +119,7 @@ def test_threshold_warn_on_high_rss(tmp_path, caplog):
         sampler = RuntimeSampler(
             sink=sink,
             watchdog=None,
-            execution_runner=None,
+            task_supervisor=None,
             data_dir=str(tmp_path),
             mem_limit_bytes=100,
         )
@@ -143,7 +143,7 @@ def test_sampler_start_stop(tmp_path):
         sampler = RuntimeSampler(
             sink=sink,
             watchdog=None,
-            execution_runner=None,
+            task_supervisor=None,
             data_dir=str(tmp_path),
             interval_sec=1,  # 1s 周期,但我们 stop 得早
         )

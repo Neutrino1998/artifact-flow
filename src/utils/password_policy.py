@@ -4,7 +4,7 @@
 CSV 批量导入、create_admin 脚本。失败抛 ValueError（带具体原因),由调用方
 决定转成 422 / 400。
 
-刻意不做（YAGNI / 见 docs/_archive/reviews/sec-review-findings.md「门类三」）:
+刻意不做（当前范围只校验新口令本身）:
 - 历史口令不重用:那是 password_changed_at + password_history 列 + 改密端点的事,
   不在强度校验里(强度只看口令本身,不看账户状态)。
 - 登录口令不在此校验:老用户带的旧密码可能不达标,登录只鉴别、不二次卡策略,

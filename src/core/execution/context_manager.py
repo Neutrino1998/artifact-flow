@@ -1,0 +1,598 @@
+"""ContextManager — 为每次 LLM 调用构建完整的 messages 列表
+
+职责：
+1. 拼接 system prompt —— 仅放全 session 稳定的内容（role_prompt + agents），
+   作为 prompt cache 的可缓存前缀。
+2. 通过 EventHistory 从 state["events"] 构建历史 messages（含 compaction_summary boundary）。
+3. 把每轮刷新的动态上下文（system_time + task_plan + artifact 清单）包裹成 ephemeral
+   <system-reminder>，追加为独立的尾部 user 消息 —— 现拼即用即丢、不入 event，避免
+   修改已有历史消息，也避免动态内容进入缓存前缀。
+
+Token 预算的上下文控制由引擎内 compaction 负责（见 compaction_runner.py），
+ContextManager 本身不再做任何截断。
+"""
+
+from typing import Dict, Any, List, Optional
+from datetime import datetime
+from xml.sax.saxutils import escape as xml_escape
+
+from config import config
+from core.capabilities.effective_toolset import EffectiveToolset
+from core.execution.event_history import build_event_history, last_llm_usage
+from utils.image import VISION_VIEWABLE_MIMES
+from models.llm import model_replays_reasoning, model_supports_vision
+from tools.artifact_envelope import make_preview_slice, render_artifact_slice
+from tools.base import MOUNT_SKILL_NAME
+from utils.logger import get_logger
+
+logger = get_logger("ArtifactFlow")
+
+
+class ContextManager:
+    """
+    为每次 LLM 调用构建完整的 messages 列表。
+
+    纯静态工具类（classmethod only），不持有状态。
+    历史和当前轮事件统一来自 state["events"]（EventHistory 处理 boundary 扫描 + 过滤）。
+    Compaction 由引擎 loop 尾部同步触发（不在 build 内执行）。
+    """
+
+    @classmethod
+    def build(
+        cls,
+        state: Dict[str, Any],
+        agent_name: str,
+        agents: Dict[str, Any],  # {name: AgentSnapshot}
+        tools: Dict[str, Any],   # {name: BaseTool}
+        effective_toolset: EffectiveToolset,  # 当前 agent 解析后的可调集 + 等级
+        compaction_threshold: int,
+        artifacts_inventory: Optional[List[Dict]] = None,
+        sandbox_status: Optional[Dict] = None,
+        available_skills: Optional[List[Dict]] = None,  # L1 候选；仅 read_skill 可调时注入
+    ) -> tuple[List[Dict[str, Any]], str]:
+        """
+        构建 LLM 调用所需的完整 messages
+
+        设计文档 §唯一的抽象：ContextManager.build()
+
+        Args:
+            state: 执行状态
+            agent_name: 当前 agent 名称
+            agents: 所有 agent 配置 {name: AgentConfig}
+            tools: 所有可用工具 {name: BaseTool}
+            compaction_threshold: 当前 agent 模型的有效阈值
+                (models.yaml context_window - 服务级 reserve)
+            artifacts_inventory: 预加载的 artifacts 清单（含完整内容）
+
+        Returns:
+            (messages, reminder) —— messages 是完整 LLM 消息列表；reminder 是并入末条
+            消息的 ephemeral <system-reminder> 原文，单独返回供引擎落进 agent_start 事件
+            （admin 重建 prompt 时拿它当持久化原值，无需重新生成 → 不漂移）。
+        """
+        agent_config = agents[agent_name]
+
+        # ========== System Prompt（全 session 稳定 → 可缓存前缀）==========
+        # 只放真正不随轮次变化的内容：角色提示词、可用 agent。工具 schema 由引擎
+        # 作为 native `tools` 独立传递。系统时间 /
+        # task_plan / artifact 清单等每轮刷新的动态上下文一律移到消息尾部的
+        # <system-reminder>（见下），避免它们坐在前缀里把后续历史的 prompt cache 全打掉。
+        system_parts = []
+
+        # 1. 角色提示词（MD body）
+        if agent_config.role_prompt:
+            system_parts.append(agent_config.role_prompt)
+
+        # 2. 可用 Agent 列表（条件注入：仅有 call_subagent 工具的 agent）
+        if "call_subagent" in effective_toolset:
+            system_parts.append(cls._build_available_agents(agents, agent_config.name))
+
+        system_prompt = "\n\n".join(s for s in system_parts if s)
+
+        # ========== Messages ==========
+        # 历史 + 当前轮统一来自 state["events"]，EventHistory 处理 boundary / 过滤。
+        # _meta 的剥离交给 assemble（与 admin 重建路径共享同一步），这里传原始历史。
+        all_messages = build_event_history(
+            state.get("events", []), agent_name, state.get("vision_blocks_by_call"),
+            vision_capable=model_supports_vision(agent_config.model),
+            replay_reasoning=model_replays_reasoning(agent_config.model),
+        )
+
+        # 动态上下文（系统时间 / task_plan / artifact 清单）作为 ephemeral
+        # <system-reminder> 追加为独立尾消息：每次 build 现拼、即用即丢、绝不入
+        # event（否则会把过期时间/清单冻进历史）。放尾部而非 system prompt，使
+        # [system + 历史] 成为稳定可缓存前缀，只有这一条尾消息因动态内容失效。
+        # build 时刻末条必为 user 角色（USER_INPUT / tool_complete / subagent_instruction
+        # / queued_message / compaction_summary），故直接并入末条 —— 无需定位最近
+        # assistant、也不会劈开多工具的结果组。
+        # all_messages 必非空（不在此兜底）：每个 agent 启动事件都携带非空内容 ——
+        # 空文本且无附件的 user_input 被 ConversationTurnHandler.run 拒（router 另有 422 快速
+        # 边界校验）、空 instruction 被 call_subagent 拒，故 USER_INPUT / subagent_instruction
+        # 必产出 ≥1 条 message。真为空 = 上游不变量被破坏，让它在 [-1] 上响亮失败。
+        # 上一次 call 的 input+output(compaction 触发口径)——build 在 LLM call 之前拼，
+        # 本轮数字尚不存在，用历史里最近一次 llm_complete 的 token_usage 做水位估计(历史
+        # 单调增长，是「这次会不会越界」的合理下界)。last_llm_usage 已按 agent 过滤 + 在最近
+        # compaction 边界后取数(刚压缩完 → None)，且直接读原始事件 token_usage，不受
+        # 「content 空则丢 _meta」影响(高 input+空 content 也能预警)。
+        last_usage = last_llm_usage(state.get("events", []), agent_name)
+        reminder = cls._build_dynamic_context(
+            agent_config, effective_toolset, tools, artifacts_inventory,
+            compaction_threshold=compaction_threshold,
+            last_usage=last_usage,
+            sandbox_status=sandbox_status,
+            available_skills=(
+                available_skills if "read_skill" in effective_toolset else None
+            ),
+            disclosed_tools=set(
+                state.get("agent_progressive_state", {})
+                .get(agent_name, {})
+                .get("disclosed_tools", [])
+            ),
+        )
+        return cls.assemble(system_prompt, all_messages, reminder), reminder
+
+    @classmethod
+    def assemble(
+        cls,
+        system_prompt: str,
+        history_messages: List[Dict[str, Any]],
+        reminder: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """追加 reminder 尾消息并前置 system message，得到最终 messages。
+
+        这是 live 路径（build）与 admin 重建路径（ConversationManager.reconstruct_prompt）
+        **共享的拼接叶子** —— reminder 的独立尾消息逻辑只此一处，两条路径必然一致。
+        build 永远传非空 reminder；重建路径对早于 reminder-持久化的旧事件传 reminder=None
+        （那时只前置 system + 历史，不拼 reminder）。发给 LLM 前剥离 _meta 也在此完成
+        （两条路径共享），故调用方传原始 build_event_history 输出即可。
+
+        既有历史绝不原地修改。每组连续 tool results 后按原位置重建一条 image
+        carrier；若图片组正好在尾部，当前 reminder 合入该 carrier，否则 reminder
+        仍作为独立尾消息。这样图片在本 turn 后续所有 LLM 调用中保持可见，同时
+        role=tool results 仍先完整闭合，绝不被 user image message 劈开。
+        """
+        all_messages, trailing_image_carrier = cls._interleave_image_carriers(
+            history_messages
+        )
+        if reminder is not None:
+            if trailing_image_carrier:
+                all_messages[-1] = {
+                    **all_messages[-1],
+                    "content": [
+                        {"type": "text", "text": reminder},
+                        *all_messages[-1]["content"],
+                    ],
+                }
+            else:
+                all_messages.append({"role": "user", "content": reminder})
+
+        return [{"role": "system", "content": system_prompt}] + all_messages
+
+    @classmethod
+    def _interleave_image_carriers(
+        cls, messages: List[Dict[str, Any]]
+    ) -> tuple[List[Dict[str, Any]], bool]:
+        """Strip private metadata and rebuild one carrier per complete tool group.
+
+        EventHistory projects every native result as ``role=tool`` and attaches a
+        turn-local image only in ``_meta``. Consecutive tool messages are one
+        assistant envelope's complete result group; emit them all before the
+        synthetic user carrier required by OpenAI-compatible multimodal APIs.
+
+        Returns ``(messages, trailing_image_carrier)`` so ``assemble`` can merge
+        the current ephemeral reminder into a carrier that is already the tail.
+        """
+        projected: List[Dict[str, Any]] = []
+        trailing_image_carrier = False
+        index = 0
+        while index < len(messages):
+            message = messages[index]
+            if message.get("role") != "tool":
+                projected.extend(cls._strip_meta([message]))
+                index += 1
+                continue
+
+            group: List[Dict[str, Any]] = []
+            images: List[Dict[str, Any]] = []
+            while index < len(messages) and messages[index].get("role") == "tool":
+                tool_message = messages[index]
+                group.append(tool_message)
+                image = (tool_message.get("_meta") or {}).get("image")
+                if image:
+                    images.append({
+                        **image,
+                        "tool_call_id": tool_message.get("tool_call_id"),
+                    })
+                index += 1
+
+            projected.extend(cls._strip_meta(group))
+            if not images:
+                continue
+
+            content: List[Dict[str, Any]] = []
+            for image in images:
+                content.append({
+                    "type": "text",
+                    "text": (
+                        "Image returned by read_artifact call_id="
+                        f"{image.get('tool_call_id')}, artifact_id="
+                        f"{image.get('artifact_id')}, "
+                        f"content_type={image.get('content_type')}:"
+                    ),
+                })
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": image["data_uri"]},
+                })
+            projected.append({"role": "user", "content": content})
+            trailing_image_carrier = index == len(messages)
+
+        return projected, trailing_image_carrier
+
+    @classmethod
+    def _build_dynamic_context(
+        cls,
+        agent_config: Any,
+        effective_toolset: EffectiveToolset,
+        tools: Dict[str, Any],
+        artifacts_inventory: Optional[List[Dict]],
+        compaction_threshold: int,
+        last_usage: Optional[int] = None,
+        sandbox_status: Optional[Dict] = None,
+        available_skills: Optional[List[Dict]] = None,
+        disclosed_tools: Optional[set[str]] = None,
+    ) -> str:
+        """组装每轮刷新的动态上下文，包裹为 ephemeral <system-reminder>。
+
+        内容：可用工具目录（有可调工具时）+ 系统时间（始终）+ task_plan（存在时）+
+        artifact 清单（仅有 artifact 工具的 agent）+ 沙盒状态（仅有沙盒工具的 agent 且
+        引擎递了快照）+ context_usage 预警（仅临近 compaction 时）。由 build() 并入
+        消息尾部，不进 system prompt、不持久化为 event。
+
+        语义定位是「当前世界状态的一瞥」（glance, don't act）—— 与需要 uptake 的
+        持久化 meta 帧（用户上传提示 / 注入消息 / compaction frame，均用 [...] 行动帧
+        且落库为 event）刻意区分：那些是历史事实、要模型据此行动；这里是易变快照、
+        模型扫一眼即可。
+        """
+        parts: List[str] = []
+
+        # 可用工具目录（渐进式披露）—— per-tool 描述放在尾部 reminder 而非 system
+        # prompt 缓存前缀，**是有意的**：active skill 会改变 catalog 成员，例如重新启用
+        #   被 agent 禁用、原本不渲染的工具。若把 catalog 放缓存前缀,skill 一 toggle →
+        #   前缀变 → 整条历史 APC 缓存失效重写(长对话尤其疼)。放尾部把这份易变性隔离在
+        #   本来就不缓存的末条消息,toggle 零额外代价(同 time/artifacts 的处置)。
+        #   反面好处:reminder 持久化进 agent_start → admin 重建按原样重放,还原的是**那
+        #   一轮真实展示的工具集**;若放 system prompt(从当前快照重建)skill 状态变了就
+        #   漂移成当前集。deferred 索引行也因此每轮重渲、无视压缩(跨压缩存活 by-construction)。
+        # non-deferred 出完整 doc、deferred unit 只出索引行(完整 schema 由 search_tools 补)。
+        available_tools = cls._build_available_tools(
+            effective_toolset, tools, disclosed_tools or set()
+        )
+        if available_tools:
+            parts.append(available_tools)
+
+        # 可用 skill 列表(L1)—— 调用方已按 read_skill 成员关系过滤；未配置该
+        # builtin 的 agent 不应看到一个要求它调用不可用工具的目录。与 catalog 同处
+        # 尾部 reminder 而非 system 前缀:
+        # active skill / user toggle 改的是注入集,放前缀会 toggle 一次打掉整条历史 APC
+        # (同 catalog 的处置)。
+        available_skills_block = cls._build_available_skills(available_skills)
+        if available_skills_block:
+            parts.append(available_skills_block)
+
+        # 系统时间 —— 刻意用本地时间（datetime.now，非 utc_now）：注入提示词的是
+        # 用户本地时间属 UX，是 persistence 一律 naive UTC 的既定例外。
+        current_time = datetime.now().strftime("%Y/%m/%d %H:%M:%S %a")
+        parts.append(f'<system_time>Current time: {current_time}</system_time>')
+
+        # 任务计划（从 artifacts 提取全文注入）
+        task_plan = cls._find_task_plan(artifacts_inventory)
+        if task_plan:
+            parts.append(
+                f'<team_task_plan version="{task_plan["version"]}" '
+                f'type="{task_plan["content_type"]}" '
+                f'source="{task_plan.get("source", "agent")}" '
+                f'updated="{task_plan["updated_at"]}">\n'
+                f'<id>{task_plan["id"]}</id>\n'
+                f'<content>\n{task_plan["content"]}\n</content>\n'
+                f'</team_task_plan>'
+            )
+
+        # Artifact 清单（仅有 artifact 工具的 agent 注入）—— 即使为空也要给出
+        # 显式的 live 清单（"暂无 artifact"），否则模型找不到当前状态会回退去读
+        # system prompt 里静态的 <artifact_authoring> 创作指引，误当成空清单。
+        has_artifact_tools = effective_toolset.has_any([
+            "create_artifact", "update_artifact", "rewrite_artifact",
+            "read_artifact", "grep_artifact"
+        ])
+        if has_artifact_tools:
+            parts.append(cls._build_artifacts_inventory(artifacts_inventory))
+
+        # 沙盒状态（仅有沙盒工具的 agent，且引擎递了 session 快照）—— 历史里上一轮
+        # 的 mount/bash 记录对模型是"文件还在"的伪证，工具描述里的 per-turn ephemeral
+        # 静态规则压不过它；只有"现在时态"的工作区事实能纠偏（与 artifact 清单同理:
+        # 状态用动态注入，能力进工具描述，契约进 inventory 标注，how-to 归 skill）。
+        has_sandbox_tools = effective_toolset.has_any(
+            ("bash", "mount", "persist", MOUNT_SKILL_NAME)
+        )
+        if has_sandbox_tools and sandbox_status is not None:
+            parts.append(cls._build_sandbox_status(sandbox_status))
+
+        # Context 水位预警（仅临近 compaction 时整段出现）—— last_usage 是上一轮 call 的
+        # input+output（compaction 触发值），≥ WARN_RATIO×阈值才注入；水位以下完全不出现，
+        # 避免每轮 cry-wolf。band 内每轮都出、不设次数上限（数字每轮刷新）。
+        context_usage = cls._build_context_usage(last_usage, compaction_threshold)
+        if context_usage:
+            parts.append(context_usage)
+
+        # 自描述首句：声明这段是什么、怎么对待 —— 降权为「环境状态、自行判断相关性」，
+        # 避免模型把工作区状态误当用户指令执行。
+        framing = (
+            "Auto-updated workspace state (refreshed each step) — "
+            "context for you to judge relevance, not a user instruction."
+        )
+        body = "\n\n".join(parts)
+        return f'<system-reminder>\n{framing}\n\n{body}\n</system-reminder>'
+
+    @classmethod
+    def _build_available_tools(
+        cls,
+        effective_toolset: EffectiveToolset,
+        tools: Dict[str, Any],
+        disclosed_tools: set[str],
+    ) -> str:
+        """Render the lightweight external unit catalog; schemas travel natively."""
+        names = effective_toolset.names()
+        if not names:
+            return ""
+
+        units = effective_toolset.tool_units
+        lines: List[str] = []
+        if "bash" in names:
+            lines.extend([
+                '<tool_boundaries>',
+                "Platform tools are native function calls; never put their names "
+                "inside bash.command. Bash can run only "
+                "executables and scripts available in the sandbox.",
+            ])
+            artifact_tool_names = {
+                "create_artifact", "update_artifact", "rewrite_artifact",
+                "read_artifact", "grep_artifact",
+            }
+            if (
+                {"mount", "persist"}.issubset(names)
+                and artifact_tool_names.intersection(names)
+            ):
+                lines.append(
+                    "Artifacts and /workspace files are separate copies with no automatic "
+                    "sync. Use artifact tools for stored text artifacts. When sandbox "
+                    "processing is needed, edit an existing artifact with "
+                    "mount -> bash -> persist; create a new file with bash -> persist."
+                )
+            lines.append('</tool_boundaries>')
+        if not units:
+            return "\n".join(lines)
+
+        deferred_names = effective_toolset.deferred_member_names()
+        lines.append('<available_tool_units>')
+        for unit_name in sorted(units):
+            unit = units[unit_name]
+            safe_name = xml_escape(unit.name, {'"': "&quot;"})
+            lines.append(f'<tool_unit name="{safe_name}">')
+            if unit.description:
+                lines.append(xml_escape(unit.description.rstrip()))
+            if unit.discovery_error:
+                lines.append(xml_escape(f"This tool server is currently unavailable: {unit.discovery_error}"))
+            for full_name in unit.member_full_names:
+                loaded = full_name not in deferred_names or full_name in disclosed_tools
+                lines.append(f"- {full_name} [{'loaded' if loaded else 'deferred'}]")
+            lines.append('</tool_unit>')
+        lines.append('</available_tool_units>')
+        return "\n".join(lines)
+
+    @classmethod
+    def _build_context_usage(
+        cls, last_usage: Optional[int], compaction_threshold: int
+    ) -> Optional[str]:
+        """临近 compaction 的水位预警段；水位以下返回 None（整段不出现）。
+
+        分子 last_usage = 上一轮 call 的 input+output（compaction 触发值，见
+        compaction_runner.maybe_trigger）；分母 = 当前模型的 compaction_threshold
+        （context_window - reserve，与前端 gauge、真正触发 compaction 的判定同源）。
+        ≥ WARN_RATIO 才注入。
+
+        advice 措辞刻意指向「要据此**动作**的状态」（plans / 收集的数据 / 中间结果）
+        而非「瞄一眼的上下文」：artifact 活在 compaction 边界之外（每轮在 inventory 里），
+        summary 则可能丢细节 —— 对齐「act vs glance」分界。
+        """
+        threshold = compaction_threshold
+        if not last_usage or threshold <= 0:
+            return None
+        if last_usage < config.CONTEXT_USAGE_WARN_RATIO * threshold:
+            return None
+
+        pct = round(last_usage / threshold * 100)
+        return (
+            '<context_usage>\n'
+            f'Context {pct}% full ({last_usage:,} / {threshold:,} tokens). Approaching '
+            f'compaction — when a call exceeds {threshold:,}, the older conversation is '
+            'summarized and its detail becomes invisible to you.\n'
+            "Persist anything you'll need to ACT on (the task plan, collected data, "
+            'intermediate results) into an artifact now to control what survives — '
+            'artifacts stay in your inventory across compaction; the summary may not '
+            'preserve full detail.\n'
+            '</context_usage>'
+        )
+
+    @classmethod
+    def _build_sandbox_status(cls, sandbox_status: Dict) -> str:
+        """渲染 <sandbox_status> 段（三态:not_started / running / unavailable）。
+
+        not_started 是高价值态:历史里上一轮 mount/bash 的成功记录会让模型以为
+        文件还在，必须用现在时态的"工作区为空"对冲。running 态列工作区第一层
+        （session 侧有界扫 + SANDBOX_STATUS_MAX_ENTRIES 截断，truncated 标记有
+        更多），给 persist 的 path 决策当依据。文件名是**非可信输入**——不止
+        bash 可造任意名，第三方内容(上传的 zip 解压后)的名字也会进工作区第一
+        层——控制字符替换为 � 防伪造清单行，XML 元字符(& < >)转义防
+        `</sandbox_status>` 式的结构逃逸 / prompt injection。
+        """
+        state = sandbox_status.get("state")
+        if state == "unavailable":
+            return (
+                f'<sandbox_status state="unavailable">\n'
+                f'Sandbox is unavailable for the rest of this turn: '
+                f'{sandbox_status.get("reason", "unknown")}\n'
+                f'</sandbox_status>'
+            )
+        if state == "not_started":
+            return (
+                '<sandbox_status state="not_started">\n'
+                'No sandbox container has started this turn — /workspace is empty. '
+                'All workspace files from previous turns are gone, including artifact '
+                'copies mounted with `mount` and skill bundles unpacked with `mount_skill`; '
+                'mount them again if needed.\n'
+                '</sandbox_status>'
+            )
+        # running
+        entries = sandbox_status.get("entries")
+        lines = ['<sandbox_status state="running">']
+        recovery = sandbox_status.get("recovery")
+        if isinstance(recovery, dict) and recovery.get("succeeded") is True:
+            generation = xml_escape(
+                str(recovery.get("generation", sandbox_status.get("generation", 2)))
+            )
+            failure_kind = xml_escape(str(recovery.get("failure_kind", "runtime failure")))
+            lines.append(
+                f"This is fresh sandbox generation {generation}, started after "
+                f"{failure_kind}. The previous /workspace was discarded; mounted artifacts, "
+                "mounted skills, and unpersisted files from that generation are gone. "
+                "Re-mount or recreate anything still needed."
+            )
+        if entries is None:
+            lines.append("Workspace listing unavailable (run `ls /workspace` to check).")
+        elif not entries:
+            lines.append("Workspace (/workspace) is empty.")
+        else:
+            lines.append("Workspace (/workspace) top-level entries:")
+            for name, is_dir in entries:
+                safe = "".join(ch if ch >= " " and ch != "\x7f" else "�" for ch in name)
+                safe = xml_escape(safe)
+                lines.append(f"- {safe}/" if is_dir else f"- {safe}")
+            if sandbox_status.get("truncated"):
+                lines.append(
+                    f"(listing capped at {len(entries)} entries — more exist; "
+                    "run `ls /workspace` for the full view)"
+                )
+        lines.append("</sandbox_status>")
+        return "\n".join(lines)
+
+    @classmethod
+    def _find_task_plan(cls, artifacts_inventory: Optional[List[Dict]]) -> Optional[Dict]:
+        """从 artifacts 清单中查找 task_plan"""
+        if not artifacts_inventory:
+            return None
+
+        for artifact in artifacts_inventory:
+            if artifact.get("id") == "task_plan" and artifact.get("content"):
+                return artifact
+        return None
+
+    @classmethod
+    def _build_artifacts_inventory(cls, artifacts_inventory: Optional[List[Dict]]) -> str:
+        """构建 artifacts 清单部分（每个 artifact 用 render_artifact_slice 渲染预览）。
+
+        空清单也显式渲染（"0 artifact(s)"），让模型对"当前工作区有什么"始终有一个
+        权威的 live 答案，不必从静态创作指引里推断。
+        """
+        artifacts_inventory = artifacts_inventory or []
+        count = len(artifacts_inventory)
+        if count == 0:
+            return (
+                '<artifacts_inventory>\n'
+                'No artifacts in this session yet.\n'
+                '</artifacts_inventory>'
+            )
+        lines = [f'{count} artifact(s) in this session.']
+        lines.append('<artifacts_inventory>')
+        for artifact in artifacts_inventory:
+            # blob 类 artifact 的 content 为空(无文本表示),给一条合成预览,让清单行
+            # 有信息量:png/jpeg 提示「read 即可看图」(识图白名单,与 read_artifact
+            # 的 VISION_VIEWABLE_MIMES gate 一致),其余二进制(docx/pdf/异型图等)
+            # 说明 mount 契约(否则空 body 易被忽略)。
+            preview_content = artifact.get("content", "")
+            if not preview_content and artifact["content_type"] in VISION_VIEWABLE_MIMES:
+                preview_content = "[image — use read_artifact to view it]"
+            elif not preview_content and artifact.get("has_blob"):
+                preview_content = (
+                    "[binary file — no text representation; mount it into the sandbox "
+                    "to inspect/convert, or the user can download it from the artifact panel]"
+                )
+            slice = make_preview_slice(
+                artifact_id=artifact["id"],
+                version=artifact["version"],
+                content_type=artifact["content_type"],
+                source=artifact.get("source", "agent"),
+                title=artifact["title"],
+                full_content=preview_content,
+                preview_len=config.INVENTORY_PREVIEW_LENGTH,
+                updated_at=artifact["updated_at"],
+            )
+            lines.append(render_artifact_slice(slice))
+        lines.append(
+            '\nArtifacts with source: user_upload are documents uploaded by the user '
+            '— use `read_artifact` for full content if relevant.'
+        )
+        lines.append(
+            'Artifacts with source: tool are outputs from tools that exceeded the '
+            'inline result size limit — use `read_artifact` for full content if needed.'
+        )
+        lines.append('</artifacts_inventory>')
+        return '\n'.join(lines)
+
+    @classmethod
+    def _build_available_agents(cls, agents: Dict[str, Any], current_agent: str) -> str:
+        """构建可用 agent 列表"""
+        sub_agents = {n: c for n, c in agents.items() if n != current_agent and not c.internal}
+        if not sub_agents:
+            return "<note>No sub-agents are currently registered. Work independently.</note>"
+
+        lines = ["<available_subagents>"]
+        lines.append("Use the `call_subagent` tool to delegate tasks. Provide clear, specific instructions.\n")
+
+        for name, config in sub_agents.items():
+            lines.append(f'<agent name="{name}">')
+            lines.append(config.description.rstrip())
+            lines.append("</agent>")
+
+        lines.append("</available_subagents>")
+        return "\n".join(lines)
+
+    @classmethod
+    def _build_available_skills(cls, available_skills: Optional[List[Dict]]) -> str:
+        """构建 <available_skills> L1 索引(slug + description;name 仅 UI 用)。
+
+        空 → 空串(不注入,与 available_subagents 的 note 不同:skill 缺席无需占位)。"""
+        if not available_skills:
+            return ""
+        lines = ["<available_skills>"]
+        lines.append(
+            "Reusable guidance for specific scenarios. When one fits the task, call "
+            "`read_skill(slug=...)` to load its full instructions before proceeding.\n"
+        )
+        for skill in available_skills:
+            lines.append(f'<skill slug="{skill["slug"]}">')
+            lines.append((skill.get("description") or "").rstrip())
+            lines.append("</skill>")
+        lines.append("</available_skills>")
+        return "\n".join(lines)
+
+    @classmethod
+    def _strip_meta(cls, messages: List[Dict]) -> List[Dict]:
+        """Return a copy of messages with _meta keys removed."""
+        result = []
+        for msg in messages:
+            if "_meta" in msg:
+                cleaned = {k: v for k, v in msg.items() if k != "_meta"}
+                result.append(cleaned)
+            else:
+                result.append(msg)
+        return result

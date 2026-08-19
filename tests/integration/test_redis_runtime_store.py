@@ -6,56 +6,17 @@ RedisRuntimeStore 集成测试
 """
 
 import asyncio
-import os
-
 import pytest
 import pytest_asyncio
 
-# 检查 Redis 可用性
-REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
-
-try:
-    import redis.asyncio as aioredis
-    _redis_available = True
-except ImportError:
-    _redis_available = False
-
 pytestmark = [
     pytest.mark.asyncio,
-    pytest.mark.skipif(not _redis_available, reason="redis package not installed"),
+    pytest.mark.external,
 ]
 
 
-async def _check_redis() -> bool:
-    """Check if Redis is reachable."""
-    try:
-        client = aioredis.from_url(REDIS_URL, decode_responses=True)
-        await client.ping()
-        await client.aclose()
-        return True
-    except Exception:
-        return False
-
-
-TEST_PREFIX = "test"
-
-
 @pytest_asyncio.fixture
-async def redis_client():
-    """Provide a Redis client, skip if not available."""
-    if not await _check_redis():
-        pytest.skip("Redis not available")
-    client = aioredis.from_url(REDIS_URL, decode_responses=True)
-    yield client
-    # Cleanup test keys (match {test:...}:* pattern)
-    keys = await client.keys(f"{{{TEST_PREFIX}:*}}:*")
-    if keys:
-        await client.delete(*keys)
-    await client.aclose()
-
-
-@pytest_asyncio.fixture
-async def store(redis_client):
+async def store(redis_client, redis_key_prefix):
     """Provide a RedisRuntimeStore instance."""
     from api.services.redis_runtime_store import RedisRuntimeStore
 
@@ -64,7 +25,7 @@ async def store(redis_client):
         lease_ttl=10,
         execution_timeout=60,
         permission_timeout=30,
-        key_prefix=TEST_PREFIX,
+        key_prefix=redis_key_prefix,
     )
     s.init_scripts()
     return s
@@ -115,13 +76,15 @@ class TestLease:
         await store.release_lease(conv, "msg-own")
         assert await store.get_lease_owner(conv) is None
 
-    async def test_cleanup_execution_clears_owner(self, store):
+    async def test_explicit_cleanup_clears_owner_state(self, store):
         from utils.instance import INSTANCE_ID
 
         conv = "test_conv_owner_cleanup"
         await store.try_acquire_lease(conv, "msg-oc")
         assert await store.get_lease_owner(conv) == INSTANCE_ID
-        await store.cleanup_execution(conv, "msg-oc")
+        await store.cleanup_message_state("msg-oc")
+        await store.clear_engine_interactive(conv, "msg-oc")
+        await store.release_lease(conv, "msg-oc")
         assert await store.get_lease_owner(conv) is None
 
     async def test_list_active_executions_pairs_conv_with_msg(self, store):
@@ -204,6 +167,22 @@ class TestLease:
         assert await store.get_interactive_message_id(conv) == "owner-C"
         assert await store.mark_engine_interactive(conv, "owner-A") is False
         assert await store.get_interactive_message_id(conv) == "owner-C"  # stale mark didn't clobber
+
+    async def test_stale_clear_and_release_do_not_touch_replacement_owner(self, store):
+        """Late callbacks from an expired owner are CAS no-ops after takeover."""
+        conv = "test_conv_stale_cleanup"
+        await store.try_acquire_lease(conv, "owner-old")
+        assert await store.mark_engine_interactive(conv, "owner-old") is True
+
+        await store.release_lease(conv, "owner-old")
+        await store.try_acquire_lease(conv, "owner-new")
+        assert await store.mark_engine_interactive(conv, "owner-new") is True
+
+        await store.clear_engine_interactive(conv, "owner-old")
+        await store.release_lease(conv, "owner-old")
+
+        assert await store.get_leased_message_id(conv) == "owner-new"
+        assert await store.get_interactive_message_id(conv) == "owner-new"
 
 
 class TestLeaseAtomicity:
@@ -390,12 +369,14 @@ class TestMessageQueue:
 
 
 class TestCleanup:
-    async def test_cleanup_execution(self, store):
+    async def test_cleanup_message_state(self, store):
         await store.try_acquire_lease("test_conv_clean", "test_msg_clean")
         await store.mark_engine_interactive("test_conv_clean", "test_msg_clean")
         await store.inject_message("test_msg_clean", "data")
 
-        await store.cleanup_execution("test_conv_clean", "test_msg_clean")
+        await store.cleanup_message_state("test_msg_clean")
+        await store.clear_engine_interactive("test_conv_clean", "test_msg_clean")
+        await store.release_lease("test_conv_clean", "test_msg_clean")
 
         assert await store.get_leased_message_id("test_conv_clean") is None
         assert await store.get_interactive_message_id("test_conv_clean") is None

@@ -85,8 +85,7 @@ class MessageEventRepository:
             # Not a duplicate — re-raise the real integrity error
             raise
 
-        # 提到 INFO:events persist 是事故诊断必需的耐久性边界(对齐 CLAUDE.md
-        # "events persist unconditionally"不变量)。N 个事件这种小尺寸字段可常驻 INFO。
+        # 提到 INFO：事件持久化是事故诊断必需的耐久性边界，且这批小尺寸字段可常驻 INFO。
         logger.info(f"Batch created {len(db_events)} message events")
         return db_events
 

@@ -5,7 +5,9 @@ import uuid
 import pytest
 from httpx import AsyncClient
 
-from api.dependencies import get_execution_runner, get_stream_transport
+from api.dependencies import get_runtime_store, get_stream_transport
+from config import config
+from core.management.conversation_manager import ConversationManager
 from db.database import DatabaseManager
 from db.models import User
 from repositories.conversation_repo import ConversationRepository
@@ -39,14 +41,151 @@ async def observed_conversation(
 
 
 async def _make_active(app, conv_id: str, message_id: str, owner_id: str):
-    runner = app.dependency_overrides[get_execution_runner]()
+    store = app.dependency_overrides[get_runtime_store]()
     transport = app.dependency_overrides[get_stream_transport]()
-    assert await runner.store.try_acquire_lease(conv_id, message_id) is None
+    assert await store.try_acquire_lease(conv_id, message_id) is None
     await transport.create_stream(message_id, owner_user_id=owner_id)
-    return runner, transport
+    return store, transport
 
 
 class TestAdminConversationActivity:
+    async def test_privacy_mode_redacts_owner_and_upload_references(
+        self,
+        monkeypatch,
+        admin_client: AsyncClient,
+        test_user: User,
+        observed_conversation: tuple[str, str],
+    ):
+        monkeypatch.setattr(config, "ADMIN_PRIVACY_MODE", True)
+        conv_id, _ = observed_conversation
+
+        listing = await admin_client.get("/api/v1/admin/conversations")
+        assert listing.status_code == 200
+        summary = next(
+            item for item in listing.json()["conversations"] if item["id"] == conv_id
+        )
+        assert summary["user_id"] is None
+        assert summary["user_display_name"] == "匿名用户"
+
+        detail = await admin_client.get(f"/api/v1/admin/conversations/{conv_id}/events")
+        assert detail.status_code == 200
+        body = detail.json()
+        assert body["user_id"] is None
+        assert body["user_display_name"] == "匿名用户"
+        assert body["messages"][0]["uploaded_files"] == [{
+            "id": None,
+            "filename": "上传文件 1",
+            "content_accessible": False,
+        }]
+        assert "Brief.docx" not in detail.text
+        assert test_user.id not in detail.text
+
+    async def test_privacy_mode_disables_owner_filter(
+        self,
+        monkeypatch,
+        admin_client: AsyncClient,
+        test_user: User,
+    ):
+        monkeypatch.setattr(config, "ADMIN_PRIVACY_MODE", True)
+        response = await admin_client.get(
+            "/api/v1/admin/conversations",
+            params={"user_id": test_user.id},
+        )
+        assert response.status_code == 400
+
+    async def test_privacy_mode_keeps_prompt_reconstruction(
+        self,
+        monkeypatch,
+        admin_client: AsyncClient,
+        observed_conversation: tuple[str, str],
+    ):
+        monkeypatch.setattr(config, "ADMIN_PRIVACY_MODE", True)
+        conv_id, message_id = observed_conversation
+
+        async def reconstruct_prompt(
+            _self,
+            requested_conv_id,
+            requested_message_id,
+            event_id,
+        ):
+            return {
+                "conversation_id": requested_conv_id,
+                "message_id": requested_message_id,
+                "agent_start_event_id": event_id,
+                "agent_name": "lead_agent",
+                "model": "test-model",
+                "exposed_tool_names": ["read_artifact"],
+                "has_reminder": True,
+                "messages": [
+                    {"role": "system", "content": "system"},
+                    {"role": "user", "content": "diagnostic prompt snapshot"},
+                ],
+            }
+
+        monkeypatch.setattr(
+            ConversationManager,
+            "reconstruct_prompt",
+            reconstruct_prompt,
+        )
+
+        response = await admin_client.get(
+            f"/api/v1/admin/conversations/{conv_id}/messages/{message_id}/reconstruct",
+            params={"agent_start_event_id": "evt-anchor"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["messages"][-1]["content"] == "diagnostic prompt snapshot"
+
+    async def test_privacy_mode_keeps_full_llm_call_reconstruction(
+        self,
+        monkeypatch,
+        admin_client: AsyncClient,
+        observed_conversation: tuple[str, str],
+    ):
+        monkeypatch.setattr(config, "ADMIN_PRIVACY_MODE", True)
+        conv_id, message_id = observed_conversation
+
+        async def reconstruct_llm_call(
+            _self,
+            requested_conv_id,
+            requested_message_id,
+            event_id,
+        ):
+            return {
+                "conversation_id": requested_conv_id,
+                "message_id": requested_message_id,
+                "agent_start_event_id": "evt-start",
+                "llm_complete_event_id": event_id,
+                "agent_name": "lead_agent",
+                "model": "test-model",
+                "exposed_tool_names": [],
+                "has_reminder": True,
+                "messages": [
+                    {"role": "system", "content": "system"},
+                    {"role": "user", "content": "question"},
+                ],
+                "response": {
+                    "content": "final answer",
+                    "reasoning_content": "diagnostic reasoning",
+                    "tool_calls": [],
+                },
+            }
+
+        monkeypatch.setattr(
+            ConversationManager,
+            "reconstruct_llm_call",
+            reconstruct_llm_call,
+        )
+
+        response = await admin_client.get(
+            f"/api/v1/admin/conversations/{conv_id}/messages/{message_id}/reconstruct-call",
+            params={"llm_complete_event_id": "evt-llm"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["llm_complete_event_id"] == "evt-llm"
+        assert response.json()["response"]["content"] == "final answer"
+
     async def test_list_and_detail_expose_active_message_id(
         self,
         app,
@@ -55,7 +194,7 @@ class TestAdminConversationActivity:
         observed_conversation: tuple[str, str],
     ):
         conv_id, message_id = observed_conversation
-        runner, transport = await _make_active(app, conv_id, message_id, test_user.id)
+        store, transport = await _make_active(app, conv_id, message_id, test_user.id)
         try:
             listing = await admin_client.get("/api/v1/admin/conversations")
             assert listing.status_code == 200
@@ -72,11 +211,15 @@ class TestAdminConversationActivity:
             assert detail.json()["is_active"] is True
             assert detail.json()["active_message_id"] == message_id
             assert detail.json()["messages"][0]["uploaded_files"] == [
-                {"id": "brief.docx", "filename": "Brief.docx"},
+                {
+                    "id": "brief.docx",
+                    "filename": "Brief.docx",
+                    "content_accessible": True,
+                },
             ]
         finally:
             await transport.close_stream(message_id)
-            await runner.store.release_lease(conv_id, message_id)
+            await store.release_lease(conv_id, message_id)
 
     async def test_admin_can_subscribe_to_owner_stream(
         self,
@@ -87,7 +230,7 @@ class TestAdminConversationActivity:
         observed_conversation: tuple[str, str],
     ):
         conv_id, message_id = observed_conversation
-        runner, transport = await _make_active(app, conv_id, message_id, test_user.id)
+        store, transport = await _make_active(app, conv_id, message_id, test_user.id)
         await transport.push_event(message_id, {
             "type": "agent_start",
             "timestamp": "2026-07-13T00:00:00",
@@ -130,7 +273,84 @@ class TestAdminConversationActivity:
             assert "event: complete" in response.text
         finally:
             await transport.close_stream(message_id)
-            await runner.store.release_lease(conv_id, message_id)
+            await store.release_lease(conv_id, message_id)
+
+    async def test_privacy_mode_suppresses_artifact_events_in_admin_stream(
+        self,
+        monkeypatch,
+        app,
+        admin_client: AsyncClient,
+        test_user: User,
+        observed_conversation: tuple[str, str],
+    ):
+        monkeypatch.setattr(config, "ADMIN_PRIVACY_MODE", True)
+        conv_id, message_id = observed_conversation
+        store, transport = await _make_active(app, conv_id, message_id, test_user.id)
+        await transport.push_event(message_id, {
+            "type": "metadata",
+            "timestamp": "2026-07-13T00:00:00",
+            "data": {
+                "conversation_id": conv_id,
+                "message_id": message_id,
+                "uploaded_files": [{"filename": "Payroll-Alice.xlsx"}],
+            },
+        })
+        await transport.push_event(message_id, {
+            "type": "artifact_created",
+            "timestamp": "2026-07-13T00:00:01",
+            "data": {
+                "id": "payroll-alice",
+                "title": "Payroll-Alice.xlsx",
+                "source": "user_upload",
+                "original_filename": "Payroll-Alice.xlsx",
+                "content": "private-created-content",
+            },
+        })
+        await transport.push_event(message_id, {
+            "type": "artifact_updated",
+            "timestamp": "2026-07-13T00:00:02",
+            "data": {
+                "id": "payroll-alice",
+                "content": "private-updated-content",
+                "delta": {
+                    "offset": 0,
+                    "deleted_len": 0,
+                    "inserted_text": "private-delta-content",
+                },
+            },
+        })
+        await transport.push_event(message_id, {
+            "type": "tool_complete",
+            "timestamp": "2026-07-13T00:00:03",
+            "data": {
+                "tool": "read_artifact",
+                "success": True,
+                "result_data": "semantic-diagnostic-content",
+            },
+        })
+        await transport.push_event(message_id, {
+            "type": "complete",
+            "timestamp": "2026-07-13T00:00:04",
+            "data": {"success": True, "message_id": message_id},
+        })
+        try:
+            response = await admin_client.get(
+                f"/api/v1/admin/conversations/{conv_id}/stream"
+            )
+            assert response.status_code == 200
+            assert "Payroll-Alice.xlsx" not in response.text
+            assert "payroll-alice" not in response.text
+            assert "private-created-content" not in response.text
+            assert "private-updated-content" not in response.text
+            assert "private-delta-content" not in response.text
+            assert "上传文件 1" in response.text
+            assert "event: artifact_created" not in response.text
+            assert "event: artifact_updated" not in response.text
+            assert "event: tool_complete" in response.text
+            assert "semantic-diagnostic-content" in response.text
+        finally:
+            await transport.close_stream(message_id)
+            await store.release_lease(conv_id, message_id)
 
     async def test_regular_user_cannot_open_admin_stream(
         self,

@@ -1,4 +1,4 @@
-"""Skill 数据访问(纯读 C-2 + 导入/删除写 E-2)。
+"""Skill 数据访问：可见性读取 + 导入/删除写入。
 
 三层职责模型的 Repository 层:只取数、不做业务/格式化,ORM 不外逃(返回标量 /
 plain dict / set)。可见性解析(EffectiveSkillSet)、CRUD 编排在上层 Manager。
@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import DepartmentSkillRule, Skill, User, UserSkill
+from repositories.base import DuplicateError
 
 
 class SkillRepository:
@@ -53,7 +54,7 @@ class SkillRepository:
         ).scalar_one_or_none()
 
     async def get_user_bundle_bytes(self, user_id: str) -> int:
-        """该用户私有 skill bundle 的总字节(导入配额记账,E-2)。与 artifact blob 共用
+        """该用户私有 skill bundle 的总字节（导入配额记账）。与 artifact blob 共用
         一个池(config.ARTIFACT_USER_QUOTA_BYTES),聚合口径在 ConversationManager.
         get_user_upload_bytes —— 此处只出 skill 一侧的加数。"""
         return int((
@@ -163,6 +164,35 @@ class SkillRepository:
             statement = statement.with_for_update()
         return (await self._session.execute(statement)).scalar_one_or_none()
 
+    async def get_shared_skill_detail(self, identifier: str) -> Optional[dict]:
+        """Shared-catalog preview projection, excluding the potentially large bundle."""
+        columns = (
+            Skill.id,
+            Skill.slug,
+            Skill.name,
+            Skill.description,
+            Skill.skill_md,
+            Skill.source,
+            Skill.visibility,
+            Skill.has_extra_files,
+        )
+        filters = (
+            Skill.owner_user_id.is_(None),
+            Skill.visibility.in_(["public", "department"]),
+        )
+        row = (
+            await self._session.execute(
+                select(*columns).where(Skill.id == identifier, *filters)
+            )
+        ).one_or_none()
+        if row is None:
+            row = (
+                await self._session.execute(
+                    select(*columns).where(Skill.slug == identifier, *filters)
+                )
+            ).one_or_none()
+        return dict(row._mapping) if row is not None else None
+
     async def scope_slug_exists(self, slug: str, owner_user_id: Optional[str]) -> bool:
         namespace_key = owner_user_id or ""
         return (
@@ -174,15 +204,19 @@ class SkillRepository:
             )
         ).scalar_one_or_none() is not None
 
-    def stage_insert_skill(self, **fields) -> None:
-        """stage 一行新 skill(commit 归 Manager;并发撞 slug 由 commit 的
-        IntegrityError 暴露,Manager 折成 409)。"""
+    async def insert_skill(self, **fields) -> None:
+        """Insert and commit one skill, normalizing concurrent slug collisions."""
         self._session.add(Skill(**fields))
+        try:
+            await self._session.commit()
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise DuplicateError("Skill", fields.get("slug")) from exc
 
     async def delete_skill(self, skill_id: str) -> None:
-        """stage 删除(commit 归 Manager)。user_skill / dept 规则由 DB FK CASCADE 清,
-        零 app-side 清理。"""
+        """Delete one skill; related rules disappear through FK cascades."""
         await self._session.execute(delete(Skill).where(Skill.id == skill_id))
+        await self._session.commit()
 
     async def clear_dept_rules(self, skill_id: str) -> None:
         """Clear department rules for one skill when its visibility changes."""
@@ -190,9 +224,12 @@ class SkillRepository:
             delete(DepartmentSkillRule).where(DepartmentSkillRule.skill_id == skill_id)
         )
 
+    async def commit_changes(self) -> None:
+        """Commit mutations of rows loaded by this repository."""
+        await self._session.commit()
+
     async def set_user_override(self, user_id: str, skill_id: str, enabled: bool) -> None:
-        """Upsert user_skill 稀疏覆盖行(个人 enable/disable)。stage-only,commit 归 Manager
-        (事务边界 = 每个 use-case,同 ToolRegistryManager)。
+        """Upsert and commit one sparse personal enable/disable override.
 
         SELECT→INSERT 非原子:两请求(两标签页/重试客户端)同用户同 skill 首次并发 toggle 会
         都读到 None、都 insert → 后者撞复合 PK IntegrityError。捕获 → rollback → 重读改 UPDATE
@@ -226,3 +263,4 @@ class SkillRepository:
             await self._session.rollback()
             await _apply()
             await self._session.flush()
+        await self._session.commit()

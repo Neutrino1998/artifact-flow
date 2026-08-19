@@ -17,14 +17,15 @@ import os
 from typing import Dict, Any, Optional
 from datetime import datetime
 from contextlib import asynccontextmanager
+from uuid import uuid4
 
-from core.controller import ExecutionController
-from core.effective_toolset import resolve_all
+from api.services.conversation_turn_handler import ConversationTurnHandler
+from core.capabilities.effective_toolset import resolve_all
 from reconcile.reconciler import reconcile_config_to_db
 from reconcile.snapshot import load_registry_snapshot
-from core.engine import EngineHooks
-from core.events import StreamEventType
-from core.conversation_manager import ConversationManager
+from core.execution.agent_runtime import RuntimeHooks
+from core.management.conversation_manager import ConversationManager
+from core.execution.events import StreamEventType
 from agents.loader import load_all_agents
 from tools.base import BaseTool, build_tool_map
 from tools.builtin.artifact_service import ArtifactService
@@ -32,14 +33,14 @@ from tools.builtin.artifact_ops import create_artifact_tools
 from tools.builtin.call_subagent import CallSubagentTool
 from tools.builtin.web_search import WebSearchTool
 from tools.builtin.web_fetch import WebFetchTool
-from api.services.execution_runner import ExecutionRunner
 from api.services.runtime_store import InMemoryRuntimeStore
 from db.database import DatabaseManager
-from repositories.artifact_repo import ArtifactRepository
 from repositories.conversation_repo import ConversationRepository
 from utils.logger import set_global_debug
 
 set_global_debug(True)
+
+_AUTO_PARENT = object()
 
 
 # ============================================================
@@ -227,13 +228,13 @@ class TestEnvironment:
     测试环境管理器
 
     模拟 API 层的依赖注入模式：
-    - db_manager 和 execution_runner 是全局共享的
-    - 每个 "请求" 通过 request_scope() 获得独立的 session/manager/controller
+    - db_manager 和 runtime_store 是全局共享的
+    - 每个 "请求" 通过 request_scope() 获得独立的 turn handler
     """
 
     def __init__(self):
         self.db_manager: Optional[DatabaseManager] = None
-        self.runner: Optional[ExecutionRunner] = None
+        self.store: Optional[InMemoryRuntimeStore] = None
         self._tools: Optional[Dict[str, BaseTool]] = None
 
     async def setup(self):
@@ -241,8 +242,8 @@ class TestEnvironment:
         self.db_manager = DatabaseManager("sqlite+aiosqlite:///:memory:")
         await self.db_manager.initialize()
 
-        # 2. config → DB 物化(镜像 prod 的 reconcile;harness 跑 B-2 真路径 = 引擎
-        #    从 DB 快照消费,而非进程级 load_all_agents/load_custom_tools)
+        # 2. config → DB 物化，镜像 prod 的 reconcile；harness 从 DB 快照走引擎真实
+        #    路径，而非进程级 load_all_agents/load_custom_tools。
         root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         async with self.db_manager.session() as session:
             await reconcile_config_to_db(
@@ -262,54 +263,83 @@ class TestEnvironment:
         builtin = [CallSubagentTool(valid_agents=valid_agents), WebSearchTool(), WebFetchTool()]
         self._tools = build_tool_map(builtin, [])
 
-        # 4. ExecutionRunner + RuntimeStore
-        self.runner = ExecutionRunner(max_concurrent=5, store=InMemoryRuntimeStore())
+        # 4. RuntimeStore（本手动 harness 直接驱动 Handler，不需要 task supervision）
+        self.store = InMemoryRuntimeStore()
 
         return self
 
     @asynccontextmanager
     async def request_scope(self):
-        """每个调用产出独立的 session + controller"""
-        store = self.runner.store
+        """每个调用产出与生产一致的短-session turn handler。"""
+        store = self.store
 
         async with self.db_manager.session() as session:
-            artifact_repo = ArtifactRepository(session)
-            artifact_service = ArtifactService(artifact_repo)
-
-            # 每请求 DB 快照(镜像 controller_factory):agents + external 工具从 DB 重建,
+            # 每请求 DB 快照(镜像 conversation_turn_factory):agents + external 工具从 DB 重建,
             # 合并进程级 builtin + 请求级 artifact 工具,resolve_all 出 effective_toolsets。
-            snapshot = await load_registry_snapshot(session)
-            all_tools = {
-                **self._tools,
-                **snapshot.external_tools,
-                **{t.name: t for t in create_artifact_tools(artifact_service)},
-            }
-            agents = snapshot.agents
-            effective_toolsets = resolve_all(snapshot, all_tools)
+            snapshot = await load_registry_snapshot(session, db_manager=self.db_manager)
 
-            conv_repo = ConversationRepository(session)
-            conv_manager = ConversationManager(conv_repo)
+        # Snapshot session closes before model/tool execution. All later DB touches use
+        # db_manager.with_retry short sessions, matching conversation_turn_factory.
+        artifact_service = ArtifactService(db_manager=self.db_manager)
+        all_tools = {
+            **self._tools,
+            **snapshot.external_tools,
+            **{t.name: t for t in create_artifact_tools(artifact_service)},
+        }
+        agents = snapshot.agents
+        effective_toolsets = resolve_all(snapshot, all_tools)
 
-            hooks = EngineHooks(
-                check_cancelled=store.is_cancelled,
-                wait_for_interrupt=store.wait_for_interrupt,
-                drain_messages=store.drain_messages,
-            )
+        hooks = RuntimeHooks(
+            check_cancelled=store.is_cancelled,
+            wait_for_interrupt=store.wait_for_interrupt,
+            drain_messages=store.drain_messages,
+        )
 
-            controller = ExecutionController(
-                agents=agents,
-                tools=all_tools,
-                effective_toolsets=effective_toolsets,
-                hooks=hooks,
-                artifact_service=artifact_service,
-                conversation_manager=conv_manager,
-            )
+        handler = ConversationTurnHandler(
+            agents=agents,
+            tools=all_tools,
+            effective_toolsets=effective_toolsets,
+            hooks=hooks,
+            artifact_service=artifact_service,
+            db_manager=self.db_manager,
+        )
 
-            yield controller
+        yield handler
+
+    async def run_turn(
+        self,
+        handler: ConversationTurnHandler,
+        *,
+        user_input: str,
+        conversation_id: Optional[str] = None,
+        parent_message_id: object = _AUTO_PARENT,
+    ):
+        """Manual Admission adapter before invoking the admitted turn handler."""
+        conv_id = conversation_id or f"conv-{uuid4().hex}"
+        message_id = f"msg-{uuid4().hex}"
+
+        async def admit(session):
+            manager = ConversationManager(ConversationRepository(session))
+            if conversation_id is None:
+                await manager.create(conv_id, user_id=None)
+            else:
+                await manager.require_owned(conv_id, None)
+            if parent_message_id is _AUTO_PARENT:
+                return await manager.get_active_branch(conv_id)
+            return parent_message_id
+
+        resolved_parent = await self.db_manager.with_retry(admit)
+        async for event in handler.run(
+            user_input=user_input,
+            conversation_id=conv_id,
+            message_id=message_id,
+            parent_message_id=resolved_parent,
+        ):
+            yield event
 
     async def cleanup(self):
-        if self.runner:
-            await self.runner.shutdown()
+        if self.store:
+            await self.store.shutdown_cleanup()
         if self.db_manager:
             await self.db_manager.close()
         print("Test environment cleaned up")
@@ -330,9 +360,9 @@ async def demo_basic():
         handler = StreamEventHandler(verbose=True)
 
         print("\n用户: Hello! What can you do? (Keep your response brief, 2 sentences max)")
-        async with env.request_scope() as controller:
+        async with env.request_scope() as turn_handler:
             await handler.process_stream(
-                controller.stream_execute(
+                env.run_turn(turn_handler,
                     user_input="Hello! What can you do? (Keep your response brief, 2 sentences max)"
                 )
             )
@@ -353,17 +383,17 @@ async def demo_multi_turn():
 
         # 第一轮
         print("\n用户: 什么是量子计算？请简要回答，3句话以内。")
-        async with env.request_scope() as controller:
+        async with env.request_scope() as turn_handler:
             result1 = await handler.process_stream(
-                controller.stream_execute(user_input="什么是量子计算？请简要回答，3句话以内。")
+                env.run_turn(turn_handler, user_input="什么是量子计算？请简要回答，3句话以内。")
             )
             conv_id = result1["conversation_id"]
 
         # 第二轮（同一 conversation_id）
         print("\n用户: 它和经典计算有什么区别？同样简要回答。")
-        async with env.request_scope() as controller:
+        async with env.request_scope() as turn_handler:
             result2 = await handler.process_stream(
-                controller.stream_execute(
+                env.run_turn(turn_handler,
                     user_input="它和经典计算有什么区别？同样简要回答。",
                     conversation_id=conv_id,
                 )
@@ -387,17 +417,17 @@ async def demo_artifact():
 
         # 第一轮：给出内容
         print("\n用户: Python 的 async/await 是什么？简要解释。")
-        async with env.request_scope() as controller:
+        async with env.request_scope() as turn_handler:
             result1 = await handler.process_stream(
-                controller.stream_execute(user_input="Python 的 async/await 是什么？简要解释。")
+                env.run_turn(turn_handler, user_input="Python 的 async/await 是什么？简要解释。")
             )
             conv_id = result1["conversation_id"]
 
         # 第二轮：要求整理到 artifact
         print("\n用户: 帮我整理到 artifact 中")
-        async with env.request_scope() as controller:
+        async with env.request_scope() as turn_handler:
             result2 = await handler.process_stream(
-                controller.stream_execute(
+                env.run_turn(turn_handler,
                     user_input="帮我整理到 artifact 中",
                     conversation_id=conv_id,
                 )
@@ -417,7 +447,7 @@ async def demo_permission():
     env = await TestEnvironment().setup()
     try:
         handler = StreamEventHandler(verbose=True)
-        store = env.runner.store
+        store = env.store
 
         # 发送会触发 web_fetch 的消息
         print("\n用户: 请抓取 https://example.com 的内容")
@@ -449,9 +479,9 @@ async def demo_permission():
 
         approve_task = asyncio.create_task(auto_approve())
 
-        async with env.request_scope() as controller:
+        async with env.request_scope() as turn_handler:
             result = await handler.process_stream(
-                controller.stream_execute(
+                env.run_turn(turn_handler,
                     user_input="请抓取 https://example.com 的内容"
                 )
             )
@@ -477,18 +507,18 @@ async def demo_branch():
 
         # 第一条消息
         print("\n用户: 计算 15 + 28 等于多少")
-        async with env.request_scope() as controller:
+        async with env.request_scope() as turn_handler:
             result1 = await handler.process_stream(
-                controller.stream_execute(user_input="计算 15 + 28 等于多少")
+                env.run_turn(turn_handler, user_input="计算 15 + 28 等于多少")
             )
             conv_id = result1["conversation_id"]
             msg1_id = result1["message_id"]
 
         # 第二条消息：继续主线
         print("\n用户: 再乘以 2")
-        async with env.request_scope() as controller:
+        async with env.request_scope() as turn_handler:
             result2 = await handler.process_stream(
-                controller.stream_execute(
+                env.run_turn(turn_handler,
                     user_input="再乘以 2",
                     conversation_id=conv_id,
                 )
@@ -497,9 +527,9 @@ async def demo_branch():
         # 第三条消息：从 msg1 创建分支
         print("\n从第一条消息创建分支...")
         print("用户: 再减去一万")
-        async with env.request_scope() as controller:
+        async with env.request_scope() as turn_handler:
             result3 = await handler.process_stream(
-                controller.stream_execute(
+                env.run_turn(turn_handler,
                     user_input="再减去一万",
                     conversation_id=conv_id,
                     parent_message_id=msg1_id,  # 从 msg1 分支

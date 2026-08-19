@@ -1,11 +1,11 @@
 """
 ErrorCounterHandler — 进程内 ERROR 日志计数器
 
-Phase C 心跳字段之一:实例面板的「黄色」信号里包含「近期是否出过 ERROR」。
+实例心跳字段之一：面板的「黄色」信号里包含「近期是否出过 ERROR」。
 用一个挂在 `ArtifactFlow` logger 上的 `logging.Handler` 累计 ERROR+ 记录数 + 最近
 一次时间戳,心跳每次采样时读一份写进 `{af:instance:<id>}`。
 
-为什么挂 `ArtifactFlow` 而非 root:root 会连带第三方库(litellm / sqlalchemy /
+为什么挂 `ArtifactFlow` 而非 root:root 会连带第三方库(openai / sqlalchemy /
 asyncpg)的 ERROR 一起计,那些不是「本服务出错」的信号,会把黄色噪声化。应用自身
 统一走 `get_logger("ArtifactFlow")`(及其子 logger,propagate 默认 True 会上浮到
 这里的 handler),所以挂在这一层既全又不掺外部噪声。

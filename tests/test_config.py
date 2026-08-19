@@ -1,6 +1,6 @@
 """Tests for config.validate_config() — startup-time config assertions.
 
-Focused on the DEP-01 CORS footgun guard: CORS_ALLOW_CREDENTIALS=True combined
+Focused on the CORS footgun guard: CORS_ALLOW_CREDENTIALS=True combined
 with a '*' entry in CORS_ORIGINS makes Starlette reflect the request Origin,
 turning an env misconfig into "any site may read authenticated responses".
 """
@@ -29,7 +29,7 @@ def _valid_prereqs(monkeypatch):
 
 
 def test_missing_credential_key_is_rejected(_valid_prereqs, monkeypatch):
-    # B-4: the credential master key is mandatory (mirrors JWT_SECRET) — required even
+    # The credential master key is mandatory (mirrors JWT_SECRET) — required even
     # with no credentialed tools, so the runtime never carries a missing-key branch.
     monkeypatch.setattr(config, "CREDENTIAL_KEY", "")
     with pytest.raises(RuntimeError, match="ARTIFACTFLOW_CREDENTIAL_KEY"):

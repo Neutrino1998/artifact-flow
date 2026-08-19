@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useState, useRef, useEffect, useCallback } from 'react';
-import { useChat } from '@/hooks/useChat';
+import { useChat } from '@/features/chat/runtime/useChat';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { useStreamStore } from '@/stores/streamStore';
 import { BUTTON_PRIMARY } from '@/lib/styles';

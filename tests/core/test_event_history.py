@@ -9,8 +9,8 @@ Covers:
 - meta attachment on llm_complete
 """
 
-from core.event_history import build_event_history
-from core.events import ExecutionEvent, StreamEventType
+from core.execution.event_history import build_event_history
+from core.execution.events import ExecutionEvent, StreamEventType
 
 
 def _ev(event_type, agent_name="lead_agent", data=None, is_historical=False):

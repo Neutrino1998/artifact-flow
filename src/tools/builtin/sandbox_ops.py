@@ -1,11 +1,11 @@
 """
-沙盒工具(模型面)— C 阶段
+沙盒工具（模型面）
 
-三个分立动词(bash / mount / persist)共享一个 per-turn SandboxSession
-(拍定 2026-06-03:分立参数面更小、对小模型更可读;共享 session 是实现层事实)。
+三个分立动词(bash / mount / persist)共享一个 per-turn SandboxSession。
+分立参数面更小、对小模型更可读；共享 session 是实现层事实。
 lazy 创建 key 在「首个沙盒工具调用」—— mount 也会起容器(模型可能先 mount 再 bash)。
 
-工厂 create_sandbox_tools 由 controller_factory 按请求调用(同
+工厂 create_sandbox_tools 由 conversation_turn_factory 按请求调用(同
 create_artifact_tools idiom),session / artifact_service 构造注入。
 
 staging 走宿主直写直读(mount 写 / persist 读 session.workspace_dir),不走
@@ -19,7 +19,7 @@ import os
 from typing import List, Optional, Tuple
 
 from config import config
-from tools.base import BaseTool, ToolPermission, ToolResult
+from tools.base import BaseTool, ToolExecutionContext, ToolPermission, ToolResult
 from tools.builtin import sandbox_fs
 from tools.builtin.artifact_service import ArtifactService
 from tools.builtin.sandbox_session import (
@@ -47,10 +47,12 @@ class BashTool(BaseTool):
       idiom 接手,引擎零改动。
     """
 
+    wants_context = True
+
     def __init__(self, session: SandboxSession):
         # 能力清单按镜像现状列全(python 科学栈+文档栈/LibreOffice/pandoc/ripgrep/zip/unrar-free/git)。版本号刻意
-        # 不写 —— 会与镜像漂移,且非模型决策所需(CLAUDE.md:一次性事实进描述、
-        # 克制噪声)。场景 how-to 留 skill 系统。git 仅本地仓库操作(无网下
+        # 不写 —— 会与镜像漂移，且非模型决策所需；一次性事实进描述即可。
+        # 场景 how-to 留 skill 系统。git 仅本地仓库操作(无网下
         # clone/fetch 死属 by design,描述里无网已声明,不重复)。
         super().__init__(
             name="bash",
@@ -89,12 +91,25 @@ class BashTool(BaseTool):
             "additionalProperties": False,
         }
 
-    async def execute(self, command: str) -> ToolResult:
+    async def execute(
+        self,
+        command: str,
+        _context: Optional[ToolExecutionContext] = None,
+    ) -> ToolResult:
         if not command.strip():
             return ToolResult(success=False, error="Parameter 'command' must not be empty.")
+        if _context is None:
+            logger.error("bash requires engine execution context but none was injected")
+            return ToolResult(
+                success=False,
+                error="bash requires engine execution context but none was injected.",
+            )
 
         try:
-            result = await self._session.exec(command)
+            result = await self._session.exec(
+                command,
+                model_invocation_epoch=_context.model_invocation_epoch,
+            )
         except SandboxError as e:
             # session 侧记 ops 原始错误；有界证据走 metadata 留给 admin，
             # 不拼进模型面错误文案。
@@ -127,16 +142,18 @@ class BashTool(BaseTool):
 
 
 class MountArtifactTool(BaseTool):
-    """把一个 artifact 物化进沙盒工作区(显式 stage-in,原则 4)。
+    """把一个 artifact 显式物化进沙盒工作区（stage-in）。
 
     - 文本 artifact:WorkingSet overlay 的当前内容(本轮 dirty/new 必须可 mount,
       直读 DB 是空的)按 UTF-8 写盘;blob artifact:原始字节(本轮 staged 上传
       经 get_blob 读 ArtifactMemory.blob,其余走 DB)。格式判别 = 有无 blob。
-    - on-disk 名 = artifact id(决策 2:id 已是 fs-safe 句柄);重复 mount 同一
+    - on-disk 名 = artifact id（已是 fs-safe 句柄）；重复 mount 同一
       id = 刷新副本(覆写)。
     - 返回纯事实(容器内路径/字节/MIME);"binary 须 mount" 的契约文案归
       inventory/read_artifact(C-wire),场景 how-to 归 skill。
     """
+
+    wants_context = True
 
     def __init__(self, session: SandboxSession, service: ArtifactService):
         super().__init__(
@@ -167,10 +184,26 @@ class MountArtifactTool(BaseTool):
             "additionalProperties": False,
         }
 
-    async def execute(self, artifact_id: str) -> ToolResult:
+    async def execute(
+        self,
+        artifact_id: str,
+        _context: Optional[ToolExecutionContext] = None,
+    ) -> ToolResult:
         artifact_id = artifact_id.strip()
         if not artifact_id:
             return ToolResult(success=False, error="Parameter 'artifact_id' must not be empty.")
+        if _context is None:
+            logger.error("mount requires engine execution context but none was injected")
+            return ToolResult(
+                success=False,
+                error="mount requires engine execution context but none was injected.",
+            )
+        try:
+            self._session.require_fresh_invocation(
+                _context.model_invocation_epoch
+            )
+        except SandboxError as e:
+            return ToolResult(success=False, error=str(e), metadata=e.diagnostics)
 
         # 保留名:`.skills` 是 mount_skill 的技能挂载根,一个同名 artifact 落成顶层
         # 文件会与它打架(id 模式允许字面 `.skills`)。loud-fail 让模型换个 id。
@@ -241,7 +274,7 @@ class MountArtifactTool(BaseTool):
 
 
 class PersistFileTool(BaseTool):
-    """把工作区文件回写成 artifact(显式 stage-out,原则 4)。
+    """把工作区文件显式回写成 artifact（stage-out）。
 
     - 默认按文件名产新 artifact(同名 `_N` dedup);给 `artifact_id` 走 **upsert**:
       目标不存在则以该 id 新建(模型给产出物起语义 id,供 `artifact://<id>` 引用),
@@ -255,6 +288,8 @@ class PersistFileTool(BaseTool):
     - 文本/二进制二分:可严格 UTF-8 解码且 ≤ SANDBOX_PERSIST_MAX_TEXT_BYTES
       → 文本 artifact;否则 blob(MIME 按扩展名猜,兜底 octet-stream)。
     """
+
+    wants_context = True
 
     def __init__(self, session: SandboxSession, service: ArtifactService):
         super().__init__(
@@ -356,11 +391,28 @@ class PersistFileTool(BaseTool):
         mime = guess_blob_mime(filename)
         return None, mime
 
-    async def execute(self, path: str, artifact_id: str = "") -> ToolResult:
+    async def execute(
+        self,
+        path: str,
+        artifact_id: str = "",
+        _context: Optional[ToolExecutionContext] = None,
+    ) -> ToolResult:
         raw_path = path.strip()
         if not raw_path:
             return ToolResult(success=False, error="Parameter 'path' must not be empty.")
         target_id = artifact_id.strip()
+        if _context is None:
+            logger.error("persist requires engine execution context but none was injected")
+            return ToolResult(
+                success=False,
+                error="persist requires engine execution context but none was injected.",
+            )
+        try:
+            self._session.require_fresh_invocation(
+                _context.model_invocation_epoch
+            )
+        except SandboxError as e:
+            return ToolResult(success=False, error=str(e), metadata=e.diagnostics)
 
         session_id = self._service.current_session_id
         if not session_id:
@@ -368,7 +420,7 @@ class PersistFileTool(BaseTool):
 
         # sticky 优先于 "nothing to persist":超额杀 / 容器中途死后 _container 已置
         # None(started=False),若先撞 not-started 会把配额失败吞成"没用过沙盒",
-        # 与 bash/mount 的 sticky 复述不一致(P3)。配额杀的契约 = 本 turn 沙盒不可用,
+        # 与 bash/mount 的 sticky 复述不一致。配额杀的契约 = 本 turn 沙盒不可用,
         # 不开"抢救残留产物"通道(超额现场文件完整性不可信、等于给超额留后门)。
         sticky = self._session.sticky_failure
         if sticky is not None:
@@ -493,7 +545,7 @@ class PersistFileTool(BaseTool):
                 source="sandbox",
             )
         else:
-            # C-0 blob-only 约定:无文本表示,content="",content_type=真实 MIME
+            # blob-only 约定：无文本表示，content=""，content_type=真实 MIME
             # (XOR 下 blob 的 content_type 即其 MIME,内核据此派生 metadata 标记)
             success, message, info = await self._service.create_from_upload(
                 session_id=session_id,

@@ -38,7 +38,7 @@ function applySpanDelta(
 }
 
 /** Build a panel-ready ArtifactDetail from live state. versions=[] is fine:
- *  the toolbar hides the version selector while streaming (decision 6). */
+ *  the toolbar hides the version selector while streaming. */
 function liveToDetail(id: string, live: LiveArtifact, sessionId: string | null): ArtifactDetail {
   return {
     id,

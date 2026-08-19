@@ -1,4 +1,4 @@
-"""工具凭证加密 + 运行期解析单测(B-4;B-5 lazy),纯单元、不碰 DB(用 fake repo/db)。"""
+"""工具凭证加密 + 运行期懒解析单测，纯单元、不碰 DB（用 fake repo/db）。"""
 
 from types import SimpleNamespace
 
@@ -47,7 +47,7 @@ def test_cipher_cross_key_cannot_decrypt():
 
 
 # --------------------------------------------------------------------------
-# CredentialResolver(B-5:execute 期 lazy、按 unit 解密、短 retrying session)
+# CredentialResolver：execute 期按 unit 懒解密，使用短 retrying session
 # --------------------------------------------------------------------------
 
 
@@ -109,7 +109,7 @@ async def test_resolve_no_unit_short_circuits_without_db(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_resolve_unit_without_rows_returns_empty_without_cipher(monkeypatch):
-    # 该 unit 无凭证行 → {} 且**不构造 cipher**(无凭证 unit 不触主密钥)
+    # resolver 路径无凭证行 → {} 且不调用 cipher factory；启动期 key 校验是独立契约。
     def _boom():
         raise AssertionError("cipher must not be constructed when there are no rows")
 

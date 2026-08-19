@@ -1,7 +1,7 @@
 """
 注册表快照(读侧)—— 从 DB 行重建运行期形状(external `HttpTool` + unit/agent 元数据)。
 
-ORM 实例不外逃(CLAUDE.md):本模块在 session 内读行、就地重建出 detached 的
+ORM 实例不外逃：本模块在 session 内读行、就地重建出 detached 的
 `HttpTool` / 纯 dataclass 返回,调用方拿不到 ORM 对象。
 """
 
@@ -46,13 +46,12 @@ class UnitInfo:
 
 @dataclass
 class AgentSnapshot:
-    """agent 重建形状。`builtin_tools`/`units` 分开存(决策 11 两轴)。
+    """agent 重建形状。`builtin_tools`/`units` 分开存，避免成员态与等级混合。
 
     engine 消费侧的扁平 `{tool: level}` 合成属 `EffectiveToolset` resolver,不在此做。"""
     name: str
     description: str
     model: str
-    max_tool_rounds: int
     internal: bool
     role_prompt: str
     builtin_tools: Dict[str, str] = field(default_factory=dict)   # {名: enabled|disabled}
@@ -79,8 +78,8 @@ class SkillInfo:
     owner_user_id: Optional[str]
     allowed_tools: List[str] = field(default_factory=list)
     has_extra_files: bool = False      # bundle 内有 SKILL.md 外文件,需要 mount_skill 才能读/运行
-    compatibility: Optional[dict] = None  # frontmatter `compatibility` 声明(mount_skill 依赖提示原样透出,D-2;小 JSON、随快照)
-    source: str = "seeded"             # seeded(config 只读)/ dynamic(UI 导入,可删;E-2)
+    compatibility: Optional[dict] = None  # mount_skill 原样透出的小型依赖提示 JSON
+    source: str = "seeded"             # seeded(config 只读)/ dynamic(UI 导入,可删)
 
 
 def build_http_tool(
@@ -93,7 +92,7 @@ def build_http_tool(
 ) -> HttpTool:
     """从 tool_member 行重建 HttpTool。full_name 作工具名、permission 作等级。
 
-    unit_name + credential_resolver 灌入运行期凭证通路(B-4;B-5 lazy):execute 期按 unit
+    unit_name + credential_resolver 灌入运行期凭证通路：execute 期按 unit
     从 tool_credentials 开短 session 解密填 {{NAME}}。两者缺省(测试直接调)→ 回落 env。
     """
     config = HttpToolConfig(
@@ -112,7 +111,7 @@ def build_http_tool(
 
 
 async def load_registry_snapshot(
-    session: AsyncSession, *, db_manager=None
+    session: AsyncSession, *, db_manager
 ) -> RegistrySnapshot:
     snapshot, _ = await _load_registry_snapshot_and_unit_matches(
         session, db_manager=db_manager, dept_ids=None
@@ -121,7 +120,7 @@ async def load_registry_snapshot(
 
 
 async def load_registry_snapshot_with_unit_matches(
-    session: AsyncSession, dept_ids: List[str], *, db_manager=None
+    session: AsyncSession, dept_ids: List[str], *, db_manager
 ) -> tuple[RegistrySnapshot, Set[str]]:
     """Load registry snapshot and department-unit rule matches in one unit projection.
 
@@ -137,7 +136,7 @@ async def load_registry_snapshot_with_unit_matches(
 
 
 async def _load_registry_snapshot_and_unit_matches(
-    session: AsyncSession, *, db_manager=None, dept_ids: Optional[List[str]]
+    session: AsyncSession, *, db_manager, dept_ids: Optional[List[str]]
 ) -> tuple[RegistrySnapshot, Set[str]]:
     """一次性读全部注册表行,重建 external 工具 + unit 元数据 + agent 元数据。
 
@@ -148,14 +147,13 @@ async def _load_registry_snapshot_and_unit_matches(
     order-preserving `JSON` 列(非 `JSONB`)在 PG/SQLite 都保序,不归这里的 order_by 管。
 
     撞名兜底(skip+log,非 raise):external 名撞 builtin/reserved 时**跳过该行 + 打
-    WARNING**,让 builtin 对象在 controller_factory 合并里继续活(消除遮蔽 = 权限绕过)。
+    WARNING**,让 builtin 对象在 conversation_turn_factory 合并里继续活(消除遮蔽 = 权限绕过)。
     不 raise —— 本函数每 turn 每用户都跑,一行坏数据 raise 会拖垮全机群;主防线是写入期
-    loud-fail(reconcile / B-4 CRUD),这里只作兜底,不该有全局爆炸半径。
+    loud-fail(reconcile / CRUD)，这里只作兜底，不该有全局爆炸半径。
     """
     # 凭证 resolver 持 db_manager(非本快照 session):execute 期按 unit 开短 session lazy
-    # 解密(B-5)—— 本 session 只读注册表行、读完即关,不被凭证解析骑成 turn-long 连接。
-    # db_manager 缺省(测试 / 进程级重建脚本不带)→ resolver=None,HttpTool 回落 env。
-    credential_resolver = CredentialResolver(db_manager) if db_manager is not None else None
+    # 解密。本 session 只读注册表行、读完即关，不被凭证解析延长为 turn-long 连接。
+    credential_resolver = CredentialResolver(db_manager)
 
     dept_match_expr = (
         exists().where(
@@ -194,7 +192,7 @@ async def _load_registry_snapshot_and_unit_matches(
         name = u["name"]
         if is_builtin_name(name):
             # unit 名撞 builtin/reserved → 不 surface(其成员随之不重建,见下),
-            # 防 B-3/B-4/C 精确匹配路径的命名空间歧义。
+            # 防渐进披露、CRUD 与 skill 授权精确匹配时的命名空间歧义。
             logger.warning(
                 "Skipping external tool unit %r: name collides with a builtin/reserved "
                 "tool name (row bypassed write-time validation — fix the DB row)",
@@ -217,9 +215,9 @@ async def _load_registry_snapshot_and_unit_matches(
     external_tools: Dict[str, BaseTool] = {}
     for m in member_rows:
         # 撞名兜底:full_name 撞 builtin/reserved → 跳过(不进 external_tools),让
-        # builtin 在 controller_factory 合并里保活(消除遮蔽 = 权限绕过)。skip+log
+        # builtin 在 conversation_turn_factory 合并里保活(消除遮蔽 = 权限绕过)。skip+log
         # 而非 raise:本函数每 turn 每用户跑,raise = 一行坏数据拖垮全机群;主防线在
-        # 写入期(reconcile / B-4 CRUD loud-fail),这里只兜绕过写校验的行。
+        # 写入期由 reconcile / CRUD loud-fail，这里只兜绕过写校验的行。
         if is_builtin_name(m.full_name):
             logger.warning(
                 "Skipping external tool member %r (unit %r): full_name collides with a "
@@ -246,7 +244,6 @@ async def _load_registry_snapshot_and_unit_matches(
             name=a.name,
             description=a.description,
             model=a.model,
-            max_tool_rounds=a.max_tool_rounds,
             internal=a.internal,
             role_prompt=a.role_prompt,
             builtin_tools=dict(a.builtin_tools or {}),
@@ -268,7 +265,7 @@ async def hydrate_mcp_tools(
     snapshot: RegistrySnapshot,
     *,
     mcp_manager,
-    db_manager=None,
+    db_manager,
     allowed_unit_names: Optional[Set[str]] = None,
 ) -> RegistrySnapshot:
     """Session-free MCP discovery pass.
@@ -278,10 +275,10 @@ async def hydrate_mcp_tools(
     connection while waiting for external HTTP. Credential resolution still uses
     `db_manager`, but only through short lazy sessions inside CredentialResolver.
 
-    `allowed_unit_names`(G-0) lets the caller apply department visibility before
+    `allowed_unit_names` lets the caller apply department visibility before
     discovery, so a dept-denied MCP server is not contacted at all.
     """
-    credential_resolver = CredentialResolver(db_manager) if db_manager is not None else None
+    credential_resolver = CredentialResolver(db_manager)
     for unit in snapshot.units.values():
         if unit.provider != "mcp":
             continue
@@ -336,8 +333,8 @@ async def _load_skill_snapshot_and_matches(
 ) -> tuple[Dict[str, SkillInfo], Set[str]]:
     """读全部 skill 行,重建轻量 user-agnostic 元数据(`{skill_id: SkillInfo}`)。
 
-    每 turn 一次快照(同 load_registry_snapshot,controller_factory 调用,C-2 接入);
-    per-user 解析(user_skill 覆盖 + dept 规则)另在 `EffectiveSkillSet` 做(C-2)。
+    每 turn 一次快照（同 load_registry_snapshot，由 conversation_turn_factory 调用）；
+    per-user 解析(user_skill 覆盖 + dept 规则)另在 `EffectiveSkillSet` 做。
     slug 定序保 L1 渲染顺序稳定(APC / prompt 快照)。skill_md / bundle 字节**不入快照**(大,
     L2/L3 按需读)—— `bundle` 对正常行恒存在,快照只投影 `has_extra_files` 来决定
     read_skill 是否提示 / 创建 mount_skill。

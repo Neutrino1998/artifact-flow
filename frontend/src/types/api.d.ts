@@ -4,6 +4,60 @@
  */
 
 export interface paths {
+    "/api/v1/auth/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Auth Config
+         * @description Anonymous, read-only capabilities for the login page.
+         */
+        get: operations["get_auth_config_api_v1_auth_config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sso/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Sso */
+        post: operations["start_sso_api_v1_auth_sso_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sso/exchange": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Exchange Sso */
+        post: operations["exchange_sso_api_v1_auth_sso_exchange_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -13,10 +67,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Login
-         * @description 用户登录，返回 JWT Token
-         */
+        /** Login */
         post: operations["login_api_v1_auth_login_post"];
         delete?: never;
         options?: never;
@@ -31,24 +82,14 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get Me
-         * @description 获取当前用户信息
-         */
+        /** Get Me */
         get: operations["get_me_api_v1_auth_me_get"];
         put?: never;
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
-        /**
-         * Update My Profile
-         * @description 当前用户自助修改非敏感资料字段（目前仅 display_name）。
-         *
-         *     设计意图：与 admin 后台 PUT /admin/users/{id} 解耦 —— role / is_active /
-         *     password 这些安全敏感字段走专门端点，profile 字段走这里。任何已登录
-         *     用户都能调，不需要 admin 权限。
-         */
+        /** Update My Profile */
         patch: operations["update_my_profile_api_v1_auth_me_patch"];
         trace?: never;
     };
@@ -61,10 +102,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Change My Password
-         * @description 当前用户自助修改密码
-         */
+        /** Change My Password */
         post: operations["change_my_password_api_v1_auth_me_password_post"];
         delete?: never;
         options?: never;
@@ -264,9 +302,8 @@ export interface paths {
          *     （src/db/models.py），删 conversation 不会因子行残留而失败，session 状态
          *     不会被某一行污染到影响后续行。
          *
-         *     其他异常（OperationalError 等基础设施级故障）冒泡为 5xx loud failure —
-         *     此时第 1 条就会失败、循环本就进不下去；与 CLAUDE.md "不为不会发生的场景
-         *     加防御代码" 一致，故不做广泛 except。
+         *     其他异常（OperationalError 等基础设施级故障）冒泡为 5xx loud failure；
+         *     此时第 1 条就会失败、循环本就进不下去，故不做无法触发的广泛 except。
          */
         post: operations["bulk_delete_conversations_api_v1_chat_bulk_delete_post"];
         delete?: never;
@@ -418,27 +455,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Stream Events
-         * @description SSE 端点，订阅执行过程
-         *
-         *     前端通过 fetch + ReadableStream 连接此端点，接收实时事件流。
-         *     stream_id 即 message_id（消息与执行 1:1）。
-         *
-         *     事件格式（使用标准 SSE event: 字段区分事件类型）：
-         *         event: metadata
-         *         data: {"type": "metadata", "timestamp": "...", "data": {...}}
-         *
-         *         event: llm_chunk
-         *         data: {"type": "llm_chunk", "timestamp": "...", "agent": "lead_agent", "data": {"content": "..."}}
-         *
-         *         event: complete
-         *         data: {"type": "complete", "timestamp": "...", "data": {...}}
-         *
-         *     连接生命周期：
-         *         - 收到 complete/cancelled/timed_out/error 事件后，服务端主动关闭连接
-         *         - 前端应释放当前读流的 AbortController
-         */
+        /** Stream Events */
         get: operations["stream_events_api_v1_stream__stream_id__get"];
         put?: never;
         post?: never;
@@ -553,6 +570,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/conversations/{conv_id}/messages/{message_id}/reconstruct-call": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reconstruct Admin Llm Call
+         * @description Reconstruct an actual LLM request and attach its persisted response.
+         */
+        get: operations["reconstruct_admin_llm_call_api_v1_admin_conversations__conv_id__messages__message_id__reconstruct_call_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/conversations/{conv_id}/artifacts": {
         parameters: {
             query?: never;
@@ -640,16 +677,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * List Users
-         * @description 列出所有用户（仅 Admin）
-         */
+        /** List Users */
         get: operations["list_users_api_v1_admin_users_get"];
         put?: never;
-        /**
-         * Create User
-         * @description 创建用户（仅 Admin）
-         */
+        /** Create User */
         post: operations["create_user_api_v1_admin_users_post"];
         delete?: never;
         options?: never;
@@ -664,14 +695,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get Users Bulk Impact
-         * @description 批量删除用户前的影响数据 — 一次 IN 查询。
-         *
-         *     给前端 DangerConfirmModal 显示"将删除 N 个用户、共 M 条会话"。
-         *     user_count 是请求 ids 的去重数（不区分是否真存在），conversation_count
-         *     是这批用户名下当前会话总数。
-         */
+        /** Get Users Bulk Impact */
         get: operations["get_users_bulk_impact_api_v1_admin_users_bulk_impact_get"];
         put?: never;
         post?: never;
@@ -690,22 +714,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Bulk User Action
-         * @description 批量执行用户管理动作（仅 Admin）。
-         *
-         *     支持 action：disable / enable / delete / set_department。Best-effort：
-         *     单条失败不阻断其余。Self-protection 取代 last-admin 计数 —— admin
-         *     不能对自己执行任何 action（与 PR2b 单条 update_user / delete_user 一致）；
-         *     配合 disabled admin 进不来后台，足以保住至少 1 个活跃 admin。
-         *
-         *     set_department 的 payload.department_id 在 loop 外预校验：非 null 且
-         *     在 DB 中找不到对应部门 → 整批 400（fail-fast，省掉无谓的 N 次失败）。
-         *
-         *     delete 走 hard_delete（DB CASCADE）。若用户当前正在跑 engine，
-         *     被级联删的 conversation 行由 PR2a 的 controller exists() / IntegrityError
-         *     catch 兜住；本端点直接 fire-and-forget。
-         */
+        /** Bulk User Action */
         post: operations["bulk_user_action_api_v1_admin_users_bulk_action_post"];
         delete?: never;
         options?: never;
@@ -722,35 +731,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Bulk Import Users
-         * @description 批量导入用户（仅 Admin）。
-         *
-         *     CSV header 必含 `username`；可选列 `password` / `display_name` /
-         *     `dept_l1` / `dept_l2` / `dept_l3`。其他列被忽略并在 warnings 里上报。
-         *     注:`password` 列虽非 parse 阶段必填,但**每行必须有非空密码**(留空 → 该行
-         *     failed),不再「缺省 = 用户名」;admin 自己填初始口令并带外分发,所有导入
-         *     用户首次登录强制改密。
-         *
-         *     语义（best-effort，非原子）：
-         *     - parse 阶段失败（解码 / 缺 username 列 / 行数超限）→ 400
-         *     - 文件内 username 重复 → 400 + duplicate_rows 列出
-         *     - 单行业务校验失败（username 格式 / 部门 gap / 字段超长 / 密码缺失或不达标）
-         *       → failed
-         *     - 单行 username 已在 DB → skipped
-         *     - 其余 → created（每行独立 commit；逐行成功/失败）
-         *
-         *     执行结构（3 段）：
-         *     1. validate + dept resolve：顺序遍历，校验失败的行进 failed，
-         *        通过的行收集到 to_create（含已 resolve 的 department_id）。
-         *        dept_cache 避免同 CSV 内重复路径多次 SELECT。
-         *     2. parallel hash：to_create 里所有 password 通过 asyncio.gather +
-         *        asyncio.to_thread 并行扔给默认 ThreadPoolExecutor 跑 bcrypt。
-         *        bcrypt-python 在 C 层释放 GIL，~8 核机器 300 行 hash 阶段
-         *        从 ~50s 缩到 ~6s，且 event loop 全程不卡（其他请求正常响应）。
-         *     3. INSERT：顺序写库；username UNIQUE 撞上 → 当 skipped 处理（race
-         *        between phase-1 batch-check 和此处之间另一 admin 抢先创建）。
-         */
+        /** Bulk Import Users */
         post: operations["bulk_import_users_api_v1_admin_users_bulk_import_post"];
         delete?: never;
         options?: never;
@@ -765,36 +746,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get User
-         * @description 单查用户（Admin） — 给前端编辑表单初始化用
-         */
+        /** Get User */
         get: operations["get_user_api_v1_admin_users__user_id__get"];
-        /**
-         * Update User
-         * @description 更新用户（仅 Admin）
-         *
-         *     防误锁：admin 不能改自己的 role / is_active / password。配合 DELETE
-         *     路径的"不能删自己"保护，足以保证系统始终至少有 1 个活跃 admin
-         *     （操作者必然活跃 → 不能动自己 → 至少剩自己）。
-         *
-         *     Self 改 password 走 POST /auth/me/password —— 该端点强制校验 current_password，
-         *     防止 token 被盗后攻击者无需旧密码就能接管账号。本端点对 self 改 password
-         *     返回 403，避免在 admin 后台绕过该校验。
-         */
+        /** Update User */
         put: operations["update_user_api_v1_admin_users__user_id__put"];
         post?: never;
-        /**
-         * Delete User
-         * @description 硬删用户（仅 Admin）
-         *
-         *     FK CASCADE 一并删除其所有会话 / messages / events / artifacts。
-         *     若用户当前有正在跑的 engine，被级联删的 conversation 行会被 controller
-         *     post-processing 的 exists() 检查兜住（PR2a），不会撞 FK。
-         *
-         *     保护：admin 不能删自己。配合"不能改自己 role/is_active"，足以保证
-         *     系统始终至少 1 个活跃 admin。
-         */
+        /** Delete User */
         delete: operations["delete_user_api_v1_admin_users__user_id__delete"];
         options?: never;
         head?: never;
@@ -808,12 +765,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get User Impact
-         * @description 硬删用户前的影响数据 — 返回会话数。
-         *
-         *     给前端 DangerConfirmModal 显示"将级联删除 N 条会话，操作不可恢复"。
-         */
+        /** Get User Impact */
         get: operations["get_user_impact_api_v1_admin_users__user_id__impact_get"];
         put?: never;
         post?: never;
@@ -862,7 +814,7 @@ export interface paths {
         };
         /**
          * List Instances
-         * @description 舰队实例面板数据源(Phase C 决策 4)。
+         * @description 舰队实例面板数据源。
          *
          *     多副本(Redis):scan `{prefix:instance:*}` + pipelined GET fan-out(镜像
          *     RedisRuntimeStore.list_active_executions,Cluster-safe —— 无跨 slot 多 key 操作),
@@ -1078,6 +1030,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/skills/{skill_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin Get Skill Detail
+         * @description 读取共享 skill 正文，不按当前管理员自己的部门可见性过滤。
+         */
+        get: operations["admin_get_skill_detail_api_v1_admin_skills__skill_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Admin Delete Skill
+         * @description 删除任意 dynamic skill(绕过可见性;seeded → 400)。级联清 user_skill/dept 规则。
+         */
+        delete: operations["admin_delete_skill_api_v1_admin_skills__skill_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Admin Update Skill
+         * @description 编辑 dynamic shared skill 的 visibility/default_enabled。seeded 仍 config-owned。
+         */
+        patch: operations["admin_update_skill_api_v1_admin_skills__skill_id__patch"];
+        trace?: never;
+    };
     "/api/v1/admin/skills/import": {
         parameters: {
             query?: never;
@@ -1116,30 +1096,6 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/skills/{skill_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Admin Delete Skill
-         * @description 删除任意 dynamic skill(绕过可见性;seeded → 400)。级联清 user_skill/dept 规则。
-         */
-        delete: operations["admin_delete_skill_api_v1_admin_skills__skill_id__delete"];
-        options?: never;
-        head?: never;
-        /**
-         * Admin Update Skill
-         * @description 编辑 dynamic shared skill 的 visibility/default_enabled。seeded 仍 config-owned。
-         */
-        patch: operations["admin_update_skill_api_v1_admin_skills__skill_id__patch"];
         trace?: never;
     };
     "/api/v1/admin/department-access/{dept_id}": {
@@ -1220,21 +1176,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * List Departments
-         * @description 列出某父下的子部门（按 name 排序）。
-         *
-         *     parent_id 缺省 → 一级部门；传具体 id → 该部门的直接子。
-         *     给前端 cascader 每级渲染用。
-         */
+        /** List Departments */
         get: operations["list_departments_api_v1_departments_get"];
         put?: never;
-        /**
-         * Create Department
-         * @description 显式创建部门（admin 在管理 UI 中点 "+ 新建" 走这里）。
-         *
-         *     冲突 → 409。批量导入 / 创建用户时的"路径解析自动建" 走 /resolve 端点。
-         */
+        /** Create Department */
         post: operations["create_department_api_v1_departments_post"];
         delete?: never;
         options?: never;
@@ -1249,13 +1194,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get Tree
-         * @description 返回完整部门树（顶层节点列表 → children 嵌套）。
-         *
-         *     一次性返回，部门表数量级别小（几十到几百）。给部门管理面板用。
-         *     user_count 是该节点的**直属**用户数，子树合计由前端按需计算。
-         */
+        /** Get Tree */
         get: operations["get_tree_api_v1_departments_tree_get"];
         put?: never;
         post?: never;
@@ -1272,29 +1211,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get Department
-         * @description 单个部门详情（含 user_count, child_count，给详情/删除前置展示用）
-         */
+        /** Get Department */
         get: operations["get_department_api_v1_departments__dept_id__get"];
         put?: never;
         post?: never;
-        /**
-         * Delete Department
-         * @description 删除部门 — 必须为空（无子部门、无直属用户）。
-         *
-         *     非空 → 409 + body 含 user_count/child_count，前端据此提示先迁。
-         *     parent_id ondelete=RESTRICT 在 DB 层兜底，但路由层先校验给出更友好错误。
-         */
+        /** Delete Department */
         delete: operations["delete_department_api_v1_departments__dept_id__delete"];
         options?: never;
         head?: never;
-        /**
-         * Rename Department
-         * @description 仅改部门名（搬家走 POST /{id}/move，路径分离避免 PATCH 字段歧义）。
-         *
-         *     冲突（同父下重名） → 409。
-         */
+        /** Rename Department */
         patch: operations["rename_department_api_v1_departments__dept_id__patch"];
         trace?: never;
     };
@@ -1307,15 +1232,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Move Department
-         * @description 搬家：把部门挂到新父下。new_parent_id=None → 搬到根。
-         *
-         *     校验：
-         *     - 环检测：不能搬到自己 / 自己子孙下 → 400
-         *     - 名称冲突：新父下已有同名 → 409
-         *     - 新父不存在 → 400
-         */
+        /** Move Department */
         post: operations["move_department_api_v1_departments__dept_id__move_post"];
         delete?: never;
         options?: never;
@@ -1332,13 +1249,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Resolve Path
-         * @description 路径 → 末级 dept_id。缺失层级自动创建（admin 显式提交，安全）。
-         *
-         *     给前端 cascader "+ 新建当前级" 入口、PR3 批量导入时按行解析用。
-         *     空路径 / 全空字符串 → 返回 {id: null}。
-         */
+        /** Resolve Path */
         post: operations["resolve_path_api_v1_departments_resolve_post"];
         delete?: never;
         options?: never;
@@ -1403,6 +1314,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/skills/{skill_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Skill Detail
+         * @description 按需读取当前用户可见 skill 的 SKILL.md 正文；不可见仍返回 404。
+         */
+        get: operations["get_skill_detail_api_v1_skills__skill_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Skill
+         * @description 删除自己导入的 dynamic skill。不可见 → 404;seeded → 400;非本人共享 → 403。
+         */
+        delete: operations["delete_skill_api_v1_skills__skill_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/skills/import": {
         parameters: {
             query?: never;
@@ -1439,26 +1374,6 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/skills/{skill_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete Skill
-         * @description 删除自己导入的 dynamic skill。不可见 → 404;seeded → 400;非本人共享 → 403。
-         */
-        delete: operations["delete_skill_api_v1_skills__skill_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1563,6 +1478,69 @@ export interface components {
              * @description SSE endpoint URL, when active
              */
             stream_url: string | null;
+        };
+        /** AdminArtifactListResponse */
+        AdminArtifactListResponse: {
+            /** Session Id */
+            session_id: string;
+            /** Artifacts */
+            artifacts: components["schemas"]["AdminArtifactSummary"][];
+        };
+        /**
+         * AdminArtifactSummary
+         * @description Artifact metadata plus the backend-authoritative admin read capability.
+         */
+        AdminArtifactSummary: {
+            /**
+             * Id
+             * @description Artifact ID
+             */
+            id: string;
+            /**
+             * Content Type
+             * @description Content type (MIME type, e.g. text/markdown, text/x-python)
+             */
+            content_type: string;
+            /**
+             * Title
+             * @description Artifact title
+             */
+            title: string;
+            /**
+             * Current Version
+             * @description Current version number
+             */
+            current_version: number;
+            /**
+             * Source
+             * @description Source (agent, user_upload)
+             */
+            source: string | null;
+            /**
+             * Original Filename
+             * @description For source=user_upload artifacts: the filename the user uploaded. From metadata['original_filename'].
+             */
+            original_filename: string | null;
+            /**
+             * Has Blob
+             * @description True for blob-backed artifacts (images / rich-format uploads): no text content; raw bytes via GET …/raw.
+             * @default false
+             */
+            has_blob: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             * @description Creation time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             * @description Last update time
+             */
+            updated_at: string;
+            /** Content Accessible */
+            content_accessible: boolean;
         };
         /**
          * AdminConversationEventsResponse
@@ -1713,6 +1691,42 @@ export interface components {
             };
         };
         /**
+         * AdminLlmCallReconstructResponse
+         * @description One persisted LLM request and its normalized response event payload.
+         */
+        AdminLlmCallReconstructResponse: {
+            /** Conversation Id */
+            conversation_id: string;
+            /** Message Id */
+            message_id: string;
+            /** Agent Start Event Id */
+            agent_start_event_id: string;
+            /** Agent Name */
+            agent_name: string | null;
+            /** Model */
+            model: string | null;
+            /**
+             * Exposed Tool Names
+             * @description Exact native function names exposed to the anchored LLM invocation. None means the legacy event predates collection; an empty list means no tools were exposed. Full tool schemas are not persisted.
+             */
+            exposed_tool_names: string[] | null;
+            /**
+             * Has Reminder
+             * @default false
+             */
+            has_reminder: boolean;
+            /** Messages */
+            messages: {
+                [key: string]: unknown;
+            }[];
+            /** Llm Complete Event Id */
+            llm_complete_event_id: string;
+            /** Response */
+            response: {
+                [key: string]: unknown;
+            };
+        };
+        /**
          * AdminMessageGroup
          * @description Events grouped by message
          */
@@ -1741,7 +1755,7 @@ export interface components {
              * Uploaded Files
              * @description Files attached to this turn, from Message.metadata_['uploaded_files']. Display-only and best-effort until the terminal DB refresh.
              */
-            uploaded_files: components["schemas"]["UploadedFileRef"][] | null;
+            uploaded_files: components["schemas"]["AdminUploadedFileRef"][] | null;
         };
         /**
          * AdminPromptReconstructResponse
@@ -1856,6 +1870,21 @@ export interface components {
              * @description New default L1 enabled state for users without an override.
              */
             default_enabled?: boolean | null;
+        };
+        /**
+         * AdminUploadedFileRef
+         * @description Admin-visible attachment metadata after the active privacy projection.
+         */
+        AdminUploadedFileRef: {
+            /** Id */
+            id: string | null;
+            /** Filename */
+            filename: string;
+            /**
+             * Content Accessible
+             * @default true
+             */
+            content_accessible: boolean;
         };
         /** AgentListResponse */
         AgentListResponse: {
@@ -2028,6 +2057,18 @@ export interface components {
              */
             updated_at: string;
         };
+        /**
+         * AuthPublicConfigResponse
+         * @description Anonymous login-page capabilities; contains no internal endpoint mapping.
+         */
+        AuthPublicConfigResponse: {
+            /**
+             * Password Login Enabled
+             * @default true
+             */
+            password_login_enabled: boolean;
+            sso: components["schemas"]["SsoPublicProviderConfig"];
+        };
         /** Body_admin_import_skill_api_v1_admin_skills_import_post */
         Body_admin_import_skill_api_v1_admin_skills_import_post: {
             /** File */
@@ -2081,7 +2122,7 @@ export interface components {
             id: string;
             /**
              * Reason
-             * @description Failure reason: 'forbidden_self' | 'not_found' | 'internal_error'
+             * @description Failure reason: 'forbidden_self' | 'not_found' | 'profile_managed_by_provider' | 'internal_error'
              */
             reason: string;
         };
@@ -2710,7 +2751,7 @@ export interface components {
         };
         /**
          * FindingItem
-         * @description 一条 validator finding(E-1 硬门产出;rule id 稳定,前端按 severity 渲染)。
+         * @description 一条 validator finding；rule id 稳定，前端按 severity 渲染。
          */
         FindingItem: {
             /**
@@ -3182,7 +3223,10 @@ export interface components {
              */
             value: string;
         };
-        /** SiteNotification */
+        /**
+         * SiteNotification
+         * @description Validated notification value shared by API schemas and persisted config.
+         */
         SiteNotification: {
             /** Id */
             id: string;
@@ -3211,6 +3255,54 @@ export interface components {
             notifications: components["schemas"]["SiteNotification"][];
             /** Revision */
             revision: number;
+        };
+        /**
+         * SkillDetailResponse
+         * @description On-demand SKILL.md preview for one management-list item.
+         */
+        SkillDetailResponse: {
+            /**
+             * Id
+             * @description Stable skill id
+             */
+            id: string;
+            /**
+             * Slug
+             * @description User-context skill slug
+             */
+            slug: string;
+            /**
+             * Name
+             * @description Display name
+             */
+            name: string;
+            /**
+             * Description
+             * @description One-line description
+             */
+            description: string;
+            /**
+             * Skill Md
+             * @description SKILL.md guidance body with YAML frontmatter removed
+             */
+            skill_md: string;
+            /**
+             * Source
+             * @description Config-owned or UI-imported source
+             * @enum {string}
+             */
+            source: "seeded" | "dynamic";
+            /**
+             * Visibility
+             * @description Effective catalog visibility
+             * @enum {string}
+             */
+            visibility: "private" | "public" | "department";
+            /**
+             * Has Extra Files
+             * @description Whether the downloadable bundle contains files beyond SKILL.md
+             */
+            has_extra_files: boolean;
         };
         /**
          * SkillImportResponse
@@ -3318,6 +3410,24 @@ export interface components {
              * @description Personal enable/disable override for this skill.
              */
             enabled: boolean;
+        };
+        /** SsoPublicProviderConfig */
+        SsoPublicProviderConfig: {
+            /** Enabled */
+            enabled: boolean;
+            /** Provider Id */
+            provider_id: string | null;
+            /** Display Name */
+            display_name: string | null;
+            /** Token Param */
+            token_param: string | null;
+        };
+        /** SsoStartResponse */
+        SsoStartResponse: {
+            /** Authorization Url */
+            authorization_url: string;
+            /** Expires In */
+            expires_in: number;
         };
         /**
          * StorageUsageResponse
@@ -3601,6 +3711,21 @@ export interface components {
              */
             role: string;
             /**
+             * Auth Provider
+             * @description Authentication provider id
+             */
+            auth_provider: string;
+            /**
+             * Can Change Password
+             * @description Whether this identity supports local password changes
+             */
+            can_change_password: boolean;
+            /**
+             * Can Edit Profile
+             * @description Whether provider-managed profile fields such as display name and department accept local edits
+             */
+            can_edit_profile: boolean;
+            /**
              * Must Change Password
              * @description True 时前端须强制弹出改密框,且除改密/登出外的请求会被后端 403 (首次登录 / 管理员重置 / 口令到期)。改密成功后清除。
              * @default false
@@ -3637,6 +3762,12 @@ export interface components {
             role: string;
             /** Is Active */
             is_active: boolean;
+            /** Auth Provider */
+            auth_provider: string;
+            /** Can Change Password */
+            can_change_password: boolean;
+            /** Can Edit Profile */
+            can_edit_profile: boolean;
             /** Department Id */
             department_id: string | null;
             /**
@@ -3721,6 +3852,73 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_auth_config_api_v1_auth_config_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthPublicConfigResponse"];
+                };
+            };
+        };
+    };
+    start_sso_api_v1_auth_sso_start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoStartResponse"];
+                };
+            };
+        };
+    };
+    exchange_sso_api_v1_auth_sso_exchange_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    state: string;
+                    upstream_token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+        };
+    };
     login_api_v1_auth_login_post: {
         parameters: {
             query?: never;
@@ -4584,6 +4782,40 @@ export interface operations {
             };
         };
     };
+    reconstruct_admin_llm_call_api_v1_admin_conversations__conv_id__messages__message_id__reconstruct_call_get: {
+        parameters: {
+            query: {
+                llm_complete_event_id: string;
+            };
+            header?: never;
+            path: {
+                conv_id: string;
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminLlmCallReconstructResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_admin_conversation_artifacts_api_v1_admin_conversations__conv_id__artifacts_get: {
         parameters: {
             query?: never;
@@ -4601,7 +4833,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ArtifactListResponse"];
+                    "application/json": components["schemas"]["AdminArtifactListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5488,40 +5720,7 @@ export interface operations {
             };
         };
     };
-    admin_import_skill_api_v1_admin_skills_import_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "multipart/form-data": components["schemas"]["Body_admin_import_skill_api_v1_admin_skills_import_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SkillImportResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    admin_export_skill_api_v1_admin_skills__skill_id__export_get: {
+    admin_get_skill_detail_api_v1_admin_skills__skill_id__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -5538,7 +5737,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SkillDetailResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5603,6 +5802,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminSkillItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_import_skill_api_v1_admin_skills_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_admin_import_skill_api_v1_admin_skills_import_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillImportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_export_skill_api_v1_admin_skills__skill_id__export_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -5823,7 +6086,6 @@ export interface operations {
     list_departments_api_v1_departments_get: {
         parameters: {
             query?: {
-                /** @description Parent id; omit for top-level */
                 parent_id?: string | null;
             };
             header?: never;
@@ -6128,6 +6390,66 @@ export interface operations {
             };
         };
     };
+    get_skill_detail_api_v1_skills__skill_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_skill_api_v1_skills__skill_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     import_skill_api_v1_skills_import_post: {
         parameters: {
             query?: never;
@@ -6180,35 +6502,6 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                 };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_skill_api_v1_skills__skill_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                skill_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
             /** @description Validation Error */
             422: {

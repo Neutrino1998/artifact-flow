@@ -6,13 +6,104 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/api/v1/auth/config": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Get Auth Config",
+        "description": "Anonymous, read-only capabilities for the login page.",
+        "operationId": "get_auth_config_api_v1_auth_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthPublicConfigResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/sso/start": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Start Sso",
+        "operationId": "start_sso_api_v1_auth_sso_start_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SsoStartResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/sso/exchange": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Exchange Sso",
+        "operationId": "exchange_sso_api_v1_auth_sso_exchange_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "state": {
+                    "type": "string",
+                    "maxLength": 256,
+                    "minLength": 1
+                  },
+                  "upstream_token": {
+                    "type": "string",
+                    "maxLength": 16384,
+                    "minLength": 1,
+                    "writeOnly": true
+                  }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "state",
+                  "upstream_token"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "tags": [
           "auth"
         ],
         "summary": "Login",
-        "description": "\u7528\u6237\u767b\u5f55\uff0c\u8fd4\u56de JWT Token",
         "operationId": "login_api_v1_auth_login_post",
         "requestBody": {
           "content": {
@@ -54,7 +145,6 @@
           "auth"
         ],
         "summary": "Get Me",
-        "description": "\u83b7\u53d6\u5f53\u524d\u7528\u6237\u4fe1\u606f",
         "operationId": "get_me_api_v1_auth_me_get",
         "responses": {
           "200": {
@@ -79,7 +169,6 @@
           "auth"
         ],
         "summary": "Update My Profile",
-        "description": "\u5f53\u524d\u7528\u6237\u81ea\u52a9\u4fee\u6539\u975e\u654f\u611f\u8d44\u6599\u5b57\u6bb5\uff08\u76ee\u524d\u4ec5 display_name\uff09\u3002\n\n\u8bbe\u8ba1\u610f\u56fe\uff1a\u4e0e admin \u540e\u53f0 PUT /admin/users/{id} \u89e3\u8026 \u2014\u2014 role / is_active /\npassword \u8fd9\u4e9b\u5b89\u5168\u654f\u611f\u5b57\u6bb5\u8d70\u4e13\u95e8\u7aef\u70b9\uff0cprofile \u5b57\u6bb5\u8d70\u8fd9\u91cc\u3002\u4efb\u4f55\u5df2\u767b\u5f55\n\u7528\u6237\u90fd\u80fd\u8c03\uff0c\u4e0d\u9700\u8981 admin \u6743\u9650\u3002",
         "operationId": "update_my_profile_api_v1_auth_me_patch",
         "requestBody": {
           "content": {
@@ -126,7 +215,6 @@
           "auth"
         ],
         "summary": "Change My Password",
-        "description": "\u5f53\u524d\u7528\u6237\u81ea\u52a9\u4fee\u6539\u5bc6\u7801",
         "operationId": "change_my_password_api_v1_auth_me_password_post",
         "requestBody": {
           "content": {
@@ -688,7 +776,7 @@
           "chat"
         ],
         "summary": "Bulk Delete Conversations",
-        "description": "\u6279\u91cf\u5220\u9664\u5bf9\u8bdd\uff08\u7528\u6237\u89c6\u89d2\uff0c\u4ec5\u5220\u81ea\u5df1\u7684\uff09\n\nBest-effort \u8303\u56f4\uff1across-user / \u4e0d\u5b58\u5728\u7684 id \u8d70 `failed.reason=\"not_found\"`\uff0c\n\u9075\u5faa \"404 not 403\" \u5b89\u5168\u7b56\u7565\u907f\u514d\u6cc4\u6f0f\u4f1a\u8bdd\u5b58\u5728\u3002\u6301\u6709 execution lease\n\uff08\u542b QUEUED / RUNNING\uff09\u7684\u4f1a\u8bdd\u8d70 `failed.reason=\"active_execution\"`\uff0c\u4e0d\u5220\u9664\u3002\n\n\u5355\u884c FK \u8fdd\u89c4\u8fd9\u6761\u8def\u5f84\u4e0d\u5b58\u5728\uff0c\u56e0\u6b64\u4e0d\u9700\u8981 IntegrityError + rollback\uff1a\u6240\u6709\u6307\u5411\n`conversations.id` \u7684\u5916\u952e\uff08Message / ArtifactSession\uff09\u90fd\u662f ondelete=CASCADE\uff0c\n\u4e0b\u6e38\u94fe messages / events / artifacts / artifact_versions \u4e5f\u5168\u662f CASCADE\n\uff08src/db/models.py\uff09\uff0c\u5220 conversation \u4e0d\u4f1a\u56e0\u5b50\u884c\u6b8b\u7559\u800c\u5931\u8d25\uff0csession \u72b6\u6001\n\u4e0d\u4f1a\u88ab\u67d0\u4e00\u884c\u6c61\u67d3\u5230\u5f71\u54cd\u540e\u7eed\u884c\u3002\n\n\u5176\u4ed6\u5f02\u5e38\uff08OperationalError \u7b49\u57fa\u7840\u8bbe\u65bd\u7ea7\u6545\u969c\uff09\u5192\u6ce1\u4e3a 5xx loud failure \u2014\n\u6b64\u65f6\u7b2c 1 \u6761\u5c31\u4f1a\u5931\u8d25\u3001\u5faa\u73af\u672c\u5c31\u8fdb\u4e0d\u4e0b\u53bb\uff1b\u4e0e CLAUDE.md \"\u4e0d\u4e3a\u4e0d\u4f1a\u53d1\u751f\u7684\u573a\u666f\n\u52a0\u9632\u5fa1\u4ee3\u7801\" \u4e00\u81f4\uff0c\u6545\u4e0d\u505a\u5e7f\u6cdb except\u3002",
+        "description": "\u6279\u91cf\u5220\u9664\u5bf9\u8bdd\uff08\u7528\u6237\u89c6\u89d2\uff0c\u4ec5\u5220\u81ea\u5df1\u7684\uff09\n\nBest-effort \u8303\u56f4\uff1across-user / \u4e0d\u5b58\u5728\u7684 id \u8d70 `failed.reason=\"not_found\"`\uff0c\n\u9075\u5faa \"404 not 403\" \u5b89\u5168\u7b56\u7565\u907f\u514d\u6cc4\u6f0f\u4f1a\u8bdd\u5b58\u5728\u3002\u6301\u6709 execution lease\n\uff08\u542b QUEUED / RUNNING\uff09\u7684\u4f1a\u8bdd\u8d70 `failed.reason=\"active_execution\"`\uff0c\u4e0d\u5220\u9664\u3002\n\n\u5355\u884c FK \u8fdd\u89c4\u8fd9\u6761\u8def\u5f84\u4e0d\u5b58\u5728\uff0c\u56e0\u6b64\u4e0d\u9700\u8981 IntegrityError + rollback\uff1a\u6240\u6709\u6307\u5411\n`conversations.id` \u7684\u5916\u952e\uff08Message / ArtifactSession\uff09\u90fd\u662f ondelete=CASCADE\uff0c\n\u4e0b\u6e38\u94fe messages / events / artifacts / artifact_versions \u4e5f\u5168\u662f CASCADE\n\uff08src/db/models.py\uff09\uff0c\u5220 conversation \u4e0d\u4f1a\u56e0\u5b50\u884c\u6b8b\u7559\u800c\u5931\u8d25\uff0csession \u72b6\u6001\n\u4e0d\u4f1a\u88ab\u67d0\u4e00\u884c\u6c61\u67d3\u5230\u5f71\u54cd\u540e\u7eed\u884c\u3002\n\n\u5176\u4ed6\u5f02\u5e38\uff08OperationalError \u7b49\u57fa\u7840\u8bbe\u65bd\u7ea7\u6545\u969c\uff09\u5192\u6ce1\u4e3a 5xx loud failure\uff1b\n\u6b64\u65f6\u7b2c 1 \u6761\u5c31\u4f1a\u5931\u8d25\u3001\u5faa\u73af\u672c\u5c31\u8fdb\u4e0d\u4e0b\u53bb\uff0c\u6545\u4e0d\u505a\u65e0\u6cd5\u89e6\u53d1\u7684\u5e7f\u6cdb except\u3002",
         "operationId": "bulk_delete_conversations_api_v1_chat_bulk_delete_post",
         "requestBody": {
           "content": {
@@ -1095,7 +1183,6 @@
           "stream"
         ],
         "summary": "Stream Events",
-        "description": "SSE \u7aef\u70b9\uff0c\u8ba2\u9605\u6267\u884c\u8fc7\u7a0b\n\n\u524d\u7aef\u901a\u8fc7 fetch + ReadableStream \u8fde\u63a5\u6b64\u7aef\u70b9\uff0c\u63a5\u6536\u5b9e\u65f6\u4e8b\u4ef6\u6d41\u3002\nstream_id \u5373 message_id\uff08\u6d88\u606f\u4e0e\u6267\u884c 1:1\uff09\u3002\n\n\u4e8b\u4ef6\u683c\u5f0f\uff08\u4f7f\u7528\u6807\u51c6 SSE event: \u5b57\u6bb5\u533a\u5206\u4e8b\u4ef6\u7c7b\u578b\uff09\uff1a\n    event: metadata\n    data: {\"type\": \"metadata\", \"timestamp\": \"...\", \"data\": {...}}\n\n    event: llm_chunk\n    data: {\"type\": \"llm_chunk\", \"timestamp\": \"...\", \"agent\": \"lead_agent\", \"data\": {\"content\": \"...\"}}\n\n    event: complete\n    data: {\"type\": \"complete\", \"timestamp\": \"...\", \"data\": {...}}\n\n\u8fde\u63a5\u751f\u547d\u5468\u671f\uff1a\n    - \u6536\u5230 complete/cancelled/timed_out/error \u4e8b\u4ef6\u540e\uff0c\u670d\u52a1\u7aef\u4e3b\u52a8\u5173\u95ed\u8fde\u63a5\n    - \u524d\u7aef\u5e94\u91ca\u653e\u5f53\u524d\u8bfb\u6d41\u7684 AbortController",
         "operationId": "stream_events_api_v1_stream__stream_id__get",
         "security": [
           {
@@ -1495,6 +1582,73 @@
         }
       }
     },
+    "/api/v1/admin/conversations/{conv_id}/messages/{message_id}/reconstruct-call": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Reconstruct Admin Llm Call",
+        "description": "Reconstruct an actual LLM request and attach its persisted response.",
+        "operationId": "reconstruct_admin_llm_call_api_v1_admin_conversations__conv_id__messages__message_id__reconstruct_call_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conv_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conv Id"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Message Id"
+            }
+          },
+          {
+            "name": "llm_complete_event_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 96,
+              "title": "Llm Complete Event Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminLlmCallReconstructResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/conversations/{conv_id}/artifacts": {
       "get": {
         "tags": [
@@ -1525,7 +1679,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ArtifactListResponse"
+                  "$ref": "#/components/schemas/AdminArtifactListResponse"
                 }
               }
             }
@@ -1730,7 +1884,6 @@
           "admin"
         ],
         "summary": "Create User",
-        "description": "\u521b\u5efa\u7528\u6237\uff08\u4ec5 Admin\uff09",
         "operationId": "create_user_api_v1_admin_users_post",
         "security": [
           {
@@ -1775,7 +1928,6 @@
           "admin"
         ],
         "summary": "List Users",
-        "description": "\u5217\u51fa\u6240\u6709\u7528\u6237\uff08\u4ec5 Admin\uff09",
         "operationId": "list_users_api_v1_admin_users_get",
         "security": [
           {
@@ -1854,7 +2006,6 @@
           "admin"
         ],
         "summary": "Get Users Bulk Impact",
-        "description": "\u6279\u91cf\u5220\u9664\u7528\u6237\u524d\u7684\u5f71\u54cd\u6570\u636e \u2014 \u4e00\u6b21 IN \u67e5\u8be2\u3002\n\n\u7ed9\u524d\u7aef DangerConfirmModal \u663e\u793a\"\u5c06\u5220\u9664 N \u4e2a\u7528\u6237\u3001\u5171 M \u6761\u4f1a\u8bdd\"\u3002\nuser_count \u662f\u8bf7\u6c42 ids \u7684\u53bb\u91cd\u6570\uff08\u4e0d\u533a\u5206\u662f\u5426\u771f\u5b58\u5728\uff09\uff0cconversation_count\n\u662f\u8fd9\u6279\u7528\u6237\u540d\u4e0b\u5f53\u524d\u4f1a\u8bdd\u603b\u6570\u3002",
         "operationId": "get_users_bulk_impact_api_v1_admin_users_bulk_impact_get",
         "security": [
           {
@@ -1907,7 +2058,6 @@
           "admin"
         ],
         "summary": "Bulk User Action",
-        "description": "\u6279\u91cf\u6267\u884c\u7528\u6237\u7ba1\u7406\u52a8\u4f5c\uff08\u4ec5 Admin\uff09\u3002\n\n\u652f\u6301 action\uff1adisable / enable / delete / set_department\u3002Best-effort\uff1a\n\u5355\u6761\u5931\u8d25\u4e0d\u963b\u65ad\u5176\u4f59\u3002Self-protection \u53d6\u4ee3 last-admin \u8ba1\u6570 \u2014\u2014 admin\n\u4e0d\u80fd\u5bf9\u81ea\u5df1\u6267\u884c\u4efb\u4f55 action\uff08\u4e0e PR2b \u5355\u6761 update_user / delete_user \u4e00\u81f4\uff09\uff1b\n\u914d\u5408 disabled admin \u8fdb\u4e0d\u6765\u540e\u53f0\uff0c\u8db3\u4ee5\u4fdd\u4f4f\u81f3\u5c11 1 \u4e2a\u6d3b\u8dc3 admin\u3002\n\nset_department \u7684 payload.department_id \u5728 loop \u5916\u9884\u6821\u9a8c\uff1a\u975e null \u4e14\n\u5728 DB \u4e2d\u627e\u4e0d\u5230\u5bf9\u5e94\u90e8\u95e8 \u2192 \u6574\u6279 400\uff08fail-fast\uff0c\u7701\u6389\u65e0\u8c13\u7684 N \u6b21\u5931\u8d25\uff09\u3002\n\ndelete \u8d70 hard_delete\uff08DB CASCADE\uff09\u3002\u82e5\u7528\u6237\u5f53\u524d\u6b63\u5728\u8dd1 engine\uff0c\n\u88ab\u7ea7\u8054\u5220\u7684 conversation \u884c\u7531 PR2a \u7684 controller exists() / IntegrityError\ncatch \u515c\u4f4f\uff1b\u672c\u7aef\u70b9\u76f4\u63a5 fire-and-forget\u3002",
         "operationId": "bulk_user_action_api_v1_admin_users_bulk_action_post",
         "requestBody": {
           "content": {
@@ -1954,7 +2104,6 @@
           "admin"
         ],
         "summary": "Bulk Import Users",
-        "description": "\u6279\u91cf\u5bfc\u5165\u7528\u6237\uff08\u4ec5 Admin\uff09\u3002\n\nCSV header \u5fc5\u542b `username`\uff1b\u53ef\u9009\u5217 `password` / `display_name` /\n`dept_l1` / `dept_l2` / `dept_l3`\u3002\u5176\u4ed6\u5217\u88ab\u5ffd\u7565\u5e76\u5728 warnings \u91cc\u4e0a\u62a5\u3002\n\u6ce8:`password` \u5217\u867d\u975e parse \u9636\u6bb5\u5fc5\u586b,\u4f46**\u6bcf\u884c\u5fc5\u987b\u6709\u975e\u7a7a\u5bc6\u7801**(\u7559\u7a7a \u2192 \u8be5\u884c\nfailed),\u4e0d\u518d\u300c\u7f3a\u7701 = \u7528\u6237\u540d\u300d;admin \u81ea\u5df1\u586b\u521d\u59cb\u53e3\u4ee4\u5e76\u5e26\u5916\u5206\u53d1,\u6240\u6709\u5bfc\u5165\n\u7528\u6237\u9996\u6b21\u767b\u5f55\u5f3a\u5236\u6539\u5bc6\u3002\n\n\u8bed\u4e49\uff08best-effort\uff0c\u975e\u539f\u5b50\uff09\uff1a\n- parse \u9636\u6bb5\u5931\u8d25\uff08\u89e3\u7801 / \u7f3a username \u5217 / \u884c\u6570\u8d85\u9650\uff09\u2192 400\n- \u6587\u4ef6\u5185 username \u91cd\u590d \u2192 400 + duplicate_rows \u5217\u51fa\n- \u5355\u884c\u4e1a\u52a1\u6821\u9a8c\u5931\u8d25\uff08username \u683c\u5f0f / \u90e8\u95e8 gap / \u5b57\u6bb5\u8d85\u957f / \u5bc6\u7801\u7f3a\u5931\u6216\u4e0d\u8fbe\u6807\uff09\n  \u2192 failed\n- \u5355\u884c username \u5df2\u5728 DB \u2192 skipped\n- \u5176\u4f59 \u2192 created\uff08\u6bcf\u884c\u72ec\u7acb commit\uff1b\u9010\u884c\u6210\u529f/\u5931\u8d25\uff09\n\n\u6267\u884c\u7ed3\u6784\uff083 \u6bb5\uff09\uff1a\n1. validate + dept resolve\uff1a\u987a\u5e8f\u904d\u5386\uff0c\u6821\u9a8c\u5931\u8d25\u7684\u884c\u8fdb failed\uff0c\n   \u901a\u8fc7\u7684\u884c\u6536\u96c6\u5230 to_create\uff08\u542b\u5df2 resolve \u7684 department_id\uff09\u3002\n   dept_cache \u907f\u514d\u540c CSV \u5185\u91cd\u590d\u8def\u5f84\u591a\u6b21 SELECT\u3002\n2. parallel hash\uff1ato_create \u91cc\u6240\u6709 password \u901a\u8fc7 asyncio.gather +\n   asyncio.to_thread \u5e76\u884c\u6254\u7ed9\u9ed8\u8ba4 ThreadPoolExecutor \u8dd1 bcrypt\u3002\n   bcrypt-python \u5728 C \u5c42\u91ca\u653e GIL\uff0c~8 \u6838\u673a\u5668 300 \u884c hash \u9636\u6bb5\n   \u4ece ~50s \u7f29\u5230 ~6s\uff0c\u4e14 event loop \u5168\u7a0b\u4e0d\u5361\uff08\u5176\u4ed6\u8bf7\u6c42\u6b63\u5e38\u54cd\u5e94\uff09\u3002\n3. INSERT\uff1a\u987a\u5e8f\u5199\u5e93\uff1busername UNIQUE \u649e\u4e0a \u2192 \u5f53 skipped \u5904\u7406\uff08race\n   between phase-1 batch-check \u548c\u6b64\u5904\u4e4b\u95f4\u53e6\u4e00 admin \u62a2\u5148\u521b\u5efa\uff09\u3002",
         "operationId": "bulk_import_users_api_v1_admin_users_bulk_import_post",
         "requestBody": {
           "content": {
@@ -2001,7 +2150,6 @@
           "admin"
         ],
         "summary": "Get User",
-        "description": "\u5355\u67e5\u7528\u6237\uff08Admin\uff09 \u2014 \u7ed9\u524d\u7aef\u7f16\u8f91\u8868\u5355\u521d\u59cb\u5316\u7528",
         "operationId": "get_user_api_v1_admin_users__user_id__get",
         "security": [
           {
@@ -2047,7 +2195,6 @@
           "admin"
         ],
         "summary": "Update User",
-        "description": "\u66f4\u65b0\u7528\u6237\uff08\u4ec5 Admin\uff09\n\n\u9632\u8bef\u9501\uff1aadmin \u4e0d\u80fd\u6539\u81ea\u5df1\u7684 role / is_active / password\u3002\u914d\u5408 DELETE\n\u8def\u5f84\u7684\"\u4e0d\u80fd\u5220\u81ea\u5df1\"\u4fdd\u62a4\uff0c\u8db3\u4ee5\u4fdd\u8bc1\u7cfb\u7edf\u59cb\u7ec8\u81f3\u5c11\u6709 1 \u4e2a\u6d3b\u8dc3 admin\n\uff08\u64cd\u4f5c\u8005\u5fc5\u7136\u6d3b\u8dc3 \u2192 \u4e0d\u80fd\u52a8\u81ea\u5df1 \u2192 \u81f3\u5c11\u5269\u81ea\u5df1\uff09\u3002\n\nSelf \u6539 password \u8d70 POST /auth/me/password \u2014\u2014 \u8be5\u7aef\u70b9\u5f3a\u5236\u6821\u9a8c current_password\uff0c\n\u9632\u6b62 token \u88ab\u76d7\u540e\u653b\u51fb\u8005\u65e0\u9700\u65e7\u5bc6\u7801\u5c31\u80fd\u63a5\u7ba1\u8d26\u53f7\u3002\u672c\u7aef\u70b9\u5bf9 self \u6539 password\n\u8fd4\u56de 403\uff0c\u907f\u514d\u5728 admin \u540e\u53f0\u7ed5\u8fc7\u8be5\u6821\u9a8c\u3002",
         "operationId": "update_user_api_v1_admin_users__user_id__put",
         "security": [
           {
@@ -2103,7 +2250,6 @@
           "admin"
         ],
         "summary": "Delete User",
-        "description": "\u786c\u5220\u7528\u6237\uff08\u4ec5 Admin\uff09\n\nFK CASCADE \u4e00\u5e76\u5220\u9664\u5176\u6240\u6709\u4f1a\u8bdd / messages / events / artifacts\u3002\n\u82e5\u7528\u6237\u5f53\u524d\u6709\u6b63\u5728\u8dd1\u7684 engine\uff0c\u88ab\u7ea7\u8054\u5220\u7684 conversation \u884c\u4f1a\u88ab controller\npost-processing \u7684 exists() \u68c0\u67e5\u515c\u4f4f\uff08PR2a\uff09\uff0c\u4e0d\u4f1a\u649e FK\u3002\n\n\u4fdd\u62a4\uff1aadmin \u4e0d\u80fd\u5220\u81ea\u5df1\u3002\u914d\u5408\"\u4e0d\u80fd\u6539\u81ea\u5df1 role/is_active\"\uff0c\u8db3\u4ee5\u4fdd\u8bc1\n\u7cfb\u7edf\u59cb\u7ec8\u81f3\u5c11 1 \u4e2a\u6d3b\u8dc3 admin\u3002",
         "operationId": "delete_user_api_v1_admin_users__user_id__delete",
         "security": [
           {
@@ -2144,7 +2290,6 @@
           "admin"
         ],
         "summary": "Get User Impact",
-        "description": "\u786c\u5220\u7528\u6237\u524d\u7684\u5f71\u54cd\u6570\u636e \u2014 \u8fd4\u56de\u4f1a\u8bdd\u6570\u3002\n\n\u7ed9\u524d\u7aef DangerConfirmModal \u663e\u793a\"\u5c06\u7ea7\u8054\u5220\u9664 N \u6761\u4f1a\u8bdd\uff0c\u64cd\u4f5c\u4e0d\u53ef\u6062\u590d\"\u3002",
         "operationId": "get_user_impact_api_v1_admin_users__user_id__impact_get",
         "security": [
           {
@@ -2217,7 +2362,7 @@
           "admin"
         ],
         "summary": "List Instances",
-        "description": "\u8230\u961f\u5b9e\u4f8b\u9762\u677f\u6570\u636e\u6e90(Phase C \u51b3\u7b56 4)\u3002\n\n\u591a\u526f\u672c(Redis):scan `{prefix:instance:*}` + pipelined GET fan-out(\u955c\u50cf\nRedisRuntimeStore.list_active_executions,Cluster-safe \u2014\u2014 \u65e0\u8de8 slot \u591a key \u64cd\u4f5c),\n\u6bcf\u6761\u5fc3\u8df3 payload \u8bfb\u4fa7\u9644\u4e00\u4e2a status(green/yellow/red)\u3002\n\u5355\u673a(InMemory,\u65e0 Redis):\u6ca1\u6709\u6ce8\u518c\u8868\u53ef scan,\u7528\u672c\u673a\u6700\u8fd1 snapshot \u9020\u51fa\u552f\u4e00\u4e00\u884c\u3002\n\nResponse:\n    {\n        \"ts\": ISO8601,\n        \"instance_id\": str,        # \u672c\u6b21\u5e94\u7b54\u5b9e\u4f8b\n        \"shared\": bool,            # True=Redis \u8230\u961f\u89c6\u56fe;False=\u5355\u673a\u672c\u5730\u89c6\u56fe\n        \"instances\": [\n          {<\u5fc3\u8df3 payload>, \"status\": \"green|yellow|red\",\n           \"status_reasons\": [{\"code\": str, \"label\": str}, ...]}, ...\n        ],\n    }",
+        "description": "\u8230\u961f\u5b9e\u4f8b\u9762\u677f\u6570\u636e\u6e90\u3002\n\n\u591a\u526f\u672c(Redis):scan `{prefix:instance:*}` + pipelined GET fan-out(\u955c\u50cf\nRedisRuntimeStore.list_active_executions,Cluster-safe \u2014\u2014 \u65e0\u8de8 slot \u591a key \u64cd\u4f5c),\n\u6bcf\u6761\u5fc3\u8df3 payload \u8bfb\u4fa7\u9644\u4e00\u4e2a status(green/yellow/red)\u3002\n\u5355\u673a(InMemory,\u65e0 Redis):\u6ca1\u6709\u6ce8\u518c\u8868\u53ef scan,\u7528\u672c\u673a\u6700\u8fd1 snapshot \u9020\u51fa\u552f\u4e00\u4e00\u884c\u3002\n\nResponse:\n    {\n        \"ts\": ISO8601,\n        \"instance_id\": str,        # \u672c\u6b21\u5e94\u7b54\u5b9e\u4f8b\n        \"shared\": bool,            # True=Redis \u8230\u961f\u89c6\u56fe;False=\u5355\u673a\u672c\u5730\u89c6\u56fe\n        \"instances\": [\n          {<\u5fc3\u8df3 payload>, \"status\": \"green|yellow|red\",\n           \"status_reasons\": [{\"code\": str, \"label\": str}, ...]}, ...\n        ],\n    }",
         "operationId": "list_instances_api_v1_admin_instances_get",
         "responses": {
           "200": {
@@ -2934,61 +3079,14 @@
         ]
       }
     },
-    "/api/v1/admin/skills/import": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "summary": "Admin Import Skill",
-        "description": "\u5bfc\u5165\u5171\u4eab skill(owner=null),\u53ef\u6307\u5b9a visibility/default_enabled \u521d\u59cb\u503c\u3002",
-        "operationId": "admin_import_skill_api_v1_admin_skills_import_post",
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_admin_import_skill_api_v1_admin_skills_import_post"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SkillImportResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/v1/admin/skills/{skill_id}/export": {
+    "/api/v1/admin/skills/{skill_id}": {
       "get": {
         "tags": [
           "admin"
         ],
-        "summary": "Admin Export Skill",
-        "description": "\u5bfc\u51fa shared catalog skill,\u4e0d\u6309\u5f53\u524d admin \u7684\u90e8\u95e8\u53ef\u89c1\u6027\u8fc7\u6ee4\u3002",
-        "operationId": "admin_export_skill_api_v1_admin_skills__skill_id__export_get",
+        "summary": "Admin Get Skill Detail",
+        "description": "\u8bfb\u53d6\u5171\u4eab skill \u6b63\u6587\uff0c\u4e0d\u6309\u5f53\u524d\u7ba1\u7406\u5458\u81ea\u5df1\u7684\u90e8\u95e8\u53ef\u89c1\u6027\u8fc7\u6ee4\u3002",
+        "operationId": "admin_get_skill_detail_api_v1_admin_skills__skill_id__get",
         "security": [
           {
             "HTTPBearer": []
@@ -3010,7 +3108,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SkillDetailResponse"
+                }
               }
             }
           },
@@ -3025,9 +3125,7 @@
             }
           }
         }
-      }
-    },
-    "/api/v1/admin/skills/{skill_id}": {
+      },
       "patch": {
         "tags": [
           "admin"
@@ -3110,6 +3208,99 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/skills/import": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Import Skill",
+        "description": "\u5bfc\u5165\u5171\u4eab skill(owner=null),\u53ef\u6307\u5b9a visibility/default_enabled \u521d\u59cb\u503c\u3002",
+        "operationId": "admin_import_skill_api_v1_admin_skills_import_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_admin_import_skill_api_v1_admin_skills_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillImportResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/skills/{skill_id}/export": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Export Skill",
+        "description": "\u5bfc\u51fa shared catalog skill,\u4e0d\u6309\u5f53\u524d admin \u7684\u90e8\u95e8\u53ef\u89c1\u6027\u8fc7\u6ee4\u3002",
+        "operationId": "admin_export_skill_api_v1_admin_skills__skill_id__export_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Skill Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -3439,7 +3630,6 @@
           "departments"
         ],
         "summary": "List Departments",
-        "description": "\u5217\u51fa\u67d0\u7236\u4e0b\u7684\u5b50\u90e8\u95e8\uff08\u6309 name \u6392\u5e8f\uff09\u3002\n\nparent_id \u7f3a\u7701 \u2192 \u4e00\u7ea7\u90e8\u95e8\uff1b\u4f20\u5177\u4f53 id \u2192 \u8be5\u90e8\u95e8\u7684\u76f4\u63a5\u5b50\u3002\n\u7ed9\u524d\u7aef cascader \u6bcf\u7ea7\u6e32\u67d3\u7528\u3002",
         "operationId": "list_departments_api_v1_departments_get",
         "security": [
           {
@@ -3460,10 +3650,8 @@
                   "type": "null"
                 }
               ],
-              "description": "Parent id; omit for top-level",
               "title": "Parent Id"
-            },
-            "description": "Parent id; omit for top-level"
+            }
           }
         ],
         "responses": {
@@ -3494,7 +3682,6 @@
           "departments"
         ],
         "summary": "Create Department",
-        "description": "\u663e\u5f0f\u521b\u5efa\u90e8\u95e8\uff08admin \u5728\u7ba1\u7406 UI \u4e2d\u70b9 \"+ \u65b0\u5efa\" \u8d70\u8fd9\u91cc\uff09\u3002\n\n\u51b2\u7a81 \u2192 409\u3002\u6279\u91cf\u5bfc\u5165 / \u521b\u5efa\u7528\u6237\u65f6\u7684\"\u8def\u5f84\u89e3\u6790\u81ea\u52a8\u5efa\" \u8d70 /resolve \u7aef\u70b9\u3002",
         "operationId": "create_department_api_v1_departments_post",
         "security": [
           {
@@ -3541,7 +3728,6 @@
           "departments"
         ],
         "summary": "Get Tree",
-        "description": "\u8fd4\u56de\u5b8c\u6574\u90e8\u95e8\u6811\uff08\u9876\u5c42\u8282\u70b9\u5217\u8868 \u2192 children \u5d4c\u5957\uff09\u3002\n\n\u4e00\u6b21\u6027\u8fd4\u56de\uff0c\u90e8\u95e8\u8868\u6570\u91cf\u7ea7\u522b\u5c0f\uff08\u51e0\u5341\u5230\u51e0\u767e\uff09\u3002\u7ed9\u90e8\u95e8\u7ba1\u7406\u9762\u677f\u7528\u3002\nuser_count \u662f\u8be5\u8282\u70b9\u7684**\u76f4\u5c5e**\u7528\u6237\u6570\uff0c\u5b50\u6811\u5408\u8ba1\u7531\u524d\u7aef\u6309\u9700\u8ba1\u7b97\u3002",
         "operationId": "get_tree_api_v1_departments_tree_get",
         "responses": {
           "200": {
@@ -3568,7 +3754,6 @@
           "departments"
         ],
         "summary": "Get Department",
-        "description": "\u5355\u4e2a\u90e8\u95e8\u8be6\u60c5\uff08\u542b user_count, child_count\uff0c\u7ed9\u8be6\u60c5/\u5220\u9664\u524d\u7f6e\u5c55\u793a\u7528\uff09",
         "operationId": "get_department_api_v1_departments__dept_id__get",
         "security": [
           {
@@ -3614,7 +3799,6 @@
           "departments"
         ],
         "summary": "Rename Department",
-        "description": "\u4ec5\u6539\u90e8\u95e8\u540d\uff08\u642c\u5bb6\u8d70 POST /{id}/move\uff0c\u8def\u5f84\u5206\u79bb\u907f\u514d PATCH \u5b57\u6bb5\u6b67\u4e49\uff09\u3002\n\n\u51b2\u7a81\uff08\u540c\u7236\u4e0b\u91cd\u540d\uff09 \u2192 409\u3002",
         "operationId": "rename_department_api_v1_departments__dept_id__patch",
         "security": [
           {
@@ -3670,7 +3854,6 @@
           "departments"
         ],
         "summary": "Delete Department",
-        "description": "\u5220\u9664\u90e8\u95e8 \u2014 \u5fc5\u987b\u4e3a\u7a7a\uff08\u65e0\u5b50\u90e8\u95e8\u3001\u65e0\u76f4\u5c5e\u7528\u6237\uff09\u3002\n\n\u975e\u7a7a \u2192 409 + body \u542b user_count/child_count\uff0c\u524d\u7aef\u636e\u6b64\u63d0\u793a\u5148\u8fc1\u3002\nparent_id ondelete=RESTRICT \u5728 DB \u5c42\u515c\u5e95\uff0c\u4f46\u8def\u7531\u5c42\u5148\u6821\u9a8c\u7ed9\u51fa\u66f4\u53cb\u597d\u9519\u8bef\u3002",
         "operationId": "delete_department_api_v1_departments__dept_id__delete",
         "security": [
           {
@@ -3711,7 +3894,6 @@
           "departments"
         ],
         "summary": "Move Department",
-        "description": "\u642c\u5bb6\uff1a\u628a\u90e8\u95e8\u6302\u5230\u65b0\u7236\u4e0b\u3002new_parent_id=None \u2192 \u642c\u5230\u6839\u3002\n\n\u6821\u9a8c\uff1a\n- \u73af\u68c0\u6d4b\uff1a\u4e0d\u80fd\u642c\u5230\u81ea\u5df1 / \u81ea\u5df1\u5b50\u5b59\u4e0b \u2192 400\n- \u540d\u79f0\u51b2\u7a81\uff1a\u65b0\u7236\u4e0b\u5df2\u6709\u540c\u540d \u2192 409\n- \u65b0\u7236\u4e0d\u5b58\u5728 \u2192 400",
         "operationId": "move_department_api_v1_departments__dept_id__move_post",
         "security": [
           {
@@ -3769,7 +3951,6 @@
           "departments"
         ],
         "summary": "Resolve Path",
-        "description": "\u8def\u5f84 \u2192 \u672b\u7ea7 dept_id\u3002\u7f3a\u5931\u5c42\u7ea7\u81ea\u52a8\u521b\u5efa\uff08admin \u663e\u5f0f\u63d0\u4ea4\uff0c\u5b89\u5168\uff09\u3002\n\n\u7ed9\u524d\u7aef cascader \"+ \u65b0\u5efa\u5f53\u524d\u7ea7\" \u5165\u53e3\u3001PR3 \u6279\u91cf\u5bfc\u5165\u65f6\u6309\u884c\u89e3\u6790\u7528\u3002\n\u7a7a\u8def\u5f84 / \u5168\u7a7a\u5b57\u7b26\u4e32 \u2192 \u8fd4\u56de {id: null}\u3002",
         "operationId": "resolve_path_api_v1_departments_resolve_post",
         "requestBody": {
           "content": {
@@ -3890,6 +4071,93 @@
         ]
       }
     },
+    "/api/v1/skills/{skill_id}": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Get Skill Detail",
+        "description": "\u6309\u9700\u8bfb\u53d6\u5f53\u524d\u7528\u6237\u53ef\u89c1 skill \u7684 SKILL.md \u6b63\u6587\uff1b\u4e0d\u53ef\u89c1\u4ecd\u8fd4\u56de 404\u3002",
+        "operationId": "get_skill_detail_api_v1_skills__skill_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Skill Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Delete Skill",
+        "description": "\u5220\u9664\u81ea\u5df1\u5bfc\u5165\u7684 dynamic skill\u3002\u4e0d\u53ef\u89c1 \u2192 404;seeded \u2192 400;\u975e\u672c\u4eba\u5171\u4eab \u2192 403\u3002",
+        "operationId": "delete_skill_api_v1_skills__skill_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Skill Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/skills/import": {
       "post": {
         "tags": [
@@ -3969,47 +4237,6 @@
                 "schema": {}
               }
             }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/skills/{skill_id}": {
-      "delete": {
-        "tags": [
-          "skills"
-        ],
-        "summary": "Delete Skill",
-        "description": "\u5220\u9664\u81ea\u5df1\u5bfc\u5165\u7684 dynamic skill\u3002\u4e0d\u53ef\u89c1 \u2192 404;seeded \u2192 400;\u975e\u672c\u4eba\u5171\u4eab \u2192 403\u3002",
-        "operationId": "delete_skill_api_v1_skills__skill_id__delete",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "skill_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Skill Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -4184,6 +4411,112 @@
         ],
         "title": "ActiveStreamResponse",
         "description": "GET /api/v1/chat/{conv_id}/active-stream response"
+      },
+      "AdminArtifactListResponse": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/AdminArtifactSummary"
+            },
+            "type": "array",
+            "title": "Artifacts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "artifacts"
+        ],
+        "title": "AdminArtifactListResponse"
+      },
+      "AdminArtifactSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Artifact ID"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type",
+            "description": "Content type (MIME type, e.g. text/markdown, text/x-python)"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "description": "Artifact title"
+          },
+          "current_version": {
+            "type": "integer",
+            "title": "Current Version",
+            "description": "Current version number"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source",
+            "description": "Source (agent, user_upload)"
+          },
+          "original_filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Filename",
+            "description": "For source=user_upload artifacts: the filename the user uploaded. From metadata['original_filename']."
+          },
+          "has_blob": {
+            "type": "boolean",
+            "title": "Has Blob",
+            "description": "True for blob-backed artifacts (images / rich-format uploads): no text content; raw bytes via GET \u2026/raw.",
+            "default": false
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Creation time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Last update time"
+          },
+          "content_accessible": {
+            "type": "boolean",
+            "title": "Content Accessible"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "content_type",
+          "title",
+          "current_version",
+          "source",
+          "original_filename",
+          "has_blob",
+          "created_at",
+          "updated_at",
+          "content_accessible"
+        ],
+        "title": "AdminArtifactSummary",
+        "description": "Artifact metadata plus the backend-authoritative admin read capability."
       },
       "AdminConversationEventsResponse": {
         "properties": {
@@ -4580,6 +4913,96 @@
         "title": "AdminInstanceEventsResponse",
         "description": "GET /api/v1/admin/instances/{instance_id}/events response."
       },
+      "AdminLlmCallReconstructResponse": {
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "title": "Conversation Id"
+          },
+          "message_id": {
+            "type": "string",
+            "title": "Message Id"
+          },
+          "agent_start_event_id": {
+            "type": "string",
+            "title": "Agent Start Event Id"
+          },
+          "agent_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Name"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "exposed_tool_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exposed Tool Names",
+            "description": "Exact native function names exposed to the anchored LLM invocation. None means the legacy event predates collection; an empty list means no tools were exposed. Full tool schemas are not persisted."
+          },
+          "has_reminder": {
+            "type": "boolean",
+            "title": "Has Reminder",
+            "default": false
+          },
+          "messages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Messages"
+          },
+          "llm_complete_event_id": {
+            "type": "string",
+            "title": "Llm Complete Event Id"
+          },
+          "response": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Response"
+          }
+        },
+        "type": "object",
+        "required": [
+          "conversation_id",
+          "message_id",
+          "agent_start_event_id",
+          "agent_name",
+          "model",
+          "exposed_tool_names",
+          "has_reminder",
+          "messages",
+          "llm_complete_event_id",
+          "response"
+        ],
+        "title": "AdminLlmCallReconstructResponse",
+        "description": "One persisted LLM request and its normalized response event payload."
+      },
       "AdminMessageGroup": {
         "properties": {
           "message_id": {
@@ -4650,7 +5073,7 @@
             "anyOf": [
               {
                 "items": {
-                  "$ref": "#/components/schemas/UploadedFileRef"
+                  "$ref": "#/components/schemas/AdminUploadedFileRef"
                 },
                 "type": "array"
               },
@@ -4879,6 +5302,38 @@
         "type": "object",
         "title": "AdminSkillUpdateRequest",
         "description": "PATCH /api/v1/admin/skills/{skill_id} request body."
+      },
+      "AdminUploadedFileRef": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename"
+          },
+          "content_accessible": {
+            "type": "boolean",
+            "title": "Content Accessible",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "filename",
+          "content_accessible"
+        ],
+        "title": "AdminUploadedFileRef",
+        "description": "Admin-visible attachment metadata after the active privacy projection."
       },
       "AgentListResponse": {
         "properties": {
@@ -5182,6 +5637,25 @@
         "title": "ArtifactSummary",
         "description": "Artifact summary in list response"
       },
+      "AuthPublicConfigResponse": {
+        "properties": {
+          "password_login_enabled": {
+            "type": "boolean",
+            "title": "Password Login Enabled",
+            "default": true
+          },
+          "sso": {
+            "$ref": "#/components/schemas/SsoPublicProviderConfig"
+          }
+        },
+        "type": "object",
+        "required": [
+          "password_login_enabled",
+          "sso"
+        ],
+        "title": "AuthPublicConfigResponse",
+        "description": "Anonymous login-page capabilities; contains no internal endpoint mapping."
+      },
       "Body_admin_import_skill_api_v1_admin_skills_import_post": {
         "properties": {
           "file": {
@@ -5287,7 +5761,7 @@
           "reason": {
             "type": "string",
             "title": "Reason",
-            "description": "Failure reason: 'forbidden_self' | 'not_found' | 'internal_error'"
+            "description": "Failure reason: 'forbidden_self' | 'not_found' | 'profile_managed_by_provider' | 'internal_error'"
           }
         },
         "type": "object",
@@ -6431,7 +6905,7 @@
           "message"
         ],
         "title": "FindingItem",
-        "description": "\u4e00\u6761 validator finding(E-1 \u786c\u95e8\u4ea7\u51fa;rule id \u7a33\u5b9a,\u524d\u7aef\u6309 severity \u6e32\u67d3)\u3002"
+        "description": "\u4e00\u6761 validator finding\uff1brule id \u7a33\u5b9a\uff0c\u524d\u7aef\u6309 severity \u6e32\u67d3\u3002"
       },
       "HTTPValidationError": {
         "properties": {
@@ -7612,7 +8086,8 @@
           "ends_at",
           "dismissible"
         ],
-        "title": "SiteNotification"
+        "title": "SiteNotification",
+        "description": "Validated notification value shared by API schemas and persisted config."
       },
       "SiteNotificationsResponse": {
         "properties": {
@@ -7635,6 +8110,72 @@
           "revision"
         ],
         "title": "SiteNotificationsResponse"
+      },
+      "SkillDetailResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Stable skill id"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug",
+            "description": "User-context skill slug"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Display name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "One-line description"
+          },
+          "skill_md": {
+            "type": "string",
+            "title": "Skill Md",
+            "description": "SKILL.md guidance body with YAML frontmatter removed"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "seeded",
+              "dynamic"
+            ],
+            "title": "Source",
+            "description": "Config-owned or UI-imported source"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "public",
+              "department"
+            ],
+            "title": "Visibility",
+            "description": "Effective catalog visibility"
+          },
+          "has_extra_files": {
+            "type": "boolean",
+            "title": "Has Extra Files",
+            "description": "Whether the downloadable bundle contains files beyond SKILL.md"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "description",
+          "skill_md",
+          "source",
+          "visibility",
+          "has_extra_files"
+        ],
+        "title": "SkillDetailResponse",
+        "description": "On-demand SKILL.md preview for one management-list item."
       },
       "SkillImportResponse": {
         "properties": {
@@ -7778,6 +8319,73 @@
         ],
         "title": "SkillToggleRequest",
         "description": "PUT /api/v1/skills/{skill_id}/enabled request body."
+      },
+      "SsoPublicProviderConfig": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "provider_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Id"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "token_param": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Param"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "provider_id",
+          "display_name",
+          "token_param"
+        ],
+        "title": "SsoPublicProviderConfig"
+      },
+      "SsoStartResponse": {
+        "properties": {
+          "authorization_url": {
+            "type": "string",
+            "title": "Authorization Url"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In"
+          }
+        },
+        "type": "object",
+        "required": [
+          "authorization_url",
+          "expires_in"
+        ],
+        "title": "SsoStartResponse"
       },
       "StorageUsageResponse": {
         "properties": {
@@ -8313,6 +8921,21 @@
             "title": "Role",
             "description": "Role"
           },
+          "auth_provider": {
+            "type": "string",
+            "title": "Auth Provider",
+            "description": "Authentication provider id"
+          },
+          "can_change_password": {
+            "type": "boolean",
+            "title": "Can Change Password",
+            "description": "Whether this identity supports local password changes"
+          },
+          "can_edit_profile": {
+            "type": "boolean",
+            "title": "Can Edit Profile",
+            "description": "Whether provider-managed profile fields such as display name and department accept local edits"
+          },
           "must_change_password": {
             "type": "boolean",
             "title": "Must Change Password",
@@ -8341,6 +8964,9 @@
           "username",
           "display_name",
           "role",
+          "auth_provider",
+          "can_change_password",
+          "can_edit_profile",
           "must_change_password",
           "department_path"
         ],
@@ -8398,6 +9024,18 @@
             "type": "boolean",
             "title": "Is Active"
           },
+          "auth_provider": {
+            "type": "string",
+            "title": "Auth Provider"
+          },
+          "can_change_password": {
+            "type": "boolean",
+            "title": "Can Change Password"
+          },
+          "can_edit_profile": {
+            "type": "boolean",
+            "title": "Can Edit Profile"
+          },
           "department_id": {
             "anyOf": [
               {
@@ -8427,6 +9065,9 @@
           "display_name",
           "role",
           "is_active",
+          "auth_provider",
+          "can_change_password",
+          "can_edit_profile",
           "department_id",
           "created_at",
           "updated_at"

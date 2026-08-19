@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from api.dependencies import get_client_config_manager, get_current_user
 from api.services.auth import TokenPayload
 from api.schemas.meta import ClientConfigResponse
-from core.client_config_manager import ClientConfigInvariantError, ClientConfigManager
+from core.management.client_config_manager import ClientConfigInvariantError, ClientConfigManager
 from utils.logger import get_logger
 
 router = APIRouter()

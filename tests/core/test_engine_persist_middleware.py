@@ -13,8 +13,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.engine import EngineHooks, create_initial_state, execute_loop
-from core.events import StreamEventType
+from core.execution.agent_runtime import RuntimeHooks
+from core.execution.engine import create_initial_state, execute_loop
+from core.execution.events import StreamEventType
 from tests.core._toolset import effective_for
 from api.services.runtime_store import InMemoryRuntimeStore
 from tools.base import ArtifactSpec, BaseTool, ToolPermission, ToolResult
@@ -30,7 +31,6 @@ class _FakeAgentConfig:
     description: str = "test lead"
     tools: dict = field(default_factory=dict)
     model: str = "文本模型"
-    max_tool_rounds: int = 3
     role_prompt: str = "You are a test agent."
     internal: bool = False
 
@@ -132,8 +132,8 @@ def _make_fake_stream_sequence(rounds: list[list[dict]]):
     return fake
 
 
-def _hooks(store: InMemoryRuntimeStore) -> EngineHooks:
-    return EngineHooks(
+def _hooks(store: InMemoryRuntimeStore) -> RuntimeHooks:
+    return RuntimeHooks(
         check_cancelled=store.is_cancelled,
         wait_for_interrupt=store.wait_for_interrupt,
         drain_messages=store.drain_messages,
@@ -169,7 +169,7 @@ async def _run_engine(
     store = InMemoryRuntimeStore()
 
     with patch("models.llm.astream_with_retry", fake_stream), \
-         patch("core.engine.config") as mock_config:
+         patch("core.execution.engine.config") as mock_config:
         from config import config as real_config
         for attr in dir(real_config):
             if attr.isupper():

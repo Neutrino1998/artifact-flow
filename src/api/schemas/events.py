@@ -8,7 +8,7 @@ from typing import Optional, Any, Dict
 from datetime import datetime
 from pydantic import BaseModel, Field
 
-from core.events import StreamEventType
+from core.execution.events import StreamEventType
 from utils.time import utc_now
 
 
@@ -16,7 +16,7 @@ class SSEEvent(BaseModel):
     """
     Unified SSE event format
 
-    Used for all streaming events from Agent/Engine/Controller layers.
+    Used for all streaming events from AgentRuntime/ConversationTurnHandler layers.
     """
     type: str = Field(..., description="Event type from StreamEventType")
     timestamp: datetime = Field(default_factory=utc_now, description="Event timestamp")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""In-sandbox ENOSYS probe (plan §B — the headline risk).
+"""In-sandbox ENOSYS probe for the primary runsc compatibility risk.
 
 Run UNDER runsc, e.g. via run-all.sh, or directly:
     docker run --rm --runtime=runsc --network=none \\

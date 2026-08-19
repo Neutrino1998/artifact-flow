@@ -1,9 +1,9 @@
 """
-search_tools —— 渐进式披露的「按需补全描述」工具(B-3)。
+search_tools —— 渐进式披露的“按需补全描述”工具。
 
-deferred tool unit 在 `<available_tools>` 里只出索引行(成员 full_name,无 param
-schema)。模型要调用前先用 `search_tools` 把完整 schema 取回来 —— 结果作 tool_result
-进历史(被压缩则模型见索引行自己再 search,不维护已发现集,decision 2)。
+deferred tool unit 在 `<available_tool_units>` 里只出索引行(成员 full_name,无 param
+schema)。模型要调用前先用 `search_tools` 把完整 schema 取回来；结果作 tool_result
+进历史。压缩后模型仍可根据索引行重新搜索，因此无需维护已发现集。
 
 渲染依赖 **per-agent 的 EffectiveToolset + 本 turn 的 tools 字典**。该工具 `wants_context`
 = True:引擎在正常工具路径里注入 `ToolExecutionContext`,故 search_tools 走**正常路由**
@@ -35,7 +35,7 @@ class SearchToolsTool(BaseTool):
         super().__init__(
             name=SEARCH_TOOLS_NAME,
             description=(
-                "Load the full parameter schemas for tools that <available_tools> lists "
+                "Load the full parameter schemas for tools that <available_tool_units> lists "
                 "by name only (deferred tool units). Call this BEFORE calling such a tool. "
                 "Query forms: `select:full_name,full_name` to fetch exact tools by name, "
                 "or a plain keyword to search tool names + descriptions. The returned tool "
@@ -85,7 +85,7 @@ def search_tools_result(
 ) -> ToolResult:
     """渲染当前 agent 可调集里匹配工具的完整 doc(纯函数,execute / 测试共用)。
 
-    过滤口径(reviewer P1):只在 **EffectiveToolset 可调集 ∩ tools** 内检索 —— 含
+    过滤口径：只在 **EffectiveToolset 可调集 ∩ tools** 内检索 —— 含
     enabled-but-deferred,排 disabled / absent / 未授;search_tools 自身不入结果。
     输出有界:匹配数封顶 `SEARCH_TOOLS_MAX_RESULTS`,超出只渲前 N + 列其余名(防把整集
     schema 灌爆下一次 call —— 压缩不兜底 tool-result overflow,工具自负输出大小)。

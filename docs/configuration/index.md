@@ -9,6 +9,7 @@ ArtifactFlow 的配置不是一个大文件。不同配置有不同的所有者�
 | Model | `config/models/models.yaml` | Release 文件 | 模型 alias、供应商、端点和采样参数 |
 | Agent | `config/agents/*.md` | DB registry | 角色提示词、模型和可用能力 |
 | HTTP Tool | `config/tools/` | DB registry | 外部 REST 操作和权限级别 |
+| [企业认证](authentication.md) | `config/auth/remote_bearer_userinfo.yaml` | 启动期文件 | 可选的 bearer userinfo 登录来源；生产由 `control/auth/` 覆盖 |
 | MCP | `config/mcp/*.md` | DB registry + 每进程发现缓存 | MCP Server 连接和工具发现 |
 | Skill | `config/skills/` | DB registry | 按需工作方法、附件和工具授予 |
 | 部署能力 | `control/site.toml` | 目标机文件 | TLS、基础设施、Sandbox、executor |

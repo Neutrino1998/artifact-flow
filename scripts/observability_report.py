@@ -121,8 +121,8 @@ async def _load_message_events(async_engine, hours: int):
     返回 Core Row(列元组),.scalars() 只剪到第一列(id);要拿到 hydrate 后的
     ORM 实例必须走 Session。
     """
-    # 事件 created_at 全链路 naive UTC(utils.time.utc_now,见 incident
-    # 2026-05-14 PR-tz-unify):应用写 / DB server_default 都是 UTC naive
+    # 事件 created_at 全链路 naive UTC（utils.time.utc_now）：应用写和 DB server_default
+    # 都是 UTC naive
     # (SQLite 自动 UTC;PG 需 TIMEZONE=UTC 部署对齐)。threshold 同样取
     # naive UTC,两边对齐;tz-aware 在 SQLite 上会报 can't compare。
     threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
@@ -156,8 +156,8 @@ async def _load_message_events(async_engine, hours: int):
 def _load_jsonl_glob(pattern: str) -> pd.DataFrame:
     """读所有切片(`.jsonl`, `.jsonl.1` ...),拼成一个 DF。
 
-    两层布局都收:实例子目录 `<obs_dir>/<instance_id>/x.jsonl*`(现行,
-    ops plan Phase A 起)与平铺 `<obs_dir>/x.jsonl*`(历史遗留文件)。
+    两层布局都收：现行实例子目录 `<obs_dir>/<instance_id>/x.jsonl*` 与历史遗留的
+    平铺 `<obs_dir>/x.jsonl*`。
     多实例记录混在一个 DF 里没问题——记录内自带 `instance_id` 字段。
 
     拼好后按 `ts` 升序排,_print_lag_events.tail(5) / _print_runtime_summary
@@ -180,7 +180,7 @@ def _load_jsonl_glob(pattern: str) -> pd.DataFrame:
         return pd.DataFrame()
     df = pd.concat(frames, ignore_index=True)
     if "ts" in df.columns:
-        # `ts` 是 ISO8601 字符串(naive UTC,见 PR-tz-unify);lexical 排序对
+        # `ts` 是 ISO8601 naive UTC 字符串；lexical 排序对
         # 同一时区的 ISO8601 与时间排序等价,不需要 parse 成 datetime。
         df = df.sort_values("ts", kind="stable", ignore_index=True)
     return df

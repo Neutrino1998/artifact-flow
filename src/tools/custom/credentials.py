@@ -1,5 +1,5 @@
 """
-工具凭证加密 + 运行期解析(B-4;B-5 退回 lazy decrypt-at-execute)。
+工具凭证加密 + 运行期按调用 lazy decrypt-at-execute。
 
 两块:
   - `CredentialCipher` —— Fernet 对称可逆加密(AES-128-CBC + HMAC)。主密钥单把、
@@ -7,18 +7,19 @@
   - `CredentialResolver` —— 运行期读侧:execute 期按 unit 名查 tool_credentials 行、
     解密成 {placeholder: 明文} map。**lazy 到 execute、只解被调工具的 unit**。
 
-    与 turn-long session 解耦(B-5):resolver 持 `db_manager`(**不是**某条 live
+    与 turn-long session 解耦：resolver 持 `db_manager`（**不是**某条 live
     session),每次 resolve 经 `with_retry` 开一条**短的、带重试的** session,读完即关。
-    旧设计骑 turn-long session、execute 期 await DB —— 那是 idle-in-transaction +
-    turn 内唯一无 fresh-session 重试的 DB 读(执行生命周期 #4),B-5 一并消掉。
+    短 session 避免 turn-long session 在 execute 期 await DB 造成 idle-in-transaction，
+    并让这条读路径获得与其他运行期 DB 访问一致的 fresh-session 重试。
 
     **零明文缓存**:解密值只作单次 resolve 的返回局部存活,既不挂 resolver、也不挂
-    HttpTool 实例 → 不驻留整轮(消 N1)。代价:同一 unit 被多次调用各自重读重解(已
-    权衡接受 —— 合规姿态优先于省一次查询)。cipher 每 resolver 只造一次(避 per-call
-    重建,#11);无凭证行的 unit 返回 {} 且不构造 cipher(无凭证部署无需设主密钥)。
+    HttpTool 实例 → 不驻留整轮。代价:同一 unit 被多次调用各自重读重解(已
+    权衡接受 —— 合规姿态优先于省一次查询)。cipher 每 resolver 只造一次，避免 per-call
+    重建；无凭证行的 unit 返回 {}，resolver 不在该调用路径构造 cipher。进程启动仍会
+    无条件校验主密钥和 Fernet 依赖。
 
-红线(贯穿 B-4):此通路只发 operator/unit 级凭证给**受信 backend** HttpTool;
-沙盒工具永不拿凭证、per-user 身份透传是另一根 defer 的轴(见 plan Non-goals)。
+红线：此通路只发 operator/unit 级凭证给**受信 backend** HttpTool；
+沙盒工具永不拿凭证，per-user 身份透传是另一条独立能力轴。
 解密值只在 execute 期存在,永不进日志 / 事件 / definition / 给模型看的 catalog。
 """
 
@@ -39,7 +40,7 @@ class CredentialCipher:
     """Fernet 封装。构造即校验 key 格式(非法直接抛 CredentialKeyError)。"""
 
     def __init__(self, key: str):
-        # 延迟 import:无凭证部署不必装 cryptography 也能 import 本模块的其它符号
+        # 局部 import 避免模块加载时绑定加密实现；启动校验仍会无条件执行此路径。
         from cryptography.fernet import Fernet
 
         if not key:
@@ -72,9 +73,9 @@ class CredentialResolver:
     """运行期凭证解析:execute 期按 unit 名查行 + 解密。HttpTool 持有并在 execute 调用。
 
     持 `db_manager`(非某条 live session)→ 每次 resolve 用 `with_retry` 开短 session
-    读密文、读完即关(B-5:不骑 turn-long session,补瞬断重试)。cipher 每 resolver 只
-    造一次(避 per-call 重建,#11);**解密明文绝不缓存** —— 只作返回值,用完即弃(消 N1
-    明文驻留整轮)。无 unit / 无凭证行 → {}、且不构造 cipher。
+    读密文、读完即关，不跨调用持有 session，并补瞬断重试。cipher 每 resolver 只
+    造一次以避免 per-call 重建；**解密明文绝不缓存** —— 只作返回值,用完即弃，避免
+    明文驻留整轮。无 unit / 无凭证行 → {}、且不构造 cipher。
     """
 
     def __init__(self, db_manager, cipher_factory=get_cipher):

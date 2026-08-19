@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { useChat } from '@/hooks/useChat';
-import { useComposerSend } from '@/hooks/useComposerSend';
+import { useChat } from '@/features/chat/runtime/useChat';
+import { useComposerSend } from '@/features/chat/runtime/useComposerSend';
 import { useStreamStore } from '@/stores/streamStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useConversationStore } from '@/stores/conversationStore';
@@ -51,7 +51,7 @@ export default function MessageInput() {
   // Armed by the "compact" toggle; rides the next send as force_compact and is
   // cleared on a successful send. A compact-only send (no text) is allowed.
   const [forceCompact, setForceCompact] = useState(false);
-  // Skill activation picker (C-3). `activeSkills` = slugs armed for the next send
+  // Skill activation picker. `activeSkills` = slugs armed for the next send
   // (rides as activate_skills, cleared on success). The picker lists only ENABLED
   // skills (a skill disabled in the management page is hidden here — enabled
   // governs both the model's L1 index and this picker). Loaded lazily on first open.
@@ -129,7 +129,7 @@ export default function MessageInput() {
   // response, no further lead call), the backend overrides last_input_tokens
   // with the summary size and zeroes last_output_tokens, so the gauge correctly
   // drops post-compaction. lead-only by convention; subagent compaction does
-  // not pollute these fields. See the engine state contract in src/core/engine.py.
+  // not pollute these fields. See the engine state contract in src/core/execution/engine.py.
   // Non-live: updates after each completed turn / on conversation load.
   const branchPath = useConversationStore((s) => s.branchPath);
   const compactionThreshold = useConfigStore((s) => s.compactionThreshold);

@@ -297,28 +297,30 @@ export default function UserMenu({
               </button>
             </div>
 
-            {/* Edit display name (all users) */}
-            <button
-              onClick={handleEditProfile}
-              className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
-            >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M11 2l3 3-9 9H2v-3z" />
-              </svg>
-              修改显示名
-            </button>
+            {user.can_edit_profile && (
+              <button
+                onClick={handleEditProfile}
+                className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M11 2l3 3-9 9H2v-3z" />
+                </svg>
+                修改显示名
+              </button>
+            )}
 
-            {/* Change password (all users) */}
-            <button
-              onClick={handleChangePassword}
-              className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
-            >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <rect x="3" y="7" width="10" height="7" rx="1" />
-                <path d="M5 7V5a3 3 0 0 1 6 0v2" />
-              </svg>
-              修改密码
-            </button>
+            {user.can_change_password && (
+              <button
+                onClick={handleChangePassword}
+                className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <rect x="3" y="7" width="10" height="7" rx="1" />
+                  <path d="M5 7V5a3 3 0 0 1 6 0v2" />
+                </svg>
+                修改密码
+              </button>
+            )}
 
             {/* Admin: manage users */}
             {isAdmin && (
@@ -376,7 +378,7 @@ export default function UserMenu({
               </button>
             )}
 
-            {/* Admin: fleet instances (Phase C) */}
+            {/* Admin: fleet instances */}
             {isAdmin && (
               <button
                 onClick={handleInstances}
@@ -422,11 +424,11 @@ export default function UserMenu({
         )}
       </div>
 
-      {changePasswordOpen && (
+      {changePasswordOpen && user.can_change_password && (
         <ChangePasswordDialog onClose={() => setChangePasswordOpen(false)} />
       )}
 
-      {editProfileOpen && (
+      {editProfileOpen && user.can_edit_profile && (
         <EditDisplayNameDialog onClose={() => setEditProfileOpen(false)} />
       )}
     </>

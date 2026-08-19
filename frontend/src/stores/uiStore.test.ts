@@ -30,9 +30,9 @@ describe('uiStore activeMode mutual exclusion', () => {
   });
 
   test('entering any right-panel-takeover mode collapses the artifact panel', () => {
-    // observability/instances/departmentAccess 全屏接管、userManagement/toolUnit master-detail —
+    // skills/observability/instances/departmentAccess 全屏接管、userManagement/toolUnit master-detail —
     // 进入任一都应收起已展开的文件面板(退出后也不弹回)。
-    for (const mode of ['observability', 'instances', 'departmentAccess', 'userManagement', 'toolUnit'] as const) {
+    for (const mode of ['skills', 'observability', 'instances', 'departmentAccess', 'userManagement', 'toolUnit'] as const) {
       useUIStore.setState({ artifactPanelVisible: true });
       useUIStore.getState().setActiveMode(mode);
       expect(useUIStore.getState().artifactPanelVisible).toBe(false);
@@ -68,6 +68,7 @@ describe('uiStore activeMode mutual exclusion', () => {
     expect(s.selectionMode).toBe(false);
     expect(s.userManagementSelection).toEqual([]);
     expect(s.toolUnitRightView).toEqual({ type: 'empty' });
+    expect(s.skillRightView).toEqual({ type: 'empty' });
     expect(s.observabilitySelectedConvId).toBeNull();
     expect(s.observabilityBrowser).toBe('none');
     expect(s.observabilityHighlightedMessageId).toBeNull();
@@ -86,6 +87,19 @@ describe('uiStore activeMode mutual exclusion', () => {
     const s = useUIStore.getState();
     expect(s.observabilitySelectedConvId).toBeNull();
     expect(s.observabilityBrowser).toBe('none');
+  });
+
+  test('leaving skill preview closes the right panel and clears selection', () => {
+    useUIStore.setState({
+      activeMode: 'skills',
+      artifactPanelVisible: true,
+      skillRightView: { type: 'detail', skillId: 'skill-1', admin: true },
+    });
+
+    useUIStore.getState().setActiveMode('none');
+
+    expect(useUIStore.getState().artifactPanelVisible).toBe(false);
+    expect(useUIStore.getState().skillRightView).toEqual({ type: 'empty' });
   });
 
   test('re-entering the current mode is a no-op (does not wipe sub-state)', () => {
@@ -113,6 +127,30 @@ describe('uiStore rightPanelIntentEpoch', () => {
     const before = useUIStore.getState().rightPanelIntentEpoch;
     useUIStore.getState().setArtifactPanelVisible(false);
     expect(useUIStore.getState().rightPanelIntentEpoch).toBe(before + 1);
+  });
+
+  test('automatic open works in chat without becoming user intent', () => {
+    const before = useUIStore.getState().rightPanelIntentEpoch;
+    useUIStore.getState().autoOpenArtifactPanel();
+    expect(useUIStore.getState().artifactPanelVisible).toBe(true);
+    expect(useUIStore.getState().rightPanelIntentEpoch).toBe(before);
+  });
+
+  test.each([
+    'skills',
+    'userManagement',
+    'toolUnit',
+    'departmentAccess',
+    'observability',
+    'instances',
+    'notificationConfig',
+  ] as const)('automatic open during %s stays closed after exit', (mode) => {
+    useUIStore.getState().setActiveMode(mode);
+    useUIStore.getState().autoOpenArtifactPanel();
+    expect(useUIStore.getState().artifactPanelVisible).toBe(false);
+
+    useUIStore.getState().setActiveMode('none');
+    expect(useUIStore.getState().artifactPanelVisible).toBe(false);
   });
 
   test('entering user management bumps epoch (right panel re-targets to detail)', () => {
@@ -143,6 +181,12 @@ describe('uiStore rightPanelIntentEpoch', () => {
   test('entering department access bumps epoch (full-screen takeover)', () => {
     const before = useUIStore.getState().rightPanelIntentEpoch;
     useUIStore.getState().setActiveMode('departmentAccess');
+    expect(useUIStore.getState().rightPanelIntentEpoch).toBe(before + 1);
+  });
+
+  test('entering skill management bumps epoch (full-screen takeover)', () => {
+    const before = useUIStore.getState().rightPanelIntentEpoch;
+    useUIStore.getState().setActiveMode('skills');
     expect(useUIStore.getState().rightPanelIntentEpoch).toBe(before + 1);
   });
 
@@ -244,5 +288,18 @@ describe('uiStore rightView payloads', () => {
   test('setToolUnitRightView updates view payload', () => {
     useUIStore.getState().setToolUnitRightView({ type: 'edit-unit', unitName: 'weather_api' });
     expect(useUIStore.getState().toolUnitRightView).toEqual({ type: 'edit-unit', unitName: 'weather_api' });
+  });
+
+  test('setSkillRightView updates view payload', () => {
+    useUIStore.getState().setSkillRightView({
+      type: 'detail',
+      skillId: 'skill-1',
+      admin: true,
+    });
+    expect(useUIStore.getState().skillRightView).toEqual({
+      type: 'detail',
+      skillId: 'skill-1',
+      admin: true,
+    });
   });
 });

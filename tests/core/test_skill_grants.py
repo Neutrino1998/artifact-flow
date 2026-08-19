@@ -1,11 +1,11 @@
-"""skill_grants 预烤 + activate_skill 单测(C-2,决策 11)。
+"""skill_grants 预烤 + activate_skill 单测。
 
 覆盖:skill 只翻 agent disabled 池(enabled no-op / absent 翻不开)、builtin singleton 与
 external unit 两路、等级取自工具对象、resolve_all 透传、activate_skill 合并 + 幂等。
 """
 
-from core.effective_skillset import resolve_effective_skillset
-from core.effective_toolset import resolve_all, resolve_effective_toolset
+from core.capabilities.effective_skillset import resolve_effective_skillset
+from core.capabilities.effective_toolset import resolve_all, resolve_effective_toolset
 from reconcile.snapshot import AgentSnapshot, RegistrySnapshot, SkillInfo, UnitInfo
 from tools.base import ToolPermission
 
@@ -18,7 +18,7 @@ class _Tool:
 
 def _agent(name="lead_agent", builtin_tools=None, units=None):
     return AgentSnapshot(
-        name=name, description="d", model="m", max_tool_rounds=10, internal=False,
+        name=name, description="d", model="m", internal=False,
         role_prompt="", builtin_tools=builtin_tools or {}, units=units or {},
     )
 
@@ -96,7 +96,7 @@ def test_grant_flips_disabled_external_unit_all_members():
 
 
 def test_full_name_entry_resolves_to_unit():
-    # allowed-tools 写成员全名 → 归属整 unit(整 unit 翻开,决策 11)
+    # allowed-tools 写成员全名 → 归属并翻开整 unit。
     unit = _unit("github", ["github__list", "github__create"])
     agent = _agent(units={"github": "disabled"})
     tools = {"github__list": _Tool("github__list", ToolPermission.AUTO),
@@ -132,7 +132,7 @@ def test_resolve_all_threads_skill_snapshot():
 
 
 def test_grants_baked_only_for_visible_skills():
-    """controller_factory 组合(Finding 1):full snapshot → EffectiveSkillSet → 只从
+    """conversation_turn_factory 组合(Finding 1):full snapshot → EffectiveSkillSet → 只从
     visible 子集烤授予。看不见的 skill(dept 无 grant)其授予不烤 → 跨回合恢复 active_skills
     时 activate_skill 对它是空操作(能力跟随可见性,by-construction)。"""
     full = {
@@ -142,7 +142,7 @@ def test_grants_baked_only_for_visible_skills():
     eff_skill = resolve_effective_skillset("u1", full, {}, dept_matched=set())
     assert "pub" in eff_skill.visible and "dept" not in eff_skill.visible
 
-    # 复刻 controller_factory:只把 visible 子集喂进 resolver
+    # 复刻 conversation_turn_factory:只把 visible 子集喂进 resolver
     visible_snap = {s: full[s] for s in eff_skill.visible}
     agent = _agent(builtin_tools={"bash": "disabled"})
     tools = {"bash": _Tool("bash", ToolPermission.CONFIRM)}

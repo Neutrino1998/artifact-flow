@@ -92,11 +92,15 @@ export function buildContentSecurityPolicy({ nonce, isDev, apiUrl }: CspOptions)
 }
 
 /** Static, nonce-independent hardening headers (set alongside the CSP). */
-export function buildSecurityHeaders(): Record<string, string> {
+export function buildSecurityHeaders(
+  options: { sensitiveCallback?: boolean } = {},
+): Record<string, string> {
   return {
     'X-Frame-Options': 'DENY',
     'X-Content-Type-Options': 'nosniff',
-    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Referrer-Policy': options.sensitiveCallback
+      ? 'no-referrer'
+      : 'strict-origin-when-cross-origin',
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
   };
 }

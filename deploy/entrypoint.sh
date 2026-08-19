@@ -164,7 +164,7 @@ if [ -n "$AF_SKIP_RELEASE" ]; then
     # A dedicated release step (compose `release` service / Ansible task) already migrated
     # + reconciled with one authoritative env. The compose `service_completed_successfully`
     # gate guarantees it succeeded before this backend starts; an empty/stale registry is
-    # still caught at runtime (controller_factory's lead_agent guard).
+    # still caught at turn assembly (conversation_turn_factory's lead_agent guard).
     echo "AF_SKIP_RELEASE set — skipping inline migrate/reconcile (handled by release step)."
 else
     run_release

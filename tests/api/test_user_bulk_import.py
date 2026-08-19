@@ -174,6 +174,55 @@ class TestDepartments:
         for f in body["failed"]:
             assert "contiguous" in f["reason"]
 
+    async def test_department_deleted_before_insert_fails_row_not_username_skip(
+        self, admin_client: AsyncClient, db_manager, monkeypatch, caplog
+    ):
+        import logging
+
+        from repositories.department_repo import DepartmentRepository
+        from repositories.user_repo import UserRepository, UserWriteError
+
+        async with db_manager.session() as session:
+            session.add(
+                Department(id="dept-race", parent_id=None, name="Race Department")
+            )
+            await session.commit()
+
+        real_get_by_id = DepartmentRepository.get_by_id
+
+        async def missing_after_insert_failure(self, department_id):
+            if department_id == "dept-race":
+                return None
+            return await real_get_by_id(self, department_id)
+
+        async def foreign_key_failure(self, user):
+            raise UserWriteError()
+
+        monkeypatch.setattr(
+            DepartmentRepository, "get_by_id", missing_after_insert_failure
+        )
+        monkeypatch.setattr(UserRepository, "create_user", foreign_key_failure)
+
+        csv = _csv_bytes(
+            "username,password,dept_l1\n"
+            "dept-race-user,Imp0rt#2026,Race Department\n"
+        )
+        with caplog.at_level(logging.WARNING, logger="ArtifactFlow"):
+            resp = await _post_csv(admin_client, csv)
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["created"] == []
+        assert body["skipped"] == []
+        assert body["failed"] == [
+            {
+                "row": 1,
+                "username": "dept-race-user",
+                "reason": "department_id does not reference an existing department",
+            }
+        ]
+        assert "User write failed" not in caplog.text
+
 
 # ============================================================
 # Validation failures (per-row)

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-# In-sandbox pandoc canary (plan §B): docx/html ↔ md round trip. Fixtures are
+# In-sandbox pandoc canary: docx/html ↔ md round trip. Fixtures are
 # self-generated (pandoc makes its own docx from md — the round-trip IS the
 # canary), so nothing binary is carried onto the air-gapped node. PDF output
-# (needs LaTeX) is out of scope this phase. Run UNDER runsc.
+# (needs LaTeX) is out of scope for this canary. Run UNDER runsc.
 
 W="$(mktemp -d)"
 cd "$W" || exit 2

@@ -5,7 +5,7 @@
   1. 拥有沙盒的 agent(lead / explore)确实在 `tools` 白名单里授予 bash/mount/persist
      —— 白名单是引擎对模型的可见性闸,漏一个工具就调不动。
   2. **三个沙盒工具默认都是 auto**:沙盒的安全边界是 containment（gVisor /
-     固定容器参数 / 禁网 / per-turn 销毁），不是 Permission Interrupt。决策 11 后
+     固定容器参数 / 禁网 / per-turn 销毁），不是 Permission Interrupt。权限等级收敛后
      等级唯一来源是工具定义(非 agent MD),故 #2 直接锁工具的 permission;
      agent MD 只声明成员(`bash: enabled`),#1 仍只查白名单 key。
 
@@ -88,7 +88,7 @@ def test_sandbox_agents_grant_all_three_tools(shipped_agents, agent_name):
 
 
 def test_sandbox_tools_are_auto():
-    # 决策 11:等级唯一来源 = 工具定义,故直接锁三个工具的出厂权限
+    # 等级唯一来源是工具定义，故直接锁三个工具的出厂权限。
     # (对所有 agent 生效)，不再逐 agent 查 MD 覆盖(绑定不存等级)。
     tools = create_sandbox_tools(None, None)
     assert {tool.name: tool.permission for tool in tools} == {

@@ -135,7 +135,7 @@ export default function ArtifactToolbar() {
           </button>
           )}
 
-          {/* Download — hidden during streaming (decision 6): a durable-acting
+          {/* Download is hidden during streaming because it is a durable-acting
               read. Text download would emit live-but-uncommitted content; blob
               raw download would 404 (blob not flushed until turn end). Re-enabled
               after COMPLETE, when the DB re-pull has aligned everything. */}

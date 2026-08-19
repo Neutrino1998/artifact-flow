@@ -39,6 +39,9 @@ func (c *Controller) envPath() string             { return filepath.Join(c.contr
 func (c *Controller) trustAnchorDir() string {
 	return filepath.Join(c.controlDir(), "trust", "ca-certificates")
 }
+func (c *Controller) authConfigDir() string {
+	return filepath.Join(c.controlDir(), "auth")
+}
 
 func (c *Controller) statePath() string { return filepath.Join(c.runtimeDir(), "state.json") }
 func (c *Controller) lockPath() string  { return filepath.Join(c.runtimeDir(), "mutation.lock") }
@@ -630,6 +633,9 @@ func (c *Controller) reconcile(ctx context.Context, site Site, release string, m
 	// read-only. Ansible consumes the same controller-side directory via /work.
 	if err := os.MkdirAll(c.trustAnchorDir(), 0o755); err != nil {
 		return fmt.Errorf("create outbound CA directory: %w", err)
+	}
+	if err := os.MkdirAll(c.authConfigDir(), 0o755); err != nil {
+		return fmt.Errorf("create authentication config directory: %w", err)
 	}
 	if site.Executor == "ansible" {
 		return c.reconcileAnsible(ctx, site, release, meta)

@@ -12,7 +12,7 @@ set -euo pipefail
 #   sandbox/gvisor-pkg/fetch-and-package.sh
 #   GVISOR_VERSION=20260706.0 ARCH=x86_64 sandbox/gvisor-pkg/fetch-and-package.sh
 #
-# Version pinned to the 2026-07-09 ARM intranet deployment download result.
+# Version pinned to the verified ARM intranet deployment artifact.
 # The package name is version+arch addressed so the same verified runtime bundle
 # is reused across application releases instead of being downloaded each time.
 

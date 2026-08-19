@@ -10,6 +10,7 @@ import asyncio
 import json
 import uuid
 from typing import Tuple, List
+from unittest.mock import MagicMock
 
 import pytest
 from httpx import AsyncClient
@@ -20,7 +21,7 @@ from db.models import User
 from db.database import DatabaseManager
 from repositories.conversation_repo import ConversationRepository
 from repositories.artifact_repo import ArtifactRepository
-from api.services.execution_runner import ExecutionRunner
+from api.dependencies import get_runtime_store
 
 
 async def _seed_conv_with_blob(
@@ -163,6 +164,28 @@ class TestListConversations:
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
 
+    async def test_list_exposes_exact_active_message_owner(
+        self,
+        client: AsyncClient,
+        app,
+        seed_conversation: Tuple[str, List[str]],
+    ):
+        """The sidebar receives the lease's message ID, not a lossy boolean."""
+        conv_id, msg_ids = seed_conversation
+        message_id = msg_ids[0]
+        store = app.dependency_overrides[get_runtime_store]()
+        assert await store.try_acquire_lease(conv_id, message_id) is None
+        try:
+            resp = await client.get("/api/v1/chat")
+            assert resp.status_code == 200
+            row = next(
+                item for item in resp.json()["conversations"]
+                if item["id"] == conv_id
+            )
+            assert row["active_message_id"] == message_id
+        finally:
+            await store.release_lease(conv_id, message_id)
+
     async def test_list_pagination(
         self,
         client: AsyncClient,
@@ -297,14 +320,12 @@ class TestResumeInterrupt:
         conv_id, msg_ids = seed_conversation
         message_id = msg_ids[0]
 
-        # Get the ExecutionRunner injected into the app
-        from api.dependencies import get_execution_runner
-        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        store = app.dependency_overrides[get_runtime_store]()
 
         # Simulate an interrupt that the engine would create (bypass wait_for_interrupt
         # which would block; directly populate internal state)
         from api.services.runtime_store import _InterruptState
-        runner.store._interrupts[message_id] = _InterruptState(interrupt_data={
+        store._interrupts[message_id] = _InterruptState(interrupt_data={
             "call_id": "call-web-search",
             "tool": "web_search",
             "params": {"query": "test"},
@@ -350,20 +371,22 @@ class TestResumeInterrupt:
         client: AsyncClient,
         app,
         seed_conversation: Tuple[str, List[str]],
+        monkeypatch,
     ):
         conv_id, msg_ids = seed_conversation
         message_id = msg_ids[0]
 
-        from api.dependencies import get_execution_runner
         from api.services.runtime_store import _InterruptState
 
-        runner: ExecutionRunner = app.dependency_overrides[get_execution_runner]()
+        store = app.dependency_overrides[get_runtime_store]()
         current = _InterruptState(interrupt_data={
             "call_id": "call-b",
             "tool": "sensitive_b",
             "params": {},
         })
-        runner.store._interrupts[message_id] = current
+        store._interrupts[message_id] = current
+        ops_warning = MagicMock()
+        monkeypatch.setattr("api.routers.chat.logger.warning", ops_warning)
 
         resp = await client.post(f"/api/v1/chat/{conv_id}/resume", json={
             "message_id": message_id,
@@ -376,6 +399,17 @@ class TestResumeInterrupt:
         assert "different tool call" in resp.json()["detail"]
         assert current.event.is_set() is False
         assert current.resume_data is None
+        # RuntimeStore logs the stale resolve and the Router logs the user-facing
+        # business reject.  Pin the Router record that carries all locators.
+        router_records = [
+            call.args[0]
+            for call in ops_warning.call_args_list
+            if call.args and "Resume rejected (409)" in call.args[0]
+        ]
+        assert len(router_records) == 1
+        assert conv_id in router_records[0]
+        assert message_id in router_records[0]
+        assert "call-a" in router_records[0]
 
 
 class TestChatInputCap:
@@ -453,6 +487,8 @@ class TestStorageQuota:
         # Shrink the quota so a tiny seeded blob + a tiny upload trips it. The
         # gate reads config live, so monkeypatching the attr is enough.
         monkeypatch.setattr(config, "ARTIFACT_USER_QUOTA_BYTES", 1000)
+        ops_warning = MagicMock()
+        monkeypatch.setattr("api.routers.chat.logger.warning", ops_warning)
         await _seed_conv_with_blob(db_manager, test_user.id, 900)
         before = (await client.get("/api/v1/chat")).json()["total"]
 
@@ -464,6 +500,11 @@ class TestStorageQuota:
         ]
         resp = await client.post("/api/v1/chat", files=parts)
         assert resp.status_code == 413
+        ops_warning.assert_called_once()
+        logged = ops_warning.call_args.args[0]
+        assert test_user.id in logged
+        assert "used=900" in logged
+        assert "incoming=200" in logged
 
         # Rejected before conversation creation → no ghost conversation.
         after = (await client.get("/api/v1/chat")).json()["total"]

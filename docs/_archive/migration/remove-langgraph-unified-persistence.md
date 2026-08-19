@@ -116,7 +116,7 @@ Message (现有，扩展)
 - Interrupt 是秒级到分钟级的短暂暂停，不是长期挂起
 - 用户刷新页面 → 重连 SSE：
   - 迁移前（asyncio.Queue）：已消费事件丢失，用户需重新提问
-  - 迁移后（Redis Streams，见 [optimization-plan.md](./optimization-plan.md) Phase 5.3）：支持 Last-Event-ID 重放，可恢复到 interrupt 状态继续确认
+  - 迁移后（Redis Streams，见 [optimization-plan.md](../design/legacy/optimization-plan.md) Phase 5.3）：支持 Last-Event-ID 重放，可恢复到 interrupt 状态继续确认
 - 用户彻底离开 → coroutine 超时，当 error 处理并 flush 事件
 - 服务器重启 → coroutine 丢失，用户重新提问
 
@@ -355,7 +355,7 @@ system_prompt = concat(
 | **注入时机** | 工具执行前 | 下一轮 LLM 调用前 |
 | **数据结构** | `asyncio.Event`（二值信号） | `asyncio.Queue`（消息通道） |
 
-两者共存在 TaskManager，互不干扰。单 worker 下 `asyncio.Queue` 天然工作，多 worker 时换 Redis List，接口不变（见 [optimization-plan.md](./optimization-plan.md) Phase 5.5）。
+两者共存在 TaskManager，互不干扰。单 worker 下 `asyncio.Queue` 天然工作，多 worker 时换 Redis List，接口不变（见 [optimization-plan.md](../design/legacy/optimization-plan.md) Phase 5.5）。
 
 ### 多工具调用支持
 
@@ -455,7 +455,7 @@ usage_percent = last_input_tokens / model_context_limit
 
 ## 部署假设：单 Worker
 
-初始设计只考虑单 worker（一个 uvicorn 进程，一个 event loop）。多 worker 部署（gunicorn 多进程）属于后续优化范围（见 [optimization-plan.md](./optimization-plan.md) Phase 5.5）。
+初始设计只考虑单 worker（一个 uvicorn 进程，一个 event loop）。多 worker 部署（gunicorn 多进程）属于后续优化范围（见 [optimization-plan.md](../design/legacy/optimization-plan.md) Phase 5.5）。
 
 **单 worker 下的简化：**
 
@@ -473,7 +473,7 @@ usage_percent = last_input_tokens / model_context_limit
 
 ## 与优化计划的交叉影响
 
-> 以下 Phase 编号引用自 [optimization-plan.md](./optimization-plan.md)。
+> 以下 Phase 编号引用自 [optimization-plan.md](../design/legacy/optimization-plan.md)。
 
 ### Phase 5.2（Redis Checkpointer）→ 不再需要
 
@@ -508,7 +508,7 @@ MessageEvent 表（永久历史）
 
 ## 实施顺序
 
-LangGraph 移除优先于 [optimization-plan.md](./optimization-plan.md) 中的持久化改造，避免在即将废弃的 checkpoint 机制上做无用投入（Phase 5.2 Redis Checkpointer 直接跳过）。
+LangGraph 移除优先于 [optimization-plan.md](../design/legacy/optimization-plan.md) 中的持久化改造，避免在即将废弃的 checkpoint 机制上做无用投入（Phase 5.2 Redis Checkpointer 直接跳过）。
 
 1. **替换执行引擎** — 用 async while loop 替代 StateGraph，interrupt 改为内存 asyncio.Event
 2. **改造 TaskManager** — 增加 `message_id` 去重（当前实现允许同 task_id 覆盖提交），增加 interrupt Event 管理 + message queue

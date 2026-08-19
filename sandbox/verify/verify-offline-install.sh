@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-# In-sandbox offline-install probe (plan §B / 原则 7 tier-2/3 delivery path).
+# In-sandbox offline-install probe for the tier-2/3 delivery path.
 # Installs the baked stub wheel with NO network via --no-index --find-links,
 # proving the offline `pip install` that skill-asset / wheel-bundle dependencies
 # rely on survives gVisor's Sentry. Run UNDER runsc --network=none.

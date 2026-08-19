@@ -1,37 +1,23 @@
-"""
-统一的LLM接口 - 基于 LiteLLM
+"""ArtifactFlow's OpenAI-compatible streaming LLM adapter.
 
-支持多种模型提供商，包括自部署服务（Ollama/vLLM）
-模型配置从 models.yaml 加载。
+All supported providers expose the OpenAI Chat Completions wire protocol. Model
+configuration is loaded from ``models.yaml``; provider-specific request fields
+are forwarded unchanged in the JSON body.
 """
 
-import asyncio
 import hashlib
 import hmac
-import json
+import inspect
 import os
+import re
 from pathlib import Path
 from typing import Optional, Dict, Any, AsyncIterator, Iterable, Mapping
 
 import httpx
 import yaml
 from dotenv import load_dotenv
-
-# litellm 的 __init__ 会在 import 时联网拉远程 model-cost-map;气隙部署里这个
-# HTTP 请求会卡在 getaddrinfo 直到连接超时,而 import 是同步跑在事件循环线程上的
-# → 冻住整个 loop(2026-05-14 监控验证时由 deadman dump 定位)。强制用 litellm
-# 自带的本地价目表。必须在下面 import litellm 之前设;setdefault 让显式 env 覆盖优先。
-os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
-
-from litellm import acompletion
-from litellm.exceptions import (
-    APIConnectionError,
-    ContextWindowExceededError,
-    InternalServerError,
-    RateLimitError,
-    ServiceUnavailableError,
-    Timeout,
-)
+from openai import AsyncOpenAI
+from openai import BadRequestError
 
 load_dotenv()
 
@@ -41,19 +27,10 @@ from models.native_tool_stream import NativeToolCallAssembler
 
 logger = get_logger("ArtifactFlow")
 
-# 仅**瞬态/基础设施**错误才重试:网络断连、超时、429 限流、5xx 服务端错误 —— 重试有望
-# 成功。ContextWindowExceeded 转成 engine 专用信号（由引擎 compact + retry once）；
-# 其余确定性失败(BadRequest/400 含「图块发给文本模型」、ContentPolicy、Auth、NotFound
-# 等),重试改变不了结果,只拖延 loud-fail + 烧 token,故立即抛。
-# 旧实现按 str(e) 子串匹配,会把 "context length limit" 误判成限流去重试 —— 改用 litellm
-# 的**类型化异常**根治。
-_RETRYABLE_LLM_ERRORS = (
-    APIConnectionError,
-    Timeout,
-    RateLimitError,
-    ServiceUnavailableError,
-    InternalServerError,
-)
+# OpenAI SDK owns retries before a streaming response is established. Two retries
+# preserve its default semantics for connection errors, 408/409/429 and 5xx while
+# avoiding an independent adapter loop with a different error/status whitelist.
+_SDK_MAX_RETRIES = 2
 
 
 # ========================================
@@ -61,10 +38,48 @@ _RETRYABLE_LLM_ERRORS = (
 # ========================================
 
 _config: Optional[Dict[str, Any]] = None
+_clients: dict[tuple[Optional[str], Optional[str]], AsyncOpenAI] = {}
 
 
 class LLMContextOverflowError(RuntimeError):
     """Provider explicitly rejected a call because its context window overflowed."""
+
+
+class LLMProtocolError(RuntimeError):
+    """An OpenAI-compatible endpoint violated ArtifactFlow's required contract."""
+
+
+def _get_client(base_url: Optional[str], api_key: Optional[str]) -> AsyncOpenAI:
+    """Reuse one async HTTP pool per endpoint/credential pair.
+
+    A custom endpoint must never inherit ``OPENAI_API_KEY`` from the SDK's
+    environment fallback. Unauthenticated endpoints use an explicit non-sensitive
+    placeholder key in model configuration.
+    """
+    if base_url and not api_key:
+        raise ValueError(
+            "A custom LLM base_url requires an explicit api_key; configure a "
+            "non-sensitive placeholder for an unauthenticated endpoint"
+        )
+    key = (base_url, api_key)
+    client = _clients.get(key)
+    if client is None:
+        kwargs: dict[str, Any] = {"max_retries": _SDK_MAX_RETRIES}
+        if base_url:
+            kwargs["base_url"] = base_url
+        if api_key:
+            kwargs["api_key"] = api_key
+        client = AsyncOpenAI(**kwargs)
+        _clients[key] = client
+    return client
+
+
+async def close_llm_clients() -> None:
+    """Close every cached provider connection pool during application shutdown."""
+    clients = list(_clients.values())
+    _clients.clear()
+    for client in clients:
+        await client.close()
 
 
 def _validate_model_config(
@@ -73,8 +88,8 @@ def _validate_model_config(
 ) -> None:
     """Validate engine-owned model capability metadata.
 
-    ``context_window`` is deliberately required instead of inferred from LiteLLM's
-    public-model catalog: private deployments can override the serving limit, and a
+    ``context_window`` is deliberately required instead of inferred from a public
+    model catalog: private deployments can override the serving limit, and a
     stale/default guess makes compaction fire after the provider has already rejected
     the request.  Validation happens at startup; the accessors below repeat the local
     entry check for scripts/tests that bypass the application lifespan.
@@ -111,6 +126,29 @@ def _validate_model_config(
         replay_reasoning = entry.get("replay_reasoning", True)
         if not isinstance(replay_reasoning, bool):
             errors.append(f"{alias}: 'replay_reasoning' must be a boolean")
+        base_url_env = entry.get("base_url_env")
+        if base_url_env is not None and (
+            not isinstance(base_url_env, str) or not base_url_env
+        ):
+            errors.append(f"{alias}: 'base_url_env' must be a non-empty string")
+        api_key_env = entry.get("api_key_env")
+        if api_key_env is not None and (
+            not isinstance(api_key_env, str) or not api_key_env
+        ):
+            errors.append(f"{alias}: 'api_key_env' must be a non-empty string")
+        configured_api_key = entry.get("api_key")
+        if configured_api_key is not None and (
+            not isinstance(configured_api_key, str) or not configured_api_key
+        ):
+            errors.append(f"{alias}: 'api_key' must be a non-empty string")
+        if (entry.get("base_url") or base_url_env) and not (
+            configured_api_key or api_key_env
+        ):
+            errors.append(
+                f"{alias}: a custom endpoint requires explicit 'api_key' or "
+                "'api_key_env'; use a non-sensitive placeholder for an "
+                "unauthenticated endpoint"
+            )
 
     required = set(required_models or ())
     missing = sorted(name for name in required if name not in models)
@@ -220,22 +258,21 @@ def _resolve_model_params(
     api_key: Optional[str] = None,
 ) -> dict:
     """
-    解析模型参数,合并 defaults → model-level params → 构建 litellm 调用参数
+    解析模型参数,合并 defaults → model-level params → 构建兼容接口调用参数
 
-    采样参数(temperature/max_tokens/top_p/...) 仅当 yaml 显式配置时才传给 litellm;
+    采样参数(temperature/max_tokens/top_p/...) 仅当 yaml 显式配置时才传给 provider;
     没配置就不传 → provider/模型用各自合理默认(OpenAI 1.0、DeepSeek 1.0、vLLM 用
     max_model_len 作为 max_tokens 上界等)。这一层不再强加"温和默认值",避免
-    defaults.max_tokens=4096 这类 cap 偷偷咬掉 reasoning 模型的输出(2026-05-28
-    在 intranet 部署上发现 deepseek-v4-flash thinking 输出被精确切在 4096)。
+    defaults.max_tokens=4096 这类 cap 偷偷咬掉 reasoning 模型的输出。
     上层有 EXECUTION_TIMEOUT + compaction 兜底,不需要这一层再加一道。
 
     Args:
-        model: 模型别名(如 "qwen3.5-plus")或 litellm 格式(如 "deepseek/deepseek-chat")
+        model: 模型别名，或在同时给出 base_url 时的 provider model ID
         base_url: 自部署 OpenAI 兼容接口地址
         api_key: API 密钥
 
     Returns:
-        litellm.acompletion() 所需的完整参数字典(不含 messages)
+        OpenAI-compatible 调用所需的完整参数字典(不含 messages)
     """
     config = _load_config()
     defaults = config.get("defaults", {})
@@ -245,8 +282,17 @@ def _resolve_model_params(
         model_config = models[model]
         model_id = model_config["model"]
         model_params = model_config.get("params", {})
-        # YAML 级 base_url/api_key(函数参数优先)
-        base_url = base_url or model_config.get("base_url")
+        # Endpoint 优先级：显式函数参数 > 配置指定的环境变量 >
+        # YAML 默认。这让 Token Plan 等部署可通过环境覆盖标准公网端点。
+        base_url_env = model_config.get("base_url_env")
+        configured_base_url = model_config.get("base_url")
+        if not base_url and base_url_env:
+            base_url = os.getenv(str(base_url_env))
+            if not base_url and not configured_base_url:
+                raise ValueError(
+                    f"Model '{model}' requires base URL env var '{base_url_env}'"
+                )
+        base_url = base_url or configured_base_url
         if not api_key:
             api_key = model_config.get("api_key")
         api_key_env = model_config.get("api_key_env")
@@ -256,46 +302,45 @@ def _resolve_model_params(
                 raise ValueError(
                     f"Model '{model}' requires API key env var '{api_key_env}'"
                 )
-    elif "/" in model or base_url:
-        # 故意支持的两条直传路径,都不经 yaml:
-        #   1. 原始 litellm 格式(带 provider 前缀,如 deepseek/deepseek-chat、ollama/llama3)
-        #   2. 自部署直传:给了 base_url 时,裸 model 是自部署 OpenAI 兼容端点的 model id
-        #      (由下方自动加 openai/ 前缀)。这是函数签名承诺的用法,不能被 guard 打断。
+    elif base_url:
+        # 故意支持的直传路径:给出 base_url 时，model 就是该
+        # OpenAI-compatible 端点的原始 model ID，不做 provider 前缀改写。
         model_id = model
         model_params = {}
     else:
         # 裸名 + 不在 models.yaml + 无 base_url —— 几乎必是 typo(写错别名/残留旧别名)。
-        # 静默透传会让 litellm 拿它当原始 model id 去调 → 用户以为在用 A 实际跑了 B
+        # 静默透传会让 SDK 把 typo 当真实 model id 发出 → 用户以为在用 A 实际跑了 B
         # (behavior-different silent fallback)。loud-fail,让 operator 当场发现。
         raise ValueError(
-            f"Unknown model '{model}': not a configured alias in models.yaml, not a "
-            f"litellm provider-prefixed id (no '/'), and no base_url for direct passthrough. "
+            f"Unknown model '{model}': not a configured alias in models.yaml and no "
+            f"base_url was supplied for direct OpenAI-compatible passthrough. "
             f"Available aliases: {sorted(models)}"
         )
 
-    params: dict = {
-        "model": model_id,
-        "stream": True,
-        "stream_options": {"include_usage": True},
-    }
+    if base_url and not api_key:
+        raise ValueError(
+            f"Model '{model}' uses a custom base_url and requires an explicit "
+            "api_key or api_key_env; configure a non-sensitive placeholder for "
+            "an unauthenticated endpoint"
+        )
+
+    params: dict = {"model": model_id}
 
     # defaults → model_params(model 级覆盖 defaults 级);
     # 两边都没写的 key 就完全不传,交给 provider/模型默认。
     for key, value in {**defaults, **model_params}.items():
         params[key] = value
 
-    # 自定义 base_url（Ollama/vLLM 等）
+    # 自定义 base_url（DashScope/DeepSeek/Ollama/vLLM 等）
     if base_url:
         params["base_url"] = base_url
-        if not model_id.startswith(("openai/", "ollama/", "deepseek/", "dashscope/")):
-            params["model"] = f"openai/{model_id}"
 
     if api_key:
         params["api_key"] = api_key
 
     # timeout 语义分层：模型/defaults 里的数字 timeout 继续表示
     # “等待模型响应数据”（read），connect/write/pool 由服务级隐藏配置
-    # 控制。不直接使用 LiteLLM 的单 float 默认：它会把为长 TTFT 留的
+    # 控制。不使用单 float timeout：否则会把为长 TTFT 留的
     # read 上限同时套到错 IP 的 TCP connect 上。
     raw_read_timeout = params.get("timeout", settings.LLM_READ_TIMEOUT)
     if (
@@ -376,36 +421,148 @@ def _apply_user_cache_salt(
     return field
 
 
-def get_litellm_model_id(model_alias: str) -> str:
-    """Resolve a model alias to its litellm model ID."""
-    params = _resolve_model_params(model_alias)
-    return params["model"]
+def _split_provider_request(params: dict, model_alias: str) -> tuple[dict, dict]:
+    """Separate SDK/client controls from fields forwarded in the request body."""
+    client_params = {
+        key: params.pop(key)
+        for key in ("model", "base_url", "api_key", "timeout")
+        if key in params
+    }
+    nested = params.pop("extra_body", None)
+    if nested is None:
+        nested = {}
+    if not isinstance(nested, dict):
+        raise ValueError(f"Model '{model_alias}' params.extra_body must be an object")
+    reserved = sorted(
+        {"messages", "model", "stream", "stream_options", "tools"}
+        .intersection({*params, *nested})
+    )
+    if reserved:
+        raise ValueError(
+            f"Model '{model_alias}' params may not override adapter-owned field(s): "
+            f"{reserved}"
+        )
+    duplicates = sorted(set(params).intersection(nested))
+    if duplicates:
+        raise ValueError(
+            f"Model '{model_alias}' defines duplicate provider request field(s) "
+            f"inside and outside params.extra_body: {duplicates}"
+        )
+    return client_params, {**params, **nested}
+
+
+_CONTEXT_OVERFLOW_CODES = {
+    "context_length_exceeded",
+    "context_window_exceeded",
+    "context_length_error",
+    "model_context_window_exceeded",
+}
+
+# OpenAI-compatible servers do not agree on an overflow error code. Keep the
+# compatibility surface centralized and require stable phrases with token counts or
+# provider-specific wording; broad fragments such as "too many tokens" are unsafe
+# because throttling and account limits use the same words.
+_CONTEXT_OVERFLOW_MESSAGE_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\byour input exceeds the context window of this model\b",
+        r"\brequested token count exceeds (?:the )?model'?s maximum context length of \d[\d,]* tokens?\b",
+        r"\binput length \(\d[\d,]*\) exceeds (?:the )?model'?s maximum context length \(\d[\d,]*\)",
+        r"\binput length \d[\d,]* exceeds the maximum allowed input length of \d[\d,]* tokens?\b",
+        r"\bthe input \(\d[\d,]* tokens?\) is longer than (?:the )?model'?s context length \(\d[\d,]* tokens?\)",
+        r"\binput token count \(\d[\d,]*\) exceeds the maximum number of tokens allowed \(\d[\d,]*\)",
+        r"\bmodel'?s maximum prompt length is \d[\d,]* but the request contains \d[\d,]* tokens?\b",
+        r"\bplease reduce the length of the messages or completion\b",
+        r"\bthe request exceeds the available context size(?:, try increasing it)?\b",
+        r"\btokens to keep from the initial prompt is greater than the context length\b",
+        r"\binvalid params, context window exceeds limit\b",
+        r"\brequest exceeded model token limit: \d[\d,]* \(requested: \d[\d,]*\)",
+        r"\bprompt contains \d[\d,]* tokens?.*too large for model with \d[\d,]* maximum context length\b",
+        r"\bprompt has \d[\d,]* tokens?, but the configured context size is \d[\d,]* tokens?\b",
+        r"\bprompt too long; exceeded (?:max )?context length by \d[\d,]* tokens?\b",
+    )
+)
+_NON_OVERFLOW_MESSAGE_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\brate[ _-]*limit\b",
+        r"\btoo many requests\b",
+        r"\bthrottl(?:e|ed|ing)\b",
+    )
+)
+_DASHSCOPE_OVERFLOW_CODES = {"invalidparameter", "invalid_parameter_error"}
+_DASHSCOPE_OVERFLOW_MESSAGE = re.compile(
+    r"\brange of input length should be \[\s*\d[\d,]*\s*,\s*\d[\d,]*\s*\]",
+    re.IGNORECASE,
+)
+
+
+def _is_context_overflow(error: BadRequestError) -> bool:
+    """Classify strict structured and OpenAI-compatible overflow signatures."""
+    raw_codes: list[Any] = [
+        getattr(error, "code", None),
+        getattr(error, "type", None),
+    ]
+    messages: list[str] = []
+    error_message = getattr(error, "message", None)
+    if isinstance(error_message, str):
+        messages.append(error_message)
+    body = getattr(error, "body", None)
+    if isinstance(body, dict):
+        nested = body.get("error")
+        for source in (body, nested if isinstance(nested, dict) else {}):
+            raw_codes.extend((source.get("code"), source.get("type")))
+            message = source.get("message")
+            if isinstance(message, str):
+                messages.append(message)
+
+    messages.append(str(error))
+    codes = {
+        value.strip().casefold()
+        for value in raw_codes
+        if isinstance(value, str) and value.strip()
+    }
+    if codes.intersection(_CONTEXT_OVERFLOW_CODES):
+        return True
+
+    text = "\n".join(dict.fromkeys(messages))
+    if any(pattern.search(text) for pattern in _NON_OVERFLOW_MESSAGE_PATTERNS):
+        return False
+    if codes.intersection(_DASHSCOPE_OVERFLOW_CODES):
+        if _DASHSCOPE_OVERFLOW_MESSAGE.search(text):
+            return True
+    return any(pattern.search(text) for pattern in _CONTEXT_OVERFLOW_MESSAGE_PATTERNS)
+
+
+async def _close_stream(stream: Any) -> None:
+    close = getattr(stream, "close", None)
+    if close is None:
+        return
+    result = close()
+    if inspect.isawaitable(result):
+        await result
 
 
 # ========================================
-# 流式调用（带重试）
+# 流式调用（SDK 负责建立阶段重试）
 # ========================================
 
 async def astream_with_retry(
     messages: list[dict],
     model: str = "gpt-4o-mini",
-    max_retries: int = 3,
-    retry_delay: float = 1.0,
     base_url: Optional[str] = None,
     api_key: Optional[str] = None,
     tools: Optional[list[dict]] = None,
     user_id: Optional[str] = None,
 ) -> AsyncIterator[dict]:
     """
-    带重试的异步流式 LLM 调用
+    异步流式 LLM 调用；返回流建立前的瞬态错误由 SDK 重试。
 
-    只在建立连接阶段重试，流式传输开始后不重试。
+    SDK 不会重放已建立的流，因此部分输出后的失败仍立即抛出。
 
     Args:
         messages: 消息列表
-        model: 模型别名或 litellm 格式
-        max_retries: 最大重试次数
-        retry_delay: 初始重试延迟（秒）
+        model: 模型别名，或与 base_url 一起使用的 provider model ID
         base_url: 自部署接口地址
         api_key: API 密钥
         user_id: 当前认证用户 ID。模型配置 ``cache_salt_field`` 时用于派生并注入
@@ -422,151 +579,143 @@ async def astream_with_retry(
     """
     params = _resolve_model_params(model, base_url, api_key)
     cache_salt_field = _apply_user_cache_salt(params, model, user_id)
-    if tools:
-        params["tools"] = tools
+    client_params, provider_body = _split_provider_request(params, model)
     cache_note = (
         f" (user cache salt field: {cache_salt_field})"
         if cache_salt_field else ""
     )
-    logger.info(f"LLM call: {params['model']}{cache_note}")
+    logger.info(f"LLM call: {client_params['model']}{cache_note}")
 
-    last_error = None
+    stream = None
+    try:
+        client = _get_client(
+            client_params.get("base_url"),
+            client_params.get("api_key"),
+        )
+        request: dict[str, Any] = {
+            "messages": messages,
+            "model": client_params["model"],
+            "stream": True,
+            "stream_options": {"include_usage": True},
+            "timeout": client_params["timeout"],
+        }
+        if provider_body:
+            request["extra_body"] = provider_body
+        if tools:
+            request["tools"] = tools
+        stream = await client.chat.completions.create(**request)
 
-    for attempt in range(max_retries):
-        try:
-            response = await acompletion(messages=messages, **params)
+        full_content = ""
+        reasoning_content = ""
+        token_usage = None
+        assembler = NativeToolCallAssembler()
+        finish_reasons: list[str] = []
 
-            full_content = ""
-            reasoning_content = ""
-            token_usage = None
-            assembler = NativeToolCallAssembler()
-            finish_reasons: list[str] = []
-
-            async for chunk in response:
-                # Token usage（通常在最后一个独立 chunk）
-                if hasattr(chunk, "usage") and chunk.usage:
-                    token_usage = {
-                        "prompt_tokens": getattr(chunk.usage, "prompt_tokens", 0),
-                        "completion_tokens": getattr(chunk.usage, "completion_tokens", 0),
-                        "total_tokens": getattr(chunk.usage, "total_tokens", 0),
-                    }
-                    # LiteLLM 将 OpenAI-compatible/vLLM、DeepSeek、Anthropic 的
-                    # cache-read token 统一到 prompt_tokens_details.cached_tokens。
-                    # None 表示 provider 未报告，必须与明确报告的 0 区分；因此只在
-                    # 字段实际存在时向下游加入可选键。
-                    prompt_details = getattr(
-                        chunk.usage, "prompt_tokens_details", None
+        async for chunk in stream:
+            # Token usage（通常在最后一个独立 chunk）
+            if hasattr(chunk, "usage") and chunk.usage:
+                token_usage = {
+                    "prompt_tokens": getattr(chunk.usage, "prompt_tokens", 0),
+                    "completion_tokens": getattr(chunk.usage, "completion_tokens", 0),
+                    "total_tokens": getattr(chunk.usage, "total_tokens", 0),
+                }
+                # OpenAI-compatible 端点在 prompt_tokens_details.cached_tokens
+                # 中报告 cache-read token。
+                # None 表示 provider 未报告，必须与明确报告的 0 区分；因此只在
+                # 字段实际存在时向下游加入可选键。
+                prompt_details = getattr(chunk.usage, "prompt_tokens_details", None)
+                if isinstance(prompt_details, dict):
+                    cached_input_tokens = prompt_details.get("cached_tokens")
+                else:
+                    cached_input_tokens = getattr(
+                        prompt_details, "cached_tokens", None
                     )
-                    if isinstance(prompt_details, dict):
-                        cached_input_tokens = prompt_details.get("cached_tokens")
-                    else:
-                        cached_input_tokens = getattr(
-                            prompt_details, "cached_tokens", None
-                        )
-                    if cached_input_tokens is not None:
-                        token_usage["cached_input_tokens"] = cached_input_tokens
+                if cached_input_tokens is not None:
+                    token_usage["cached_input_tokens"] = cached_input_tokens
 
-                if not chunk.choices:
-                    continue
+            if not chunk.choices:
+                continue
 
-                choice = chunk.choices[0]
-                if choice.finish_reason is not None:
-                    finish_reasons.append(str(choice.finish_reason))
-                delta = choice.delta
+            choice = chunk.choices[0]
+            if choice.finish_reason is not None:
+                finish_reasons.append(str(choice.finish_reason))
+            delta = choice.delta
 
-                if hasattr(delta, "reasoning_content") and delta.reasoning_content:
-                    reasoning_content += delta.reasoning_content
-                    yield {"type": "reasoning", "content": delta.reasoning_content}
+            if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                reasoning_content += delta.reasoning_content
+                yield {"type": "reasoning", "content": delta.reasoning_content}
 
-                if delta.content:
-                    full_content += delta.content
-                    yield {"type": "content", "content": delta.content}
+            if delta.content:
+                full_content += delta.content
+                yield {"type": "content", "content": delta.content}
 
-                tool_call_deltas = getattr(delta, "tool_calls", None) or []
-                if tool_call_deltas:
-                    assembler.add_many(tool_call_deltas)
-                    yield {
-                        "type": "tool_call_progress",
-                        "tool_call_progress": assembler.progress_snapshot(),
-                    }
+            tool_call_deltas = getattr(delta, "tool_calls", None) or []
+            if tool_call_deltas:
+                assembler.add_many(tool_call_deltas)
+                yield {
+                    "type": "tool_call_progress",
+                    "tool_call_progress": assembler.progress_snapshot(),
+                }
 
-            tool_calls = assembler.accept(finish_reasons)
+        tool_calls = assembler.accept(finish_reasons)
 
-            # Ensure token_usage is always populated — estimate if provider didn't return it
-            if not token_usage or token_usage.get("prompt_tokens", 0) == 0:
-                try:
-                    from litellm import token_counter
-                    model_id = params["model"]
-                    est_input = token_counter(model=model_id, messages=messages)
-                    output_payload = reasoning_content + full_content
-                    if tool_calls:
-                        output_payload += json.dumps(
-                            tool_calls,
-                            ensure_ascii=False,
-                            sort_keys=True,
-                            separators=(",", ":"),
-                        )
-                    est_output = (
-                        token_counter(model=model_id, text=output_payload)
-                        if output_payload else 0
-                    )
-                    token_usage = {
-                        "prompt_tokens": est_input,
-                        "completion_tokens": est_output,
-                        "total_tokens": est_input + est_output,
-                    }
-                    logger.debug(f"Estimated token usage via token_counter: {token_usage}")
-                except Exception as e:
-                    logger.warning(f"Token usage estimation failed: {e}")
-                    token_usage = token_usage or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-
-            yield {"type": "usage", "token_usage": token_usage}
-
-            yield {
-                "type": "final",
-                "content": full_content,
-                "reasoning_content": reasoning_content or None,
-                "tool_calls": tool_calls,
-                "token_usage": token_usage,
-            }
-            return  # 流式完成
-
-        except ContextWindowExceededError as e:
-            # This is the one deterministic provider rejection the engine can
-            # repair structurally: compact the same agent's history and retry the
-            # failed invocation once.  Give the engine a provider-neutral type;
-            # every other non-retryable error keeps the existing loud-fail path.
-            raise LLMContextOverflowError(str(e)) from e
-
-        except _RETRYABLE_LLM_ERRORS as e:
-            last_error = e
-            if isinstance(e, RateLimitError):
-                wait_time = retry_delay * (2 ** attempt)
-                logger.warning(f"LLM rate limited, retry {attempt+1}/{max_retries} after {wait_time}s")
-            elif isinstance(e, Timeout):
-                wait_time = retry_delay
-                logger.warning(f"LLM timeout, retry {attempt+1}/{max_retries} after {wait_time}s")
-            else:
-                wait_time = retry_delay * (1.5 ** attempt)
-                logger.warning(
-                    f"LLM transient error ({type(e).__name__}): {e}, "
-                    f"retry {attempt+1}/{max_retries} after {wait_time}s"
+        # Usage drives compaction and resource metrics. A guessed tokenizer can
+        # silently undercount private/provider-specific models, so successful
+        # streams must honor include_usage instead of degrading to local estimates.
+        if token_usage is None:
+            raise LLMProtocolError(
+                f"Model '{model}' completed without usage despite "
+                "stream_options.include_usage=true"
+            )
+        for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            value = token_usage.get(field)
+            if (
+                not isinstance(value, int)
+                or isinstance(value, bool)
+                or value < 0
+            ):
+                raise LLMProtocolError(
+                    f"Model '{model}' returned invalid usage field '{field}'"
                 )
+        cached_input_tokens = token_usage.get("cached_input_tokens")
+        if (
+            cached_input_tokens is not None
+            and (
+                not isinstance(cached_input_tokens, int)
+                or isinstance(cached_input_tokens, bool)
+                or cached_input_tokens < 0
+            )
+        ):
+            raise LLMProtocolError(
+                f"Model '{model}' returned invalid cached input token usage"
+            )
 
-            if attempt < max_retries - 1:
-                await asyncio.sleep(wait_time)
-            else:
-                raise
+        yield {"type": "usage", "token_usage": token_usage}
 
-        except Exception as e:
-            # 非瞬态 = 确定性失败:重试无意义。立即响亮失败(不烧 token、不拖延诊断)。
-            # 含 BadRequest/400(图块发给文本模型即此类)、ContentPolicy、
-            # Authentication、NotFound 等。ContextWindowExceeded 已在上面转成
-            # engine 可恢复信号。
-            logger.error(f"LLM non-retryable error ({type(e).__name__}): {e}")
-            raise
+        yield {
+            "type": "final",
+            "content": full_content,
+            "reasoning_content": reasoning_content or None,
+            "tool_calls": tool_calls,
+            "token_usage": token_usage,
+        }
 
-    raise last_error or RuntimeError("LLM call failed without specific error")
+    except BadRequestError as e:
+        # This is the one deterministic provider rejection the engine can
+        # repair structurally: compact the same agent's history and retry the
+        # failed invocation once. Give the engine a provider-neutral type.
+        if _is_context_overflow(e):
+            raise LLMContextOverflowError(str(e)) from e
+        logger.error(f"LLM request rejected ({type(e).__name__}): {e}")
+        raise
+    except Exception as e:
+        # By this point the SDK has exhausted any eligible establishment retries.
+        # Established-stream failures are never replayed.
+        logger.error(f"LLM call failed ({type(e).__name__}): {e}")
+        raise
+    finally:
+        if stream is not None:
+            await _close_stream(stream)
 
 
 # ========================================
@@ -636,8 +785,18 @@ def get_model_info(model: str) -> Dict[str, Any]:
     if model in models:
         model_config = models[model]
         params = model_config.get("params", {})
-        # 推理模型: enable_thinking=True 或模型名含 reasoner
-        is_reasoning = params.get("enable_thinking", False) or "reasoner" in model_config["model"]
+        extra_body = params.get("extra_body", {})
+        chat_template = (
+            extra_body.get("chat_template_kwargs", {})
+            if isinstance(extra_body, dict) else {}
+        )
+        # 推理模型：支持 DashScope enable_thinking 与私有端点的
+        # chat_template_kwargs.thinking 两种显式能力声明。
+        is_reasoning = bool(
+            params.get("enable_thinking", extra_body.get("enable_thinking", False))
+            or chat_template.get("thinking", False)
+            or "reasoner" in model_config["model"]
+        )
         return {
             "model_id": model_config["model"],
             "is_reasoning": is_reasoning,
@@ -667,7 +826,7 @@ def model_supports_vision(model: str) -> bool:
 def model_replays_reasoning(model: str) -> bool:
     """Whether assistant reasoning is replayed into this model's message history.
 
-    The alias-level flag is application metadata, not a LiteLLM parameter. Unknown
+    The alias-level flag is application metadata, not a provider parameter. Unknown
     direct-passthrough models retain the historical behavior (True); runtime Agents
     are separately required to use configured aliases.
     """

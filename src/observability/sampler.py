@@ -46,7 +46,7 @@ class RuntimeSampler:
         sampler = RuntimeSampler(
             sink=metrics_sink,
             watchdog=watchdog,
-            execution_runner=runner,
+            task_supervisor=supervisor,
             db_manager=db,
             redis_client=redis,
             long_task_age_sec=60,
@@ -57,7 +57,7 @@ class RuntimeSampler:
         await sampler.stop()
     """
 
-    # 高水位告警阈值(对齐 fix plan §注入点 #3):RSS / FD 用 80% ulimit,redis 自配
+    # 高水位告警阈值：RSS / FD 用 80% ulimit，Redis 使用自身配置。
     _RSS_WARN_RATIO = 0.80
     _FD_WARN_RATIO = 0.80
     _REDIS_USED_WARN_RATIO = 0.80
@@ -67,7 +67,7 @@ class RuntimeSampler:
         *,
         sink: JsonlSink,
         watchdog: Optional[LoopLagWatchdog],
-        execution_runner: Any = None,
+        task_supervisor: Any = None,
         db_manager: Any = None,
         redis_client: Any = None,
         data_dir: str = "data",
@@ -78,14 +78,14 @@ class RuntimeSampler:
     ):
         self._sink = sink
         self._watchdog = watchdog
-        self._runner = execution_runner
+        self._supervisor = task_supervisor
         self._db = db_manager
         self._redis = redis_client
         self._data_dir = Path(data_dir)
         self._long_task_age_sec = long_task_age_sec
         self._interval = interval_sec
         self._mem_limit = mem_limit_bytes  # None = 用 ulimit fallback
-        # Phase C 心跳:每 tick 把快照子集多写一份到 Redis。None = 不写(未配置)。
+        # 每 tick 把快照子集多写一份到 Redis 心跳。None = 不写(未配置)。
         self._heartbeat = heartbeat
 
         self._proc = psutil.Process(os.getpid())
@@ -152,7 +152,7 @@ class RuntimeSampler:
         )
 
         # ── in-flight / tasks ──
-        in_flight, long_running = self._collect_runner_state()
+        in_flight, long_running = self._collect_supervisor_state()
         snapshot["in_flight"] = in_flight
         snapshot["tasks_long_running"] = long_running
         try:
@@ -191,22 +191,22 @@ class RuntimeSampler:
 
         return snapshot
 
-    def _collect_runner_state(self) -> tuple[int, int]:
+    def _collect_supervisor_state(self) -> tuple[int, int]:
         """返回 (in_flight, long_running) — long_running 是超 age 阈值的任务数。
 
-        long_running_count 是 ExecutionRunner 上的可选方法;不存在时(如测试
+        long_running_count 是 TaskSupervisor 上的可选方法;不存在时(如测试
         fake)优雅退化为 0,而不是让 sampler 整个采样失败。
         """
-        if self._runner is None:
+        if self._supervisor is None:
             return 0, 0
         try:
-            tasks = getattr(self._runner, "_tasks", {})
+            tasks = getattr(self._supervisor, "_tasks", {})
             in_flight = len(tasks)
         except Exception:
             return 0, 0
 
         try:
-            long_running_fn = getattr(self._runner, "long_running_count", None)
+            long_running_fn = getattr(self._supervisor, "long_running_count", None)
             if callable(long_running_fn):
                 long_running = int(long_running_fn(self._long_task_age_sec))
             else:

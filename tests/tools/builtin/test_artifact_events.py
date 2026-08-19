@@ -14,7 +14,7 @@ import uuid
 
 import pytest
 
-from core.events import StreamEventType
+from core.execution.events import StreamEventType
 from db.models import User
 from repositories.artifact_repo import ArtifactRepository
 from repositories.conversation_repo import ConversationRepository
@@ -89,7 +89,7 @@ class TestEmitBehavior:
     ):
         """persist 覆盖回写的 ARTIFACT_UPDATED:has_blob/blob_size/content_type +
         空 content、绝不带字节。content_type 必带——跨轮 artifact 本轮首个事件
-        可能就是本条,前端无 live base 时靠它选二进制视图(reviewer #1 回归)。"""
+        可能就是本条，前端无 live base 时靠它选二进制视图。"""
         service.set_session(session_id)
         ok, _, info = await service.create_from_upload(
             session_id=session_id, filename="pkg.zip", content="",

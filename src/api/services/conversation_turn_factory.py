@@ -1,0 +1,317 @@
+"""Assemble an admitted ConversationTurnHandler and forward its events."""
+
+import asyncio
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator, AsyncIterator
+
+from config import config
+from api.dependencies import (
+    get_db_manager,
+    get_mcp_client_manager,
+    get_tools,
+)
+from api.services.runtime_store import RuntimeStore
+from api.services.stream_transport import StreamTransport
+from api.services.conversation_turn_handler import ConversationTurnHandler
+from core.execution.engine import EmptyTurnInputError
+from core.execution.task_supervisor import TaskScope
+from utils.logger import get_logger, get_request_id
+from utils.time import utc_now
+
+logger = get_logger("ArtifactFlow")
+
+
+def sanitize_error_event(event: dict, client_safe: bool = False) -> dict:
+    """脱敏 error 事件并注入 request_id 定位码。
+
+    request_id 不论 DEBUG 都注入(prod 回传给用户安全,是可回传的错误码);
+    脱敏只删 error 文本,绝不删定位码。request_id 取自当前 context —— 后台
+    引擎任务由 chat 请求 create_task 起,会继承发起请求的 request_id。
+
+    client_safe=True:文案本身就是给用户的(client-caused 预期失败,4xx 档),
+    跳过脱敏、只注 request_id —— 脱敏是 5xx 档待遇,不适用。
+    """
+    if event.get("type") != "error" or not isinstance(event.get("data"), dict):
+        return event
+    data = {**event["data"]}
+    req_id = get_request_id()
+    if req_id and not data.get("request_id"):
+        data["request_id"] = req_id
+    if not config.DEBUG and not client_safe:
+        data["error"] = "Internal server error"
+    return {**event, "data": data}
+
+
+@asynccontextmanager
+async def create_turn_handler(
+    conversation_id: str,
+    message_id: str,
+    user_id: str,
+    *,
+    task_scope: TaskScope,
+    runtime_store: RuntimeStore,
+) -> AsyncGenerator[ConversationTurnHandler, None]:
+    """
+    Build a fresh ConversationTurnHandler wired to the db_manager factory.
+
+    The handler belongs to a background task whose
+    lifetime exceeds the HTTP request, so it can't ride the request-scoped session.
+
+    The background task never holds a DB session across LLM or authorization waits.
+    Instead, the handler holds db_manager and opens a short retrying session per DB touch:
+    artifact access, conversation/event persistence, and lazy credential reads. The
+    registry snapshot is also read in a short session; everything else is loaded lazily.
+
+    The Conversation execution service supplies the TaskScope and RuntimeStore;
+    direct callers should use that service rather than assemble this factory.
+    """
+    from repositories.department_repo import load_ancestor_ids
+    from core.capabilities.effective_skillset import resolve_effective_skillset
+    from core.capabilities.effective_toolset import resolve_all, unit_visible_by_department
+    from core.execution.agent_runtime import RuntimeHooks
+    from reconcile.snapshot import (
+        hydrate_mcp_tools,
+        load_registry_snapshot_with_unit_matches,
+        load_skill_snapshot_with_matches,
+    )
+    from repositories.skill_repo import SkillRepository
+    from tools.builtin.artifact_service import ArtifactService
+    from tools.builtin.artifact_ops import create_artifact_tools
+    from tools.builtin.read_skill import create_skill_tools
+    from tools.builtin.sandbox_session import SandboxSession
+    from tools.builtin.sandbox_ops import create_sandbox_tools
+    from tools.builtin.skill_service import SkillService
+
+    db_manager = get_db_manager()
+    store = runtime_store
+
+    # per-turn 沙盒 session:对象壳在此创建(同 ArtifactService,构造注入工具),
+    # 容器 lazy 于首个沙盒工具调用 —— 无沙盒 turn 壳零成本。拆除句柄注册进
+    # TaskScope,在 supervised task 的最外层 finally 执行,与 lease 同生灭;
+    # close 幂等不依赖 DB session,故晚于本 context manager 退出也安全。
+    sandbox_session = SandboxSession(conversation_id, message_id)
+    task_scope.add_cleanup("sandbox session", sandbox_session.close)
+
+    # ArtifactService 持 db_manager(不绑一条 turn-long session):turn 期每次 DB 读/写各开
+    # 短 retrying session 读完即关，WorkingSet 留实例做 turn-live 缓存。
+    artifact_service = ArtifactService(db_manager=db_manager)
+
+    # per-turn scope snapshot:agent/tool registry + skill snapshot + user dept rule matches.
+    # Resource visibility and dept-rule matches are loaded by same-row SQL projections;
+    # a shared AsyncSession alone is not enough under PostgreSQL READ COMMITTED because
+    # each SELECT gets its own snapshot.
+    # Close the DB session before MCP hydration so external HTTP never pins a DB conn.
+    async def _load_turn_scope(session):
+        repo = SkillRepository(session)
+        dept_id = await repo.user_department_id(user_id)
+        ancestors = await load_ancestor_ids(session, dept_id)
+        registry_snapshot, dept_matched_units = await load_registry_snapshot_with_unit_matches(
+            session, ancestors, db_manager=db_manager
+        )
+        skill_snap, dept_matched = await load_skill_snapshot_with_matches(
+            session, ancestors
+        )
+        overrides = await repo.user_overrides(user_id)
+        return registry_snapshot, skill_snap, overrides, dept_matched, dept_matched_units
+
+    (
+        snapshot,
+        skill_snapshot,
+        skill_overrides,
+        dept_matched,
+        dept_matched_units,
+    ) = await db_manager.with_retry(_load_turn_scope)
+
+    if "lead_agent" not in snapshot.agents:
+        # DB 注册表为空/缺 lead_agent = reconcile 没跑(或跑挂)。引擎此时无可执行
+        # agent,与其在 turn 中途撞 KeyError,不如在装配处 loud-fail 给出可操作指引。
+        raise RuntimeError(
+            "Tool/agent registry is empty or missing 'lead_agent' — run "
+            "`python scripts/reconcile_config.py` to materialize config into the DB "
+            "(prod: entrypoint does this under the migration lock)."
+        )
+    effective_skillset = resolve_effective_skillset(
+        user_id, skill_snapshot, skill_overrides, dept_matched
+    )
+
+    # MCP discovery 是外部 HTTP,必须在 DB snapshot session 关闭后执行;否则慢/
+    # 不可达 server 会阻塞到 timeout，因此 discovery 必须在 DB snapshot session 关闭后执行。
+    # 先按当前用户部门 visibility 过滤 server unit：dept-denied MCP server 不联系。
+    allowed_mcp_units = {
+        unit.name
+        for unit in snapshot.units.values()
+        if unit.provider == "mcp" and unit_visible_by_department(unit, dept_matched_units)
+    }
+    if allowed_mcp_units:
+        await hydrate_mcp_tools(
+            snapshot,
+            mcp_manager=get_mcp_client_manager(),
+            db_manager=db_manager,
+            allowed_unit_names=allowed_mcp_units,
+        )
+
+    # 合并工具来源:全局 builtin(进程级) + DB external(快照重建) + 请求级
+    # artifact / 沙盒 / skill 工具。external 工具自此唯一来源是 DB —— 不再进程级加载
+    # config/tools/*.md(见 dependencies._load_tools)。read_skill 请求级(持 EffectiveSkillSet
+    # 做可见性闸 + SkillService lazy 取正文),仅有可见 skill 时建。
+    artifact_tools = create_artifact_tools(artifact_service)
+    sandbox_tools = create_sandbox_tools(sandbox_session, artifact_service)
+    skill_tools = create_skill_tools(
+        SkillService(db_manager=db_manager), effective_skillset, sandbox_session
+    )
+    all_tools = {
+        **get_tools(),
+        **snapshot.external_tools,
+        **{t.name: t for t in artifact_tools},
+        **{t.name: t for t in sandbox_tools},
+        **{t.name: t for t in skill_tools},
+    }
+    agents = snapshot.agents
+    # skill_grants 只从**可见**子集烤(能力跟随当前可见性):不给用户已看不见的 skill 烤
+    # 授予 → 跨回合恢复 active_skills 时,被撤销(admin 撤 dept 授权 / public→department /
+    # 换部门)的 skill 其 activate_skill 自然空操作,by-construction 消泄漏,非在恢复循环加闸。
+    # active_skills 名单仍 sticky(= 用户意图),能力每轮按可见性重算 → visible=correctness /
+    # enabled=UX 的切分落到工具授予轴(admin 撤后又授,下轮 slug 仍在、能力自动回来)。
+    visible_skill_snapshot = dict(effective_skillset.visible)
+    # 单一解析点：把每 agent 的宇宙(builtin ∪ units)解析成扁平
+    # {full_name: 等级};等级从工具对象取(绑定不存等级)。引擎/上下文构建全程读这个。
+    # Builtin 成员关系只来自 agent 配置。all_tools 中请求级 read_skill/mount_skill
+    # 对象的存在只能收窄配置，不能替 agent 扩权；search_tools 同样必须显式配置。
+    effective_toolsets = resolve_all(
+        snapshot, all_tools, skill_snapshot=visible_skill_snapshot,
+        dept_matched_units=dept_matched_units,
+    )
+
+    hooks = RuntimeHooks(
+        check_cancelled=store.is_cancelled,
+        wait_for_interrupt=store.wait_for_interrupt,
+        drain_messages=store.drain_messages,
+    )
+
+    async def _on_engine_exit(conv_id: str, msg_id: str) -> None:
+        await store.clear_engine_interactive(conv_id, msg_id)
+
+    # conversation_manager / message_event_repo 不在此绑 session：handler 经
+    # _with_db_retry 每调一次开短 session。db_manager 模式与 bound-repository 模式在
+    # Handler 构造时互斥且完整，生产装配不会静默退化成无持久化执行。
+    yield ConversationTurnHandler(
+        agents=agents,
+        tools=all_tools,
+        effective_toolsets=effective_toolsets,
+        hooks=hooks,
+        artifact_service=artifact_service,
+        on_engine_exit=_on_engine_exit,
+        db_manager=db_manager,
+        sandbox_session=sandbox_session,
+        effective_skillset=effective_skillset,
+        user_id=user_id,
+        entry_agent="lead_agent",
+    )
+
+
+async def run_and_push(
+    stream_transport: StreamTransport,
+    stream_id: str,
+    event_stream: AsyncIterator[dict],
+) -> None:
+    """
+    Consume turn events and push them to the StreamTransport.
+
+    Handles timeout and unexpected errors, pushing sanitized error events.
+    Execution runs to completion even if the SSE client disconnects. The owning
+    Conversation TaskScope closes the stream after sandbox/runtime cleanup.
+    """
+    stream_closed = False
+    # llm_chunk coalescing: 保留最新快照，定时 flush（80ms）
+    pending_chunks: dict[str, dict] = {}
+    # channel (content | reasoning_content | tool_call_progress) → latest event
+    last_flush_time = 0.0
+
+    async def flush_pending():
+        nonlocal last_flush_time, stream_closed
+        for key in list(pending_chunks):
+            if stream_closed:
+                pending_chunks.clear()
+                return
+            if not await stream_transport.push_event(stream_id, sanitize_error_event(pending_chunks.pop(key))):
+                logger.info(f"Stream {stream_id} closed, execution continues")
+                stream_closed = True
+        last_flush_time = asyncio.get_event_loop().time()
+
+    # 纯转发器:不再裹 asyncio.timeout —— 超时事实由 AgentRuntime 产生，并由 Handler
+    # 的唯一 dispatcher 转成 TIMED_OUT 终态，与 DB 终态
+    # 同源、经同一个 decide_terminal dispatcher 产出。这里只转发包括 TIMED_OUT 在内的
+    # 所有事件。(后处理的 wall-clock 上界由 DB 层负责。)
+    try:
+        async for event in event_stream:
+            if stream_closed:
+                continue
+
+            if event.get("type") == "llm_chunk":
+                data = event.get("data", {})
+                if "tool_call_progress" in data:
+                    chunk_key = "tool_call_progress"
+                elif "reasoning_content" in data:
+                    chunk_key = "reasoning_content"
+                else:
+                    chunk_key = "content"
+                pending_chunks[chunk_key] = event
+                now = asyncio.get_event_loop().time()
+                if now - last_flush_time >= 0.08:
+                    await flush_pending()
+            else:
+                await flush_pending()  # 非 chunk 前先 flush
+                if stream_closed:
+                    continue
+                if not await stream_transport.push_event(stream_id, sanitize_error_event(event)):
+                    logger.info(f"Stream {stream_id} closed, execution continues")
+                    stream_closed = True
+
+        await flush_pending()  # 流结束 flush 残余
+
+    except asyncio.CancelledError as cancel_exc:
+        # Cancellation can land while this forwarder is awaiting StreamTransport,
+        # leaving ConversationTurnHandler suspended at `yield`.  Explicitly close
+        # the generator so GeneratorExit reaches the Handler; it cancels/drains its
+        # runtime child and completes persistence-only finalization before cleanup.
+        close = getattr(event_stream, "aclose", None)
+        if close is not None:
+            close_task = asyncio.create_task(close())
+            try:
+                while not close_task.done():
+                    try:
+                        await asyncio.shield(close_task)
+                    except asyncio.CancelledError:
+                        # A second fence/shutdown cancel must not strand Handler
+                        # finalization. The original cancellation is re-raised below.
+                        continue
+                await close_task
+            except asyncio.CancelledError:
+                logger.error(
+                    "Turn event stream close was itself cancelled; preserving outer cancel"
+                )
+            except Exception:
+                # Closing is cleanup for the already-cancelled workload. Loud-log a
+                # Handler bug, but never replace the supervisor-visible cancellation.
+                logger.exception(
+                    "Turn event stream close failed during cancellation"
+                )
+        raise cancel_exc
+
+    except EmptyTurnInputError as e:
+        # client-caused 预期失败(如 stale picker:勾选的 skill 已被删/不可见)。两受众分开:
+        # ops 记 warning(非 bug,栈无价值);用户拿原文案自纠,不脱敏成 "Internal server error"。
+        logger.warning(f"Turn rejected, input resolves to empty: {e}")
+        await stream_transport.push_event(stream_id, sanitize_error_event({
+            "type": "error",
+            "timestamp": utc_now().isoformat(),
+            "data": {"success": False, "error": str(e)}
+        }, client_safe=True))
+
+    except Exception as e:
+        logger.exception(f"Error in execution: {e}")
+        await stream_transport.push_event(stream_id, sanitize_error_event({
+            "type": "error",
+            "timestamp": utc_now().isoformat(),
+            "data": {"success": False, "error": str(e)}
+        }))

@@ -1,72 +1,93 @@
-"""
-Auth Router
-
-处理认证 + 当前用户自助资料管理的 API 端点：
-- POST  /api/v1/auth/login        - 登录
-- GET   /api/v1/auth/me           - 当前用户信息
-- PATCH /api/v1/auth/me           - 自助修改 profile（display_name）
-- POST  /api/v1/auth/me/password  - 自助修改密码
-
-用户管理（admin 视角的 CRUD / bulk）放在 routers/admin_users.py，
-挂在 /api/v1/admin/users/* 下。
-"""
+"""Authentication and current-user HTTP endpoints."""
 
 import asyncio
-from datetime import timedelta
+import json
 import math
-from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import ValidationError
 
 from config import config
-from utils.time import utc_now
 from api.dependencies import (
     get_current_user,
-    get_department_repository,
     get_login_rate_limiter,
-    get_user_repository,
+    get_remote_auth_manager,
+    get_remote_bearer_config,
+    get_sso_start_rate_limiter,
+    get_user_account_manager,
 )
 from api.schemas.auth import (
+    AuthPublicConfigResponse,
+    ChangePasswordRequest,
     LoginRequest,
     LoginResponse,
-    UserInfo,
-    ChangePasswordRequest,
+    SsoExchangeRequest,
+    SsoPublicProviderConfig,
+    SsoStartResponse,
     UpdateMyProfileRequest,
+    UserInfo,
 )
-from api.services.auth import (
-    TokenPayload,
-    DUMMY_PASSWORD_HASH,
-    apply_new_password,
-    hash_password,
-    passwords_match_any,
-    password_reuse_candidates,
-    verify_password,
-    create_access_token,
+from api.services.auth import TokenPayload, create_access_token
+from api.services.sso_rate_limiter import SsoStartRateLimitError
+from core.management.user_account_manager import (
+    CurrentPasswordIncorrectError,
+    InactiveUserError,
+    InvalidCredentialsError,
+    PasswordReusedError,
+    PasswordUnavailableError,
+    ProfileUnavailableError,
+    UserAccountError,
+    UserAccountManager,
+    UserAccountNotFoundError,
 )
-from repositories.department_repo import DepartmentRepository
-from repositories.user_repo import UserRepository
+from core.management.remote_auth_manager import (
+    RemoteAuthDisabledError,
+    RemoteAuthIdentityDisabledError,
+    RemoteAuthManager,
+    RemoteAuthPersistenceError,
+    RemoteAuthStateError,
+)
+from core.security.remote_bearer_userinfo import (
+    RemoteBearerCredentialsRejected,
+    RemoteBearerProtocolError,
+    RemoteBearerUpstreamUnavailable,
+)
+from core.security.sso_state import SsoStateCapacityError
 from utils.logger import get_logger
 
+router = APIRouter()
 logger = get_logger("ArtifactFlow")
 
-router = APIRouter()
+_SSO_BINDING_COOKIE = "af_sso_binding"
+_SSO_EXCHANGE_BODY_MAX_BYTES = 20 * 1024
+
+
+async def _parse_sso_exchange(http_request: Request) -> SsoExchangeRequest:
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in http_request.stream():
+        total += len(chunk)
+        if total > _SSO_EXCHANGE_BODY_MAX_BYTES:
+            logger.warning("SSO exchange request body exceeded the fixed size limit")
+            raise HTTPException(status_code=400, detail="Invalid exchange request")
+        chunks.append(chunk)
+    try:
+        payload = json.loads(b"".join(chunks))
+        return SsoExchangeRequest.model_validate(payload)
+    except (
+        json.JSONDecodeError,
+        UnicodeDecodeError,
+        ValidationError,
+        TypeError,
+        RecursionError,
+    ):
+        # Do not log ValidationError: its structured input may contain the bearer.
+        logger.warning("SSO exchange request body had an invalid JSON shape")
+        raise HTTPException(status_code=400, detail="Invalid exchange request") from None
 
 
 def _client_ip(request: Request) -> str:
-    """提取客户端 IP 用于 per-IP 频控。
-
-    读 `X-Real-IP`(nginx 用 `proxy_set_header X-Real-IP $remote_addr` **覆写**),
-    无则回落 `request.client.host`。
-
-    安全前提:prod / intranet 里 backend 是 `expose`(不 publish 主机端口),只经
-    nginx 可达 → nginx 覆写的 `X-Real-IP` **不可被客户端伪造**。SQLite/dev 模式直接
-    发布 app 端口、无 nginx,这里会回落 client.host;该模式仅供开发测试,per-IP 不
-    做加固(可被伪造但无实际威胁)。
-
-    **刻意不读 `X-Forwarded-For`** —— nginx 用 `$proxy_add_x_forwarded_for` 是
-    *追加* 语义,首段是客户端自带的、可伪造(reviewer P1)。per-username 计数才是
-    不可伪造的主防线;per-IP 是补抓"同 IP 喷多个用户名"的二级防线。
-    """
+    """Resolve the trusted proxy-overwritten client IP for login throttling."""
     real_ip = request.headers.get("x-real-ip")
     if real_ip:
         return real_ip.strip()
@@ -79,46 +100,212 @@ def _login_retry_detail(seconds: int) -> str:
     return f"Too many failed login attempts. Please try again in {minutes} {unit}."
 
 
-async def _resolve_dept_path(
-    department_id: Optional[str],
-    dept_repo: DepartmentRepository,
-) -> Optional[list[str]]:
-    """
-    给 UserInfo.department_path 用 — 把用户的 department_id 翻译成 root → leaf
-    的部门名链路。未分配 → None；FK 还没 SET NULL 时遇到孤儿 id → None。
-    """
-    if not department_id:
-        return None
-    chain = await dept_repo.get_ancestor_chain(department_id)
-    if not chain:
-        return None
-    return [d.name for d in chain]
+def _map_account_error(exc: UserAccountError) -> HTTPException:
+    if isinstance(exc, UserAccountNotFoundError):
+        return HTTPException(status_code=404, detail=exc.detail)
+    if isinstance(exc, (PasswordUnavailableError, ProfileUnavailableError)):
+        return HTTPException(status_code=403, detail=exc.detail)
+    if isinstance(exc, (CurrentPasswordIncorrectError, PasswordReusedError)):
+        return HTTPException(status_code=400, detail=exc.detail)
+    if isinstance(exc, (InvalidCredentialsError, InactiveUserError)):
+        return HTTPException(status_code=401, detail=exc.detail)
+    return HTTPException(status_code=400, detail=exc.detail)
+
+
+@router.get("/config", response_model=AuthPublicConfigResponse)
+async def get_auth_config(
+    response: Response,
+    provider_config=Depends(get_remote_bearer_config),
+):
+    """Anonymous, read-only capabilities for the login page."""
+    response.headers["Cache-Control"] = "no-store"
+    if not provider_config.enabled:
+        sso = SsoPublicProviderConfig(enabled=False)
+    else:
+        sso = SsoPublicProviderConfig(
+            enabled=True,
+            provider_id=provider_config.provider.id,
+            display_name=provider_config.provider.display_name,
+            token_param=provider_config.login.token_param,
+        )
+    return AuthPublicConfigResponse(sso=sso)
+
+
+@router.post("/sso/start", response_model=SsoStartResponse)
+async def start_sso(
+    http_request: Request,
+    response: Response,
+    manager: RemoteAuthManager = Depends(get_remote_auth_manager),
+    rate_limiter=Depends(get_sso_start_rate_limiter),
+):
+    response.headers["Cache-Control"] = "no-store"
+    if not manager.is_enabled():
+        raise HTTPException(
+            status_code=404, detail="Enterprise authentication is unavailable"
+        )
+
+    try:
+        await rate_limiter.admit(_client_ip(http_request))
+    except SsoStartRateLimitError as exc:
+        headers = {"Retry-After": str(exc.retry_after)}
+        if exc.scope == "ip":
+            raise HTTPException(
+                status_code=429,
+                detail="Too many enterprise authentication attempts",
+                headers=headers,
+            ) from exc
+        logger.warning("SSO start global admission exhausted")
+        raise HTTPException(
+            status_code=503,
+            detail="Enterprise authentication is temporarily unavailable",
+            headers=headers,
+        ) from exc
+    except Exception:
+        logger.exception("SSO start admission check failed")
+        raise HTTPException(
+            status_code=503,
+            detail="Enterprise authentication is temporarily unavailable",
+        ) from None
+
+    try:
+        authorization_url, issued = await manager.start()
+    except RemoteAuthDisabledError as exc:
+        raise HTTPException(status_code=404, detail=exc.detail) from exc
+    except SsoStateCapacityError as exc:
+        logger.error("SSO state store admission failed: capacity exhausted")
+        raise HTTPException(
+            status_code=503, detail="Enterprise authentication is temporarily unavailable"
+        ) from exc
+    except Exception:
+        logger.exception("SSO state issuance failed")
+        raise HTTPException(
+            status_code=500, detail="Enterprise authentication could not be started"
+        ) from None
+
+    secure = manager.callback_uses_https()
+    response.set_cookie(
+        _SSO_BINDING_COOKIE,
+        issued.browser_binding,
+        max_age=issued.expires_in,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        path="/api/v1/auth/sso/exchange",
+    )
+    return SsoStartResponse(
+        authorization_url=authorization_url, expires_in=issued.expires_in
+    )
+
+
+@router.post(
+    "/sso/exchange",
+    response_model=LoginResponse,
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["state", "upstream_token"],
+                        "properties": {
+                            "state": {"type": "string", "minLength": 1, "maxLength": 256},
+                            "upstream_token": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 16384,
+                                "writeOnly": True,
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+async def exchange_sso(
+    http_request: Request,
+    response: Response,
+    manager: RemoteAuthManager = Depends(get_remote_auth_manager),
+):
+    request = await _parse_sso_exchange(http_request)
+    browser_binding = http_request.cookies.get(_SSO_BINDING_COOKIE, "")
+    try:
+        result = await manager.exchange(
+            state=request.state,
+            browser_binding=browser_binding,
+            upstream_token=request.upstream_token,
+        )
+    except RemoteAuthDisabledError as exc:
+        raise HTTPException(status_code=404, detail=exc.detail) from exc
+    except (RemoteAuthStateError, RemoteBearerCredentialsRejected) as exc:
+        raise HTTPException(status_code=401, detail="Enterprise authentication failed") from exc
+    except RemoteAuthIdentityDisabledError as exc:
+        raise HTTPException(status_code=401, detail=exc.detail) from exc
+    except RemoteBearerProtocolError as exc:
+        logger.error("SSO userinfo protocol failure: %s", exc)
+        raise HTTPException(
+            status_code=502, detail="Enterprise identity response was invalid"
+        ) from exc
+    except RemoteBearerUpstreamUnavailable as exc:
+        logger.error("SSO userinfo upstream unavailable: %s", exc)
+        raise HTTPException(
+            status_code=503, detail="Enterprise authentication is temporarily unavailable"
+        ) from exc
+    except RemoteAuthPersistenceError as exc:
+        logger.exception("SSO local identity synchronization failed")
+        raise HTTPException(
+            status_code=500, detail="Enterprise authentication could not be completed"
+        ) from exc
+    except Exception:
+        logger.exception("Unexpected SSO exchange failure")
+        raise HTTPException(
+            status_code=500, detail="Enterprise authentication could not be completed"
+        ) from None
+
+    response.headers["Cache-Control"] = "no-store"
+    response.delete_cookie(
+        _SSO_BINDING_COOKIE,
+        path="/api/v1/auth/sso/exchange",
+        secure=manager.callback_uses_https(),
+        httponly=True,
+        samesite="lax",
+    )
+    profile = result["profile"]
+    token = create_access_token(
+        profile["id"],
+        profile["username"],
+        profile["role"],
+        result["password_version"],
+    )
+    return LoginResponse(
+        access_token=token,
+        token_type="bearer",
+        expires_in=config.JWT_EXPIRY_SECONDS,
+        user=UserInfo(**profile),
+    )
 
 
 @router.post("/login", response_model=LoginResponse)
 async def login(
     request: LoginRequest,
     http_request: Request,
-    user_repo: UserRepository = Depends(get_user_repository),
-    dept_repo: DepartmentRepository = Depends(get_department_repository),
+    manager: UserAccountManager = Depends(get_user_account_manager),
     rate_limiter=Depends(get_login_rate_limiter),
 ):
-    """用户登录，返回 JWT Token"""
-    # 登录入口归一化:去首尾空白。合法用户名不含空格(注册 validate_username
-    # 拒空格、CSV 导入 strip),故 strip 只会帮本该成功的登录匹配上,永不会
-    # 误匹配到他人。同时让频控 key 归一,避免加空格绕过 per-username 计数。
     username = request.username.strip()
     user_key = f"user:{username}"
     ip_key = f"ip:{_client_ip(http_request)}"
-
-    # 频控预检(ACC-01):任一 key 失败累计超阈 → 锁定窗口内一律 429,连正确
-    # 密码也拒(锁定本身就是目的)。per-username 主防线 + per-IP 二级。
     user_retry_after, ip_retry_after = await asyncio.gather(
-        rate_limiter.retry_after(user_key),
-        rate_limiter.retry_after(ip_key),
+        rate_limiter.retry_after(user_key), rate_limiter.retry_after(ip_key)
     )
     retry_after = max(
-        (s for s in (user_retry_after, ip_retry_after) if s is not None),
+        (
+            seconds
+            for seconds in (user_retry_after, ip_retry_after)
+            if seconds is not None
+        ),
         default=None,
     )
     if retry_after is not None:
@@ -128,139 +315,73 @@ async def login(
             headers={"Retry-After": str(retry_after)},
         )
 
-    user = await user_repo.get_by_username(username)
-    # 时序防枚举(ACC-05):用户不存在时也对固定假 hash 跑一次 bcrypt,让
-    # 「用户不存在」与「密码错误」两条分支耗时恒定 —— 否则秒回 401 即暴露
-    # 用户名不存在。bcrypt 是 CPU bound (~250ms),丢线程池避免卡 event loop
-    # 影响其他用户的 SSE 流。
-    hashed = user.hashed_password if user else DUMMY_PASSWORD_HASH
-    password_ok = await asyncio.to_thread(verify_password, request.password, hashed)
-    if not user or not password_ok:
-        # 认证失败 → 两 key 各 +1。账号存在但密码对(下面的 disabled 分支)
-        # 不算撞库信号,不计。
-        await rate_limiter.record_failure(user_key)
-        await rate_limiter.record_failure(ip_key)
-        raise HTTPException(status_code=401, detail="Invalid username or password")
-
-    if not user.is_active:
-        raise HTTPException(status_code=401, detail="User account is disabled")
-
-    # 认证成功 → 重置该用户名计数(IP 计数让其自然过期,避免一个合法用户
-    # 把同 IP 下他人造成的失败一并清掉)。
-    await rate_limiter.reset(user_key)
-
-    # 周期到期(等保):口令龄 > 到期天数 → 置 must_change_password(NULL 视为
-    # 已过期)。登录本身不拦,但闸门会把除改密外的请求挡在 403;前端据
-    # must_change_password 弹强制改密框。已是 True 则跳过(无谓写库)。
-    if (
-        config.PASSWORD_EXPIRY_DAYS > 0
-        and not user.must_change_password
-        and (
-            user.password_changed_at is None
-            or utc_now() - user.password_changed_at > timedelta(days=config.PASSWORD_EXPIRY_DAYS)
+    try:
+        result = await manager.authenticate(username, request.password)
+    except InvalidCredentialsError as exc:
+        await asyncio.gather(
+            rate_limiter.record_failure(user_key),
+            rate_limiter.record_failure(ip_key),
         )
-    ):
-        user.must_change_password = True
-        await user_repo.update(user)
+        raise _map_account_error(exc) from exc
+    except UserAccountError as exc:
+        raise _map_account_error(exc) from exc
 
-    token = create_access_token(user.id, user.username, user.role, user.password_version)
-
+    await rate_limiter.reset(user_key)
+    profile = result["profile"]
+    token = create_access_token(
+        profile["id"],
+        profile["username"],
+        profile["role"],
+        result["password_version"],
+    )
     return LoginResponse(
         access_token=token,
         token_type="bearer",
-        expires_in=config.JWT_EXPIRY_DAYS * 86400,
-        user=UserInfo(
-            id=user.id,
-            username=user.username,
-            display_name=user.display_name,
-            role=user.role,
-            must_change_password=user.must_change_password,
-            department_path=await _resolve_dept_path(user.department_id, dept_repo),
-        ),
+        expires_in=config.JWT_EXPIRY_SECONDS,
+        user=UserInfo(**profile),
     )
 
 
 @router.get("/me", response_model=UserInfo)
 async def get_me(
     current_user: TokenPayload = Depends(get_current_user),
-    user_repo: UserRepository = Depends(get_user_repository),
-    dept_repo: DepartmentRepository = Depends(get_department_repository),
+    manager: UserAccountManager = Depends(get_user_account_manager),
 ):
-    """获取当前用户信息"""
-    user = await user_repo.get_by_id(current_user.user_id)
-    return UserInfo(
-        id=current_user.user_id,
-        username=current_user.username,
-        display_name=user.display_name if user else None,
-        role=current_user.role,
-        must_change_password=user.must_change_password if user else False,
-        department_path=await _resolve_dept_path(
-            user.department_id if user else None, dept_repo
-        ),
-    )
+    try:
+        return UserInfo(**await manager.get_profile(current_user.user_id))
+    except UserAccountError as exc:
+        raise _map_account_error(exc) from exc
 
 
 @router.post("/me/password", status_code=204)
 async def change_my_password(
     request: ChangePasswordRequest,
     current_user: TokenPayload = Depends(get_current_user),
-    user_repo: UserRepository = Depends(get_user_repository),
+    manager: UserAccountManager = Depends(get_user_account_manager),
 ):
-    """当前用户自助修改密码"""
-    user = await user_repo.get_by_id(current_user.user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    if not await asyncio.to_thread(verify_password, request.current_password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Current password is incorrect")
-
-    # 不重用查重(等保):新口令不得与「最近 N 个用过的口令(含当前)」相同。
-    # N=PASSWORD_HISTORY_COUNT;候选 = [当前 hash] + history[:N-1]。
-    if await passwords_match_any(request.new_password, password_reuse_candidates(user)):
-        raise HTTPException(
-            status_code=400,
-            detail="新密码不能与最近使用过的密码相同，请更换",
+    try:
+        await manager.change_password(
+            current_user.user_id,
+            current_password=request.current_password,
+            new_password=request.new_password,
         )
-
-    new_hash = await asyncio.to_thread(hash_password, request.new_password)
-    # 自助改密:不强制再改 → mark_must_change=False(同时清掉可能存在的强制标志)。
-    apply_new_password(user, new_hash, mark_must_change=False)
-    await user_repo.update(user)
-
-    logger.info(f"Password changed: {user.username} (pwd_v={user.password_version})")
+    except UserAccountError as exc:
+        raise _map_account_error(exc) from exc
 
 
 @router.patch("/me", response_model=UserInfo)
 async def update_my_profile(
     request: UpdateMyProfileRequest,
     current_user: TokenPayload = Depends(get_current_user),
-    user_repo: UserRepository = Depends(get_user_repository),
-    dept_repo: DepartmentRepository = Depends(get_department_repository),
+    manager: UserAccountManager = Depends(get_user_account_manager),
 ):
-    """
-    当前用户自助修改非敏感资料字段（目前仅 display_name）。
-
-    设计意图：与 admin 后台 PUT /admin/users/{id} 解耦 —— role / is_active /
-    password 这些安全敏感字段走专门端点，profile 字段走这里。任何已登录
-    用户都能调，不需要 admin 权限。
-    """
-    user = await user_repo.get_by_id(current_user.user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    if request.display_name is not None:
-        # 显式空字符串 = 清空 display_name（落库为 NULL）
-        user.display_name = request.display_name.strip() or None
-
-    await user_repo.update(user)
-
-    logger.info(f"Profile updated: {user.username}")
-
-    return UserInfo(
-        id=user.id,
-        username=user.username,
-        display_name=user.display_name,
-        role=user.role,
-        must_change_password=user.must_change_password,
-        department_path=await _resolve_dept_path(user.department_id, dept_repo),
-    )
+    try:
+        return UserInfo(
+            **await manager.update_profile(
+                current_user.user_id,
+                display_name=request.display_name,
+                display_name_supplied="display_name" in request.model_fields_set,
+            )
+        )
+    except UserAccountError as exc:
+        raise _map_account_error(exc) from exc

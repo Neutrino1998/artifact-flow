@@ -5,12 +5,14 @@ Covers CRUD, count/pagination, and inherited BaseRepository methods.
 """
 
 import uuid
+import traceback
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 
 from db.models import User
-from repositories.user_repo import UserRepository
+from repositories.base import DuplicateError
+from repositories.user_repo import UserRepository, UserWriteError
 from api.services.auth import hash_password
 
 
@@ -20,6 +22,8 @@ class TestUserCRUD:
     async def test_add_and_get_by_id(self, user_repo: UserRepository):
         user = User(
             id=str(uuid.uuid4()),
+            auth_provider="local_password",
+            auth_subject="alice",
             username="alice",
             hashed_password=hash_password("pw"),
             role="user",
@@ -38,18 +42,24 @@ class TestUserCRUD:
         result = await user_repo.get_by_id("nonexistent-id")
         assert result is None
 
-    async def test_get_by_username(self, user_repo: UserRepository, test_user: User):
-        fetched = await user_repo.get_by_username(test_user.username)
+    async def test_get_by_auth_identity(self, user_repo: UserRepository, test_user: User):
+        fetched = await user_repo.get_by_auth_identity(
+            test_user.auth_provider, test_user.auth_subject
+        )
         assert fetched is not None
         assert fetched.id == test_user.id
 
-    async def test_get_by_username_nonexistent(self, user_repo: UserRepository):
-        result = await user_repo.get_by_username("no-such-user")
+    async def test_get_by_auth_identity_nonexistent(self, user_repo: UserRepository):
+        result = await user_repo.get_by_auth_identity(
+            "local_password", "no-such-user"
+        )
         assert result is None
 
-    async def test_unique_username_constraint(self, user_repo: UserRepository, test_user: User):
+    async def test_unique_auth_identity_constraint(self, user_repo: UserRepository, test_user: User):
         duplicate = User(
             id=str(uuid.uuid4()),
+            auth_provider=test_user.auth_provider,
+            auth_subject=test_user.auth_subject,
             username=test_user.username,  # same username
             hashed_password=hash_password("other"),
             role="user",
@@ -57,6 +67,50 @@ class TestUserCRUD:
         )
         with pytest.raises(IntegrityError):
             await user_repo.add(duplicate)
+
+    async def test_create_user_normalizes_confirmed_username_race(
+        self, user_repo: UserRepository, test_user: User
+    ):
+        duplicate = User(
+            id=str(uuid.uuid4()),
+            auth_provider=test_user.auth_provider,
+            auth_subject=test_user.auth_subject,
+            username=test_user.username,
+            hashed_password=hash_password("other"),
+            role="user",
+            is_active=True,
+        )
+
+        with pytest.raises(DuplicateError):
+            await user_repo.create_user(duplicate)
+
+    async def test_create_user_preserves_non_username_integrity_error(
+        self, user_repo: UserRepository
+    ):
+        username = f"fk-race-{uuid.uuid4().hex[:8]}"
+        user = User(
+            id=str(uuid.uuid4()),
+            auth_provider="local_password",
+            auth_subject=username,
+            username=username,
+            hashed_password="SENSITIVE_HASH_MUST_NOT_APPEAR",
+            role="user",
+            is_active=True,
+            department_id="deleted-department",
+        )
+
+        with pytest.raises(UserWriteError) as exc_info:
+            await user_repo.create_user(user)
+
+        cause = exc_info.value.__cause__
+        assert str(exc_info.value) == "User write failed"
+        assert isinstance(cause, IntegrityError)
+        assert "SENSITIVE_HASH_MUST_NOT_APPEAR" not in str(cause)
+        assert "SQL parameters hidden" in str(cause)
+        rendered_traceback = "".join(
+            traceback.format_exception(exc_info.value)
+        )
+        assert "SENSITIVE_HASH_MUST_NOT_APPEAR" not in rendered_traceback
 
     async def test_update_user_fields(self, user_repo: UserRepository, test_user: User):
         test_user.display_name = "Updated Name"
@@ -85,9 +139,12 @@ class TestUserCountPagination:
     async def _create_users(self, user_repo, count, active=True):
         users = []
         for i in range(count):
+            username = f"paguser-{uuid.uuid4().hex[:8]}"
             u = User(
                 id=str(uuid.uuid4()),
-                username=f"paguser-{uuid.uuid4().hex[:8]}",
+                auth_provider="local_password",
+                auth_subject=username,
+                username=username,
                 hashed_password=hash_password("pw"),
                 role="user",
                 is_active=active,
@@ -145,6 +202,8 @@ class TestUserBaseRepo:
         users = [
             User(
                 id=str(uuid.uuid4()),
+                auth_provider="local_password",
+                auth_subject=f"batch-{i}",
                 username=f"batch-{i}",
                 hashed_password=hash_password("pw"),
                 role="user",

@@ -3,8 +3,8 @@
 # contract. Runs the real caddy container against a stub upstream
 # (proxy_stub.py) and asserts the behaviours that must survive any edit to
 # deploy/caddy/common.caddy: routing ownership, Swagger block, X-Real-IP
-# overwrite, upload cap, SSE flush, maintenance gate. Run it after touching
-# the caddy configs.
+# overwrite, upload cap + product error, SSE flush, maintenance gate. Run it
+# after touching the caddy configs.
 #
 # History: born as the nginx⇆Caddy equivalence gate for the Mode 3 migration
 # (one battery, two targets). nginx retired 2026-07 (commit d489c0e) — the
@@ -31,7 +31,7 @@
 # Contract checked (mirror of deploy/caddy/common.caddy):
 #   1. Swagger 404                          5. maintenance gate → 503 for /, /api, SSE
 #   2. /health ungated AND routed to backend   6. maintenance assets + note reachable mid-window
-#   3. routing (api & health→8000, /→3000)  7. upload: 211MiB→413, 200MiB legit→backend 200
+#   3. routing (api & health→8000, /→3000)  7. upload: 211MiB→correlated JSON/log 413, 200MiB→backend 200
 #   4. X-Real-IP injected + anti-spoof       8. SSE buffering off (incremental flush)
 #   9. HTTPS + both HTTP 308 entries strip technology-identifying headers
 
@@ -71,6 +71,8 @@ code_of() { hc -o /dev/null -w "%{http_code}" "$@"; }
 # path (8000 backend / 3000 frontend), not just that something returned 200.
 # Empty if the response isn't the stub's JSON (e.g. the 503 maintenance page).
 port_of() { hc "$BASE$1" | python3 -c "import sys,json;print(json.load(sys.stdin).get('served_by_port',''))" 2>/dev/null; }
+access_log_count() { docker logs "$PROXY_CTR" 2>&1 | grep -c '"logger":"http.log.access' || true; }
+edge_log_count() { docker logs "$PROXY_CTR" 2>&1 | grep -c '"logger":"http.log.access.edge_errors"' || true; }
 
 ok()   { PASS=$((PASS+1)); echo "  ✓ $1"; }
 no()   { FAIL=$((FAIL+1)); echo "  ✗ $1"; }
@@ -286,18 +288,78 @@ assert_upload_cap() {
   if [[ -n "${SMOKE_SKIP_UPLOAD:-}" ]]; then
     echo "  ⊘ upload-cap: 跳过 (SMOKE_SKIP_UPLOAD)"; return
   fi
-  local big code resp port
+  local big code resp port body_file headers_file detail content_type
+  local request_id header_request_id access_logs_before access_logs_after
+  local edge_logs_before edge_logs_after edge_log_line
   # Negative: 211MiB (> the 210MiB cap) → proxy 413s before the body reaches
-  # backend. Sparse file → ~0 disk; curl streams the zeros over loopback.
+  # backend, with a product-owned JSON explanation rather than an empty/proxy-
+  # identifying response. Sparse file → ~0 disk; curl streams the zeros over
+  # loopback.
   big="$(mktemp)"
+  body_file="$(mktemp)"
+  headers_file="$(mktemp)"
+  # All earlier routing/health/redirect requests are ordinary. They must be
+  # discarded, not merely absent from edge_errors while leaking through Caddy's
+  # default http.log.access logger.
+  access_logs_before="$(access_log_count)"
+  edge_logs_before="$(edge_log_count)"
+  [[ "$access_logs_before" -eq 0 && "$edge_logs_before" -eq 0 ]] \
+    && ok "access-log: 413 前普通请求全部丢弃" \
+    || no "access-log: 413 前已意外记录 access log(all=$access_logs_before edge=$edge_logs_before)"
   dd if=/dev/null of="$big" bs=1 count=0 seek=$((211*1024*1024)) 2>/dev/null
-  code="$(curl -k -s -m 30 --noproxy '*' -H "Host: test.local" -o /dev/null -w "%{http_code}" \
+  code="$(curl -k -s -m 30 --noproxy '*' -H "Host: test.local" -H "Expect:" \
+            -D "$headers_file" -o "$body_file" -w "%{http_code}" \
             -H "Content-Type: application/octet-stream" \
-            --data-binary @"$big" "$BASE/api/upload")"
-  rm -f "$big"
+            -H "Authorization: Bearer proxy-smoke-secret" \
+            --data-binary @"$big" "$BASE/api/upload?proxy_smoke_secret=must-not-log")"
+  detail="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8")).get("detail", ""))' "$body_file" 2>/dev/null)"
+  request_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8")).get("request_id", ""))' "$body_file" 2>/dev/null)"
+  header_request_id="$(grep -i '^x-request-id:' "$headers_file" | tail -1 | sed 's/^[^:]*:[[:space:]]*//;s/\r$//')"
+  content_type="$(grep -i '^content-type:' "$headers_file" | tail -1 | sed 's/^[^:]*:[[:space:]]*//;s/\r$//')"
   [[ "$code" == "413" ]] \
     && ok "upload-cap: 211MiB(超限) → 413" \
     || no "upload-cap: 211MiB 应 413，实得 '$code'"
+  [[ "$detail" == "单次上传内容过大：所有文件合计不得超过 200MB。请减少文件数量或文件大小后重试。" ]] \
+    && ok "upload-cap: 413 返回带 200MB 上限的用户可读 detail" \
+    || no "upload-cap: 413 detail 缺失或不正确，实得 '$detail'"
+  [[ "$request_id" == edge-* && "$header_request_id" == "$request_id" ]] \
+    && ok "upload-cap: 413 JSON/响应头返回同一 edge request_id" \
+    || no "upload-cap: 413 关联 ID 缺失或不一致，body='$request_id' header='$header_request_id'"
+  [[ "$content_type" == application/json* ]] \
+    && ok "upload-cap: 413 声明 application/json" \
+    || no "upload-cap: 413 Content-Type 应为 application/json，实得 '$content_type'"
+  if grep -Eiq '^(x-powered-by|via|server)[[:space:]]*:' "$headers_file"; then
+    no "upload-cap: 413 暴露了 X-Powered-By/Via/Server"
+  else
+    ok "upload-cap: 413 未暴露技术标识头"
+  fi
+  edge_log_line="$(docker logs "$PROXY_CTR" 2>&1 \
+    | grep '"logger":"http.log.access.edge_errors"' \
+    | tail -1)"
+  access_logs_after="$(access_log_count)"
+  edge_logs_after="$(edge_log_count)"
+  if [[ "$access_logs_after" -eq 1 && "$edge_logs_after" -eq 1 ]] \
+      && printf '%s' "$edge_log_line" | python3 -c '
+import json, sys
+row = json.load(sys.stdin)
+assert row.get("event") == "edge_request_rejected"
+assert row.get("request_id") == sys.argv[1]
+assert row.get("status") == 413
+assert row.get("method") == "POST"
+assert row.get("path") == "/api/upload"
+assert "request" not in row
+assert "resp_headers" not in row
+' "$request_id" 2>/dev/null; then
+    ok "upload-cap: 仅 413 写入同 ID 的最小结构化边缘日志"
+  else
+    no "upload-cap: 413 边缘日志缺失、不唯一或字段越界(before=$edge_logs_before after=$edge_logs_after line='$edge_log_line')"
+  fi
+  if [[ "$edge_log_line" == *proxy-smoke-secret* || "$edge_log_line" == *proxy_smoke_secret* ]]; then
+    no "upload-cap: 413 边缘日志泄露了请求头或查询参数"
+  else
+    ok "upload-cap: 413 边缘日志未记录请求头/查询参数"
+  fi
+  rm -f "$big" "$body_file" "$headers_file"
   # Positive: a max legit batch (200MiB = the authoritative total-bytes cap; note
   # this is now LESS than per-file×count = 200MB×30, by design) must pass the proxy
   # and REACH backend. Guards against the cap being silently lowered below the
@@ -316,6 +378,20 @@ assert_upload_cap() {
     ok "upload-cap: 200MiB(合法批量) → 透传至 backend:8000(200)"
   else
     no "upload-cap: 200MiB 合法批量应透传 backend(200/8000)，实得 code=$code port=$port"
+  fi
+  [[ "$(access_log_count)" -eq 1 ]] \
+    && ok "access-log: 合法上传未新增记录" \
+    || no "access-log: 合法上传意外写入了访问日志"
+}
+
+assert_access_log_scope() {
+  local expected="$1" label="$2" all edge
+  all="$(access_log_count)"
+  edge="$(edge_log_count)"
+  if [[ "$all" -eq "$expected" && "$edge" -eq "$expected" ]]; then
+    ok "$label: access log 只包含预期的 413 edge 记录($expected 条)"
+  else
+    no "$label: access log 越界(all=$all edge=$edge expected=$expected)"
   fi
 }
 
@@ -368,6 +444,7 @@ PY
 }
 
 run_target() {
+  local expected_access_logs=1
   echo ""
   echo "═══ 目标: static TLS ═══"
   PASS=0; FAIL=0
@@ -394,6 +471,8 @@ run_target() {
   assert_upload_cap
   assert_sse
   assert_maintenance   # LAST: sets the flag, which we can't reliably clear
+  [[ -n "${SMOKE_SKIP_UPLOAD:-}" ]] && expected_access_logs=0
+  assert_access_log_scope "$expected_access_logs" "static 全流程"
   echo "  ── caddy: $PASS 通过 / $FAIL 失败"
   [[ $FAIL -gt 0 ]] && FAILED_TARGETS+=("caddy($FAIL 失败)")
   docker rm -f "$PROXY_CTR" >/dev/null 2>&1 || true
@@ -416,6 +495,7 @@ run_acme_target() {
   fi
   assert_no_technology_headers
   assert_redirect "ACME redirect" "https://localhost/redirect-check?q=1"
+  assert_access_log_scope 0 "ACME 全流程"
   echo "  ── ACME entry: $PASS 通过 / $FAIL 失败"
   [[ $FAIL -gt 0 ]] && FAILED_TARGETS+=("acme($FAIL 失败)")
   docker rm -f "$PROXY_CTR" >/dev/null 2>&1 || true

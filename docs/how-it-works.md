@@ -34,28 +34,48 @@ flowchart LR
 sequenceDiagram
     participant User as 用户
     participant API as API
-    participant Lead as Lead Agent
+    participant Admission as Conversation Admission
+    participant Supervisor as TaskSupervisor
+    participant Handler as ConversationTurnHandler
+    participant Runtime as AgentRuntime
+    participant Stream as event sink / SSE
     participant Model as LLM
     participant Tool as Tool / Subagent
     participant DB as Database
 
     User->>API: 发送消息和附件
+    API->>Admission: 准入请求
+    Admission->>Admission: acquire lease 并立即 heartbeat
+    Admission->>DB: create / require + parent 最终校验
+    Admission->>Supervisor: 交接同一个 lease handle
+    Admission-->>API: conversation / message / stream ID
     API-->>User: 返回 stream 地址
-    API->>Lead: 启动本轮执行
-    loop 直到 Lead 给出无工具调用的回复
-        Lead->>Model: 当前上下文与可用能力
-        Model-->>Lead: 文本和可选工具调用
-        Lead-->>User: SSE 流式事件
+    Supervisor->>Handler: 取得进程内并发槽后启动
+    Handler->>Runtime: AgentInvocation + hooks + event sink
+    loop 直到入口 Agent 给出无工具调用的回复
+        Runtime->>Model: 当前上下文与可用能力
+        Model-->>Runtime: 文本和可选工具调用
+        Runtime-->>Stream: 非终态 event
+        Stream-->>User: SSE
         opt 调用工具或 Subagent
-            Lead->>Tool: 串行执行
-            Tool-->>Lead: ToolResult / Subagent result
+            Runtime->>Tool: 串行执行
+            Tool-->>Runtime: ToolResult / Subagent result
         end
     end
-    Lead->>DB: 落库消息、事件和 Artifact
-    Lead-->>User: complete
+    Runtime-->>Handler: EngineOutcome(state + stop reason)
+    Handler->>DB: flush Artifact
+    Handler->>Handler: 单一 terminal 决策
+    Handler->>DB: 先写事件，再写展示 response
+    Handler-->>Stream: complete / cancelled / timed_out / error
+    Stream-->>User: SSE terminal
+    Supervisor->>Supervisor: LIFO cleanup，最后释放 lease
 ```
 
-引擎是一个 per-agent 的普通循环：构造上下文、调用模型、解析并串行执行工具，然后把结果放回下一次模型调用。`call_subagent` 会原地进入目标 Agent 的同类循环；Subagent 结束后，结果像普通工具结果一样回到调用者。
+发送与用户删除使用同一条 Conversation lease 做准入线性化。Lease 获取成功就开始续租；任务排队时持有 lease 但还不能注入或取消，取得唯一并发槽并通过 owner CAS 后才进入可交互的 RUNNING 状态。TaskSupervisor 只监管进程内任务、容量与通用 LIFO cleanup，不理解 Conversation、Redis 或 SSE；Conversation 服务负责组合 lease、stream、interactive 与 Sandbox 生命周期。
+
+`AgentRuntime` 是可嵌入的核心调用边界：调用方提供 Agent/Tool 配置、初始 state、hooks 和可选 event sink，Runtime 返回 state 与事实性的 stop reason。它不要求 Conversation、Web、数据库、Redis 或 SSE，也不产生最终 terminal；Web Chat 由 `ConversationTurnHandler` 统一完成 Artifact flush、terminal 决策、事件持久化和展示 response 写入。这样 embedded 调用可以直接复用同一引擎，而 Web 路径仍保留完整的持久化和实时交互语义。
+
+引擎内部是一个 per-agent 的普通循环：构造上下文、调用模型、解析并串行执行工具，然后把结果放回下一次模型调用。`call_subagent` 会原地进入目标 Agent 的同类循环；Subagent 结束后，结果像普通工具结果一样回到调用者。
 
 Lead Agent 是唯一的用户回复出口。Subagent 的最终文本不会直接发送给用户。
 
@@ -90,10 +110,10 @@ Artifact 是任务的持久化工作成果，不等同于聊天回复。Agent �
 
 - 模型片段、工具状态和 Artifact 变更通过 SSE 实时发送。
 - `confirm` 级工具在执行前等待用户批准；`auto` 级工具直接执行。
-- 同一对话通过 lease 保证同一时刻只有一个执行。
+- 同一对话通过 lease 保证同一时刻只有一个发送或删除操作；续租归属不明时 fail closed。
 - 取消、超时、错误和正常完成最终都进入统一的终态处理，随后持久化本轮事件。
 
-本地试用使用进程内 RuntimeStore 和 StreamTransport。生产多副本使用 Redis 保存 lease、interrupt、cancel 和流式传输状态；PostgreSQL 保存用户、对话、事件、配置注册表和 Artifact。
+本地试用使用进程内 RuntimeStore 和 StreamTransport。生产多副本使用 Redis 保存 lease、interactive owner、interrupt、cancel 和流式传输等 **live state**；这些状态用于当前执行的协调和观测，会过期且不承担历史恢复。PostgreSQL 保存用户、对话、消息事件、配置注册表和 Artifact 等 **durable state**。TaskSupervisor 的 task 引用也只属于当前进程，不会被投影到两种存储之间。
 
 ## Sandbox 边界
 

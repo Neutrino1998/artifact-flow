@@ -410,7 +410,7 @@ class WebFetchTool(BaseTool):
             logger.warning(f"BS4 fetch too large for {url}: {e}")
             return {"success": False, "url": url, "error": "Response too large"}
         except Exception as e:
-            # str(e) 可能含内网地址/连接细节，不回显给 LLM（SSRF-06）
+            # str(e) 可能含内网地址/连接细节，不回显给 LLM。
             logger.warning(f"BS4 fetch failed for {url}: {e}")
             return {"success": False, "url": url, "error": "Failed to fetch content"}
 
@@ -478,7 +478,7 @@ class WebFetchTool(BaseTool):
             logger.warning(f"File too large for {url}: {e}")
             return {"success": False, "url": url, "is_blob": True, "error": "File too large"}
         except Exception as e:
-            # 不回显 str(e)(可能含内网地址/路径),仅入 server 日志(SSRF-06)
+            # 不回显 str(e)（可能含内网地址/路径），仅入 server 日志。
             logger.exception(f"File download failed for {url}")
             return {"success": False, "url": url, "is_blob": True, "error": "File download failed"}
 

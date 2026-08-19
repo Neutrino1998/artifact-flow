@@ -8,7 +8,7 @@ Usage:
 
 Dev:本地手动跑(改了 config/tools 或 config/agents 后)。
 Prod:`deploy/entrypoint.sh` 在 migration 后、起 uvicorn 前于 leader 槽调用本脚本
-(复用 PG advisory lock);**绝不在 per-worker FastAPI lifespan 跑**(每副本互写,原则 5)。
+(复用 PG advisory lock)；**绝不在 per-worker FastAPI lifespan 跑**，避免每副本并发互写。
 
 坏 config / 撞名 / unit 名违规 → 非零退出(启动期 loud-fail,同 create_admin 风格)。
 """
@@ -35,7 +35,7 @@ async def main(dry_run: bool) -> int:
 
     logger = get_logger("ArtifactFlow")
 
-    # 部署门禁(reviewer N4):release(非 dry-run)先全量校验 config —— 缺/格式错主密钥
+    # 部署门禁：release（非 dry-run）先全量校验 config —— 缺失或格式错误的主密钥
     # (及其它必填项)在 release 闸即 loud-fail,而非"无凭证工具时 release 成功、backend
     # 启动才在 validate_config 崩 → crash-loop"。dry-run(纯解析报告)跳过,免逼着配齐 env。
     if not dry_run:

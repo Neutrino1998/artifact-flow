@@ -2,7 +2,7 @@
 模板变量解析器
 将 {{VAR_NAME}} 占位符替换为运行时环境变量值。
 
-安全约束(SSRF-02):自定义工具只能解析带 `CUSTOM_TOOL_SECRET_PREFIX`
+安全约束：自定义工具只能解析带 `CUSTOM_TOOL_SECRET_PREFIX`
 (默认 `TOOL_SECRET_`)前缀的变量 —— 把 JWT 签名密钥 / DB 密码 / 第三方
 凭证等进程环境里的敏感变量挡在自定义工具可触及范围之外(最小权限)。
 

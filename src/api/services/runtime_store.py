@@ -39,8 +39,8 @@ class InjectQueueFull(Exception):
 
 
 @runtime_checkable
-class RuntimeStore(Protocol):
-    """运行时状态存储协议 — 可替换为 Redis 实现。"""
+class ConversationLeaseStore(Protocol):
+    """Conversation lease 的读写与续租边界。"""
 
     # 跨进程共享?Redis=True(多 worker 共享真相源),InMemory=False(进程本地)。
     # 沙盒 reaper 据此判定能否安全跑(进程本地 store 下它会误删兄弟进程的活沙盒)。
@@ -60,13 +60,41 @@ class RuntimeStore(Protocol):
         """
         ...
 
-    # ── Engine interactive（inject/cancel 有效）──
+    def get_lease_key(self, conversation_id: str) -> str: ...
+    async def renew_lease(self, conversation_id: str, message_id: str, ttl: float) -> bool: ...
+
+
+@runtime_checkable
+class ConversationLeaseReader(Protocol):
+    """只读 lease 视图，供 Router/Admin/Reaper/observability 组合。"""
+
+    is_shared: bool
+
+    async def get_leased_message_id(self, conversation_id: str) -> Optional[str]: ...
+    async def get_lease_owner(self, conversation_id: str) -> Optional[str]: ...
+    async def list_active_conversations(self) -> List[str]: ...
+    async def list_active_executions(self) -> Dict[str, str]: ...
+
+
+@runtime_checkable
+class InteractionStore(Protocol):
+    """Engine interactive（RUNNING）状态边界。"""
 
     async def mark_engine_interactive(self, conversation_id: str, message_id: str) -> bool: ...
     async def clear_engine_interactive(self, conversation_id: str, message_id: str) -> None: ...
     async def get_interactive_message_id(self, conversation_id: str) -> Optional[str]: ...
 
-    # ── Interrupts ──
+
+@runtime_checkable
+class InteractionReader(Protocol):
+    """只读 RUNNING 状态视图。"""
+
+    async def get_interactive_message_id(self, conversation_id: str) -> Optional[str]: ...
+
+
+@runtime_checkable
+class InterruptStore(Protocol):
+    """Permission interrupt 等待/恢复边界。"""
 
     async def wait_for_interrupt(self, message_id: str, data: Dict[str, Any], timeout: float) -> Optional[Dict[str, Any]]: ...
     async def resolve_interrupt(
@@ -74,12 +102,18 @@ class RuntimeStore(Protocol):
     ) -> Literal["resolved", "not_found", "call_mismatch", "already_resolved"]: ...
     async def get_interrupt_data(self, message_id: str) -> Optional[Dict[str, Any]]: ...
 
-    # ── Cancellation ──
+
+@runtime_checkable
+class CancellationStore(Protocol):
+    """协作式取消标记边界。"""
 
     async def request_cancel(self, message_id: str) -> None: ...
     async def is_cancelled(self, message_id: str) -> bool: ...
 
-    # ── Message queue ──
+
+@runtime_checkable
+class InjectQueue(Protocol):
+    """执行中消息注入队列边界。"""
 
     async def inject_message(self, message_id: str, content: str) -> None:
         """Enqueue a message for the active execution.
@@ -90,31 +124,27 @@ class RuntimeStore(Protocol):
         ...
     async def drain_messages(self, message_id: str) -> List[str]: ...
 
-    # ── Lease key (for stream transport lease check) ──
 
-    def get_lease_key(self, conversation_id: str) -> str: ...
+@runtime_checkable
+class RuntimeStateLifecycle(Protocol):
+    """消息级易失状态与 store 关停边界，不释放 lease。"""
 
-    # ── Active conversations ──
-
-    async def list_active_conversations(self) -> List[str]:
-        """Return conversation IDs that currently hold a lease."""
-        ...
-
-    async def list_active_executions(self) -> Dict[str, str]:
-        """Return {conversation_id: message_id} for every currently-held lease.
-
-        Distinct from list_active_conversations: callers that need to
-        distinguish *which* execution is active (e.g. sidebar dot vs. compare-
-        and-swap on terminal) cannot use the bool-only flavor, otherwise an
-        old turn's terminal event clobbers a freshly-started new turn's mark.
-        """
-        ...
-
-    # ── Lifecycle ──
-
-    async def cleanup_execution(self, conversation_id: str, message_id: str) -> None: ...
+    async def cleanup_message_state(self, message_id: str) -> None: ...
     async def shutdown_cleanup(self) -> None: ...
-    async def renew_lease(self, conversation_id: str, message_id: str, ttl: float) -> bool: ...
+
+
+@runtime_checkable
+class RuntimeStore(
+    ConversationLeaseStore,
+    ConversationLeaseReader,
+    InteractionStore,
+    InterruptStore,
+    CancellationStore,
+    InjectQueue,
+    RuntimeStateLifecycle,
+    Protocol,
+):
+    """完整 store 的组合类型；消费者应标注上面的最小协议。"""
 
 
 # ============================================================
@@ -157,8 +187,9 @@ class InMemoryRuntimeStore:
         return None
 
     async def release_lease(self, conversation_id: str, message_id: str) -> None:
-        """释放 conversation lease。InMemory 忽略 msg_id（单进程无竞争）。"""
-        self._conversation_leases.pop(conversation_id, None)
+        """仅释放仍归 ``message_id`` 的 lease，与 Redis owner CAS 对齐。"""
+        if self._conversation_leases.get(conversation_id) == message_id:
+            self._conversation_leases.pop(conversation_id, None)
 
     async def get_leased_message_id(self, conversation_id: str) -> Optional[str]:
         return self._conversation_leases.get(conversation_id)
@@ -174,10 +205,11 @@ class InMemoryRuntimeStore:
     async def mark_engine_interactive(self, conversation_id: str, message_id: str) -> bool:
         """Mark RUNNING only if this message still owns the conversation lease.
 
-        Returns True if marked, False if the lease was lost/taken over (runner
-        then aborts). Single process → the check is a plain dict comparison; it
-        still matters because a fenced/superseded queued task could otherwise
-        clobber a new owner's interactive key on the QUEUED→RUNNING edge.
+        Returns True if marked, False if the lease was lost/taken over (the
+        execution service then aborts). Single process → the check is a plain
+        dict comparison; it still matters because a fenced/superseded queued
+        task could otherwise clobber a new owner's interactive key on the
+        QUEUED→RUNNING edge.
         """
         if self._conversation_leases.get(conversation_id) != message_id:
             return False
@@ -185,8 +217,9 @@ class InMemoryRuntimeStore:
         return True
 
     async def clear_engine_interactive(self, conversation_id: str, message_id: str) -> None:
-        """清除 engine 可交互状态。InMemory 忽略 msg_id（单进程无竞争）。"""
-        self._engine_interactive.pop(conversation_id, None)
+        """仅清理由 ``message_id`` 写入的 RUNNING 标记。"""
+        if self._engine_interactive.get(conversation_id) == message_id:
+            self._engine_interactive.pop(conversation_id, None)
 
     async def get_interactive_message_id(self, conversation_id: str) -> Optional[str]:
         return self._engine_interactive.get(conversation_id)
@@ -304,32 +337,25 @@ class InMemoryRuntimeStore:
 
     # ── Lifecycle ──
 
-    async def cleanup_execution(self, conversation_id: str, message_id: str) -> None:
-        """清理指定 message_id 的所有运行时状态"""
+    async def cleanup_message_state(self, message_id: str) -> None:
+        """清理指定 message_id 的非 Conversation 运行时状态。"""
         self._interrupts.pop(message_id, None)
         self._cancellations.pop(message_id, None)
         self._queues.pop(message_id, None)
-        # 清理 lease 和 interactive — O(1) 条件删除（conversation_id 已知）
-        if self._conversation_leases.get(conversation_id) == message_id:
-            self._conversation_leases.pop(conversation_id, None)
-        if self._engine_interactive.get(conversation_id) == message_id:
-            self._engine_interactive.pop(conversation_id, None)
         logger.debug(f"Execution {message_id} cleaned up from runtime store")
 
     async def shutdown_cleanup(self) -> None:
-        """关闭时清理：唤醒所有 pending interrupt + 清空所有 dict"""
+        """关闭时只唤醒 pending interrupt。
+
+        Lease/interactive 必须留到各 TaskScope 完成易失资源清理后
+        再按 owner 释放；在这里提前 clear 会重建 shutdown 时的孤儿窗口。
+        """
         for message_id, interrupt in self._interrupts.items():
             if not interrupt.event.is_set():
                 interrupt.resume_data = {"approved": False, "reason": "shutdown"}
                 interrupt.event.set()
-
-        self._conversation_leases.clear()
-        self._engine_interactive.clear()
-        self._interrupts.clear()
-        self._cancellations.clear()
-        self._queues.clear()
-        logger.debug("Runtime store shutdown cleanup complete")
+        logger.debug("Runtime store shutdown interrupts resolved")
 
     async def renew_lease(self, conversation_id: str, message_id: str, ttl: float) -> bool:
-        """心跳续租。InMemory 永远成功（内存无 TTL）。"""
-        return True
+        """InMemory 无 TTL，但仍必须校验 owner 以支持 fencing。"""
+        return self._conversation_leases.get(conversation_id) == message_id

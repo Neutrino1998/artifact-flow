@@ -8,7 +8,8 @@ from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 from pydantic import BaseModel, Field
 
-from api.schemas.chat import MessageFeedbackResponse, UploadedFileRef
+from api.schemas.chat import MessageFeedbackResponse
+from api.schemas.artifact import ArtifactSummary
 
 
 class AdminConversationSummary(BaseModel):
@@ -52,11 +53,30 @@ class AdminFeedbackListResponse(BaseModel):
 class AdminEventItem(BaseModel):
     """Single event in admin event timeline"""
     id: int
-    event_id: Optional[str] = None  # 业务事件 id；agent_start 用它当 prompt 重建锚
+    event_id: Optional[str] = None  # 业务事件 id；用作 prompt / LLM call 重建锚
     event_type: str
     agent_name: Optional[str] = None
     data: Optional[Dict[str, Any]] = None
     created_at: datetime
+
+
+class AdminUploadedFileRef(BaseModel):
+    """Admin-visible attachment metadata after the active privacy projection."""
+
+    id: Optional[str] = None
+    filename: str
+    content_accessible: bool = True
+
+
+class AdminArtifactSummary(ArtifactSummary):
+    """Artifact metadata plus the backend-authoritative admin read capability."""
+
+    content_accessible: bool
+
+
+class AdminArtifactListResponse(BaseModel):
+    session_id: str
+    artifacts: List[AdminArtifactSummary]
 
 
 class AdminMessageGroup(BaseModel):
@@ -69,7 +89,7 @@ class AdminMessageGroup(BaseModel):
     events: List[AdminEventItem]
     execution_metrics: Optional[Dict[str, Any]] = None
     feedback: Optional[MessageFeedbackResponse] = None
-    uploaded_files: Optional[List[UploadedFileRef]] = Field(
+    uploaded_files: Optional[List[AdminUploadedFileRef]] = Field(
         None,
         description=(
             "Files attached to this turn, from Message.metadata_['uploaded_files']. "
@@ -100,6 +120,13 @@ class AdminPromptReconstructResponse(BaseModel):
     )
     has_reminder: bool = False
     messages: List[Dict[str, Any]]
+
+
+class AdminLlmCallReconstructResponse(AdminPromptReconstructResponse):
+    """One persisted LLM request and its normalized response event payload."""
+
+    llm_complete_event_id: str
+    response: Dict[str, Any]
 
 
 class AdminConversationEventsResponse(BaseModel):

@@ -6,6 +6,7 @@ import uuid
 from httpx import AsyncClient
 from sqlalchemy import update
 
+from config import config
 from db.database import DatabaseManager
 from db.models import MessageFeedback, User
 from repositories.conversation_repo import ConversationRepository
@@ -89,6 +90,31 @@ class TestMessageFeedbackWrite:
 
 
 class TestAdminFeedbackBrowser:
+    async def test_privacy_mode_redacts_feedback_owner(
+        self,
+        monkeypatch,
+        admin_client: AsyncClient,
+        db_manager: DatabaseManager,
+        test_user: User,
+    ):
+        monkeypatch.setattr(config, "ADMIN_PRIVACY_MODE", True)
+        _, message_id = await _seed_message(db_manager, test_user.id)
+        async with db_manager.session() as session:
+            await MessageFeedbackRepository(session).upsert(
+                message_id,
+                rating="negative",
+                tags=["incorrect_incomplete"],
+                detail="needs review",
+            )
+
+        response = await admin_client.get("/api/v1/admin/feedback")
+
+        assert response.status_code == 200
+        (item,) = response.json()["feedback"]
+        assert item["user_id"] is None
+        assert item["user_display_name"] == "匿名用户"
+        assert test_user.id not in response.text
+
     async def test_lists_filters_searches_and_exposes_message_feedback(
         self,
         admin_client: AsyncClient,

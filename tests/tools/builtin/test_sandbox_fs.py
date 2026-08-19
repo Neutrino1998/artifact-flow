@@ -105,7 +105,7 @@ class TestMeasureUsage:
 
     def test_openat_failure_fails_closed(self, tmp_path, monkeypatch):
         """openat 下探失败(EMFILE/EACCES 等非 ENOENT)→ incomplete=True。
-        reviewer 复现:RLIMIT_NOFILE=64 扫 80 层树曾返回 incomplete=False。"""
+        RLIMIT_NOFILE=64 扫 80 层树曾错误返回 incomplete=False。"""
         sub = tmp_path / "sub"
         sub.mkdir()
         (sub / "f").write_bytes(b"x" * 100)
@@ -135,7 +135,7 @@ class TestMeasureUsage:
         assert not incomplete
 
     def test_real_fd_exhaustion_fails_closed(self, tmp_path):
-        """真降 RLIMIT_NOFILE 扫深树(reviewer 原始复现):必须 incomplete=True。"""
+        """真降 RLIMIT_NOFILE 扫深树时必须返回 incomplete=True。"""
         d = tmp_path
         for i in range(80):
             d = d / f"l{i}"
@@ -264,7 +264,7 @@ class TestWriteFile:
 
     def test_short_write_is_completed(self, tmp_path, monkeypatch):
         """os.write 短写(POSIX 允许)→ 循环写完,文件不被静默截断。
-        reviewer 复现:monkeypatch 让 os.write 每次只吐 3 字节。"""
+        monkeypatch 让 os.write 每次只吐 3 字节，验证完整写出。"""
         ws = tmp_path / "ws"
         ws.mkdir()
         real_write = os.write

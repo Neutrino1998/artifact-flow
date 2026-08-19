@@ -116,6 +116,7 @@ func (c *Controller) initialDirectories() []string {
 		c.controlDir(),
 		filepath.Join(c.controlDir(), "certs"),
 		c.trustAnchorDir(),
+		c.authConfigDir(),
 		filepath.Join(c.controlDir(), "site"),
 		filepath.Join(c.controlDir(), "maintenance"),
 		filepath.Join(c.controlDir(), "autoheal"),

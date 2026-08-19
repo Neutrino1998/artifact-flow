@@ -1,7 +1,7 @@
 """
 Document converter for file import.
 
-路由(上传翻转后,2026-06-11):**文本白名单(EXTENSION_MIME_MAP)→ content,
+路由：**文本白名单(EXTENSION_MIME_MAP)→ content,
 png/jpeg → 识图 blob,其余一律 → blob**。路由纯声明式(按扩展名三分),
 charset 启发式不参与路由判定 —— 改后缀 / 损坏 / 不认识的字节照收进 blob,
 模型 mount 进沙盒后自己检视、诊断、转换(remediation 提示归 skill 系统);
@@ -66,7 +66,7 @@ EXTENSION_MIME_MAP: Dict[str, str] = {
     ".svg": "text/xml",
 }
 
-# 图片(png/jpeg):识图路径(见 sandbox plan A 决策)。真实 MIME 由 Pillow 按内容
+# 图片(png/jpeg)：供识图路径使用。真实 MIME 由 Pillow 按内容
 # 探测、非按扩展名,故这里只用扩展名圈定"走图片分支"。
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
 
@@ -127,7 +127,7 @@ _BINARY_EXTENSION_MIME: Dict[str, str] = {
     ".heif": "image/heif",
     ".ico": "image/x-icon",
     ".avif": "image/avif",
-    # 压缩包(原则 5:zip 等进 blob,沙盒里解)
+    # 压缩包存为 blob，在沙盒里解压。
     ".zip": "application/zip",
     ".gz": "application/gzip",
     ".tgz": "application/gzip",
@@ -145,8 +145,8 @@ class ConvertResult:
 
     XOR:一个结果只一份实质 data —— 纯文本即 `content`(`content_type` 为 text MIME,
     `blob=None`);图片与富格式 docx/pdf 为 `blob`(`content=""`,`content_type` 即原件
-    真实 MIME,无需另给 blob MIME)。富格式的读/写/转换全归沙盒(sandbox plan 原则 6,
-    C-0 起 blob-only,不再预转 md)。
+    真实 MIME，无需另给 blob MIME）。富格式的读/写/转换全归沙盒；blob-only 文件
+    不再预转为 Markdown。
     """
     content: str
     content_type: str  # 文本表示的 MIME;blob-only 时即原件真实 MIME

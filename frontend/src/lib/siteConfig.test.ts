@@ -12,7 +12,7 @@ import { API_URL } from './apiBase';
 /**
  * Tests for siteConfig 静态配置 fetcher。
  *
- * 覆盖 reviewer 反馈的两个洞：
+ * 覆盖两个配置边界：
  *  - starts_at/ends_at 坏值要 fail-closed（整条丢弃，而不是当作"无边界"）
  *  - severity / id / title / body schema 错位也要丢弃
  *

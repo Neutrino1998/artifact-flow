@@ -3,9 +3,9 @@
 #   老 Docker 会在 ADD 行硬报错。钉版会在构建时拉 frontend 镜像 —— 构建必须
 #   在联网机做(本文件既有前提),气隙节点只 docker load,不受影响。
 #
-# ArtifactFlow sandbox image — gVisor (runsc) functional verification (plan §B).
+# ArtifactFlow sandbox image — gVisor (runsc) functional environment.
 #
-# This is the "tier-1 baked environment" (plan 原则 7): interpreter +
+# This is the tier-1 baked environment: interpreter +
 # scientific/document stack + LibreOffice + text-edit + merman-cli + pandoc +
 # ripgrep + zip + best-effort RAR extraction + git. It runs untrusted
 # LLM-generated code under runsc.
@@ -15,7 +15,7 @@
 # Build for linux/amd64 (intranet target is x86_64) via scripts/build-sandbox-image.sh.
 # Air-gap: everything is fetched HERE on the networked build host and baked in;
 # the intranet test node only `docker load`s the saved tar and runs it under
-# --runtime=runsc --network=none with ZERO network (plan 原则 7).
+# --runtime=runsc --network=none with ZERO network.
 
 # merman-cli is a headless Mermaid renderer. Build the same pinned source on
 # both target architectures instead of carrying Chromium/Node or mixing
@@ -36,7 +36,7 @@ RUN mkdir -p /tmp/merman /opt/merman/licenses && \
 FROM python:3.11-slim
 
 LABEL maintainer="1998neutrino@gmail.com"
-LABEL description="ArtifactFlow sandbox runtime (gVisor verification, plan §B)"
+LABEL description="ArtifactFlow sandbox runtime for gVisor verification"
 
 # MPLBACKEND=Agg — headless matplotlib backend; without it `import
 # matplotlib.pyplot` may try to reach an X server, which under runsc/--network=none
@@ -81,7 +81,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# 中文字形(E-4):没有 CJK 字体 matplotlib 中文标签全是豆腐块,gate 所有内网
+# 中文字形：没有 CJK 字体时 matplotlib 中文标签全是豆腐块，会阻断中文图表场景。
 # 中文图表场景。不用 apt fonts-noto-cjk —— 它只装 .ttc 集合,matplotlib 只注册
 # 集合第一个 face(JP,简体字形有日式变体),实测 "Noto Sans CJK SC" 查无此名;
 # 直接烤两个 SC 单 .otf(Regular/Bold,共 ~32MB,比 apt 包省 ~60MB)。
@@ -113,7 +113,7 @@ RUN git config --system user.name "sandbox" && \
     git config --system init.defaultBranch main && \
     git config --system safe.directory '*'
 
-# Scientific stack — the real ENOSYS workload under runsc (plan §B "验什么").
+# Scientific stack — the real ENOSYS workload under runsc.
 COPY sandbox/requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
@@ -131,8 +131,8 @@ RUN chmod 755 /usr/local/bin/text-edit /usr/local/bin/artifactflow-office
 # dist/ sidecar so ops can diff bundles without loading the tar.
 RUN pip freeze > /opt/sandbox-wheels.lock.txt
 
-# Offline-install fixture (plan §B: verify the tier-2/3 find-links delivery path
-# under runsc). Build a trivial pure-Python wheel HERE (networked build host)
+# Offline-install fixture for the tier-2/3 find-links delivery path under runsc.
+# Build a trivial pure-Python wheel HERE (networked build host)
 # into /opt/stub-wheels so the in-sandbox probe can:
 #   pip install --no-index --find-links /opt/stub-wheels af-sandbox-stub
 # with zero network — proving offline `pip install` survives Sentry.
@@ -140,7 +140,7 @@ COPY sandbox/stub-pkg /tmp/stub-pkg
 RUN pip wheel --no-deps -w /opt/stub-wheels /tmp/stub-pkg && rm -rf /tmp/stub-pkg
 
 # Non-root: untrusted code must not run as root inside the sandbox. Fixed uid
-# 1000 + a known-owned /work so the bind-mount uid-mapping check (plan §B) has a
+# 1000 + a known-owned /work so the bind-mount uid-mapping check has a
 # concrete owner to assert against on the host side.
 RUN useradd --create-home --uid 1000 sandbox && \
     mkdir -p /work && chown sandbox:sandbox /work

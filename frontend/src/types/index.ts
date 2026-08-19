@@ -1,4 +1,4 @@
-import type { components } from './api';
+import type { components, operations } from './api';
 type S = components['schemas'];
 
 // ============================================================
@@ -8,6 +8,9 @@ type S = components['schemas'];
 export type LoginRequest = S['LoginRequest'];
 export type UserInfo = S['UserInfo'];
 export type LoginResponse = S['LoginResponse'];
+export type AuthPublicConfigResponse = S['AuthPublicConfigResponse'];
+export type SsoStartResponse = S['SsoStartResponse'];
+export type SsoExchangeRequest = operations['exchange_sso_api_v1_auth_sso_exchange_post']['requestBody']['content']['application/json'];
 
 // ============================================================
 // User Management Types (Admin)
@@ -48,7 +51,7 @@ export type ResolveDepartmentRequest = S['ResolveDepartmentRequest'];
 export type ResolveDepartmentResponse = S['ResolveDepartmentResponse'];
 
 // ============================================================
-// Tool Registry Types (Admin) — B-4 工具 unit 管理
+// Tool Registry Types (Admin) — 工具 unit 管理
 // ============================================================
 
 export type ToolMemberSpec = S['ToolMemberSpec'];
@@ -68,11 +71,12 @@ export type AgentSummaryResponse = S['AgentSummaryResponse'];
 export type AgentListResponse = S['AgentListResponse'];
 
 // ============================================================
-// Skill Types — 列举/toggle (C-3) + 导入/导出/删除 (E-2)
+// Skill Types — 列举/正文预览/toggle + 导入/导出/删除
 // ============================================================
 
 export type SkillItem = S['SkillItem'];
 export type SkillListResponse = S['SkillListResponse'];
+export type SkillDetailResponse = S['SkillDetailResponse'];
 export type SkillFindingItem = S['FindingItem'];
 export type SkillImportResponse = S['SkillImportResponse'];
 export type AdminSkillItem = S['AdminSkillItem'];

@@ -6,7 +6,6 @@ description: |
 internal: true
 model: 文本模型
 tools: {}
-max_tool_rounds: 0
 ---
 
 You are a conversation compaction agent. Your task is to produce a single detailed structured summary of the conversation so far so that subsequent turns can continue without losing context.

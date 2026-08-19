@@ -14,17 +14,17 @@ ENV PIP_NO_CACHE_DIR=1 \
 
 WORKDIR /build
 
-# Install from the pinned lockfile (DEP-02), not the abstract requirements.txt,
+# Install from the pinned lockfile, not the abstract requirements.txt,
 # so the image audited on the build host == the image deployed (no `>=` drift).
 # requirements.lock is regenerated from requirements.txt via pip-compile inside
-# this same python:3.11-slim image — see CLAUDE.md "Essential Commands".
+# this same python:3.11-slim image so platform markers match production.
 COPY requirements.lock .
 RUN pip install --user --no-warn-script-location -r requirements.lock
 
 # py-spy: in-container backup attach path for incident forensics. Kept out
 # of requirements.txt because it's not a runtime dep — the main process
 # never imports it; it's invoked via `docker exec backend py-spy ...` when
-# PR-obs-lite's faulthandler deadman dump isn't enough. ~6MB; rides the
+# the faulthandler deadman dump isn't enough. ~6MB; rides the
 # existing `COPY --from=builder /root/.local` path into the runtime image.
 # Requires `cap_add: [SYS_PTRACE]` on the backend service to actually
 # attach in-container — see deploy/compose.base.yml.

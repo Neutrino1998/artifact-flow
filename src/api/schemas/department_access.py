@@ -1,4 +1,4 @@
-"""Schemas for admin department access management (Phase G-1)."""
+"""Schemas for admin department access management."""
 
 from typing import List, Literal, Optional
 

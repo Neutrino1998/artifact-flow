@@ -62,13 +62,34 @@ class SkillListResponse(BaseModel):
     )
 
 
+class SkillDetailResponse(BaseModel):
+    """On-demand SKILL.md preview for one management-list item."""
+    id: str = Field(..., description="Stable skill id")
+    slug: str = Field(..., description="User-context skill slug")
+    name: str = Field(..., description="Display name")
+    description: str = Field(..., description="One-line description")
+    skill_md: str = Field(
+        ...,
+        description="SKILL.md guidance body with YAML frontmatter removed",
+    )
+    source: Literal["seeded", "dynamic"] = Field(
+        ..., description="Config-owned or UI-imported source"
+    )
+    visibility: Literal["private", "public", "department"] = Field(
+        ..., description="Effective catalog visibility"
+    )
+    has_extra_files: bool = Field(
+        ..., description="Whether the downloadable bundle contains files beyond SKILL.md"
+    )
+
+
 class SkillToggleRequest(BaseModel):
     """PUT /api/v1/skills/{skill_id}/enabled request body."""
     enabled: bool = Field(..., description="Personal enable/disable override for this skill.")
 
 
 class FindingItem(BaseModel):
-    """一条 validator finding(E-1 硬门产出;rule id 稳定,前端按 severity 渲染)。"""
+    """一条 validator finding；rule id 稳定，前端按 severity 渲染。"""
     rule: str = Field(..., description="Stable rule id, e.g. 'zip.invalid' / 'md.body_empty'.")
     severity: str = Field(..., description="'error' (rejected) or 'warning' (surfaced only).")
     message: str = Field(..., description="Human-readable explanation.")

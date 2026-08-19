@@ -1,4 +1,4 @@
-"""config→DB skill reconciler + snapshot 测试(Phase C-1;bundle = D-1)。"""
+"""config→DB skill reconciler + snapshot（含 bundle）测试。"""
 
 import io
 import logging
@@ -148,7 +148,10 @@ async def test_skill_prune_cascades_user_and_dept_rules(db_session, cfg):
     await _run(db_session, cfg)
 
     # 建一个 user + department + 指向 skill 的 user_skill / dept rule
-    db_session.add(User(id="u1", username="u1", hashed_password="x"))
+    db_session.add(User(
+        id="u1", auth_provider="local_password", auth_subject="u1",
+        username="u1", hashed_password="x",
+    ))
     db_session.add(Department(id="d1", name="dept1"))
     await db_session.flush()
     skill = (await db_session.execute(
@@ -174,7 +177,7 @@ async def test_skill_prune_cascades_user_and_dept_rules(db_session, cfg):
 
 
 # --------------------------------------------------------------------------
-# clear-on-visibility(决策 10:改 visibility 清 dept 规则、留 user_skill)
+# clear-on-visibility：改 visibility 清 dept 规则、保留 user_skill
 # --------------------------------------------------------------------------
 
 
@@ -183,7 +186,10 @@ async def test_skill_visibility_change_clears_dept_rules_keeps_user(db_session, 
     _write(skills / "s" / "SKILL.md", _skill_md(name="s", visibility="public"))
     await _run(db_session, cfg)
 
-    db_session.add(User(id="u1", username="u1", hashed_password="x"))
+    db_session.add(User(
+        id="u1", auth_provider="local_password", auth_subject="u1",
+        username="u1", hashed_password="x",
+    ))
     db_session.add(Department(id="d1", name="dept1"))
     await db_session.flush()
     skill = (await db_session.execute(
@@ -282,7 +288,7 @@ async def test_load_skill_snapshot_roundtrip(db_session, cfg):
 
 
 # --------------------------------------------------------------------------
-# unit 侧 dept 规则钩子在 C-1 已接通(建好空跑 + clear/prune 真删)
+# unit 侧 dept 规则钩子：无规则时 no-op，clear/prune 时真删。
 # --------------------------------------------------------------------------
 
 
@@ -327,7 +333,7 @@ async def test_unit_prune_deletes_dept_unit_rule(db_session, cfg):
 
 
 # --------------------------------------------------------------------------
-# bundle skill(D-1:<slug>.zip 存原始字节;prose = 单 SKILL.md 目录 → NULL)
+# bundle skill：`<slug>.zip` 存原始字节；prose = 单 SKILL.md 目录 → NULL
 # --------------------------------------------------------------------------
 
 
@@ -360,7 +366,7 @@ async def test_bundle_zip_stored_verbatim(db_session, cfg):
     await _run(db_session, cfg)
 
     row = (await db_session.execute(select(Skill).where(Skill.slug == "pack"))).scalar_one()
-    assert row.bundle == blob                 # 原始字节无损存(决策 3)
+    assert row.bundle == blob                 # 原始字节无损存
     assert row.skill_md == "Mount me."         # 从 zip 内 SKILL.md 解出正文
     assert row.has_extra_files is True
     snap = await load_skill_snapshot(db_session)
@@ -473,7 +479,7 @@ async def test_get_bundle_roundtrip(db_session, cfg):
 
 
 # --------------------------------------------------------------------------
-# E-1:seed 侧经由 skill_validator 的新规则(zip/prose 空正文、fence、链接、穿越)
+# seed 侧与导入侧共用 skill_validator 规则（空正文、fence、链接、路径穿越）
 # --------------------------------------------------------------------------
 
 

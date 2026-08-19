@@ -1,9 +1,9 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import AdminConversationList from './AdminConversationList';
-import NotificationConfigList from './NotificationConfigList';
-import { useNotificationConfigStore } from '@/stores/notificationConfigStore';
+import AdminConversationList from '@/features/admin/observability/AdminConversationList';
+import NotificationConfigList from '@/features/admin/notifications/NotificationConfigList';
+import { useNotificationConfigStore } from '@/features/admin/notifications/notificationConfigStore';
 import { INITIAL_UI_STATE, useUIStore } from '@/stores/uiStore';
 
 const apiMocks = vi.hoisted(() => ({

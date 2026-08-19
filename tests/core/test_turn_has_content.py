@@ -4,7 +4,7 @@
 activated_skill_bodies,与上传/compact(presence ⟺ 注入非空)对齐,不认 raw 请求。
 """
 
-from core.engine import turn_has_content
+from core.execution.engine import turn_has_content
 
 
 def test_plain_text_has_content():

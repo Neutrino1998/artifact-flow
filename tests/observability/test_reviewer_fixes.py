@@ -1,5 +1,5 @@
 """
-Regression tests for the four reviewer findings on PR-obs-lite:
+Regression tests for four observability boundary conditions:
   - tasks_long_running counts actual long-running tasks
   - mem_limit resolution via env override + cgroup v2 + cgroup v1
   - sampler RSS high-water WARN actually fires when mem_limit is wired
@@ -30,8 +30,8 @@ from observability.sampler import RuntimeSampler, resolve_mem_limit_bytes
 # ============================================================
 
 
-class _FakeRunner:
-    """Mirror the minimal shape RuntimeSampler reads on ExecutionRunner."""
+class _FakeSupervisor:
+    """Mirror the minimal shape RuntimeSampler reads on TaskSupervisor."""
 
     def __init__(self, *, long_running: int, in_flight: int):
         self._tasks = {f"t-{i}": object() for i in range(in_flight)}
@@ -45,40 +45,40 @@ class _FakeRunner:
         return self._long_running
 
 
-def test_execution_runner_long_running_count():
-    """ExecutionRunner.long_running_count returns ages over threshold."""
-    from api.services.execution_runner import ExecutionRunner
+def test_task_supervisor_long_running_count():
+    """TaskSupervisor.long_running_count returns ages over threshold."""
+    from core.execution.task_supervisor import TaskSupervisor
 
-    runner = ExecutionRunner(max_concurrent=4)
+    supervisor = TaskSupervisor(max_concurrent=4)
     now = time.monotonic()
     # synthesize 3 tasks: 2 over threshold, 1 fresh
-    runner._task_started_at = {
+    supervisor._task_started_at = {
         "old-1": now - 120,
         "old-2": now - 90,
         "fresh-3": now - 5,
     }
-    assert runner.long_running_count(60) == 2     # only old-1 (120s) + old-2 (90s)
-    assert runner.long_running_count(1) == 3      # all three exceed 1s
-    assert runner.long_running_count(1000) == 0   # nothing exceeds 1000s
+    assert supervisor.long_running_count(60) == 2     # only old-1 (120s) + old-2 (90s)
+    assert supervisor.long_running_count(1) == 3      # all three exceed 1s
+    assert supervisor.long_running_count(1000) == 0   # nothing exceeds 1000s
 
 
-def test_execution_runner_long_running_empty():
+def test_task_supervisor_long_running_empty():
     """No tracked tasks → 0, no exception."""
-    from api.services.execution_runner import ExecutionRunner
+    from core.execution.task_supervisor import TaskSupervisor
 
-    runner = ExecutionRunner(max_concurrent=4)
-    assert runner.long_running_count(60) == 0
+    supervisor = TaskSupervisor(max_concurrent=4)
+    assert supervisor.long_running_count(60) == 0
 
 
-def test_sampler_reads_long_running_from_runner(tmp_path):
-    """Sampler.tasks_long_running pulls from runner.long_running_count."""
+def test_sampler_reads_long_running_from_supervisor(tmp_path):
+    """Sampler.tasks_long_running pulls from supervisor.long_running_count."""
 
     async def runner():
         sink = JsonlSink(tmp_path / "metrics.jsonl", max_mb=1, backups=1, mirror_stdout=False)
         sampler = RuntimeSampler(
             sink=sink,
             watchdog=None,
-            execution_runner=_FakeRunner(long_running=2, in_flight=3),
+            task_supervisor=_FakeSupervisor(long_running=2, in_flight=3),
             data_dir=str(tmp_path),
             long_task_age_sec=60,
         )
@@ -93,7 +93,7 @@ def test_sampler_reads_long_running_from_runner(tmp_path):
 def test_sampler_long_running_graceful_when_method_missing(tmp_path):
     """Old runners without long_running_count → 0, not exception."""
 
-    class _LegacyRunner:
+    class _LegacySupervisor:
         def __init__(self):
             self._tasks = {"a": object()}
 
@@ -105,7 +105,7 @@ def test_sampler_long_running_graceful_when_method_missing(tmp_path):
         sink = JsonlSink(tmp_path / "metrics.jsonl", max_mb=1, backups=1, mirror_stdout=False)
         sampler = RuntimeSampler(
             sink=sink, watchdog=None,
-            execution_runner=_LegacyRunner(), data_dir=str(tmp_path),
+            task_supervisor=_LegacySupervisor(), data_dir=str(tmp_path),
         )
         snap = await sampler.sample_once()
         sink.close()
@@ -209,7 +209,7 @@ def test_sampler_rss_warn_fires_when_mem_limit_set(tmp_path, caplog):
         sampler = RuntimeSampler(
             sink=sink,
             watchdog=None,
-            execution_runner=None,
+            task_supervisor=None,
             data_dir=str(tmp_path),
             mem_limit_bytes=100,
         )
@@ -232,7 +232,7 @@ def test_sampler_rss_warn_silent_when_mem_limit_none(tmp_path, caplog):
         sampler = RuntimeSampler(
             sink=sink,
             watchdog=None,
-            execution_runner=None,
+            task_supervisor=None,
             data_dir=str(tmp_path),
             mem_limit_bytes=None,
         )
@@ -258,7 +258,7 @@ def test_data_dir_scan_runs_off_event_loop(tmp_path):
     async def runner():
         sink = JsonlSink(tmp_path / "metrics.jsonl", max_mb=1, backups=1, mirror_stdout=False)
         sampler = RuntimeSampler(
-            sink=sink, watchdog=None, execution_runner=None, data_dir=str(tmp_path)
+            sink=sink, watchdog=None, task_supervisor=None, data_dir=str(tmp_path)
         )
 
         loop_thread_id = threading.get_ident()

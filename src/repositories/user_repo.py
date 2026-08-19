@@ -8,10 +8,12 @@ import re
 from typing import Optional, List
 
 from sqlalchemy import select, func, or_, delete, false
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import User, Department
-from repositories.base import BaseRepository
+from core.security.identity import LOCAL_AUTH_PROVIDER
+from repositories.base import BaseRepository, DuplicateError
 from utils.department_tree import expand_subtree
 
 
@@ -21,14 +23,50 @@ class UserRepository(BaseRepository[User]):
     def __init__(self, session: AsyncSession):
         super().__init__(session, User)
 
-    async def get_by_username(self, username: str) -> Optional[User]:
-        """根据用户名查询用户"""
+    async def create_user(self, user: User) -> User:
+        """Create one user and normalize authentication-identity races."""
+        identity = (user.auth_provider, user.auth_subject)
+        self._session.add(user)
+        try:
+            await self._session.flush()
+            await self._session.commit()
+            await self._session.refresh(user)
+            return user
+        except IntegrityError as exc:
+            await self._session.rollback()
+            # ``users`` also has credential checks, a department FK, and a
+            # primary key, so IntegrityError alone is not identity-race proof.
+            # Re-read after rollback: under READ COMMITTED this sees the winner
+            # of a concurrent identity insert without parsing dialect-specific
+            # constraint names.
+            if await self.get_by_auth_identity(*identity) is not None:
+                raise DuplicateError("UserIdentity", identity) from exc
+            raise UserWriteError() from exc
+
+    async def save_user(self, user: User) -> User:
+        """Commit one already-loaded user mutation."""
+        try:
+            await self._session.flush()
+            await self._session.commit()
+            await self._session.refresh(user)
+            return user
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise UserWriteError() from exc
+
+    async def get_by_auth_identity(
+        self, auth_provider: str, auth_subject: str
+    ) -> Optional[User]:
+        """Resolve exactly one principal in one authentication namespace."""
         result = await self._session.execute(
-            select(User).where(User.username == username)
+            select(User).where(
+                User.auth_provider == auth_provider,
+                User.auth_subject == auth_subject,
+            )
         )
         return result.scalar_one_or_none()
 
-    async def find_existing_usernames(self, usernames: set[str]) -> set[str]:
+    async def find_existing_local_usernames(self, usernames: set[str]) -> set[str]:
         """
         批查已存在的 username 集合 — 给批量导入 preflight 用。
 
@@ -38,9 +76,28 @@ class UserRepository(BaseRepository[User]):
         if not usernames:
             return set()
         result = await self._session.execute(
-            select(User.username).where(User.username.in_(usernames))
+            select(User.username).where(
+                User.auth_provider == LOCAL_AUTH_PROVIDER,
+                User.auth_subject.in_(usernames),
+            )
         )
         return set(result.scalars().all())
+
+    async def display_names(self, user_ids: set[str]) -> dict[str, str]:
+        """Return display-name projections without leaking ORM rows upward."""
+        if not user_ids:
+            return {}
+        rows = (
+            await self._session.execute(
+                select(User.id, User.display_name, User.username).where(
+                    User.id.in_(user_ids)
+                )
+            )
+        ).all()
+        return {
+            user_id: display_name or username
+            for user_id, display_name, username in rows
+        }
 
     async def _apply_search_filter(self, query, search_query: Optional[str]):
         """
@@ -118,8 +175,8 @@ class UserRepository(BaseRepository[User]):
 
         FK CASCADE 会连带删掉该用户的所有 conversation / messages /
         events / artifacts。如果用户有正在跑的 engine，被级联删除的
-        conversation 行会被 controller post-processing 的 exists() 检查
-        兜住（PR2a），不会撞 FK。
+        conversation 行会被 ConversationTurnHandler post-processing 的 exists() 检查
+        兜住，不会撞 FK。
 
         Returns:
             True — 删除成功；False — 用户不存在
@@ -129,3 +186,16 @@ class UserRepository(BaseRepository[User]):
         )
         await self._session.commit()
         return result.rowcount > 0
+
+
+class UserWriteError(Exception):
+    """Safe application error for a user write integrity failure.
+
+    The original database exception remains available through ``__cause__``
+    for stack diagnostics.  Its text is deliberately not copied here because
+    SQLAlchemy statement parameters may contain password hashes or other
+    sensitive values.
+    """
+
+    def __init__(self):
+        super().__init__("User write failed")

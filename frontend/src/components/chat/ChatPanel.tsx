@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import Image from 'next/image';
+import dynamic from 'next/dynamic';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useStreamStore } from '@/stores/streamStore';
 import { useUIStore } from '@/stores/uiStore';
@@ -13,14 +14,44 @@ import StreamingMessage from './StreamingMessage';
 import ErrorFlowBlock from './ErrorFlowBlock';
 import UserMessage from './UserMessage';
 import ConversationBrowser from './ConversationBrowser';
-import SkillManagementPanel from './SkillManagementPanel';
-import UserManagementPanel from './UserManagementPanel';
-import ToolUnitManagementPanel from './ToolUnitManagementPanel';
-import DepartmentAccessPanel from './DepartmentAccessPanel';
-import ObservabilityPanel from './ObservabilityPanel';
-import InstancePanel from './InstancePanel';
-import NotificationConfigPanel from './NotificationConfigPanel';
 import { useAuthStore } from '@/stores/authStore';
+
+function FeaturePanelLoading() {
+  return (
+    <div className="flex-1 flex items-center justify-center bg-chat dark:bg-chat-dark text-sm text-text-tertiary dark:text-text-tertiary-dark">
+      加载功能中...
+    </div>
+  );
+}
+
+const SkillManagementPanel = dynamic(
+  () => import('@/features/skills/SkillManagementPanel'),
+  { loading: FeaturePanelLoading },
+);
+const UserManagementPanel = dynamic(
+  () => import('@/features/admin/users/UserManagementPanel'),
+  { loading: FeaturePanelLoading },
+);
+const ToolUnitManagementPanel = dynamic(
+  () => import('@/features/admin/tool-units/ToolUnitManagementPanel'),
+  { loading: FeaturePanelLoading },
+);
+const DepartmentAccessPanel = dynamic(
+  () => import('@/features/admin/departments/DepartmentAccessPanel'),
+  { loading: FeaturePanelLoading },
+);
+const ObservabilityPanel = dynamic(
+  () => import('@/features/admin/observability/ObservabilityPanel'),
+  { loading: FeaturePanelLoading },
+);
+const InstancePanel = dynamic(
+  () => import('@/features/admin/instances/InstancePanel'),
+  { loading: FeaturePanelLoading },
+);
+const NotificationConfigPanel = dynamic(
+  () => import('@/features/admin/notifications/NotificationConfigPanel'),
+  { loading: FeaturePanelLoading },
+);
 
 function getGreeting(): string {
   const hour = new Date().getHours();
@@ -94,7 +125,7 @@ export default function ChatPanel() {
     return <ConversationBrowser />;
   }
 
-  // 技能管理:全用户(非 admin),中间面板接管。
+  // 技能管理:全用户,中间面板接管；右栏按选择改由 SkillPreviewPanel 承载。
   if (activeMode === 'skills') {
     return <SkillManagementPanel />;
   }

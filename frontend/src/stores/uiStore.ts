@@ -20,6 +20,10 @@ export type ToolUnitRightView =
   | { type: 'import-unit' }
   | { type: 'edit-unit'; unitName: string; showMountReminder?: boolean };
 
+export type SkillRightView =
+  | { type: 'empty' }
+  | { type: 'detail'; skillId: string; admin: boolean };
+
 export type ObservabilityBrowser = 'none' | 'conversations' | 'feedback';
 
 // 顶层互斥 UI 模式。这是「同一时刻最多一个接管面板」这个不变量的**唯一真相源**:
@@ -27,7 +31,7 @@ export type ObservabilityBrowser = 'none' | 'conversations' | 'feedback';
 // setter 手动 spread `其他: false` 来维持(那是旧设计的反复漏点,如选对话不退工具管理)。
 //   - none               : 普通聊天(右面板由 artifactPanelVisible 这个独立轴控制)
 //   - conversationBrowser : 中间面板接管(不动右面板)
-//   - skills             : 中间面板接管(不动右面板;用户侧技能管理,全用户,非 admin)
+//   - skills             : 中列表 + 按点击打开的右侧正文预览(全用户)
 //   - userManagement      : master-detail(中列表 + 右详情)
 //   - toolUnit            : master-detail(中列表 + 右详情)
 //   - departmentAccess    : 全屏接管(部门授权工作台)
@@ -43,9 +47,10 @@ export type ActiveMode =
   | 'instances'
   | 'notificationConfig';
 
-// 哪些 mode 接管/影响**右面板**(master-detail 重定向 or 全屏隐藏)。
+// 哪些 mode 接管/影响**右面板**(重定向、按需预览或全屏隐藏)。
 // conversationBrowser 只接管中间面板 → 进出它不算右面板意图变更,不 bump epoch。
 const RIGHT_PANEL_MODES: ReadonlySet<ActiveMode> = new Set([
+  'skills',
   'userManagement',
   'toolUnit',
   'departmentAccess',
@@ -73,11 +78,14 @@ interface UIState {
   // 列表刷新版本号 — 右面板表单（创建/编辑/删除）成功后 bump，
   // UserManagementPanel 订阅版本号触发 refetch，避免 prop 钻透
   userMgmtListVersion: number;
-  // 工具 unit 管理（B-4）— 与 user-mgmt 同构的 master-detail：中间面板列表 +
+  // 工具 unit 管理 — 与 user-mgmt 同构的 master-detail：中间面板列表 +
   // 右面板详情/创建。listVersion 由挂载/凭证/CRUD 成功后 bump 触发列表刷新。
   toolUnitRightView: ToolUnitRightView;
   toolUnitListVersion: number;
-  // PR5a: 中间面板的选择模式 + 选中集；与 RightView 协调（进入选择模式
+  // Skill preview is independent from ArtifactStore: skill guidance is not a
+  // conversation artifact and has no artifact versions/session semantics.
+  skillRightView: SkillRightView;
+  // 中间面板的选择模式 + 选中集；与 RightView 协调（进入选择模式
   // 自动切到 'bulk-action'，退出回 'empty'）
   selectionMode: boolean;
   userManagementSelection: string[];
@@ -105,12 +113,18 @@ interface UIState {
   setSidebarCollapsed: (collapsed: boolean) => void;
   toggleArtifactPanel: () => void;
   setArtifactPanelVisible: (visible: boolean) => void;
+  // Background sources (SSE, upload completion, conversation hydration) may
+  // request an auto-open, but must not leave latent visibility behind while a
+  // management mode owns the right panel. Unlike explicit user actions this
+  // does not bump rightPanelIntentEpoch.
+  autoOpenArtifactPanel: () => void;
   // 进入某个顶层模式(排他);回普通聊天用 setActiveMode('none')。
   setActiveMode: (mode: ActiveMode) => void;
   setUserManagementRightView: (view: UserMgmtRightView) => void;
   bumpUserMgmtListVersion: () => void;
   setToolUnitRightView: (view: ToolUnitRightView) => void;
   bumpToolUnitListVersion: () => void;
+  setSkillRightView: (view: SkillRightView) => void;
   enterSelectionMode: () => void;
   exitSelectionMode: () => void;
   toggleUserSelection: (userId: string) => void;
@@ -143,11 +157,12 @@ interface UIState {
 }
 
 // 初始**数据**态(不含 actions)。单独导出 → 测试可 setState(INITIAL_UI_STATE) 整体复位,
-// 不再手抄字段清单(漏抄会让状态泄漏到下个用例 —— reviewer #7)。新增字段只改这一处。
+// 不再手抄字段清单；漏抄会让状态泄漏到下个用例。新增字段只改这一处。
 type UIData = Omit<UIState,
-  | 'toggleSidebar' | 'setSidebarCollapsed' | 'toggleArtifactPanel' | 'setArtifactPanelVisible'
+  | 'toggleSidebar' | 'setSidebarCollapsed' | 'toggleArtifactPanel' | 'setArtifactPanelVisible' | 'autoOpenArtifactPanel'
   | 'setActiveMode' | 'setUserManagementRightView' | 'bumpUserMgmtListVersion'
   | 'setToolUnitRightView' | 'bumpToolUnitListVersion' | 'enterSelectionMode' | 'exitSelectionMode'
+  | 'setSkillRightView'
   | 'toggleUserSelection' | 'setUserManagementSelection' | 'clearUserSelection'
   | 'setObservabilitySelectedConvId' | 'setObservabilityBrowser' | 'openObservabilityMessage'
   | 'consumeObservabilityFocusRequest'
@@ -167,6 +182,7 @@ export const INITIAL_UI_STATE: UIData = {
   userMgmtListVersion: 0,
   toolUnitRightView: { type: 'empty' },
   toolUnitListVersion: 0,
+  skillRightView: { type: 'empty' },
   selectionMode: false,
   userManagementSelection: [],
   observabilitySelectedConvId: null,
@@ -204,6 +220,11 @@ export const useUIStore = create<UIState>((set) => ({
       artifactPanelVisible: visible,
       rightPanelIntentEpoch: s.rightPanelIntentEpoch + 1,
     })),
+  autoOpenArtifactPanel: () =>
+    set((s) => {
+      if (RIGHT_PANEL_MODES.has(s.activeMode) || s.artifactPanelVisible) return {};
+      return { artifactPanelVisible: true };
+    }),
   setActiveMode: (mode) => set((s) => {
     if (s.activeMode === mode) return {}; // 重复进同一 mode = no-op,不清子状态/不 bump
     const affectsRight = RIGHT_PANEL_MODES.has(s.activeMode) || RIGHT_PANEL_MODES.has(mode);
@@ -215,15 +236,15 @@ export const useUIStore = create<UIState>((set) => ({
       selectionMode: false,
       userManagementSelection: [],
       toolUnitRightView: { type: 'empty' },
+      skillRightView: { type: 'empty' },
       observabilitySelectedConvId: null,
       observabilityBrowser: 'none',
       observabilityHighlightedMessageId: null,
       observabilityFocusRequestId: 0,
       observabilityFocusConsumedId: 0,
-      // 进入任一接管右面板的模式(用户管理/工具管理/会话监控/实例监控)→ 收起已展开的
-      // 文件面板:全屏接管的(observability/instances)本就不该露出,master-detail 的
-      // (userManagement/toolUnit)则避免退出时残留的 artifactPanelVisible 让文件面板弹回。
-      ...(RIGHT_PANEL_MODES.has(mode) && { artifactPanelVisible: false }),
+      // 进出任一影响右面板的模式都收起当前右面板。skills 会由明确的技能点击
+      // 再打开正文预览；离开 skills 时必须关掉，避免右栏瞬间换回旧 Artifact。
+      ...(affectsRight && { artifactPanelVisible: false }),
       // 仅当进/出影响右面板的模式时才 bump(conversationBrowser 只动中间面板,不算)
       ...(affectsRight && { rightPanelIntentEpoch: s.rightPanelIntentEpoch + 1 }),
     };
@@ -234,6 +255,7 @@ export const useUIStore = create<UIState>((set) => ({
   setToolUnitRightView: (view) => set({ toolUnitRightView: view }),
   bumpToolUnitListVersion: () =>
     set((s) => ({ toolUnitListVersion: s.toolUnitListVersion + 1 })),
+  setSkillRightView: (view) => set({ skillRightView: view }),
   enterSelectionMode: () => set({
     selectionMode: true,
     userManagementSelection: [],

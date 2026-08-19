@@ -1,4 +1,4 @@
-"""SkillManager 用户侧列举 + 个人 toggle(C-3,DB)。
+"""SkillManager 用户侧列举 + 个人 toggle（DB）。
 
 覆盖:list 只列可见 + 有效启用态(覆盖后)、toggle 写 user_skill、不可见 → 404、
 default 与覆盖态区分(is_overridden)。可见性口径复用 EffectiveSkillSet(单点闸)。
@@ -6,7 +6,7 @@ default 与覆盖态区分(is_overridden)。可见性口径复用 EffectiveSkill
 
 import pytest
 
-from core.skill_manager import SkillManager, SkillNotFoundError
+from core.management.skill_manager import SkillManager, SkillNotFoundError
 from db.models import Department, DepartmentSkillRule, Skill, User, UserSkill
 
 
@@ -21,7 +21,10 @@ async def _user(session, uid="u1", dept=None):
     if dept:
         session.add(Department(id=dept, name=dept))
         await session.flush()
-    session.add(User(id=uid, username=uid, hashed_password="x", department_id=dept))
+    session.add(User(
+        id=uid, auth_provider="local_password", auth_subject=uid,
+        username=uid, hashed_password="x", department_id=dept,
+    ))
     await session.flush()
 
 

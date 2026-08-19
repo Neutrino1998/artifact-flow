@@ -26,7 +26,6 @@ tools:
   mount: enabled
   persist: enabled
 model: 文本模型
-max_tool_rounds: 50
 ---
 
 <role>

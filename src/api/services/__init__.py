@@ -11,7 +11,6 @@ from .stream_transport import (
     StreamNotFoundError,
     StreamAlreadyExistsError,
 )
-from .execution_runner import ExecutionRunner, DuplicateExecutionError
 from .runtime_store import RuntimeStore, InMemoryRuntimeStore
 
 __all__ = [
@@ -19,8 +18,6 @@ __all__ = [
     "StreamContext",
     "StreamNotFoundError",
     "StreamAlreadyExistsError",
-    "ExecutionRunner",
-    "DuplicateExecutionError",
     "RuntimeStore",
     "InMemoryRuntimeStore",
     "StreamTransport",

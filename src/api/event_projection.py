@@ -1,14 +1,22 @@
-"""User-facing projection for execution-event payloads.
+"""Observer-specific projection for execution-event payloads.
 
-Raw events are retained in the stream transport and MessageEvent storage for
-admin observability and prompt reconstruction.  Ordinary-user APIs must expose
-only the public shape of event types that carry internal execution context.
+Ordinary-user APIs expose only the public shape of internal execution events.
+Admin observability retains semantic diagnostic events, while the optional
+privacy boundary suppresses direct artifact live transports.
 """
 
-from typing import Any, Dict
+import re
+from typing import Any, Dict, Optional
 
+from api.admin_privacy import project_admin_uploaded_files
 from config import config
-from core.events import StreamEventType
+from core.execution.events import StreamEventType
+
+
+_UPLOAD_HINT_RE = re.compile(
+    r"\[The user attached (\d+) file\(s\) to this message: [^\n]*?\. "
+    r"Use read_artifact with the id for full content\.\]"
+)
 
 
 def project_event_data_for_user(event_type: str, data: Any) -> Any:
@@ -43,4 +51,43 @@ def project_event_for_user(event: Dict[str, Any]) -> Dict[str, Any]:
         "data": project_event_data_for_user(
             str(event.get("type", "")), event.get("data")
         ),
+    }
+
+
+def project_event_data_for_admin(event_type: str, data: Any) -> Any:
+    """Remove direct upload names from admin events when privacy mode is active."""
+    if not config.ADMIN_PRIVACY_MODE or not isinstance(data, dict):
+        return data
+
+    if event_type == StreamEventType.METADATA.value and "uploaded_files" in data:
+        return {
+            **data,
+            "uploaded_files": project_admin_uploaded_files(data.get("uploaded_files")),
+        }
+
+    if event_type == StreamEventType.USER_INPUT.value:
+        content = data.get("content")
+        if isinstance(content, str):
+            return {
+                **data,
+                "content": _UPLOAD_HINT_RE.sub(
+                    r"[The user attached \1 protected file(s) to this message.]",
+                    content,
+                ),
+            }
+
+    return data
+
+
+def project_event_for_admin(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Project one live admin event, or suppress a direct artifact transport."""
+    event_type = str(event.get("type", ""))
+    if config.ADMIN_PRIVACY_MODE and event_type in {
+        StreamEventType.ARTIFACT_CREATED.value,
+        StreamEventType.ARTIFACT_UPDATED.value,
+    }:
+        return None
+    return {
+        **event,
+        "data": project_event_data_for_admin(event_type, event.get("data")),
     }

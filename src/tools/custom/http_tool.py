@@ -76,7 +76,7 @@ class HttpTool(BaseTool):
         self._artifact_output = config.artifact_output
         self._timeout = config.timeout
         self._input_schema = config.input_schema
-        # 运行期凭证(B-4;B-5 退回 lazy):snapshot 重建时灌入 unit 名 + resolver。两者齐备
+        # 运行期凭证：snapshot 重建时灌入 unit 名 + resolver。两者齐备
         # → execute 期按 unit 从 tool_credentials(加密落库)开短 session 解密填 {{NAME}}
         # (只解被调工具、用完即弃);否则回落 env(legacy loader / 直接构造的工具,无 unit
         # 上下文)。凭证 = unit 级,故按 unit 名(非 full_name)查。
@@ -108,7 +108,7 @@ class HttpTool(BaseTool):
             return ToolResult(success=False, error=str(e))
 
         # 注入 secrets(缺失 / 非白名单前缀 / 解密失败 → 拒绝,不外发占位符原文)。
-        # DB 路径(B-4;B-5 lazy):resolver + unit 名齐备 → execute 期开短 session 按 unit
+        # DB 路径：resolver + unit 名齐备 → execute 期开短 session 按 unit
         # 解密凭证表填 {{NAME}}(只解被调工具、不驻留整轮);回落路径:无注入(legacy loader /
         # 测试直接构造)→ env 解析(白名单前缀)。
         try:

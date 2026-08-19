@@ -11,7 +11,7 @@ models:
   # 用低温,DeepSeek V3.x 官方推荐对称 1.0(thinking 和 non-thinking 共享同一组采样
   # 参数),没有 thinking-需要-低温 这个差异。两边对称,后续做评测才有干净的对照。
   文本模型:
-    model: openai/deepseek-v4-flash
+    model: deepseek-v4-flash
     context_window: 220000
     base_url: https://172.25.16.129:86/v1
     api_key_env: GPUSTACK_DEEPSEEK_API_KEY
@@ -24,7 +24,7 @@ models:
           thinking: true
 
   deepseek-v4-flash-no-thinking:
-    model: openai/deepseek-v4-flash
+    model: deepseek-v4-flash
     context_window: 260000
     base_url: https://172.25.16.129:86/v1
     api_key_env: GPUSTACK_DEEPSEEK_API_KEY
@@ -37,7 +37,7 @@ models:
           thinking: false
 
   视觉模型:
-    model: openai/qwen3.6-27b
+    model: qwen3.6-27b
     context_window: 128000
     base_url: http://172.22.3.54/v1
     api_key_env: GPUSTACK_VISION_API_KEY
@@ -50,7 +50,7 @@ models:
 
 # # 另一个 OpenAI 兼容内网 endpoint
 # my-other-model:
-#   model: openai/my-model-name
+#   model: my-model-name
 #   context_window: 32768
 #   base_url: http://10.0.0.1:8080/v1
 #   api_key: dummy

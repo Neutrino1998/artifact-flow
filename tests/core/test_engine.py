@@ -9,8 +9,9 @@ import pytest
 from dataclasses import dataclass, field
 from unittest.mock import patch, AsyncMock
 
-from core.engine import EngineHooks, create_initial_state, execute_loop
-from core.events import StreamEventType
+from core.execution.agent_runtime import RuntimeHooks, StopReason
+from core.execution.engine import create_initial_state, execute_loop
+from core.execution.events import StreamEventType
 from tests.core._toolset import effective_for
 
 
@@ -27,7 +28,6 @@ class _FakeAgentConfig:
     capabilities: list = field(default_factory=list)
     tools: dict = field(default_factory=dict)
     model: str = "文本模型"
-    max_tool_rounds: int = 3
     role_prompt: str = ""
 
 
@@ -39,8 +39,8 @@ def _make_fake_stream(chunks: list[dict]):
     return fake
 
 
-def _noop_hooks() -> EngineHooks:
-    """EngineHooks stub: nothing cancelled, no interrupts, no messages."""
+def _noop_hooks() -> RuntimeHooks:
+    """RuntimeHooks stub: nothing cancelled, no interrupts, no messages."""
     async def _check_cancelled(_mid):
         return False
 
@@ -50,7 +50,7 @@ def _noop_hooks() -> EngineHooks:
     async def _drain_messages(_mid):
         return []
 
-    return EngineHooks(
+    return RuntimeHooks(
         check_cancelled=_check_cancelled,
         wait_for_interrupt=_wait_for_interrupt,
         drain_messages=_drain_messages,
@@ -119,7 +119,7 @@ class TestAgentNotFound:
 
         # State must be marked as error, with the detail recorded for the
         # unified terminal authority (decide_terminal) to build the ERROR event.
-        assert result["error"] is True
+        assert result["stop_reason"] is StopReason.ERROR
         assert "lead_agent" in result["response"]
         assert "lead_agent" in result["error_detail"]["error"]
         assert result["error_detail"]["agent"] == "lead_agent"
@@ -171,7 +171,7 @@ class _FakeArtifactService:
 class TestUploadStagingAbort:
     """A failed upload staging must abort the turn loudly AND atomically, then
     fall through to the unified tail (unbind + finalize_metrics) — never early
-    return past cleanup (reviewer P2)."""
+    return past cleanup."""
 
     @pytest.mark.parametrize("raise_exc", [True, False])
     async def test_staging_failure_aborts_atomically_and_finalizes(self, raise_exc):
@@ -203,9 +203,11 @@ class TestUploadStagingAbort:
             emit=capture_emit,
         )
 
-        # Loud abort: turn marked error + completed.
-        assert result["error"] is True
-        assert result["completed"] is True
+        # Loud abort: turn reaches one ERROR terminal reason.
+        assert result["stop_reason"] is StopReason.ERROR
+        assert result["response"] == (
+            "Failed to attach file 'b.md'. Please check the file and retry."
+        )
 
         # Atomic: the already-staged first file was rolled back so flush_all
         # persists nothing this turn (no _N collision on the user's retry).
@@ -225,7 +227,7 @@ class TestUploadStagingAbort:
         ]
 
         # Reached the unified tail: finalize_metrics ran → started_at serialized
-        # to an ISO string (datetime would break controller's metadata write).
+        # to an ISO string (datetime would break the turn handler's metadata write).
         assert isinstance(result["execution_metrics"]["started_at"], str)
         assert "total_duration_ms" in result["execution_metrics"]
 
@@ -256,7 +258,7 @@ class TestLlmChunkAccumulation:
         assert llm_chunks[2]["data"]["content"] == "让我来分析这个问题"
 
         # Final state
-        assert result["completed"] is True
+        assert result["stop_reason"] is StopReason.COMPLETE
         assert result["response"] == "让我来分析这个问题"
 
     async def test_reasoning_chunks_are_cumulative(self):

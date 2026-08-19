@@ -9,8 +9,11 @@ import uuid
 from datetime import datetime, timedelta
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
+from core.management.conversation_manager import ConversationManager
 from db.models import User, Conversation, Message
+from db.database import DatabaseManager
 from repositories.conversation_repo import ConversationRepository
 from repositories.base import NotFoundError, DuplicateError
 
@@ -457,28 +460,29 @@ class TestBranchPath:
 
 
 class TestRetryIdempotency:
-    """ConversationManager 的 setup 写被 controller._with_db_retry 包裹;with_retry 在瞬断后
-    从头重跑 fn → 这些写必须幂等(同 id 第二遍不得抛)。锁定 reviewer #1/#2 的修复。"""
+    """ConversationManager 的 setup 写被 turn handler 的 retry 边界包裹;with_retry 在瞬断后
+    从头重跑 fn → 这些写必须幂等（同 id 第二遍不得抛）。"""
 
-    async def test_add_message_async_idempotent_on_retry(
+    async def test_append_message_idempotent_on_retry(
         self, conversation_repo: ConversationRepository, test_user: User
     ):
-        # 模拟 with_retry:首次已 commit message 后瞬断 → 重跑 add_message_async。
+        # 模拟 with_retry:首次已 commit message 后瞬断 → 重跑 append_message。
         # 修复前第二遍撞 DuplicateError(非瞬断)逃出 with_retry → 整轮崩;修复后撞重当成功。
-        from core.conversation_manager import ConversationManager
+        from core.management.conversation_manager import ConversationManager
         mgr = ConversationManager(conversation_repo)
         conv_id = f"conv-{uuid.uuid4().hex}"
         msg_id = f"msg-{uuid.uuid4().hex}"
+        await mgr.create(conv_id, user_id=test_user.id)
 
         activated = [{"slug": "docx", "name": "Word documents"}]
-        await mgr.add_message_async(
+        await mgr.append_message(
             conv_id=conv_id,
             message_id=msg_id,
             user_input="hi",
             metadata={"activated_skills": activated},
         )
         # 第二遍(= retry 从头重跑)不得抛
-        await mgr.add_message_async(
+        await mgr.append_message(
             conv_id=conv_id,
             message_id=msg_id,
             user_input="hi",
@@ -489,15 +493,16 @@ class TestRetryIdempotency:
         assert message is not None
         assert message.metadata_["activated_skills"] == activated
 
-    async def test_add_message_async_blank_root_title_falls_back(
+    async def test_append_message_blank_root_title_falls_back(
         self, conversation_repo: ConversationRepository, test_user: User
     ):
-        from core.conversation_manager import ConversationManager
+        from core.management.conversation_manager import ConversationManager
         mgr = ConversationManager(conversation_repo)
         conv_id = f"conv-{uuid.uuid4().hex}"
         msg_id = f"msg-{uuid.uuid4().hex}"
+        await mgr.create(conv_id, user_id=test_user.id)
 
-        await mgr.add_message_async(
+        await mgr.append_message(
             conv_id=conv_id,
             message_id=msg_id,
             user_input="",
@@ -508,33 +513,183 @@ class TestRetryIdempotency:
         assert conv is not None
         assert conv.title == "Untitled"
 
-    async def test_add_message_can_require_existing_conversation(
+    async def test_append_message_requires_existing_conversation(
         self, conversation_repo: ConversationRepository
     ):
-        """Execution callers can fail closed instead of resurrecting a deleted row."""
-        from core.conversation_manager import ConversationManager
+        """Append fails closed instead of resurrecting a deleted parent row."""
+        from core.management.conversation_manager import ConversationManager
 
         mgr = ConversationManager(conversation_repo)
         conv_id = f"conv-{uuid.uuid4().hex}"
 
         with pytest.raises(NotFoundError):
-            await mgr.add_message_async(
+            await mgr.append_message(
                 conv_id=conv_id,
                 message_id=f"msg-{uuid.uuid4().hex}",
                 user_input="hi",
-                create_conversation_if_missing=False,
             )
 
         assert await conversation_repo.get_conversation(conv_id) is None
 
-    async def test_start_conversation_async_idempotent_on_same_id(
+    async def test_create_idempotent_on_same_stable_id(
         self, conversation_repo: ConversationRepository, test_user: User
     ):
-        # #2 的修法(controller 在 retry 边界外定 conv_id 再传入)依赖此幂等:固定 id
+        # #2 的修法(turn handler 在 retry 边界外定 conv_id 再传入)依赖此幂等:固定 id
         # 重复调用返回同 id、不抛(撞重被 manager 吞)。
-        from core.conversation_manager import ConversationManager
+        from core.management.conversation_manager import ConversationManager
         mgr = ConversationManager(conversation_repo)
         conv_id = f"conv-{uuid.uuid4().hex}"
 
-        assert await mgr.start_conversation_async(conv_id) == conv_id
-        assert await mgr.start_conversation_async(conv_id) == conv_id
+        assert await mgr.create(conv_id, user_id=test_user.id) == conv_id
+        assert await mgr.create(conv_id, user_id=test_user.id) == conv_id
+
+    async def test_require_owned_hides_missing_and_wrong_owner(
+        self, conversation_repo: ConversationRepository, test_user: User
+    ):
+        from core.management.conversation_manager import ConversationManager
+
+        mgr = ConversationManager(conversation_repo)
+        conv_id = f"conv-{uuid.uuid4().hex}"
+        await mgr.create(conv_id, user_id=test_user.id)
+
+        assert await mgr.require_owned(conv_id, test_user.id) is None
+
+        with pytest.raises(NotFoundError):
+            await mgr.require_owned(conv_id, "different-user")
+        with pytest.raises(NotFoundError):
+            await mgr.require_owned(f"conv-{uuid.uuid4().hex}", test_user.id)
+
+    async def test_manager_requires_repository_at_construction(self):
+        """Manager has no dependencyless/test-only persistence mode."""
+        from core.management.conversation_manager import ConversationManager
+
+        with pytest.raises(ValueError, match="requires a repository"):
+            ConversationManager(None)
+
+    async def test_fixed_conversation_id_survives_post_commit_disconnect(
+        self,
+        db_manager: DatabaseManager,
+        test_user: User,
+        monkeypatch,
+    ):
+        """A retry after commit reuses the caller-allocated conversation ID.
+
+        Raising ``OperationalError`` after the repository returns models the
+        reachable "commit succeeded, acknowledgement/post-commit work failed"
+        shape.  ``DatabaseManager.with_retry`` opens a fresh session and reruns
+        the whole operation; the duplicate fixed ID is idempotent success.
+        """
+        conv_id = f"conv-{uuid.uuid4().hex}"
+        original_create = ConversationRepository.create_conversation
+        disconnected = False
+        attempts = 0
+
+        async def create_then_disconnect(repo, *args, **kwargs):
+            nonlocal disconnected
+            result = await original_create(repo, *args, **kwargs)
+            if kwargs.get("conversation_id") == conv_id and not disconnected:
+                disconnected = True
+                raise OperationalError(
+                    "post-commit acknowledgement",
+                    {},
+                    ConnectionError("connection lost after commit"),
+                )
+            return result
+
+        monkeypatch.setattr(
+            ConversationRepository,
+            "create_conversation",
+            create_then_disconnect,
+        )
+
+        async def create_with_fresh_session(session):
+            nonlocal attempts
+            attempts += 1
+            manager = ConversationManager(ConversationRepository(session))
+            return await manager.create(
+                conv_id,
+                user_id=test_user.id,
+            )
+
+        result = await db_manager.with_retry(
+            create_with_fresh_session,
+            max_retries=1,
+            base_delay=0,
+        )
+
+        assert result == conv_id
+        assert attempts == 2
+        async with db_manager.session() as session:
+            persisted = await ConversationRepository(session).get_conversation(conv_id)
+            assert persisted is not None
+            assert persisted.user_id == test_user.id
+
+    async def test_message_retry_after_insert_commit_still_finishes_root_title(
+        self,
+        db_manager: DatabaseManager,
+        test_user: User,
+        monkeypatch,
+    ):
+        """Retry must continue past Duplicate and finish the later title write.
+
+        ``add_message`` commits Message + active_branch before ``update_title``.
+        A disconnect at that boundary reruns the whole manager operation: the
+        stable message ID collides, is treated as success, and title update must
+        still execute instead of returning early from the Duplicate branch.
+        """
+        conv_id = f"conv-{uuid.uuid4().hex}"
+        msg_id = f"msg-{uuid.uuid4().hex}"
+        async with db_manager.session() as session:
+            await ConversationRepository(session).create_conversation(
+                conversation_id=conv_id,
+                user_id=test_user.id,
+            )
+
+        original_update_title = ConversationRepository.update_title
+        disconnected = False
+        attempts = 0
+
+        async def disconnect_before_first_title(repo, conversation_id, title):
+            nonlocal disconnected
+            if conversation_id == conv_id and not disconnected:
+                disconnected = True
+                raise OperationalError(
+                    "title update after committed message",
+                    {},
+                    ConnectionError("connection lost before title update"),
+                )
+            return await original_update_title(repo, conversation_id, title)
+
+        monkeypatch.setattr(
+            ConversationRepository,
+            "update_title",
+            disconnect_before_first_title,
+        )
+
+        async def append_with_fresh_session(session):
+            nonlocal attempts
+            attempts += 1
+            manager = ConversationManager(ConversationRepository(session))
+            return await manager.append_message(
+                conv_id=conv_id,
+                message_id=msg_id,
+                user_input="Stable retry title",
+                parent_id=None,
+            )
+
+        await db_manager.with_retry(
+            append_with_fresh_session,
+            max_retries=1,
+            base_delay=0,
+        )
+
+        assert attempts == 2
+        async with db_manager.session() as session:
+            repo = ConversationRepository(session)
+            persisted = await repo.get_message(msg_id)
+            conversation = await repo.get_conversation(conv_id)
+            assert persisted is not None
+            assert persisted.parent_id is None
+            assert conversation is not None
+            assert conversation.active_branch == msg_id
+            assert conversation.title == "Stable retry title"

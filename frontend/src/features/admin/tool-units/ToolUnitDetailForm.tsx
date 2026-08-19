@@ -1,0 +1,683 @@
+'use client';
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import * as api from '@/lib/api';
+import { useUIStore } from '@/stores/uiStore';
+import {
+  BUTTON_PRIMARY,
+  BUTTON_SECONDARY,
+  INPUT_ON_PANEL,
+  LABEL_CLASS,
+} from '@/lib/styles';
+import PanelShell from '@/components/layout/PanelShell';
+import ConfirmModal from '@/components/layout/ConfirmModal';
+import DangerConfirmModal, { DangerConfirmTarget } from '@/components/layout/DangerConfirmModal';
+import ToolUnitEditor, {
+  draftToRequest,
+  unitResponseToDraft,
+  type UnitDraft,
+} from './ToolUnitEditor';
+import { SELECT_CHEVRON } from '@/components/ui/SelectChevron';
+import { SourceBadge } from './ToolUnitBadges';
+import { SwitchTrack } from '@/components/ui/SwitchTrack';
+import type {
+  AgentSummaryResponse,
+  CredentialStatusResponse,
+  MountedAgentResponse,
+  ToolUnitResponse,
+} from '@/types';
+
+interface ToolUnitDetailFormProps {
+  unitName: string;
+  initialShowMountReminder?: boolean;
+}
+
+export default function ToolUnitDetailForm({
+  unitName,
+  initialShowMountReminder = false,
+}: ToolUnitDetailFormProps) {
+  const setRightView = useUIStore((s) => s.setToolUnitRightView);
+  const bumpListVersion = useUIStore((s) => s.bumpToolUnitListVersion);
+  const mountSectionRef = useRef<HTMLDivElement | null>(null);
+  const credentialSectionRef = useRef<HTMLDivElement | null>(null);
+
+  const [unit, setUnit] = useState<ToolUnitResponse | null>(null);
+  const [agents, setAgents] = useState<AgentSummaryResponse[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // 编辑器 draft + 基线(最近一次已保存态),用于 dirty 判定
+  const [baseline, setBaseline] = useState<UnitDraft | null>(null);
+  const [draft, setDraft] = useState<UnitDraft | null>(null);
+
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [mcpTestEpoch, setMcpTestEpoch] = useState(0);
+  const [showMountReminder, setShowMountReminder] = useState(initialShowMountReminder);
+
+  const isDynamic = unit?.source === 'dynamic';
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [u, agentsRes] = await Promise.all([
+        api.getToolUnit(unitName),
+        api.listToolAgents(),
+      ]);
+      setUnit(u);
+      const d = unitResponseToDraft(u);
+      setBaseline(d);
+      setDraft(d);
+      setAgents(agentsRes.agents);
+      setMcpTestEpoch((n) => n + 1);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : '加载工具 unit 失败');
+    } finally {
+      setLoading(false);
+    }
+  }, [unitName]);
+
+  useEffect(() => {
+    load();
+    setSaveError(null);
+  }, [load]);
+
+  useEffect(() => {
+    if (!initialShowMountReminder) return;
+    setRightView({ type: 'edit-unit', unitName });
+  }, [initialShowMountReminder, setRightView, unitName]);
+
+  // 挂载/凭证是即时生效的独立端点 — 操作后只刷新 unit 的挂载/凭证展示,
+  // 不动编辑器 draft/baseline(避免冲掉未保存的核心/成员编辑)。
+  const refreshLiveState = useCallback(async () => {
+    try {
+      const u = await api.getToolUnit(unitName);
+      setUnit(u);
+      bumpListVersion();
+    } catch {
+      // 刷新失败不阻断 — 下次操作会再拉
+    }
+  }, [unitName, bumpListVersion]);
+
+  const dirty =
+    isDynamic && baseline !== null && draft !== null &&
+    JSON.stringify(baseline) !== JSON.stringify(draft);
+  const kindLabel = unit?.kind === 'mcp' ? 'MCP server' : unit?.kind === 'tool' ? '单工具' : '工具集';
+  const hasUnconfiguredCredentials = (unit?.credentials ?? []).some((c) => !c.configured);
+
+  const handleSave = async () => {
+    if (!draft || !dirty || saving) return;
+    setSaveError(null);
+    let body;
+    try {
+      body = draftToRequest(draft);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : '表单校验失败');
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await api.updateToolUnit(unitName, body);
+      setUnit(updated);
+      const d = unitResponseToDraft(updated);
+      setBaseline(d);
+      setDraft(d);
+      if (updated.kind === 'mcp') {
+        setMcpTestEpoch((n) => n + 1);
+      }
+      bumpListVersion();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : '保存失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCredentialChanged = useCallback(async () => {
+    await refreshLiveState();
+    if (unit?.kind === 'mcp') {
+      setMcpTestEpoch((n) => n + 1);
+    }
+  }, [refreshLiveState, unit?.kind]);
+
+  const closeMountReminder = () => {
+    setShowMountReminder(false);
+  };
+
+  const scrollToSetupSection = () => {
+    setShowMountReminder(false);
+    requestAnimationFrame(() => {
+      const target = hasUnconfiguredCredentials ? credentialSectionRef : mountSectionRef;
+      target.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
+  };
+
+  if (loading) {
+    return (
+      <div className="flex-1 flex items-center justify-center bg-chat dark:bg-chat-dark p-6">
+        <div className="text-sm text-text-tertiary dark:text-text-tertiary-dark">加载中…</div>
+      </div>
+    );
+  }
+
+  if (loadError || !unit || !draft) {
+    return (
+      <div className="flex-1 flex flex-col gap-3 items-center justify-center bg-chat dark:bg-chat-dark p-6">
+        <div className="text-sm text-status-error">{loadError ?? '工具 unit 不存在'}</div>
+        <button
+          onClick={load}
+          className="px-4 py-1.5 rounded-lg border border-border dark:border-border-dark text-text-secondary dark:text-text-secondary-dark font-medium bg-surface dark:bg-surface-dark hover:bg-bg dark:hover:bg-bg-dark transition-colors"
+        >
+          重试
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <PanelShell
+      header={
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-base font-semibold text-text-primary dark:text-text-primary-dark truncate font-mono">
+                {unit.name}
+              </span>
+              <SourceBadge source={unit.source} />
+            </div>
+            <div className="text-xs text-text-tertiary dark:text-text-tertiary-dark mt-0.5">
+              {kindLabel} · {unit.provider} · 可见性 {unit.visibility}
+            </div>
+          </div>
+          <button
+            onClick={() => setRightView({ type: 'empty' })}
+            className="flex-shrink-0 p-1 rounded-lg text-text-tertiary dark:text-text-tertiary-dark hover:text-text-secondary dark:hover:text-text-secondary-dark transition-colors"
+            aria-label="关闭"
+            title="关闭"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d="M4 4l8 8M12 4l-8 8" />
+            </svg>
+          </button>
+        </div>
+      }
+      footer={
+        isDynamic ? (
+          <button
+            onClick={handleSave}
+            disabled={!dirty || saving}
+            className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
+          >
+            {saving ? '保存中…' : '保存定义'}
+          </button>
+        ) : (
+          <p className="flex-1 text-center text-sm text-text-secondary dark:text-text-secondary-dark">
+            种子 unit：定义只读。改 {unit.kind === 'mcp' ? 'config/mcp' : 'config/tools'} 后重跑 reconcile。挂载可在下方调整。
+          </p>
+        )
+      }
+    >
+      <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+        {/* 定义编辑器 — seeded 只读 */}
+        <ToolUnitEditor
+          value={draft}
+          onChange={setDraft}
+          readOnly={!isDynamic}
+          lockIdentity
+          disabled={saving}
+        />
+
+        {saveError && <div className="text-status-error text-sm">{saveError}</div>}
+
+        {unit.kind === 'mcp' && (
+          <>
+            <div className="border-t border-border dark:border-border-dark" />
+            <McpTestSection
+              unitName={unit.name}
+              disabled={saving || dirty}
+              dirty={dirty}
+              resetKey={`${unit.name}:${mcpTestEpoch}:${dirty ? 'dirty' : 'saved'}`}
+            />
+          </>
+        )}
+
+        <div className="border-t border-border dark:border-border-dark" />
+
+        {/* 挂载管理 — 对所有 unit 可用(创建 dynamic 绑定);seeded 绑定只读 */}
+        <div ref={mountSectionRef}>
+          <MountSection
+            unitName={unit.name}
+            mounted={unit.mounted_agents}
+            agents={agents}
+            onChanged={refreshLiveState}
+          />
+        </div>
+
+        <div className="border-t border-border dark:border-border-dark" />
+
+        {/* 凭证 — 写-only;dynamic 可配,seeded 仅看状态(由 reconcile/env 提供) */}
+        <div ref={credentialSectionRef}>
+          <CredentialSection
+            unitName={unit.name}
+            credentials={unit.credentials}
+            isDynamic={isDynamic}
+            onChanged={handleCredentialChanged}
+          />
+        </div>
+      </div>
+
+      {showMountReminder && (
+        <ConfirmModal
+          title="工具已创建"
+          message={
+            hasUnconfiguredCredentials
+              ? '检测到该工具引用了凭证。请先配置凭证，再挂载到 agent 后使用。'
+              : '还需要挂载到 agent 后，模型才能在对话中使用这个工具。'
+          }
+          cancelLabel="稍后"
+          confirmLabel={hasUnconfiguredCredentials ? '去配置凭证' : '去挂载'}
+          onCancel={closeMountReminder}
+          onConfirm={scrollToSetupSection}
+        />
+      )}
+    </PanelShell>
+  );
+}
+
+function McpTestSection({
+  unitName,
+  disabled,
+  dirty,
+  resetKey,
+}: {
+  unitName: string;
+  disabled: boolean;
+  dirty: boolean;
+  resetKey: string;
+}) {
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<{ success: boolean; message: string; tool_count: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const requestSeq = useRef(0);
+
+  useEffect(() => {
+    requestSeq.current += 1;
+    setTesting(false);
+    setResult(null);
+    setError(null);
+  }, [resetKey]);
+
+  const run = async () => {
+    if (testing || disabled) return;
+    const seq = requestSeq.current + 1;
+    requestSeq.current = seq;
+    setTesting(true);
+    setResult(null);
+    setError(null);
+    try {
+      const next = await api.testToolUnit(unitName);
+      if (requestSeq.current === seq) {
+        setResult(next);
+      }
+    } catch (err) {
+      if (requestSeq.current === seq) {
+        setError(err instanceof Error ? err.message : '测试失败');
+      }
+    } finally {
+      if (requestSeq.current === seq) {
+        setTesting(false);
+      }
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-semibold text-text-primary dark:text-text-primary-dark">
+          MCP 连接
+        </div>
+        <button
+          type="button"
+          onClick={run}
+          disabled={testing || disabled}
+          title={dirty ? '先保存定义' : '测试已保存配置'}
+          className={`${BUTTON_SECONDARY} rounded-lg px-4 py-1.5 text-sm`}
+        >
+          {testing ? '测试中…' : '测试连接'}
+        </button>
+      </div>
+      {result && (
+        <div className={`text-sm ${result.success ? 'text-status-success' : 'text-status-warning'}`}>
+          {result.success ? `连接成功，发现 ${result.tool_count} 个工具` : result.message}
+        </div>
+      )}
+      {error && <div className="text-status-error text-sm">{error}</div>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 挂载区
+// ---------------------------------------------------------------------------
+
+function MountSection({
+  unitName,
+  mounted,
+  agents,
+  onChanged,
+}: {
+  unitName: string;
+  mounted: MountedAgentResponse[];
+  agents: AgentSummaryResponse[];
+  onChanged: () => Promise<void> | void;
+}) {
+  const [addAgent, setAddAgent] = useState('');
+  const [addState, setAddState] = useState<'enabled' | 'disabled'>('enabled');
+  const [busy, setBusy] = useState<string | null>(null); // agent_name 或 '__add__'
+  const [error, setError] = useState<string | null>(null);
+
+  const mountedNames = new Set(mounted.map((m) => m.agent_name));
+  const available = agents.filter((a) => !mountedNames.has(a.name));
+
+  const run = async (key: string, fn: () => Promise<unknown>) => {
+    setBusy(key);
+    setError(null);
+    try {
+      await fn();
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '操作失败');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleAdd = () => {
+    if (!addAgent) return;
+    void run('__add__', async () => {
+      await api.mountToolUnit(unitName, addAgent, { member_state: addState });
+      setAddAgent('');
+    });
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="text-sm font-semibold text-text-primary dark:text-text-primary-dark">
+        挂载到 agent
+      </div>
+
+      {mounted.length === 0 ? (
+        <p className="text-xs text-text-tertiary dark:text-text-tertiary-dark">尚未挂载到任何 agent</p>
+      ) : (
+        <div className="space-y-2">
+          {mounted.map((m) => {
+            const seeded = m.source === 'seeded';
+            const enabled = m.member_state === 'enabled';
+            const rowBusy = busy === m.agent_name;
+            return (
+              <div
+                key={m.agent_name}
+                className={`flex items-center gap-3 px-3 py-2 rounded-lg bg-surface dark:bg-surface-dark border transition-colors ${
+                  enabled
+                    ? 'border-accent/60'
+                    : 'border-border dark:border-border-dark'
+                }`}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="font-mono text-sm text-text-primary dark:text-text-primary-dark truncate">
+                    {m.agent_name}
+                  </div>
+                  {seeded && (
+                    <div className="mt-0.5 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                      MD 绑定，只读
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={enabled}
+                    aria-label={`${enabled ? '停用' : '启用'} agent ${m.agent_name} 的工具挂载`}
+                    title={seeded ? 'MD 绑定只读，请修改 agent 配置' : enabled ? '停用挂载' : '启用挂载'}
+                    disabled={seeded || rowBusy}
+                    onClick={() =>
+                      run(m.agent_name, () =>
+                        api.mountToolUnit(unitName, m.agent_name, {
+                          member_state: enabled ? 'disabled' : 'enabled',
+                        }),
+                      )
+                    }
+                    className="disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <SwitchTrack checked={enabled} />
+                  </button>
+
+                  {!seeded && (
+                    <button
+                      onClick={() => run(m.agent_name, () => api.unmountToolUnit(unitName, m.agent_name))}
+                      disabled={rowBusy}
+                      className="p-1.5 text-text-tertiary dark:text-text-tertiary-dark hover:text-status-error disabled:opacity-40 transition-colors"
+                      aria-label="卸载"
+                      title="卸载"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                        <path d="M3 3l8 8M11 3l-8 8" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 新增挂载 */}
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <select
+            value={addAgent}
+            onChange={(e) => setAddAgent(e.target.value)}
+            disabled={available.length === 0 || busy === '__add__'}
+            className={`${INPUT_ON_PANEL} appearance-none pr-9`}
+          >
+            <option value="">{available.length === 0 ? '无可挂载 agent' : '选择 agent…'}</option>
+            {available.map((a) => (
+              <option key={a.name} value={a.name}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+          {SELECT_CHEVRON}
+        </div>
+        <div className="relative w-28 flex-shrink-0">
+          <select
+            value={addState}
+            onChange={(e) => setAddState(e.target.value as 'enabled' | 'disabled')}
+            disabled={busy === '__add__'}
+            className={`${INPUT_ON_PANEL} appearance-none pr-9`}
+          >
+            <option value="enabled">启用</option>
+            <option value="disabled">停用</option>
+          </select>
+          {SELECT_CHEVRON}
+        </div>
+        <button
+          onClick={handleAdd}
+          disabled={!addAgent || busy === '__add__'}
+          className="flex-shrink-0 px-3 py-2 text-sm rounded-lg border border-border dark:border-border-dark text-accent hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
+        >
+          挂载
+        </button>
+      </div>
+
+      {error && <div className="text-status-error text-sm">{error}</div>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 凭证区
+// ---------------------------------------------------------------------------
+
+function CredentialSection({
+  unitName,
+  credentials,
+  isDynamic,
+  onChanged,
+}: {
+  unitName: string;
+  credentials: CredentialStatusResponse[];
+  isDynamic: boolean;
+  onChanged: () => Promise<void> | void;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="text-sm font-semibold text-text-primary dark:text-text-primary-dark">
+        凭证
+      </div>
+      <p className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
+        占位符取自各成员 endpoint / 请求头里的 <code className="font-mono">{'{{...}}'}</code> 引用。
+        {isDynamic
+          ? '值加密落库、永不回读 — 留空提交即不改。新增引用请先保存定义。'
+          : '种子 unit 凭证由 reconcile / env 提供，此处只读。'}
+      </p>
+
+      {credentials.length === 0 ? (
+        <p className="text-xs text-text-tertiary dark:text-text-tertiary-dark">无凭证占位符</p>
+      ) : (
+        <div className="space-y-2">
+          {credentials.map((c) => (
+            <CredentialRow
+              key={c.placeholder}
+              unitName={unitName}
+              cred={c}
+              isDynamic={isDynamic}
+              onChanged={onChanged}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CredentialRow({
+  unitName,
+  cred,
+  isDynamic,
+  onChanged,
+}: {
+  unitName: string;
+  cred: CredentialStatusResponse;
+  isDynamic: boolean;
+  onChanged: () => Promise<void> | void;
+}) {
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmDeleteCredential, setConfirmDeleteCredential] = useState(false);
+
+  const run = async (fn: () => Promise<unknown>, clear: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      if (clear) setValue('');
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '操作失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDeleteCredential = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deleteToolCredential(unitName, cred.placeholder);
+      await onChanged();
+      setConfirmDeleteCredential(false);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '删除凭证失败';
+      setError(message);
+      if (err instanceof Error) throw err;
+      throw new Error(message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="px-3 py-2 rounded-lg border border-border dark:border-border-dark space-y-2">
+      <div className="flex items-center gap-2">
+        <code className="font-mono text-sm text-text-primary dark:text-text-primary-dark truncate flex-1">
+          {`{{${cred.placeholder}}}`}
+        </code>
+        {cred.configured ? (
+          <span className="inline-flex items-center gap-1 text-xs text-status-success">
+            <span className="w-1.5 h-1.5 rounded-full bg-status-success" />
+            已配置{cred.source ? `（${cred.source}）` : ''}
+          </span>
+        ) : (
+          <span className="text-xs text-text-tertiary dark:text-text-tertiary-dark">未配置</span>
+        )}
+      </div>
+
+      {isDynamic && (
+        <div className="flex items-center gap-2">
+          <input
+            type="password"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            disabled={busy}
+            placeholder={cred.configured ? '输入新值以覆盖' : '输入凭证值'}
+            autoComplete="new-password"
+            className={`${INPUT_ON_PANEL} flex-1`}
+          />
+          <button
+            onClick={() => run(() => api.setToolCredential(unitName, cred.placeholder, { value }), true)}
+            disabled={busy || value.length === 0}
+            className="flex-shrink-0 px-3 py-2 text-sm rounded-lg border border-border dark:border-border-dark text-accent hover:bg-bg dark:hover:bg-bg-dark disabled:opacity-40 transition-colors"
+          >
+            保存
+          </button>
+          {cred.configured && (
+            <button
+              onClick={() => setConfirmDeleteCredential(true)}
+              disabled={busy}
+              className="flex-shrink-0 p-2 text-text-tertiary dark:text-text-tertiary-dark hover:text-status-error disabled:opacity-40 transition-colors"
+              aria-label="删除凭证"
+              title="删除凭证"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <path d="M3 3l8 8M11 3l-8 8" />
+              </svg>
+            </button>
+          )}
+        </div>
+      )}
+
+      {error && <div className="text-status-error text-xs">{error}</div>}
+
+      {confirmDeleteCredential && (
+        <DangerConfirmModal
+          title="删除凭证"
+          message="删除后该凭证不会再用于工具调用；原值不可回读，需要重新配置新值。\n操作不可恢复。"
+          confirmLabel="确认删除"
+          onCancel={() => setConfirmDeleteCredential(false)}
+          onConfirm={handleDeleteCredential}
+        >
+          <DangerConfirmTarget
+            name={`{{${cred.placeholder}}}`}
+            description={cred.source ? `当前来源：${cred.source}` : null}
+          />
+        </DangerConfirmModal>
+      )}
+    </div>
+  );
+}

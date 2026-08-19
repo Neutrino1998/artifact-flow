@@ -1,18 +1,19 @@
 """
 ToolRegistry Repository(写侧)—— tool_units / tool_members / agent_units 的数据访问。
 
-纯数据访问、**不 commit**(事务边界归 ToolRegistryManager 的 use-case):staging 写 +
-查询。读侧的运行期快照另在 reconcile/snapshot.py(那里只读、重建运行形状)。
+纯数据访问：查询、staging 写与最终 commit 都封装在 Repository。
+读侧的运行期快照另在 reconcile/snapshot.py(那里只读、重建运行形状)。
 ORM 实例不外逃:Manager 在同 session 内读其列做序列化,不把对象交给 router。
 """
 
 from typing import Dict, List, Optional
 
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Agent, AgentUnit, DepartmentUnitRule, ToolMember, ToolUnit
-from repositories.base import BaseRepository
+from repositories.base import BaseRepository, DuplicateError
 
 
 class ToolRegistryRepository(BaseRepository[ToolUnit]):
@@ -68,7 +69,19 @@ class ToolRegistryRepository(BaseRepository[ToolUnit]):
     async def get_agent_unit(self, agent_name: str, unit_name: str) -> Optional[AgentUnit]:
         return await self._session.get(AgentUnit, (agent_name, unit_name))
 
-    # ---- 写(staging,不 commit)-------------------------------------------
+    async def commit_changes(self, operation: str) -> None:
+        """Commit a registry use-case and normalize uniqueness races."""
+        try:
+            await self._session.commit()
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise DuplicateError("ToolRegistry", operation) from exc
+
+    def expire_members(self, unit: ToolUnit) -> None:
+        """Invalidate a relationship replaced by bulk SQL before re-querying it."""
+        self._session.expire(unit, ["members"])
+
+    # ---- writes (staged until commit_changes) ---------------------------
 
     def add_unit(self, unit: ToolUnit, members: List[ToolMember]) -> None:
         self._session.add(unit)
@@ -83,7 +96,7 @@ class ToolRegistryRepository(BaseRepository[ToolUnit]):
             self._session.add(m)
 
     async def clear_dept_rules(self, unit_name: str) -> None:
-        """删该 unit 的 dept 规则 —— 决策 10 clear-on-visibility 的**唯一实现**。
+        """删该 unit 的 dept 规则 —— clear-on-visibility 的**唯一实现**。
 
         规则行的 grant/deny 方向派生自资源 visibility,行熬过 visibility 变更 / unit
         删除重建 = 方向静默反转(反授权)。三条路径同调:Manager update_unit(UI 改

@@ -35,6 +35,9 @@ describe('UserMenu task notification switch', () => {
         username: 'tester',
         display_name: 'Tester',
         role: 'user',
+        auth_provider: 'local_password',
+        can_change_password: true,
+        can_edit_profile: true,
         must_change_password: false,
         department_path: null,
       },
@@ -101,5 +104,28 @@ describe('UserMenu task notification switch', () => {
     expect(toggle?.querySelector('span span')?.className).toContain('translate-x-4');
     expect(container.textContent).not.toContain('首次发送任务时询问权限');
     expect(readTaskNotificationPreference('user-1')).toBe(true);
+  });
+
+  it('does not offer local profile or password actions for a provider-managed identity', async () => {
+    useAuthStore.setState({
+      user: {
+        ...useAuthStore.getState().user!,
+        auth_provider: 'company-sso',
+        can_change_password: false,
+        can_edit_profile: false,
+      },
+    });
+    await act(async () => {
+      root.render(<UserMenu />);
+    });
+
+    const trigger = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('Tester'),
+    );
+    await act(async () => trigger?.click());
+
+    expect(container.textContent).not.toContain('显示名和部门由企业认证维护');
+    expect(container.textContent).not.toContain('修改显示名');
+    expect(container.textContent).not.toContain('修改密码');
   });
 });

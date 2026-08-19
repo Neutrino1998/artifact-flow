@@ -97,4 +97,9 @@ describe('buildSecurityHeaders', () => {
     expect(h['X-Content-Type-Options']).toBe('nosniff');
     expect(h['Referrer-Policy']).toBe('strict-origin-when-cross-origin');
   });
+
+  it('suppresses referrers for the credential-bearing SSO callback document', () => {
+    const h = buildSecurityHeaders({ sensitiveCallback: true });
+    expect(h['Referrer-Policy']).toBe('no-referrer');
+  });
 });

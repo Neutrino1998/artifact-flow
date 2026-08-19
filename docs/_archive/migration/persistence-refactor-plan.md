@@ -1,12 +1,12 @@
 # 持久化改造计划 — Redis 多 Worker + 关系型数据库通用适配
 
-> 基于 optimization-plan.md Phase 5/6 重新整理。
+> 基于 [`optimization-plan.md`](../design/legacy/optimization-plan.md) Phase 5/6 重新整理。
 > 前置变更：LangGraph 已移除（Pi-style engine）、TaskManager 已拆分为 ExecutionRunner + RuntimeStore、StreamTransport Protocol 已抽象。
 > 目标部署形态：双服务器 + 云托管关系型数据库（TDSQL/MySQL 或 PostgreSQL）+ 云托管 Redis。
 
 ---
 
-## 与旧计划（optimization-plan.md P5/P6）的差异
+## 与旧计划（[`optimization-plan.md`](../design/legacy/optimization-plan.md) P5/P6）的差异
 
 | 旧计划项 | 当前状态 | 本计划处理 |
 |----------|---------|-----------|

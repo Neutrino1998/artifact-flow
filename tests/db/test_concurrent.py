@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from config import config
-from core.skill_manager import SkillCountLimitError, SkillManager
+from core.management.skill_manager import SkillCountLimitError, SkillManager
 from db.database import DatabaseManager
 from db.models import Skill, User
 from repositories.user_repo import UserRepository
@@ -52,9 +52,12 @@ async def _create_test_user(db: DatabaseManager) -> User:
     """Helper: create a user and return it."""
     async with db.session() as session:
         repo = UserRepository(session)
+        username = f"user-{uuid.uuid4().hex[:8]}"
         user = User(
             id=str(uuid.uuid4()),
-            username=f"user-{uuid.uuid4().hex[:8]}",
+            auth_provider="local_password",
+            auth_subject=username,
+            username=username,
             hashed_password=hash_password("pw"),
             role="user",
             is_active=True,

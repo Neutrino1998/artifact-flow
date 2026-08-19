@@ -10,13 +10,13 @@ const chatMocks = vi.hoisted(() => ({
   startNewChat: vi.fn(),
 }));
 
-vi.mock('@/hooks/useChat', () => ({
+vi.mock('@/features/chat/runtime/useChat', () => ({
   useChat: () => ({ startNewChat: chatMocks.startNewChat }),
 }));
 
 vi.mock('./ConversationList', () => ({ default: () => <div>Conversation list</div> }));
-vi.mock('./AdminConversationList', () => ({ default: () => null }));
-vi.mock('./NotificationConfigList', () => ({ default: () => null }));
+vi.mock('@/features/admin/observability/AdminConversationList', () => ({ default: () => null }));
+vi.mock('@/features/admin/notifications/NotificationConfigList', () => ({ default: () => null }));
 vi.mock('./NotificationCenter', () => ({ default: () => null }));
 vi.mock('./UserMenu', () => ({ default: () => null }));
 vi.mock('@/components/BrandingFooter', () => ({ default: () => null }));
@@ -69,6 +69,9 @@ describe('Sidebar drawer presentation', () => {
         username: 'admin',
         display_name: 'Admin',
         role: 'admin',
+        auth_provider: 'local_password',
+        can_change_password: true,
+        can_edit_profile: true,
         must_change_password: false,
         department_path: null,
       },

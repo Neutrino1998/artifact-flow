@@ -15,8 +15,10 @@ from aiodocker.exceptions import DockerError
 
 from config import config
 from tools.builtin.sandbox_session import (
+    SandboxCommandError,
     SandboxExecTimeoutError,
     SandboxSession,
+    SandboxStaleInvocationError,
     SandboxUnavailableError,
     WORKER_ID,
     WORKSPACE_MOUNT,
@@ -185,8 +187,8 @@ class TestLifecycle:
         assert not os.path.exists(session.scratch_dir)
 
     async def test_first_exec_starts_container_once(self, session, fake_docker):
-        await session.exec("echo hi")
-        await session.exec("echo again")
+        await session.exec("echo hi", model_invocation_epoch=1)
+        await session.exec("echo again", model_invocation_epoch=1)
         assert len(fake_docker.create_calls) == 1
         assert fake_docker.created_containers[0].started
 
@@ -198,7 +200,7 @@ class TestLifecycle:
         assert os.path.isdir(session.workspace_dir)
         assert os.path.isdir(session.tmp_dir)
         assert os.path.isdir(os.path.join(session.tmp_dir, "home"))
-        # 容器内 uid 1000 须可写(D 阶段在真实 Linux 上复验属主策略)
+        # 容器内 uid 1000 须可写；属主策略需在真实 Linux 上复验。
         for d in (session.scratch_dir, session.workspace_dir, session.tmp_dir):
             assert os.stat(d).st_mode & 0o777 == 0o777
 
@@ -230,6 +232,7 @@ class TestLifecycle:
         assert labels["artifactflow.sandbox"] == "1"
         assert labels["artifactflow.sandbox.conversation-id"] == "conv-abc"
         assert labels["artifactflow.sandbox.message-id"] == "msg-def"
+        assert labels["artifactflow.sandbox.generation"] == "1"
         assert call["name"] == "af-sandbox-msg-def"
 
     async def test_default_runtime_omitted(self, session, fake_docker, monkeypatch):
@@ -242,10 +245,10 @@ class TestLifecycle:
         session = SandboxSession("conv-a", "msg-b", docker_factory=lambda: fake_docker)
 
         with pytest.raises(SandboxUnavailableError):
-            await session.exec("echo hi")
+            await session.exec("echo hi", model_invocation_epoch=1)
         # 本 turn 不重试:第二次立即复述失败,不再打 daemon
         with pytest.raises(SandboxUnavailableError):
-            await session.exec("echo hi")
+            await session.exec("echo hi", model_invocation_epoch=1)
         assert len(fake_docker.create_calls) == 1
 
     async def test_missing_image_message_names_the_image(self, scratch_root, fake_docker):
@@ -254,14 +257,14 @@ class TestLifecycle:
         )
         session = SandboxSession("conv-a", "msg-b", docker_factory=lambda: fake_docker)
         with pytest.raises(SandboxUnavailableError, match=config.SANDBOX_IMAGE):
-            await session.exec("echo hi")
+            await session.exec("echo hi", model_invocation_epoch=1)
 
     async def test_start_failure_keeps_handle_for_close(self, scratch_root, fake_docker):
         """create 成功 start 失败:句柄已记,close() 仍能删到半成品容器。"""
         fake_docker.fail_start = True
         session = SandboxSession("conv-a", "msg-b", docker_factory=lambda: fake_docker)
         with pytest.raises(SandboxUnavailableError):
-            await session.exec("echo hi")
+            await session.exec("echo hi", model_invocation_epoch=1)
 
         await session.close()
         assert fake_docker.created_containers[0].deleted_with == {"force": True}
@@ -270,7 +273,7 @@ class TestLifecycle:
 class TestClose:
 
     async def test_close_tears_down_everything(self, session, fake_docker):
-        await session.exec("echo hi")
+        await session.exec("echo hi", model_invocation_epoch=1)
         assert os.path.isdir(session.scratch_dir)
 
         await session.close()
@@ -279,7 +282,7 @@ class TestClose:
         assert fake_docker.closed
 
     async def test_close_is_idempotent(self, session, fake_docker):
-        await session.exec("echo hi")
+        await session.exec("echo hi", model_invocation_epoch=1)
         await session.close()
         fake_docker.created_containers[0].deleted_with = None
         await session.close()
@@ -292,7 +295,7 @@ class TestClose:
 
     async def test_close_survives_delete_failure(self, session, fake_docker, scratch_root):
         """容器删失败(reaper 兜)不阻断 scratch/client 清理。"""
-        await session.exec("echo hi")
+        await session.exec("echo hi", model_invocation_epoch=1)
         container = fake_docker.created_containers[0]
 
         async def boom(force=False):
@@ -306,7 +309,7 @@ class TestClose:
     async def test_exec_after_close_raises(self, session):
         await session.close()
         with pytest.raises(SandboxUnavailableError):
-            await session.exec("echo hi")
+            await session.exec("echo hi", model_invocation_epoch=1)
 
 
 # ============================================================
@@ -319,7 +322,7 @@ class TestExec:
     async def test_command_wrapped_in_container_timeout_argv(self, session, fake_docker, monkeypatch):
         monkeypatch.setattr(config, "SANDBOX_COMMAND_TIMEOUT", 42)
         cmd = "echo \"it's got 'quotes' $and $(subshells)\""
-        await session.exec(cmd)
+        await session.exec(cmd, model_invocation_epoch=1)
         container = fake_docker.created_containers[0]
         call = container.exec_calls[0]
         # cmd 整体一个 argv 元素 —— 无宿主侧 shell、无引号问题
@@ -334,7 +337,7 @@ class TestExec:
             messages=[_msg(b"out1\n", 1), _msg(b"err1\n", 2), _msg(b"out2\n", 1)],
             inspect_results=[{"ExitCode": 3, "Running": False}],
         )
-        result = await session.exec("whatever")
+        result = await session.exec("whatever", model_invocation_epoch=1)
         assert result.output == "out1\nerr1\nout2\n"
         assert result.exit_code == 3
         assert not result.truncated
@@ -347,7 +350,7 @@ class TestExec:
             messages=[_msg(encoded[:2], 1), _msg(encoded[2:], 1)],
             inspect_results=[{"ExitCode": 0, "Running": False}],
         )
-        result = await session.exec("whatever")
+        result = await session.exec("whatever", model_invocation_epoch=1)
         assert result.output == "沙盒"
 
     async def test_output_capped_but_drained(self, session, fake_docker, monkeypatch):
@@ -358,7 +361,7 @@ class TestExec:
             messages=[_msg(b"a" * 8, 1), _msg(b"b" * 8, 1), _msg(b"c" * 8, 1)],
             inspect_results=[{"ExitCode": 0, "Running": False}],
         )
-        result = await session.exec("whatever")
+        result = await session.exec("whatever", model_invocation_epoch=1)
         assert result.output == "a" * 8 + "b" * 2
         assert result.truncated
 
@@ -372,7 +375,7 @@ class TestExec:
                 {"ExitCode": 7, "Running": False},
             ],
         )
-        result = await session.exec("whatever")
+        result = await session.exec("whatever", model_invocation_epoch=1)
         assert result.exit_code == 7
 
     async def test_container_inspect_failure_is_best_effort(self, session, fake_docker):
@@ -381,7 +384,7 @@ class TestExec:
         container = fake_docker.created_containers[0]
         container.show_error = DockerError(500, {"message": "inspect unavailable"})
 
-        result = await session.exec("echo ok")
+        result = await session.exec("echo ok", model_invocation_epoch=1)
 
         assert result.exit_code == 0
         assert container.show_calls == 1
@@ -389,19 +392,32 @@ class TestExec:
     async def test_container_missing_after_exec_is_authoritative(
         self, session, fake_docker
     ):
-        """inspect 404 说明目标已消失，当前命令不能继续标成成功。"""
+        """inspect 404 说明目标已消失：当前命令失败，但空 generation 2 可继续。"""
         await session.ensure_container()
         container = fake_docker.created_containers[0]
         container.show_error = DockerError(404, {"message": "No such container"})
 
-        with pytest.raises(SandboxUnavailableError) as caught:
-            await session.exec("echo maybe")
+        with pytest.raises(SandboxCommandError) as caught:
+            await session.exec("echo maybe", model_invocation_epoch=1)
 
         failure = caught.value.diagnostics["sandbox_failure"]
         assert failure["failure_kind"] == "container_stopped"
         assert failure["inspect_available"] is False
         assert failure["state"]["running"] is False
         assert failure["state"]["error"] == "container_not_found"
+        assert caught.value.diagnostics["sandbox_recovery"] == {
+            "attempted": True,
+            "succeeded": True,
+            "generation": 2,
+            "workspace_reset": True,
+        }
+        assert container.deleted_with == {"force": True}
+        assert session.generation == 2
+        assert session.started
+        assert len(fake_docker.created_containers) == 2
+        assert fake_docker.create_calls[1]["name"] == "af-sandbox-msg-def-g2"
+        replacement_labels = fake_docker.create_calls[1]["config"]["Labels"]
+        assert replacement_labels["artifactflow.sandbox.generation"] == "2"
 
     async def test_silent_oom_is_attributed_to_current_exec_with_diagnostics(
         self, session, fake_docker
@@ -425,8 +441,15 @@ class TestExec:
             },
         }]
 
-        with pytest.raises(SandboxUnavailableError, match="1024MB") as caught:
-            await session.exec("python eat_memory.py")
+        old_file = os.path.join(session.workspace_dir, "partial.txt")
+        with open(old_file, "w") as f:
+            f.write("must be discarded")
+        old_tmp_file = os.path.join(session.tmp_dir, "partial.tmp")
+        with open(old_tmp_file, "w") as f:
+            f.write("must also be discarded")
+
+        with pytest.raises(SandboxCommandError, match="1024MB") as caught:
+            await session.exec("python eat_memory.py", model_invocation_epoch=1)
 
         failure = caught.value.diagnostics["sandbox_failure"]
         assert failure["failure_kind"] == "oom"
@@ -442,13 +465,46 @@ class TestExec:
         }
         assert failure["limits"]["memory_mb"] == config.SANDBOX_MEM_LIMIT_MB
         assert failure["exec"]["exit_code"] == 128
+        assert caught.value.diagnostics["sandbox_recovery"] == {
+            "attempted": True,
+            "succeeded": True,
+            "generation": 2,
+            "workspace_reset": True,
+        }
+        assert "failed command was not retried" in str(caught.value)
+        assert "fresh empty sandbox" in str(caught.value)
+        assert "unpersisted files" in str(caught.value)
+        assert container.deleted_with == {"force": True}
+        assert session.generation == 2
+        assert not os.path.exists(old_file)
+        assert not os.path.exists(old_tmp_file)
+        assert os.listdir(session.workspace_dir) == []
 
-        # 后续调用复述同一份已冻结证据，不再撞死容器句柄。
-        with pytest.raises(SandboxUnavailableError) as repeated:
-            await session.exec("again")
-        assert repeated.value.diagnostics == caught.value.diagnostics
+        # 原命令没有在新容器重放；同一模型响应的 sibling epoch 仍为 1，
+        # 必须在触碰 replacement 前失败。下一次模型调用 epoch 2 才可继续。
         assert len(container.exec_calls) == 1
         assert container.show_calls == 1
+        replacement = fake_docker.created_containers[1]
+        assert replacement.exec_calls == []
+        assert session.minimum_valid_invocation_epoch == 2
+        with pytest.raises(SandboxStaleInvocationError) as stale:
+            await session.exec("stale sibling", model_invocation_epoch=1)
+        assert stale.value.diagnostics["sandbox_invocation"] == {
+            "stale": True,
+            "invocation_epoch": 1,
+            "minimum_valid_epoch": 2,
+            "generation": 2,
+        }
+        assert replacement.exec_calls == []
+
+        result = await session.exec("again", model_invocation_epoch=2)
+        assert result.exit_code == 0
+        assert len(replacement.exec_calls) == 1
+
+        snapshot = session.status_snapshot()
+        assert snapshot["generation"] == 2
+        assert snapshot["recovery"]["failure_kind"] == "oom"
+        assert snapshot["entries"] == []
 
     async def test_abandon_guard_raises_timeout_error(self, session, fake_docker, monkeypatch):
         """exec 通道卡死 → asyncio 弃等护栏(只提前返回,不假装杀死了进程)。"""
@@ -468,11 +524,16 @@ class TestExec:
                 return HangingStream([])
 
         container.next_exec = HangingExec([], [{"ExitCode": None, "Running": True}])
-        with pytest.raises(SandboxExecTimeoutError):
-            await session.exec("hang")
+        with pytest.raises(SandboxExecTimeoutError) as caught:
+            await session.exec("hang", model_invocation_epoch=1)
+        assert caught.value.diagnostics["sandbox_recovery"]["succeeded"] is True
+        assert "not retried" in str(caught.value)
+        assert container.deleted_with == {"force": True}
+        assert len(fake_docker.created_containers) == 2
+        assert session.generation == 2
 
-    async def test_container_died_mid_exec_is_loud_and_sticky(self, session, fake_docker):
-        """exec API 失败但 inspect 仍说 running → 通道失败 + sticky。"""
+    async def test_container_died_mid_exec_recovers_empty_sandbox(self, session, fake_docker):
+        """exec API 失败但 inspect 仍说 running → 当前调用失败 + 空沙盒 rollover。"""
         await session.ensure_container()
         container = fake_docker.created_containers[0]
 
@@ -481,14 +542,125 @@ class TestExec:
                 raise DockerError(409, {"message": "container is not running"})
 
         container.next_exec = DeadExec([], [{"ExitCode": None, "Running": True}])
-        with pytest.raises(SandboxUnavailableError, match="channel") as caught:
-            await session.exec("whatever")
+        with pytest.raises(SandboxCommandError, match="channel") as caught:
+            await session.exec("whatever", model_invocation_epoch=1)
         failure = caught.value.diagnostics["sandbox_failure"]
         assert failure["failure_kind"] == "exec_channel_error"
         assert failure["docker_error_status"] == 409
         assert failure["container_id"] == container._id
-        with pytest.raises(SandboxUnavailableError, match="channel"):
-            await session.exec("again")
+        assert caught.value.diagnostics["sandbox_recovery"]["succeeded"] is True
+        assert len(fake_docker.created_containers) == 2
+        assert (
+            await session.exec("again", model_invocation_epoch=2)
+        ).exit_code == 0
+
+    async def test_second_runtime_failure_is_sticky_without_third_container(
+        self, session, fake_docker
+    ):
+        """一次 rollover 已用完后再炸：不形成重启循环，本 turn 永久不可用。"""
+        await session.ensure_container()
+        first = fake_docker.created_containers[0]
+        first.show_error = DockerError(404, {"message": "No such container"})
+        with pytest.raises(SandboxCommandError):
+            await session.exec("first crash", model_invocation_epoch=1)
+
+        second = fake_docker.created_containers[1]
+        second.show_error = DockerError(404, {"message": "No such container"})
+        with pytest.raises(SandboxUnavailableError, match="already been restarted once"):
+            await session.exec("second crash", model_invocation_epoch=2)
+
+        assert len(fake_docker.created_containers) == 2
+        assert second.deleted_with is None  # 留给 turn 末 close/reaper，不再尝试 rollover
+        second_exec_count = len(second.exec_calls)
+        with pytest.raises(SandboxUnavailableError, match="already been restarted once"):
+            await session.exec("third call", model_invocation_epoch=3)
+        assert len(second.exec_calls) == second_exec_count
+
+    async def test_recovery_delete_failure_refuses_replacement(
+        self, session, fake_docker
+    ):
+        """旧容器删除不确定时不得清 scratch 或启动一个会共享目录的新容器。"""
+        await session.ensure_container()
+        container = fake_docker.created_containers[0]
+        container.show_error = DockerError(404, {"message": "No such container"})
+        marker = os.path.join(session.workspace_dir, "old.txt")
+        with open(marker, "w") as f:
+            f.write("old generation")
+
+        async def fail_delete(force=False):
+            raise DockerError(500, {"message": "daemon uncertain"})
+
+        container.delete = fail_delete
+        with pytest.raises(SandboxUnavailableError, match="recovery failed") as caught:
+            await session.exec("crash", model_invocation_epoch=1)
+
+        assert caught.value.diagnostics["sandbox_recovery"] == {
+            "attempted": True,
+            "succeeded": False,
+            "generation": 2,
+            "workspace_reset": False,
+            "failure_stage": "container_delete",
+        }
+        assert os.path.exists(marker)
+        assert len(fake_docker.created_containers) == 1
+        assert session.generation == 1
+
+    async def test_recovery_start_failure_is_sticky_after_workspace_reset(
+        self, session, fake_docker
+    ):
+        """旧现场已安全清空但 replacement 起不来：不伪报恢复，也不尝试第三次。"""
+        await session.ensure_container()
+        container = fake_docker.created_containers[0]
+        container.show_error = DockerError(404, {"message": "No such container"})
+        marker = os.path.join(session.workspace_dir, "old.txt")
+        with open(marker, "w") as f:
+            f.write("old generation")
+        fake_docker.fail_start = True
+
+        with pytest.raises(SandboxUnavailableError, match="recovery failed") as caught:
+            await session.exec("crash", model_invocation_epoch=1)
+
+        assert caught.value.diagnostics["sandbox_recovery"] == {
+            "attempted": True,
+            "succeeded": False,
+            "generation": 2,
+            "workspace_reset": True,
+            "failure_stage": "container_start",
+        }
+        assert container.deleted_with == {"force": True}
+        assert not os.path.exists(marker)
+        assert len(fake_docker.created_containers) == 2
+        assert session.generation == 2
+        with pytest.raises(SandboxUnavailableError, match="recovery failed"):
+            await session.exec("do not retry", model_invocation_epoch=2)
+        assert len(fake_docker.created_containers) == 2
+
+    async def test_recovery_workspace_cleanup_failure_refuses_replacement(
+        self, session, fake_docker, monkeypatch
+    ):
+        """旧容器虽已删除，但 scratch 清理失败时仍不得让新容器碰旧目录。"""
+        await session.ensure_container()
+        container = fake_docker.created_containers[0]
+        container.show_error = DockerError(404, {"message": "No such container"})
+
+        def fail_rmtree(_path):
+            raise OSError("filesystem busy")
+
+        monkeypatch.setattr("tools.builtin.sandbox_session.shutil.rmtree", fail_rmtree)
+        with pytest.raises(SandboxUnavailableError, match="recovery failed") as caught:
+            await session.exec("crash", model_invocation_epoch=1)
+
+        assert caught.value.diagnostics["sandbox_recovery"] == {
+            "attempted": True,
+            "succeeded": False,
+            "generation": 2,
+            "workspace_reset": False,
+            "failure_stage": "workspace_cleanup",
+        }
+        assert container.deleted_with == {"force": True}
+        assert len(fake_docker.created_containers) == 1
+        assert not session.started
+        assert session.generation == 1
 
     async def test_quota_sticky_set_during_docker_error_inspect_wins(
         self, session, fake_docker, monkeypatch
@@ -524,7 +696,7 @@ class TestExec:
         )
 
         with pytest.raises(SandboxUnavailableError, match="quota") as caught:
-            await session.exec("whatever")
+            await session.exec("whatever", model_invocation_epoch=1)
 
         failure = caught.value.diagnostics["sandbox_failure"]
         assert failure["failure_kind"] == "workspace_quota"
@@ -543,9 +715,9 @@ class TestQuota:
         """准入水位:池子剩余低于阈值 → 拒起容器,sticky,不打 daemon。"""
         monkeypatch.setattr(config, "SANDBOX_POOL_MIN_FREE_MB", 10 ** 9)  # 1PB,必触发
         with pytest.raises(SandboxUnavailableError, match="storage"):
-            await session.exec("echo hi")
+            await session.exec("echo hi", model_invocation_epoch=1)
         with pytest.raises(SandboxUnavailableError, match="storage"):
-            await session.exec("echo hi")
+            await session.exec("echo hi", model_invocation_epoch=1)
         assert fake_docker.create_calls == []
 
     async def test_watchdog_kills_over_quota_and_failure_is_sticky(
@@ -563,7 +735,9 @@ class TestQuota:
                 break
         assert fake_docker.created_containers[0].deleted_with == {"force": True}
         with pytest.raises(SandboxUnavailableError, match="quota"):
-            await session.exec("echo hi")
+            await session.exec("echo hi", model_invocation_epoch=1)
+        assert len(fake_docker.created_containers) == 1
+        assert session.generation == 1
 
     async def test_inflight_exec_attributed_to_quota_kill(
         self, session, fake_docker, monkeypatch
@@ -588,7 +762,9 @@ class TestQuota:
 
         container.next_exec = SlowExec([], [{"ExitCode": 137, "Running": False}])
         with pytest.raises(SandboxUnavailableError, match="quota"):
-            await session.exec("dd if=/dev/zero of=big")
+            await session.exec(
+                "dd if=/dev/zero of=big", model_invocation_epoch=1
+            )
 
     async def test_watchdog_depth_cap_fails_closed(self, session, fake_docker, monkeypatch):
         """目录树过深(计量无法穷尽)→ fail-closed 当超额杀,不放过深埋占用。"""
@@ -608,7 +784,7 @@ class TestQuota:
         assert fake_docker.created_containers[0].deleted_with == {"force": True}
         # sticky 复述配额失败(深度命中也归到配额语义,模型 remediation 一致)
         with pytest.raises(SandboxUnavailableError, match="quota"):
-            await session.exec("echo hi")
+            await session.exec("echo hi", model_invocation_epoch=1)
 
     async def test_close_cancels_watchdog(self, session):
         await session.ensure_container()
@@ -660,7 +836,7 @@ class TestStatusSnapshot:
         assert snap["truncated"] is True
 
     def test_snapshot_scan_is_bounded_not_full_materialize(self, session, monkeypatch):
-        # reviewer P2 回归:顶层条目数模型可控,快照必须有界扫(cap+1 即停),
+        # 顶层条目数模型可控，快照必须有界扫描（cap+1 即停）。
         # 不得全量物化整个目录 —— 断言传给 list_dir 的 max_entries
         from tools.builtin import sandbox_session as ss_mod
 

@@ -1,10 +1,10 @@
-"""EffectiveToolset resolver 单测(决策 11 单一解析点)。
+"""EffectiveToolset 单一解析点的 resolver 单测。
 
 覆盖:enabled/disabled/absent 三态、singleton 与 toolset 展开、等级取自工具对象
 (非绑定)、缺席 unit 跳过、resolve_all 全 agent。
 """
 
-from core.effective_toolset import (
+from core.capabilities.effective_toolset import (
     EffectiveToolset,
     resolve_all,
     resolve_effective_toolset,
@@ -25,7 +25,6 @@ def _agent(name="lead_agent", builtin_tools=None, units=None):
         name=name,
         description="d",
         model="m",
-        max_tool_rounds=10,
         internal=False,
         role_prompt="",
         builtin_tools=builtin_tools or {},
@@ -165,7 +164,7 @@ def test_has_any():
 
 
 # ============================================================
-# B-3 渐进式披露:deferred_units + 显式 search_tools 配置
+# 渐进式披露：deferred_units + 显式 search_tools 配置
 # ============================================================
 
 
@@ -309,7 +308,7 @@ def test_disabled_search_tools_is_not_injected_for_deferred_unit():
 
 
 # ============================================================
-# G-0 部门规则:unit visibility + department_unit_rule 命中集合
+# 部门规则：unit visibility + department_unit_rule 命中集合
 # ============================================================
 
 

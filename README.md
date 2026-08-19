@@ -57,6 +57,7 @@ docker compose exec backend python scripts/create_admin.py admin
 | Model | `config/models/models.yaml` |
 | Agent | `config/agents/*.md` |
 | HTTP Tool / Toolset | `config/tools/` |
+| 企业认证 | `config/auth/remote_bearer_userinfo.yaml`（生产由 `control/auth/` 覆盖） |
 | MCP Server | `config/mcp/*.md` |
 | Skill | `config/skills/` |
 | 现场配置 | 生产目标机的 `control/site.toml`、`control/.env`、`control/site/` |
@@ -126,8 +127,17 @@ cd frontend && npm run generate-types
 测试：
 
 ```bash
+# 完整串行回归（便于调试）
 pytest
+
+# 日常无外部依赖回归；普通测试默认必须支持 xdist 并行
+pytest -n 4 -m "not external and not serial"
+
+# 真实 Redis 集成回归
+REDIS_URL=redis://localhost:6379 pytest -m external
+
 cd frontend && npm run test:run
+go test ./...
 ```
 
 ## 文档

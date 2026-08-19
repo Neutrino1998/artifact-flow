@@ -10,6 +10,7 @@ from typing import Tuple
 import pytest
 from httpx import AsyncClient
 
+from config import config
 from db.models import User
 from db.database import DatabaseManager
 from repositories.conversation_repo import ConversationRepository
@@ -204,7 +205,7 @@ class TestUploadSizeGuard:
     async def test_oversize_rejected_before_read(self, monkeypatch):
         from fastapi import HTTPException
         from config import config as cfg
-        from api.routers import artifacts as art
+        from api.services import upload_conversion
 
         monkeypatch.setattr(cfg, "MAX_UPLOAD_SIZE", 10)
         f = self._FakeUpload(size=11)  # parser-reported part length over the cap
@@ -212,7 +213,7 @@ class TestUploadSizeGuard:
             # The size guard lives in convert_uploaded_file (phase 1, pure
             # transform). The old convert_and_create_artifact wrapper was removed
             # when uploads moved to in-engine staging (no immediate commit).
-            await art.convert_uploaded_file(f)
+            await upload_conversion.convert_uploaded_file(f)
         assert ei.value.status_code == 422
         assert "too large" in ei.value.detail.lower()
         # The whole point: the body was never materialized.
@@ -221,7 +222,7 @@ class TestUploadSizeGuard:
     async def test_fallback_len_check_when_size_unset(self, monkeypatch):
         from fastapi import HTTPException
         from config import config as cfg
-        from api.routers import artifacts as art
+        from api.services import upload_conversion
 
         monkeypatch.setattr(cfg, "MAX_UPLOAD_SIZE", 10)
         # .size is None → pre-check skipped; the post-read len() guard catches it.
@@ -230,13 +231,13 @@ class TestUploadSizeGuard:
             # The size guard lives in convert_uploaded_file (phase 1, pure
             # transform). The old convert_and_create_artifact wrapper was removed
             # when uploads moved to in-engine staging (no immediate commit).
-            await art.convert_uploaded_file(f)
+            await upload_conversion.convert_uploaded_file(f)
         assert ei.value.status_code == 422
         assert f.read_called is True
 
 
 # ============================================================
-# has_blob:二进制 artifact 在用户路由与 admin 路由都要标对(C-0)
+# has_blob：二进制 artifact 在用户路由与 admin 路由都要标对。
 # ============================================================
 
 _DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -390,3 +391,107 @@ class TestHasBlobField:
         assert resp.content == b"PK\x03\x04" + b"\x00" * 16
         assert resp.headers["cache-control"] == "no-cache"
         assert resp.headers["content-disposition"].startswith("attachment;")
+
+    async def test_admin_privacy_mode_hides_and_blocks_user_upload(
+        self,
+        monkeypatch,
+        admin_client: AsyncClient,
+        seed_blob_artifact: Tuple[str, str],
+    ):
+        monkeypatch.setattr(config, "ADMIN_PRIVACY_MODE", True)
+        session_id, artifact_id = seed_blob_artifact
+
+        listing = await admin_client.get(
+            f"/api/v1/admin/conversations/{session_id}/artifacts"
+        )
+        assert listing.status_code == 200
+        (item,) = listing.json()["artifacts"]
+        assert item["id"] == "__protected_artifact_1__"
+        assert item["title"] == "受保护文件 1"
+        assert item["original_filename"] is None
+        assert item["content_accessible"] is False
+        assert artifact_id not in listing.text
+        assert "spec.docx" not in listing.text
+
+        detail = await admin_client.get(
+            f"/api/v1/admin/conversations/{session_id}/artifacts/{artifact_id}"
+        )
+        raw = await admin_client.get(
+            f"/api/v1/admin/conversations/{session_id}/artifacts/{artifact_id}/raw"
+        )
+        version = await admin_client.get(
+            f"/api/v1/admin/conversations/{session_id}/artifacts/{artifact_id}/versions/1"
+        )
+        assert detail.status_code == 404
+        assert raw.status_code == 404
+        assert version.status_code == 404
+
+    async def test_admin_privacy_mode_blocks_generated_artifacts_too(
+        self,
+        monkeypatch,
+        admin_client: AsyncClient,
+        seed_artifacts: Tuple[str, str],
+    ):
+        monkeypatch.setattr(config, "ADMIN_PRIVACY_MODE", True)
+        session_id, artifact_id = seed_artifacts
+
+        listing = await admin_client.get(
+            f"/api/v1/admin/conversations/{session_id}/artifacts"
+        )
+        assert listing.status_code == 200
+        (item,) = listing.json()["artifacts"]
+        assert item["id"] == "__protected_artifact_1__"
+        assert item["title"] == "受保护文件 1"
+        assert item["content_accessible"] is False
+        assert artifact_id not in listing.text
+        assert "Test Artifact" not in listing.text
+
+        detail = await admin_client.get(
+            f"/api/v1/admin/conversations/{session_id}/artifacts/{artifact_id}"
+        )
+        version = await admin_client.get(
+            f"/api/v1/admin/conversations/{session_id}/artifacts/{artifact_id}/versions/1"
+        )
+        assert detail.status_code == 404
+        assert version.status_code == 404
+
+    async def test_admin_privacy_mode_blocks_legacy_rewritten_artifact_without_marker(
+        self,
+        monkeypatch,
+        admin_client: AsyncClient,
+        db_manager: DatabaseManager,
+        test_user: User,
+    ):
+        monkeypatch.setattr(config, "ADMIN_PRIVACY_MODE", True)
+        async with db_manager.session() as session:
+            conversation_repo = ConversationRepository(session)
+            artifact_repo = ArtifactRepository(session)
+            conv_id = f"conv-{uuid.uuid4().hex}"
+            artifact_id = "private-notes.txt"
+            await conversation_repo.create_conversation(
+                conv_id,
+                title="Rewritten upload",
+                user_id=test_user.id,
+            )
+            await artifact_repo.create_artifact(
+                session_id=conv_id,
+                artifact_id=artifact_id,
+                content_type="text/plain",
+                title="private-notes",
+                content="rewritten by the agent",
+                metadata={"original_filename": "Private Notes.txt"},
+                source="agent",
+            )
+
+        listing = await admin_client.get(
+            f"/api/v1/admin/conversations/{conv_id}/artifacts"
+        )
+        detail = await admin_client.get(
+            f"/api/v1/admin/conversations/{conv_id}/artifacts/{artifact_id}"
+        )
+
+        assert listing.status_code == 200
+        assert listing.json()["artifacts"][0]["content_accessible"] is False
+        assert artifact_id not in listing.text
+        assert "Private Notes.txt" not in listing.text
+        assert detail.status_code == 404

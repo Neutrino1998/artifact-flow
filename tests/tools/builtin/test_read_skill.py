@@ -1,4 +1,4 @@
-"""skill 工具单测(C-2 read_skill / D-2 mount_skill,L2/L3)。
+"""skill 工具 L2 read_skill / L3 mount_skill 单测。
 
 read_skill 覆盖:可见 slug → 正文 + 条件化 mount 提示 + activated_skill metadata;
 不可见 → 404 风格;无正文 → 错误;空 slug → 错误;契约镜像 read_artifact。
@@ -15,8 +15,8 @@ from types import SimpleNamespace
 import pytest
 
 from config import config
-from core.effective_skillset import EffectiveSkillSet
-from core.effective_toolset import EffectiveToolset, SkillGrant
+from core.capabilities.effective_skillset import EffectiveSkillSet
+from core.capabilities.effective_toolset import EffectiveToolset, SkillGrant
 from reconcile.snapshot import SkillInfo
 from tools.base import ToolExecutionContext, ToolPermission
 from tools.builtin.read_skill import (
@@ -24,6 +24,7 @@ from tools.builtin.read_skill import (
     ReadSkillTool,
     create_skill_tools,
 )
+from tools.builtin.skill_service import SkillService
 from tools.builtin.sandbox_session import SandboxError
 
 
@@ -37,6 +38,11 @@ class _FakeService:
 
     async def get_bundle(self, slug):
         return self._bundles.get(slug)
+
+
+def test_skill_service_requires_db_manager():
+    with pytest.raises(ValueError, match="requires a db_manager"):
+        SkillService(None)
 
 
 def _skillset(*slugs, has_extra_files=False, compatibility=None):
@@ -53,7 +59,7 @@ def _tool(bodies, *visible):
     return ReadSkillTool(_FakeService(bodies), _skillset(*visible))
 
 
-def _context(*enabled, skill_grants=None):
+def _context(*enabled, skill_grants=None, model_invocation_epoch=1):
     return ToolExecutionContext(
         agent_name="lead_agent",
         effective_toolset=EffectiveToolset(
@@ -61,6 +67,7 @@ def _context(*enabled, skill_grants=None):
             skill_grants=skill_grants or {},
         ),
         tools={},
+        model_invocation_epoch=model_invocation_epoch,
     )
 
 
@@ -209,6 +216,10 @@ class _FakeSandbox:
         self.sticky_failure = sticky
         self.sticky_diagnostics = {}
         self.last_command = None
+        self.last_invocation_epoch = None
+
+    def require_fresh_invocation(self, model_invocation_epoch):
+        assert model_invocation_epoch >= 1
 
     async def ensure_container(self):
         if self._ensure_error is not None:
@@ -216,8 +227,9 @@ class _FakeSandbox:
         if self.tmp_dir is not None:
             os.makedirs(self.tmp_dir, exist_ok=True)
 
-    async def exec(self, command):
+    async def exec(self, command, *, model_invocation_epoch=1):
         self.last_command = command
+        self.last_invocation_epoch = model_invocation_epoch
         if self._exec_error is not None:
             raise self._exec_error
         return self._exec_result
@@ -242,13 +254,13 @@ def test_mount_identity():
 
 async def test_mount_empty_slug(tmp_path):
     tool, _ = _mount_tool(tmp_path)
-    res = await tool.execute(slug="  ")
+    res = await tool.execute(_context=_context(), slug="  ")
     assert not res.success and "slug" in res.error.lower()
 
 
 async def test_mount_invisible_not_found(tmp_path):
     tool, _ = _mount_tool(tmp_path, bundle=_make_zip({"SKILL.md": "x"}))
-    res = await tool.execute(slug="other")
+    res = await tool.execute(_context=_context(), slug="other")
     assert not res.success and "not found" in res.error.lower()
 
 
@@ -260,7 +272,7 @@ async def test_mount_no_extra_files_errors(tmp_path):
         svc,
         _skillset("doc", has_extra_files=False),
     )
-    res = await tool.execute(slug="doc")
+    res = await tool.execute(_context=_context(), slug="doc")
     assert not res.success
     assert "no extra" in res.error.lower()
     assert "read_skill" in res.error
@@ -273,14 +285,14 @@ async def test_mount_missing_bundle_reports_unloaded(tmp_path):
         svc,
         _skillset("doc", has_extra_files=True),
     )
-    res = await tool.execute(slug="doc")
+    res = await tool.execute(_context=_context(), slug="doc")
     assert not res.success
     assert "could not be loaded" in res.error.lower()
 
 
 async def test_mount_bad_bundle_reports_unreadable(tmp_path):
     tool, _ = _mount_tool(tmp_path, bundle=b"not a zip")
-    res = await tool.execute(slug="doc")
+    res = await tool.execute(_context=_context(), slug="doc")
     assert not res.success
     assert "could not be read" in res.error.lower()
 
@@ -288,12 +300,15 @@ async def test_mount_bad_bundle_reports_unreadable(tmp_path):
 async def test_mount_wrapper_prefix_stripped_in_command(tmp_path):
     bundle = _make_zip({"pkg/SKILL.md": "guide", "pkg/references/n.md": "n"})
     tool, sandbox = _mount_tool(tmp_path, bundle=bundle)
-    res = await tool.execute(slug="doc")
+    res = await tool.execute(
+        _context=_context(model_invocation_epoch=7), slug="doc"
+    )
     assert res.success, res.error
     # 剥壳:解到 /workspace/.skills/.extract(与 target 同盘)→ mv .extract/pkg → target
     assert "/workspace/.skills/.extract/pkg" in sandbox.last_command
     assert "/workspace/.skills/doc" in sandbox.last_command
     assert "python3 -m zipfile -e" in sandbox.last_command
+    assert sandbox.last_invocation_epoch == 7
     # bundle 已 staging 落 tmp_dir
     assert os.path.exists(os.path.join(sandbox.tmp_dir, ".skill-bundle.zip"))
 
@@ -301,7 +316,7 @@ async def test_mount_wrapper_prefix_stripped_in_command(tmp_path):
 async def test_mount_bare_root_no_prefix(tmp_path):
     bundle = _make_zip({"SKILL.md": "guide", "references/n.md": "n"})
     tool, sandbox = _mount_tool(tmp_path, bundle=bundle)
-    res = await tool.execute(slug="doc")
+    res = await tool.execute(_context=_context(), slug="doc")
     assert res.success, res.error
     # 裸根:mv .extract(整棵)→ target,无子目录后缀;同盘 rename、无 /tmp 跨挂载
     assert "mv /workspace/.skills/.extract /workspace/.skills/doc" in sandbox.last_command
@@ -319,7 +334,7 @@ async def test_mount_success_message_has_path_listing_and_hints(tmp_path):
     )
     skillset = _skillset("doc", has_extra_files=True, compatibility={"python": ">=3.11"})
     tool = MountSkillTool(sandbox, svc, skillset)
-    res = await tool.execute(slug="doc")
+    res = await tool.execute(_context=_context(), slug="doc")
     assert res.success
     assert res.metadata["path"] == "/workspace/.skills/doc"
     assert "/workspace/.skills/doc/" in res.data
@@ -338,7 +353,7 @@ async def test_mount_extraction_failure_loud(tmp_path):
         exec_result=_ExecResult(1, "boom: bad zip"),
     )
     tool = MountSkillTool(sandbox, svc, _skillset("doc", has_extra_files=True))
-    res = await tool.execute(slug="doc")
+    res = await tool.execute(_context=_context(), slug="doc")
     assert not res.success
     assert "failed to unpack" in res.error.lower()
 
@@ -352,7 +367,7 @@ async def test_mount_over_quota_reports_sticky(tmp_path):
         sticky="Sandbox workspace exceeded the disk quota and was terminated.",
     )
     tool = MountSkillTool(sandbox, svc, _skillset("doc", has_extra_files=True))
-    res = await tool.execute(slug="doc")
+    res = await tool.execute(_context=_context(), slug="doc")
     assert not res.success
     assert "quota" in res.error.lower()               # 归因 sticky 而非裸 137
 
@@ -365,6 +380,6 @@ async def test_mount_ensure_container_failure(tmp_path):
         ensure_error=SandboxError("sandbox unavailable this turn"),
     )
     tool = MountSkillTool(sandbox, svc, _skillset("doc", has_extra_files=True))
-    res = await tool.execute(slug="doc")
+    res = await tool.execute(_context=_context(), slug="doc")
     assert not res.success
     assert "unavailable" in res.error.lower()

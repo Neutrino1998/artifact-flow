@@ -1,4 +1,4 @@
-"""登录频控（ACC-01）—— per-username + per-IP 失败计数,超阈临时锁定。
+"""登录频控 —— per-username + per-IP 失败计数，超阈临时锁定。
 
 防无节制撞库 / credential stuffing。调用方(login 端点)对两个独立 key
 (username 与 client-IP)各跑一遍:验证前预检任一锁定即 429;认证失败对两 key

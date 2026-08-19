@@ -6,7 +6,7 @@ Defines request and response models for authentication endpoints.
 
 from typing import Any, Dict, Literal, Optional, List
 from datetime import datetime
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from utils.password_policy import validate_password_strength
 from utils.validators import validate_username
@@ -87,6 +87,15 @@ class UpdateMyProfileRequest(BaseModel):
     display_name: Optional[str] = Field(None, max_length=128, description="Display name; pass empty string to clear")
 
 
+class SsoExchangeRequest(BaseModel):
+    """Sensitive POST body parsed manually so validation errors never echo the token."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: str = Field(..., min_length=1, max_length=256)
+    upstream_token: str = Field(..., min_length=1, max_length=16_384)
+
+
 # ============================================================
 # Response Models
 # ============================================================
@@ -97,6 +106,17 @@ class UserInfo(BaseModel):
     username: str = Field(..., description="Username")
     display_name: Optional[str] = Field(None, description="Display name")
     role: str = Field(..., description="Role")
+    auth_provider: str = Field(..., description="Authentication provider id")
+    can_change_password: bool = Field(
+        ..., description="Whether this identity supports local password changes"
+    )
+    can_edit_profile: bool = Field(
+        ...,
+        description=(
+            "Whether provider-managed profile fields such as display name and "
+            "department accept local edits"
+        ),
+    )
     must_change_password: bool = Field(
         False,
         description=(
@@ -122,6 +142,25 @@ class LoginResponse(BaseModel):
     user: UserInfo = Field(..., description="User info")
 
 
+class SsoPublicProviderConfig(BaseModel):
+    enabled: bool
+    provider_id: Optional[str] = None
+    display_name: Optional[str] = None
+    token_param: Optional[str] = None
+
+
+class AuthPublicConfigResponse(BaseModel):
+    """Anonymous login-page capabilities; contains no internal endpoint mapping."""
+
+    password_login_enabled: bool = True
+    sso: SsoPublicProviderConfig
+
+
+class SsoStartResponse(BaseModel):
+    authorization_url: str
+    expires_in: int
+
+
 class UserResponse(BaseModel):
     """Single user response (admin)"""
     id: str
@@ -129,6 +168,9 @@ class UserResponse(BaseModel):
     display_name: Optional[str] = None
     role: str
     is_active: bool
+    auth_provider: str
+    can_change_password: bool
+    can_edit_profile: bool
     department_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -150,7 +192,7 @@ class UserImpactResponse(BaseModel):
 
 
 # ============================================================
-# Bulk Import (PR3)
+# Bulk Import
 # ============================================================
 
 
@@ -184,7 +226,7 @@ class BulkImportResponse(BaseModel):
 
 
 # ============================================================
-# Bulk Actions (PR5a)
+# Bulk Actions
 # ============================================================
 
 
@@ -215,7 +257,11 @@ class BulkActionFailedItem(BaseModel):
     """单条 bulk-action 失败项。"""
     id: str = Field(..., description="User ID that failed")
     reason: str = Field(
-        ..., description="Failure reason: 'forbidden_self' | 'not_found' | 'internal_error'"
+        ...,
+        description=(
+            "Failure reason: 'forbidden_self' | 'not_found' | "
+            "'profile_managed_by_provider' | 'internal_error'"
+        ),
     )
 
 

@@ -1,4 +1,4 @@
-"""skill 管理 REST:C-3 列举/toggle + E-2 导入/导出/删除(user/admin 双通道)。"""
+"""skill 管理 REST：列举/toggle + 导入/导出/删除(user/admin 双通道)。"""
 
 import io
 import uuid
@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from api.services.auth import hash_password
 from config import config
-from core.skill_manager import SkillManager
+from core.management.skill_manager import SkillManager
 from db.models import Department, DepartmentSkillRule, Skill, User, UserSkill
 from utils.skill_validator import validate_skill_zip
 
@@ -108,9 +108,61 @@ class TestToggleSkill:
         assert r.status_code == 401
 
 
+class TestSkillDetail:
+    async def test_reads_visible_guidance_body(
+        self, client: AsyncClient, db_session
+    ):
+        row = await _seed_skill(db_session, "guide", has_extra_files=True)
+        row.skill_md = "# Guide\n\nFollow the steps."
+        await db_session.commit()
+
+        r = await client.get(f"/api/v1/skills/{row.id}")
+
+        assert r.status_code == 200, r.text
+        assert r.json() == {
+            "id": row.id,
+            "slug": "guide",
+            "name": "Guide",
+            "description": "d",
+            "skill_md": "# Guide\n\nFollow the steps.",
+            "source": "seeded",
+            "visibility": "public",
+            "has_extra_files": True,
+        }
+
+    async def test_disabled_visible_skill_remains_readable(
+        self, client: AsyncClient, db_session
+    ):
+        row = await _seed_skill(db_session, "off", default_enabled=False)
+
+        r = await client.get(f"/api/v1/skills/{row.id}")
+
+        assert r.status_code == 200
+        assert r.json()["skill_md"] == "body"
+
+    async def test_invisible_and_unknown_return_404(
+        self, client: AsyncClient, db_session
+    ):
+        other = await _add_user(db_session, "detail-owner")
+        private = await _seed_skill(
+            db_session,
+            "theirs",
+            visibility="private",
+            source="dynamic",
+            owner_user_id=other.id,
+        )
+
+        assert (await client.get(f"/api/v1/skills/{private.id}")).status_code == 404
+        assert (await client.get("/api/v1/skills/ghost")).status_code == 404
+
+    async def test_anon_blocked(self, anon_client: AsyncClient):
+        assert (await anon_client.get("/api/v1/skills/ghost")).status_code == 401
+
+
 async def _add_user(db_session, username: str) -> User:
     user = User(
-        id=str(uuid.uuid4()), username=username,
+        id=str(uuid.uuid4()), auth_provider="local_password",
+        auth_subject=username, username=username,
         hashed_password=hash_password("x-pass-123"), role="user", is_active=True,
     )
     db_session.add(user)
@@ -413,6 +465,47 @@ class TestAdminSharedSkillManagement:
         assert items["dynamic"]["can_edit"] is True
         assert items["dept-only"]["visibility"] == "department"
         assert items["dept-only"]["default_enabled"] is False
+
+    async def test_detail_bypasses_admin_department_scope(
+        self, admin_client: AsyncClient, db_session
+    ):
+        row = await _seed_skill(
+            db_session,
+            "dept-only",
+            visibility="department",
+            source="dynamic",
+        )
+        row.skill_md = "# Department guidance"
+        await db_session.commit()
+
+        assert (await admin_client.get(f"/api/v1/skills/{row.id}")).status_code == 404
+        r = await admin_client.get(f"/api/v1/admin/skills/{row.id}")
+
+        assert r.status_code == 200, r.text
+        assert r.json()["skill_md"] == "# Department guidance"
+        assert r.json()["visibility"] == "department"
+
+    async def test_detail_excludes_private_skills_and_non_admins(
+        self,
+        admin_client: AsyncClient,
+        client: AsyncClient,
+        db_session,
+        test_user: User,
+    ):
+        private = await _seed_skill(
+            db_session,
+            "private-detail",
+            visibility="private",
+            source="dynamic",
+            owner_user_id=test_user.id,
+        )
+
+        assert (
+            await admin_client.get(f"/api/v1/admin/skills/{private.id}")
+        ).status_code == 404
+        assert (
+            await client.get("/api/v1/admin/skills/ghost")
+        ).status_code == 403
 
     async def test_patch_dynamic_shared_updates_and_clears_dept_rules(
         self, admin_client: AsyncClient, db_session, test_user: User

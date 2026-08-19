@@ -1,5 +1,5 @@
 """
-web_fetch fallback 下载体封顶测试（SSRF-04）。
+web_fetch fallback 下载体封顶测试。
 
 _read_capped 不依赖网络：用伪 response 验证 Content-Length 预检 + 流式累计中断。
 """

@@ -2,12 +2,15 @@
 BashTool unit tests — fake SandboxSession(契约层,不碰 docker)。
 """
 
+from types import SimpleNamespace
+
 import pytest
 
 from config import config
 from tools.base import ToolPermission
 from tools.builtin.sandbox_ops import BashTool, create_sandbox_tools
 from tools.builtin.sandbox_session import (
+    SandboxCommandError,
     SandboxExecResult,
     SandboxUnavailableError,
 )
@@ -18,9 +21,11 @@ class FakeSession:
         self._result = result
         self._error = error
         self.commands: list[str] = []
+        self.invocation_epochs: list[int] = []
 
-    async def exec(self, command):
+    async def exec(self, command, *, model_invocation_epoch=1):
         self.commands.append(command)
+        self.invocation_epochs.append(model_invocation_epoch)
         if self._error is not None:
             raise self._error
         return self._result
@@ -30,6 +35,10 @@ def _result(exit_code=0, output="hello\n", truncated=False, duration=0.5):
     return SandboxExecResult(
         exit_code=exit_code, output=output, truncated=truncated, duration=duration
     )
+
+
+def _context(epoch=1):
+    return SimpleNamespace(model_invocation_epoch=epoch)
 
 
 class TestBashTool:
@@ -48,21 +57,26 @@ class TestBashTool:
 
     async def test_zero_exit_returns_plain_output(self):
         session = FakeSession(result=_result())
-        result = await BashTool(session)(command="echo hello")
+        result = await BashTool(session)(
+            _context=_context(7), command="echo hello"
+        )
         assert result.success
         assert result.data == "hello"
         assert result.metadata["exit_code"] == 0
         assert session.commands == ["echo hello"]
+        assert session.invocation_epochs == [7]
 
     async def test_empty_output_placeholder(self):
-        result = await BashTool(FakeSession(result=_result(output="")))(command="true")
+        result = await BashTool(FakeSession(result=_result(output="")))(
+            _context=_context(), command="true"
+        )
         assert result.success
         assert result.data == "(no output)"
 
     async def test_nonzero_exit_is_information_not_failure(self):
         """grep 无命中 exit 1 是信息不是故障 —— success=True + 显式 exit code。"""
         result = await BashTool(FakeSession(result=_result(exit_code=2, output="oops\n")))(
-            command="ls /nope"
+            _context=_context(), command="ls /nope"
         )
         assert result.success
         assert "oops" in result.data
@@ -72,7 +86,7 @@ class TestBashTool:
         monkeypatch.setattr(config, "SANDBOX_COMMAND_TIMEOUT", 5)
         result = await BashTool(
             FakeSession(result=_result(exit_code=137, output="", duration=5.2))
-        )(command="while true; do :; done")
+        )(_context=_context(), command="while true; do :; done")
         assert result.success
         assert "killed by the 5s command timeout" in result.data
 
@@ -81,13 +95,13 @@ class TestBashTool:
         monkeypatch.setattr(config, "SANDBOX_COMMAND_TIMEOUT", 100)
         result = await BashTool(
             FakeSession(result=_result(exit_code=137, output="", duration=2.0))
-        )(command="python eat_memory.py")
+        )(_context=_context(), command="python eat_memory.py")
         assert "[exit code: 137]" in result.data
         assert "timeout" not in result.data
 
     async def test_truncation_marker(self):
         result = await BashTool(FakeSession(result=_result(output="x" * 50, truncated=True)))(
-            command="yes"
+            _context=_context(), command="yes"
         )
         assert f"[output truncated at {config.SANDBOX_MAX_OUTPUT_CHARS} chars]" in result.data
 
@@ -105,16 +119,43 @@ class TestBashTool:
                     diagnostics=diagnostics,
                 )
             )
-        )(command="echo hi")
+        )(_context=_context(), command="echo hi")
         assert not result.success
         assert "not found" in result.error
         assert result.metadata == diagnostics
 
+    async def test_recovered_sandbox_still_returns_failed_tool_result_with_reset_notice(self):
+        diagnostics = {
+            "sandbox_failure": {"failure_kind": "oom"},
+            "sandbox_recovery": {
+                "attempted": True,
+                "succeeded": True,
+                "generation": 2,
+                "workspace_reset": True,
+            },
+        }
+        result = await BashTool(
+            FakeSession(
+                error=SandboxCommandError(
+                    "The command failed. A fresh empty sandbox has started successfully. "
+                    "The failed command was not retried.",
+                    diagnostics=diagnostics,
+                )
+            )
+        )(_context=_context(), command="python eat_memory.py")
+
+        assert not result.success
+        assert "fresh empty sandbox" in result.error
+        assert "not retried" in result.error
+        assert result.metadata == diagnostics
+
     async def test_blank_command_rejected(self):
-        result = await BashTool(FakeSession(result=_result()))(command="   ")
+        result = await BashTool(FakeSession(result=_result()))(
+            _context=_context(), command="   "
+        )
         assert not result.success
 
     async def test_missing_command_rejected(self):
-        result = await BashTool(FakeSession(result=_result()))()
+        result = await BashTool(FakeSession(result=_result()))(_context=_context())
         assert not result.success
         assert "command" in result.error

@@ -1,4 +1,4 @@
-"""ACC-01: 登录频控 —— per-username + per-IP 失败计数,超阈临时锁定。
+"""登录频控 —— per-username + per-IP 失败计数，超阈临时锁定。
 
 每个 test 拿到全新 InMemory 频控器(见 tests/api/conftest.py 的 override),
 计数不跨 test 泄漏。后端只认 X-Real-IP(不认可伪造的 XFF,见 _client_ip),

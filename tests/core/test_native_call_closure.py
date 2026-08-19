@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from core.events import ExecutionEvent, StreamEventType
-from core.native_call_closure import (
+from core.execution.events import ExecutionEvent, StreamEventType
+from core.execution.native_call_closure import (
     NativeCallClosureError,
     assert_native_calls_closed,
     close_open_native_calls,

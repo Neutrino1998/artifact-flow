@@ -1,4 +1,4 @@
-"""SQLite per-connection FK pragma 回归(E-2 reviewer #1)。
+"""SQLite per-connection FK pragma 回归测试。
 
 `PRAGMA foreign_keys` 是 per-connection 的:老实现只在 init 连接上设,文件库多连接
 池的其余连接 FK=OFF → DB 级 ondelete=CASCADE 静默不生效(Core DELETE 留孤儿
@@ -34,9 +34,11 @@ async def test_core_delete_cascades_on_fresh_pool_connection(file_db):
     await file_db._engine.dispose()
 
     user_id = str(uuid.uuid4())
+    username = f"fk-{user_id[:8]}"
     async with file_db.session() as session:
         session.add(User(
-            id=user_id, username=f"fk-{user_id[:8]}",
+            id=user_id, auth_provider="local_password", auth_subject=username,
+            username=username,
             hashed_password=hash_password("x-pass-123"), role="user", is_active=True,
         ))
         await session.flush()  # User 先落,Skill.owner FK 才有目标(无 ORM 关系,UoW 不排序)

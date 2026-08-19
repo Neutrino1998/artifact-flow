@@ -115,7 +115,7 @@ async def probe_2_kill_during_exec():
     kill_task = asyncio.create_task(killer())
     t0 = time.monotonic()
     try:
-        result = await session.exec("sleep 60")
+        result = await session.exec("sleep 60", model_invocation_epoch=1)
         print(
             f"  exec 正常返回: exit={result.exit_code} dur={result.duration:.1f}s "
             f"output={result.output!r}"
@@ -129,7 +129,9 @@ async def probe_2_kill_during_exec():
 
     # 容器死后再 exec(sticky 行为预演:当前实现 _container 句柄还在,会发生什么?)
     try:
-        result = await session.exec("echo after-kill")
+        result = await session.exec(
+            "echo after-kill", model_invocation_epoch=2
+        )
         print(f"  kill 后再 exec: exit={result.exit_code} output={result.output!r}")
     except Exception as e:
         print(f"  kill 后再 exec 抛: {type(e).__module__}.{type(e).__name__}: {e}")

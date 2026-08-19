@@ -9,7 +9,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from core.department_access_manager import DepartmentAccessManager
+from core.management.department_access_manager import DepartmentAccessManager
 from db.models import (
     Department,
     DepartmentSkillRule,
@@ -269,6 +269,7 @@ class TestDepartmentAccessMutation:
         db_session.add(_skill("public-skill", "public"))
         await db_session.commit()
         mgr = DepartmentAccessManager(db_session)
+        real_commit = db_session.commit
 
         async def fake_duplicate_commit():
             # Simulate the other transaction winning the same natural-key insert
@@ -279,10 +280,10 @@ class TestDepartmentAccessMutation:
                     department_id="dept-leaf", skill_id="public-skill"
                 )
             )
-            await db_session.commit()
+            await real_commit()
             raise IntegrityError("duplicate", None, Exception())
 
-        monkeypatch.setattr(mgr._repo, "commit", fake_duplicate_commit)
+        monkeypatch.setattr(db_session, "commit", fake_duplicate_commit)
 
         await mgr.put_skill_rule("dept-leaf", "public-skill")
 
@@ -308,7 +309,7 @@ class TestDepartmentAccessMutation:
             await db_session.rollback()
             raise IntegrityError("not duplicate", None, Exception())
 
-        monkeypatch.setattr(mgr._repo, "commit", fake_unrelated_integrity_error)
+        monkeypatch.setattr(db_session, "commit", fake_unrelated_integrity_error)
 
         with pytest.raises(IntegrityError):
             await mgr.put_unit_rule("dept-leaf", "dept_mcp")

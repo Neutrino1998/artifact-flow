@@ -28,7 +28,7 @@ from utils.logger import get_logger, get_request_id
 logger = get_logger("ArtifactFlow")
 
 # 终结事件类型(consumer 见到即 return)。本地副本——传输层不依赖执行语义;
-# 与 core.events.TERMINAL_EVENT_TYPES 的一致性由 tests/core/test_terminal_event_sync.py 守护。
+# 与 core.execution.events.TERMINAL_EVENT_TYPES 的一致性由 tests/core/test_terminal_event_sync.py 守护。
 _TERMINAL_EVENTS = frozenset(("complete", "cancelled", "timed_out", "error"))
 
 # XADD + 首次 EXPIRE 原子合一。pipeline(transaction=False) 只是批量发送、非原子：
@@ -124,7 +124,7 @@ class RedisStreamTransport:
         meta_key = self._meta_key(stream_id)
         # ⚠️ 已知竞态窗口：HGET → XADD 之间 close_stream 可能将 status 置为 closed，
         # 导致事件写入已关闭的 stream。当前不修复，原因：
-        # 1. close_stream 和 push_event 在同一执行流中由 controller 顺序调用，close 一定在最后一个 push 之后
+        # 1. close_stream 和 push_event 在同一 turn 流中顺序调用，close 一定在最后一个 push 之后
         # 2. 即使未来引入外部强制关闭，孤儿事件有 TTL 自动清理
         # 3. events 已通过 _persist_events 持久化到 DB，stream 只是 SSE 传输通道
         status = await self._redis.hget(meta_key, "status")
@@ -145,8 +145,8 @@ class RedisStreamTransport:
         # 检测，省去单独的 exists 预查，并消除 XADD 与 EXPIRE 之间的孤儿窗口。
         # stream/meta 两个 key 共享 stream_id hash tag，Cluster 下是同 slot 操作。
         # best-effort 契约：stream key 必带 TTL（= EXECUTION_TIMEOUT + STREAM_TTL_GRACE，
-        # 覆盖 post-processing）；与 meta_key 剩余 TTL 的精确对齐留给 PR-C（届时
-        # create_stream / TTL bump 移到 RUNNING，时钟起点统一）。
+        # 覆盖 post-processing）。stream 与 meta_key 的 TTL 不保证精确对齐；若以后需要
+        # 强一致，应把 create_stream / TTL bump 移到 RUNNING，统一时钟起点。
         entry_id = await self._script_xadd_with_ttl(
             keys=[stream_key, meta_key],
             args=[event_type, event_json, self._stream_ttl, snapshot_field],

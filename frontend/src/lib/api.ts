@@ -12,10 +12,14 @@ import type {
   MessageFeedbackRequest,
   MessageFeedbackResponse,
   ArtifactListResponse,
+  ArtifactSummary,
   ArtifactDetail,
   VersionDetail,
   LoginRequest,
   LoginResponse,
+  AuthPublicConfigResponse,
+  SsoStartResponse,
+  SsoExchangeRequest,
   CreateUserRequest,
   UpdateUserRequest,
   ChangePasswordRequest,
@@ -50,6 +54,7 @@ import type {
   AgentListResponse,
   SkillItem,
   SkillListResponse,
+  SkillDetailResponse,
   SkillImportResponse,
   AdminSkillListResponse,
   AdminSkillUpdateRequest,
@@ -161,7 +166,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
   });
   if (res.status === 401) {
-    useAuthStore.getState().logout();
+    useAuthStore.getState().logout('session_expired');
     throw new ApiError(401, 'Session expired');
   }
   if (!res.ok) {
@@ -210,6 +215,65 @@ export function login(body: LoginRequest) {
   });
 }
 
+export function getAuthConfig() {
+  return fetchWithMaintenanceRedirect(`${BASE_URL}/api/v1/auth/config`, {
+    headers: { Accept: 'application/json' },
+  }).then(async (res) => {
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      const requestId = res.headers.get('X-Request-ID') ?? undefined;
+      throw new ApiError(
+        res.status,
+        formatApiError(res.status, text, res.status >= 500 ? requestId : undefined),
+        undefined,
+        requestId,
+      );
+    }
+    return res.json() as Promise<AuthPublicConfigResponse>;
+  });
+}
+
+export function startSso() {
+  return fetchWithMaintenanceRedirect(`${BASE_URL}/api/v1/auth/sso/start`, {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+    credentials: 'include',
+  }).then(async (res) => {
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      const requestId = res.headers.get('X-Request-ID') ?? undefined;
+      throw new ApiError(
+        res.status,
+        formatApiError(res.status, text, res.status >= 500 ? requestId : undefined),
+        undefined,
+        requestId,
+      );
+    }
+    return res.json() as Promise<SsoStartResponse>;
+  });
+}
+
+export function exchangeSso(body: SsoExchangeRequest) {
+  return fetchWithMaintenanceRedirect(`${BASE_URL}/api/v1/auth/sso/exchange`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(body),
+  }).then(async (res) => {
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      const requestId = res.headers.get('X-Request-ID') ?? undefined;
+      throw new ApiError(
+        res.status,
+        formatApiError(res.status, text, res.status >= 500 ? requestId : undefined),
+        undefined,
+        requestId,
+      );
+    }
+    return res.json() as Promise<LoginResponse>;
+  });
+}
+
 // Conversations
 export function listConversations(limit = 20, offset = 0, query?: string) {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
@@ -222,11 +286,18 @@ export function getStorageUsage() {
   return request<StorageUsageResponse>('/api/v1/chat/storage');
 }
 
-// Skills (C-3) — user-side list + personal enable/disable. Returns ALL visible
+// Skills — user-side list + personal enable/disable. Returns ALL visible
 // skills (including disabled ones — the management page needs them to re-enable);
 // the composer picker filters to `enabled` client-side.
 export function getSkills() {
   return request<SkillListResponse>('/api/v1/skills');
+}
+
+export function getSkillDetail(skillId: string, opts?: { admin?: boolean }) {
+  const path = opts?.admin
+    ? `/api/v1/admin/skills/${encodeURIComponent(skillId)}`
+    : `/api/v1/skills/${encodeURIComponent(skillId)}`;
+  return request<SkillDetailResponse>(path);
 }
 
 export function setSkillEnabled(skillId: string, enabled: boolean) {
@@ -237,7 +308,7 @@ export function setSkillEnabled(skillId: string, enabled: boolean) {
 }
 
 /**
- * 导入 skill zip（E-2）。marketplace=true 走 admin 共享通道（可指定
+ * 导入 skill zip。marketplace=true 走 admin 共享通道（可指定
  * public/department 与默认开关）；否则私有导入（仅自己可见、立即启用）。
  *
  * 错误（detail 由 SkillManager 结构化产出）：
@@ -271,7 +342,7 @@ export async function importSkill(
     body: formData,
   });
   if (res.status === 401) {
-    useAuthStore.getState().logout();
+    useAuthStore.getState().logout('session_expired');
     throw new ApiError(401, 'Session expired');
   }
   if (!res.ok) {
@@ -297,7 +368,7 @@ export async function downloadSkillBundle(
     { headers: authHeaders() },
   );
   if (res.status === 401) {
-    useAuthStore.getState().logout();
+    useAuthStore.getState().logout('session_expired');
     throw new ApiError(401, 'Session expired');
   }
   if (!res.ok) {
@@ -434,7 +505,7 @@ export async function sendMessage(
 
     xhr.onload = () => {
       if (xhr.status === 401) {
-        useAuthStore.getState().logout();
+        useAuthStore.getState().logout('session_expired');
         reject(new ApiError(401, 'Session expired'));
         return;
       }
@@ -551,7 +622,7 @@ async function fetchRawBlob(path: string): Promise<Blob> {
   const res = await fetchWithMaintenanceRedirect(`${BASE_URL}${path}`, { headers: authHeaders() });
 
   if (res.status === 401) {
-    useAuthStore.getState().logout();
+    useAuthStore.getState().logout('session_expired');
     throw new ApiError(401, 'Session expired');
   }
   if (!res.ok) {
@@ -643,7 +714,7 @@ export interface AdminFeedbackListResponse {
 
 export interface AdminEventItem {
   id: number;
-  event_id: string | null; // 业务事件 id；agent_start 用它当 prompt 重建锚
+  event_id: string | null; // 业务事件 id；用作 prompt / LLM call 重建锚
   event_type: string;
   agent_name: string | null;
   data: Record<string, unknown> | null;
@@ -659,7 +730,11 @@ export interface AdminMessageGroup {
   events: AdminEventItem[];
   execution_metrics: Record<string, unknown> | null;
   feedback?: MessageFeedbackResponse | null;
-  uploaded_files: { id?: string; filename: string }[] | null;
+  uploaded_files: {
+    id?: string | null;
+    filename: string;
+    content_accessible?: boolean;
+  }[] | null;
 }
 
 export interface AdminPromptReconstructResponse {
@@ -673,6 +748,11 @@ export interface AdminPromptReconstructResponse {
   messages: Record<string, unknown>[];
 }
 
+export interface AdminLlmCallReconstructResponse extends AdminPromptReconstructResponse {
+  llm_complete_event_id: string;
+  response: Record<string, unknown>;
+}
+
 export interface AdminConversationEventsResponse {
   conversation_id: string;
   title: string | null;
@@ -684,6 +764,15 @@ export interface AdminConversationEventsResponse {
   created_at: string;
   updated_at: string;
   messages: AdminMessageGroup[];
+}
+
+export type AdminArtifactSummary = ArtifactSummary & {
+  content_accessible: boolean;
+};
+
+export interface AdminArtifactListResponse {
+  session_id: string;
+  artifacts: AdminArtifactSummary[];
 }
 
 export function listAdminConversations(
@@ -720,7 +809,7 @@ export function getAdminConversationStreamUrl(convId: string) {
   return `/api/v1/admin/conversations/${encodeURIComponent(convId)}/stream`;
 }
 
-// ── Fleet instances (Phase C) ──
+// ── Fleet instances ──
 // The backend endpoint returns a dynamic dict (no response_model), so the shape
 // is hand-declared here rather than generated. One entry per live heartbeat.
 export interface InstanceHeartbeat {
@@ -784,8 +873,19 @@ export function getAdminPromptReconstruct(
   );
 }
 
+export function getAdminLlmCallReconstruct(
+  convId: string,
+  messageId: string,
+  llmCompleteEventId: string,
+) {
+  const params = new URLSearchParams({ llm_complete_event_id: llmCompleteEventId });
+  return request<AdminLlmCallReconstructResponse>(
+    `/api/v1/admin/conversations/${convId}/messages/${messageId}/reconstruct-call?${params}`
+  );
+}
+
 export function listAdminConversationArtifacts(convId: string) {
-  return request<ArtifactListResponse>(
+  return request<AdminArtifactListResponse>(
     `/api/v1/admin/conversations/${convId}/artifacts`
   );
 }
@@ -853,7 +953,7 @@ export function getUserImpact(userId: string) {
   return request<UserImpactResponse>(`/api/v1/admin/users/${userId}/impact`);
 }
 
-// PR5a — Bulk user actions
+// Bulk user actions
 export function bulkUserAction(body: BulkActionRequest) {
   return request<BulkActionResponse>('/api/v1/admin/users/bulk-action', {
     method: 'POST',
@@ -868,7 +968,7 @@ export function getUsersBulkImpact(ids: string[]) {
 }
 
 /**
- * 批量导入用户（CSV）— PR3。
+ * 批量导入用户（CSV）。
  *
  * 错误：
  * - 400 + dict detail（`{message, duplicate_rows}`）→ 文件内 username 重复，
@@ -887,7 +987,7 @@ export async function bulkImportUsers(file: File): Promise<BulkImportResponse> {
   });
 
   if (res.status === 401) {
-    useAuthStore.getState().logout();
+    useAuthStore.getState().logout('session_expired');
     throw new ApiError(401, 'Session expired');
   }
 
@@ -1015,7 +1115,7 @@ export function updateSiteNotifications(body: UpdateSiteNotificationsRequest) {
   });
 }
 
-// Tool Registry (Admin) — B-4 工具 unit 管理。
+// Tool Registry (Admin) — 工具 unit 管理。
 // 单名段用 encodeURIComponent：unit/placeholder 名虽受后端字符约束，但走 URL path
 // 仍统一编码，避免任何含特殊字符的值（如占位符）破坏路径。
 export function listToolUnits() {
@@ -1056,7 +1156,7 @@ export async function importToolUnitSeed(file: File): Promise<ToolUnitImportResp
     body: formData,
   });
   if (res.status === 401) {
-    useAuthStore.getState().logout();
+    useAuthStore.getState().logout('session_expired');
     throw new ApiError(401, 'Session expired');
   }
   if (!res.ok) {
@@ -1076,7 +1176,7 @@ export async function downloadToolUnitSeedBundle(name: string): Promise<Blob> {
     { headers: authHeaders() },
   );
   if (res.status === 401) {
-    useAuthStore.getState().logout();
+    useAuthStore.getState().logout('session_expired');
     throw new ApiError(401, 'Session expired');
   }
   if (!res.ok) {
