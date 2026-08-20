@@ -12,7 +12,9 @@ export interface ComposerTrigger {
  *
  * Triggers are recognized only at the start of the input or after whitespace.
  * This keeps email addresses, URLs, and paths from opening the menu. The query
- * ends at whitespace, matching the lightweight token semantics of a textarea.
+ * ends at the caret, while the replacement range extends to whitespace.
+ * This lets a user search with a prefix from the middle of an existing token
+ * without leaving the token suffix behind after selection.
  */
 export function findComposerTrigger(
   text: string,
@@ -26,13 +28,32 @@ export function findComposerTrigger(
   const marker = text[tokenStart];
   if (marker !== '@' && marker !== '/') return null;
 
+  let tokenEnd = caret;
+  while (tokenEnd < text.length && !/\s/.test(text[tokenEnd])) tokenEnd += 1;
+
   return {
     kind: marker === '@' ? 'file' : 'skill',
     marker,
     start: tokenStart,
-    end: caret,
+    end: tokenEnd,
     query: text.slice(tokenStart + 1, caret),
   };
+}
+
+export function shouldCommitComposerSelection(
+  key: string,
+  options: {
+    shiftKey: boolean;
+    isComposing: boolean;
+    suggestionCount: number;
+  },
+): boolean {
+  return (
+    (key === 'Enter' || key === 'Tab')
+    && !options.shiftKey
+    && !options.isComposing
+    && options.suggestionCount > 0
+  );
 }
 
 export function composerTriggerKey(trigger: ComposerTrigger): string {

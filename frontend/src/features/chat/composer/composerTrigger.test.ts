@@ -3,6 +3,7 @@ import {
   findComposerTrigger,
   matchesComposerQuery,
   removeComposerTrigger,
+  shouldCommitComposerSelection,
 } from './composerTrigger';
 
 describe('composerTrigger', () => {
@@ -25,6 +26,45 @@ describe('composerTrigger', () => {
       text: '请比较  后面的内容',
       caret: 4,
     });
+  });
+
+  it('removes the full token when selection happens from the middle', () => {
+    const text = '比较 @report 内容';
+    const trigger = findComposerTrigger(text, 7);
+
+    expect(trigger).toMatchObject({ query: 'rep', start: 3, end: 10 });
+    expect(removeComposerTrigger(text, trigger!)).toEqual({
+      text: '比较  内容',
+      caret: 3,
+    });
+  });
+
+  it('commits suggestions only for an eligible key with a real candidate', () => {
+    expect(shouldCommitComposerSelection('Enter', {
+      shiftKey: false,
+      isComposing: false,
+      suggestionCount: 1,
+    })).toBe(true);
+    expect(shouldCommitComposerSelection('Tab', {
+      shiftKey: false,
+      isComposing: false,
+      suggestionCount: 1,
+    })).toBe(true);
+    expect(shouldCommitComposerSelection('Enter', {
+      shiftKey: false,
+      isComposing: false,
+      suggestionCount: 0,
+    })).toBe(false);
+    expect(shouldCommitComposerSelection('Enter', {
+      shiftKey: true,
+      isComposing: false,
+      suggestionCount: 1,
+    })).toBe(false);
+    expect(shouldCommitComposerSelection('Enter', {
+      shiftKey: false,
+      isComposing: true,
+      suggestionCount: 1,
+    })).toBe(false);
   });
 
   it('matches names and descriptions case-insensitively', () => {

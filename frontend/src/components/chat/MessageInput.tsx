@@ -24,6 +24,7 @@ import {
   findComposerTrigger,
   matchesComposerQuery,
   removeComposerTrigger,
+  shouldCommitComposerSelection,
 } from '@/features/chat/composer/composerTrigger';
 
 // Composer upload-progress state. `uploading` carries live byte counts from
@@ -512,13 +513,15 @@ export default function MessageInput() {
           );
           return;
         }
-        if (e.key === 'Enter' || e.key === 'Tab') {
+        if (shouldCommitComposerSelection(e.key, {
+          shiftKey: e.shiftKey,
+          isComposing: isComposingRef.current,
+          suggestionCount: autocompleteSuggestions.length,
+        })) {
           e.preventDefault();
-          if (autocompleteSuggestions.length > 0) {
-            selectAutocompleteSuggestion(
-              autocompleteSuggestions[Math.min(autocompleteIndex, autocompleteSuggestions.length - 1)],
-            );
-          }
+          selectAutocompleteSuggestion(
+            autocompleteSuggestions[Math.min(autocompleteIndex, autocompleteSuggestions.length - 1)],
+          );
           return;
         }
         if (e.key === 'Escape') {

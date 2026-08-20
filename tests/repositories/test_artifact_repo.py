@@ -8,6 +8,8 @@ version history, and batch operations.
 import uuid
 
 import pytest
+from sqlalchemy import inspect
+from sqlalchemy.exc import InvalidRequestError
 
 from db.models import (
     User,
@@ -185,6 +187,42 @@ class TestArtifactCRUD:
         arts = await artifact_repo.list_artifacts(artifact_session)
         assert len(arts) == 1
         assert arts[0].content == long_content
+
+    async def test_reference_lookup_does_not_load_content_or_versions(
+        self,
+        artifact_repo: ArtifactRepository,
+        artifact_session: str,
+        db_session,
+    ):
+        artifact_id = f"art-{uuid.uuid4().hex[:8]}"
+        await artifact_repo.create_artifact(
+            artifact_session,
+            artifact_id,
+            "text/plain",
+            "Reference",
+            "large body that reference validation must not load",
+            metadata={"original_filename": "reference.txt"},
+            source="user_upload",
+        )
+        db_session.expunge_all()
+
+        rows = await artifact_repo.get_artifacts_by_ids(
+            artifact_session,
+            [artifact_id],
+        )
+
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.id == artifact_id
+        assert row.source == "user_upload"
+        assert row.title == "Reference"
+        assert row.metadata_ == {"original_filename": "reference.txt"}
+        assert "content" in inspect(row).unloaded
+        assert "versions" in inspect(row).unloaded
+        with pytest.raises(InvalidRequestError):
+            _ = row.content
+        with pytest.raises(InvalidRequestError):
+            _ = row.versions
 
 
 # ============================================================

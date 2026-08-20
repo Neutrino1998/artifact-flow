@@ -83,7 +83,10 @@ function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCo
     const trimmed = editContent.trim();
     if (!trimmed || isStreaming) return;
     setEditing(false);
-    // Send as a new branch from the parent of this message
+    // Editing and rerun deliberately create a text-only sibling branch. Per-turn
+    // uploads, explicit references, and skill selections are display snapshots
+    // of the original request and are not replayed. Existing artifacts remain in
+    // the session inventory; sticky runtime state is inherited from `parentId`.
     await sendMessage(trimmed, parentId);
   }, [editContent, isStreaming, sendMessage, parentId]);
 
@@ -223,11 +226,11 @@ function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCo
               <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
             </svg>
           </button>
-          {/* Rerun re-sends the text; an attachment-only message has none to
-              re-send (the backend rejects blank text with no files — attachment
-              replay is deliberately not a thing, the artifacts already live in
-              the session inventory). Hide rather than disable: the action is
-              semantically absent, not temporarily unavailable. */}
+          {/* Rerun re-sends text only. Uploads, explicit references, and skill
+              selections are not replayed; their original chips remain historical
+              display snapshots. A context-only message therefore has nothing to
+              rerun. Hide rather than disable: the action is semantically absent,
+              not temporarily unavailable. */}
           {content.trim() !== '' && (
           <button
             onClick={handleRerun}

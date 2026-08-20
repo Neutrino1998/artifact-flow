@@ -8,7 +8,7 @@ from typing import Optional, List, Dict, Any, Tuple
 
 from sqlalchemy import select, update, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import load_only, raiseload, selectinload
 
 from db.models import (
     Artifact,
@@ -278,18 +278,37 @@ class ArtifactRepository(BaseRepository[Artifact]):
         session_id: str,
         artifact_ids: List[str],
     ) -> List[Artifact]:
-        """Return artifacts from one session without loading blob bytes.
+        """Return the small ORM projection needed to validate file references.
 
         The query is session-scoped, so an id from another conversation is
         indistinguishable from a missing id. Callers that need request-order
         preservation should reorder the returned rows against ``artifact_ids``.
+        Unselected columns and relationships raise on access: this admission
+        path must never materialize artifact bodies or version history.
         """
         if not artifact_ids:
             return []
-        query = select(Artifact).where(
-            and_(
-                Artifact.session_id == session_id,
-                Artifact.id.in_(artifact_ids),
+        query = (
+            select(Artifact)
+            .options(
+                load_only(
+                    Artifact.id,
+                    Artifact.session_id,
+                    Artifact.source,
+                    Artifact.title,
+                    Artifact.metadata_,
+                    raiseload=True,
+                ),
+                # Artifact.versions defaults to selectin eager loading. Override
+                # it explicitly so a reference-only admission check cannot load
+                # every historical ArtifactVersion.content row.
+                raiseload(Artifact.versions),
+            )
+            .where(
+                and_(
+                    Artifact.session_id == session_id,
+                    Artifact.id.in_(artifact_ids),
+                )
             )
         )
         result = await self._session.execute(query)
