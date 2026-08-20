@@ -1079,6 +1079,7 @@ class ArtifactService:
             db_artifacts = await repo.list_artifacts(
                 session_id=session_id,
                 content_type=content_type,
+                include_content=include_content,
             )
 
             seen_ids: set = set()

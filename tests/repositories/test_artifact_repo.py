@@ -173,7 +173,10 @@ class TestArtifactCRUD:
         assert md_only[0].content_type == "text/markdown"
 
     async def test_list_artifacts_returns_orm_objects(
-        self, artifact_repo: ArtifactRepository, artifact_session: str
+        self,
+        artifact_repo: ArtifactRepository,
+        artifact_session: str,
+        db_session,
     ):
         long_content = "x" * 300
         await artifact_repo.create_artifact(
@@ -183,10 +186,55 @@ class TestArtifactCRUD:
             "Long",
             long_content,
         )
+        db_session.expunge_all()
 
         arts = await artifact_repo.list_artifacts(artifact_session)
         assert len(arts) == 1
         assert arts[0].content == long_content
+        assert "versions" in inspect(arts[0]).unloaded
+        with pytest.raises(InvalidRequestError):
+            _ = arts[0].versions
+
+    async def test_list_artifact_summaries_do_not_load_content_or_versions(
+        self,
+        artifact_repo: ArtifactRepository,
+        artifact_session: str,
+        db_session,
+    ):
+        artifact_id = f"art-{uuid.uuid4().hex[:8]}"
+        await artifact_repo.create_artifact(
+            artifact_session,
+            artifact_id,
+            "text/plain",
+            "Summary",
+            "body that a summary query must not load",
+            metadata={"original_filename": "summary.txt"},
+            source="user_upload",
+        )
+        db_session.expunge_all()
+
+        arts = await artifact_repo.list_artifacts(
+            artifact_session,
+            include_content=False,
+        )
+
+        assert len(arts) == 1
+        row = arts[0]
+        assert row.id == artifact_id
+        assert row.content_type == "text/plain"
+        assert row.source == "user_upload"
+        assert row.title == "Summary"
+        assert row.current_version == 1
+        assert row.metadata_ == {"original_filename": "summary.txt"}
+        assert row.has_blob is False
+        assert row.created_at is not None
+        assert row.updated_at is not None
+        assert "content" in inspect(row).unloaded
+        assert "versions" in inspect(row).unloaded
+        with pytest.raises(InvalidRequestError):
+            _ = row.content
+        with pytest.raises(InvalidRequestError):
+            _ = row.versions
 
     async def test_reference_lookup_does_not_load_content_or_versions(
         self,
