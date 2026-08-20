@@ -78,7 +78,10 @@ async def seed_conversation(
             metadata={
                 "activated_skills": [
                     {"slug": "docx", "name": "Word documents"}
-                ]
+                ],
+                "referenced_artifacts": [
+                    {"id": "prior-brief", "filename": "Prior Brief.pdf"}
+                ],
             },
         )
         await repo.update_response(msg1_id, "first response")
@@ -232,6 +235,9 @@ class TestConversationDetail:
         first = next(message for message in body["messages"] if message["id"] == msg_ids[0])
         assert first["activated_skills"] == [
             {"slug": "docx", "name": "Word documents"}
+        ]
+        assert first["referenced_artifacts"] == [
+            {"id": "prior-brief", "filename": "Prior Brief.pdf"}
         ]
         # Per-turn user intent is distinct from the cumulative lead-agent state.
         assert first["active_skills"] is None

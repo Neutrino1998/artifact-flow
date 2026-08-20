@@ -54,6 +54,7 @@ describe('conversationStore — active_message_id CAS', () => {
       executionMetrics: { total_duration_ms: 1_800_000 },
       uploadedFiles: [{ filename: 'brief.docx' }],
       activatedSkills: [{ slug: 'docx', name: 'Word 文档' }],
+      referencedArtifacts: [{ id: 'prior-brief', filename: 'prior-brief.docx' }],
     });
 
     const state = useConversationStore.getState();
@@ -66,6 +67,9 @@ describe('conversationStore — active_message_id CAS', () => {
     expect(state.branchPath[0].uploaded_files?.[0].filename).toBe('brief.docx');
     expect(state.branchPath[0].activated_skills).toEqual([
       { slug: 'docx', name: 'Word 文档' },
+    ]);
+    expect(state.branchPath[0].referenced_artifacts).toEqual([
+      { id: 'prior-brief', filename: 'prior-brief.docx' },
     ]);
   });
 
@@ -88,6 +92,7 @@ describe('conversationStore — active_message_id CAS', () => {
         execution_metrics: null,
         uploaded_files: null,
         activated_skills: null,
+        referenced_artifacts: null,
         active_skills: null,
       }],
     });
@@ -126,6 +131,7 @@ describe('conversationStore — active_message_id CAS', () => {
         execution_metrics: null,
         uploaded_files: null,
         activated_skills: null,
+        referenced_artifacts: null,
         active_skills: null,
       }],
     });

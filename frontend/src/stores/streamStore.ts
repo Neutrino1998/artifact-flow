@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { CompactionReason, ExecutionMetrics, TokenUsage } from '@/types/events';
-import type { ActivatedSkillRef } from '@/types';
+import type { ActivatedSkillRef, ReferencedArtifactRef } from '@/types';
 
 export interface ToolCallInfo {
   /** Provider-issued native tool-call id; joins llm_complete/start/complete. */
@@ -193,6 +193,9 @@ interface StreamState {
   // active_skills or model-initiated read_skill activation.
   pendingUserSkills: ActivatedSkillRef[] | null;
 
+  // Existing conversation uploads explicitly referenced for this turn.
+  pendingUserReferences: ReferencedArtifactRef[] | null;
+
   // Parent ID for rerun/edit branching (controls branchPath truncation)
   // undefined = normal send, null = root rerun, string = rerun from specific parent
   streamParentId: string | null | undefined;
@@ -257,6 +260,7 @@ interface StreamState {
   setPendingUserMessage: (msg: string | null) => void;
   setPendingUserFiles: (files: string[] | null) => void;
   setPendingUserSkills: (skills: ActivatedSkillRef[] | null) => void;
+  setPendingUserReferences: (references: ReferencedArtifactRef[] | null) => void;
   setStreamParentId: (id: string | null | undefined) => void;
 
   // Non-agent blocks / metrics
@@ -336,6 +340,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
     pendingUserMessage: null,
     pendingUserFiles: null,
     pendingUserSkills: null,
+    pendingUserReferences: null,
     streamParentId: undefined,
     completedSegments: new Map(),
     nonAgentBlocks: [],
@@ -386,6 +391,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
         pendingUserMessage: null,
         pendingUserFiles: null,
         pendingUserSkills: null,
+        pendingUserReferences: null,
         pendingInjects: [],
         streamParentId: undefined,
         permissionRequest: null,
@@ -484,6 +490,7 @@ export const useStreamStore = create<StreamState>((set, get) => {
     setPendingUserMessage: (msg) => set({ pendingUserMessage: msg }),
     setPendingUserFiles: (files) => set({ pendingUserFiles: files }),
     setPendingUserSkills: (skills) => set({ pendingUserSkills: skills }),
+    setPendingUserReferences: (references) => set({ pendingUserReferences: references }),
     setStreamParentId: (id) => set({ streamParentId: id }),
 
     pushNonAgentBlock: (block) =>

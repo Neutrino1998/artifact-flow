@@ -126,6 +126,7 @@ def create_initial_state(
     agent_progressive_state: Optional[Dict[str, Dict[str, List[str]]]] = None,
     activated_skill_bodies: Optional[List[Dict[str, Any]]] = None,
     uploaded_files: Optional[List[Dict[str, Any]]] = None,
+    referenced_artifacts: Optional[List[Dict[str, str]]] = None,
     force_compact: bool = False,
     entry_agent: str = "lead_agent",
 ) -> Dict[str, Any]:
@@ -144,6 +145,8 @@ def create_initial_state(
                         ArtifactService.create_from_upload stage 进 WorkingSet（发
                         ARTIFACT_CREATED、随 turn 末 flush 落库），并据回填的 id 在
                         USER_INPUT 正文追加归属说明（仅 LLM 可见）。不在 chat 路由即时 commit。
+        referenced_artifacts: 本轮显式引用的既有 user_upload [{"id","filename"}]；
+                        execute_loop 仅注入优先读取提示，不裁剪 session inventory。
         agent_progressive_state: 按 agent 隔离的 sticky skill/tool 披露状态。
         activated_skill_bodies: 本轮按钮勾选、要注入正文的 skill [{"slug","name","body"}, ...]
                        (turn handler 取自 skill_md,已过可见性/空 body 过滤)。execute_loop 在
@@ -181,6 +184,7 @@ def create_initial_state(
         # [{id, filename}](execute_loop 填充,供 USER_INPUT 归属说明用)。
         "uploaded_files": list(uploaded_files) if uploaded_files else [],
         "uploaded_artifacts": [],
+        "referenced_artifacts": list(referenced_artifacts) if referenced_artifacts else [],
         "force_compact": force_compact,
     }
 
@@ -228,21 +232,23 @@ def turn_has_content(
     uploaded_files: Optional[List[Any]] = None,
     force_compact: bool = False,
     activated_skill_bodies: Optional[List[Any]] = None,
+    referenced_artifacts: Optional[List[Any]] = None,
 ) -> bool:
     """本轮 USER_INPUT 是否会有内容注入 —— 空输入不变量的**单一真相**。
 
-    正文 / 上传归属串 / skill 正文 / 压缩指令,任一非空即有内容(镜像 execute_loop 的
+    正文 / 上传归属串 / 文件引用 / skill 正文 / 压缩指令,任一非空即有内容(镜像 execute_loop 的
     `parts` 组装)。全空 → 空 USER_INPUT → 被 EventHistory `if content:` 过滤 → 空 history
     → context_manager `[-1]` 崩(见 context_manager 注释的上游不变量)。
 
     关键:`activated_skill_bodies` 是**解析后**的 skill 正文(经可见性/去重/空 body 三重过滤),
-    **不是** raw `activate_skills` 请求 —— 后者是意图、可能全被过滤掉。上传/compact 的判据本
-    就"presence ⟺ 注入非空",skill 不是,故此闸只认解析后的 bodies(三者对齐)。"""
+    **不是** raw `activate_skills` 请求 —— 后者是意图、可能全被过滤掉。上传/引用/compact
+    的判据本就"presence ⟺ 注入非空",skill 不是,故此闸只认解析后的 bodies。"""
     return bool(
         user_input.strip()
         or uploaded_files
         or force_compact
         or activated_skill_bodies
+        or referenced_artifacts
     )
 
 
@@ -437,8 +443,8 @@ async def execute_loop(
 
     # 3a. 记录用户原始输入为事件（统一 context 构建路径）。USER_INPUT 正文 = 用户原始输入
     # + 本轮**增补**(turn augmentations，仅 LLM 可见，不入 Message.user_input display)。
-    # 三类增补 —— 上传归属串 / skill 正文 / 压缩指令 —— 产地各异(上传 stage 后拿 id、skill
-    # 由 turn handler 从 DB 取、compact 静态)，但都汇到这一处:塞进 `parts` list、末尾 join 一次
+    # 四类增补 —— 上传归属串 / 既有文件引用 / skill 正文 / 压缩指令 —— 产地各异，但都
+    # 汇到这一处:塞进 `parts` list、末尾 join 一次
     # (取代过去三段各自 `f"{c}\n\n{x}" if c.strip() else x` 的复制注入)。turn 非空的唯一真相
     # = `bool(parts)`，由 ConversationTurnHandler.run 的权威闸保证 —— 到这里
     # parts 必非空(空 → 空 USER_INPUT → 被 EventHistory 过滤 → 击穿 context_manager 的 [-1])。
@@ -456,6 +462,16 @@ async def execute_loop(
             parts.append(
                 f"[The user attached {len(_uploaded)} file(s) to this message: {_listing}. "
                 f"Use read_artifact with the id for full content.]"
+            )
+
+        _referenced = state.get("referenced_artifacts") or []
+        if _referenced:
+            _listing = ", ".join(a["id"] for a in _referenced)
+            parts.append(
+                f"[The user explicitly referenced {len(_referenced)} existing uploaded "
+                f"file(s) for this request: {_listing}. Prioritize these files when "
+                "answering and use read_artifact with the ids for full content. Other "
+                "session artifacts remain available.]"
             )
 
         # 用户点按钮激活 skill：注入新激活 skill 的正文（与模型自调 read_skill 等价,入口是用户

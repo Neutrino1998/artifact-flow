@@ -13,6 +13,7 @@ function msg(id: string, parent_id: string | null = null): MessageResponse {
     execution_metrics: null,
     uploaded_files: null,
     activated_skills: null,
+    referenced_artifacts: null,
     active_skills: null,
   };
 }

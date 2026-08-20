@@ -5,6 +5,7 @@ import type {
   MessageResponse,
   MessageFeedbackResponse,
   ActivatedSkillRef,
+  ReferencedArtifactRef,
 } from '@/types';
 import { MessageNode, buildMessageTree, extractBranchPath } from '@/lib/messageTree';
 
@@ -52,6 +53,7 @@ interface ConversationState {
     executionMetrics?: Record<string, unknown> | null;
     uploadedFiles?: { filename: string }[] | null;
     activatedSkills?: ActivatedSkillRef[] | null;
+    referencedArtifacts?: ReferencedArtifactRef[] | null;
   }) => void;
   removeConversation: (id: string) => void;
   /** Optimistically set the cached active_message_id for a conv. Called by
@@ -148,6 +150,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     executionMetrics,
     uploadedFiles,
     activatedSkills,
+    referencedArtifacts,
   }) => {
     const now = new Date().toISOString();
     const state = get();
@@ -164,6 +167,8 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         execution_metrics: executionMetrics ?? messages[idx].execution_metrics ?? null,
         uploaded_files: uploaded ?? messages[idx].uploaded_files ?? null,
         activated_skills: activatedSkills ?? messages[idx].activated_skills ?? null,
+        referenced_artifacts:
+          referencedArtifacts ?? messages[idx].referenced_artifacts ?? null,
       };
     } else {
       messages.push({
@@ -179,6 +184,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         execution_metrics: executionMetrics ?? null,
         uploaded_files: uploaded ?? null,
         activated_skills: activatedSkills ?? null,
+        referenced_artifacts: referencedArtifacts ?? null,
         active_skills: null,
       });
     }

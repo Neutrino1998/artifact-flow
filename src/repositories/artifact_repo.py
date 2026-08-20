@@ -273,6 +273,28 @@ class ArtifactRepository(BaseRepository[Artifact]):
         result = await self._session.execute(query)
         return list(result.scalars().all())
 
+    async def get_artifacts_by_ids(
+        self,
+        session_id: str,
+        artifact_ids: List[str],
+    ) -> List[Artifact]:
+        """Return artifacts from one session without loading blob bytes.
+
+        The query is session-scoped, so an id from another conversation is
+        indistinguishable from a missing id. Callers that need request-order
+        preservation should reorder the returned rows against ``artifact_ids``.
+        """
+        if not artifact_ids:
+            return []
+        query = select(Artifact).where(
+            and_(
+                Artifact.session_id == session_id,
+                Artifact.id.in_(artifact_ids),
+            )
+        )
+        result = await self._session.execute(query)
+        return list(result.scalars().all())
+
     # ========================================
     # 二进制存储 (ArtifactBlob)
     # ========================================

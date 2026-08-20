@@ -3103,6 +3103,11 @@ export interface components {
              */
             activated_skills: components["schemas"]["ActivatedSkillRef"][] | null;
             /**
+             * Referenced Artifacts
+             * @description Existing user-upload artifacts explicitly referenced on this turn, from Message.metadata_['referenced_artifacts']. This is a per-message display snapshot.
+             */
+            referenced_artifacts: components["schemas"]["ReferencedArtifactRef"][] | null;
+            /**
              * Active Skills
              * @description Lead-agent skill slugs active as of this turn, projected from Message.metadata_['agent_progressive_state']['lead_agent']['active_skills']. The branch-tail message drives the activation picker. Absent/empty when no skills are active.
              */
@@ -3169,6 +3174,22 @@ export interface components {
             require_digit: boolean;
             /** Require Symbol */
             require_symbol: boolean;
+        };
+        /**
+         * ReferencedArtifactRef
+         * @description Existing uploaded artifact explicitly referenced on one message.
+         */
+        ReferencedArtifactRef: {
+            /**
+             * Id
+             * @description Referenced artifact ID
+             */
+            id: string;
+            /**
+             * Filename
+             * @description Original filename frozen at send time
+             */
+            filename: string;
         };
         /**
          * ResolveDepartmentRequest

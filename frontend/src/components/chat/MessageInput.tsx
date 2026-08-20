@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useChat } from '@/features/chat/runtime/useChat';
 import { useComposerSend } from '@/features/chat/runtime/useComposerSend';
 import { useStreamStore } from '@/stores/streamStore';
@@ -9,14 +9,22 @@ import { useConversationStore } from '@/stores/conversationStore';
 import { useConfigStore } from '@/stores/configStore';
 import { useStagedFilesStore, type StagedFile } from '@/stores/stagedFilesStore';
 import StagedFileChip from './StagedFileChip';
-import { injectMessage, cancelExecution, getSkills } from '@/lib/api';
+import { injectMessage, cancelExecution, getSkills, listArtifacts } from '@/lib/api';
 import type { UploadEvent } from '@/lib/api';
-import type { SkillItem } from '@/types';
-import { PillBadge } from '@/components/ui/PillBadge';
+import type { ArtifactSummary, ReferencedArtifactRef, SkillItem } from '@/types';
 import { StatusNotice } from '@/components/ui/StatusNotice';
 import { formatTokens } from '@/lib/formatTokens';
 import { formatBytes } from '@/lib/formatBytes';
 import { MAX_MESSAGE_CHARS, MAX_CHAT_ATTACHMENTS } from '@/lib/constants';
+import ComposerAutocomplete, {
+  type ComposerSuggestion,
+} from '@/features/chat/composer/ComposerAutocomplete';
+import {
+  composerTriggerKey,
+  findComposerTrigger,
+  matchesComposerQuery,
+  removeComposerTrigger,
+} from '@/features/chat/composer/composerTrigger';
 
 // Composer upload-progress state. `uploading` carries live byte counts from
 // xhr.upload.onprogress; `processing` is the gap between "last byte sent"
@@ -60,8 +68,17 @@ export default function MessageInput() {
   const [enabledSkills, setEnabledSkills] = useState<SkillItem[]>([]);
   const [skillsLoaded, setSkillsLoaded] = useState(false);
   const [skillsError, setSkillsError] = useState(false);
-  // picker 内的即时过滤(技能多了翻不动;关闭时清空,下次打开从全量开始)
-  const [skillFilter, setSkillFilter] = useState('');
+  // Existing user-upload artifacts explicitly referenced for the next send.
+  // These are per-turn (unlike sticky skill activation) and are resolved by id
+  // again at the backend admission boundary.
+  const [referencedArtifacts, setReferencedArtifacts] = useState<ReferencedArtifactRef[]>([]);
+  const [referenceCandidates, setReferenceCandidates] = useState<ArtifactSummary[]>([]);
+  const [referencesLoaded, setReferencesLoaded] = useState(false);
+  const [referencesError, setReferencesError] = useState(false);
+  const [caretPosition, setCaretPosition] = useState(0);
+  const [compositionActive, setCompositionActive] = useState(false);
+  const [dismissedTriggerKey, setDismissedTriggerKey] = useState<string | null>(null);
+  const [autocompleteIndex, setAutocompleteIndex] = useState(0);
   // null when idle; only set when a send carried files (text-only sends finish
   // too fast for a progress bar to be useful). Lifecycle is owned by handleSend
   // — it sets this in the onUpload callback and clears it in the finally branch.
@@ -120,6 +137,18 @@ export default function MessageInput() {
   const conversationId = useConversationStore((s) => s.current?.id);
   const streamConversationId = useStreamStore((s) => s.conversationId);
 
+  const rawComposerTrigger = !isStreaming && !compositionActive
+    ? findComposerTrigger(content, caretPosition)
+    : null;
+  const rawTriggerKey = rawComposerTrigger
+    ? composerTriggerKey(rawComposerTrigger)
+    : null;
+  const composerTrigger = rawComposerTrigger && rawTriggerKey !== dismissedTriggerKey
+    ? rawComposerTrigger
+    : null;
+  const skillAutocompleteOpen = composerTrigger?.kind === 'skill';
+  const fileAutocompleteOpen = composerTrigger?.kind === 'file';
+
   // Context-usage gauge: how much context the next message will carry, vs the
   // backend auto-compaction threshold. Sourced from the persisted branch tail's
   // `execution_metrics` — the last lead LLM call's `last_input_tokens +
@@ -139,16 +168,10 @@ export default function MessageInput() {
   // The picker marks these "已激活" so re-checking one — which re-injects its full body,
   // a deliberate "re-remind" (useful after compaction) — is an informed choice, not a
   // surprise re-send. Doesn't gate arming: the user can still re-check to re-inject.
-  const alreadyActiveSkills = new Set(lastNode?.active_skills ?? []);
-  // picker 过滤视图(name/描述子串,大小写不敏感)。空过滤 = 全量。
-  const skillFilterQ = skillFilter.trim().toLowerCase();
-  const filteredEnabledSkills = skillFilterQ
-    ? enabledSkills.filter(
-        (s) =>
-          s.name.toLowerCase().includes(skillFilterQ) ||
-          (s.description ?? '').toLowerCase().includes(skillFilterQ),
-      )
-    : enabledSkills;
+  const alreadyActiveSkills = useMemo(
+    () => new Set(lastNode?.active_skills ?? []),
+    [lastNode?.active_skills],
+  );
   const lastMetrics = lastNode?.execution_metrics as
     | { last_input_tokens?: number | null; last_output_tokens?: number | null }
     | null
@@ -179,7 +202,8 @@ export default function MessageInput() {
     if (!hasPersistedHistory && forceCompact) setForceCompact(false);
   }, [hasPersistedHistory, forceCompact]);
 
-  // Refresh the enabled-skill list each time the picker opens — still a refetch
+  // Refresh the enabled-skill list each time either entry opens — the button is
+  // the browse path, while `/` filters the same candidates from the textarea.
   // (a skill just disabled in 技能管理 must not linger here), but stale-while-
   // revalidate: keep the previously-loaded list on screen and refetch silently,
   // so re-opening doesn't flash "加载中" on every open. The spinner shows only on
@@ -188,7 +212,7 @@ export default function MessageInput() {
   // the stale list (render prefers a usable list over the error screen) and only
   // surface the error when there's nothing cached to show.
   useEffect(() => {
-    if (!skillPickerOpen) return;
+    if (!skillPickerOpen && !skillAutocompleteOpen) return;
     let alive = true;
     setSkillsError(false);
     (async () => {
@@ -208,7 +232,86 @@ export default function MessageInput() {
     return () => {
       alive = false;
     };
-  }, [skillPickerOpen]);
+  }, [skillPickerOpen, skillAutocompleteOpen]);
+
+  // `@` searches persisted user uploads from the whole current conversation.
+  // Current-turn staged files are intentionally absent: they already ride this
+  // message as attachments and only become reference candidates after flush.
+  useEffect(() => {
+    if (!fileAutocompleteOpen) return;
+    if (!conversationId) {
+      setReferenceCandidates([]);
+      setReferencesLoaded(true);
+      setReferencesError(false);
+      return;
+    }
+    let alive = true;
+    setReferencesError(false);
+    (async () => {
+      try {
+        const data = await listArtifacts(conversationId);
+        if (!alive) return;
+        setReferenceCandidates(
+          data.artifacts
+            .filter((artifact) => artifact.source === 'user_upload')
+            .sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
+        );
+      } catch (err) {
+        console.error('Failed to load reference candidates:', err);
+        if (alive) setReferencesError(true);
+      } finally {
+        if (alive) setReferencesLoaded(true);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [fileAutocompleteOpen, conversationId]);
+
+  const skillSuggestions = useMemo<ComposerSuggestion[]>(() => enabledSkills.map((skill) => ({
+    key: `skill:${skill.slug}`,
+    title: skill.name,
+    description: skill.description,
+    badge: alreadyActiveSkills.has(skill.slug) ? '已激活' : undefined,
+    selected: activeSkills.includes(skill.slug),
+  })), [enabledSkills, alreadyActiveSkills, activeSkills]);
+
+  const autocompleteSuggestions = useMemo<ComposerSuggestion[]>(() => {
+    if (!composerTrigger) return [];
+    if (composerTrigger.kind === 'skill') {
+      return skillSuggestions.filter((suggestion) => matchesComposerQuery(
+        composerTrigger.query,
+        suggestion.title,
+        suggestion.description,
+        suggestion.key.slice('skill:'.length),
+      ));
+    }
+    return referenceCandidates
+      .filter((artifact) => matchesComposerQuery(
+        composerTrigger.query,
+        artifact.original_filename,
+        artifact.title,
+        artifact.id,
+      ))
+      .map((artifact) => ({
+        key: `file:${artifact.id}`,
+        title: artifact.original_filename || artifact.title,
+        description: '当前会话已上传文件',
+        selected: referencedArtifacts.some((item) => item.id === artifact.id),
+      }));
+  }, [
+    composerTrigger,
+    skillSuggestions,
+    referenceCandidates,
+    referencedArtifacts,
+  ]);
+
+  const autocompleteSuggestionKey = autocompleteSuggestions
+    .map((suggestion) => suggestion.key)
+    .join('|');
+  useEffect(() => {
+    setAutocompleteIndex(0);
+  }, [composerTrigger?.kind, composerTrigger?.query, autocompleteSuggestionKey, skillPickerOpen]);
 
   // Armed skills belong to the conversation they were armed in — clear on any
   // conversation change, 新建对话 included (#2). Switching to an *existing*
@@ -217,8 +320,12 @@ export default function MessageInput() {
   // message. Mirrors forceCompact's hygiene (which is gated by hasPersistedHistory).
   useEffect(() => {
     setActiveSkills([]);
+    setReferencedArtifacts([]);
+    setReferenceCandidates([]);
+    setReferencesLoaded(false);
+    setReferencesError(false);
     setSkillPickerOpen(false);
-    setSkillFilter('');
+    setDismissedTriggerKey(null);
   }, [activeKey]);
 
   const toggleSkill = useCallback((slug: string) => {
@@ -226,6 +333,55 @@ export default function MessageInput() {
       prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug],
     );
   }, []);
+
+  const removeReference = useCallback((artifactId: string) => {
+    setReferencedArtifacts((prev) => prev.filter((item) => item.id !== artifactId));
+  }, []);
+
+  const commitComposerSelection = useCallback(() => {
+    if (!composerTrigger) return;
+    const next = removeComposerTrigger(content, composerTrigger);
+    setText(next.text);
+    setCaretPosition(next.caret);
+    setDismissedTriggerKey(null);
+    setSkillPickerOpen(false);
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      textarea.setSelectionRange(next.caret, next.caret);
+    });
+  }, [composerTrigger, content, setText]);
+
+  const selectAutocompleteSuggestion = useCallback((suggestion: ComposerSuggestion) => {
+    if (suggestion.key.startsWith('skill:')) {
+      const slug = suggestion.key.slice('skill:'.length);
+      setActiveSkills((prev) => prev.includes(slug) ? prev : [...prev, slug]);
+      commitComposerSelection();
+      return;
+    }
+
+    const artifactId = suggestion.key.slice('file:'.length);
+    const artifact = referenceCandidates.find((candidate) => candidate.id === artifactId);
+    if (!artifact) return;
+    setReferencedArtifacts((prev) => {
+      if (prev.some((item) => item.id === artifact.id)) return prev;
+      if (prev.length >= MAX_CHAT_ATTACHMENTS) return prev;
+      return [
+        ...prev,
+        {
+          id: artifact.id,
+          filename: artifact.original_filename || artifact.title,
+        },
+      ];
+    });
+    commitComposerSelection();
+  }, [commitComposerSelection, referenceCandidates]);
+
+  const selectSkillPickerSuggestion = useCallback((suggestion: ComposerSuggestion) => {
+    if (!suggestion.key.startsWith('skill:')) return;
+    toggleSkill(suggestion.key.slice('skill:'.length));
+  }, [toggleSkill]);
 
   const handleSend = useCallback(async () => {
     if (isStreaming && !content.trim()) {
@@ -272,6 +428,7 @@ export default function MessageInput() {
     // Snapshot armed skills for this send (cleared on success below). An
     // activation-only send (no text/files) is allowed, same as compact.
     const skillsToActivate = activeSkills;
+    const referencesToUse = referencedArtifacts;
     const skillRefsToActivate = skillsToActivate.map((slug) => {
       const info = enabledSkills.find((skill) => skill.slug === slug);
       return { slug, name: info?.name ?? slug };
@@ -297,9 +454,11 @@ export default function MessageInput() {
         const ok = await sendMessage(
           text, undefined, files, compact, onUpload,
           skillRefsToActivate.length ? skillRefsToActivate : undefined,
+          referencesToUse.length ? referencesToUse : undefined,
         );
         if (ok && forceCompact) setForceCompact(false);
         if (ok && skillsToActivate.length) setActiveSkills([]);
+        if (ok && referencesToUse.length) setReferencedArtifacts([]);
         return ok;
       } finally {
         // Single convergence point: success / failure / throw all clear the
@@ -308,11 +467,12 @@ export default function MessageInput() {
         // by useComposerSend's reconcile-on-success rule.
         setUploadProgress(null);
       }
-    }, compact || skillsToActivate.length > 0);
-  }, [content, isStreaming, cancelling, setCancelling, conversationId, streamConversationId, inject, submit, sendMessage, forceCompact, effectiveForceCompact, activeSkills, enabledSkills, addPendingInject, removePendingInject]);
+    }, compact || skillsToActivate.length > 0 || referencesToUse.length > 0);
+  }, [content, isStreaming, cancelling, setCancelling, conversationId, streamConversationId, inject, submit, sendMessage, forceCompact, effectiveForceCompact, activeSkills, referencedArtifacts, enabledSkills, addPendingInject, removePendingInject]);
 
   const handleCompositionStart = useCallback(() => {
     isComposingRef.current = true;
+    setCompositionActive(true);
   }, []);
 
   const handleCompositionEnd = useCallback(() => {
@@ -320,17 +480,59 @@ export default function MessageInput() {
     // to ensure the Enter keydown that confirms composition is still blocked
     requestAnimationFrame(() => {
       isComposingRef.current = false;
+      setCompositionActive(false);
     });
+  }, []);
+
+  const handleTextChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setText(e.target.value);
+    setCaretPosition(e.target.selectionStart ?? e.target.value.length);
+    setDismissedTriggerKey(null);
+    setSkillPickerOpen(false);
+  }, [setText]);
+
+  const handleTextSelection = useCallback((e: React.SyntheticEvent<HTMLTextAreaElement>) => {
+    const textarea = e.currentTarget;
+    setCaretPosition(textarea.selectionStart ?? textarea.value.length);
+    setDismissedTriggerKey(null);
   }, []);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if (composerTrigger) {
+        if (e.key === 'ArrowDown' && autocompleteSuggestions.length > 0) {
+          e.preventDefault();
+          setAutocompleteIndex((index) => (index + 1) % autocompleteSuggestions.length);
+          return;
+        }
+        if (e.key === 'ArrowUp' && autocompleteSuggestions.length > 0) {
+          e.preventDefault();
+          setAutocompleteIndex((index) =>
+            (index - 1 + autocompleteSuggestions.length) % autocompleteSuggestions.length,
+          );
+          return;
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          e.preventDefault();
+          if (autocompleteSuggestions.length > 0) {
+            selectAutocompleteSuggestion(
+              autocompleteSuggestions[Math.min(autocompleteIndex, autocompleteSuggestions.length - 1)],
+            );
+          }
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          if (rawTriggerKey) setDismissedTriggerKey(rawTriggerKey);
+          return;
+        }
+      }
       if (e.key === 'Enter' && !e.shiftKey && !isComposingRef.current) {
         e.preventDefault();
         handleSend();
       }
     },
-    [handleSend]
+    [composerTrigger, autocompleteSuggestions, autocompleteIndex, selectAutocompleteSuggestion, rawTriggerKey, handleSend]
   );
 
   const handlePaste = useCallback(
@@ -431,8 +633,38 @@ export default function MessageInput() {
             into a single dynamic breakpoint was brittle. @container makes the
             composer self-aware: it only shows what fits in its own box. */}
         <div
-          className="@container bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-2xl shadow-float px-4 py-3 transition-colors"
+          className="relative @container bg-surface dark:bg-surface-dark border border-border dark:border-border-dark focus-within:border-accent dark:focus-within:border-accent rounded-2xl shadow-float px-4 py-3 transition-colors"
         >
+          {skillPickerOpen && (
+            <button
+              className="fixed inset-0 z-20 cursor-default"
+              aria-label="关闭技能选择"
+              onClick={() => setSkillPickerOpen(false)}
+            />
+          )}
+          {(composerTrigger || skillPickerOpen) && (
+            <ComposerAutocomplete
+              kind={composerTrigger?.kind ?? 'skill'}
+              suggestions={composerTrigger ? autocompleteSuggestions : skillSuggestions}
+              activeIndex={autocompleteIndex}
+              loading={
+                (composerTrigger?.kind ?? 'skill') === 'skill'
+                  ? !skillsLoaded
+                  : !referencesLoaded
+              }
+              error={
+                (composerTrigger?.kind ?? 'skill') === 'skill'
+                  ? skillsError
+                  : referencesError
+              }
+              hasConversation={Boolean(conversationId)}
+              hint={skillPickerOpen ? '可多选 · 输入 / 可搜索' : undefined}
+              emptyText={skillPickerOpen ? '暂无可激活的技能，可在「技能管理」中开启。' : undefined}
+              multiSelect={skillPickerOpen}
+              onActiveIndexChange={setAutocompleteIndex}
+              onSelect={skillPickerOpen ? selectSkillPickerSuggestion : selectAutocompleteSuggestion}
+            />
+          )}
           {/* Why some picked files weren't staged (unsupported format / over
               the attachment cap). Covers drag-drop too, which bypasses the
               disabled attach button. */}
@@ -467,6 +699,36 @@ export default function MessageInput() {
               <span className="inline-flex items-center px-1 text-xs tabular-nums text-text-tertiary dark:text-text-tertiary-dark">
                 {stagedFiles.length}/{MAX_CHAT_ATTACHMENTS}
               </span>
+            </div>
+          )}
+
+          {/* Existing uploads from this conversation, explicitly referenced for
+              the next turn via @. Distinct from staged files: no bytes are sent. */}
+          {referencedArtifacts.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {referencedArtifacts.map((artifact) => (
+                <span
+                  key={artifact.id}
+                  className="inline-flex min-w-0 items-center gap-1 max-w-[16rem] pl-2 pr-1 py-1 rounded-lg bg-surface dark:bg-bg-dark border border-border dark:border-border-dark text-xs text-text-secondary dark:text-text-secondary-dark"
+                  title={`引用会话文件：${artifact.filename}`}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                    <path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1" />
+                    <path d="M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.1-1.1" />
+                  </svg>
+                  <span className="shrink-0 text-text-tertiary dark:text-text-tertiary-dark">引用</span>
+                  <span className="min-w-0 truncate">{artifact.filename}</span>
+                  <button
+                    onClick={() => removeReference(artifact.id)}
+                    className="shrink-0 p-0.5 rounded hover:bg-bg dark:hover:bg-surface-dark"
+                    aria-label={`取消引用 ${artifact.filename}`}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                      <path d="M18 6L6 18M6 6l12 12" />
+                    </svg>
+                  </button>
+                </span>
+              ))}
             </div>
           )}
 
@@ -567,7 +829,12 @@ export default function MessageInput() {
           <textarea
             ref={textareaRef}
             value={content}
-            onChange={(e) => setText(e.target.value)}
+            onChange={handleTextChange}
+            onSelect={handleTextSelection}
+            onClick={handleTextSelection}
+            onBlur={() => {
+              if (rawTriggerKey) setDismissedTriggerKey(rawTriggerKey);
+            }}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             onCompositionStart={handleCompositionStart}
@@ -577,9 +844,13 @@ export default function MessageInput() {
               isStreaming
                 ? '输入追加指令，按 Enter 发送…'
                 : isNewConversation
-                  ? '开始新的对话…'
-                  : '输入消息…'
+                  ? '开始新的对话，/ 选择技能…'
+                  : '输入消息，@ 引用文件，/ 选择技能…'
             }
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={Boolean(composerTrigger)}
+            aria-controls={composerTrigger ? 'composer-autocomplete-list' : undefined}
             rows={1}
             className="w-full resize-none bg-transparent leading-5 text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none"
           />
@@ -629,8 +900,8 @@ export default function MessageInput() {
               <div className="relative">
                 <button
                   onClick={() => {
+                    if (rawTriggerKey) setDismissedTriggerKey(rawTriggerKey);
                     setSkillPickerOpen((v) => !v);
-                    setSkillFilter('');
                   }}
                   disabled={isStreaming}
                   className={`h-11 w-11 sm:h-8 sm:w-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
@@ -640,6 +911,8 @@ export default function MessageInput() {
                   }`}
                   aria-label="激活技能"
                   aria-pressed={skillPickerOpen}
+                  aria-expanded={skillPickerOpen}
+                  aria-controls={skillPickerOpen ? 'composer-autocomplete-list' : undefined}
                   title="激活技能：让本轮应用某个技能的指令"
                 >
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -648,90 +921,6 @@ export default function MessageInput() {
                   </svg>
                 </button>
 
-                {skillPickerOpen && (
-                  <>
-                    {/* Click-away backdrop */}
-                    <button
-                      className="fixed inset-0 z-10 cursor-default"
-                      aria-hidden="true"
-                      tabIndex={-1}
-                      onClick={() => {
-                        setSkillPickerOpen(false);
-                        setSkillFilter('');
-                      }}
-                    />
-                    <div className="fixed inset-x-4 bottom-[calc(7rem+env(safe-area-inset-bottom))] z-20 max-h-72 overflow-y-auto rounded-xl bg-surface dark:bg-surface-dark border border-border dark:border-border-dark shadow-float py-1 sm:absolute sm:inset-x-auto sm:left-0 sm:bottom-full sm:mb-2 sm:w-64">
-                      <div className="sticky top-0 px-2 pt-1 pb-1.5 mb-1 bg-surface dark:bg-surface-dark select-none space-y-1">
-                        <span className="flex items-center px-2.5 py-1.5 rounded-lg bg-bg dark:bg-bg-dark text-sm font-medium text-text-secondary dark:text-text-secondary-dark">
-                          选择激活技能
-                        </span>
-                        {enabledSkills.length > 6 && (
-                          <input
-                            type="text"
-                            value={skillFilter}
-                            onChange={(e) => setSkillFilter(e.target.value)}
-                            placeholder="过滤技能…"
-                            className="w-full min-h-11 sm:min-h-0 px-2.5 py-1 rounded-lg bg-bg dark:bg-bg-dark text-xs text-text-primary dark:text-text-primary-dark placeholder:text-text-tertiary dark:placeholder:text-text-tertiary-dark outline-none border border-transparent focus:border-accent"
-                          />
-                        )}
-                      </div>
-                      {filteredEnabledSkills.length > 0 ? (
-                        filteredEnabledSkills.map((skill) => {
-                          const checked = activeSkills.includes(skill.slug);
-                          return (
-                            <button
-                              key={skill.slug}
-                              onClick={() => toggleSkill(skill.slug)}
-                              title={skill.description || undefined}
-                              className="w-full min-h-11 sm:min-h-0 flex items-center gap-2 px-3 py-2 text-left hover:bg-bg dark:hover:bg-bg-dark transition-colors"
-                            >
-                              <span className={`flex-shrink-0 h-4 w-4 rounded border flex items-center justify-center ${
-                                checked
-                                  ? 'bg-accent border-accent text-white'
-                                  : 'border-border dark:border-border-dark'
-                              }`}>
-                                {checked && (
-                                  <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M3 8l3.5 3.5L13 5" />
-                                  </svg>
-                                )}
-                              </span>
-                              <span className="min-w-0 flex items-center gap-1.5">
-                                <span className="text-xs font-medium text-text-primary dark:text-text-primary-dark truncate">
-                                  {skill.name}
-                                </span>
-                                {alreadyActiveSkills.has(skill.slug) && (
-                                  <PillBadge
-                                    tone="accent"
-                                    title="该技能已在本对话激活；重新勾选会再次注入其正文（用于压缩后重提醒）"
-                                  >
-                                    已激活
-                                  </PillBadge>
-                                )}
-                              </span>
-                            </button>
-                          );
-                        })
-                      ) : !skillsLoaded ? (
-                        <div className="px-3 py-3 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                          加载中...
-                        </div>
-                      ) : skillsError ? (
-                        <div className="px-3 py-3 text-xs text-status-error">
-                          技能加载失败，请稍后重试。
-                        </div>
-                      ) : enabledSkills.length > 0 ? (
-                        <div className="px-3 py-3 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                          没有匹配的技能。
-                        </div>
-                      ) : (
-                        <div className="px-3 py-3 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                          暂无可激活的技能。可在「技能管理」中开启。
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
               </div>
 
               {/* Compact context — arms a one-shot compaction on the next send.
@@ -844,7 +1033,7 @@ export default function MessageInput() {
               // a silent no-op. Re-enables when agent_start clears queuedInfo.
               const queued = queuedInfo !== null;
               const sendDisabled =
-                (!isStreaming && !content.trim() && !hasStaged && !effectiveForceCompact && activeSkills.length === 0) || cancelling || sending || queued;
+                (!isStreaming && !content.trim() && !hasStaged && !effectiveForceCompact && activeSkills.length === 0 && referencedArtifacts.length === 0) || cancelling || sending || queued;
               return (
                 <button
                   onClick={handleSend}

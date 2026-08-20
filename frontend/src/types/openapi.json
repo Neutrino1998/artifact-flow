@@ -7795,6 +7795,21 @@
             "title": "Activated Skills",
             "description": "Skills the user explicitly activated on this turn, from Message.metadata_['activated_skills']. This is a per-message display snapshot, unlike cumulative active_skills; model-initiated read_skill calls are excluded."
           },
+          "referenced_artifacts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ReferencedArtifactRef"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referenced Artifacts",
+            "description": "Existing user-upload artifacts explicitly referenced on this turn, from Message.metadata_['referenced_artifacts']. This is a per-message display snapshot."
+          },
           "active_skills": {
             "anyOf": [
               {
@@ -7823,6 +7838,7 @@
           "execution_metrics",
           "uploaded_files",
           "activated_skills",
+          "referenced_artifacts",
           "active_skills"
         ],
         "title": "MessageResponse",
@@ -7951,6 +7967,27 @@
         ],
         "title": "PasswordPolicyResponse",
         "description": "Backend-authoritative password-shape policy used for frontend guidance."
+      },
+      "ReferencedArtifactRef": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Referenced artifact ID"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename",
+            "description": "Original filename frozen at send time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "filename"
+        ],
+        "title": "ReferencedArtifactRef",
+        "description": "Existing uploaded artifact explicitly referenced on one message."
       },
       "ResolveDepartmentRequest": {
         "properties": {

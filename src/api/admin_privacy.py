@@ -49,6 +49,31 @@ def project_admin_uploaded_files(
     return redacted
 
 
+def project_admin_referenced_artifacts(
+    files: Any,
+) -> Any:
+    """Remove ids and original names from existing-file references."""
+    if (
+        not config.ADMIN_PRIVACY_MODE
+        or not isinstance(files, Sequence)
+        or isinstance(files, (str, bytes))
+    ):
+        return files
+
+    redacted = []
+    for index, file in enumerate(files, start=1):
+        if not isinstance(file, Mapping):
+            continue
+        redacted.append(
+            {
+                "id": None,
+                "filename": f"引用文件 {index}",
+                "content_accessible": False,
+            }
+        )
+    return redacted
+
+
 def admin_artifact_content_accessible() -> bool:
     """Whether an admin may read artifact content under the active policy."""
     return not config.ADMIN_PRIVACY_MODE

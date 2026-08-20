@@ -159,6 +159,7 @@ class ConversationTurnHandler:
         uploaded_files: Optional[List[Dict[str, Any]]] = None,
         force_compact: bool = False,
         activate_skills: Optional[List[str]] = None,
+        referenced_artifacts: Optional[List[Dict[str, str]]] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         流式执行接口（新消息）
@@ -173,6 +174,9 @@ class ConversationTurnHandler:
                             未即时 commit）。execute_loop 在 turn 起点 stage 进 WorkingSet
                             （发 ARTIFACT_CREATED、随 turn 末 flush），并据回填 id 在
                             USER_INPUT 正文追加归属说明。
+            referenced_artifacts: 已在准入边界解析的会话历史上传文件
+                            [{"id","filename"}, ...]。仅作为本轮重点引用，不限制
+                            其他 session artifact 的可见性。
 
         Yields:
             流式事件字典
@@ -187,7 +191,7 @@ class ConversationTurnHandler:
         # 为空 → 被 EventHistory 过滤 → 空 history → ContextManager.build 在 [-1] 崩。
         # 在此（任何 yield / DB 写之前）拒掉，不依赖调用方校验；router 另留 422 作为 HTTP
         # 快速边界。带附件时 execute_loop 会给 USER_INPUT 拼归属串（非空），故仅无附件时要求非空。
-        # 顶层快速闸(pre-DB):文本/附件/compact/activate_skills 全空 = 真无输入,早拒(免下方
+        # 顶层快速闸(pre-DB):文本/附件/compact/activate_skills/引用全空 = 真无输入,早拒(免下方
         # DB setup)。这里对 activate_skills 用 **raw** 值(此刻还没解析可见性/body)—— 它是放行
         # 代理,非权威;skill 可能全被过滤成空,那种情况由**解析后**的 turn_has_content 闸收口
         # (见下,#1:raw activate_skills ≠ 会注入内容)。
@@ -196,6 +200,7 @@ class ConversationTurnHandler:
             and not uploaded_files
             and not force_compact
             and not activate_skills
+            and not referenced_artifacts
         ):
             raise ValueError(
                 "'user_input' must be non-empty when no artifacts are attached"
@@ -233,6 +238,7 @@ class ConversationTurnHandler:
                     {"filename": f["filename"]}
                     for f in (uploaded_files or [])
                 ],
+                "referenced_artifacts": list(referenced_artifacts or []),
             }
         }
 
@@ -350,10 +356,14 @@ class ConversationTurnHandler:
 
         # 权威空输入闸(#1):activate_skills 是意图,经可见性/空 body 过滤后才知本轮真会不会注入
         # 内容。顶层闸放行 raw activate_skills;这里按**解析后**的 activated_skill_bodies 收口 ——
-        # 与上传/compact 对齐(三者都以"真会注入非空"为准)。全空(勾的全不可见 / 空 body,或
+        # 与上传/compact/引用对齐(都以"真会注入非空"为准)。全空(勾的全不可见 / 空 body,或
         # 啥也没勾)→ 拒,免空 USER_INPUT 击穿 context_manager 的 [-1]。
         if not turn_has_content(
-            user_input, uploaded_files, force_compact, activated_skill_bodies
+            user_input,
+            uploaded_files,
+            force_compact,
+            activated_skill_bodies,
+            referenced_artifacts,
         ):
             raise EmptyTurnInputError(
                 "'user_input' resolves to empty content: the activated skill(s) "
@@ -382,6 +392,7 @@ class ConversationTurnHandler:
             agent_progressive_state=agent_progressive_state,
             activated_skill_bodies=activated_skill_bodies,
             uploaded_files=uploaded_files,
+            referenced_artifacts=referenced_artifacts,
             force_compact=force_compact,
             entry_agent=self.entry_agent,
         )
@@ -404,10 +415,16 @@ class ConversationTurnHandler:
                     message_id=message_id,
                     user_input=user_input,
                     parent_id=resolved_parent,
-                    metadata=(
-                        {"activated_skills": activated_skills}
-                        if activated_skills else None
-                    ),
+                    metadata={
+                        **(
+                            {"activated_skills": activated_skills}
+                            if activated_skills else {}
+                        ),
+                        **(
+                            {"referenced_artifacts": referenced_artifacts}
+                            if referenced_artifacts else {}
+                        ),
+                    } or None,
                 )
             )
         except NotFoundError:

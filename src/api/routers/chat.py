@@ -58,6 +58,7 @@ from api.services.conversation_execution_service import (
     PendingInterruptAlreadyResolved,
     PendingInterruptNotFound,
     PendingInterruptStale,
+    ReferencedArtifactNotFound,
     UploadQuotaExceeded,
 )
 from api.services.runtime_status_reader import RuntimeStatusReader
@@ -121,13 +122,14 @@ async def send_message(
     # 空白正文且无附件 = 本轮无可处理输入：USER_INPUT 正文为空 → 被 EventHistory 过滤
     # → history 为空 → build() 在 [-1] 崩。边界即拒（前端 sendDisabled 同条件，这里是
     # 非 UI 客户端的兜底）；带附件时由归属串补足正文，故仅无附件时要求非空。
-    # force_compact / activate_skills 与附件同理：execute_loop 会向 USER_INPUT 正文注入压缩
-    # 指令 / skill 正文（非空），故「只点压缩/只激活 skill 但不打字」的轮次同样放行。
+    # force_compact / activate_skills / referenced_artifact_ids 与附件同理：execute_loop
+    # 会向 USER_INPUT 正文注入相应的非空说明，故仅选择这些结构化输入也可发送。
     if (
         not request.user_input.strip()
         and attachment_count == 0
         and not request.force_compact
         and not request.activate_skills
+        and not request.referenced_artifact_ids
     ):
         raise HTTPException(
             status_code=422,
@@ -178,11 +180,17 @@ async def send_message(
             uploaded_files=uploaded_files,
             force_compact=request.force_compact,
             activate_skills=request.activate_skills,
+            referenced_artifact_ids=request.referenced_artifact_ids,
         ))
     except ConversationResourceNotFoundError:
         raise HTTPException(
             status_code=404,
             detail=f"Conversation '{request.conversation_id}' not found",
+        )
+    except ReferencedArtifactNotFound:
+        raise HTTPException(
+            status_code=404,
+            detail="Referenced file not found in this conversation",
         )
     except InvalidParentMessage:
         logger.warning(
@@ -475,6 +483,7 @@ async def get_conversation(
                     execution_metrics=(msg.metadata_ or {}).get("execution_metrics"),
                     uploaded_files=(msg.metadata_ or {}).get("uploaded_files"),
                     activated_skills=(msg.metadata_ or {}).get("activated_skills"),
+                    referenced_artifacts=(msg.metadata_ or {}).get("referenced_artifacts"),
                     active_skills=(
                         ((msg.metadata_ or {}).get("agent_progressive_state") or {})
                         .get("lead_agent", {})

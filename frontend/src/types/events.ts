@@ -49,6 +49,7 @@ export interface MetadataData {
   /** Best-effort observer preview; terminal conversation detail is authoritative. */
   user_input?: string;
   uploaded_files?: { filename: string }[];
+  referenced_artifacts?: { id: string; filename: string }[];
 }
 
 export interface AgentStartData {

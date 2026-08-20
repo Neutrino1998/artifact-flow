@@ -55,6 +55,7 @@ export function useTerminalReconciliation() {
           : null,
         uploadedFiles: streamState.pendingUserFiles?.map((filename) => ({ filename })) ?? null,
         activatedSkills: streamState.pendingUserSkills,
+        referencedArtifacts: streamState.pendingUserReferences,
       });
     },
     [applyTerminalMessageSnapshot],
