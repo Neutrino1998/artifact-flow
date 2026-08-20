@@ -7,7 +7,7 @@ description: >
   适配 ArtifactFlow 静态 HTML artifact 和无网络 sandbox。
 license: Apache-2.0
 metadata:
-  version: "0.1.3"
+  version: "0.1.4"
 ---
 
 # 数据可视化
@@ -43,8 +43,9 @@ python3 $SKILL/scripts/validate_palette.py "#60a5fa,#f59e0b,#a78bfa" --mode dark
 
 5. **再做图表结构。** 标题说清指标和范围；一条轴只承载一个尺度；多尺度拆成多个图。
    标记、标签、图例、表格视图和静态 HTML 约束见 [chart-patterns.md](references/chart-patterns.md)。
-6. **最后检查实际输出。** 按交付形式执行 [rendering-qa.md](references/rendering-qa.md)
-   的最小渲染验收。validator 只管颜色，不替你检查布局、数据映射或缺字。
+6. **最后按能力检查。** 先完成静态可验证项；仅在当前部署具备渲染和识图能力时查看
+   实际输出。无法预览不得阻止交付，但要说明未完成视觉验收，且不能声称看过成图。
+   细则见 [rendering-qa.md](references/rendering-qa.md)。
 
 ## 本平台约束
 
@@ -61,5 +62,5 @@ python3 $SKILL/scripts/validate_palette.py "#60a5fa,#f59e0b,#a78bfa" --mode dark
 - [palette.md](references/palette.md)：可直接使用的中性调色板、状态色和 surfaces。
 - [chart-selection.md](references/chart-selection.md)：按数据任务选择图形。
 - [chart-patterns.md](references/chart-patterns.md)：图表结构、标签、静态 HTML 和可访问性规则。
-- [rendering-qa.md](references/rendering-qa.md)：HTML/SVG/PNG 的风险驱动渲染验收。
+- [rendering-qa.md](references/rendering-qa.md)：HTML/SVG/PNG 的静态检查与可选视觉验收。
 - [validate_palette.py](scripts/validate_palette.py)：分类/有序调色板校验器。
