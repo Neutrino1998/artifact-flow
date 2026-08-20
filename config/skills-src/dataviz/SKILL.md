@@ -7,7 +7,7 @@ description: >
   适配 ArtifactFlow 静态 HTML artifact 和无网络 sandbox。
 license: Apache-2.0
 metadata:
-  version: "0.1.2"
+  version: "0.1.3"
 ---
 
 # 数据可视化
@@ -23,11 +23,14 @@ pandas、Noto Sans CJK 字体；无 node/npm。HTML artifact 不执行 script。
 本技能处理定量数据图。流程图、架构图、时序图、状态图、ER 图需要 PNG 时改用
 `mermaid-to-png` skill；仅在回复中展示 Mermaid 时直接输出 fenced code block。
 
-1. **先定图形，不先选颜色。** 判断读者要比较大小、看趋势、识别系列、看目标偏差、
-   看构成，还是只需要一个数字。细则见 [chart-selection.md](references/chart-selection.md)。
-2. **给颜色分工。** 身份用分类色；大小用单色连续渐变；正负/高低两端用发散色；
+1. **先确认图是否必要。** 如果读者主要需要查精确值、复制数据或阅读少量结论，优先用
+   表格或文字摘要。不要为了让页面显得丰富而发明 KPI、筛选器、状态卡或第二张图。
+2. **再定图形，不先选颜色。** 判断读者要比较大小、看趋势、识别关系、看分布、判断
+   目标偏差、看构成，还是只需要一个数字。细则见
+   [chart-selection.md](references/chart-selection.md)。
+3. **给颜色分工。** 身份用分类色；大小用单色连续渐变；正负/高低两端用发散色；
    成功/警告/危险用状态色。不要用颜色重复编码已经由长度、位置表达的数值。
-3. **分类色和有序色必须跑校验。**
+4. **分类色和有序色必须跑校验。**
 
 ```bash
 python3 $SKILL/scripts/validate_palette.py "#2563eb,#d97706,#7c3aed" --mode light
@@ -38,10 +41,10 @@ python3 $SKILL/scripts/validate_palette.py "#60a5fa,#f59e0b,#a78bfa" --mode dark
 - 有序类别(漏斗阶段、等级、年龄段)用单色阶，加 `--ordinal`。
 - `FAIL` 要改颜色；`WARN` 要加直接标签、图例、表格视图或纹理等第二编码。
 
-4. **再做图表结构。** 标题说清指标和范围；一条轴只承载一个尺度；多尺度拆成多个图。
+5. **再做图表结构。** 标题说清指标和范围；一条轴只承载一个尺度；多尺度拆成多个图。
    标记、标签、图例、表格视图和静态 HTML 约束见 [chart-patterns.md](references/chart-patterns.md)。
-5. **最后渲染检查。** 看是否有标签碰撞、坐标轴被裁剪、颜色只在浅色可读、表格缺失、
-   或移动端横向溢出。validator 只管颜色，不替你检查布局。
+6. **最后检查实际输出。** 按交付形式执行 [rendering-qa.md](references/rendering-qa.md)
+   的最小渲染验收。validator 只管颜色，不替你检查布局、数据映射或缺字。
 
 ## 本平台约束
 
@@ -58,4 +61,5 @@ python3 $SKILL/scripts/validate_palette.py "#60a5fa,#f59e0b,#a78bfa" --mode dark
 - [palette.md](references/palette.md)：可直接使用的中性调色板、状态色和 surfaces。
 - [chart-selection.md](references/chart-selection.md)：按数据任务选择图形。
 - [chart-patterns.md](references/chart-patterns.md)：图表结构、标签、静态 HTML 和可访问性规则。
+- [rendering-qa.md](references/rendering-qa.md)：HTML/SVG/PNG 的风险驱动渲染验收。
 - [validate_palette.py](scripts/validate_palette.py)：分类/有序调色板校验器。
