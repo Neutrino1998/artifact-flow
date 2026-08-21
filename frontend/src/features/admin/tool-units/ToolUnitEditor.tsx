@@ -98,6 +98,12 @@ const EXTENSION_CONTENT_TYPES: Record<string, string> = {
   '.zip': 'application/zip',
 };
 
+const KIND_HELP: Record<UnitKind, string> = {
+  tool: '适合一个独立 API 操作；Tool 全名与 unit 名相同。',
+  toolset: '适合同一服务下共享凭证、可见性和成员关系的多个操作；每个成员仍可单独设置执行确认。',
+  mcp: '连接 streamable_http MCP Server；成员由上游动态发现，并使用统一的默认执行权限。',
+};
+
 function emptyMcpProviderConfig(): McpProviderConfigDraft {
   return {
     transport: 'streamable_http',
@@ -406,7 +412,7 @@ export default function ToolUnitEditor({
             <label className={LABEL_CLASS}>类型</label>
             {lockIdentity ? (
               <div className="text-sm text-text-secondary dark:text-text-secondary-dark py-2">
-                {value.kind === 'mcp' ? 'MCP server' : value.kind === 'tool' ? '单工具' : '工具集'}
+                {value.kind === 'mcp' ? 'MCP Server' : value.kind === 'tool' ? '单工具（1 个操作）' : '工具集（多个相关操作）'}
                 <span className="ml-2 text-xs text-text-tertiary dark:text-text-tertiary-dark">建后不可变</span>
               </div>
             ) : (
@@ -417,13 +423,16 @@ export default function ToolUnitEditor({
                   disabled={ro}
                   className={`${INPUT_ON_PANEL} appearance-none pr-9`}
                 >
-                  <option value="tool">单工具（singleton）</option>
-                  <option value="toolset">工具集（toolset）</option>
-                  <option value="mcp">MCP server</option>
+                  <option value="tool">单工具（1 个操作）</option>
+                  <option value="toolset">工具集（多个相关操作）</option>
+                  <option value="mcp">MCP Server（动态发现）</option>
                 </select>
                 {SELECT_CHEVRON}
               </div>
             )}
+            <p className="mt-1 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+              {KIND_HELP[value.kind]}
+            </p>
           </div>
           <div>
             <label className={LABEL_CLASS}>可见性</label>
@@ -465,7 +474,7 @@ export default function ToolUnitEditor({
             渐进式披露（defer）
           </span>
           <span className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-            默认不进目录，经 search_tools 检索后才暴露
+            同时启用 search_tools 时先展示索引、按需加载完整参数；否则仍完整披露
           </span>
         </label>
       </div>

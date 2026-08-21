@@ -168,6 +168,17 @@ export default function PersonalAccessTokenDialog({
         surfaceClassName="bg-chat dark:bg-chat-dark"
       >
         <div className="space-y-6">
+          <section
+            aria-label="PAT API 调用方式"
+            className="rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-3 text-xs text-text-secondary dark:text-text-secondary-dark"
+          >
+            <div className="font-medium text-text-primary dark:text-text-primary-dark">API 调用方式</div>
+            <code className="mt-1 block break-all text-accent">Authorization: Bearer &lt;PAT&gt;</code>
+            <p className="mt-1">
+              只可调用普通用户 API；创建时选择的权限范围（scope）决定它能执行哪些操作。
+            </p>
+          </section>
+
           {created && (
             <section className="rounded-lg border border-status-warning/50 bg-status-warning/10 p-4">
               <div className="font-medium text-text-primary dark:text-text-primary-dark">

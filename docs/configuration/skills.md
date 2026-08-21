@@ -2,6 +2,21 @@
 
 Skill 是按需加载的工作方法。它可以只有一份 `SKILL.md`，也可以携带脚本、参考资料和模板；激活时还可以临时授予相关 Tool unit。
 
+## 在界面中使用和管理 Skill
+
+- 普通用户可在“技能管理”中启用/停用对自己可见的 Skill，也可导入只有自己可见、
+  立即启用的个人 Skill。
+- 管理员可把一个包导入为共享 Skill，选择 `public` / `department` 可见性和
+  默认是否启用。共享只决定谁能看到，部门例外规则在“部门授权”中管理。
+- Release 预装的 seeded Skill 是只读配置；管理员不能在线改它的正文，需要通过
+  Release 修改种子源。
+- 用户在输入框主动选择 Skill 和 Model 自行调用 `read_skill` 会加载同一份指导。
+
+如果目标是真正创建、打包或体检一个 Skill，在对话中直接要求“帮我创建 Skill”或
+“检查这个 Skill 能不能运行”，由预装 `skill-creator` 执行访谈、沙盒实测和打包。
+产品字段、导入规则、Tool/PAT 和权限问题由 `artifactflow-help` 解答，不塞进
+`skill-creator` 的创作流程。
+
 ## 纯文本 Skill
 
 目录只能包含一份 `SKILL.md`：

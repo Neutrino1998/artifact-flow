@@ -92,6 +92,8 @@ describe('PersonalAccessTokenDialog', () => {
     expect(expiryInput?.inputMode).toBe('numeric');
     expect(expiryInput?.value).toBe('90');
     expect(document.body.textContent).toContain('最长 365 天');
+    expect(document.body.textContent).toContain('Authorization: Bearer <PAT>');
+    expect(document.body.textContent).toContain('只可调用普通用户 API');
   });
 
   it('does not allow creation before the initial token list settles', async () => {

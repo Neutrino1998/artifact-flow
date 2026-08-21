@@ -1,0 +1,7 @@
+{
+  "references/product-guide.md": "docs/product-guide.md",
+  "references/tool-management.md": "docs/configuration/tools.md",
+  "references/skill-management.md": "docs/configuration/skills.md",
+  "references/pat-and-api.md": "docs/personal-access-tokens.md",
+  "references/troubleshooting.md": "docs/operations/troubleshooting.md"
+}

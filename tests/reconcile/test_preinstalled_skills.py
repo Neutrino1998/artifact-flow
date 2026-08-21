@@ -31,7 +31,8 @@ ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = ROOT / "config" / "skills-src"
 ZIP_DIR = ROOT / "config" / "skills"
 PREINSTALLED = [
-    "dataviz", "docx", "mermaid-to-png", "pdf", "pptx", "skill-creator", "xlsx",
+    "artifactflow-help", "dataviz", "docx", "mermaid-to-png", "pdf", "pptx",
+    "skill-creator", "xlsx",
 ]
 # skills-src 内的 SKILL.md-only 预装包。仍产 zip 供下载，has_extra_files=False。
 PREINSTALLED_SINGLE_FILE = {"mermaid-to-png"}
@@ -111,6 +112,21 @@ def test_seed_parse_clean_and_defaults():
         assert seed.has_extra_files is (not is_single_file)
         assert _zip_manifest(seed.bundle)
         assert seed.skill_md.strip()
+
+
+def test_artifactflow_help_packages_active_docs_as_references():
+    with zipfile.ZipFile(ZIP_DIR / "artifactflow-help.zip") as zf:
+        expected = {
+            "product-guide.md": ROOT / "docs" / "product-guide.md",
+            "tool-management.md": ROOT / "docs" / "configuration" / "tools.md",
+            "skill-management.md": ROOT / "docs" / "configuration" / "skills.md",
+            "pat-and-api.md": ROOT / "docs" / "personal-access-tokens.md",
+            "troubleshooting.md": ROOT / "docs" / "operations" / "troubleshooting.md",
+        }
+        for bundled_name, source_path in expected.items():
+            assert zf.read(
+                f"artifactflow-help/references/{bundled_name}"
+            ) == source_path.read_bytes()
 
 
 def test_preinstalled_agents_configure_helper_tools_explicitly():

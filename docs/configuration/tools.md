@@ -2,6 +2,62 @@
 
 一个 Tool 是一项可独立授权、可被模型调用的操作。外部集成优先使用声明式 HTTP Tool 或 MCP；只有需要应用内部逻辑时才编写 Python Builtin。
 
+## 在管理员界面中选择类型
+
+管理员可从用户菜单进入“工具管理”创建数据库管理的 Tool unit。Tool 是 Model
+最终调用的一项操作；unit 是可见性、Agent/Skill/部门成员关系、凭证和渐进式披露的
+管理边界。成员自己的 `auto` / `confirm` 则决定每次执行是否需要确认。
+
+| 界面类型 | 适合什么 | 调用名称 |
+|---|---|---|
+| 单工具（1 个操作，singleton） | 一个独立 endpoint，例如“查询股价” | Tool 全名等于 unit 名 |
+| 工具集（多个操作，toolset） | 同一服务下共享可见性、凭证和成员关系的多个 endpoint | `<unit>__<member>` |
+| MCP Server | 上游已实现 MCP `streamable_http`，希望每轮动态发现 Tool | `<unit>__<MCP tool>` |
+
+不要因为“都在同一个系统”就强行放进一个工具集。如果两个 endpoint 需要不同凭证、
+可见部门、Agent/Skill 成员关系或 defer 策略，应拆成不同 unit。单个 Tool 的
+`auto` / `confirm` 仍是成员自己的执行权限，不会因为处于同一 toolset 就自动相同。
+
+## 输入参数：参数配置与高级 JSON Schema
+
+JSON Schema Draft 2020-12 是 Tool 输入的唯一权威状态：同一份 Schema 既告诉 Model
+应该传什么，也用于执行前校验。界面提供两种编辑方式，但不存在两份参数定义：
+
+- **参数配置**：对常用的顶层参数做无损可视化编辑，包括类型、必填、说明、默认值、
+  enum 和简单数组元素类型。它会实时生成规范 JSON Schema。
+- **高级 JSON Schema**：用于嵌套 object/array、`oneOf` / `anyOf`、条件、`patternProperties`、
+  `minProperties` 等完整 Draft 2020-12 结构。
+
+当现有 Schema 使用参数配置无法无损表达的字段时，界面会显示检测到的具体约束，
+并不允许用参数卡片修改。这不是 Schema 无效，而是为了避免切换表单时静默丢失高级约束。
+请继续在高级 JSON Schema 中编辑；删除高级字段后，界面会自动恢复参数配置。
+
+参数的 HTTP 位置由 method 和 endpoint 决定：
+
+- endpoint 中的 `{id}` 来自同名必填或带默认值的非 null 标量参数；
+- `GET` / `DELETE` 的其余参数进入 query string；
+- `POST` / `PUT` / `PATCH` 的其余参数进入 JSON body。
+
+### 最小参数示例
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string",
+      "description": "检索词"
+    },
+    "limit": {
+      "type": "integer",
+      "default": 20
+    }
+  },
+  "required": ["query"],
+  "additionalProperties": false
+}
+```
+
 ## HTTP Singleton
 
 在 `config/tools/stock_price.md` 创建：

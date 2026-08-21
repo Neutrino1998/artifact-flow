@@ -37,6 +37,7 @@ markdown_extensions:
 
 nav:
   - 首页: index.md
+  - 产品使用指南: product-guide.md
   - 工作原理: how-it-works.md
   - PAT 与 API 调用: personal-access-tokens.md
   - 配置:
