@@ -6,7 +6,7 @@ description: >
   不用于一般编程 API 问题，也不替代真正创建和体检 Skill 的 skill-creator。
 license: Apache-2.0
 metadata:
-  version: "1.0.2"
+  version: "1.0.3"
 ---
 
 # ArtifactFlow 产品帮助
