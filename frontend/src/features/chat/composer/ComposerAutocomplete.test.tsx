@@ -3,6 +3,32 @@ import { describe, expect, it, vi } from 'vitest';
 import ComposerAutocomplete from './ComposerAutocomplete';
 
 describe('ComposerAutocomplete', () => {
+  it('renders file suggestions with their shared format icon', () => {
+    const html = renderToStaticMarkup(
+      <ComposerAutocomplete
+        kind="file"
+        suggestions={[
+          {
+            key: 'file:report',
+            title: 'report.pdf',
+            description: 'PDF · 上传于 2026/08/22 14:30',
+            contentType: 'application/pdf',
+          },
+        ]}
+        activeIndex={0}
+        loading={false}
+        error={false}
+        hasConversation
+        onActiveIndexChange={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('tabler-icon-file-type-pdf');
+    expect(html).toContain('report.pdf');
+    expect(html).toContain('PDF · 上传于 2026/08/22 14:30');
+  });
+
   it('renders the shared skill picker as a multi-select list', () => {
     const html = renderToStaticMarkup(
       <ComposerAutocomplete
