@@ -9,6 +9,7 @@ import { readTaskNotificationPreference } from '@/lib/taskNotifications';
 vi.mock('./StorageBar', () => ({ default: () => null }));
 vi.mock('@/components/layout/ChangePasswordDialog', () => ({ default: () => null }));
 vi.mock('@/components/layout/EditDisplayNameDialog', () => ({ default: () => null }));
+vi.mock('@/components/layout/PersonalAccessTokenDialog', () => ({ default: () => null }));
 
 class MockNotification {
   static permission: NotificationPermission = 'default';

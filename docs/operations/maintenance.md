@@ -73,7 +73,7 @@ sudo /opt/artifactflow/bin/afctl --root /opt/artifactflow maintenance off
 ## 证书和 Secret 轮换
 
 - Tool/MCP Secret：更新 `control/.env` 中对应 `TOOL_SECRET_*`，执行 `apply current`，Release gate 会重新加密 seeded credential。
-- JWT Secret：变更会使现有登录 token 失效，应安排通知窗口。
+- JWT Secret：变更会使现有登录 token 和 PAT 全部失效，应安排通知窗口。
 - Credential Key：当前是单主密钥且没有在线轮换协议；不要直接替换，否则数据库中的既有 Tool credential 无法解密。
 - 静态 TLS：原子替换 `server.crt` 和 `server.key`，保持私钥 `0600`，再执行 `plan apply current` / `apply current`。
 

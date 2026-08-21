@@ -93,6 +93,44 @@ export interface paths {
         patch: operations["update_my_profile_api_v1_auth_me_patch"];
         trace?: never;
     };
+    "/api/v1/auth/pats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Personal Access Tokens */
+        get: operations["list_personal_access_tokens_api_v1_auth_pats_get"];
+        put?: never;
+        /**
+         * Create Personal Access Token
+         * @description Create a user PAT and reveal its bearer secret exactly once.
+         */
+        post: operations["create_personal_access_token_api_v1_auth_pats_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/pats/{token_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke Personal Access Token */
+        delete: operations["revoke_personal_access_token_api_v1_auth_pats__token_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/me/password": {
         parameters: {
             query?: never;
@@ -3176,6 +3214,86 @@ export interface components {
             require_symbol: boolean;
         };
         /**
+         * PersonalAccessTokenCreateRequest
+         * @description Create a PAT. This request is accepted only from an interactive session.
+         */
+        PersonalAccessTokenCreateRequest: {
+            /** Name */
+            name: string;
+            /** Scopes */
+            scopes: components["schemas"]["PersonalAccessTokenScope"][];
+            /**
+             * Expires In Days
+             * @default 90
+             */
+            expires_in_days: number;
+        };
+        /** PersonalAccessTokenCreateResponse */
+        PersonalAccessTokenCreateResponse: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Prefix */
+            prefix: string;
+            /** Scopes */
+            scopes: components["schemas"]["PersonalAccessTokenScope"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Revoked At */
+            revoked_at: string | null;
+            /**
+             * Token
+             * @description Bearer secret returned once; the server does not retain plaintext
+             */
+            token: string;
+        };
+        /** PersonalAccessTokenListResponse */
+        PersonalAccessTokenListResponse: {
+            /** Tokens */
+            tokens: components["schemas"]["PersonalAccessTokenResponse"][];
+        };
+        /** PersonalAccessTokenResponse */
+        PersonalAccessTokenResponse: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Prefix */
+            prefix: string;
+            /** Scopes */
+            scopes: components["schemas"]["PersonalAccessTokenScope"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Revoked At */
+            revoked_at: string | null;
+        };
+        /**
+         * PersonalAccessTokenScope
+         * @enum {string}
+         */
+        PersonalAccessTokenScope: "conversations:read" | "conversations:write" | "conversations:control" | "conversations:delete" | "artifacts:read" | "skills:read" | "skills:write" | "tools:approve";
+        /**
          * ReferencedArtifactRef
          * @description Existing uploaded artifact explicitly referenced on one message.
          */
@@ -3235,7 +3353,7 @@ export interface components {
             approved: boolean;
             /**
              * Always Allow
-             * @description Always allow this tool for the rest of this execution
+             * @description Allow this tool name without further confirmation along the current conversation branch
              * @default false
              */
             always_allow: boolean;
@@ -4032,6 +4150,88 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["UserInfo"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_personal_access_tokens_api_v1_auth_pats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonalAccessTokenListResponse"];
+                };
+            };
+        };
+    };
+    create_personal_access_token_api_v1_auth_pats_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PersonalAccessTokenCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonalAccessTokenCreateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_personal_access_token_api_v1_auth_pats__token_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

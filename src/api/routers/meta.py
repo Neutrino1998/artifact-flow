@@ -9,8 +9,8 @@ frontend fetches once and caches.
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from api.dependencies import get_client_config_manager, get_current_user
-from api.services.auth import TokenPayload
+from api.dependencies import get_client_config_manager, get_current_principal
+from api.services.auth import AuthPrincipal
 from api.schemas.meta import ClientConfigResponse
 from core.management.client_config_manager import ClientConfigInvariantError, ClientConfigManager
 from utils.logger import get_logger
@@ -21,7 +21,7 @@ logger = get_logger("ArtifactFlow")
 
 @router.get("", response_model=ClientConfigResponse)
 async def get_client_config(
-    _current_user: TokenPayload = Depends(get_current_user),
+    _current_user: AuthPrincipal = Depends(get_current_principal),
     manager: ClientConfigManager = Depends(get_client_config_manager),
 ) -> ClientConfigResponse:
     """返回前端所需的后端常量（单一真相源）。值静态，前端取一次缓存即可。"""

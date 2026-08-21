@@ -9,8 +9,10 @@ from pydantic import ValidationError
 
 from config import config
 from api.dependencies import (
+    get_current_principal,
     get_current_user,
     get_login_rate_limiter,
+    get_personal_access_token_manager,
     get_remote_auth_manager,
     get_remote_bearer_config,
     get_sso_start_rate_limiter,
@@ -21,13 +23,17 @@ from api.schemas.auth import (
     ChangePasswordRequest,
     LoginRequest,
     LoginResponse,
+    PersonalAccessTokenCreateRequest,
+    PersonalAccessTokenCreateResponse,
+    PersonalAccessTokenListResponse,
+    PersonalAccessTokenResponse,
     SsoExchangeRequest,
     SsoPublicProviderConfig,
     SsoStartResponse,
     UpdateMyProfileRequest,
     UserInfo,
 )
-from api.services.auth import TokenPayload, create_access_token
+from api.services.auth import AuthPrincipal, TokenPayload, create_access_token
 from api.services.sso_rate_limiter import SsoStartRateLimitError
 from core.management.user_account_manager import (
     CurrentPasswordIncorrectError,
@@ -39,6 +45,12 @@ from core.management.user_account_manager import (
     UserAccountError,
     UserAccountManager,
     UserAccountNotFoundError,
+)
+from core.management.personal_access_token_manager import (
+    PersonalAccessTokenError,
+    PersonalAccessTokenLimitExceeded,
+    PersonalAccessTokenManager,
+    PersonalAccessTokenNotFound,
 )
 from core.management.remote_auth_manager import (
     RemoteAuthDisabledError,
@@ -344,13 +356,67 @@ async def login(
 
 @router.get("/me", response_model=UserInfo)
 async def get_me(
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: AuthPrincipal = Depends(get_current_principal),
     manager: UserAccountManager = Depends(get_user_account_manager),
 ):
     try:
         return UserInfo(**await manager.get_profile(current_user.user_id))
     except UserAccountError as exc:
         raise _map_account_error(exc) from exc
+
+
+@router.post(
+    "/pats",
+    response_model=PersonalAccessTokenCreateResponse,
+    status_code=201,
+)
+async def create_personal_access_token(
+    request: PersonalAccessTokenCreateRequest,
+    response: Response,
+    current_user: TokenPayload = Depends(get_current_user),
+    manager: PersonalAccessTokenManager = Depends(get_personal_access_token_manager),
+):
+    """Create a user PAT and reveal its bearer secret exactly once."""
+    try:
+        result = await manager.create(
+            user_id=current_user.user_id,
+            name=request.name,
+            scopes=[scope.value for scope in request.scopes],
+            expires_in_days=request.expires_in_days,
+        )
+    except PersonalAccessTokenLimitExceeded as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
+    except PersonalAccessTokenError as exc:
+        raise HTTPException(status_code=400, detail=exc.detail) from exc
+    response.headers["Cache-Control"] = "no-store"
+    return PersonalAccessTokenCreateResponse(**result)
+
+
+@router.get("/pats", response_model=PersonalAccessTokenListResponse)
+async def list_personal_access_tokens(
+    response: Response,
+    current_user: TokenPayload = Depends(get_current_user),
+    manager: PersonalAccessTokenManager = Depends(get_personal_access_token_manager),
+):
+    response.headers["Cache-Control"] = "no-store"
+    return PersonalAccessTokenListResponse(
+        tokens=[
+            PersonalAccessTokenResponse(**token)
+            for token in await manager.list(current_user.user_id)
+        ]
+    )
+
+
+@router.delete("/pats/{token_id}", status_code=204)
+async def revoke_personal_access_token(
+    token_id: str,
+    current_user: TokenPayload = Depends(get_current_user),
+    manager: PersonalAccessTokenManager = Depends(get_personal_access_token_manager),
+) -> None:
+    try:
+        await manager.revoke(current_user.user_id, token_id)
+    except PersonalAccessTokenNotFound as exc:
+        raise HTTPException(status_code=404, detail=exc.detail) from exc
 
 
 @router.post("/me/password", status_code=204)

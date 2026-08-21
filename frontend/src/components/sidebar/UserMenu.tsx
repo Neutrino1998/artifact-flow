@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import ChangePasswordDialog from '@/components/layout/ChangePasswordDialog';
 import EditDisplayNameDialog from '@/components/layout/EditDisplayNameDialog';
+import PersonalAccessTokenDialog from '@/components/layout/PersonalAccessTokenDialog';
 import { PillBadge } from '@/components/ui/PillBadge';
 import { SwitchTrack } from '@/components/ui/SwitchTrack';
 import { MENU_ROW_HOVER, MENU_ROW_DANGER_HOVER } from '@/lib/styles';
@@ -34,6 +35,7 @@ export default function UserMenu({
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
+  const [personalAccessTokenOpen, setPersonalAccessTokenOpen] = useState(false);
   const [taskNotificationsOn, setTaskNotificationsOn] = useState(false);
   const [taskNotificationCapability, setTaskNotificationCapability] =
     useState<TaskNotificationCapability>('loading');
@@ -167,6 +169,11 @@ export default function UserMenu({
   const handleEditProfile = () => {
     setPopoverOpen(false);
     setEditProfileOpen(true);
+  };
+
+  const handlePersonalAccessTokens = () => {
+    setPopoverOpen(false);
+    setPersonalAccessTokenOpen(true);
   };
 
   const handleTaskNotificationsToggle = () => {
@@ -322,6 +329,16 @@ export default function UserMenu({
               </button>
             )}
 
+            <button
+              onClick={handlePersonalAccessTokens}
+              className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M10.5 0a5.499 5.499 0 1 1-1.288 10.848l-.932.932a.749.749 0 0 1-.53.22H7v.75a.749.749 0 0 1-.22.53l-.5.5a.749.749 0 0 1-.53.22H5v.75a.749.749 0 0 1-.22.53l-.5.5a.749.749 0 0 1-.53.22h-2A1.75 1.75 0 0 1 0 14.25v-2c0-.199.079-.389.22-.53l4.932-4.932A5.5 5.5 0 0 1 10.5 0Zm-4 5.5c-.001.431.069.86.205 1.269a.75.75 0 0 1-.181.768L1.5 12.56v1.69c0 .138.112.25.25.25h1.69l.06-.06v-1.19a.75.75 0 0 1 .75-.75h1.19l.06-.06v-1.19a.75.75 0 0 1 .75-.75h1.19l1.023-1.025a.75.75 0 0 1 .768-.18A4 4 0 1 0 6.5 5.5ZM11 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z" />
+              </svg>
+              API 密钥
+            </button>
+
             {/* Admin: manage users */}
             {isAdmin && (
               <button
@@ -430,6 +447,10 @@ export default function UserMenu({
 
       {editProfileOpen && user.can_edit_profile && (
         <EditDisplayNameDialog onClose={() => setEditProfileOpen(false)} />
+      )}
+
+      {personalAccessTokenOpen && (
+        <PersonalAccessTokenDialog onClose={() => setPersonalAccessTokenOpen(false)} />
       )}
     </>
   );

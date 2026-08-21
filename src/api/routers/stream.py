@@ -3,8 +3,8 @@
 from fastapi import APIRouter, Depends, Request
 from starlette.responses import StreamingResponse
 
-from api.dependencies import get_current_user, get_stream_transport
-from api.services.auth import TokenPayload
+from api.dependencies import get_stream_transport, require_scope
+from api.services.auth import AuthPrincipal
 from api.services.stream_response import SSE_OPENAPI_RESPONSES, build_stream_response
 from api.services.stream_transport import StreamTransport
 
@@ -19,7 +19,7 @@ router = APIRouter()
 async def stream_events(
     stream_id: str,
     request: Request,
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: AuthPrincipal = Depends(require_scope("conversations:read")),
     stream_transport: StreamTransport = Depends(get_stream_transport),
 ) -> StreamingResponse:
     return build_stream_response(

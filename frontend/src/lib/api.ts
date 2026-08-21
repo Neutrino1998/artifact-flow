@@ -24,6 +24,9 @@ import type {
   UpdateUserRequest,
   ChangePasswordRequest,
   UpdateMyProfileRequest,
+  PersonalAccessTokenCreateRequest,
+  PersonalAccessTokenCreateResponse,
+  PersonalAccessTokenListResponse,
   UserInfo,
   UserResponse,
   UserListResponse,
@@ -1018,6 +1021,23 @@ export function updateMyProfile(body: UpdateMyProfileRequest) {
 
 export function getMe() {
   return request<UserInfo>('/api/v1/auth/me');
+}
+
+export function createPersonalAccessToken(body: PersonalAccessTokenCreateRequest) {
+  return request<PersonalAccessTokenCreateResponse>('/api/v1/auth/pats', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function listPersonalAccessTokens() {
+  return request<PersonalAccessTokenListResponse>('/api/v1/auth/pats');
+}
+
+export function revokePersonalAccessToken(tokenId: string) {
+  return request<void>(`/api/v1/auth/pats/${encodeURIComponent(tokenId)}`, {
+    method: 'DELETE',
+  });
 }
 
 // Departments (Admin)

@@ -11,6 +11,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from config import PASSWORD_MAX_CHARS
 from utils.password_policy import validate_password_strength
 from utils.validators import validate_username
+from core.security.personal_access_tokens import (
+    PAT_DEFAULT_EXPIRY_DAYS,
+    PAT_MAX_EXPIRY_DAYS,
+    PersonalAccessTokenScope,
+)
 
 
 MAX_BULK_USER_ACTION_IDS = 200
@@ -102,6 +107,36 @@ class UpdateMyProfileRequest(BaseModel):
     display_name: Optional[str] = Field(None, max_length=128, description="Display name; pass empty string to clear")
 
 
+class PersonalAccessTokenCreateRequest(BaseModel):
+    """Create a PAT. This request is accepted only from an interactive session."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=128)
+    scopes: List[PersonalAccessTokenScope] = Field(..., min_length=1)
+    expires_in_days: int = Field(
+        PAT_DEFAULT_EXPIRY_DAYS,
+        ge=1,
+        le=PAT_MAX_EXPIRY_DAYS,
+    )
+
+    @field_validator("name")
+    @classmethod
+    def _name_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Token name must not be blank")
+        return value
+
+    @field_validator("scopes")
+    @classmethod
+    def _scopes_must_be_unique(
+        cls, value: List[PersonalAccessTokenScope]
+    ) -> List[PersonalAccessTokenScope]:
+        if len(value) != len(set(value)):
+            raise ValueError("Token scopes must be unique")
+        return value
+
+
 class SsoExchangeRequest(BaseModel):
     """Sensitive POST body parsed manually so validation errors never echo the token."""
 
@@ -155,6 +190,28 @@ class LoginResponse(BaseModel):
     token_type: str = Field("bearer", description="Token type")
     expires_in: int = Field(..., description="Token expiry in seconds")
     user: UserInfo = Field(..., description="User info")
+
+
+class PersonalAccessTokenResponse(BaseModel):
+    id: str
+    name: str
+    prefix: str
+    scopes: List[PersonalAccessTokenScope]
+    created_at: datetime
+    expires_at: datetime
+    last_used_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = None
+
+
+class PersonalAccessTokenCreateResponse(PersonalAccessTokenResponse):
+    token: str = Field(
+        ...,
+        description="Bearer secret returned once; the server does not retain plaintext",
+    )
+
+
+class PersonalAccessTokenListResponse(BaseModel):
+    tokens: List[PersonalAccessTokenResponse]
 
 
 class SsoPublicProviderConfig(BaseModel):

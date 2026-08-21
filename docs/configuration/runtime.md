@@ -53,7 +53,7 @@ ready_timeout_seconds = 120
 
 | 变量 | 用途 |
 |---|---|
-| `ARTIFACTFLOW_JWT_SECRET` | JWT 签名 |
+| `ARTIFACTFLOW_JWT_SECRET` | JWT 签名，并以域隔离 HMAC 派生 PAT 校验密钥 |
 | `ARTIFACTFLOW_CREDENTIAL_KEY` | 加密 Tool/MCP 凭证；即使暂时没有凭证工具也必需 |
 | `ARTIFACTFLOW_DATABASE_URL` 或 `ARTIFACTFLOW_DATABASE_URLS` | 数据库连接；后者是逗号分隔的 PostgreSQL 地址列表 |
 | `ARTIFACTFLOW_REDIS_URL` | 生产运行时、SSE、lease 与多副本协调 |
