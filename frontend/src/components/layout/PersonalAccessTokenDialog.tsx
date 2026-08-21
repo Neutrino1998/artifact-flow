@@ -9,6 +9,7 @@ import type {
   PersonalAccessTokenScope,
 } from '@/types';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
+import Checkbox from '@/components/ui/Checkbox';
 import { CopyIcon } from '@/components/ui/CopyIcon';
 import { parseUtcIso } from '@/lib/time';
 import {
@@ -262,13 +263,14 @@ export default function PersonalAccessTokenDialog({
                       key={option.value}
                       className="flex cursor-pointer items-start gap-3 rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-3"
                     >
-                      <input
-                        type="checkbox"
-                        checked={scopes.has(option.value)}
-                        onChange={() => toggleScope(option.value)}
-                        disabled={loading || submitting}
-                        className="mt-1 accent-accent"
-                      />
+                      <span className="mt-1">
+                        <Checkbox
+                          checked={scopes.has(option.value)}
+                          onChange={() => toggleScope(option.value)}
+                          disabled={loading || submitting}
+                          ariaLabel={`权限范围：${option.label}`}
+                        />
+                      </span>
                       <span>
                         <span className="block text-sm font-medium text-text-primary dark:text-text-primary-dark">
                           {option.label}

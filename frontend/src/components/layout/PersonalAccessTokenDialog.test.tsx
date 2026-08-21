@@ -94,6 +94,11 @@ describe('PersonalAccessTokenDialog', () => {
     expect(document.body.textContent).toContain('最长 365 天');
     expect(document.body.textContent).toContain('Authorization: Bearer <PAT>');
     expect(document.body.textContent).toContain('只可调用普通用户 API');
+    const readConversationScope = document.body.querySelector<HTMLInputElement>(
+      'input[aria-label="权限范围：读取对话"]',
+    );
+    expect(readConversationScope?.className).toContain('appearance-none');
+    expect(readConversationScope?.className).not.toContain('accent-accent');
   });
 
   it('does not allow creation before the initial token list settles', async () => {
