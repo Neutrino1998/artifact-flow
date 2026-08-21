@@ -177,6 +177,13 @@ class User(Base):
         passive_deletes=True,
     )
 
+    personal_access_tokens: Mapped[List["PersonalAccessToken"]] = relationship(
+        "PersonalAccessToken",
+        back_populates="owner",
+        lazy="noload",
+        passive_deletes=True,
+    )
+
     # 关系：多对一 -> department（按需 lazy load，列表场景不预加载）
     department: Mapped[Optional["Department"]] = relationship(
         "Department",
@@ -206,6 +213,49 @@ class User(Base):
             "AND must_change_password = false "
             "AND password_changed_at IS NULL)",
             name="ck_users_auth_credentials",
+        ),
+    )
+
+
+class PersonalAccessToken(Base):
+    """Long-lived, user-owned credential for ordinary-user API access.
+
+    Only a keyed verifier is persisted.  The bearer secret is returned once at
+    creation and cannot be recovered from this row.
+    """
+
+    __tablename__ = "personal_access_tokens"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    secret_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    scopes: Mapped[list] = mapped_column(JSON, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    owner: Mapped["User"] = relationship(
+        "User",
+        back_populates="personal_access_tokens",
+    )
+
+    __table_args__ = (
+        CheckConstraint("length(name) > 0", name="ck_personal_access_tokens_name_nonempty"),
+        Index(
+            "ix_personal_access_tokens_user_created",
+            "user_id",
+            "created_at",
         ),
     )
 
@@ -421,6 +471,7 @@ class Message(Base):
 
     # 扩展元数据（顶层 keys: always_allowed_tools, execution_metrics,
     # uploaded_files=[{id, filename}] 本轮上传文件 display 快照；
+    # referenced_artifacts=[{id, filename}] 本轮显式引用的既有上传文件快照；
     # last_input_tokens 嵌在 execution_metrics 内部）
     metadata_: Mapped[Optional[Dict[str, Any]]] = mapped_column(
         "metadata",

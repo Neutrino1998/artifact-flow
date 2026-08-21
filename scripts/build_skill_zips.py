@@ -20,9 +20,10 @@ seed_hash(sha256(bundle))才稳定,重跑构建不会造成 reconcile 无谓换�
 
 from __future__ import annotations
 
+import json
 import sys
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = ROOT / "config" / "skills-src"
@@ -31,6 +32,7 @@ OUT_DIR = ROOT / "config" / "skills"
 # 打包排除:开发环境垃圾,永不属于 bundle
 _JUNK_NAMES = {".DS_Store", "__pycache__", ".gitkeep"}
 _JUNK_SUFFIXES = {".pyc", ".pyo"}
+_SOURCE_MANIFEST = "_bundle_sources.json"
 
 _FIXED_DATE = (1980, 1, 1, 0, 0, 0)   # zip 格式的最小合法时间戳
 _FIXED_MODE = 0o644                    # 脚本经 `python x.py` 执行,无需 exec 位
@@ -42,10 +44,53 @@ def _members(src: Path) -> list[Path]:
         if not p.is_file():
             continue
         parts = set(p.relative_to(src).parts)
-        if parts & _JUNK_NAMES or p.suffix in _JUNK_SUFFIXES:
+        if (
+            parts & _JUNK_NAMES
+            or p.name == _SOURCE_MANIFEST
+            or p.suffix in _JUNK_SUFFIXES
+        ):
             continue
         out.append(p)
     return out
+
+
+def _payloads(src: Path) -> dict[str, bytes]:
+    """Return bundle-relative payloads, optionally projecting canonical docs.
+
+    ``_bundle_sources.json`` maps a bundle path to one repository-relative
+    source file. It lets a skill package active Wiki pages without maintaining
+    a second hand-copied reference tree.
+    """
+    payloads = {
+        path.relative_to(src).as_posix(): path.read_bytes()
+        for path in _members(src)
+    }
+    manifest_path = src / _SOURCE_MANIFEST
+    if not manifest_path.is_file():
+        return payloads
+
+    raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise SystemExit(f"error: {manifest_path} must contain a JSON object")
+    for bundle_name, source_name in raw.items():
+        if not isinstance(bundle_name, str) or not isinstance(source_name, str):
+            raise SystemExit(f"error: {manifest_path} keys and values must be strings")
+        bundle_path = PurePosixPath(bundle_name)
+        if (
+            bundle_path.is_absolute()
+            or not bundle_path.parts
+            or ".." in bundle_path.parts
+            or bundle_name != bundle_path.as_posix()
+        ):
+            raise SystemExit(f"error: unsafe bundle path {bundle_name!r} in {manifest_path}")
+        if bundle_name in payloads:
+            raise SystemExit(f"error: duplicate bundle path {bundle_name!r} in {manifest_path}")
+
+        source_path = (ROOT / source_name).resolve()
+        if not source_path.is_relative_to(ROOT) or not source_path.is_file():
+            raise SystemExit(f"error: source {source_name!r} in {manifest_path} is unavailable")
+        payloads[bundle_name] = source_path.read_bytes()
+    return payloads
 
 
 def build_zip(slug: str) -> bytes:
@@ -57,13 +102,13 @@ def build_zip(slug: str) -> bytes:
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
-        for path in _members(src):
-            arcname = f"{slug}/{path.relative_to(src).as_posix()}"
+        for relative_name, payload in sorted(_payloads(src).items()):
+            arcname = f"{slug}/{relative_name}"
             zi = zipfile.ZipInfo(arcname, date_time=_FIXED_DATE)
             zi.compress_type = zipfile.ZIP_DEFLATED
             zi.create_system = 3   # Unix;ZipInfo 默认跟构建平台走(Windows→0)
             zi.external_attr = _FIXED_MODE << 16
-            zf.writestr(zi, path.read_bytes(), compresslevel=9)
+            zf.writestr(zi, payload, compresslevel=9)
     return buf.getvalue()
 
 

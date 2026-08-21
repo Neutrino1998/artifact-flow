@@ -19,14 +19,15 @@ FastAPI 依赖注入
         └──► get_conversation_manager() / use-case managers
 
 认证依赖：
-    get_current_user()          # JWT 校验 + DB 查活
+    get_current_user()          # 仅交互会话 JWT：账户与管理端点
+    get_current_principal()     # 普通用户 API：JWT 或带 scope 的 PAT
         └──► require_admin()    # 管理员权限
 """
 
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import AsyncGenerator, Any, Dict, Optional, TYPE_CHECKING
+from typing import AsyncGenerator, Any, Callable, Dict, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from api.services.stream_transport import StreamTransport
@@ -549,6 +550,16 @@ async def get_user_account_manager(
     return UserAccountManager(UserRepository(session), DepartmentRepository(session))
 
 
+async def get_personal_access_token_manager(
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Return the session-bound PAT lifecycle/authentication manager."""
+    from core.management.personal_access_token_manager import PersonalAccessTokenManager
+    from repositories.personal_access_token_repo import PersonalAccessTokenRepository
+
+    return PersonalAccessTokenManager(PersonalAccessTokenRepository(session))
+
+
 async def get_remote_auth_manager(
     session: AsyncSession = Depends(get_db_session),
 ):
@@ -595,10 +606,11 @@ async def get_client_config_manager(
 
 _bearer_scheme = HTTPBearer(auto_error=False)
 
-# must_change_password 闸门豁免:仅这两个 (method, path) 在标志为 True 时仍放行,
-# 让用户能拉到自己的状态(GET /me)并完成改密(POST /me/password)。其余一律 403。
+# must_change_password 闸门豁免：用户可拉取自身状态和只读运行时密码策略，
+# 并完成改密；其余业务接口一律 403。
 _PASSWORD_GATE_EXEMPT: set[tuple[str, str]] = {
     ("GET", "/api/v1/auth/me"),
+    ("GET", "/api/v1/meta"),
     ("POST", "/api/v1/auth/me/password"),
 }
 
@@ -644,6 +656,86 @@ async def get_current_user(
         role=user.role,
         password_version=user.password_version,
     )
+
+
+async def get_current_principal(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+    session: AsyncSession = Depends(get_db_session),
+) -> "AuthPrincipal":
+    """Authenticate an ordinary-user endpoint with either a JWT session or PAT."""
+    from api.services.auth import AuthPrincipal, decode_access_token
+    from core.management.personal_access_token_manager import PersonalAccessTokenManager
+    from core.security.personal_access_tokens import ALL_PAT_SCOPES, PAT_BEARER_PREFIX
+    from repositories.personal_access_token_repo import PersonalAccessTokenRepository
+    from repositories.user_repo import UserRepository
+
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    bearer = credentials.credentials
+    credential_type = "session"
+    credential_id = None
+    scopes = frozenset(ALL_PAT_SCOPES)
+    password_version: Optional[int] = None
+
+    if bearer.startswith(PAT_BEARER_PREFIX):
+        authenticated_pat = await PersonalAccessTokenManager(
+            PersonalAccessTokenRepository(session)
+        ).authenticate(bearer)
+        if authenticated_pat is None:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+        user_id = authenticated_pat.user_id
+        credential_type = "pat"
+        credential_id = authenticated_pat.token_id
+        scopes = authenticated_pat.scopes
+    else:
+        payload = decode_access_token(bearer)
+        if payload is None:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+        user_id = payload.user_id
+        password_version = payload.password_version
+
+    user = await UserRepository(session).get_by_id(user_id)
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="User disabled or not found")
+
+    if credential_type == "session" and password_version != user.password_version:
+        raise HTTPException(status_code=401, detail="Token invalidated; please log in again")
+
+    if (
+        user.must_change_password
+        and (request.method, request.url.path) not in _PASSWORD_GATE_EXEMPT
+    ):
+        raise HTTPException(status_code=403, detail="Password change required")
+
+    # A PAT is always an ordinary-user credential, even when its owner is an
+    # administrator. Admin authority remains exclusive to interactive JWTs.
+    principal_role = "user" if credential_type == "pat" else user.role
+    return AuthPrincipal(
+        user_id=user.id,
+        username=user.username,
+        role=principal_role,
+        password_version=user.password_version,
+        credential_type=credential_type,
+        credential_id=credential_id,
+        scopes=scopes,
+    )
+
+
+def require_scope(scope: str) -> Callable[..., Any]:
+    """Require one explicit PAT scope; interactive sessions have full user access."""
+    async def dependency(
+        principal: "AuthPrincipal" = Depends(get_current_principal),
+    ) -> "AuthPrincipal":
+        if scope not in principal.scopes:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Personal access token requires scope '{scope}'",
+            )
+        return principal
+
+    return dependency
 
 
 async def require_admin(

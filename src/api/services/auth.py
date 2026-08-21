@@ -6,7 +6,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import FrozenSet, Literal, Optional
 
 import jwt
 
@@ -28,6 +28,19 @@ class TokenPayload:
     username: str
     role: str
     password_version: int = 0
+
+
+@dataclass(frozen=True)
+class AuthPrincipal:
+    """Current ordinary-user API actor, authenticated by session JWT or PAT."""
+
+    user_id: str
+    username: str
+    role: str
+    password_version: int
+    credential_type: Literal["session", "pat"]
+    credential_id: Optional[str]
+    scopes: FrozenSet[str]
 
 
 def create_access_token(

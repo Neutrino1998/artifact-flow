@@ -5,28 +5,31 @@ from typing import TYPE_CHECKING, Iterable, Optional
 
 import bcrypt
 
-from config import config
+from config import PASSWORD_MAX_BYTES, config
 from utils.time import utc_now
 
 if TYPE_CHECKING:
     from db.models import User
 
 
-_BCRYPT_MAX_BYTES = 72
-
 DUMMY_PASSWORD_HASH = "$2b$12$mVnKMOjGcfCqIRsSQMoM6uzEEe3tfZKFqAHVbj3w6/P0JBtySBr7W"
 
 
-def _bcrypt_bytes(plain: str) -> bytes:
-    return plain.encode("utf-8")[:_BCRYPT_MAX_BYTES]
-
-
 def hash_password(plain: str) -> str:
-    return bcrypt.hashpw(_bcrypt_bytes(plain), bcrypt.gensalt()).decode("utf-8")
+    encoded = plain.encode("utf-8")
+    if len(encoded) > PASSWORD_MAX_BYTES:
+        raise ValueError(
+            f"口令 UTF-8 编码后不能超过 {PASSWORD_MAX_BYTES} 字节"
+        )
+    return bcrypt.hashpw(encoded, bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.checkpw(_bcrypt_bytes(plain), hashed.encode("utf-8"))
+    # Historical writers accepted longer values but hashed only bcrypt's first
+    # 72 UTF-8 bytes. Preserve that verification behavior so existing accounts
+    # can log in; all new writes reject overlong input in hash_password.
+    candidate = plain.encode("utf-8")[:PASSWORD_MAX_BYTES]
+    return bcrypt.checkpw(candidate, hashed.encode("utf-8"))
 
 
 async def passwords_match_any(

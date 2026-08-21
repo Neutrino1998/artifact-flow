@@ -37,6 +37,12 @@ markdown_extensions:
 
 nav:
   - 首页: index.md
+  - 产品使用:
+      - 使用指南: product-help/index.md
+      - Tool 与 MCP: product-help/tools.md
+      - Skill: product-help/skills.md
+      - PAT 与 API: product-help/pat-api.md
+      - 常见问题: product-help/troubleshooting.md
   - 工作原理: how-it-works.md
   - 配置:
       - 配置总览: configuration/index.md

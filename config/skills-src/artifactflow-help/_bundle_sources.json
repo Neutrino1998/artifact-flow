@@ -1,0 +1,7 @@
+{
+  "references/product-help/index.md": "docs/product-help/index.md",
+  "references/product-help/tools.md": "docs/product-help/tools.md",
+  "references/product-help/skills.md": "docs/product-help/skills.md",
+  "references/product-help/pat-api.md": "docs/product-help/pat-api.md",
+  "references/product-help/troubleshooting.md": "docs/product-help/troubleshooting.md"
+}

@@ -5,7 +5,7 @@
 
 import pytest
 
-from config import config
+from config import PASSWORD_MAX_BYTES, config
 from utils.password_policy import validate_password_strength
 
 
@@ -29,6 +29,17 @@ class TestLength:
     def test_exactly_min_length_ok(self):
         assert config.PASSWORD_MIN_LENGTH == 8
         validate_password_strength("Abcd123!")  # 恰 8 位
+
+    def test_bcrypt_byte_maximum_is_enforced(self):
+        maximum = "A1!" + "x" * (PASSWORD_MAX_BYTES - 3)
+        validate_password_strength(maximum)
+
+        with pytest.raises(ValueError, match="72 字节"):
+            validate_password_strength(maximum + "x")
+
+    def test_bcrypt_maximum_counts_utf8_bytes(self):
+        with pytest.raises(ValueError, match="72 字节"):
+            validate_password_strength("A1!" + "中" * 24)
 
 
 class TestComplexity:

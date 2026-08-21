@@ -2,7 +2,7 @@
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import config
+from config import PASSWORD_MAX_BYTES, config
 from models.llm import get_compaction_threshold
 from repositories.tool_registry_repo import ToolRegistryRepository
 
@@ -29,4 +29,11 @@ class ClientConfigManager:
             "max_upload_size": config.MAX_UPLOAD_SIZE,
             "max_private_skills": config.SKILL_USER_MAX_PRIVATE_COUNT,
             "message_feedback_max_detail_chars": config.MESSAGE_FEEDBACK_MAX_DETAIL_CHARS,
+            "password_policy": {
+                "min_length": config.PASSWORD_MIN_LENGTH,
+                "max_bytes": PASSWORD_MAX_BYTES,
+                "require_letter": config.PASSWORD_REQUIRE_LETTER,
+                "require_digit": config.PASSWORD_REQUIRE_DIGIT,
+                "require_symbol": config.PASSWORD_REQUIRE_SYMBOL,
+            },
         }

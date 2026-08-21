@@ -11,7 +11,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import config
+from config import PASSWORD_MAX_BYTES, config
 from db.models import Agent
 
 
@@ -79,6 +79,33 @@ async def test_meta_returns_full_shape(client: AsyncClient):
 
     assert data["message_feedback_max_detail_chars"] == (
         config.MESSAGE_FEEDBACK_MAX_DETAIL_CHARS
+    )
+
+    assert data["password_policy"] == {
+        "min_length": config.PASSWORD_MIN_LENGTH,
+        "max_bytes": PASSWORD_MAX_BYTES,
+        "require_letter": config.PASSWORD_REQUIRE_LETTER,
+        "require_digit": config.PASSWORD_REQUIRE_DIGIT,
+        "require_symbol": config.PASSWORD_REQUIRE_SYMBOL,
+    }
+
+
+@pytest.mark.asyncio
+async def test_meta_is_available_while_password_change_is_required(
+    client: AsyncClient,
+    test_user,
+    db_manager,
+):
+    async with db_manager.session() as session:
+        user = await session.get(type(test_user), test_user.id)
+        user.must_change_password = True
+        await session.commit()
+
+    response = await client.get("/api/v1/meta")
+
+    assert response.status_code == 200
+    assert response.json()["password_policy"]["min_length"] == (
+        config.PASSWORD_MIN_LENGTH
     )
 
 

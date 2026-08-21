@@ -1,7 +1,7 @@
 """门类三 C6: 强制改密闸门 + 周期到期 + 不重用查重 + 建号/重置强制改密。
 
 覆盖:
-- must_change_password 闸门:置 True 时除 GET /me、POST /me/password 外 403;改密后解除
+- must_change_password 闸门:置 True 时仅放行 GET /me、GET /meta、POST /me/password;改密后解除
 - 90/180 天到期:登录时口令超龄 → 标记强制改密
 - 不重用:新口令 = 当前口令 → 400(PASSWORD_HISTORY_COUNT=1 即「≠ 当前」)
 - admin 建号 / admin 重置 → 该用户首次登录强制改密

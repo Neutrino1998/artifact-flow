@@ -8,6 +8,7 @@ ArtifactFlow 是一套面向私有化部署的多智能体服务。Agent、Model
 
 | 你的目标 | 阅读入口 |
 |---|---|
+| 理解界面、Tool/Skill/PAT 和管理员能力 | [产品使用指南](product-help/index.md) |
 | 先理解一次任务怎样执行 | [工作原理](how-it-works.md) |
 | 配置模型、Agent、工具或 Skill | [配置总览](configuration/index.md) |
 | 准备一台新的生产主机 | [主机准备](operations/host-preparation.md) |

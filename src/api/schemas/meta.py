@@ -8,6 +8,18 @@ src/config.py. Values are static for the session — fetch once, cache.
 
 from pydantic import BaseModel, Field
 
+from config import PASSWORD_MAX_BYTES
+
+
+class PasswordPolicyResponse(BaseModel):
+    """Backend-authoritative password-shape policy used for frontend guidance."""
+
+    min_length: int = Field(..., ge=1, le=PASSWORD_MAX_BYTES)
+    max_bytes: int = Field(..., ge=1)
+    require_letter: bool
+    require_digit: bool
+    require_symbol: bool
+
 
 class ClientConfigResponse(BaseModel):
     """GET /api/v1/meta response — runtime constants for the frontend."""
@@ -51,4 +63,11 @@ class ClientConfigResponse(BaseModel):
         ...,
         ge=1,
         description="Maximum optional detail length for one message feedback record.",
+    )
+    password_policy: PasswordPolicyResponse = Field(
+        ...,
+        description=(
+            "Current password length and character-class requirements. The frontend "
+            "uses them only for guidance; backend password validation remains authoritative."
+        ),
     )

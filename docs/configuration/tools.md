@@ -2,6 +2,9 @@
 
 一个 Tool 是一项可独立授权、可被模型调用的操作。外部集成优先使用声明式 HTTP Tool 或 MCP；只有需要应用内部逻辑时才编写 Python Builtin。
 
+管理员界面中的类型选择、字段含义、参数配置、凭证和挂载流程见
+[Tool 与 MCP 管理](../product-help/tools.md)。本页只说明部署方维护的配置文件契约。
+
 ## HTTP Singleton
 
 在 `config/tools/stock_price.md` 创建：

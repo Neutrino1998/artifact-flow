@@ -9,7 +9,7 @@ import pytest
 from cryptography.fernet import Fernet
 from pydantic import ValidationError
 
-from config import Settings, config, validate_config
+from config import PASSWORD_MAX_BYTES, Settings, config, validate_config
 
 
 def test_execution_timeout_defaults_to_sixty_minutes(monkeypatch):
@@ -73,6 +73,48 @@ def test_private_skill_count_limit_accepts_three_supported_states(limit):
 def test_private_skill_count_limit_rejects_values_below_minus_one():
     with pytest.raises(ValidationError, match="SKILL_USER_MAX_PRIVATE_COUNT"):
         Settings(SKILL_USER_MAX_PRIVATE_COUNT=-2)
+
+
+def test_password_min_length_must_be_positive():
+    with pytest.raises(ValidationError, match="PASSWORD_MIN_LENGTH"):
+        Settings(PASSWORD_MIN_LENGTH=0)
+
+
+def test_password_min_length_must_fit_password_input_contract():
+    assert (
+        Settings(PASSWORD_MIN_LENGTH=PASSWORD_MAX_BYTES).PASSWORD_MIN_LENGTH
+        == PASSWORD_MAX_BYTES
+    )
+    with pytest.raises(ValidationError, match="PASSWORD_MIN_LENGTH"):
+        Settings(PASSWORD_MIN_LENGTH=PASSWORD_MAX_BYTES + 1)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("LOGIN_MAX_FAILURES", 0),
+        ("LOGIN_FAILURE_WINDOW_SEC", 0),
+        ("REDIS_MAX_CONNECTIONS", 0),
+        ("DATABASE_POOL_SIZE", 0),
+        ("DATABASE_MAX_OVERFLOW", -1),
+        ("DATABASE_POOL_TIMEOUT", -1),
+    ],
+)
+def test_documented_capacity_settings_reject_unsafe_values(field, value):
+    with pytest.raises(ValidationError, match=field):
+        Settings(**{field: value})
+
+
+def test_database_pool_settings_accept_bounded_minimums():
+    settings = Settings(
+        DATABASE_POOL_SIZE=1,
+        DATABASE_MAX_OVERFLOW=0,
+        DATABASE_POOL_TIMEOUT=0,
+    )
+
+    assert settings.DATABASE_POOL_SIZE == 1
+    assert settings.DATABASE_MAX_OVERFLOW == 0
+    assert settings.DATABASE_POOL_TIMEOUT == 0
 
 
 @pytest.mark.parametrize("invalid_limit", [0, 1, 63])

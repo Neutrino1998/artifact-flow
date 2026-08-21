@@ -17,6 +17,7 @@ export default function MessageList() {
   const pendingUserMessage = useStreamStore((s) => s.pendingUserMessage);
   const pendingUserFiles = useStreamStore((s) => s.pendingUserFiles);
   const pendingUserSkills = useStreamStore((s) => s.pendingUserSkills);
+  const pendingUserReferences = useStreamStore((s) => s.pendingUserReferences);
 
   // Only show streaming UI if the active stream belongs to this conversation
   const isStreamingHere = isStreaming && streamConversationId === currentId;
@@ -51,6 +52,7 @@ export default function MessageList() {
                 siblingCount={node.siblingCount}
                 attachments={node.uploaded_files}
                 activatedSkills={node.activated_skills}
+                referencedArtifacts={node.referenced_artifacts}
                 timestamp={node.created_at}
               />
 
@@ -81,6 +83,7 @@ export default function MessageList() {
             pending
             attachments={pendingUserFiles?.map((filename) => ({ filename }))}
             activatedSkills={pendingUserSkills}
+            referencedArtifacts={pendingUserReferences}
           />
         )}
 

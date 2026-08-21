@@ -209,6 +209,117 @@
         ]
       }
     },
+    "/api/v1/auth/pats": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "List Personal Access Tokens",
+        "operationId": "list_personal_access_tokens_api_v1_auth_pats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonalAccessTokenListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Create Personal Access Token",
+        "description": "Create a user PAT and reveal its bearer secret exactly once.",
+        "operationId": "create_personal_access_token_api_v1_auth_pats_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PersonalAccessTokenCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonalAccessTokenCreateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/pats/{token_id}": {
+      "delete": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Revoke Personal Access Token",
+        "operationId": "revoke_personal_access_token_api_v1_auth_pats__token_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "token_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Token Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/me/password": {
       "post": {
         "tags": [
@@ -6072,7 +6183,6 @@
         "properties": {
           "current_password": {
             "type": "string",
-            "maxLength": 128,
             "minLength": 1,
             "title": "Current Password",
             "description": "Current password"
@@ -6147,6 +6257,10 @@
             "minimum": 1.0,
             "title": "Message Feedback Max Detail Chars",
             "description": "Maximum optional detail length for one message feedback record."
+          },
+          "password_policy": {
+            "$ref": "#/components/schemas/PasswordPolicyResponse",
+            "description": "Current password length and character-class requirements. The frontend uses them only for guidance; backend password validation remains authoritative."
           }
         },
         "type": "object",
@@ -6155,7 +6269,8 @@
           "lead_agent_model",
           "max_upload_size",
           "max_private_skills",
-          "message_feedback_max_detail_chars"
+          "message_feedback_max_detail_chars",
+          "password_policy"
         ],
         "title": "ClientConfigResponse",
         "description": "GET /api/v1/meta response \u2014 runtime constants for the frontend."
@@ -7791,6 +7906,21 @@
             "title": "Activated Skills",
             "description": "Skills the user explicitly activated on this turn, from Message.metadata_['activated_skills']. This is a per-message display snapshot, unlike cumulative active_skills; model-initiated read_skill calls are excluded."
           },
+          "referenced_artifacts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ReferencedArtifactRef"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referenced Artifacts",
+            "description": "Existing user-upload artifacts explicitly referenced on this turn, from Message.metadata_['referenced_artifacts']. This is a per-message display snapshot."
+          },
           "active_skills": {
             "anyOf": [
               {
@@ -7819,6 +7949,7 @@
           "execution_metrics",
           "uploaded_files",
           "activated_skills",
+          "referenced_artifacts",
           "active_skills"
         ],
         "title": "MessageResponse",
@@ -7911,6 +8042,271 @@
         "title": "MoveDepartmentRequest",
         "description": "POST /api/v1/departments/{id}/move request body \u2014 \u642c\u5bb6"
       },
+      "PasswordPolicyResponse": {
+        "properties": {
+          "min_length": {
+            "type": "integer",
+            "maximum": 72.0,
+            "minimum": 1.0,
+            "title": "Min Length"
+          },
+          "max_bytes": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Max Bytes"
+          },
+          "require_letter": {
+            "type": "boolean",
+            "title": "Require Letter"
+          },
+          "require_digit": {
+            "type": "boolean",
+            "title": "Require Digit"
+          },
+          "require_symbol": {
+            "type": "boolean",
+            "title": "Require Symbol"
+          }
+        },
+        "type": "object",
+        "required": [
+          "min_length",
+          "max_bytes",
+          "require_letter",
+          "require_digit",
+          "require_symbol"
+        ],
+        "title": "PasswordPolicyResponse",
+        "description": "Backend-authoritative password-shape policy used for frontend guidance."
+      },
+      "PersonalAccessTokenCreateRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/PersonalAccessTokenScope"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Scopes"
+          },
+          "expires_in_days": {
+            "type": "integer",
+            "maximum": 365.0,
+            "minimum": 1.0,
+            "title": "Expires In Days",
+            "default": 90
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "scopes"
+        ],
+        "title": "PersonalAccessTokenCreateRequest",
+        "description": "Create a PAT. This request is accepted only from an interactive session."
+      },
+      "PersonalAccessTokenCreateResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "prefix": {
+            "type": "string",
+            "title": "Prefix"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/PersonalAccessTokenScope"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "token": {
+            "type": "string",
+            "title": "Token",
+            "description": "Bearer secret returned once; the server does not retain plaintext"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "prefix",
+          "scopes",
+          "created_at",
+          "expires_at",
+          "last_used_at",
+          "revoked_at",
+          "token"
+        ],
+        "title": "PersonalAccessTokenCreateResponse"
+      },
+      "PersonalAccessTokenListResponse": {
+        "properties": {
+          "tokens": {
+            "items": {
+              "$ref": "#/components/schemas/PersonalAccessTokenResponse"
+            },
+            "type": "array",
+            "title": "Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tokens"
+        ],
+        "title": "PersonalAccessTokenListResponse"
+      },
+      "PersonalAccessTokenResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "prefix": {
+            "type": "string",
+            "title": "Prefix"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/PersonalAccessTokenScope"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "prefix",
+          "scopes",
+          "created_at",
+          "expires_at",
+          "last_used_at",
+          "revoked_at"
+        ],
+        "title": "PersonalAccessTokenResponse"
+      },
+      "PersonalAccessTokenScope": {
+        "type": "string",
+        "enum": [
+          "conversations:read",
+          "conversations:write",
+          "conversations:control",
+          "conversations:delete",
+          "artifacts:read",
+          "skills:read",
+          "skills:write",
+          "tools:approve"
+        ],
+        "title": "PersonalAccessTokenScope"
+      },
+      "ReferencedArtifactRef": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Referenced artifact ID"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename",
+            "description": "Original filename frozen at send time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "filename"
+        ],
+        "title": "ReferencedArtifactRef",
+        "description": "Existing uploaded artifact explicitly referenced on one message."
+      },
       "ResolveDepartmentRequest": {
         "properties": {
           "path": {
@@ -7972,7 +8368,7 @@
           "always_allow": {
             "type": "boolean",
             "title": "Always Allow",
-            "description": "Always allow this tool for the rest of this execution",
+            "description": "Allow this tool name without further confirmation along the current conversation branch",
             "default": false
           }
         },

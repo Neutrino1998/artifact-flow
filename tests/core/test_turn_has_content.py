@@ -28,6 +28,13 @@ def test_resolved_skill_bodies_alone_have_content():
     assert turn_has_content("", activated_skill_bodies=[{"slug": "s", "body": "x"}]) is True
 
 
+def test_existing_file_references_alone_have_content():
+    assert turn_has_content(
+        "",
+        referenced_artifacts=[{"id": "brief", "filename": "brief.pdf"}],
+    ) is True
+
+
 def test_empty_resolved_bodies_is_empty():
     # 这正是 #1:raw activate_skills 非空但解析后 bodies 空 → 判为无内容(该拒)。
     assert turn_has_content("", activated_skill_bodies=[]) is False

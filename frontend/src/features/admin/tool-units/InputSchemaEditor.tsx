@@ -70,7 +70,7 @@ export default function InputSchemaEditor({
           onChange={setMode}
           ariaLabel="输入参数编辑模式"
           options={[
-            { value: 'form', label: '参数表单' },
+            { value: 'form', label: '参数配置' },
             { value: 'json', label: '高级 JSON Schema' },
           ]}
         />
@@ -96,6 +96,11 @@ export default function InputSchemaEditor({
               {inspection.kind === 'invalid' ? '当前 Schema 无法解析' : '当前 Schema 包含高级约束'}
             </div>
             <div className="mt-1">{inspection.reason}</div>
+            {inspection.kind === 'advanced' ? (
+              <div className="mt-1">
+                参数配置无法无损表达这些字段；强制切换会丢失约束，请继续使用 JSON 编辑。
+              </div>
+            ) : null}
             <button
               type="button"
               onClick={() => setMode('json')}
@@ -109,7 +114,7 @@ export default function InputSchemaEditor({
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-              Draft 2020-12，根 type 必须是 object；这里保存的内容就是模型披露与运行时校验使用的 Schema。
+              Draft 2020-12，根 type 必须是 object；嵌套对象、组合与条件约束在这里编辑。保存内容就是模型披露与运行时校验使用的 Schema。
             </p>
             {!readOnly ? (
               <button
@@ -139,10 +144,10 @@ export default function InputSchemaEditor({
             <p className="text-xs text-status-error">{inspection.reason}</p>
           ) : inspection.kind === 'advanced' ? (
             <p className="text-xs text-status-warning">
-              {inspection.reason}；参数表单不会修改或简化这些字段。
+              {inspection.reason}；参数配置不会修改或简化这些字段。
             </p>
           ) : (
-            <p className="text-xs text-status-success">此 Schema 可与参数表单无损切换。</p>
+            <p className="text-xs text-status-success">此 Schema 可与参数配置无损切换。</p>
           )}
         </div>
       )}
@@ -211,7 +216,7 @@ function SimpleSchemaForm({
         </div>
       </div>
       <p className="text-xs text-text-tertiary dark:text-text-tertiary-dark">
-        参数表单会实时生成 JSON Schema。复杂嵌套、组合约束和条件约束请使用“高级 JSON Schema”。
+        参数配置会实时生成 JSON Schema。复杂嵌套、组合约束和条件约束请使用“高级 JSON Schema”。
       </p>
     </div>
   );

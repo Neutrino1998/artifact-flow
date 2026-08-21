@@ -13,9 +13,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
 from config import config
-from api.dependencies import get_artifact_service, get_conversation_manager, get_current_user
+from api.dependencies import get_artifact_service, get_conversation_manager, require_scope
 from api.artifact_raw_response import RAW_ARTIFACT_RESPONSES, build_artifact_blob_response
-from api.services.auth import TokenPayload
+from api.services.auth import AuthPrincipal
 from core.management.conversation_manager import ConversationManager
 from api.schemas.artifact import (
     ArtifactListResponse,
@@ -33,7 +33,7 @@ router = APIRouter()
 
 
 async def _verify_session_ownership(
-    session_id: str, user: TokenPayload, conversation_manager: ConversationManager
+    session_id: str, user: AuthPrincipal, conversation_manager: ConversationManager
 ) -> None:
     """校验 session（= conversation）归属当前用户"""
     if not await conversation_manager.verify_ownership(session_id, user.user_id):
@@ -43,7 +43,7 @@ async def _verify_session_ownership(
 @router.get("/{session_id}", response_model=ArtifactListResponse)
 async def list_artifacts(
     session_id: str,
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: AuthPrincipal = Depends(require_scope("artifacts:read")),
     artifact_service: ArtifactService = Depends(get_artifact_service),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
@@ -97,7 +97,7 @@ async def list_artifacts(
 async def get_artifact_raw(
     session_id: str,
     artifact_id: str,
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: AuthPrincipal = Depends(require_scope("artifacts:read")),
     artifact_service: ArtifactService = Depends(get_artifact_service),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
@@ -126,7 +126,7 @@ async def get_artifact_raw(
 async def get_artifact(
     session_id: str,
     artifact_id: str,
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: AuthPrincipal = Depends(require_scope("artifacts:read")),
     artifact_service: ArtifactService = Depends(get_artifact_service),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
@@ -184,7 +184,7 @@ async def get_version(
     session_id: str,
     artifact_id: str,
     version: int,
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: AuthPrincipal = Depends(require_scope("artifacts:read")),
     artifact_service: ArtifactService = Depends(get_artifact_service),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):

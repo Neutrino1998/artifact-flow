@@ -173,7 +173,7 @@ export function inspectInputSchema(schemaText: string): InputSchemaInspection {
     const unknownRequired = required[unknownRequiredIndex];
     return {
       kind: 'advanced',
-      reason: `required 中的 ${JSON.stringify(unknownRequired)} 未在 properties 声明，无法用参数表单无损表达`,
+      reason: `required 中的 ${JSON.stringify(unknownRequired)} 未在 properties 声明，无法用参数配置无损表达`,
     };
   }
 

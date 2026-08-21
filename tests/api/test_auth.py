@@ -6,6 +6,7 @@ Covers login, /me endpoint, and admin user CRUD.
 
 import uuid
 
+import bcrypt
 import pytest
 from httpx import AsyncClient
 
@@ -67,6 +68,32 @@ class TestLogin:
             json={"username": "nobody", "password": "whatever"},
         )
         assert resp.status_code == 401
+
+    async def test_overlong_legacy_password_can_login_without_rewriting_hash(
+        self,
+        anon_client: AsyncClient,
+        test_user: User,
+        db_manager,
+    ):
+        legacy_password = "Aa1!" + "x" * 140
+        legacy_hash = bcrypt.hashpw(
+            legacy_password.encode("utf-8")[:72],
+            bcrypt.gensalt(rounds=4),
+        ).decode("utf-8")
+        async with db_manager.session() as session:
+            user = await session.get(User, test_user.id)
+            user.hashed_password = legacy_hash
+            await session.commit()
+
+        resp = await anon_client.post(
+            "/api/v1/auth/login",
+            json={"username": "testuser", "password": legacy_password},
+        )
+        assert resp.status_code == 200
+
+        async with db_manager.session() as session:
+            unchanged = await session.get(User, test_user.id)
+            assert unchanged.hashed_password == legacy_hash
 
     async def test_unknown_username_still_runs_bcrypt(
         self, anon_client: AsyncClient, monkeypatch
@@ -411,6 +438,38 @@ class TestChangeMyPassword:
         assert resp.status_code == 400
         assert "current password" in resp.json()["detail"].lower()
 
+    async def test_overlong_legacy_current_password_can_be_replaced(
+        self,
+        client: AsyncClient,
+        anon_client: AsyncClient,
+        test_user: User,
+        db_manager,
+    ):
+        legacy_password = "Aa1!" + "x" * 140
+        legacy_hash = bcrypt.hashpw(
+            legacy_password.encode("utf-8")[:72],
+            bcrypt.gensalt(rounds=4),
+        ).decode("utf-8")
+        async with db_manager.session() as session:
+            user = await session.get(User, test_user.id)
+            user.hashed_password = legacy_hash
+            await session.commit()
+
+        response = await client.post(
+            "/api/v1/auth/me/password",
+            json={
+                "current_password": legacy_password,
+                "new_password": "Replacement1!",
+            },
+        )
+        assert response.status_code == 204
+
+        relogin = await anon_client.post(
+            "/api/v1/auth/login",
+            json={"username": "testuser", "password": "Replacement1!"},
+        )
+        assert relogin.status_code == 200
+
     async def test_new_password_too_short(self, client: AsyncClient, test_user: User):
         resp = await client.post(
             "/api/v1/auth/me/password",
@@ -467,28 +526,21 @@ class TestChangeMyPassword:
         assert stale.status_code == 401
 
 
-class TestLongPasswordBcrypt:
-    """>72 字节口令不应 500（bcrypt 5.0 会抛 ValueError；我们截到 72 字节
-    + 全局 handler 兜底）。多字节口令在 72 字节边界被切断不影响 bcrypt。"""
+class TestNewPasswordBcryptLimit:
+    """New passwords fail loud instead of silently dropping a bcrypt suffix."""
 
-    async def test_create_and_login_with_long_multibyte_password(
-        self, admin_client: AsyncClient, anon_client: AsyncClient
+    async def test_create_rejects_password_over_72_utf8_bytes(
+        self, admin_client: AsyncClient
     ):
         uname = f"longpw-{uuid.uuid4().hex[:8]}"
-        long_pw = "Aa1!" + "中" * 30  # 94 字节 / 34 字符,强度达标且超 72 字节
+        long_pw = "Aa1!" + "中" * 23  # 73 UTF-8 bytes
 
         resp = await admin_client.post(
             "/api/v1/admin/users",
             json={"username": uname, "password": long_pw, "role": "user"},
         )
-        assert resp.status_code == 200  # 不是 500
-
-        # 完整明文登录成功(hash 与 verify 用同样的 72 字节截断)
-        ok = await anon_client.post(
-            "/api/v1/auth/login",
-            json={"username": uname, "password": long_pw},
-        )
-        assert ok.status_code == 200
+        assert resp.status_code == 422
+        assert "72" in str(resp.json())
 
 
 class TestUsernameValidation:

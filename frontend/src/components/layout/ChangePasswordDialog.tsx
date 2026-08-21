@@ -4,8 +4,9 @@ import { useState } from 'react';
 import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
+import { useConfigStore } from '@/stores/configStore';
 import {
-  PASSWORD_POLICY_HINT,
+  getPasswordPolicyHint,
   validatePasswordStrength,
 } from '@/lib/passwordPolicy';
 import {
@@ -26,6 +27,7 @@ interface ChangePasswordDialogProps {
 }
 
 export default function ChangePasswordDialog({ onClose, forced = false }: ChangePasswordDialogProps) {
+  const passwordPolicy = useConfigStore((s) => s.passwordPolicy);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -34,7 +36,10 @@ export default function ChangePasswordDialog({ onClose, forced = false }: Change
   const [success, setSuccess] = useState(false);
 
   // 客户端强度提示(后端权威);新口令非空时才校验,避免初始就报红。
-  const policyError = newPassword ? validatePasswordStrength(newPassword) : null;
+  const passwordPolicyHint = getPasswordPolicyHint(passwordPolicy);
+  const policyError = newPassword
+    ? validatePasswordStrength(newPassword, passwordPolicy)
+    : null;
   const newPasswordMismatch =
     confirmPassword.length > 0 && newPassword !== confirmPassword;
 
@@ -124,7 +129,7 @@ export default function ChangePasswordDialog({ onClose, forced = false }: Change
               <p className="text-status-error text-xs mt-1">{policyError}</p>
             ) : (
               <p className="text-text-tertiary dark:text-text-tertiary-dark text-xs mt-1">
-                {PASSWORD_POLICY_HINT}
+                {passwordPolicyHint}
               </p>
             )}
           </div>

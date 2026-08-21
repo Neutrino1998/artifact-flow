@@ -9,6 +9,7 @@ import { readTaskNotificationPreference } from '@/lib/taskNotifications';
 vi.mock('./StorageBar', () => ({ default: () => null }));
 vi.mock('@/components/layout/ChangePasswordDialog', () => ({ default: () => null }));
 vi.mock('@/components/layout/EditDisplayNameDialog', () => ({ default: () => null }));
+vi.mock('@/components/layout/PersonalAccessTokenDialog', () => ({ default: () => null }));
 
 class MockNotification {
   static permission: NotificationPermission = 'default';
@@ -127,5 +128,58 @@ describe('UserMenu task notification switch', () => {
     expect(container.textContent).not.toContain('显示名和部门由企业认证维护');
     expect(container.textContent).not.toContain('修改显示名');
     expect(container.textContent).not.toContain('修改密码');
+  });
+
+  it('draws the dark-theme sun rays at one consistent radius', async () => {
+    await act(async () => {
+      root.render(<UserMenu />);
+    });
+
+    const trigger = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('Tester'),
+    );
+    await act(async () => trigger?.click());
+
+    const themeButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('浅色模式'),
+    );
+    expect(themeButton?.querySelector('circle[cx="8"][cy="8"][r="3"]')).not.toBeNull();
+    expect(themeButton?.querySelector('path[d="M8 1.25v1.5M8 13.25v1.5M1.25 8h1.5M13.25 8h1.5"]')).not.toBeNull();
+    expect(themeButton?.querySelector('path[d="m3.25 3.25 1.05 1.05m8.45-1.05L11.7 4.3m1.05 8.45-1.05-1.05m-8.45 1.05L4.3 11.7"]')).not.toBeNull();
+  });
+
+  it('visually distinguishes admin actions and the two notification controls', async () => {
+    useAuthStore.setState({
+      user: {
+        ...useAuthStore.getState().user!,
+        role: 'admin',
+      },
+    });
+    await act(async () => {
+      root.render(<UserMenu />);
+    });
+
+    const trigger = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('Tester'),
+    );
+    await act(async () => trigger?.click());
+
+    for (const label of ['用户管理', '工具管理', '部门授权', '会话监控', '实例监控', '通知管理']) {
+      const button = Array.from(container.querySelectorAll('button')).find(
+        (candidate) => candidate.textContent?.includes(label),
+      );
+      const pill = Array.from(button?.querySelectorAll('span') ?? []).find(
+        (candidate) => candidate.textContent === 'admin',
+      );
+      expect(pill, `${label} should carry an admin pill`).toBeDefined();
+    }
+
+    expect(container.querySelector('path[d^="M8 1.5V3"]')).not.toBeNull();
+    expect(container.querySelector('path[d^="M5 5.5 12.5 2"]')).not.toBeNull();
+
+    const apiKeyButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.includes('API 密钥'),
+    );
+    expect(apiKeyButton?.querySelector('svg')?.getAttribute('width')).toBe('13');
   });
 });

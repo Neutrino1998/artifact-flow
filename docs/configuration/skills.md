@@ -2,6 +2,9 @@
 
 Skill 是按需加载的工作方法。它可以只有一份 `SKILL.md`，也可以携带脚本、参考资料和模板；激活时还可以临时授予相关 Tool unit。
 
+界面中的启用、导入、共享、同名覆盖和 Skill/Agent/Tool 关系见
+[Skill 使用与管理](../product-help/skills.md)。本页只说明部署方维护的配置与 bundle 契约。
+
 ## 纯文本 Skill
 
 目录只能包含一份 `SKILL.md`：

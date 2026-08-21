@@ -69,9 +69,10 @@ describe('ToolUnitEditor input schema modes', () => {
     expect(container.querySelector('textarea[aria-label="输入参数 JSON Schema"]')).not.toBeNull();
     expect(container.textContent).toContain('根级字段 minProperties');
 
-    await act(async () => buttonByText(container, '参数表单')?.click());
+    await act(async () => buttonByText(container, '参数配置')?.click());
     expect(container.textContent).toContain('当前 Schema 包含高级约束');
     expect(container.textContent).toContain('根级字段 minProperties');
+    expect(container.textContent).toContain('强制切换会丢失约束');
   });
 
   it('renders multiline descriptions and string defaults with lossless controls', async () => {
@@ -111,7 +112,7 @@ describe('ToolUnitEditor input schema modes', () => {
     expect(container.querySelector('textarea[aria-label="输入参数 JSON Schema"]')).not.toBeNull();
     expect(container.textContent).toContain('参数名首尾不能包含空白字符');
 
-    await act(async () => buttonByText(container, '参数表单')?.click());
+    await act(async () => buttonByText(container, '参数配置')?.click());
     expect(container.textContent).toContain('当前 Schema 包含高级约束');
     expect(container.querySelector('input[aria-label="参数名  user_id "]')).toBeNull();
   });
@@ -183,5 +184,30 @@ describe('ToolUnitEditor input schema modes', () => {
     expect(container.querySelector('textarea[aria-label="输入参数 JSON Schema"]')).not.toBeNull();
     expect(container.textContent).toContain('required 中的 "constructor" 未在 properties 声明');
     expect(container.textContent).not.toContain('这个工具暂时没有输入参数');
+  });
+
+  it('explains tool unit kinds and the search_tools condition for defer', async () => {
+    const draft = emptyUnitDraft();
+    draft.name = 'catalog';
+
+    await act(async () => root.render(<Harness initial={draft} />));
+
+    expect(container.textContent).toContain('适合一个独立 API 操作');
+    expect(container.textContent).toContain('同时启用 search_tools 时先展示索引');
+
+    const kindSelect = Array.from(container.querySelectorAll('select')).find(
+      (select) => Array.from(select.options).some((option) => option.value === 'toolset'),
+    );
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLSelectElement.prototype,
+        'value',
+      )?.set;
+      setter?.call(kindSelect, 'toolset');
+      kindSelect?.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain('共享凭证、可见性和成员关系的多个操作');
+    expect(container.textContent).toContain('每个成员仍可单独设置执行确认');
   });
 });

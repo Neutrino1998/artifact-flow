@@ -12,6 +12,8 @@ CSV 批量导入、create_admin 脚本。失败抛 ValueError（带具体原因)
 
 强度档由 config 常量驱动（operator/测试中心可调,不改码):
   PASSWORD_MIN_LENGTH / REQUIRE_LETTER / REQUIRE_DIGIT / REQUIRE_SYMBOL。
+输入 envelope 由代码内部常量约束；其中 bcrypt 的 72-byte 上限按 UTF-8 字节校验，
+不能由 operator 覆盖。
 
 弱口令/键盘序列黑名单是 best-effort、非穷举 —— 覆盖两高一弱给的典型例子
 （默认口令、纯数字/字母、键盘行走、连续/重复串),挡住绝大多数低质口令,
@@ -22,7 +24,7 @@ from __future__ import annotations
 
 import re
 
-from config import config
+from config import PASSWORD_MAX_BYTES, PASSWORD_MAX_CHARS, config
 
 
 # 符号集:键盘可见的非字母数字 ASCII。等保「符号」即特殊字符,这里用
@@ -88,6 +90,14 @@ def validate_password_strength(plain: str) -> None:
     """
     if plain is None:
         raise ValueError("口令不能为空")
+
+    if len(plain) > PASSWORD_MAX_CHARS:
+        raise ValueError(f"口令长度不能超过 {PASSWORD_MAX_CHARS} 位")
+
+    if len(plain.encode("utf-8")) > PASSWORD_MAX_BYTES:
+        raise ValueError(
+            f"口令 UTF-8 编码后不能超过 {PASSWORD_MAX_BYTES} 字节"
+        )
 
     if len(plain) < config.PASSWORD_MIN_LENGTH:
         raise ValueError(f"口令长度不足，至少需要 {config.PASSWORD_MIN_LENGTH} 位")

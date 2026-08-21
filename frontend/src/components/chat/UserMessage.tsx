@@ -6,7 +6,7 @@ import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { useStreamStore } from '@/stores/streamStore';
 import { BUTTON_PRIMARY } from '@/lib/styles';
 import { CopyIcon } from '@/components/ui/CopyIcon';
-import type { ActivatedSkillRef } from '@/types';
+import type { ActivatedSkillRef, ReferencedArtifactRef } from '@/types';
 import { formatMessageDateTime } from '@/lib/time';
 import BranchNavigator from './BranchNavigator';
 
@@ -37,11 +37,13 @@ interface UserMessageProps {
   attachments?: { filename: string }[] | null;
   /** Skills explicitly selected by the user for this turn (not cumulative/model-read). */
   activatedSkills?: ActivatedSkillRef[] | null;
+  /** Existing conversation uploads explicitly referenced for this turn. */
+  referencedArtifacts?: ReferencedArtifactRef[] | null;
   /** Persisted message creation time. */
   timestamp?: string | null;
 }
 
-function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCount = 1, pending = false, attachments = null, activatedSkills = null, timestamp = null }: UserMessageProps) {
+function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCount = 1, pending = false, attachments = null, activatedSkills = null, referencedArtifacts = null, timestamp = null }: UserMessageProps) {
   const { copied, copy } = useCopyFeedback();
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(content);
@@ -51,7 +53,8 @@ function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCo
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const hasAttachments = Boolean(attachments?.length);
   const hasActivatedSkills = Boolean(activatedSkills?.length);
-  const hasContextChips = hasAttachments || hasActivatedSkills;
+  const hasReferencedArtifacts = Boolean(referencedArtifacts?.length);
+  const hasContextChips = hasAttachments || hasActivatedSkills || hasReferencedArtifacts;
   const formattedTimestamp = timestamp ? formatMessageDateTime(timestamp) : null;
 
   useEffect(() => {
@@ -80,7 +83,10 @@ function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCo
     const trimmed = editContent.trim();
     if (!trimmed || isStreaming) return;
     setEditing(false);
-    // Send as a new branch from the parent of this message
+    // Editing and rerun deliberately create a text-only sibling branch. Per-turn
+    // uploads, explicit references, and skill selections are display snapshots
+    // of the original request and are not replayed. Existing artifacts remain in
+    // the session inventory; sticky runtime state is inherited from `parentId`.
     await sendMessage(trimmed, parentId);
   }, [editContent, isStreaming, sendMessage, parentId]);
 
@@ -157,6 +163,20 @@ function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCo
                 <span className="min-w-0 truncate">{f.filename}</span>
               </span>
             ))}
+            {referencedArtifacts?.map((artifact) => (
+              <span
+                key={artifact.id}
+                className="inline-flex min-w-0 items-center gap-1 max-w-[16rem] px-2 py-1 rounded-lg bg-surface dark:bg-surface-dark border border-border dark:border-border-dark text-xs text-text-secondary dark:text-text-secondary-dark"
+                title={`引用文件：${artifact.filename}`}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                  <path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1" />
+                  <path d="M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.1-1.1" />
+                </svg>
+                <span className="shrink-0 text-text-tertiary dark:text-text-tertiary-dark">引用</span>
+                <span className="min-w-0 truncate">{artifact.filename}</span>
+              </span>
+            ))}
             {activatedSkills?.map((skill) => (
               <span
                 key={skill.slug}
@@ -206,11 +226,11 @@ function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCo
               <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
             </svg>
           </button>
-          {/* Rerun re-sends the text; an attachment-only message has none to
-              re-send (the backend rejects blank text with no files — attachment
-              replay is deliberately not a thing, the artifacts already live in
-              the session inventory). Hide rather than disable: the action is
-              semantically absent, not temporarily unavailable. */}
+          {/* Rerun re-sends text only. Uploads, explicit references, and skill
+              selections are not replayed; their original chips remain historical
+              display snapshots. A context-only message therefore has nothing to
+              rerun. Hide rather than disable: the action is semantically absent,
+              not temporarily unavailable. */}
           {content.trim() !== '' && (
           <button
             onClick={handleRerun}

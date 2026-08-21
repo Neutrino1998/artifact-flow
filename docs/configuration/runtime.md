@@ -53,7 +53,7 @@ ready_timeout_seconds = 120
 
 | 变量 | 用途 |
 |---|---|
-| `ARTIFACTFLOW_JWT_SECRET` | JWT 签名 |
+| `ARTIFACTFLOW_JWT_SECRET` | JWT 签名，并以域隔离 HMAC 派生 PAT 校验密钥 |
 | `ARTIFACTFLOW_CREDENTIAL_KEY` | 加密 Tool/MCP 凭证；即使暂时没有凭证工具也必需 |
 | `ARTIFACTFLOW_DATABASE_URL` 或 `ARTIFACTFLOW_DATABASE_URLS` | 数据库连接；后者是逗号分隔的 PostgreSQL 地址列表 |
 | `ARTIFACTFLOW_REDIS_URL` | 生产运行时、SSE、lease 与多副本协调 |
@@ -66,26 +66,56 @@ ready_timeout_seconds = 120
 - Model：对应供应商的 API Key；
 - Tool/MCP：定义引用的 `TOOL_SECRET_*`。
 
-常用应用调节项：
+应用调节项：
 
-| 变量 | 默认 | 何时调整 |
-|---|---:|---|
-| `ARTIFACTFLOW_EXECUTION_TIMEOUT` | `3600` 秒 | Agent 引擎 loop 的 deadline；含权限等待，不含结束后的持久化 |
-| `ARTIFACTFLOW_PERMISSION_TIMEOUT` | `300` 秒 | 等待一次用户确认的时间 |
-| `ARTIFACTFLOW_MAX_CONCURRENT_TASKS` | `32` | 按模型、DB 和主机容量限制并发 |
-| `ARTIFACTFLOW_SSO_START_IP_MAX_REQUESTS` | `60` | 单一客户端 IP 在 SSO start 窗口内的准入上限 |
-| `ARTIFACTFLOW_SSO_START_GLOBAL_MAX_REQUESTS` | `120` | 所有 Backend 通过 Redis 共享的 SSO start 窗口上限 |
-| `ARTIFACTFLOW_SSO_START_RATE_WINDOW_SEC` | `60` 秒 | SSO start 固定窗口长度 |
-| `ARTIFACTFLOW_SSO_STATE_MAX_PENDING` | `1000` | 一次性 SSO state 的硬容量上限 |
-| `ARTIFACTFLOW_SSO_USERINFO_MAX_CONNECTIONS` | `10` | 每个 Backend 的 userinfo 出站连接上限 |
-| `ARTIFACTFLOW_MAX_UPLOAD_SIZE` | `200 MiB` | 单文件上传上限；代理另有批量总量上限 |
-| `ARTIFACTFLOW_ARTIFACT_USER_QUOTA_BYTES` | `2 GiB` | 每用户二进制 Artifact 配额；`0` 表示不限 |
-| `ARTIFACTFLOW_ADMIN_PRIVACY_MODE` | `false` | 开启后，会话监控不返回账户关联字段和上传文件原名，并禁止管理员读取任何 Artifact 的内容 |
-| `ARTIFACTFLOW_SKILL_USER_MAX_PRIVATE_COUNT` | `3` | `-1` 不限，`0` 禁止个人导入 |
-| `ARTIFACTFLOW_CORS_ORIGINS` | 本地前端 | 直接跨域访问 API 时设置明确 origin 列表 |
-| `ARTIFACTFLOW_DB_COMMAND_TIMEOUT` | `30` 秒 | PostgreSQL 单语句上限；设 `0` 禁用 |
+| 变量 | 级别 | 默认 | 何时调整 |
+|---|---|---:|---|
+| `ARTIFACTFLOW_EXECUTION_TIMEOUT` | 标准 | `3600` 秒 | Agent 引擎 loop 的 deadline；含权限等待，不含结束后的持久化 |
+| `ARTIFACTFLOW_PERMISSION_TIMEOUT` | 标准 | `300` 秒 | 等待一次用户确认的时间 |
+| `ARTIFACTFLOW_MAX_CONCURRENT_TASKS` | 标准 | `32` | 按模型、DB 和主机容量限制并发 |
+| `ARTIFACTFLOW_REDIS_CLUSTER` | 高级 | `false` | 外部 Redis 使用 Cluster 拓扑时开启 |
+| `ARTIFACTFLOW_REDIS_MAX_CONNECTIONS` | 高级 | `64` | 每个 Backend 的 Redis 连接池上限；结合副本数和任务并发调整 |
+| `ARTIFACTFLOW_SSO_START_IP_MAX_REQUESTS` | 标准 | `60` | 单一客户端 IP 在 SSO start 窗口内的准入上限 |
+| `ARTIFACTFLOW_SSO_START_GLOBAL_MAX_REQUESTS` | 标准 | `120` | 所有 Backend 通过 Redis 共享的 SSO start 窗口上限 |
+| `ARTIFACTFLOW_SSO_START_RATE_WINDOW_SEC` | 标准 | `60` 秒 | SSO start 固定窗口长度 |
+| `ARTIFACTFLOW_SSO_STATE_MAX_PENDING` | 标准 | `1000` | 一次性 SSO state 的硬容量上限 |
+| `ARTIFACTFLOW_SSO_USERINFO_MAX_CONNECTIONS` | 标准 | `10` | 每个 Backend 的 userinfo 出站连接上限 |
+| `ARTIFACTFLOW_MAX_UPLOAD_SIZE` | 高级 | `200 MiB` | 单文件上传上限；调整时同步核对代理批量总量和存储 envelope |
+| `ARTIFACTFLOW_ARTIFACT_USER_QUOTA_BYTES` | 标准 | `2 GiB` | 每用户二进制 Artifact 配额；`0` 表示不限 |
+| `ARTIFACTFLOW_MAX_BULK_IMPORT_ROWS` | 高级 | `1000` | 单次用户 CSV 导入的数据行上限 |
+| `ARTIFACTFLOW_MAX_BULK_IMPORT_BYTES` | 高级 | `5 MiB` | 单次用户 CSV 导入的文件字节上限 |
+| `ARTIFACTFLOW_ADMIN_PRIVACY_MODE` | 标准 | `false` | 开启后，会话监控不返回账户关联字段和上传文件原名，并禁止管理员读取任何 Artifact 的内容 |
+| `ARTIFACTFLOW_SKILL_USER_MAX_PRIVATE_COUNT` | 标准 | `3` | `-1` 不限，`0` 禁止个人导入 |
+| `ARTIFACTFLOW_CORS_ORIGINS` | 标准 | 本地前端 | 直接跨域访问 API 时设置明确 origin 列表 |
+| `ARTIFACTFLOW_CORS_ALLOW_CREDENTIALS` | 高级 | `true` | 跨域请求是否允许凭证；为 `true` 时 origins 不得包含 `*` |
+| `ARTIFACTFLOW_DB_COMMAND_TIMEOUT` | 标准 | `30` 秒 | PostgreSQL 单语句上限；设 `0` 禁用 |
+| `ARTIFACTFLOW_DATABASE_POOL_SIZE` | 高级 | `10` | 每个 Backend 的数据库常驻连接池容量，必须至少为 `1` |
+| `ARTIFACTFLOW_DATABASE_MAX_OVERFLOW` | 高级 | `20` | 数据库连接池耗尽后允许临时增加的连接数，必须至少为 `0` |
+| `ARTIFACTFLOW_DATABASE_POOL_TIMEOUT` | 高级 | `30` 秒 | 等待数据库连接池槽位的最长时间；`0` 表示不等待、立即失败 |
+| `ARTIFACTFLOW_JWT_EXPIRY_SECONDS` | 标准 | `28800` 秒 | 本地密码和远程身份共用的登录会话有效期 |
+| `ARTIFACTFLOW_LOGIN_MAX_FAILURES` | 标准 | `5` | 用户名或客户端 IP 在窗口内达到该失败次数后临时锁定 |
+| `ARTIFACTFLOW_LOGIN_FAILURE_WINDOW_SEC` | 标准 | `900` 秒 | 登录失败累计窗口及临时锁定窗口 |
+| `ARTIFACTFLOW_PASSWORD_MIN_LENGTH` | 标准 | `8` | 新口令最小字符数，允许 `1–72`；前端通过 `/api/v1/meta` 同步提示 |
+| `ARTIFACTFLOW_PASSWORD_REQUIRE_LETTER` | 标准 | `true` | 新口令是否必须包含字母 |
+| `ARTIFACTFLOW_PASSWORD_REQUIRE_DIGIT` | 标准 | `true` | 新口令是否必须包含数字 |
+| `ARTIFACTFLOW_PASSWORD_REQUIRE_SYMBOL` | 标准 | `true` | 新口令是否必须包含符号 |
 
-`src/config.py` 还有算法护栏和内部实现常量。它们即使能被环境变量覆盖，也不等于常规部署契约；没有具体容量或故障证据时不要照单调大。
+密码 hash 保持标准 bcrypt 格式。bcrypt 最多使用 72 个输入字节，因此新口令在 UTF-8
+编码后不得超过 72 字节；这是代码内部固定的算法边界，不能通过环境变量调整。历史版本
+可能曾接受更长输入并只 hash 前 72 字节，为避免已有账户失效，登录和“当前口令”校验继续
+兼容该行为；用户设置新口令时会收敛到明确的 72 字节边界，不需要改写已有 hash。
+
+`src/config.py` 中的字段先分为两类：
+
+- **运维配置**：本页、相关专题配置文档或 `.env.example` 明确命名的 Secret、连接信息、
+  路径、容量、超时和策略，是稳定的 `ARTIFACTFLOW_*` 配置契约。源码中的“标准运维”与
+  “高级运维”标记必须与这些活跃文档一致；“标准”项可独立调整，“高级”项仍受支持，
+  但调整时必须同时检查代理、数据库和容器层的关联约束；
+- **代码内部参数**：grep/fuzzy 算法、Prompt/预览截断、固定协议映射和展示文案，默认值
+  随代码评审和 Release 演进，不作为常规部署旋钮。
+
+当前 `Settings` 保持统一、简单的加载方式，字段在技术上都能被环境变量覆盖；上述分类
+是支持范围和维护责任的边界，不额外引入运行时过滤、第二配置源或优先级规则。
 
 `ARTIFACTFLOW_MAX_CONCURRENT_TASKS` 对每个 Backend 进程内唯一的 TaskSupervisor capacity gate 生效。超过容量的 Conversation turn 保持 QUEUED：它继续持有并续租 Conversation lease，但尚未标记为可交互 RUNNING，因此 inject/cancel 会按现有 409 契约拒绝。多 Backend 副本必须使用 Redis，让 lease、interactive、interrupt、cancel 与 SSE 状态跨进程共享；进程内 TaskSupervisor 只保留本进程 task 引用，不承担崩溃恢复。
 

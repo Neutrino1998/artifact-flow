@@ -41,7 +41,11 @@ def test_admin_privacy_projection_redacts_upload_hint_without_changing_user_text
             "content": (
                 "Please inspect this.\n\n"
                 "[The user attached 1 file(s) to this message: Payroll-Alice.xlsx. "
-                "Use read_artifact with the id for full content.]"
+                "Use read_artifact with the id for full content.]\n\n"
+                "[The user explicitly referenced 1 existing uploaded file(s) for this "
+                "request: Prior-Payroll.xlsx. Prioritize these files when answering and "
+                "use read_artifact with the ids for full content. Other session artifacts "
+                "remain available.]"
             )
         },
     }
@@ -51,10 +55,34 @@ def test_admin_privacy_projection_redacts_upload_hint_without_changing_user_text
     assert projected is not None
     assert projected["data"]["content"] == (
         "Please inspect this.\n\n"
-        "[The user attached 1 protected file(s) to this message.]"
+        "[The user attached 1 protected file(s) to this message.]\n\n"
+        "[The user referenced 1 protected file(s) for this request.]"
     )
     assert "Payroll-Alice.xlsx" not in str(projected)
     assert "Payroll-Alice.xlsx" in raw["data"]["content"]
+    assert "Prior-Payroll.xlsx" not in str(projected)
+
+
+def test_admin_privacy_projection_redacts_reference_metadata(monkeypatch):
+    monkeypatch.setattr(config, "ADMIN_PRIVACY_MODE", True)
+    raw = {
+        "type": "metadata",
+        "data": {
+            "conversation_id": "conv-1",
+            "referenced_artifacts": [
+                {"id": "payroll", "filename": "Payroll-Alice.xlsx"}
+            ],
+        },
+    }
+
+    projected = project_event_for_admin(raw)
+
+    assert projected is not None
+    assert projected["data"]["referenced_artifacts"] == [{
+        "id": None,
+        "filename": "引用文件 1",
+        "content_accessible": False,
+    }]
 
 
 def test_admin_privacy_projection_suppresses_artifact_live_payloads(monkeypatch):

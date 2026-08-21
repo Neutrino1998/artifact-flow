@@ -20,11 +20,11 @@ from config import config
 from api.event_projection import project_event_data_for_user
 from api.dependencies import (
     get_conversation_manager,
-    get_current_user,
     get_conversation_execution_service,
     get_runtime_status_reader,
+    require_scope,
 )
-from api.services.auth import TokenPayload
+from api.services.auth import AuthPrincipal
 from api.schemas.chat import (
     BulkDeleteFailedItem,
     BulkDeleteRequest,
@@ -58,6 +58,7 @@ from api.services.conversation_execution_service import (
     PendingInterruptAlreadyResolved,
     PendingInterruptNotFound,
     PendingInterruptStale,
+    ReferencedArtifactNotFound,
     UploadQuotaExceeded,
 )
 from api.services.runtime_status_reader import RuntimeStatusReader
@@ -75,7 +76,7 @@ router = APIRouter()
 
 
 async def _verify_ownership(
-    conv_id: str, user: TokenPayload, conversation_manager: ConversationManager
+    conv_id: str, user: AuthPrincipal, conversation_manager: ConversationManager
 ) -> None:
     """校验 conversation 归属当前用户，不匹配返回 404"""
     if not await conversation_manager.verify_ownership(conv_id, user.user_id):
@@ -86,7 +87,7 @@ async def _verify_ownership(
 async def send_message(
     payload: str = Form(...),
     files: List[UploadFile] = File(default=[]),
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: AuthPrincipal = Depends(require_scope("conversations:write")),
     execution_service: ConversationExecutionService = Depends(
         get_conversation_execution_service
     ),
@@ -121,13 +122,14 @@ async def send_message(
     # 空白正文且无附件 = 本轮无可处理输入：USER_INPUT 正文为空 → 被 EventHistory 过滤
     # → history 为空 → build() 在 [-1] 崩。边界即拒（前端 sendDisabled 同条件，这里是
     # 非 UI 客户端的兜底）；带附件时由归属串补足正文，故仅无附件时要求非空。
-    # force_compact / activate_skills 与附件同理：execute_loop 会向 USER_INPUT 正文注入压缩
-    # 指令 / skill 正文（非空），故「只点压缩/只激活 skill 但不打字」的轮次同样放行。
+    # force_compact / activate_skills / referenced_artifact_ids 与附件同理：execute_loop
+    # 会向 USER_INPUT 正文注入相应的非空说明，故仅选择这些结构化输入也可发送。
     if (
         not request.user_input.strip()
         and attachment_count == 0
         and not request.force_compact
         and not request.activate_skills
+        and not request.referenced_artifact_ids
     ):
         raise HTTPException(
             status_code=422,
@@ -178,11 +180,17 @@ async def send_message(
             uploaded_files=uploaded_files,
             force_compact=request.force_compact,
             activate_skills=request.activate_skills,
+            referenced_artifact_ids=request.referenced_artifact_ids,
         ))
     except ConversationResourceNotFoundError:
         raise HTTPException(
             status_code=404,
             detail=f"Conversation '{request.conversation_id}' not found",
+        )
+    except ReferencedArtifactNotFound:
+        raise HTTPException(
+            status_code=404,
+            detail="Referenced file not found in this conversation",
         )
     except InvalidParentMessage:
         logger.warning(
@@ -226,7 +234,7 @@ async def send_message(
 @router.get("/{conv_id}/active-stream", response_model=ActiveStreamResponse)
 async def get_active_stream(
     conv_id: str,
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: AuthPrincipal = Depends(require_scope("conversations:read")),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
     runtime_status: RuntimeStatusReader = Depends(get_runtime_status_reader),
 ):
@@ -249,7 +257,7 @@ async def get_active_stream(
 async def inject_message(
     conv_id: str,
     request: InjectRequest,
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: AuthPrincipal = Depends(require_scope("conversations:control")),
     execution_service: ConversationExecutionService = Depends(
         get_conversation_execution_service
     ),
@@ -290,7 +298,7 @@ async def inject_message(
 @router.post("/{conv_id}/cancel", response_model=CancelResponse)
 async def cancel_execution(
     conv_id: str,
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: AuthPrincipal = Depends(require_scope("conversations:control")),
     execution_service: ConversationExecutionService = Depends(
         get_conversation_execution_service
     ),
@@ -331,7 +339,7 @@ async def list_conversations(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     q: Optional[str] = Query(default=None, max_length=200),
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: AuthPrincipal = Depends(require_scope("conversations:read")),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
     runtime_status: RuntimeStatusReader = Depends(get_runtime_status_reader),
 ):
@@ -371,7 +379,7 @@ async def list_conversations(
 
 @router.get("/storage", response_model=StorageUsageResponse)
 async def get_storage_usage(
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: AuthPrincipal = Depends(require_scope("conversations:read")),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """当前用户的附件存储用量 + 配额（喂前端进度条）。
@@ -394,7 +402,7 @@ async def put_message_feedback(
     conv_id: str,
     msg_id: str,
     request: MessageFeedbackRequest,
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: AuthPrincipal = Depends(require_scope("conversations:write")),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """Create or replace the current user's feedback for one assistant response."""
@@ -418,7 +426,7 @@ async def put_message_feedback(
 async def delete_message_feedback(
     conv_id: str,
     msg_id: str,
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: AuthPrincipal = Depends(require_scope("conversations:write")),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """Remove feedback idempotently; cross-user/mismatched messages stay hidden."""
@@ -435,7 +443,7 @@ async def delete_message_feedback(
 @router.get("/{conv_id}", response_model=ConversationDetailResponse)
 async def get_conversation(
     conv_id: str,
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: AuthPrincipal = Depends(require_scope("conversations:read")),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
     """获取对话详情（含消息树）"""
@@ -475,6 +483,7 @@ async def get_conversation(
                     execution_metrics=(msg.metadata_ or {}).get("execution_metrics"),
                     uploaded_files=(msg.metadata_ or {}).get("uploaded_files"),
                     activated_skills=(msg.metadata_ or {}).get("activated_skills"),
+                    referenced_artifacts=(msg.metadata_ or {}).get("referenced_artifacts"),
                     active_skills=(
                         ((msg.metadata_ or {}).get("agent_progressive_state") or {})
                         .get("lead_agent", {})
@@ -503,7 +512,7 @@ async def get_conversation(
 )
 async def delete_conversation(
     conv_id: str,
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: AuthPrincipal = Depends(require_scope("conversations:delete")),
     execution_service: ConversationExecutionService = Depends(
         get_conversation_execution_service
     ),
@@ -534,7 +543,7 @@ async def delete_conversation(
 @router.post("/bulk-delete", response_model=BulkDeleteResponse)
 async def bulk_delete_conversations(
     request: BulkDeleteRequest,
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: AuthPrincipal = Depends(require_scope("conversations:delete")),
     execution_service: ConversationExecutionService = Depends(
         get_conversation_execution_service
     ),
@@ -576,10 +585,14 @@ async def get_message_events(
     conv_id: str,
     msg_id: str,
     event_type: Optional[str] = Query(None, description="Filter by event type"),
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: AuthPrincipal = Depends(require_scope("conversations:read")),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
-    """查询消息的事件链（用于历史回放和可观测性）"""
+    """查询消息的完整事件链（用于历史回放和可观测性）。
+
+    conversations:read 是对话观察能力，可包含执行时复制进事件的
+    Artifact/工具内容；artifacts:read 只单独控制 Artifact REST API。
+    """
     await _verify_ownership(conv_id, current_user, conversation_manager)
 
     # 校验 message 归属
@@ -609,7 +622,7 @@ async def get_message_events(
 async def resume_execution(
     conv_id: str,
     request: ResumeRequest,
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: AuthPrincipal = Depends(require_scope("tools:approve")),
     execution_service: ConversationExecutionService = Depends(
         get_conversation_execution_service
     ),

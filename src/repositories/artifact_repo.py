@@ -8,7 +8,7 @@ from typing import Optional, List, Dict, Any, Tuple
 
 from sqlalchemy import select, update, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import load_only, raiseload, selectinload
 
 from db.models import (
     Artifact,
@@ -232,6 +232,7 @@ class ArtifactRepository(BaseRepository[Artifact]):
         session_id: str,
         *,
         content_type: Optional[str] = None,
+        include_content: bool = True,
     ) -> List[Artifact]:
         """
         列出 Session 的所有 Artifacts
@@ -239,11 +240,37 @@ class ArtifactRepository(BaseRepository[Artifact]):
         Args:
             session_id: Session ID
             content_type: 按类型筛选
+            include_content: 是否加载当前正文；列表消费者不需要历史版本
 
         Returns:
             Artifact ORM 对象列表
         """
         query = select(Artifact).where(Artifact.session_id == session_id)
+
+        # Artifact.versions defaults to selectin eager loading, but no list
+        # consumer uses version history. Keep it behind the dedicated version
+        # queries instead of materializing every historical content row here.
+        options = [raiseload(Artifact.versions)]
+        if not include_content:
+            # The REST/admin list contracts return summaries. Make that a DB
+            # projection as well as a serialization choice so current content
+            # never crosses the DB/worker boundary on those paths.
+            options.append(
+                load_only(
+                    Artifact.id,
+                    Artifact.session_id,
+                    Artifact.content_type,
+                    Artifact.source,
+                    Artifact.title,
+                    Artifact.has_blob,
+                    Artifact.current_version,
+                    Artifact.created_at,
+                    Artifact.updated_at,
+                    Artifact.metadata_,
+                    raiseload=True,
+                )
+            )
+        query = query.options(*options)
 
         if content_type:
             query = query.where(Artifact.content_type == content_type)
@@ -270,6 +297,47 @@ class ArtifactRepository(BaseRepository[Artifact]):
         # timestamp contract.
         query = query.order_by(Artifact.created_at, Artifact.id)
 
+        result = await self._session.execute(query)
+        return list(result.scalars().all())
+
+    async def get_artifacts_by_ids(
+        self,
+        session_id: str,
+        artifact_ids: List[str],
+    ) -> List[Artifact]:
+        """Return the small ORM projection needed to validate file references.
+
+        The query is session-scoped, so an id from another conversation is
+        indistinguishable from a missing id. Callers that need request-order
+        preservation should reorder the returned rows against ``artifact_ids``.
+        Unselected columns and relationships raise on access: this admission
+        path must never materialize artifact bodies or version history.
+        """
+        if not artifact_ids:
+            return []
+        query = (
+            select(Artifact)
+            .options(
+                load_only(
+                    Artifact.id,
+                    Artifact.session_id,
+                    Artifact.source,
+                    Artifact.title,
+                    Artifact.metadata_,
+                    raiseload=True,
+                ),
+                # Artifact.versions defaults to selectin eager loading. Override
+                # it explicitly so a reference-only admission check cannot load
+                # every historical ArtifactVersion.content row.
+                raiseload(Artifact.versions),
+            )
+            .where(
+                and_(
+                    Artifact.session_id == session_id,
+                    Artifact.id.in_(artifact_ids),
+                )
+            )
+        )
         result = await self._session.execute(query)
         return list(result.scalars().all())
 

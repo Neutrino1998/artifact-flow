@@ -819,6 +819,74 @@ class TestChatStreamE2E:
                 # ...but does NOT surface the original filename (it's a record,
                 # and the inventory title already carries the human-readable name).
                 assert "Meeting Notes.txt" not in content
+
+                # A later turn can reference the persisted upload without
+                # re-uploading bytes. The id is validated at admission, injected
+                # into USER_INPUT, and frozen into Message metadata for display.
+                ref_resp = await client.post(
+                    "/api/v1/chat",
+                    files={
+                        "payload": (
+                            None,
+                            json.dumps({
+                                "user_input": "Focus on the referenced file",
+                                "conversation_id": conv_id,
+                                "referenced_artifact_ids": [artifact_id],
+                            }),
+                        ),
+                    },
+                )
+                assert ref_resp.status_code == 200
+                ref_message_id = ref_resp.json()["message_id"]
+                for _ in range(50):
+                    if ref_message_id not in supervisor._tasks:
+                        break
+                    await asyncio.sleep(0.1)
+
+                async with db_manager.session() as session:
+                    ref_message = await ConversationRepository(session).get_message(
+                        ref_message_id
+                    )
+                assert ref_message.metadata_["referenced_artifacts"] == [
+                    {"id": artifact_id, "filename": "Meeting Notes.txt"}
+                ]
+
+                async with db_manager.session() as session:
+                    ref_events = await MessageEventRepository(session).get_by_message(
+                        ref_message_id
+                    )
+                ref_content = next(
+                    event.data["content"]
+                    for event in ref_events
+                    if event.event_type == "user_input"
+                )
+                assert "explicitly referenced" in ref_content
+                assert artifact_id in ref_content
+                assert "Other session artifacts remain available" in ref_content
+
+                detail = await client.get(f"/api/v1/chat/{conv_id}")
+                detail_message = next(
+                    item for item in detail.json()["messages"]
+                    if item["id"] == ref_message_id
+                )
+                assert detail_message["referenced_artifacts"] == [
+                    {"id": artifact_id, "filename": "Meeting Notes.txt"}
+                ]
+
+                invalid_ref = await client.post(
+                    "/api/v1/chat",
+                    files={
+                        "payload": (
+                            None,
+                            json.dumps({
+                                "user_input": "missing",
+                                "conversation_id": conv_id,
+                                "referenced_artifact_ids": ["not-in-this-conversation"],
+                            }),
+                        ),
+                    },
+                )
+                assert invalid_ref.status_code == 404
         finally:
             deps._agents = old_agents
             deps._tools = old_tools

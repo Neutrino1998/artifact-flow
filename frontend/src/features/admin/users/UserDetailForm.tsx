@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
+import { useConfigStore } from '@/stores/configStore';
 import { useUIStore } from '@/stores/uiStore';
 import {
   BUTTON_DANGER_OUTLINE,
@@ -19,7 +20,7 @@ import DepartmentCascader from '@/features/admin/departments/DepartmentCascader'
 import Checkbox from '@/components/ui/Checkbox';
 import { SELECT_CHEVRON } from '@/components/ui/SelectChevron';
 import {
-  PASSWORD_POLICY_HINT,
+  getPasswordPolicyHint,
   validatePasswordStrength,
 } from '@/lib/passwordPolicy';
 import { authProviderLabel } from './authIdentity';
@@ -35,6 +36,7 @@ const ROLE_OPTIONS = [
 
 export default function UserDetailForm({ userId }: UserDetailFormProps) {
   const currentUserId = useAuthStore((s) => s.user?.id);
+  const passwordPolicy = useConfigStore((s) => s.passwordPolicy);
   const setRightView = useUIStore((s) => s.setUserManagementRightView);
   const bumpListVersion = useUIStore((s) => s.bumpUserMgmtListVersion);
   const listVersion = useUIStore((s) => s.userMgmtListVersion);
@@ -102,7 +104,10 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
   // 空值表示不修改密码。强度不在前端硬阻断(后端策略可调,避免漂移误拒)——
   // policyError 仅作即时提示;真正的强度/不重用由后端权威校验,被拒显示后端原因。
   const passwordChanged = newPassword.length > 0;
-  const policyError = passwordChanged ? validatePasswordStrength(newPassword) : null;
+  const passwordPolicyHint = getPasswordPolicyHint(passwordPolicy);
+  const policyError = passwordChanged
+    ? validatePasswordStrength(newPassword, passwordPolicy)
+    : null;
   const profileManaged = user !== null && !user.can_edit_profile;
 
   const dirty =
@@ -349,7 +354,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               disabled={saving}
-              placeholder={PASSWORD_POLICY_HINT}
+              placeholder={passwordPolicyHint}
               autoComplete="new-password"
               className={INPUT_ON_PANEL}
             />
@@ -358,7 +363,7 @@ export default function UserDetailForm({ userId }: UserDetailFormProps) {
                 <p className="text-status-error text-xs mt-1">{policyError}</p>
               ) : (
                 <p className="text-text-tertiary dark:text-text-tertiary-dark text-xs mt-1">
-                  {PASSWORD_POLICY_HINT}；重置后该用户首次登录将被要求改密
+                  {passwordPolicyHint}；重置后该用户首次登录将被要求改密
                 </p>
               )
             )}

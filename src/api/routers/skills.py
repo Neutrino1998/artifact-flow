@@ -8,7 +8,7 @@ admin 共享导入/删除在 routers/admin/skills.py。dept 授权 UI 留 G。
 from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import Response
 
-from api.dependencies import get_current_user, get_skill_manager
+from api.dependencies import get_skill_manager, require_scope
 from api.schemas.skills import (
     SkillDetailResponse,
     SkillImportResponse,
@@ -24,7 +24,7 @@ router = APIRouter()
 
 @router.get("", response_model=SkillListResponse)
 async def list_skills(
-    user=Depends(get_current_user),
+    user=Depends(require_scope("skills:read")),
     mgr: SkillManager = Depends(get_skill_manager),
 ) -> SkillListResponse:
     """列出对当前用户可见的 skill + 有效启用态。"""
@@ -35,7 +35,7 @@ async def list_skills(
 @router.get("/{skill_id}", response_model=SkillDetailResponse)
 async def get_skill_detail(
     skill_id: str,
-    user=Depends(get_current_user),
+    user=Depends(require_scope("skills:read")),
     mgr: SkillManager = Depends(get_skill_manager),
 ) -> SkillDetailResponse:
     """按需读取当前用户可见 skill 的 SKILL.md 正文；不可见仍返回 404。"""
@@ -49,7 +49,7 @@ async def get_skill_detail(
 @router.post("/import", response_model=SkillImportResponse)
 async def import_skill(
     file: UploadFile = File(...),
-    user=Depends(get_current_user),
+    user=Depends(require_scope("skills:write")),
     mgr: SkillManager = Depends(get_skill_manager),
 ) -> SkillImportResponse:
     """导入私有 skill zip(owner=本人,立即进自己的 L1)。硬门拒收 → 422 结构化
@@ -67,7 +67,7 @@ async def import_skill(
 @router.get("/{skill_id}/export")
 async def export_skill(
     skill_id: str,
-    user=Depends(get_current_user),
+    user=Depends(require_scope("skills:read")),
     mgr: SkillManager = Depends(get_skill_manager),
 ) -> Response:
     """导出 DB 中保存的 skill zip。不可见 → 404。"""
@@ -85,7 +85,7 @@ async def export_skill(
 @router.delete("/{skill_id}", status_code=204)
 async def delete_skill(
     skill_id: str,
-    user=Depends(get_current_user),
+    user=Depends(require_scope("skills:write")),
     mgr: SkillManager = Depends(get_skill_manager),
 ) -> None:
     """删除自己导入的 dynamic skill。不可见 → 404;seeded → 400;非本人共享 → 403。"""
@@ -99,7 +99,7 @@ async def delete_skill(
 async def set_skill_enabled(
     skill_id: str,
     body: SkillToggleRequest,
-    user=Depends(get_current_user),
+    user=Depends(require_scope("skills:write")),
     mgr: SkillManager = Depends(get_skill_manager),
 ) -> SkillItem:
     """个人开关某 skill 是否进 L1 索引(写 user_skill 覆盖)。"""

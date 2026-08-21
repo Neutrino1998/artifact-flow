@@ -7,7 +7,7 @@ import { useArtifactStore } from '@/stores/artifactStore';
 import { useStagedFilesStore } from '@/stores/stagedFilesStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useSSE } from './useSSE';
-import type { ActivatedSkillRef, ChatRequest } from '@/types';
+import type { ActivatedSkillRef, ChatRequest, ReferencedArtifactRef } from '@/types';
 import * as api from '@/lib/api';
 import type { UploadEvent } from '@/lib/api';
 import { getNavGen, bumpNavGen } from '@/lib/navGen';
@@ -27,6 +27,7 @@ export function useChat() {
   const setPendingUserMessage = useStreamStore((s) => s.setPendingUserMessage);
   const setPendingUserFiles = useStreamStore((s) => s.setPendingUserFiles);
   const setPendingUserSkills = useStreamStore((s) => s.setPendingUserSkills);
+  const setPendingUserReferences = useStreamStore((s) => s.setPendingUserReferences);
   const setStreamParentId = useStreamStore((s) => s.setStreamParentId);
   const setSendError = useStreamStore((s) => s.setSendError);
   const resetStream = useStreamStore((s) => s.reset);
@@ -57,6 +58,8 @@ export function useChat() {
       // ride the request; names are a send-local display snapshot for the live
       // bubble until the backend-resolved Message metadata is refreshed.
       activateSkills?: ActivatedSkillRef[],
+      // Existing user-upload artifacts explicitly referenced for this turn.
+      referencedArtifacts?: ReferencedArtifactRef[],
     ): Promise<boolean> => {
       // Task notifications are opt-out. The first send is an explicit user
       // gesture, so it is the earliest browser-safe point to request the
@@ -98,6 +101,9 @@ export function useChat() {
         // compact, an activation-only send (empty text) is allowed.
         if (activateSkills && activateSkills.length) {
           body.activate_skills = activateSkills.map((skill) => skill.slug);
+        }
+        if (referencedArtifacts && referencedArtifacts.length) {
+          body.referenced_artifact_ids = referencedArtifacts.map((artifact) => artifact.id);
         }
 
         let resolvedParentMessageId: string | null = null;
@@ -166,6 +172,9 @@ export function useChat() {
         // Always set, including null, so a later send cannot inherit the prior
         // turn's skill chips in its live bubble.
         setPendingUserSkills(activateSkills?.length ? activateSkills : null);
+        setPendingUserReferences(
+          referencedArtifacts?.length ? referencedArtifacts : null,
+        );
         // Track the exact parent sent to the backend for live truncation and
         // terminal snapshots. This must be stable even if the user switches
         // branches while the turn is running.
@@ -200,7 +209,7 @@ export function useChat() {
         return false;
       }
     },
-    [current?.id, lastMessageId, setPendingUserMessage, setPendingUserFiles, setPendingUserSkills, setStreamParentId, connect, setSendError, setConversations, setConversationActiveMessage, setArtifactSessionId, autoOpenArtifactPanel]
+    [current?.id, lastMessageId, setPendingUserMessage, setPendingUserFiles, setPendingUserSkills, setPendingUserReferences, setStreamParentId, connect, setSendError, setConversations, setConversationActiveMessage, setArtifactSessionId, autoOpenArtifactPanel]
   );
 
   // Switch to an existing conversation: tear down the previous conversation's

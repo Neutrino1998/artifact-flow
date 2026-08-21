@@ -44,6 +44,32 @@ class ChatRequest(BaseModel):
             "activation-only turn (no text) is allowed."
         ),
     )
+    referenced_artifact_ids: List[str] = Field(
+        default_factory=list,
+        max_length=config.MAX_CHAT_ATTACHMENTS,
+        description=(
+            "Existing user-upload artifact ids from this conversation that the user "
+            "explicitly referenced for this turn. References prioritize those files but "
+            "do not hide other session artifacts. A reference-only turn is allowed."
+        ),
+    )
+
+    @field_validator("referenced_artifact_ids")
+    @classmethod
+    def normalize_referenced_artifact_ids(cls, value: List[str]) -> List[str]:
+        unique: List[str] = []
+        for artifact_id in value:
+            if not artifact_id:
+                raise ValueError("referenced artifact ids must not be empty")
+            if artifact_id not in unique:
+                unique.append(artifact_id)
+        return unique
+
+    @model_validator(mode="after")
+    def references_require_existing_conversation(self):
+        if self.referenced_artifact_ids and self.conversation_id is None:
+            raise ValueError("referenced artifacts require an existing conversation")
+        return self
 
 
 class InjectRequest(BaseModel):
@@ -67,7 +93,13 @@ class ResumeRequest(BaseModel):
     message_id: str = Field(..., description="Message ID to resume")
     call_id: str = Field(..., min_length=1, description="Native tool-call ID to resume")
     approved: bool = Field(..., description="Whether the permission was approved")
-    always_allow: bool = Field(False, description="Always allow this tool for the rest of this execution")
+    always_allow: bool = Field(
+        False,
+        description=(
+            "Allow this tool name without further confirmation along the current "
+            "conversation branch"
+        ),
+    )
 
 
 MAX_BULK_DELETE_IDS = 200
@@ -207,6 +239,13 @@ class ActivatedSkillRef(BaseModel):
     name: str = Field(..., description="Skill display name frozen at activation time")
 
 
+class ReferencedArtifactRef(BaseModel):
+    """Existing uploaded artifact explicitly referenced on one message."""
+
+    id: str = Field(..., description="Referenced artifact ID")
+    filename: str = Field(..., description="Original filename frozen at send time")
+
+
 class MessageResponse(BaseModel):
     """Message in conversation detail response"""
     id: str = Field(..., description="Message ID")
@@ -229,6 +268,13 @@ class MessageResponse(BaseModel):
     activated_skills: Optional[List[ActivatedSkillRef]] = Field(
         None,
         description="Skills the user explicitly activated on this turn, from Message.metadata_['activated_skills']. This is a per-message display snapshot, unlike cumulative active_skills; model-initiated read_skill calls are excluded.",
+    )
+    referenced_artifacts: Optional[List[ReferencedArtifactRef]] = Field(
+        None,
+        description=(
+            "Existing user-upload artifacts explicitly referenced on this turn, from "
+            "Message.metadata_['referenced_artifacts']. This is a per-message display snapshot."
+        ),
     )
     active_skills: Optional[List[str]] = Field(
         None,

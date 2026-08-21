@@ -93,6 +93,44 @@ export interface paths {
         patch: operations["update_my_profile_api_v1_auth_me_patch"];
         trace?: never;
     };
+    "/api/v1/auth/pats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Personal Access Tokens */
+        get: operations["list_personal_access_tokens_api_v1_auth_pats_get"];
+        put?: never;
+        /**
+         * Create Personal Access Token
+         * @description Create a user PAT and reveal its bearer secret exactly once.
+         */
+        post: operations["create_personal_access_token_api_v1_auth_pats_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/pats/{token_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke Personal Access Token */
+        delete: operations["revoke_personal_access_token_api_v1_auth_pats__token_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/me/password": {
         parameters: {
             query?: never;
@@ -2374,6 +2412,8 @@ export interface components {
              * @description Maximum optional detail length for one message feedback record.
              */
             message_feedback_max_detail_chars: number;
+            /** @description Current password length and character-class requirements. The frontend uses them only for guidance; backend password validation remains authoritative. */
+            password_policy: components["schemas"]["PasswordPolicyResponse"];
         };
         /**
          * ConversationDetailResponse
@@ -3101,6 +3141,11 @@ export interface components {
              */
             activated_skills: components["schemas"]["ActivatedSkillRef"][] | null;
             /**
+             * Referenced Artifacts
+             * @description Existing user-upload artifacts explicitly referenced on this turn, from Message.metadata_['referenced_artifacts']. This is a per-message display snapshot.
+             */
+            referenced_artifacts: components["schemas"]["ReferencedArtifactRef"][] | null;
+            /**
              * Active Skills
              * @description Lead-agent skill slugs active as of this turn, projected from Message.metadata_['agent_progressive_state']['lead_agent']['active_skills']. The branch-tail message drives the activation picker. Absent/empty when no skills are active.
              */
@@ -3153,6 +3198,118 @@ export interface components {
             new_parent_id?: string | null;
         };
         /**
+         * PasswordPolicyResponse
+         * @description Backend-authoritative password-shape policy used for frontend guidance.
+         */
+        PasswordPolicyResponse: {
+            /** Min Length */
+            min_length: number;
+            /** Max Bytes */
+            max_bytes: number;
+            /** Require Letter */
+            require_letter: boolean;
+            /** Require Digit */
+            require_digit: boolean;
+            /** Require Symbol */
+            require_symbol: boolean;
+        };
+        /**
+         * PersonalAccessTokenCreateRequest
+         * @description Create a PAT. This request is accepted only from an interactive session.
+         */
+        PersonalAccessTokenCreateRequest: {
+            /** Name */
+            name: string;
+            /** Scopes */
+            scopes: components["schemas"]["PersonalAccessTokenScope"][];
+            /**
+             * Expires In Days
+             * @default 90
+             */
+            expires_in_days: number;
+        };
+        /** PersonalAccessTokenCreateResponse */
+        PersonalAccessTokenCreateResponse: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Prefix */
+            prefix: string;
+            /** Scopes */
+            scopes: components["schemas"]["PersonalAccessTokenScope"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Revoked At */
+            revoked_at: string | null;
+            /**
+             * Token
+             * @description Bearer secret returned once; the server does not retain plaintext
+             */
+            token: string;
+        };
+        /** PersonalAccessTokenListResponse */
+        PersonalAccessTokenListResponse: {
+            /** Tokens */
+            tokens: components["schemas"]["PersonalAccessTokenResponse"][];
+        };
+        /** PersonalAccessTokenResponse */
+        PersonalAccessTokenResponse: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Prefix */
+            prefix: string;
+            /** Scopes */
+            scopes: components["schemas"]["PersonalAccessTokenScope"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Revoked At */
+            revoked_at: string | null;
+        };
+        /**
+         * PersonalAccessTokenScope
+         * @enum {string}
+         */
+        PersonalAccessTokenScope: "conversations:read" | "conversations:write" | "conversations:control" | "conversations:delete" | "artifacts:read" | "skills:read" | "skills:write" | "tools:approve";
+        /**
+         * ReferencedArtifactRef
+         * @description Existing uploaded artifact explicitly referenced on one message.
+         */
+        ReferencedArtifactRef: {
+            /**
+             * Id
+             * @description Referenced artifact ID
+             */
+            id: string;
+            /**
+             * Filename
+             * @description Original filename frozen at send time
+             */
+            filename: string;
+        };
+        /**
          * ResolveDepartmentRequest
          * @description POST /api/v1/departments/resolve request body
          */
@@ -3196,7 +3353,7 @@ export interface components {
             approved: boolean;
             /**
              * Always Allow
-             * @description Always allow this tool for the rest of this execution
+             * @description Allow this tool name without further confirmation along the current conversation branch
              * @default false
              */
             always_allow: boolean;
@@ -3993,6 +4150,88 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["UserInfo"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_personal_access_tokens_api_v1_auth_pats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonalAccessTokenListResponse"];
+                };
+            };
+        };
+    };
+    create_personal_access_token_api_v1_auth_pats_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PersonalAccessTokenCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonalAccessTokenCreateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_personal_access_token_api_v1_auth_pats__token_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

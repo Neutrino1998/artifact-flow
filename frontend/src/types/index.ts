@@ -20,6 +20,11 @@ export type CreateUserRequest = S['CreateUserRequest'];
 export type UpdateUserRequest = S['UpdateUserRequest'];
 export type ChangePasswordRequest = S['ChangePasswordRequest'];
 export type UpdateMyProfileRequest = S['UpdateMyProfileRequest'];
+export type PersonalAccessTokenScope = S['PersonalAccessTokenScope'];
+export type PersonalAccessTokenCreateRequest = S['PersonalAccessTokenCreateRequest'];
+export type PersonalAccessTokenResponse = S['PersonalAccessTokenResponse'];
+export type PersonalAccessTokenCreateResponse = S['PersonalAccessTokenCreateResponse'];
+export type PersonalAccessTokenListResponse = S['PersonalAccessTokenListResponse'];
 export type UserResponse = S['UserResponse'];
 export type UserListResponse = S['UserListResponse'];
 export type UserImpactResponse = S['UserImpactResponse'];
@@ -115,6 +120,10 @@ export type ChatRequest = {
   // activation is sticky across the conversation. Relaxes the empty-input
   // requirement, so an activation-only send with no text is allowed.
   activate_skills?: string[];
+  // Existing user uploads from this conversation that the user explicitly
+  // referenced for this turn. References prioritize; they do not hide the
+  // rest of the artifact inventory. A reference-only send is allowed.
+  referenced_artifact_ids?: string[];
 };
 export type ChatResponse = S['ChatResponse'];
 export type InjectResponse = S['InjectResponse'];
@@ -123,6 +132,7 @@ export type ResumeRequest = S['ResumeRequest'];
 export type ResumeResponse = S['ResumeResponse'];
 export type MessageFeedbackRequest = S['MessageFeedbackRequest'];
 export type MessageFeedbackResponse = S['MessageFeedbackResponse'];
+export type ReferencedArtifactRef = S['ReferencedArtifactRef'];
 export type MessageResponse = Omit<S['MessageResponse'], 'feedback' | 'created_at'> & {
   feedback?: MessageFeedbackResponse | null;
   /** Null only for a terminal snapshot awaiting authoritative REST reconciliation. */

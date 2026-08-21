@@ -55,6 +55,10 @@ class InvalidParentMessage(Exception):
     pass
 
 
+class ReferencedArtifactNotFound(Exception):
+    """A requested file reference is absent or is not a user upload in this conversation."""
+
+
 class NoActiveExecution(Exception):
     pass
 
@@ -92,6 +96,7 @@ class ConversationTurnRequest:
     uploaded_files: Sequence[Dict[str, Any]] = ()
     force_compact: bool = False
     activate_skills: Sequence[str] = ()
+    referenced_artifact_ids: Sequence[str] = ()
 
 
 @dataclass(frozen=True)
@@ -151,6 +156,39 @@ class ConversationExecutionService:
 
         return await self._with_manager(_check)
 
+    async def _resolve_referenced_artifacts(
+        self,
+        conversation_id: str,
+        artifact_ids: Sequence[str],
+    ) -> tuple[Dict[str, str], ...]:
+        """Resolve request ids to immutable display refs inside a short session."""
+        if not artifact_ids:
+            return ()
+
+        from repositories.artifact_repo import ArtifactRepository
+
+        ordered_ids = list(dict.fromkeys(artifact_ids))
+
+        async def _load(session) -> tuple[Dict[str, str], ...]:
+            artifacts = await ArtifactRepository(session).get_artifacts_by_ids(
+                conversation_id,
+                ordered_ids,
+            )
+            by_id = {artifact.id: artifact for artifact in artifacts}
+            resolved: list[Dict[str, str]] = []
+            for artifact_id in ordered_ids:
+                artifact = by_id.get(artifact_id)
+                if artifact is None or artifact.source != "user_upload":
+                    raise ReferencedArtifactNotFound(artifact_id)
+                resolved.append({
+                    "id": artifact.id,
+                    "filename": (artifact.metadata_ or {}).get("original_filename")
+                    or artifact.title,
+                })
+            return tuple(resolved)
+
+        return await self._db.with_retry(_load)
+
     @staticmethod
     def _ensure_lease(handle: ConversationLeaseHandle) -> None:
         try:
@@ -180,6 +218,11 @@ class ConversationExecutionService:
             raise InvalidParentMessage(
                 "parent_message_id does not belong to this conversation"
             )
+
+        referenced_artifacts = await self._resolve_referenced_artifacts(
+            conversation_id,
+            request.referenced_artifact_ids,
+        )
 
         incoming_blob_bytes = sum(
             len(file["blob"])
@@ -285,6 +328,7 @@ class ConversationExecutionService:
                         conversation_id=conversation_id,
                         message_id=message_id,
                         resolved_parent=resolved_parent,
+                        referenced_artifacts=referenced_artifacts,
                     )
 
                 return workload
@@ -353,6 +397,7 @@ class ConversationExecutionService:
         conversation_id: str,
         message_id: str,
         resolved_parent: Optional[str],
+        referenced_artifacts: Sequence[Dict[str, str]],
     ) -> None:
         try:
             async with create_turn_handler(
@@ -373,6 +418,7 @@ class ConversationExecutionService:
                         uploaded_files=list(request.uploaded_files),
                         force_compact=request.force_compact,
                         activate_skills=list(request.activate_skills),
+                        referenced_artifacts=list(referenced_artifacts),
                     ),
                 )
         except Exception as exc:
