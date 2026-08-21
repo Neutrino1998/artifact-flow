@@ -15,6 +15,8 @@ import base64
 import importlib.util
 import io
 import json
+import posixpath
+import re
 import shutil
 import subprocess
 import zipfile
@@ -38,6 +40,11 @@ PREINSTALLED = [
 PREINSTALLED_SINGLE_FILE = {"mermaid-to-png"}
 # 纯散文预装(SKILL.md-only 目录源码;入库时也会生成单文件 zip bundle)
 PREINSTALLED_PROSE = ["html-artifact-design"]
+_MARKDOWN_LINK_RE = re.compile(
+    r"\[[^\]]*\]\(\s*(<[^>]*>|[^)\s]+)(?:\s+\"[^\"]*\")?\s*\)"
+)
+_INLINE_CODE_RE = re.compile(r"`[^`]*`")
+_EXTERNAL_LINK_PREFIXES = ("http://", "https://", "mailto:", "data:", "#")
 
 
 def _build_zip(slug: str) -> bytes:
@@ -115,18 +122,73 @@ def test_seed_parse_clean_and_defaults():
 
 
 def test_artifactflow_help_packages_active_docs_as_references():
+    source_manifest = json.loads(
+        (SRC_DIR / "artifactflow-help" / "_bundle_sources.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    product_help_dir = ROOT / "docs" / "product-help"
+    expected_sources = {
+        path.relative_to(ROOT).as_posix()
+        for path in product_help_dir.rglob("*.md")
+    }
+    assert set(source_manifest.values()) == expected_sources
+    assert source_manifest == {
+        f"references/{source.removeprefix('docs/')}": source
+        for source in source_manifest.values()
+    }
+
     with zipfile.ZipFile(ZIP_DIR / "artifactflow-help.zip") as zf:
-        expected = {
-            "product-guide.md": ROOT / "docs" / "product-guide.md",
-            "tool-management.md": ROOT / "docs" / "configuration" / "tools.md",
-            "skill-management.md": ROOT / "docs" / "configuration" / "skills.md",
-            "pat-and-api.md": ROOT / "docs" / "personal-access-tokens.md",
-            "troubleshooting.md": ROOT / "docs" / "operations" / "troubleshooting.md",
+        bundled_references = {
+            name
+            for name in zf.namelist()
+            if name.startswith("artifactflow-help/references/")
         }
-        for bundled_name, source_path in expected.items():
+        expected_references = {
+            f"artifactflow-help/{bundle_name}"
+            for bundle_name in source_manifest
+        }
+        assert bundled_references == expected_references
+        for bundle_name, source_name in source_manifest.items():
             assert zf.read(
-                f"artifactflow-help/references/{bundled_name}"
-            ) == source_path.read_bytes()
+                f"artifactflow-help/{bundle_name}"
+            ) == (ROOT / source_name).read_bytes()
+
+
+def test_artifactflow_help_bundled_markdown_links_are_self_contained():
+    with zipfile.ZipFile(ZIP_DIR / "artifactflow-help.zip") as zf:
+        names = set(zf.namelist())
+        markdown_names = sorted(
+            name
+            for name in names
+            if name.startswith("artifactflow-help/references/")
+            and name.endswith(".md")
+        )
+        missing = []
+        for name in markdown_names:
+            text = zf.read(name).decode("utf-8")
+            in_fence = False
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                if line.lstrip().startswith(("```", "~~~")):
+                    in_fence = not in_fence
+                    continue
+                if in_fence:
+                    continue
+                prose = _INLINE_CODE_RE.sub("", line)
+                for target in _MARKDOWN_LINK_RE.findall(prose):
+                    if target.startswith("<") and target.endswith(">"):
+                        target = target[1:-1]
+                    if target.startswith(_EXTERNAL_LINK_PREFIXES):
+                        continue
+                    path = target.split("#", 1)[0]
+                    if not path:
+                        continue
+                    resolved = posixpath.normpath(
+                        posixpath.join(posixpath.dirname(name), path)
+                    )
+                    if resolved not in names:
+                        missing.append(f"{name}:{line_number}: {target} -> {resolved}")
+        assert not missing
 
 
 def test_preinstalled_agents_configure_helper_tools_explicitly():
