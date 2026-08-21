@@ -22,6 +22,11 @@ async def stream_events(
     current_user: AuthPrincipal = Depends(require_scope("conversations:read")),
     stream_transport: StreamTransport = Depends(get_stream_transport),
 ) -> StreamingResponse:
+    """Stream the complete same-user conversation feed.
+
+    Artifact/tool content already copied into this feed remains conversation
+    data; ``artifacts:read`` separately gates direct Artifact REST access.
+    """
     return build_stream_response(
         stream_id=stream_id,
         stream_transport=stream_transport,

@@ -33,7 +33,10 @@ def project_event_data_for_user(event_type: str, data: Any) -> Any:
     ``agent_start`` is allowlisted rather than having known-sensitive fields
     removed.  That keeps future internal context fields private by default.
     Other event types preserve their existing public contract; production error
-    text remains sanitized exactly as it was on the replay endpoint.
+    text remains sanitized exactly as it was on the replay endpoint. PAT scopes
+    gate API capabilities, not content copied between same-user resources:
+    conversation observers intentionally receive complete event payloads even
+    when they cannot call the Artifact REST API directly.
     """
     if event_type == StreamEventType.AGENT_START.value:
         if not isinstance(data, dict):

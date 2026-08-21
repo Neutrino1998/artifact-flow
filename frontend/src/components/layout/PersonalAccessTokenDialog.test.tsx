@@ -93,4 +93,31 @@ describe('PersonalAccessTokenDialog', () => {
     expect(expiryInput?.value).toBe('90');
     expect(document.body.textContent).toContain('最长 365 天');
   });
+
+  it('does not allow creation before the initial token list settles', async () => {
+    let resolveList!: (value: { tokens: [] }) => void;
+    listPersonalAccessTokens.mockReturnValue(new Promise((resolve) => {
+      resolveList = resolve;
+    }));
+
+    await act(async () => {
+      root.render(<PersonalAccessTokenDialog onClose={vi.fn()} />);
+    });
+
+    const nameInput = document.body.querySelector<HTMLInputElement>(
+      'input[placeholder="例如：数据分析脚本"]',
+    );
+    const createButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '创建密钥',
+    );
+    expect(nameInput?.disabled).toBe(true);
+    expect(createButton?.hasAttribute('disabled')).toBe(true);
+
+    await act(async () => {
+      resolveList({ tokens: [] });
+      await Promise.resolve();
+    });
+
+    expect(nameInput?.disabled).toBe(false);
+  });
 });

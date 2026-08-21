@@ -588,7 +588,11 @@ async def get_message_events(
     current_user: AuthPrincipal = Depends(require_scope("conversations:read")),
     conversation_manager: ConversationManager = Depends(get_conversation_manager),
 ):
-    """查询消息的事件链（用于历史回放和可观测性）"""
+    """查询消息的完整事件链（用于历史回放和可观测性）。
+
+    conversations:read 是对话观察能力，可包含执行时复制进事件的
+    Artifact/工具内容；artifacts:read 只单独控制 Artifact REST API。
+    """
     await _verify_ownership(conv_id, current_user, conversation_manager)
 
     # 校验 message 归属

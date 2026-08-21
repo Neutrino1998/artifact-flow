@@ -114,7 +114,7 @@ class PersonalAccessTokenManager:
     async def list(self, user_id: str) -> list[dict]:
         return [
             self._serialize(token)
-            for token in await self._tokens.list_for_user(user_id)
+            for token in await self._tokens.list_active_for_user(user_id, utc_now())
         ]
 
     async def revoke(self, user_id: str, token_id: str) -> None:

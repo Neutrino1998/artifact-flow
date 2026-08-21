@@ -73,12 +73,68 @@ async def test_pat_lifecycle_reveals_secret_once_and_revokes_immediately(
     revoked = await client.delete(f"/api/v1/auth/pats/{created['id']}")
     assert revoked.status_code == 204
     assert (await client.delete(f"/api/v1/auth/pats/{created['id']}")).status_code == 204
+    assert (await client.get("/api/v1/auth/pats")).json()["tokens"] == []
 
     rejected = await anon_client.get(
         "/api/v1/auth/me",
         headers=_pat_headers(created["token"]),
     )
     assert rejected.status_code == 401
+
+
+async def test_pat_list_returns_all_fifty_active_tokens_despite_inactive_history(
+    client: AsyncClient,
+    test_user: User,
+    db_manager: DatabaseManager,
+):
+    now = utc_now()
+    active_ids = {f"pat_{uuid.uuid4().hex}" for _ in range(50)}
+    rows = [
+        PersonalAccessToken(
+            id=token_id,
+            user_id=test_user.id,
+            name="active automation",
+            secret_hash="a" * 64,
+            scopes=["conversations:read"],
+            created_at=now - timedelta(days=300),
+            expires_at=now + timedelta(days=1),
+        )
+        for token_id in active_ids
+    ]
+    for index in range(101):
+        is_revoked = index % 2 == 0
+        rows.append(PersonalAccessToken(
+            id=f"pat_{uuid.uuid4().hex}",
+            user_id=test_user.id,
+            name="inactive history",
+            secret_hash="b" * 64,
+            scopes=["conversations:read"],
+            created_at=now - timedelta(minutes=index),
+            expires_at=(
+                now + timedelta(days=1)
+                if is_revoked
+                else now - timedelta(seconds=1)
+            ),
+            revoked_at=now if is_revoked else None,
+        ))
+
+    async with db_manager.session() as session:
+        session.add_all(rows)
+        await session.commit()
+
+    listed = await client.get("/api/v1/auth/pats")
+    assert listed.status_code == 200
+    assert {item["id"] for item in listed.json()["tokens"]} == active_ids
+
+    over_limit = await client.post(
+        "/api/v1/auth/pats",
+        json={
+            "name": "one too many",
+            "scopes": ["conversations:read"],
+            "expires_in_days": 30,
+        },
+    )
+    assert over_limit.status_code == 409
 
 
 async def test_pat_scope_and_resource_ownership_are_both_required(

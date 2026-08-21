@@ -30,11 +30,19 @@ const SCOPE_OPTIONS: Array<{
   label: string;
   description: string;
 }> = [
-  { value: 'conversations:read', label: '读取对话', description: '查看对话、历史事件和 SSE' },
+  {
+    value: 'conversations:read',
+    label: '读取对话',
+    description: '查看完整对话、事件和 SSE，可能包含 Artifact 与工具内容',
+  },
   { value: 'conversations:write', label: '发送对话', description: '发送消息、上传附件和引用文件' },
   { value: 'conversations:control', label: '控制执行', description: '向运行中的任务注入消息或取消任务' },
   { value: 'conversations:delete', label: '删除对话', description: '删除单个或批量删除自己的对话' },
-  { value: 'artifacts:read', label: '读取文件', description: '查看、下载 artifact 和历史版本' },
+  {
+    value: 'artifacts:read',
+    label: '读取文件',
+    description: '通过 Artifact API 查看、下载文件和历史版本',
+  },
   { value: 'skills:read', label: '读取技能', description: '查看和导出用户可见的技能' },
   { value: 'skills:write', label: '管理技能', description: '导入、启停和删除自己的技能' },
   {
@@ -52,19 +60,6 @@ const DEFAULT_SCOPES = new Set<PersonalAccessTokenScope>([
 
 function formatDate(value: string): string {
   return parseUtcIso(value).toLocaleString('zh-CN');
-}
-
-function tokenStatus(token: PersonalAccessTokenResponse): {
-  label: string;
-  className: string;
-} {
-  if (token.revoked_at) {
-    return { label: '已撤销', className: 'text-text-tertiary dark:text-text-tertiary-dark' };
-  }
-  if (parseUtcIso(token.expires_at).getTime() <= Date.now()) {
-    return { label: '已过期', className: 'text-status-warning' };
-  }
-  return { label: '有效', className: 'text-status-success' };
 }
 
 export default function PersonalAccessTokenDialog({
@@ -121,7 +116,13 @@ export default function PersonalAccessTokenDialog({
 
   const handleCreate = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!name.trim() || selectedScopes.length === 0 || !expiryIsValid || submitting) return;
+    if (
+      loading
+      || !name.trim()
+      || selectedScopes.length === 0
+      || !expiryIsValid
+      || submitting
+    ) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -146,10 +147,7 @@ export default function PersonalAccessTokenDialog({
     setError(null);
     try {
       await api.revokePersonalAccessToken(revokeTarget.id);
-      const revokedAt = new Date().toISOString();
-      setTokens((current) => current.map((token) => (
-        token.id === revokeTarget.id ? { ...token, revoked_at: revokedAt } : token
-      )));
+      setTokens((current) => current.filter((token) => token.id !== revokeTarget.id));
       setRevokeTarget(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '撤销 API 密钥失败');
@@ -215,7 +213,7 @@ export default function PersonalAccessTokenDialog({
                     maxLength={128}
                     placeholder="例如：数据分析脚本"
                     className={INPUT_ON_PANEL}
-                    disabled={submitting}
+                    disabled={loading || submitting}
                   />
                 </div>
                 <div>
@@ -240,7 +238,7 @@ export default function PersonalAccessTokenDialog({
                     placeholder="1–365"
                     aria-invalid={!expiryIsValid}
                     className={INPUT_ON_PANEL}
-                    disabled={submitting}
+                    disabled={loading || submitting}
                   />
                 </div>
               </div>
@@ -257,7 +255,7 @@ export default function PersonalAccessTokenDialog({
                         type="checkbox"
                         checked={scopes.has(option.value)}
                         onChange={() => toggleScope(option.value)}
-                        disabled={submitting}
+                        disabled={loading || submitting}
                         className="mt-1 accent-accent"
                       />
                       <span>
@@ -284,7 +282,13 @@ export default function PersonalAccessTokenDialog({
                 </button>
                 <button
                   type="submit"
-                  disabled={!name.trim() || selectedScopes.length === 0 || !expiryIsValid || submitting}
+                  disabled={
+                    loading
+                    || !name.trim()
+                    || selectedScopes.length === 0
+                    || !expiryIsValid
+                    || submitting
+                  }
                   className={`${BUTTON_PRIMARY} rounded-lg px-6 py-2`}
                 >
                   {submitting ? '创建中…' : '创建密钥'}
@@ -297,7 +301,7 @@ export default function PersonalAccessTokenDialog({
 
           <section>
             <h3 className="mb-2 text-sm font-medium text-text-primary dark:text-text-primary-dark">
-              已创建的密钥
+              有效密钥（最多 50 个）
             </h3>
             {loading ? (
               <div className="text-sm text-text-secondary dark:text-text-secondary-dark">加载中…</div>
@@ -307,40 +311,32 @@ export default function PersonalAccessTokenDialog({
               </div>
             ) : (
               <div className="space-y-2">
-                {tokens.map((token) => {
-                  const status = tokenStatus(token);
-                  return (
-                    <div
-                      key={token.id}
-                      className="flex flex-col gap-3 rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-3 sm:flex-row sm:items-center"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate font-medium text-text-primary dark:text-text-primary-dark">
-                            {token.name}
-                          </span>
-                          <span className={`text-xs ${status.className}`}>{status.label}</span>
-                        </div>
-                        <div className="mt-1 font-mono text-xs text-text-secondary dark:text-text-secondary-dark">
-                          {token.prefix}
-                        </div>
-                        <div className="mt-1 text-xs text-text-tertiary dark:text-text-tertiary-dark">
-                          到期：{formatDate(token.expires_at)}
-                          {token.last_used_at ? ` · 最近使用：${formatDate(token.last_used_at)}` : ' · 尚未使用'}
-                        </div>
+                {tokens.map((token) => (
+                  <div
+                    key={token.id}
+                    className="flex flex-col gap-3 rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-3 sm:flex-row sm:items-center"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-medium text-text-primary dark:text-text-primary-dark">
+                        {token.name}
                       </div>
-                      {!token.revoked_at && parseUtcIso(token.expires_at).getTime() > Date.now() && (
-                        <button
-                          type="button"
-                          onClick={() => setRevokeTarget(token)}
-                          className={`${BUTTON_DANGER_OUTLINE} rounded-lg px-4 py-2 text-sm`}
-                        >
-                          撤销
-                        </button>
-                      )}
+                      <div className="mt-1 font-mono text-xs text-text-secondary dark:text-text-secondary-dark">
+                        {token.prefix}
+                      </div>
+                      <div className="mt-1 text-xs text-text-tertiary dark:text-text-tertiary-dark">
+                        到期：{formatDate(token.expires_at)}
+                        {token.last_used_at ? ` · 最近使用：${formatDate(token.last_used_at)}` : ' · 尚未使用'}
+                      </div>
                     </div>
-                  );
-                })}
+                    <button
+                      type="button"
+                      onClick={() => setRevokeTarget(token)}
+                      className={`${BUTTON_DANGER_OUTLINE} rounded-lg px-4 py-2 text-sm`}
+                    >
+                      撤销
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
           </section>

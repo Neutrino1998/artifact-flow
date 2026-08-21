@@ -11,6 +11,9 @@
 重新创建。撤销立即生效，用户被禁用、删除或被要求修改密码时，PAT 也不能继续调用
 业务接口。
 
+每个用户最多同时保有 50 个有效 PAT。用户列表只显示尚未撤销且未过期的密钥；
+撤销或过期记录仍保留在服务端作为安全审计记录，但不再占用有效 PAT 名额。
+
 请求使用标准 Bearer Header，不要把令牌放在 URL：
 
 ```http
@@ -24,17 +27,21 @@ Scope 决定令牌可执行哪一类操作，资源所有权仍由现有 API 独
 
 | Scope | 能力 |
 |---|---|
-| `conversations:read` | 对话列表、详情、历史事件、活跃流和 SSE |
+| `conversations:read` | 完整对话、历史事件、活跃流和 SSE，可能包含 Artifact、工具与 reasoning 内容 |
 | `conversations:write` | 发送消息、上传附件、引用文件和提交反馈 |
 | `conversations:control` | 向运行中任务注入消息或取消任务 |
 | `conversations:delete` | 单个或批量删除对话 |
-| `artifacts:read` | artifact 列表、正文、版本和原始文件下载 |
+| `artifacts:read` | 通过 Artifact API 读取列表、正文、版本和原始文件 |
 | `skills:read` | 查看和导出用户可见的 Skill |
 | `skills:write` | 导入、启停和删除用户自己的 Skill |
 | `tools:approve` | 批准或拒绝工具调用，并可按工具在当前对话分支持续允许 |
 
 网页登录 JWT 保持完整的普通用户能力；PAT 没有隐式 scope 继承，例如
 `conversations:write` 不自动包含 `conversations:read`。
+
+Scope 控制 API 能力入口，不是同一用户数据之间的内容隔离边界。Artifact 正文可能被工具结果、
+模型回复、reasoning 或事件复制到对话流中；因此 `conversations:read` 允许观察完整对话内容，
+而 `artifacts:read` 单独控制 Artifact REST 端点。
 
 ## 发送消息和附件
 

@@ -31,12 +31,18 @@ class PersonalAccessTokenRepository(BaseRepository[PersonalAccessToken]):
         )
         return result.scalar_one()
 
-    async def list_for_user(self, user_id: str) -> list[PersonalAccessToken]:
+    async def list_active_for_user(
+        self, user_id: str, now: datetime
+    ) -> list[PersonalAccessToken]:
+        """Return every manageable token; admission bounds this set to 50."""
         result = await self._session.execute(
             select(PersonalAccessToken)
-            .where(PersonalAccessToken.user_id == user_id)
+            .where(
+                PersonalAccessToken.user_id == user_id,
+                PersonalAccessToken.revoked_at.is_(None),
+                PersonalAccessToken.expires_at > now,
+            )
             .order_by(PersonalAccessToken.created_at.desc())
-            .limit(100)
         )
         return list(result.scalars().all())
 
