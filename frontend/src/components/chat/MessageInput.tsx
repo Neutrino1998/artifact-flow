@@ -856,7 +856,7 @@ export default function MessageInput() {
                 ? '输入追加指令，按 Enter 发送…'
                 : isNewConversation
                   ? '开始新的对话，/ 选择技能…'
-                  : '输入消息，@ 引用文件，/ 选择技能…'
+                  : '输入消息，@ 引用已上传文件，/ 选择技能…'
             }
             role="combobox"
             aria-autocomplete="list"
