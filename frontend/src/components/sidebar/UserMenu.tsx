@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import ChangePasswordDialog from '@/components/layout/ChangePasswordDialog';
@@ -20,6 +20,15 @@ import {
 import StorageBar from './StorageBar';
 
 type TaskNotificationCapability = NotificationPermission | 'loading' | 'unsupported';
+
+function AdminMenuLabel({ children }: { children: ReactNode }) {
+  return (
+    <>
+      <span className="min-w-0 flex-1 text-left">{children}</span>
+      <PillBadge tone="accent">admin</PillBadge>
+    </>
+  );
+}
 
 export default function UserMenu({
   collapsed,
@@ -260,8 +269,10 @@ export default function UserMenu({
                   <path d="M14 9.27A6 6 0 0 1 6.73 2 6 6 0 1 0 14 9.27z" />
                 </svg>
               ) : (
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M8 1v1m0 12v1m7-7h-1M2 8H1m12.07-4.07-.71.71M3.64 12.36l-.71.71m10.14 0-.71-.71M3.64 3.64l-.71-.71M11 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                  <circle cx="8" cy="8" r="3" />
+                  <path d="M8 1.25v1.5M8 13.25v1.5M1.25 8h1.5M13.25 8h1.5" />
+                  <path d="m3.25 3.25 1.05 1.05m8.45-1.05L11.7 4.3m1.05 8.45-1.05-1.05m-8.45 1.05L4.3 11.7" />
                 </svg>
               )}
               {theme === 'light' ? '深色模式' : '浅色模式'}
@@ -270,7 +281,7 @@ export default function UserMenu({
             {/* Browser-level task terminal notifications (opt-out by default). */}
             <div className="w-full flex items-center gap-2 px-2.5 py-2 text-text-primary dark:text-text-primary-dark rounded-lg">
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="shrink-0">
-                <path d="M8 2v1M4 6a4 4 0 0 1 8 0v3l1.5 2H2.5L4 9V6z" strokeLinejoin="round" />
+                <path d="M8 1.5V3M4 7a4 4 0 0 1 8 0v2l1.5 2H2.5L4 9V7z" strokeLinejoin="round" />
                 <path d="M6.5 13a1.5 1.5 0 0 0 3 0" />
               </svg>
               <div className="min-w-0 flex-1">
@@ -333,9 +344,11 @@ export default function UserMenu({
               onClick={handlePersonalAccessTokens}
               className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
             >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                <path d="M10.5 0a5.499 5.499 0 1 1-1.288 10.848l-.932.932a.749.749 0 0 1-.53.22H7v.75a.749.749 0 0 1-.22.53l-.5.5a.749.749 0 0 1-.53.22H5v.75a.749.749 0 0 1-.22.53l-.5.5a.749.749 0 0 1-.53.22h-2A1.75 1.75 0 0 1 0 14.25v-2c0-.199.079-.389.22-.53l4.932-4.932A5.5 5.5 0 0 1 10.5 0Zm-4 5.5c-.001.431.069.86.205 1.269a.75.75 0 0 1-.181.768L1.5 12.56v1.69c0 .138.112.25.25.25h1.69l.06-.06v-1.19a.75.75 0 0 1 .75-.75h1.19l.06-.06v-1.19a.75.75 0 0 1 .75-.75h1.19l1.023-1.025a.75.75 0 0 1 .768-.18A4 4 0 1 0 6.5 5.5ZM11 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z" />
-              </svg>
+              <span className="w-3.5 h-3.5 inline-flex items-center justify-center shrink-0" aria-hidden="true">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M10.5 0a5.499 5.499 0 1 1-1.288 10.848l-.932.932a.749.749 0 0 1-.53.22H7v.75a.749.749 0 0 1-.22.53l-.5.5a.749.749 0 0 1-.53.22H5v.75a.749.749 0 0 1-.22.53l-.5.5a.749.749 0 0 1-.53.22h-2A1.75 1.75 0 0 1 0 14.25v-2c0-.199.079-.389.22-.53l4.932-4.932A5.5 5.5 0 0 1 10.5 0Zm-4 5.5c-.001.431.069.86.205 1.269a.75.75 0 0 1-.181.768L1.5 12.56v1.69c0 .138.112.25.25.25h1.69l.06-.06v-1.19a.75.75 0 0 1 .75-.75h1.19l.06-.06v-1.19a.75.75 0 0 1 .75-.75h1.19l1.023-1.025a.75.75 0 0 1 .768-.18A4 4 0 1 0 6.5 5.5ZM11 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z" />
+                </svg>
+              </span>
               API 密钥
             </button>
 
@@ -349,7 +362,7 @@ export default function UserMenu({
                   <circle cx="8" cy="5" r="3" />
                   <path d="M2 14c0-3.3 2.7-6 6-6s6 2.7 6 6" />
                 </svg>
-                用户管理
+                <AdminMenuLabel>用户管理</AdminMenuLabel>
               </button>
             )}
 
@@ -362,7 +375,7 @@ export default function UserMenu({
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M9.8 4.2a.67.67 0 0 0 0 .93l1.07 1.07a.67.67 0 0 0 .93 0l2.51-2.51a4 4 0 0 1-5.29 5.29l-4.61 4.61a1.41 1.41 0 0 1-2-2l4.61-4.61a4 4 0 0 1 5.29-5.29l-2.51 2.51z" />
                 </svg>
-                工具管理
+                <AdminMenuLabel>工具管理</AdminMenuLabel>
               </button>
             )}
 
@@ -376,7 +389,7 @@ export default function UserMenu({
                   <path d="M3 4h10M3 8h10M3 12h6" />
                   <path d="M11.5 11.5l1 1 1.8-2" />
                 </svg>
-                部门授权
+                <AdminMenuLabel>部门授权</AdminMenuLabel>
               </button>
             )}
 
@@ -391,7 +404,7 @@ export default function UserMenu({
                   <path d="M8 12l3-4" />
                   <circle cx="8" cy="12" r="0.6" fill="currentColor" stroke="none" />
                 </svg>
-                会话监控
+                <AdminMenuLabel>会话监控</AdminMenuLabel>
               </button>
             )}
 
@@ -407,7 +420,7 @@ export default function UserMenu({
                   <circle cx="4.5" cy="4.5" r="0.6" fill="currentColor" stroke="none" />
                   <circle cx="4.5" cy="11.5" r="0.6" fill="currentColor" stroke="none" />
                 </svg>
-                实例监控
+                <AdminMenuLabel>实例监控</AdminMenuLabel>
               </button>
             )}
 
@@ -418,10 +431,10 @@ export default function UserMenu({
                 className={`w-full flex items-center gap-2 px-2.5 py-2 font-medium text-text-primary dark:text-text-primary-dark rounded-lg ${MENU_ROW_HOVER}`}
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M8 2v1M4 6a4 4 0 0 1 8 0v3l1.5 2H2.5L4 9V6z" />
-                  <path d="M6.5 13a1.5 1.5 0 0 0 3 0" />
+                  <path d="M5 5.5 12.5 2v12L5 10.5H3.5A1.5 1.5 0 0 1 2 9V7a1.5 1.5 0 0 1 1.5-1.5H5Z" />
+                  <path d="m5 10.5 1 3" />
                 </svg>
-                通知管理
+                <AdminMenuLabel>通知管理</AdminMenuLabel>
               </button>
             )}
 
