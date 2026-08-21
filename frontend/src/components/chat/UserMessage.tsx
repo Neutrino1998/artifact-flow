@@ -6,6 +6,7 @@ import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { useStreamStore } from '@/stores/streamStore';
 import { BUTTON_PRIMARY } from '@/lib/styles';
 import { CopyIcon } from '@/components/ui/CopyIcon';
+import { FileTypeIcon } from '@/components/ui/FileTypeIcon';
 import type { ActivatedSkillRef, ReferencedArtifactRef } from '@/types';
 import { formatMessageDateTime } from '@/lib/time';
 import BranchNavigator from './BranchNavigator';
@@ -156,10 +157,7 @@ function UserMessage({ content, messageId, parentId, siblingIndex = 0, siblingCo
                 className="inline-flex min-w-0 items-center gap-1 max-w-[16rem] px-2 py-1 rounded-lg bg-panel-accent dark:bg-surface-dark text-xs text-text-secondary dark:text-text-secondary-dark"
                 title={f.filename}
               >
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <path d="M14 2v6h6" />
-                </svg>
+                <FileTypeIcon filename={f.filename} size={14} />
                 <span className="min-w-0 truncate">{f.filename}</span>
               </span>
             ))}

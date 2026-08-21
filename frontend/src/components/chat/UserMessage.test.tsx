@@ -32,6 +32,7 @@ describe('UserMessage context chips', () => {
 
     expect(html).toContain('brief.docx');
     expect(html).toContain('old-brief.docx');
+    expect(html).toContain('tabler-icon-file-word');
     expect(html).toContain('引用');
     expect(html).toContain('Word 文档');
     expect(html).toContain('review this');
