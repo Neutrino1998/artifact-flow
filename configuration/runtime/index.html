@@ -250,6 +250,205 @@
   
   
   
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    产品使用
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    产品使用
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../product-help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    使用指南
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../product-help/tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tool 与 MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../product-help/skills/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Skill
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../product-help/pat-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PAT 与 API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../product-help/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    常见问题
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
     <li class="md-nav__item">
       <a href="../../how-it-works/" class="md-nav__link">
         
@@ -293,10 +492,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
         
           
-          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
             
   
   
@@ -314,8 +513,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_3">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -650,10 +849,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
         
           
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
             
   
   
@@ -671,8 +870,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1018,7 +1217,7 @@
 <tbody>
 <tr>
 <td><code>ARTIFACTFLOW_JWT_SECRET</code></td>
-<td>JWT 签名</td>
+<td>JWT 签名，并以域隔离 HMAC 派生 PAT 校验密钥</td>
 </tr>
 <tr>
 <td><code>ARTIFACTFLOW_CREDENTIAL_KEY</code></td>
@@ -1045,11 +1244,12 @@
 <li>Model：对应供应商的 API Key；</li>
 <li>Tool/MCP：定义引用的 <code>TOOL_SECRET_*</code>。</li>
 </ul>
-<p>常用应用调节项：</p>
+<p>应用调节项：</p>
 <table>
 <thead>
 <tr>
 <th>变量</th>
+<th>级别</th>
 <th style="text-align: right;">默认</th>
 <th>何时调整</th>
 </tr>
@@ -1057,77 +1257,195 @@
 <tbody>
 <tr>
 <td><code>ARTIFACTFLOW_EXECUTION_TIMEOUT</code></td>
+<td>标准</td>
 <td style="text-align: right;"><code>3600</code> 秒</td>
 <td>Agent 引擎 loop 的 deadline；含权限等待，不含结束后的持久化</td>
 </tr>
 <tr>
 <td><code>ARTIFACTFLOW_PERMISSION_TIMEOUT</code></td>
+<td>标准</td>
 <td style="text-align: right;"><code>300</code> 秒</td>
 <td>等待一次用户确认的时间</td>
 </tr>
 <tr>
 <td><code>ARTIFACTFLOW_MAX_CONCURRENT_TASKS</code></td>
+<td>标准</td>
 <td style="text-align: right;"><code>32</code></td>
 <td>按模型、DB 和主机容量限制并发</td>
 </tr>
 <tr>
+<td><code>ARTIFACTFLOW_REDIS_CLUSTER</code></td>
+<td>高级</td>
+<td style="text-align: right;"><code>false</code></td>
+<td>外部 Redis 使用 Cluster 拓扑时开启</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_REDIS_MAX_CONNECTIONS</code></td>
+<td>高级</td>
+<td style="text-align: right;"><code>64</code></td>
+<td>每个 Backend 的 Redis 连接池上限；结合副本数和任务并发调整</td>
+</tr>
+<tr>
 <td><code>ARTIFACTFLOW_SSO_START_IP_MAX_REQUESTS</code></td>
+<td>标准</td>
 <td style="text-align: right;"><code>60</code></td>
 <td>单一客户端 IP 在 SSO start 窗口内的准入上限</td>
 </tr>
 <tr>
 <td><code>ARTIFACTFLOW_SSO_START_GLOBAL_MAX_REQUESTS</code></td>
+<td>标准</td>
 <td style="text-align: right;"><code>120</code></td>
 <td>所有 Backend 通过 Redis 共享的 SSO start 窗口上限</td>
 </tr>
 <tr>
 <td><code>ARTIFACTFLOW_SSO_START_RATE_WINDOW_SEC</code></td>
+<td>标准</td>
 <td style="text-align: right;"><code>60</code> 秒</td>
 <td>SSO start 固定窗口长度</td>
 </tr>
 <tr>
 <td><code>ARTIFACTFLOW_SSO_STATE_MAX_PENDING</code></td>
+<td>标准</td>
 <td style="text-align: right;"><code>1000</code></td>
 <td>一次性 SSO state 的硬容量上限</td>
 </tr>
 <tr>
 <td><code>ARTIFACTFLOW_SSO_USERINFO_MAX_CONNECTIONS</code></td>
+<td>标准</td>
 <td style="text-align: right;"><code>10</code></td>
 <td>每个 Backend 的 userinfo 出站连接上限</td>
 </tr>
 <tr>
 <td><code>ARTIFACTFLOW_MAX_UPLOAD_SIZE</code></td>
+<td>高级</td>
 <td style="text-align: right;"><code>200 MiB</code></td>
-<td>单文件上传上限；代理另有批量总量上限</td>
+<td>单文件上传上限；调整时同步核对代理批量总量和存储 envelope</td>
 </tr>
 <tr>
 <td><code>ARTIFACTFLOW_ARTIFACT_USER_QUOTA_BYTES</code></td>
+<td>标准</td>
 <td style="text-align: right;"><code>2 GiB</code></td>
 <td>每用户二进制 Artifact 配额；<code>0</code> 表示不限</td>
 </tr>
 <tr>
+<td><code>ARTIFACTFLOW_MAX_BULK_IMPORT_ROWS</code></td>
+<td>高级</td>
+<td style="text-align: right;"><code>1000</code></td>
+<td>单次用户 CSV 导入的数据行上限</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_MAX_BULK_IMPORT_BYTES</code></td>
+<td>高级</td>
+<td style="text-align: right;"><code>5 MiB</code></td>
+<td>单次用户 CSV 导入的文件字节上限</td>
+</tr>
+<tr>
 <td><code>ARTIFACTFLOW_ADMIN_PRIVACY_MODE</code></td>
+<td>标准</td>
 <td style="text-align: right;"><code>false</code></td>
 <td>开启后，会话监控不返回账户关联字段和上传文件原名，并禁止管理员读取任何 Artifact 的内容</td>
 </tr>
 <tr>
 <td><code>ARTIFACTFLOW_SKILL_USER_MAX_PRIVATE_COUNT</code></td>
+<td>标准</td>
 <td style="text-align: right;"><code>3</code></td>
 <td><code>-1</code> 不限，<code>0</code> 禁止个人导入</td>
 </tr>
 <tr>
 <td><code>ARTIFACTFLOW_CORS_ORIGINS</code></td>
+<td>标准</td>
 <td style="text-align: right;">本地前端</td>
 <td>直接跨域访问 API 时设置明确 origin 列表</td>
 </tr>
 <tr>
+<td><code>ARTIFACTFLOW_CORS_ALLOW_CREDENTIALS</code></td>
+<td>高级</td>
+<td style="text-align: right;"><code>true</code></td>
+<td>跨域请求是否允许凭证；为 <code>true</code> 时 origins 不得包含 <code>*</code></td>
+</tr>
+<tr>
 <td><code>ARTIFACTFLOW_DB_COMMAND_TIMEOUT</code></td>
+<td>标准</td>
 <td style="text-align: right;"><code>30</code> 秒</td>
 <td>PostgreSQL 单语句上限；设 <code>0</code> 禁用</td>
 </tr>
+<tr>
+<td><code>ARTIFACTFLOW_DATABASE_POOL_SIZE</code></td>
+<td>高级</td>
+<td style="text-align: right;"><code>10</code></td>
+<td>每个 Backend 的数据库常驻连接池容量，必须至少为 <code>1</code></td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_DATABASE_MAX_OVERFLOW</code></td>
+<td>高级</td>
+<td style="text-align: right;"><code>20</code></td>
+<td>数据库连接池耗尽后允许临时增加的连接数，必须至少为 <code>0</code></td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_DATABASE_POOL_TIMEOUT</code></td>
+<td>高级</td>
+<td style="text-align: right;"><code>30</code> 秒</td>
+<td>等待数据库连接池槽位的最长时间；<code>0</code> 表示不等待、立即失败</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_JWT_EXPIRY_SECONDS</code></td>
+<td>标准</td>
+<td style="text-align: right;"><code>28800</code> 秒</td>
+<td>本地密码和远程身份共用的登录会话有效期</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_LOGIN_MAX_FAILURES</code></td>
+<td>标准</td>
+<td style="text-align: right;"><code>5</code></td>
+<td>用户名或客户端 IP 在窗口内达到该失败次数后临时锁定</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_LOGIN_FAILURE_WINDOW_SEC</code></td>
+<td>标准</td>
+<td style="text-align: right;"><code>900</code> 秒</td>
+<td>登录失败累计窗口及临时锁定窗口</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_PASSWORD_MIN_LENGTH</code></td>
+<td>标准</td>
+<td style="text-align: right;"><code>8</code></td>
+<td>新口令最小字符数，允许 <code>1–72</code>；前端通过 <code>/api/v1/meta</code> 同步提示</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_PASSWORD_REQUIRE_LETTER</code></td>
+<td>标准</td>
+<td style="text-align: right;"><code>true</code></td>
+<td>新口令是否必须包含字母</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_PASSWORD_REQUIRE_DIGIT</code></td>
+<td>标准</td>
+<td style="text-align: right;"><code>true</code></td>
+<td>新口令是否必须包含数字</td>
+</tr>
+<tr>
+<td><code>ARTIFACTFLOW_PASSWORD_REQUIRE_SYMBOL</code></td>
+<td>标准</td>
+<td style="text-align: right;"><code>true</code></td>
+<td>新口令是否必须包含符号</td>
+</tr>
 </tbody>
 </table>
-<p><code>src/config.py</code> 还有算法护栏和内部实现常量。它们即使能被环境变量覆盖，也不等于常规部署契约；没有具体容量或故障证据时不要照单调大。</p>
+<p>密码 hash 保持标准 bcrypt 格式。bcrypt 最多使用 72 个输入字节，因此新口令在 UTF-8
+编码后不得超过 72 字节；这是代码内部固定的算法边界，不能通过环境变量调整。历史版本
+可能曾接受更长输入并只 hash 前 72 字节，为避免已有账户失效，登录和“当前口令”校验继续
+兼容该行为；用户设置新口令时会收敛到明确的 72 字节边界，不需要改写已有 hash。</p>
+<p><code>src/config.py</code> 中的字段先分为两类：</p>
+<ul>
+<li><strong>运维配置</strong>：本页、相关专题配置文档或 <code>.env.example</code> 明确命名的 Secret、连接信息、
+  路径、容量、超时和策略，是稳定的 <code>ARTIFACTFLOW_*</code> 配置契约。源码中的“标准运维”与
+  “高级运维”标记必须与这些活跃文档一致；“标准”项可独立调整，“高级”项仍受支持，
+  但调整时必须同时检查代理、数据库和容器层的关联约束；</li>
+<li><strong>代码内部参数</strong>：grep/fuzzy 算法、Prompt/预览截断、固定协议映射和展示文案，默认值
+  随代码评审和 Release 演进，不作为常规部署旋钮。</li>
+</ul>
+<p>当前 <code>Settings</code> 保持统一、简单的加载方式，字段在技术上都能被环境变量覆盖；上述分类
+是支持范围和维护责任的边界，不额外引入运行时过滤、第二配置源或优先级规则。</p>
 <p><code>ARTIFACTFLOW_MAX_CONCURRENT_TASKS</code> 对每个 Backend 进程内唯一的 TaskSupervisor capacity gate 生效。超过容量的 Conversation turn 保持 QUEUED：它继续持有并续租 Conversation lease，但尚未标记为可交互 RUNNING，因此 inject/cancel 会按现有 409 契约拒绝。多 Backend 副本必须使用 Redis，让 lease、interactive、interrupt、cancel 与 SSE 状态跨进程共享；进程内 TaskSupervisor 只保留本进程 task 引用，不承担崩溃恢复。</p>
 <p>SSO 的五个容量项属于部署资源边界，不写入认证 Provider YAML。per-IP 超限返回 429；
 Redis 共享的全局窗口或 state 容量耗尽返回 503。userinfo 连接数是每个 Backend 的
