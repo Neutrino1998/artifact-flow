@@ -13,8 +13,10 @@ import { injectMessage, cancelExecution, getSkills, listArtifacts } from '@/lib/
 import type { UploadEvent } from '@/lib/api';
 import type { ArtifactSummary, ReferencedArtifactRef, SkillItem } from '@/types';
 import { StatusNotice } from '@/components/ui/StatusNotice';
+import { fileTypeLabel } from '@/components/ui/FileTypeIcon';
 import { formatTokens } from '@/lib/formatTokens';
 import { formatBytes } from '@/lib/formatBytes';
+import { formatMessageDateTime } from '@/lib/time';
 import { MAX_MESSAGE_CHARS, MAX_CHAT_ATTACHMENTS } from '@/lib/constants';
 import ComposerAutocomplete, {
   type ComposerSuggestion,
@@ -294,12 +296,18 @@ export default function MessageInput() {
         artifact.title,
         artifact.id,
       ))
-      .map((artifact) => ({
-        key: `file:${artifact.id}`,
-        title: artifact.original_filename || artifact.title,
-        description: '当前会话已上传文件',
-        selected: referencedArtifacts.some((item) => item.id === artifact.id),
-      }));
+      .map((artifact) => {
+        const title = artifact.original_filename || artifact.title;
+        const typeLabel = fileTypeLabel(artifact.content_type, title);
+        const uploadedAt = formatMessageDateTime(artifact.created_at);
+        return {
+          key: `file:${artifact.id}`,
+          title,
+          description: uploadedAt ? `${typeLabel} · 上传于 ${uploadedAt}` : typeLabel,
+          contentType: artifact.content_type,
+          selected: referencedArtifacts.some((item) => item.id === artifact.id),
+        };
+      });
   }, [
     composerTrigger,
     skillSuggestions,
@@ -848,7 +856,7 @@ export default function MessageInput() {
                 ? '输入追加指令，按 Enter 发送…'
                 : isNewConversation
                   ? '开始新的对话，/ 选择技能…'
-                  : '输入消息，@ 引用文件，/ 选择技能…'
+                  : '输入消息，@ 引用已上传文件，/ 选择技能…'
             }
             role="combobox"
             aria-autocomplete="list"

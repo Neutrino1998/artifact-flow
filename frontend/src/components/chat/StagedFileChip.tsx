@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { FileTypeIcon } from '@/components/ui/FileTypeIcon';
 import type { StagedFile } from '@/stores/stagedFilesStore';
 
 /** One staged-attachment chip. Image files show a local thumbnail rendered from
- *  the File the user just picked (objectURL — no upload/round-trip needed); other
- *  files show a paperclip. The objectURL is revoked on unmount / file change. */
+ *  the File the user just picked (objectURL — no upload/round-trip needed); all
+ *  other states use the shared file-format icon. The objectURL is revoked on
+ *  unmount / file change. */
 export default function StagedFileChip({
   sf,
   onRemove,
@@ -32,9 +34,7 @@ export default function StagedFileChip({
         // eslint-disable-next-line @next/next/no-img-element
         <img src={thumb} alt={sf.file.name} className="w-5 h-5 rounded object-cover shrink-0" />
       ) : (
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 ml-1">
-          <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-        </svg>
+        <FileTypeIcon contentType={sf.file.type} filename={sf.file.name} size={16} />
       )}
       <span className="truncate">{sf.file.name}</span>
       <button
